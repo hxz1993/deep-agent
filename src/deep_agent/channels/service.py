@@ -13,6 +13,7 @@ from deep_agent.core.exceptions import AgentModelNotConfiguredError
 
 from .commands import help_text, parse_command
 from .contracts import ChannelAdapter, InboundMessage
+from .metadata import wecom_application_id
 
 
 @dataclass
@@ -179,6 +180,22 @@ class ChannelService:
             loading_started = True
             preview_enabled = await self._preview(job, loading=True)
             showing_loading = True
+            identity = None
+            identity_application = wecom_application_id(account)
+            if identity_application:
+                try:
+                    # Native progress is already visible. The API continues a
+                    # bounded background lookup when this request times out.
+                    async with asyncio.timeout(5):
+                        identity = await self.deep_agent.resolve_wecom_user(
+                            account, sender_id=job.message.sender_id,
+                            peer_type=job.message.peer_type, peer_id=job.message.peer_id,
+                            session_id=job.session_id,
+                        )
+                except Exception:
+                    # Identity is optional; auth/network/permission failures
+                    # must not turn an otherwise valid chat into a failed Run.
+                    identity = None
             attachments = []
             for media in job.message.media:
                 data, filename = await job.adapter.download_media(media)
@@ -204,17 +221,36 @@ class ChannelService:
             # it only on the first persisted User Event of each Session. A
             # title-only /new or failed preflight must not consume that turn;
             # persisted Events also make the decision survive gateway restarts.
+            # Re-read after external I/O: a user may have switched applications
+            # or disabled enrichment while the lookup/media was in progress.
+            if identity_application:
+                current_account = await self.store.get_account(account.id)
+                if current_account is None or not current_account.enabled or account.id in self._closed:
+                    job.stopped = True
+                    raise asyncio.CancelledError
+                current_application = wecom_application_id(current_account)
+                if current_application != identity_application:
+                    identity = None
+                identity_application = current_application
             if job.message.peer_type != "single" or not await self.store.has_user_messages(job.session_id):
+                source = {
+                    "channel_type": account.channel_type,
+                    "account_id": account.id,
+                    "peer_type": job.message.peer_type,
+                    "peer_id": job.message.peer_id,
+                    "sender_id": job.message.sender_id,
+                }
+                if identity_application:
+                    trusted_identity = identity if (
+                        isinstance(identity, dict) and identity.get("application_id") == identity_application
+                        and identity.get("status") in {"resolved", "partial", "pending"}
+                    ) else {}
+                    source.update({key: trusted_identity.get(key) if isinstance(trusted_identity.get(key), str) else None
+                                   for key in ("userid", "name")})
                 input_options.setdefault("context_refs", []).append({
                     "key": "channel_source", "type": "channel.message_source",
                     "schema_version": "1.0", "label": f"发送者 · {job.message.sender_id}",
-                    "payload": {
-                        "channel_type": account.channel_type,
-                        "account_id": account.id,
-                        "peer_type": job.message.peer_type,
-                        "peer_id": job.message.peer_id,
-                        "sender_id": job.message.sender_id,
-                    },
+                    "payload": source,
                 })
             # Durable dispatch boundary: absence of an SSE run ID is not proof
             # that the API did not execute the request.

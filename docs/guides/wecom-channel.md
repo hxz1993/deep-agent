@@ -1,12 +1,12 @@
 # 渠道网关与企业微信接入
 
-DeepAgent 0.7.0 支持企微智能机器人 WebSocket 长连接。API 与 Gateway 使用同一代码和镜像，但
+DeepAgent 支持企微智能机器人 WebSocket 长连接。API 与 Gateway 使用同一代码和镜像，但
 Gateway 是可选独立进程：不使用渠道的环境无需启动，也不会建立外部连接。公共网关通过 Adapter
 管理渠道，当前只实现企微 Adapter；飞书需要后续增加适配，不能直接填配置启用。
 
 ## 前置条件
 
-- 数据库已由 API 升级到 Alembic `002`。
+- 数据库已由 API 升级到当前 Head；v0.10.1 对应 Alembic `006`，`005 → 006` 保留现有渠道配置。
 - 已安装 `requirements.txt` 中固定的 `wecom-aibot-python-sdk==1.0.2`。
 - API 与 Gateway 可以访问同一数据库，Gateway 可以访问 DeepAgent API 和企微公网地址。
 - 生产环境生成高熵内部 Token，并只通过 Secret/私有环境变量注入。
@@ -31,7 +31,7 @@ DEEP_AGENT_CHANNEL_INTERNAL_TOKEN='<same-private-token>' \
 PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 ```
 
-Gateway 不运行迁移，由 API 先完成当前代码的迁移。Gateway 不维护固定 Revision 白名单，健康接口仅返回启动时读取的实际 Revision。0.7.0 保持一个 API worker、一个 Gateway 副本：
+Gateway 不运行迁移，由 API 先完成当前代码的迁移。Gateway 不维护固定 Revision 白名单，健康接口仅返回启动时读取的实际 Revision。当前保持一个 API worker、一个 Gateway 副本：
 当前取消注册表与消息队列不跨实例共享，相同 Bot 的多条长连接还可能互相顶替。DevBox 服务名为“渠道网关”。
 
 Jenkins 网关启动版（`Jenkinsfile.gateway`）采用同一容器内的两个独立进程：`deep_agent.combined_runtime` 先启动 API，
@@ -72,8 +72,14 @@ Token、Cookie、Bot Secret 不得写入源码、日志、文档或测试夹具�
 “会话用户”直接输入平台 User ID，对应 `session_user_id`；只有企业管理员可以配置。
 它决定 DeepAgent Session 的归属，不负责签发平台权限或 Token。平台凭据仍由私有运行环境提供，
 应与实际业务访问账号匹配；渠道不配置 App、Space 或 Language。
-Secret 按0.7.0产品约定明文入库，
-但管理接口只返回是否已配置，不返回原值；编辑时留空即保持原配置。配置备份仍必须按敏感文件保护。
+Secret 按当前产品约定明文入库，
+但管理接口只返回 `secret_set/secret_masked`，不返回原值；编辑时以首尾字符和中间星号回显，
+留空或保留原掩码即保持原配置，实际输入新值才替换。配置备份仍必须按敏感文件保护。
+
+v0.10.1 起，标题同行右侧切换“渠道账户 / 企微应用”。企微应用单独保存企业 ID、企微 Agent ID 与
+App Secret，可以供多个机器人共用。渠道编辑器新增“查询用户详情”，默认关闭；开启后必须选择真实
+企微应用。关闭时不查询用户资料，允许保留应用引用，不影响原有连接和对话。成员缓存统计、刷新／重置、
+身份兼容与完整接口见[企微应用与成员资料](wecom-applications.md)。
 
 渠道是否启用只在列表 Switch 中维护，不放在新建或编辑弹框中。新建渠道默认关闭，管理员确认配置后
 再从列表启用。
@@ -139,11 +145,15 @@ thinking、工具参数与结果不发到企微，加载占位不写入对话历
 
 Binding 只代表来源会话，群内 A、B 发言仍指向同一个 Session；不把当前发送者写成群的固定属性。
 Runs 的 `sender_id` 继续用于该条消息的处理记录；群聊逐条、私聊仅每个 Session 首轮增加 `channel.message_source`
-Context Reference，白名单保存 `channel_type/account_id/peer_type/peer_id/sender_id`，随 User Event
+Context Reference，基础字段保存 `channel_type/account_id/peer_type/peer_id/sender_id`，随 User Event
 进入历史和模型输入。模型能看到“A 说了什么、B 说了什么”，不必反查 Runs，也不拆分群历史。
 私聊后续沿用首轮身份，不再向每条消息重复追加；网关重启不会重带，`/new` 后的新 Session 首轮重新携带。
 首轮按是否已有持久化用户消息判断，命令、标题占位与未入会话的失败请求不占首轮。
 旧消息不伪造发送者、不回写历史；已有私聊不补写来源上下文。
+
+“查询用户详情”开启时，来源 payload 额外保存 `userid/name`，查询未成功为 `null`；`sender_id` 和
+`peer_id` 仍是原始 ID。群聊每轮独立解析当前发言人；私聊仍只注入首轮。超时后可以后台补全资料及
+当前自动标题，但不回写首轮上下文、不在后续每轮追加身份。关闭时不增加这两个字段。
 
 经过内部 Token 验证的渠道请求才追加中文渠道系统说明：识别不同发送者、优先回答当前问题、区分引用、
 不将其他人的个人信息或授权混用、明确群内可见性与 UI/HITL 边界。普通客户端不追加该说明；外部
@@ -174,11 +184,13 @@ Console 可通过原有“引用消息”上下文查看，无需额外查询群
 - 私聊按 `account + single + from.userid` 复用 Session；群聊按 `account + group + chatid` 复用 Session。企微 `peer_type` 使用原生小写 `single/group`，界面中的标识名称仍展示 User ID / Chat ID。
 - Account 切换 Agent 或会话用户后，下一条消息创建新 Session；旧历史及其用户归属保留。
 - 删除 DeepAgent Session 后，下一条企微消息自动重建绑定。
-- 默认标题为 `User｜User ID` 或 `Group｜Chat ID`，实际收到名称时为 `User｜名称（User ID）` 等，不按聊天内容生成；来源保存在 Session 的标题事件，
+- 关闭用户详情查询时，标题为 `User｜User ID` 或 `Group｜Chat ID`，实际收到名称时为 `User｜名称（User ID）` 等，不按聊天内容生成；来源保存在 Session 的标题事件，
   `/new` 后旧 Session 仍保留来源，人工改名不会丢失它。控制台列表图标和详情可查看渠道来源。
+- 开启查询后的私聊为 `user/姓名/原始 ID`，没有姓名时为 `user/原始 ID`；群标题保持不变。
+  回调名称与查询补全资料分开保存；关闭查询或更换应用后重新计算当前自动标题，人工标题和历史上下文不覆盖。
 - Binding 的 `peer_metadata` JSON保存来源会话的用户/群ID及实际收到的名称；查私聊身份不依赖Runs。
   私聊可同时保留回调的Chat ID；群内每条消息的发送者仅记在Runs，不作为群绑定身份。
-- 本地已安装早期002结构时，先停止API和Gateway，运行
+- 以下只适用于未完成历史修复的早期 002 本地结构，**不是 `005 → 006` 升级步骤**。先停止 API 和 Gateway，运行
   `PYTHONPATH=src python3.12 -m maintenance.channel_peer_metadata --sqlite data/deep-agent-local.db`只读预检，
   确认后追加`--apply`。脚本先生成带`TMP_to_delete`的私有完整备份，再转换旧名称列、来源快照和
   自动渠道标题；保留Session/Binding ID、人工标题与历史正文，Revision仍为002。共享环境需维护窗口，不自动执行。
@@ -190,7 +202,7 @@ Gateway 只向企微输出模型 Markdown 文本；thinking、工具参数、轨
 
 ## 已有本地会话来源修复
 
-旧 0.7.0 测试数据可通过幂等维护工具补充来源，不新增表，不修改 Alembic `002`：
+以下是旧 0.7.0 / 002 测试数据的可选维护工具，不是当前版本安装或升级必做步骤；当前已正常的来源不要重复修复。工具补充来源，不新增表：
 
 ```bash
 PYTHONPATH=src python3.12 -m maintenance.channel_origins --sqlite data/deep-agent-local.db

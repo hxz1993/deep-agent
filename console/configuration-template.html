@@ -149,16 +149,23 @@
           <p class="panel-subtitle">连接外部聊天平台，将消息交给绑定的 Agent 处理。</p>
         </div>
         <div class="panel-toolbar-actions">
+          <div id="channelAccountActions" class="channel-view-actions">
             <button class="btn channel-commands-btn" type="button" id="channelCommandsBtn"><i data-lucide="terminal"></i><span>快捷命令</span></button>
           <div class="channel-create-control">
             <button class="btn primary" type="button" id="newChannelBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="newChannelMenu"><i data-lucide="plus"></i><span>新建渠道</span><i data-lucide="chevron-down"></i></button>
             <div class="channel-create-menu" id="newChannelMenu" role="menu" aria-label="选择渠道" hidden>
-              <button class="console-select-option" type="button" id="createWecomChannelBtn" role="menuitem"><i data-lucide="messages-square"></i><span>企微</span></button>
+              <button class="console-select-option" type="button" id="createWecomChannelBtn" role="menuitem"><img src="./assets/channel-logos/wecom.png" width="16" height="16" alt="" /><span>企微（WS）</span></button>
             </div>
+          </div>
+          </div>
+          <button class="btn primary" type="button" id="newWecomApplicationBtn" hidden><i data-lucide="plus"></i>新建应用</button>
+          <div class="agent-view-switch channel-view-switch" role="tablist" aria-label="渠道内容">
+            <button type="button" id="channelAccountsTab" class="active" role="tab" aria-selected="true" aria-controls="channelAccountsView" data-channel-view="accounts"><i data-lucide="messages-square" aria-hidden="true"></i><span>渠道账户</span></button>
+            <button type="button" id="wecomApplicationsTab" role="tab" aria-selected="false" aria-controls="wecomApplicationsView" data-channel-view="applications" tabindex="-1"><img src="./assets/channel-logos/wecom.png" width="14" height="14" alt="" /><span>企微应用</span></button>
           </div>
         </div>
       </div>
-      <div class="table-wrap console-list-a">
+      <div class="table-wrap console-list-a" id="channelAccountsView" role="tabpanel" aria-labelledby="channelAccountsTab">
         <table class="data-table channel-table">
           <thead>
             <tr>
@@ -175,6 +182,10 @@
             <tr><td colspan="7" class="empty-cell">正在加载渠道…</td></tr>
           </tbody>
         </table>
+      </div>
+      <div class="provider-admin-workspace wecom-application-workspace" id="wecomApplicationsView" role="tabpanel" aria-labelledby="wecomApplicationsTab" hidden>
+        <aside class="provider-list-pane" id="wecomApplicationList" aria-label="企微应用列表"></aside>
+        <section class="provider-detail-pane" id="wecomApplicationDetail" aria-live="polite"><p class="provider-detail-empty">选择一个企微应用查看详情</p></section>
       </div>
     </section>
 
@@ -678,12 +689,43 @@
             <input type="text" id="channelSessionUserId" maxlength="128" required autocomplete="off" placeholder="平台 User ID" aria-describedby="channelSessionUserHint" />
           </label>
         </div>
+        <div class="channel-extension-settings">
+          <h4 class="channel-extension-heading">扩展设置</h4>
+          <div class="channel-form-grid">
+          <div class="field channel-profile-toggle-field">
+            <span class="field-label-row"><label for="channelUserDetailsEnabled">查询用户详情</label><small class="field-subtitle">获取企微成员账号和姓名。</small></span>
+            <button type="button" id="channelUserDetailsEnabled" class="model-enabled-switch off" role="switch" aria-checked="false" aria-label="查询用户详情"><span></span></button>
+          </div>
+          <div class="field channel-application-field" id="channelWecomApplicationField" hidden>
+            <span class="field-label-row"><label for="channelWecomApplicationId">企微应用</label><button type="button" class="btn-link" id="clearChannelWecomApplicationBtn">清空</button></span>
+            <select id="channelWecomApplicationId" aria-describedby="channelWecomApplicationHint"><option value="" hidden disabled selected>选择企微应用</option></select>
+            <small class="field-hint" id="channelWecomApplicationHint"></small>
+          </div>
+          </div>
+        </div>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer">
         <button type="button" class="btn" id="cancelChannelAccountBtn">取消</button>
         <button type="submit" class="btn primary">保存</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog class="modal wecom-application-modal" id="wecomApplicationModal" aria-labelledby="wecomApplicationModalTitle">
+    <form id="wecomApplicationForm" method="dialog" novalidate>
+      <div class="modal-header">
+        <h3 id="wecomApplicationModalTitle">新建企微应用</h3>
+        <button type="button" class="icon-btn" id="closeWecomApplicationModal" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body">
+        <label class="field"><span>应用名称</span><input id="wecomApplicationName" required maxlength="191" autocomplete="off" /></label>
+        <label class="field"><span>企业 ID</span><input id="wecomApplicationCorpId" required maxlength="191" autocomplete="off" /></label>
+        <label class="field"><span>企微 Agent ID</span><input id="wecomApplicationAgentId" required maxlength="191" autocomplete="off" /></label>
+        <label class="field"><span>App Secret</span><input id="wecomApplicationSecret" type="password" autocomplete="new-password" /><small class="field-hint">用于获取企微成员账号和姓名；留空保留已有凭据。</small></label>
+      </div>
+      <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
+      <div class="modal-footer"><button type="button" class="btn" id="cancelWecomApplicationBtn">取消</button><button type="submit" class="btn primary" id="saveWecomApplicationBtn">保存</button></div>
     </form>
   </dialog>
 

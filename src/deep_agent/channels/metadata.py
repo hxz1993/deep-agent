@@ -4,13 +4,26 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
+def wecom_application_id(account: Any) -> str | None:
+    """Only an explicit opt-in enables identity enrichment on a channel."""
+    settings = getattr(account, "settings", None)
+    wecom = settings.get("wecom") if isinstance(settings, dict) else None
+    if getattr(account, "channel_type", None) != "wecom" or not isinstance(wecom, dict):
+        return None
+    application_id = wecom.get("application_id")
+    if wecom.get("user_details_enabled") is True and isinstance(application_id, str) and application_id:
+        return application_id
+    return None
+
+
 def normalize_peer_metadata(
     peer_type: str, peer_id: str, metadata: Mapping[str, Any] | None,
     *, legacy_display_name: str | None = None,
 ) -> dict[str, str]:
     result = {
         key: value.strip() for key, value in (metadata or {}).items()
-        if key in {"user_id", "chat_id", "display_name"} and isinstance(value, str) and value.strip()
+        if key in {"user_id", "chat_id", "display_name", "wecom_application_id", "wecom_userid", "wecom_name"}
+        and isinstance(value, str) and value.strip()
     }
     if isinstance(legacy_display_name, str) and legacy_display_name.strip() and not result.get("display_name"):
         result["display_name"] = legacy_display_name.strip()

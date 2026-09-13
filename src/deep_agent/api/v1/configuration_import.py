@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
@@ -30,6 +31,23 @@ from deep_agent.skills.runtime import RUNTIME_READY, skill_platform_file_headers
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 tag = "Configuration Import"
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+@asynccontextmanager
+async def _pause_wecom_runtime(ctx):
+    # Keep the closed service installed during import. get_wecom_profiles()
+    # therefore cannot recreate clients against a half-replaced configuration.
+    # Serialize imports so one finally block cannot reopen another's runtime.
+    async with ctx.wecom_import_lock:
+        runtime = ctx.get_wecom_profiles()
+        try:
+            await runtime.close()
+            yield
+        finally:
+            # close() shields task cleanup; even request cancellation must wait
+            # for old queries before a same-ID/revision import becomes usable.
+            await runtime.close()
+            ctx.wecom_profiles = None
 
 
 async def _close_uploads(*uploads: UploadFile | None) -> None:
@@ -166,13 +184,14 @@ async def import_configuration(
             request_headers = skill_platform_file_headers(
                 extract_forward_headers(request)
             )
-            result = await apply_configuration_import(
-                plan,
-                target_engine=ctx.db_engine,
-                file_store=ctx.file_store,
-                request_headers=request_headers,
-                active_run_count=ctx.active_runs.active_count(),
-            )
+            async with _pause_wecom_runtime(ctx):
+                result = await apply_configuration_import(
+                    plan,
+                    target_engine=ctx.db_engine,
+                    file_store=ctx.file_store,
+                    request_headers=request_headers,
+                    active_run_count=ctx.active_runs.active_count(),
+                )
             warnings: list[str] = []
             if result.plan.skills:
                 try:

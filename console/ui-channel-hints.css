@@ -23,3 +23,8 @@
 .field-label-row > span:first-child { line-height: 18px; }
 .field .field-label-row > .field-help, .field-label-row > .field-help { display: inline-flex; align-items: center; justify-content: center; align-self: center; width: 14px; height: 18px; min-height: 0; margin: 0; padding: 0; line-height: 18px; }
 .field-label-row > .field-help > svg { display: block; width: 14px; height: 14px; margin: 0; flex: 0 0 14px; }
+
+/* Keep channel headings on the same line as other dialog headers. */
+#channelAccountModal .modal-title-copy { display: flex; flex-direction: row; align-items: center; gap: 12px; min-width: 0; }
+#channelAccountModal .modal-title-copy h3 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#channelAccountModal .channel-modal-subtitle { margin-top: 0; flex: none; flex-wrap: nowrap; white-space: nowrap; }

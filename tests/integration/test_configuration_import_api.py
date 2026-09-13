@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+import asyncio
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -18,6 +20,9 @@ from maintenance.config_backup import export_backup
 from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
 from tests.unit import test_config_backup as config_backup_tests
+from deep_agent.schemas.channel import ChannelAccountCreate
+from deep_agent.services.wecom_client import WecomError
+from tests.helpers.sqlite_stores import seed_default_agent
 
 
 class _RejectingFileStore:
@@ -73,7 +78,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await connection.execute(
-                text("INSERT INTO alembic_version (version_num) VALUES ('005')")
+                text("INSERT INTO alembic_version (version_num) VALUES ('006')")
             )
         self.app = FastAPI()
         self.app.include_router(api_router)
@@ -139,6 +144,68 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self._post(apply=True, confirm=False)
         self.assertEqual(response.status_code, 422)
         self.assertIn("confirm=true", response.json()["detail"])
+
+    async def test_import_closes_old_identity_jobs_and_tokens_before_reusing_application_revision(self):
+        from deep_agent.api.v1 import configuration_import as import_api
+
+        ctx = get_context()
+        agent_id = await seed_default_agent(self.stores)
+        app = await self.stores.wecom.create_application(name="旧应用", corp_id="test-corp",
+            wecom_agent_id="identity-agent", app_secret="old-test-secret")
+        account = await self.stores.channel.create_account(ChannelAccountCreate(name="旧机器人",
+            bot_id="old-bot", secret="test-only", agent_id=agent_id, session_user_id="test-owner", enabled=True,
+            settings={"wecom": {"user_details_enabled": True, "application_id": app.id}}))
+        with sqlite3.connect(self.backup_path) as db:
+            db.execute("""INSERT INTO wecom_applications
+                (id,name,corp_id,wecom_agent_id,app_secret,settings,revision)
+                VALUES (?, '恢复后的应用', 'test-corp', 'identity-agent', 'new-test-secret', '{}', ?)""",
+                (app.id, app.revision))
+        runtime = ctx.get_wecom_profiles()
+        self.addAsyncCleanup(runtime.close)
+        member_started, member_cancelled = asyncio.Event(), asyncio.Event()
+
+        async def old_wire(method, path, **kwargs):
+            if path == "/gettoken":
+                return {"access_token": "old-test-token", "expires_in": 7200}
+            if path == "/batch/openuserid_to_userid":
+                return {"errcode": 0, "userid_list": [{"open_userid": "opaque", "userid": "Member"}]}
+            member_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                member_cancelled.set()
+
+        runtime.client._request = AsyncMock(side_effect=old_wire)
+        old_query = asyncio.create_task(runtime.resolve(account, "opaque", peer_type="group"))
+        async def close_query():
+            old_query.cancel()
+            await asyncio.gather(old_query, return_exceptions=True)
+        self.addAsyncCleanup(close_query)
+        await asyncio.wait_for(member_started.wait(), 2)
+        apply_original = import_api.apply_configuration_import
+
+        async def apply_with_runtime_check(*args, **kwargs):
+            self.assertTrue(member_cancelled.is_set())
+            self.assertIs(ctx.get_wecom_profiles(), runtime)
+            self.assertEqual((await runtime.resolve(account, "opaque"))["status"], "disabled")
+            with self.assertRaises(WecomError):
+                await runtime.client.token(app)
+            return await apply_original(*args, **kwargs)
+
+        with patch.object(import_api, "apply_configuration_import", side_effect=apply_with_runtime_check):
+            response = await self._post(apply=True, confirm=True)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((await old_query)["status"], "disabled")
+        self.assertIsNone(ctx.wecom_profiles)
+        self.assertEqual((await self.stores.wecom.cache_stats(app.id))["total"], 0)
+        restored = await self.stores.wecom.get_application(app.id)
+        self.assertEqual((restored.revision, restored.app_secret), (app.revision, "new-test-secret"))
+        new_runtime = ctx.get_wecom_profiles()
+        self.addAsyncCleanup(new_runtime.close)
+        self.assertIsNot(new_runtime, runtime)
+        new_runtime.client._request = AsyncMock(return_value={"access_token": "new-test-token", "expires_in": 7200})
+        self.assertEqual(await new_runtime.client.token(restored), "new-test-token")
+        self.assertEqual(new_runtime.client._request.await_args.kwargs["params"]["corpsecret"], "new-test-secret")
 
 
 if __name__ == "__main__":

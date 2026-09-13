@@ -4,7 +4,7 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260913-49";
+} from "./configuration.js?v=20260914-wecom-review2";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260913-49";
 import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260913-49";
 import { initWorkspace } from "./workspace.js?v=20260913-49";
@@ -76,6 +76,7 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
     if (!(await window.mcpAdmin.requestCloseEditor())) return;
   }
   if (next !== "configuration" && window.integrationsAdmin?.deactivate() === false) return;
+  if (next !== "configuration" && window.wecomApplicationsAdmin?.deactivate() === false) return;
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);
   });
@@ -185,10 +186,10 @@ function bindNavigation() {
   if (resourceNav && template) resourceNav.append(template.content);
   const agentTab = resourceNav?.querySelector('[data-tab="agents"]');
   if (agentTab) document.querySelector(".console-rail .console-nav")?.append(agentTab);
-  const channelTab = resourceNav?.querySelector('[data-tab="channels"]');
-  if (channelTab) document.querySelector(".console-rail .console-nav")?.append(channelTab);
   const integrationTab = resourceNav?.querySelector('[data-tab="integrations"]');
   if (integrationTab) document.querySelector(".console-rail .console-nav")?.append(integrationTab);
+  const channelTab = resourceNav?.querySelector('[data-tab="channels"]');
+  if (channelTab) document.querySelector(".console-rail .console-nav")?.append(channelTab);
   document.querySelectorAll(".console-rail [data-tab]").forEach((button) => {
     const label = button.querySelector("span")?.textContent.trim();
     if (label) { button.title = label; button.setAttribute("aria-label", label); }

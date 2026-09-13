@@ -3,6 +3,10 @@ const channelAdminState = {
   agents: [],
   runtime: null,
   editingId: null,
+  view: "accounts",
+  applications: [],
+  applicationLoadGeneration: 0,
+  saving: false,
 };
 
 const CHANNEL_STATE_LABELS = {
@@ -44,8 +48,67 @@ function setChannelSecretEditor({ maskedValue = "", secretSet = false, required 
   input.placeholder = masked || secretSet ? "留空则保持不变" : "请输入 Secret";
 }
 
+function channelUserDetailsSettings(settings, enabled, applicationId) {
+  return { ...settings, wecom: { ...(settings?.wecom || {}), user_details_enabled: enabled, application_id: applicationId || null } };
+}
+
+function setChannelUserDetailsEnabled(enabled) {
+  const button = document.getElementById("channelUserDetailsEnabled");
+  if (!button) return;
+  button.setAttribute("aria-checked", String(enabled));
+  button.classList.toggle("on", enabled);
+  button.classList.toggle("off", !enabled);
+  document.getElementById("channelWecomApplicationField").hidden = !enabled;
+  document.getElementById("channelWecomApplicationId").required = enabled;
+}
+
+async function prepareChannelApplicationEditor(settings = {}) {
+  const select = document.getElementById("channelWecomApplicationId");
+  if (!select) return;
+  const generation = ++channelAdminState.applicationLoadGeneration;
+  const selectedId = settings?.wecom?.application_id || "";
+  select.dataset.selectedId = selectedId;
+  select.innerHTML = '<option value="" hidden disabled selected>正在加载企微应用…</option>';
+  select.disabled = true;
+  channelAdminState.applications = [];
+  setChannelUserDetailsEnabled(settings?.wecom?.user_details_enabled === true);
+  const hint = document.getElementById("channelWecomApplicationHint");
+  hint.textContent = "";
+  try {
+    const items = await apiFetch("/api/v1/wecom-applications");
+    if (generation !== channelAdminState.applicationLoadGeneration) return;
+    channelAdminState.applications = items;
+    select.innerHTML = `<option value="" hidden disabled ${!selectedId ? "selected" : ""}>选择企微应用</option>${selectedId && !items.some(item => item.id === selectedId) ? `<option value="${escapeHtml(selectedId)}" hidden disabled selected>应用已不可用</option>` : ""}${items.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === selectedId ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}`;
+    select.disabled = !items.length;
+    hint.textContent = !items.length ? "暂无企微应用，请先在渠道 → 企微应用中新建。" : "";
+  } catch (error) {
+    if (generation !== channelAdminState.applicationLoadGeneration) return;
+    hint.textContent = `企微应用读取失败：${error.message}`;
+    select.innerHTML = '<option value="" hidden disabled selected>企微应用加载失败</option>';
+  }
+}
+
 const channelsAdmin = {
+  selectView(view) {
+    if (!["accounts", "applications"].includes(view)) return;
+    if (view === "accounts" && window.wecomApplicationsAdmin?.deactivate() === false) return;
+    channelAdminState.view = view;
+    this.renderView();
+    return view === "applications" ? window.wecomApplicationsAdmin?.refresh() : undefined;
+  },
+  renderView() {
+    const applications = channelAdminState.view === "applications";
+    document.querySelectorAll("[data-channel-view]").forEach(button => {
+      const active = button.dataset.channelView === channelAdminState.view;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+    const visibility = { channelAccountsView: applications, channelAccountActions: applications, channelRuntimeBanner: applications, wecomApplicationsView: !applications, newWecomApplicationBtn: !applications };
+    Object.entries(visibility).forEach(([id, hidden]) => { const node = document.getElementById(id); if (node) node.hidden = hidden; });
+  },
   async refresh() {
+    if (channelAdminState.view === "applications") return window.wecomApplicationsAdmin?.refresh();
     const tbody = document.getElementById("channelTableBody");
     if (!tbody) return;
     tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">正在加载渠道…</td></tr>';
@@ -119,7 +182,7 @@ const channelsAdmin = {
       return `<tr class="channel-list-row" data-open-channel="${escapeHtml(account.id)}" tabindex="0">
         <td class="channel-enabled-cell"><button type="button" class="model-enabled-switch ${account.enabled ? "on" : "off"}" data-toggle-channel="${escapeHtml(account.id)}" role="switch" aria-checked="${account.enabled}" title="${account.enabled ? "停用渠道" : "启用渠道"}" aria-label="${account.enabled ? "停用渠道" : "启用渠道"}"><span></span></button></td>
         <td><strong>${escapeHtml(account.name)}</strong></td>
-        <td class="channel-type-cell">企微（WS）</td>
+        <td class="channel-type-cell"><span class="channel-type-label"><img src="./assets/channel-logos/wecom.png" width="18" height="18" alt="" />企微（WS）</span></td>
         <td>${escapeHtml(account.agent_name || account.agent_id)}</td>
         <td><span class="channel-status" data-state="${escapeHtml(runtime.state)}" title="${escapeHtml(runtime.message || "")}"><span></span>${escapeHtml(CHANNEL_STATE_LABELS[runtime.state] || runtime.state)}</span></td>
         <td>${escapeHtml(formatDate(account.updated_at))}</td>
@@ -170,6 +233,7 @@ const channelsAdmin = {
     document.getElementById("channelBotId").value = "";
     document.getElementById("channelSessionUserId").value = "";
     setChannelSecretEditor({ required: true });
+    void prepareChannelApplicationEditor();
     AdminFormFeedback.clear(document.getElementById("channelAccountForm"));
     document.getElementById("channelAccountModal").showModal();
   },
@@ -184,6 +248,7 @@ const channelsAdmin = {
     document.getElementById("channelBotId").value = account.bot_id;
     document.getElementById("channelSessionUserId").value = account.session_user_id;
     setChannelSecretEditor({ maskedValue: account.secret_masked, secretSet: account.secret_set });
+    void prepareChannelApplicationEditor(account.settings);
     AdminFormFeedback.clear(document.getElementById("channelAccountForm"));
     document.getElementById("channelAccountModal").showModal();
   },
@@ -191,9 +256,18 @@ const channelsAdmin = {
   async save(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    if (!form.reportValidity()) return;
+    if (channelAdminState.saving || !form.reportValidity()) return;
     const editingId = channelAdminState.editingId;
+    const account = channelAdminState.accounts.find(item => item.id === editingId);
+    const enabled = document.getElementById("channelUserDetailsEnabled").getAttribute("aria-checked") === "true";
+    const applicationSelect = document.getElementById("channelWecomApplicationId");
+    const applicationId = applicationSelect.disabled ? applicationSelect.dataset.selectedId : applicationSelect.value;
+    if (enabled && !channelAdminState.applications.some(item => item.id === applicationId)) {
+      AdminFormFeedback.show(form, "请选择有效的企微应用；没有应用时，请先创建。");
+      return;
+    }
     const payload = {
+      settings: channelUserDetailsSettings(account?.settings || {}, enabled, applicationId),
       name: document.getElementById("channelName").value.trim(),
       bot_id: document.getElementById("channelBotId").value.trim(),
       agent_id: document.getElementById("channelAgentId").value,
@@ -203,6 +277,8 @@ const channelsAdmin = {
     const secret = secretInput.value.trim();
     if (secret && secret !== secretInput.dataset.maskedValue) payload.secret = secret;
     if (!editingId) payload.enabled = false;
+    channelAdminState.saving = true;
+    form.querySelectorAll("button").forEach(button => { button.disabled = true; });
     try {
       await apiFetch(editingId ? `/api/v1/channel-accounts/${editingId}` : "/api/v1/channel-accounts", {
         method: editingId ? "PUT" : "POST",
@@ -213,6 +289,9 @@ const channelsAdmin = {
       await this.refresh();
     } catch (error) {
       AdminFormFeedback.show(form, error.message);
+    } finally {
+      channelAdminState.saving = false;
+      form.querySelectorAll("button").forEach(button => { button.disabled = false; });
     }
   },
 
@@ -314,6 +393,21 @@ window.channelsAdmin = channelsAdmin;
 
 document.addEventListener("DOMContentLoaded", () => {
   bindChannelCreateMenu();
+  const viewButtons = Array.from(document.querySelectorAll("[data-channel-view]"));
+  viewButtons.forEach((button, index) => {
+    button.addEventListener("click", () => channelsAdmin.selectView(button.dataset.channelView));
+    button.addEventListener("keydown", event => {
+      const next = event.key === "Home" ? 0 : event.key === "End" ? viewButtons.length - 1 : ["ArrowLeft", "ArrowRight"].includes(event.key) ? (index + 1) % viewButtons.length : -1;
+      if (next < 0) return;
+      event.preventDefault(); channelsAdmin.selectView(viewButtons[next].dataset.channelView); viewButtons[next].focus();
+    });
+  });
+  document.getElementById("channelUserDetailsEnabled")?.addEventListener("click", event => setChannelUserDetailsEnabled(event.currentTarget.getAttribute("aria-checked") !== "true"));
+  document.getElementById("clearChannelWecomApplicationBtn")?.addEventListener("click", () => {
+    const select = document.getElementById("channelWecomApplicationId");
+    select.value = ""; select.dataset.selectedId = "";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   document.getElementById("refreshChannelsBtn")?.addEventListener("click", () => channelsAdmin.refresh());
   document.getElementById("channelCommandsBtn")?.addEventListener("click", () => channelsAdmin.openCommands());
   document.getElementById("retryChannelCommandsBtn")?.addEventListener("click", () => channelsAdmin.openCommands());
@@ -328,6 +422,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const input = event.currentTarget;
     input.type = input.value && input.value === input.dataset.maskedValue ? "text" : "password";
   });
-  document.getElementById("closeChannelAccountModal")?.addEventListener("click", () => document.getElementById("channelAccountModal").close());
-  document.getElementById("cancelChannelAccountBtn")?.addEventListener("click", () => document.getElementById("channelAccountModal").close());
+  const closeAccount = () => { if (!channelAdminState.saving) document.getElementById("channelAccountModal").close(); };
+  document.getElementById("closeChannelAccountModal")?.addEventListener("click", closeAccount);
+  document.getElementById("cancelChannelAccountBtn")?.addEventListener("click", closeAccount);
+  document.getElementById("channelAccountModal")?.addEventListener("cancel", event => { event.preventDefault(); closeAccount(); });
+  document.getElementById("channelAccountModal")?.addEventListener("close", () => { channelAdminState.applicationLoadGeneration++; document.getElementById("channelSecret").value = ""; });
 });

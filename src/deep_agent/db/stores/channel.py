@@ -17,13 +17,15 @@ from deep_agent.db.models import (
     ChatSession,
     ChatSessionEvent,
     LlmModel,
+    WecomApplication,
 )
 from deep_agent.db.reference_integrity import (
     ReferenceConflict, is_unique_conflict, lock_optional, lock_reference,
 )
 from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.db.stores.wecom import validate_channel_wecom_settings
 from deep_agent.db.stores.event.base import SessionEventStore
-from deep_agent.channels.metadata import channel_session_title, normalize_channel_origin, normalize_peer_metadata
+from deep_agent.channels.metadata import channel_session_title, normalize_channel_origin, normalize_peer_metadata, wecom_application_id
 from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
 
 
@@ -68,8 +70,9 @@ class ChannelStore(SessionBoundMixin):
         self, data: ChannelAccountCreate
     ) -> ChannelAccount:
         try:
-            async with self._write() as db:
+            async with self._write(exclusive=True) as db:
                 await lock_reference(db, Agent, Agent.id, data.agent_id, "Agent")
+                await validate_channel_wecom_settings(db, data.settings)
                 row = ChannelAccount(
                     id=uuid4().hex,
                     **data.model_dump(),
@@ -89,12 +92,13 @@ class ChannelStore(SessionBoundMixin):
         data: ChannelAccountUpdate,
     ) -> ChannelAccount | None:
         try:
-            async with self._write() as db:
+            async with self._write(exclusive=True) as db:
                 row = await self._lock_account_for_write(
                     db, account_id, new_agent_id=data.agent_id,
                 )
                 if row is None:
                     return None
+                await validate_channel_wecom_settings(db, data.settings if "settings" in data.model_fields_set else row.settings)
                 for field, value in data.model_dump(exclude_unset=True).items():
                     setattr(row, field, value)
                 row.updated_at = datetime.now(timezone.utc)
@@ -244,7 +248,90 @@ class ChannelStore(SessionBoundMixin):
 
     @staticmethod
     def session_title(account: ChannelAccount, binding: ChannelSessionBinding) -> str:
+        application_id = wecom_application_id(account)
+        if application_id and binding.peer_type in {"single", "userid"}:
+            metadata = binding.peer_metadata or {}
+            name = metadata.get("wecom_name") if metadata.get("wecom_application_id") == application_id else None
+            return f"user/{name}/{binding.peer_id}" if name else f"user/{binding.peer_id}"
         return channel_session_title(binding.peer_type, binding.peer_id, binding.peer_metadata)
+
+    async def refresh_wecom_titles(
+        self, account_id: str, *, application_id: str | None = None,
+        sender_id: str | None = None, userid: str | None = None,
+        name: str | None = None, session_id: str | None = None, revision: int | None = None,
+    ) -> int:
+        """Refresh active private bindings without rewriting user titles/history.
+
+        No application_id means a settings change: clear previous enrichment.
+        A background result must carry the application and original session ID
+        to avoid changing a new conversation after /new or an account edit.
+        """
+        async with self._read() as db:
+            peers = list((await db.execute(select(
+                ChannelSessionBinding.peer_type, ChannelSessionBinding.peer_id,
+            ).where(
+                ChannelSessionBinding.account_id == account_id,
+                ChannelSessionBinding.peer_type.in_({"single", "userid"}),
+            ).order_by(ChannelSessionBinding.id))).all())
+        changed = 0
+        for peer_type, peer_id in peers:
+            async with self._write() as db:
+                account, expected_session = await self._lock_peer_account(db, account_id, peer_type, peer_id)
+                if account is None or account.channel_type != "wecom":
+                    continue
+                if application_id and (not account.enabled or wecom_application_id(account) != application_id):
+                    continue
+                if application_id:
+                    application = await lock_optional(db, WecomApplication, WecomApplication.id, application_id)
+                    if application is None or (revision is not None and application.revision != revision):
+                        continue
+                binding = await self._get_binding(db, account_id, peer_type, peer_id, for_update=True)
+                if binding is None:
+                    continue
+                self._check_binding_snapshot(binding, expected_session)
+                if session_id is not None and binding.session_id != session_id:
+                    continue
+                metadata = dict(binding.peer_metadata or {})
+                if application_id:
+                    # Batch cache refresh can match an already confirmed userid;
+                    # an initial query must match the original private peer ID.
+                    if peer_id != sender_id and not (
+                        userid and metadata.get("wecom_application_id") == application_id
+                        and str(metadata.get("wecom_userid", "")).casefold() == userid.casefold()
+                    ):
+                        continue
+                    if metadata.get("wecom_application_id") != application_id or (
+                        userid and metadata.get("wecom_userid")
+                        and str(metadata["wecom_userid"]).casefold() != userid.casefold()
+                    ):
+                        metadata.pop("wecom_name", None)
+                        metadata.pop("wecom_userid", None)
+                    metadata["wecom_application_id"] = application_id
+                    if userid:
+                        metadata["wecom_userid"] = userid
+                    if name:
+                        metadata["wecom_name"] = name
+                else:
+                    for key in ("wecom_application_id", "wecom_userid", "wecom_name"):
+                        metadata.pop(key, None)
+                if metadata != binding.peer_metadata:
+                    binding.peer_metadata = metadata
+                    binding.updated_at = datetime.now(timezone.utc)
+                if not binding.session_id:
+                    continue
+                session = await lock_optional(db, ChatSession, ChatSession.session_id, binding.session_id)
+                if session is None or session.agent_id != account.agent_id or session.user_id != account.session_user_id:
+                    continue
+                latest = await self._events._latest_title(db, session.session_id)
+                title = self.session_title(account, binding)
+                if latest is None or latest.payload.get("source") != "channel" or latest.payload.get("title") == title:
+                    continue
+                await self._events._append_title(
+                    db, session, title=title, source="channel", source_event_id=None,
+                    turn_id=None, run_id=None, details={"channel": self.session_origin(account, binding)},
+                )
+                changed += 1
+        return changed
 
     async def _create_session(
         self, db: AsyncSession, account: ChannelAccount,

@@ -9,6 +9,7 @@ from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.agent import AgentStoreBase, create_agent_store
 from deep_agent.db.stores.chat_session import ChatSessionStoreBase, create_chat_session_store
 from deep_agent.db.stores.channel import ChannelStore
+from deep_agent.db.stores.wecom import WecomStore
 from deep_agent.db.stores.event import SessionEventStore
 from deep_agent.db.stores.global_setting import GlobalSettingStore
 from deep_agent.db.stores.integration_settings import IntegrationSettingsStore
@@ -44,6 +45,7 @@ class DataStores:
     global_setting: GlobalSettingStore | None = None
     channel: ChannelStore | None = None
     integration_settings: IntegrationSettingsStore | None = None
+    wecom: WecomStore | None = None
 
 
 def create_data_stores(
@@ -70,6 +72,7 @@ def create_data_stores(
         ui_tool_package=create_ui_tool_package_store(dialect, session_factory),
         skill_package=create_skill_package_store(dialect, session_factory),
         channel=ChannelStore(session_factory),
+        wecom=WecomStore(session_factory),
         global_setting=GlobalSettingStore(session_factory),
         integration_settings=IntegrationSettingsStore(session_factory),
     )

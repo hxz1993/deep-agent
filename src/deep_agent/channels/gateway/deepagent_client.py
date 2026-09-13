@@ -76,6 +76,25 @@ class DeepAgentChannelClient:
                 raise RuntimeError("DeepAgent upload returned an invalid response")
             return payload
 
+    async def resolve_wecom_user(
+        self, account, *, sender_id: str, peer_type: str, peer_id: str, session_id: str,
+    ) -> dict[str, Any]:
+        """The API owns token/query tasks; losing this request never cancels them."""
+        await self.start()
+        assert self._session is not None
+        async with self._session.post(
+            f"{self.config.api_url}/api/v1/internal/channels/wecom/resolve-user",
+            headers=self._headers(account),
+            json={"sender_id": sender_id, "peer_type": peer_type, "peer_id": peer_id, "session_id": session_id},
+            timeout=aiohttp.ClientTimeout(total=5),
+        ) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"DeepAgent identity query failed with HTTP {response.status}")
+            payload = await response.json(content_type=None)
+            if not isinstance(payload, dict):
+                raise RuntimeError("DeepAgent identity query returned an invalid response")
+            return payload
+
     async def _session_action(self, account, session_id: str, action: str, *, method: str = "GET", agent_id: str | None = None) -> dict[str, Any]:
         from urllib.parse import quote
 

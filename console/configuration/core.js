@@ -189,7 +189,7 @@ async function apiFetch(path, options = {}) {
     headers: { "Content-Type": "application/json", ...optionHeaders },
   });
 
-  if (resp.status === 503 && !String(path).includes("channel") && !String(path).startsWith("/api/v1/integrations")) {
+  if (resp.status === 503 && !String(path).includes("channel") && !String(path).startsWith("/api/v1/integrations") && !String(path).startsWith("/api/v1/wecom-applications")) {
     showDbBanner(true);
     throw new Error("数据库未配置 (503)");
   }
@@ -291,6 +291,7 @@ function initTabs() {
       if (window.agentsAdmin?.isEditorOpen?.() && !(await window.agentsAdmin.requestCloseEditor())) return;
       if (window.mcpAdmin?.isEditorOpen?.() && !(await window.mcpAdmin.requestCloseEditor())) return;
       if (tab.dataset.tab !== "integrations" && window.integrationsAdmin?.deactivate() === false) return;
+      if (tab.dataset.tab !== "channels" && window.wecomApplicationsAdmin?.deactivate() === false) return;
       tabs.forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       const name = tab.dataset.tab;

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.db.configuration_transfer import (
     SESSION_TABLES,
+    CACHE_TABLES,
     backup_scope_manifest,
     configuration_table_names,
     validate_table_classification,
@@ -354,6 +355,9 @@ async def inspect_configuration_backup(
                     "Backup scope manifest does not match the current contract"
                 )
             await _validate_empty_sessions(connection, target=False)
+            for table_name in CACHE_TABLES:
+                if await _table_count(connection, table_name):
+                    raise ConfigurationImportError("Configuration backup contains member cache data")
             await _validate_logical_references(connection, prefix="Backup")
 
             rows: dict[str, list[dict[str, Any]]] = {}
@@ -696,6 +700,9 @@ async def _replace_configuration(
             source_revision=plan.source.revision,
         )
         table_names = configuration_table_names()
+        # Profiles are rebuildable and must not survive replacement of their application identity.
+        for table_name in CACHE_TABLES:
+            await connection.execute(Base.metadata.tables[table_name].delete())
         for table_name in reversed(table_names):
             await connection.execute(Base.metadata.tables[table_name].delete())
         for table_name in table_names:

@@ -11,13 +11,15 @@ SESSION_TABLES = (
     "channel_session_bindings",
     "channel_message_runs",
 )
+CACHE_TABLES = ("wecom_user_profiles",)
+STRUCTURE_ONLY_TABLES = SESSION_TABLES + CACHE_TABLES
 BACKUP_SCOPE_SCHEMA_VERSION = "1.1"
 # Explicit logical dependency order. Keep this stable across 002/003: backup
 # manifests are versioned assets and must not change with ORM FK declarations.
 CONFIGURATION_TABLE_ORDER = (
     "global_settings", "llm_providers", "mcp_servers", "model_catalog",
     "skill_packages", "ui_tool_packages", "llm_models", "ui_tool_definitions",
-    "agents", "channel_accounts", "integration_settings",
+    "agents", "wecom_applications", "channel_accounts", "integration_settings",
 )
 
 
@@ -34,7 +36,7 @@ def configuration_table_names() -> tuple[str, ...]:
     """Return configuration tables in explicit logical insertion order."""
 
     return order_configuration_tables(
-        tuple(name for name in Base.metadata.tables if name not in SESSION_TABLES)
+        tuple(name for name in Base.metadata.tables if name not in STRUCTURE_ONLY_TABLES)
     )
 
 
@@ -42,7 +44,7 @@ def backup_scope_manifest(copied_tables: Sequence[str]) -> dict[str, Any]:
     return {
         "schema_version": BACKUP_SCOPE_SCHEMA_VERSION,
         "copied_tables": list(copied_tables),
-        "structure_only_tables": list(SESSION_TABLES),
+        "structure_only_tables": list(STRUCTURE_ONLY_TABLES if "wecom_applications" in copied_tables else SESSION_TABLES),
         "external_files": [
             {
                 "kind": "uploaded_skill_packages",
@@ -56,7 +58,7 @@ def backup_scope_manifest(copied_tables: Sequence[str]) -> dict[str, Any]:
 
 
 def validate_table_classification() -> None:
-    structure_only = set(SESSION_TABLES)
+    structure_only = set(STRUCTURE_ONLY_TABLES)
     model_tables = set(Base.metadata.tables)
     unknown = structure_only - model_tables
     if unknown:

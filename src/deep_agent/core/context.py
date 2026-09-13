@@ -54,6 +54,15 @@ class AppContext:
     sandbox_backend: PythonExecutionBackend | None = None
     sandbox_profile: ResolvedSandboxProfile | None = None
     session_live: SessionLiveHub = field(default_factory=SessionLiveHub)
+    wecom_profiles: object | None = None
+    wecom_import_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def get_wecom_profiles(self):
+        # One service per API process, shared by gateway and administrator calls.
+        if self.wecom_profiles is None:
+            from deep_agent.services.wecom_profiles import WecomProfileService
+            self.wecom_profiles = WecomProfileService(self.stores.wecom, self.stores.channel)
+        return self.wecom_profiles
 
     @property
     def store(self) -> SessionStore:
@@ -218,6 +227,8 @@ class AppContext:
         )
 
     async def aclose(self) -> None:
+        if self.wecom_profiles is not None:
+            await self.wecom_profiles.close()
         self.session_live.close()
         self.active_runs.cancel_all()
         await self.mcp_lease_manager.close_all()

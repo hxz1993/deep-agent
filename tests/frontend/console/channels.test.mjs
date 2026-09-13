@@ -153,7 +153,10 @@ function secretEditorHarness() {
   const requests = [];
   const getElement = (id) => {
     if (!elements.has(id)) elements.set(id, {
-      value: "", dataset: {}, listeners: {}, open: false, selected: false,
+      value: "", dataset: {}, listeners: {}, attributes: {}, open: false, selected: false,
+      classList: { toggle() {} }, querySelectorAll() { return []; },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      getAttribute(key) { return this.attributes[key]; },
       addEventListener(type, listener) { this.listeners[type] = listener; },
       showModal() { this.open = true; }, close() { this.open = false; },
       select() { this.selected = true; }, reportValidity() { return true; },
@@ -165,8 +168,9 @@ function secretEditorHarness() {
     document: {
       addEventListener(type, listener) { if (type === "DOMContentLoaded") ready.push(listener); },
       getElementById: getElement,
+      querySelectorAll() { return []; },
     },
-    apiFetch: async (path, options) => { requests.push({ path, ...options, payload: JSON.parse(options.body) }); },
+    apiFetch: async (path, options) => { if (!options?.body) return []; requests.push({ path, ...options, payload: JSON.parse(options.body) }); },
     AdminFormFeedback: { clear() {}, show() { assert.fail("unexpected save failure"); } },
     escapeHtml: (value) => String(value ?? ""),
     showToast() {},
@@ -290,5 +294,5 @@ test("新建渠道先选择企微，支持键盘和外部关闭且不提前创�
   trigger.listeners.click();
   documentEvents.click({ target: {} });
   assert.equal(menu.hidden, true);
-  assert.match(templateHtml, /id="createWecomChannelBtn" role="menuitem"[^\n]*<span>企微<\/span>/);
+  assert.match(templateHtml, /id="createWecomChannelBtn" role="menuitem"[^\n]*<span>企微（WS）<\/span>/);
 });

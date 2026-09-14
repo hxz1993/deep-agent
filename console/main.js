@@ -4,7 +4,7 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260914-wecom-review5";
+} from "./configuration.js?v=20260914-wecom-review6";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260913-49";
 import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260913-49";
 import { initWorkspace } from "./workspace.js?v=20260913-49";

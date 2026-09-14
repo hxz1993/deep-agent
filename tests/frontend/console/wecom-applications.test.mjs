@@ -184,7 +184,7 @@ test('缓存仅提供重置入口并锚定二次确认', () => {
   assert.match(source, /setAttribute\('popover', 'auto'\)/);
   assert.match(source, /trigger\.getBoundingClientRect\(\)/);
   assert.doesNotMatch(source, /<button[^>]*data-wecom-action="refresh"/);
-  assert.match(source, /保留姓名和 ID 映射，仅将资料标记为过期/);
+  assert.match(source, /将本应用下所有已缓存成员资料标记为过期/);
   const invalidate = source.split('async invalidate()')[1];
   assert.doesNotMatch(invalidate, /confirmAction/);
 });

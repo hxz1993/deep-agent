@@ -102,7 +102,7 @@
     node.setAttribute('popover', 'auto');
     node.setAttribute('role', 'dialog');
     node.setAttribute('aria-label', '重置成员缓存确认');
-    const copy = '保留姓名和 ID 映射，仅将资料标记为过期；下次收到消息时按需更新。';
+    const copy = '<strong>将本应用下所有已缓存成员资料标记为过期。</strong></p><p>保留用户记录、姓名和 ID 映射，<strong>不会删除缓存数据</strong>，也不会立即请求企微接口。</p><p>成员下次发送消息时按需更新资料，更新前仍可使用已有姓名。<strong>已保存的会话消息、上下文和标题不受本次重置影响。</strong>';
     node.innerHTML = `<p>${copy}</p><div class="wecom-detail-actions"><button type="button" class="btn" data-cache-cancel>取消</button><button type="button" class="btn primary" data-cache-confirm>确认重置</button></div>`;
     el('wecomApplicationDetail').appendChild(node);
     cacheConfirmation = { node, trigger };

@@ -41,6 +41,14 @@
     el('wecomApplicationDetail')?.querySelectorAll('button').forEach(node => { node.disabled = value; });
     if (!value) renderJob();
   }
+  function renderSecretHint() {
+    const input = el('wecomApplicationSecret');
+    const deleting = input.dataset.clearRequested === 'true';
+    const existing = !!input.dataset.maskedValue;
+    const changed = input.value && input.value !== input.dataset.maskedValue;
+    el('wecomApplicationSecretHint').textContent = deleting ? '保存后删除密钥' : changed ? '保存后使用新密钥' : existing ? '未修改时保留原密钥' : '用于查询成员资料';
+    input.placeholder = deleting ? '待删除，保存后生效' : existing ? '未输入新密钥，保存时保留原值' : '请输入 App Secret';
+  }
   function renderList() {
     const list = el('wecomApplicationList');
     const scroll = list.scrollTop;
@@ -60,7 +68,7 @@
       <header class="wecom-detail-heading"><h3>${escapeHtml(item.name)}</h3><div class="wecom-detail-actions"><button type="button" class="btn" data-wecom-action="edit"><i data-lucide="pencil"></i>编辑</button><button type="button" class="btn" data-wecom-action="test"><i data-lucide="plug-zap"></i>测试连接</button><button type="button" class="btn danger" data-wecom-action="delete"><i data-lucide="trash-2"></i>删除</button></div></header>
       <p id="wecomApplicationStatus" class="wecom-inline-status" role="status"></p>
       <section class="wecom-info-card" aria-label="应用配置"><dl class="wecom-detail-fields"><div><dt>企业 ID</dt><dd>${escapeHtml(item.corp_id)}</dd></div><div><dt>企微 Agent ID</dt><dd>${escapeHtml(item.wecom_agent_id)}</dd></div><div><dt>App Secret</dt><dd>${escapeHtml(item.app_secret_masked || '未配置')}</dd></div><div><dt>关联渠道</dt><dd>${linked}</dd></div></dl></section>
-      <section class="wecom-cache-region" aria-label="成员缓存"><div class="wecom-card-heading"><span class="field-label-row"><h3>成员缓存</h3><span class="field-help" tabindex="0" aria-label="成员缓存说明" aria-describedby="wecomCacheHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="wecomCacheHelp" role="tooltip">仅缓存已遇到的用户，姓名资料有效期为一周；过期后在收到消息时按需刷新。</span></span></span><div class="wecom-detail-actions"><button type="button" class="btn" data-wecom-action="refresh" aria-haspopup="dialog" aria-expanded="false"><i data-lucide="refresh-cw"></i>刷新缓存</button><button type="button" class="btn" data-wecom-action="invalidate" aria-haspopup="dialog" aria-expanded="false"><i data-lucide="rotate-ccw"></i>重置缓存</button></div></div>
+      <section class="wecom-cache-region" aria-label="成员缓存"><div class="wecom-card-heading"><span class="field-label-row"><h3>成员缓存</h3><span class="field-help" tabindex="0" aria-label="成员缓存说明" aria-describedby="wecomCacheHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="wecomCacheHelp" role="tooltip">仅缓存已遇到的用户，姓名资料有效期为一周；过期后在收到消息时按需刷新。</span></span></span><div class="wecom-detail-actions"><button type="button" class="btn" data-wecom-action="invalidate" aria-haspopup="dialog" aria-expanded="false"><i data-lucide="rotate-ccw"></i>重置缓存</button></div></div>
         <p id="wecomCacheStatus" class="wecom-inline-status" role="status"></p><dl class="wecom-detail-fields" id="wecomApplicationCache"><div><dt>已缓存用户</dt><dd class="wecom-placeholder">正在读取…</dd></div></dl>
       </section>
     </div>`;
@@ -93,9 +101,9 @@
     node.className = 'wecom-cache-confirm';
     node.setAttribute('popover', 'auto');
     node.setAttribute('role', 'dialog');
-    node.setAttribute('aria-label', action === 'refresh' ? '刷新成员缓存确认' : '重置成员缓存确认');
-    const copy = action === 'refresh' ? '更新所有已缓存成员的姓名和 7 天有效期；不拉取全公司通讯录。' : '保留姓名和 ID 映射，仅将资料标记为过期；下次收到消息时按需更新。';
-    node.innerHTML = `<p>${copy}</p><div class="wecom-detail-actions"><button type="button" class="btn" data-cache-cancel>取消</button><button type="button" class="btn primary" data-cache-confirm>${action === 'refresh' ? '确认刷新' : '确认重置'}</button></div>`;
+    node.setAttribute('aria-label', '重置成员缓存确认');
+    const copy = '保留姓名和 ID 映射，仅将资料标记为过期；下次收到消息时按需更新。';
+    node.innerHTML = `<p>${copy}</p><div class="wecom-detail-actions"><button type="button" class="btn" data-cache-cancel>取消</button><button type="button" class="btn primary" data-cache-confirm>确认重置</button></div>`;
     el('wecomApplicationDetail').appendChild(node);
     cacheConfirmation = { node, trigger };
     trigger.setAttribute('aria-expanded', 'true');
@@ -108,8 +116,7 @@
     node.querySelector('[data-cache-confirm]').addEventListener('click', () => {
       closeCacheConfirmation({ focus: true });
       if (state.selectedId !== id || !state.active) return;
-      if (action === 'refresh') void admin.refreshCache();
-      else void admin.invalidate();
+      void admin.invalidate();
     });
     node.addEventListener('toggle', event => { if (event.newState === 'closed' && cacheConfirmation?.node === node) closeCacheConfirmation(); });
     node.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeCacheConfirmation({ focus: true }); } });
@@ -228,7 +235,7 @@
       input.value = input.dataset.maskedValue;
       input.type = input.value ? 'text' : 'password';
       input.required = !item;
-      input.placeholder = item ? '留空则保持不变' : '请输入 App Secret';
+      renderSecretHint();
       AdminFormFeedback.clear(el('wecomApplicationForm'));
       el('wecomApplicationModal').showModal();
     },
@@ -324,6 +331,7 @@
       event.target.dataset.clearRequested = 'false';
       const button = el('clearWecomApplicationSecretBtn');
       button.textContent = '清空'; button.classList.toggle('is-undo', false);
+      renderSecretHint();
     });
     el('clearWecomApplicationSecretBtn')?.addEventListener('click', () => {
       if (state.busy) return;
@@ -332,9 +340,9 @@
       input.dataset.clearRequested = String(clear);
       input.value = clear ? '' : input.dataset.maskedValue;
       input.type = clear || !input.value ? 'password' : 'text';
-      input.placeholder = clear ? '保存后清空 App Secret' : '留空则保持不变';
       const button = el('clearWecomApplicationSecretBtn');
-      button.textContent = clear ? '撤销清空' : '清空'; button.classList.toggle('is-undo', clear);
+      button.textContent = clear ? '保留原密钥' : '清空'; button.classList.toggle('is-undo', clear);
+      renderSecretHint();
     });
   });
   document.addEventListener('deep-agent-configuration-tab', event => { if (event.detail?.name !== 'channels') admin.deactivate(); });

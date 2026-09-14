@@ -179,11 +179,11 @@ test('应用标题和边框操作位于单个配置卡外，关联渠道展示�
   assert.match(html, /class="field-help"[\s\S]*资料有效期为一周/);
 });
 
-test('缓存两项操作锚定二次确认，不使用全屏确认弹窗', () => {
+test('缓存仅提供重置入口并锚定二次确认', () => {
   assert.match(source, /else askCacheConfirmation\(button, action\)/);
   assert.match(source, /setAttribute\('popover', 'auto'\)/);
   assert.match(source, /trigger\.getBoundingClientRect\(\)/);
-  assert.match(source, /更新所有已缓存成员的姓名和 7 天有效期[\s\S]*不拉取全公司通讯录/);
+  assert.doesNotMatch(source, /<button[^>]*data-wecom-action="refresh"/);
   assert.match(source, /保留姓名和 ID 映射，仅将资料标记为过期/);
   const invalidate = source.split('async invalidate()')[1];
   assert.doesNotMatch(invalidate, /confirmAction/);
@@ -212,6 +212,8 @@ test('显式清空 Secret 仅改变草稿，保存携带独立清空标记', asy
   assert.equal(h.requests.length, before);
   assert.equal(h.get('wecomApplicationSecret').value, '');
   assert.equal(h.get('wecomApplicationSecret').dataset.clearRequested, 'true');
+  assert.equal(h.get('wecomApplicationSecretHint').textContent, '保存后删除密钥');
+  assert.equal(h.get('clearWecomApplicationSecretBtn').textContent, '保留原密钥');
   await h.admin.save({ preventDefault() {}, currentTarget: h.get('wecomApplicationForm') });
   assert.deepEqual(h.requests.findLast(request => request.method === 'PUT').payload, { name: fixture.name, clear_app_secret: true });
 });

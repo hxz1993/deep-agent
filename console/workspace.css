@@ -224,6 +224,11 @@ html, body {
   outline: none;
 }
 
+#workspaceLegacyHost .chat-title {
+  /* Keep the editing border inside the clipped title container. */
+  padding-left: 6px;
+  margin-left: -6px;
+}
 #workspaceLegacyHost #chatTitle {
   box-sizing: border-box;
   min-width: min(180px, 100%);

@@ -59,6 +59,33 @@ class WecomApplicationsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.http.delete(path, headers=self.headers)).status_code, 409)
         self.assertEqual((await self.http.get("/api/v1/channel-accounts/"+account.id, headers=self.headers)).status_code, 200)
 
+    async def test_explicit_secret_clear_invalidates_token_and_skips_external_request(self):
+        app = await self.create()
+        path = self.path + "/" + app["id"]
+        profiles = self.ctx.get_wecom_profiles()
+        client = profiles.client
+        client._request = AsyncMock(return_value={"access_token": "fixture-token", "expires_in": 7200})
+        before = await self.stores.wecom.get_application(app["id"])
+        await client.token(before)
+        self.assertTrue(client._tokens)
+        conflict = await self.http.put(path, json={"clear_app_secret": True, "app_secret": "new-secret"}, headers=self.headers)
+        self.assertEqual(conflict.status_code, 422)
+        response = await self.http.put(path, json={"clear_app_secret": True}, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["secret_set"])
+        self.assertFalse(response.json()["app_secret_masked"])
+        after = await self.stores.wecom.get_application(app["id"])
+        self.assertEqual(after.app_secret, "")
+        self.assertGreater(after.revision, before.revision)
+        self.assertFalse(client._tokens)
+        client._request.reset_mock()
+        result = await self.http.post(path + "/test-connection", headers=self.headers)
+        self.assertFalse(result.json()["success"])
+        self.assertIn("secret_not_configured", result.json()["message"])
+        client._request.assert_not_awaited()
+        restored = await self.http.put(path, json={"app_secret": "replacement-secret"}, headers=self.headers)
+        self.assertTrue(restored.json()["secret_set"])
+
     async def test_admin_only_and_safe_validation(self):
         app = await self.create()
         path = self.path + "/" + app["id"]

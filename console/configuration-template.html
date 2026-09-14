@@ -722,7 +722,7 @@
         <label class="field"><span>应用名称</span><input id="wecomApplicationName" required maxlength="191" autocomplete="off" /></label>
         <label class="field"><span>企业 ID</span><input id="wecomApplicationCorpId" required maxlength="191" autocomplete="off" /></label>
         <label class="field"><span>企微 Agent ID</span><input id="wecomApplicationAgentId" required maxlength="191" autocomplete="off" /></label>
-        <label class="field"><span>App Secret</span><input id="wecomApplicationSecret" type="password" autocomplete="new-password" /><small class="field-hint">用于获取企微成员账号和姓名；留空保留已有凭据。</small></label>
+        <div class="field"><div class="field-label-actions"><span class="field-label-row"><label for="wecomApplicationSecret">App Secret</label><small class="field-subtitle">查询成员资料；留空保留。</small></span><button type="button" class="field-text-action hidden" id="clearWecomApplicationSecretBtn">清空</button></div><input id="wecomApplicationSecret" type="password" autocomplete="new-password" /></div>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
       <div class="modal-footer"><button type="button" class="btn" id="cancelWecomApplicationBtn">取消</button><button type="submit" class="btn primary" id="saveWecomApplicationBtn">保存</button></div>

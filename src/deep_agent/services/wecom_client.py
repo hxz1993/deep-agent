@@ -108,6 +108,8 @@ class WecomClient:
     async def token(self, app, *, force=False):
         if self._closed:
             raise WecomError("token", "service_closed")
+        if not app.app_secret:
+            raise WecomError("token", "secret_not_configured")
         key = (app.id, app.revision)
         if force:
             self._tokens.pop(key, None)

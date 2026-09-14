@@ -52,6 +52,7 @@ class ApplicationUpdate(BaseModel):
     corp_id: str | None = Field(default=None, min_length=1, max_length=128)
     wecom_agent_id: str | None = Field(default=None, min_length=1, max_length=128)
     app_secret: str | None = Field(default=None, max_length=1024)
+    clear_app_secret: bool = False
     settings: dict[str, Any] | None = None
 
 
@@ -117,6 +118,8 @@ async def update_application(application_id: str, body: ApplicationUpdate, ctx: 
         updates.pop(field, None)
     if any(updates.get(key) is None for key in ("name", "settings") if key in updates):
         raise HTTPException(422, "名称和扩展配置不能为 null")
+    if updates.get("clear_app_secret") and updates.get("app_secret") not in (None, ""):
+        raise HTTPException(422, "清空凭据与设置新凭据不能同时提交")
     if updates.get("app_secret") in (None, "", mask_api_key(current.app_secret)):
         updates.pop("app_secret", None)
     try:

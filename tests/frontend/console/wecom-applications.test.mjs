@@ -107,7 +107,7 @@ test('重置缓存保留资料，仅调用应用失效并重新读取统计', as
   });
   await select(h); await h.admin.invalidate();
   assert.match(h.get('wecomApplicationCache').innerHTML, /2 人待更新/);
-  assert.match(h.get('wecomApplicationStatus').textContent, /姓名和 ID 映射保留/);
+  assert.match(h.get('wecomCacheStatus').textContent, /姓名和 ID 映射保留/);
   assert.equal(h.requests.filter(request => request.method === 'DELETE').length, 0);
   assert.equal(h.requests.filter(request => request.path.endsWith('/cache/invalidate')).length, 1);
 });
@@ -183,22 +183,66 @@ test('缓存两项操作锚定二次确认，不使用全屏确认弹窗', () =>
   assert.match(source, /else askCacheConfirmation\(button, action\)/);
   assert.match(source, /setAttribute\('popover', 'auto'\)/);
   assert.match(source, /trigger\.getBoundingClientRect\(\)/);
-  assert.match(source, /逐个请求已缓存成员的资料[\s\S]*不拉取全公司通讯录/);
+  assert.match(source, /更新所有已缓存成员的姓名和 7 天有效期[\s\S]*不拉取全公司通讯录/);
   assert.match(source, /保留姓名和 ID 映射，仅将资料标记为过期/);
   const invalidate = source.split('async invalidate()')[1];
   assert.doesNotMatch(invalidate, /confirmAction/);
 });
 
-test('列表删除使用独立按钮，可删除非当前应用而保留当前详情', async () => {
+test('应用整张卡片可选择，首次选首项且刷新保留有效选择', async () => {
   const other = { ...fixture, id: 'app-2', name: '另一应用' };
-  let items = [fixture, other];
   const h = harness(request => {
-    if (request.path.endsWith('/wecom-applications')) return items;
-    if (request.method === 'DELETE') { items = [fixture]; return { deleted: true }; }
+    if (request.path.endsWith('/wecom-applications')) return [fixture, other];
+    if (request.path.endsWith('/app-2')) return other;
   });
-  await select(h);
-  assert.match(h.get('wecomApplicationList').innerHTML, /<\/button><button[^>]*data-wecom-delete/);
-  await h.admin.remove('app-2');
-  assert.equal(h.requests.findLast(request => request.method === 'DELETE').path, '/api/v1/wecom-applications/app-2');
+  await h.admin.refresh();
+  assert.match(h.get('wecomApplicationList').innerHTML, /<button type="button" class="provider-list-item wecom-application-list-item active" data-wecom-application="app-1"/);
+  assert.doesNotMatch(h.get('wecomApplicationList').innerHTML, /data-wecom-delete|wecom-list-delete/);
   assert.match(h.get('wecomApplicationDetail').innerHTML, /成员应用/);
+  await h.admin.select('app-2'); await h.admin.refresh();
+  assert.match(h.get('wecomApplicationList').innerHTML, /active" data-wecom-application="app-2"/);
+  assert.match(h.get('wecomApplicationDetail').innerHTML, /另一应用/);
+});
+
+test('显式清空 Secret 仅改变草稿，保存携带独立清空标记', async () => {
+  const h = harness(request => request.method === 'PUT' ? fixture : undefined);
+  await select(h); h.admin.openEdit();
+  const before = h.requests.length;
+  h.get('clearWecomApplicationSecretBtn').listeners.click();
+  assert.equal(h.requests.length, before);
+  assert.equal(h.get('wecomApplicationSecret').value, '');
+  assert.equal(h.get('wecomApplicationSecret').dataset.clearRequested, 'true');
+  await h.admin.save({ preventDefault() {}, currentTarget: h.get('wecomApplicationForm') });
+  assert.deepEqual(h.requests.findLast(request => request.method === 'PUT').payload, { name: fixture.name, clear_app_secret: true });
+});
+
+test('清空可撤销，输入新值取消清空标记，关闭编辑器不保存', async () => {
+  const h = harness(request => request.method === 'PUT' ? fixture : undefined);
+  await select(h); h.admin.openEdit();
+  const input = h.get('wecomApplicationSecret');
+  const clear = () => h.get('clearWecomApplicationSecretBtn').listeners.click();
+  clear(); clear();
+  assert.equal(input.value, fixture.app_secret_masked);
+  assert.equal(input.dataset.clearRequested, 'false');
+  clear(); input.value = 'replacement-fixture'; input.listeners.input({ target: input });
+  assert.equal(input.dataset.clearRequested, 'false');
+  await h.admin.save({ preventDefault() {}, currentTarget: h.get('wecomApplicationForm') });
+  assert.deepEqual(h.requests.findLast(request => request.method === 'PUT').payload, { name: fixture.name, app_secret: 'replacement-fixture' });
+  h.admin.openEdit(); clear();
+  const before = h.requests.length;
+  h.admin.closeEditor();
+  assert.equal(h.requests.length, before);
+  assert.equal(input.dataset.clearRequested, 'false');
+});
+
+test('应用与缓存反馈分别紧跟自己的操作栏，缓存失败不占连接状态', async () => {
+  const h = harness(request => request.path.endsWith('/cache/invalidate') ? Promise.reject(new Error('重置失败')) : undefined);
+  await select(h); await h.admin.test();
+  const previous = h.get('wecomApplicationStatus').textContent;
+  await h.admin.invalidate();
+  assert.equal(h.get('wecomCacheStatus').textContent, '重置失败');
+  assert.equal(h.get('wecomApplicationStatus').textContent, previous);
+  const html = h.get('wecomApplicationDetail').innerHTML;
+  assert.match(html, /<\/header>\s*<p id="wecomApplicationStatus"[\s\S]*<section class="wecom-info-card"/);
+  assert.match(html, /data-wecom-action="invalidate"[\s\S]*id="wecomCacheStatus"[\s\S]*id="wecomApplicationCache"/);
 });

@@ -2,7 +2,7 @@
 (() => {
   const el = id => document.getElementById(id);
   const path = id => `/api/v1/wecom-applications${id ? `/${encodeURIComponent(id)}` : ''}`;
-  const state = { items: [], selectedId: null, editingId: null, cache: null, active: false, busy: false, jobs: new Map(), generation: 0 };
+  const state = { items: [], selectedId: null, editingId: null, cache: null, active: false, busy: false, jobs: new Map(), cacheMessages: new Map(), generation: 0 };
   const requestControllers = new Set();
   let pollTimer = null;
   let cacheConfirmation = null;
@@ -44,10 +44,9 @@
   function renderList() {
     const list = el('wecomApplicationList');
     const scroll = list.scrollTop;
-    list.innerHTML = state.items.length ? state.items.map(item => `<div class="provider-list-item wecom-application-list-item ${item.id === state.selectedId ? 'active' : ''}"><button type="button" class="wecom-application-select" data-wecom-application="${escapeHtml(item.id)}" aria-pressed="${item.id === state.selectedId}"><span class="provider-list-copy"><strong>${escapeHtml(item.name)}</strong><small>Agent ID ${escapeHtml(item.wecom_agent_id)}</small></span></button><button type="button" class="icon-btn danger wecom-list-delete" data-wecom-delete="${escapeHtml(item.id)}" aria-label="删除 ${escapeHtml(item.name)}" title="删除应用"><i data-lucide="trash-2"></i></button></div>`).join('') : '<div class="provider-list-state"><span>暂无企微应用</span><button type="button" class="btn" data-wecom-new><i data-lucide="plus"></i>新建应用</button></div>';
+    list.innerHTML = state.items.length ? state.items.map(item => `<button type="button" class="provider-list-item wecom-application-list-item ${item.id === state.selectedId ? 'active' : ''}" data-wecom-application="${escapeHtml(item.id)}" aria-pressed="${item.id === state.selectedId}"><span class="provider-list-copy"><strong>${escapeHtml(item.name)}</strong><small>Agent ID ${escapeHtml(item.wecom_agent_id)}</small></span></button>`).join('') : '<div class="provider-list-state"><span>暂无企微应用</span><button type="button" class="btn" data-wecom-new><i data-lucide="plus"></i>新建应用</button></div>';
     list.scrollTop = scroll;
     list.querySelectorAll('[data-wecom-application]').forEach(button => button.addEventListener('click', () => admin.select(button.dataset.wecomApplication)));
-    list.querySelectorAll('[data-wecom-delete]').forEach(button => button.addEventListener('click', () => admin.remove(button.dataset.wecomDelete)));
     list.querySelector('[data-wecom-new]')?.addEventListener('click', () => admin.openCreate());
     window.lucide?.createIcons();
   }
@@ -59,10 +58,10 @@
     const linked = channels.length ? `<ul class="wecom-linked-channels">${channels.map(channel => `<li>${escapeHtml(channel.name)}</li>`).join('')}</ul>` : '<span class="wecom-placeholder">未关联</span>';
     el('wecomApplicationDetail').innerHTML = `<div class="wecom-detail-content">
       <header class="wecom-detail-heading"><h3>${escapeHtml(item.name)}</h3><div class="wecom-detail-actions"><button type="button" class="btn" data-wecom-action="edit"><i data-lucide="pencil"></i>编辑</button><button type="button" class="btn" data-wecom-action="test"><i data-lucide="plug-zap"></i>测试连接</button><button type="button" class="btn danger" data-wecom-action="delete"><i data-lucide="trash-2"></i>删除</button></div></header>
-      <section class="wecom-info-card" aria-label="应用配置"><dl class="wecom-detail-fields"><div><dt>企业 ID</dt><dd>${escapeHtml(item.corp_id)}</dd></div><div><dt>企微 Agent ID</dt><dd>${escapeHtml(item.wecom_agent_id)}</dd></div><div><dt>App Secret</dt><dd>${escapeHtml(item.app_secret_masked || '未配置')}</dd></div><div><dt>关联渠道</dt><dd>${linked}</dd></div></dl></section>
       <p id="wecomApplicationStatus" class="wecom-inline-status" role="status"></p>
+      <section class="wecom-info-card" aria-label="应用配置"><dl class="wecom-detail-fields"><div><dt>企业 ID</dt><dd>${escapeHtml(item.corp_id)}</dd></div><div><dt>企微 Agent ID</dt><dd>${escapeHtml(item.wecom_agent_id)}</dd></div><div><dt>App Secret</dt><dd>${escapeHtml(item.app_secret_masked || '未配置')}</dd></div><div><dt>关联渠道</dt><dd>${linked}</dd></div></dl></section>
       <section class="wecom-cache-region" aria-label="成员缓存"><div class="wecom-card-heading"><span class="field-label-row"><h3>成员缓存</h3><span class="field-help" tabindex="0" aria-label="成员缓存说明" aria-describedby="wecomCacheHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="wecomCacheHelp" role="tooltip">仅缓存已遇到的用户，姓名资料有效期为一周；过期后在收到消息时按需刷新。</span></span></span><div class="wecom-detail-actions"><button type="button" class="btn" data-wecom-action="refresh" aria-haspopup="dialog" aria-expanded="false"><i data-lucide="refresh-cw"></i>刷新缓存</button><button type="button" class="btn" data-wecom-action="invalidate" aria-haspopup="dialog" aria-expanded="false"><i data-lucide="rotate-ccw"></i>重置缓存</button></div></div>
-        <dl class="wecom-detail-fields" id="wecomApplicationCache"><div><dt>已缓存用户</dt><dd class="wecom-placeholder">正在读取…</dd></div></dl><p id="wecomCacheStatus" class="wecom-inline-status" role="status"></p>
+        <p id="wecomCacheStatus" class="wecom-inline-status" role="status"></p><dl class="wecom-detail-fields" id="wecomApplicationCache"><div><dt>已缓存用户</dt><dd class="wecom-placeholder">正在读取…</dd></div></dl>
       </section>
     </div>`;
     el('wecomApplicationDetail').querySelectorAll('[data-wecom-action]').forEach(button => button.addEventListener('click', () => {
@@ -95,7 +94,7 @@
     node.setAttribute('popover', 'auto');
     node.setAttribute('role', 'dialog');
     node.setAttribute('aria-label', action === 'refresh' ? '刷新成员缓存确认' : '重置成员缓存确认');
-    const copy = action === 'refresh' ? '逐个请求已缓存成员的资料，成功后更新姓名及 7 天有效期；不拉取全公司通讯录。' : '保留姓名和 ID 映射，仅将资料标记为过期；下次收到消息时按需更新。';
+    const copy = action === 'refresh' ? '更新所有已缓存成员的姓名和 7 天有效期；不拉取全公司通讯录。' : '保留姓名和 ID 映射，仅将资料标记为过期；下次收到消息时按需更新。';
     node.innerHTML = `<p>${copy}</p><div class="wecom-detail-actions"><button type="button" class="btn" data-cache-cancel>取消</button><button type="button" class="btn primary" data-cache-confirm>${action === 'refresh' ? '确认刷新' : '确认重置'}</button></div>`;
     el('wecomApplicationDetail').appendChild(node);
     cacheConfirmation = { node, trigger };
@@ -124,12 +123,17 @@
     target.innerHTML = `<div><dt>已缓存用户</dt><dd>${Number(value.total) || 0} 人 <span class="wecom-placeholder">（${Number(value.pending) || 0} 人待更新）</span></dd></div><div><dt>最早创建</dt><dd>${time(value.earliest_created_at)}</dd></div><div><dt>最早更新</dt><dd>${time(value.earliest_synced_at)}</dd></div>`;
   }
   function running(job) { return !!job && ['queued', 'pending', 'running'].includes(job.status); }
+  function cacheStatus(message, error = false) {
+    state.cacheMessages.set(state.selectedId, { message, error });
+    renderJob();
+  }
   function renderJob() {
+    const feedback = state.cacheMessages.get(state.selectedId);
     const job = state.jobs.get(state.selectedId);
     const target = el('wecomCacheStatus');
     if (target) {
-      target.textContent = !job ? '' : running(job) ? `正在刷新 ${job.completed || 0} / ${job.total || 0}` : (job.unknown || job.status === 'unknown') ? '结果待确认，已重新读取缓存统计。' : `刷新结束：成功 ${job.succeeded || 0}，失败 ${job.failed || 0}${job.status === 'failed' ? '；任务未完成，请重试。' : ''}`;
-      target.classList.toggle('error', !!job && (job.unknown || job.status === 'unknown' || job.status === 'failed' || job.failed > 0));
+      target.textContent = feedback ? feedback.message : !job ? '' : running(job) ? `正在刷新 ${job.completed || 0} / ${job.total || 0}` : (job.unknown || job.status === 'unknown') ? '结果待确认，已重新读取缓存统计。' : `刷新结束：成功 ${job.succeeded || 0}，失败 ${job.failed || 0}${job.status === 'failed' ? '；任务未完成，请重试。' : ''}`;
+      target.classList.toggle('error', feedback ? feedback.error : !!job && (job.unknown || job.status === 'unknown' || job.status === 'failed' || job.failed > 0));
     }
     el('wecomApplicationDetail')?.querySelectorAll('[data-wecom-action="refresh"], [data-wecom-action="invalidate"]').forEach(button => { button.disabled = state.busy || running(job); });
   }
@@ -137,9 +141,10 @@
     try {
       const result = await read(`${path(id)}/cache`);
       if (state.selectedId !== id || state.generation !== generation) return;
-      state.cache = result; renderCache();
+      state.cache = result; renderCache(); return true;
     } catch (error) {
-      if (state.generation === generation && state.selectedId === id) status(`缓存统计读取失败：${error.message}`, true);
+      if (state.generation === generation && state.selectedId === id) cacheStatus(`缓存统计读取失败：${error.message}`, true);
+      return false;
     }
   }
   function schedulePoll(id) {
@@ -174,7 +179,7 @@
         if (generation !== state.generation) return;
         if (!Array.isArray(items)) throw new Error('企微应用列表格式不正确');
         state.items = items;
-        if (state.selectedId && !items.some(item => item.id === state.selectedId)) state.selectedId = null;
+        if (!items.some(item => item.id === state.selectedId)) state.selectedId = items[0]?.id || null;
         renderList();
         if (state.selectedId) await this.select(state.selectedId);
         else renderDetail();
@@ -215,6 +220,11 @@
       el('wecomApplicationAgentId').readOnly = !!item;
       const input = el('wecomApplicationSecret');
       input.dataset.maskedValue = item?.app_secret_masked || '';
+      input.dataset.clearRequested = 'false';
+      const clearButton = el('clearWecomApplicationSecretBtn');
+      clearButton.classList.toggle('hidden', !item?.secret_set && !input.dataset.maskedValue);
+      clearButton.textContent = '清空';
+      clearButton.classList.toggle('is-undo', false);
       input.value = input.dataset.maskedValue;
       input.type = input.value ? 'text' : 'password';
       input.required = !item;
@@ -226,6 +236,7 @@
       if (state.busy) return;
       el('wecomApplicationModal').close();
       el('wecomApplicationSecret').value = '';
+      el('wecomApplicationSecret').dataset.clearRequested = 'false';
       state.editingId = null;
     },
     async save(event) {
@@ -237,6 +248,7 @@
       const input = el('wecomApplicationSecret');
       const secret = input.value.trim();
       if (secret && secret !== input.dataset.maskedValue) payload.app_secret = secret;
+      else if (id && input.dataset.clearRequested === 'true') payload.clear_app_secret = true;
       setBusy(true);
       let saved = false;
       try {
@@ -276,26 +288,27 @@
       if (state.busy || !current() || running(state.jobs.get(state.selectedId))) return;
       const id = state.selectedId;
       stopReads();
-      setBusy(true); status('');
+      state.jobs.delete(id);
+      setBusy(true); cacheStatus('正在开始刷新…');
       try {
         const job = await mutate(`${path(id)}/cache/refresh`, 'POST');
-        state.jobs.set(id, job); renderJob();
+        state.jobs.set(id, job); state.cacheMessages.delete(id); renderJob();
         if (running(job)) schedulePoll(id);
         else await loadCache(id, state.generation);
-      } catch (error) { status(error.message, true); }
+      } catch (error) { cacheStatus(error.message, true); }
       finally { setBusy(false); }
     },
     async invalidate() {
       if (state.busy || !current() || running(state.jobs.get(state.selectedId))) return;
       const id = state.selectedId;
       stopReads();
-      setBusy(true);
+      state.jobs.delete(id);
+      setBusy(true); cacheStatus('正在重置缓存…');
       try {
         await mutate(`${path(id)}/cache/invalidate`, 'POST');
         state.jobs.delete(id); renderJob();
-        await loadCache(id, state.generation);
-        status('成员资料已标记为过期，姓名和 ID 映射保留。');
-      } catch (error) { status(error.message, true); }
+        if (await loadCache(id, state.generation)) cacheStatus('成员资料已标记为过期，姓名和 ID 映射保留。');
+      } catch (error) { cacheStatus(error.message, true); }
       finally { setBusy(false); }
     },
   };
@@ -306,7 +319,23 @@
     ['closeWecomApplicationModal', 'cancelWecomApplicationBtn'].forEach(id => el(id)?.addEventListener('click', () => admin.closeEditor()));
     el('wecomApplicationModal')?.addEventListener('cancel', event => { event.preventDefault(); admin.closeEditor(); });
     el('wecomApplicationSecret')?.addEventListener('focus', event => { if (event.target.value === event.target.dataset.maskedValue) event.target.select(); });
-    el('wecomApplicationSecret')?.addEventListener('input', event => { event.target.type = event.target.value && event.target.value === event.target.dataset.maskedValue ? 'text' : 'password'; });
+    el('wecomApplicationSecret')?.addEventListener('input', event => {
+      event.target.type = event.target.value && event.target.value === event.target.dataset.maskedValue ? 'text' : 'password';
+      event.target.dataset.clearRequested = 'false';
+      const button = el('clearWecomApplicationSecretBtn');
+      button.textContent = '清空'; button.classList.toggle('is-undo', false);
+    });
+    el('clearWecomApplicationSecretBtn')?.addEventListener('click', () => {
+      if (state.busy) return;
+      const input = el('wecomApplicationSecret');
+      const clear = input.dataset.clearRequested !== 'true';
+      input.dataset.clearRequested = String(clear);
+      input.value = clear ? '' : input.dataset.maskedValue;
+      input.type = clear || !input.value ? 'password' : 'text';
+      input.placeholder = clear ? '保存后清空 App Secret' : '留空则保持不变';
+      const button = el('clearWecomApplicationSecretBtn');
+      button.textContent = clear ? '撤销清空' : '清空'; button.classList.toggle('is-undo', clear);
+    });
   });
   document.addEventListener('deep-agent-configuration-tab', event => { if (event.detail?.name !== 'channels') admin.deactivate(); });
   window.addEventListener('resize', () => closeCacheConfirmation());

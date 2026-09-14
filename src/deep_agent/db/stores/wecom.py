@@ -72,7 +72,13 @@ class WecomStore(SessionBoundMixin):
             for key in ("corp_id", "wecom_agent_id"):
                 if key in changes and changes[key] != getattr(row, key):
                     raise ValueError("企业 ID 和企微 Agent ID 创建后不可修改")
+            clear_secret = changes.get("clear_app_secret") is True
+            if clear_secret and changes.get("app_secret") not in (None, ""):
+                raise ValueError("清空凭据与设置新凭据不能同时提交")
             changed = False
+            if clear_secret and row.app_secret:
+                row.app_secret = ""
+                changed = True
             for key in ("name", "settings", "app_secret"):
                 if key not in changes:
                     continue

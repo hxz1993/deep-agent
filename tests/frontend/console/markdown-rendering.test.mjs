@@ -151,3 +151,41 @@ test("每张表格独立保留 Markdown 原文，不从 HTML 重建", () => {
   assert.equal((html.match(/class="markdown-table-copy"/g) || []).length, 2);
   assert.doesNotMatch(render('```md\n' + first + '```'), /data-table-source=/);
 });
+
+test("脚注重复引用与相似标签不碰撞，每个链接都有唯一目标", () => {
+  const html = render('A[^a] B[^a] C[^a-2] D[^ref-a] E[^label]\n\n[^a]: One\n[^a-2]: Two\n[^ref-a]: Three\n[^label]: Four');
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  const hrefs = [...html.matchAll(/href="#([^"]+)"/g)].map(match => match[1]);
+  assert.equal(ids.length, new Set(ids).size);
+  assert.equal(hrefs.length, 10);
+  for (const href of hrefs) assert.equal(ids.filter(id => id === href).length, 1);
+  const refs = [...html.matchAll(/<a id="([^"]+)" href="#([^"]+)"/g)];
+  assert.equal(refs[0][2], refs[1][2]);
+  assert.notEqual(refs[0][1], refs[1][1]);
+  // A raw label must never escape a renderer-owned attribute even before sanitize.
+  assert.doesNotMatch(render('说明[^x" onclick="bad]。\n\n[^x" onclick="bad]: 注解'), /onclick=/);
+});
+
+test("Markdown 脚注定位只滚动最近内容面板并保持外层及路由不变", async () => {
+  let click, prevented = false, focused;
+  const body = { scrollTop: 0 }, html = { scrollTop: 0 };
+  const pane = { parentElement: body, scrollTop: 100, clientTop: 1, clientHeight: 400, scrollHeight: 1600, getBoundingClientRect: () => ({ top: 50 }) };
+  const details = { tagName: 'DETAILS', parentElement: pane, open: false };
+  const target = { id: 'note', parentElement: details, getBoundingClientRect: () => ({ top: 700, bottom: 720 }), setAttribute() {}, focus: value => { focused = value; } };
+  const root = { querySelectorAll: () => [target] };
+  const link = { getAttribute: () => '#note', closest: () => root };
+  const doc = { body, documentElement: html, addEventListener: (type, handler) => { click = handler; } };
+  const context = vm.createContext({ console, document: doc, getComputedStyle: node => ({ overflowY: node === pane ? 'auto' : 'visible' }) });
+  context.window = context;
+  context.DOMPurify = { addHook() {}, sanitize: value => value };
+  vm.runInContext(await readFile(new URL('../../../console/vendor/marked.min.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(markdownSource, context);
+  context.DeepAgentMarkdown.init();
+  await click({ target: { closest: selector => selector.includes('a[href') ? link : null }, preventDefault() { prevented = true; } });
+  assert.equal(pane.scrollTop, 369);
+  assert.equal(body.scrollTop, 0);
+  assert.equal(html.scrollTop, 0);
+  assert.equal(details.open, true);
+  assert.equal(prevented, true);
+  assert.equal(focused.preventScroll, true);
+});

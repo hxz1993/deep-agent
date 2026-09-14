@@ -115,7 +115,7 @@ test("Agent 卡片与列表统一使用稳定标识的纯图标行操作", () =>
   assert.ok((agents.match(/class="row-actions agent-row-actions"/g) || []).length >= 2);
   assert.ok((agents.match(/data-agent-chat/g) || []).length >= 2);
   assert.ok((agents.match(/data-copy-agent/g) || []).length >= 2);
-  assert.match(agents, /title="发起对话" aria-label="发起对话"><i data-lucide="message-square"/);
+  assert.match(agents, /title="发起对话" aria-label="发起对话"><i data-lucide="messages-square"/);
   assert.match(agents, /title="复制" aria-label="复制"><i data-lucide="copy"/);
   assert.doesNotMatch(agents, /title="编辑" aria-label="编辑"><i data-lucide="pencil"/);
   assert.match(agents, /title="删除" aria-label="删除"><i data-lucide="trash-2"/);

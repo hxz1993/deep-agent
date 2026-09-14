@@ -1,5 +1,5 @@
-import { renderSessionInspector } from "./session-inspector.js?v=20260915-context-hint";
-import { channelOriginPresentation } from "./session-display.js?v=20260915-context-hint";
+import { renderSessionInspector } from "./session-inspector.js?v=20260915-session-icons";
+import { channelOriginPresentation } from "./session-display.js?v=20260915-session-icons";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 

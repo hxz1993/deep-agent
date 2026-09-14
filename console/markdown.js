@@ -73,7 +73,16 @@
       for (let parent = target.parentElement; parent; parent = parent.parentElement) {
         if (parent.tagName === "DETAILS") parent.open = true;
       }
-      target.scrollIntoView({ block: "nearest" });
+      // Scroll only the nearest owned pane. scrollIntoView also moves hidden
+      // shell ancestors, clipping the Console header just like message focus.
+      for (let pane = target.parentElement; pane && pane !== global.document.body && pane !== global.document.documentElement; pane = pane.parentElement) {
+        if (!/(auto|scroll)/.test(global.getComputedStyle(pane).overflowY) || pane.scrollHeight <= pane.clientHeight) continue;
+        const top = pane.getBoundingClientRect().top + pane.clientTop;
+        const rect = target.getBoundingClientRect();
+        if (rect.top < top) pane.scrollTop += rect.top - top;
+        else if (rect.bottom > top + pane.clientHeight) pane.scrollTop += Math.min(rect.top - top, rect.bottom - top - pane.clientHeight);
+        break;
+      }
       target.setAttribute("tabindex", "-1");
       target.focus({ preventScroll: true });
     }
@@ -178,24 +187,38 @@
     return true;
   }
 
+  function scopedFootnotes(prefix) {
+    const extension = global.markedFootnote({ prefixId: prefix, description: "脚注", refMarkers: true });
+    const references = new Map();
+    // Use numeric note IDs and separate namespaces. The pinned plugin uses raw
+    // labels in attributes and repeats reference IDs; suffixing those labels
+    // cannot distinguish a repeated "a" from a literal "a-2" or "ref-a".
+    extension.extensions.find(item => item.name === "footnoteRef").renderer = function({ id }) {
+      const count = (references.get(id) || 0) + 1;
+      references.set(id, count);
+      return `<sup><a id="${prefix}ref-${id}-${count}" href="#${prefix}note-${id}" data-footnote-ref aria-describedby="${prefix}label">[${id}]</a></sup>`;
+    };
+    extension.extensions.find(item => item.name === "footnotes").renderer = function({ items = [] }) {
+      if (!items.length) return "";
+      const notes = items.map(({ content, refs }) => {
+        const id = refs[0].id;
+        const body = this.parser.parse(content).trimEnd();
+        const links = refs.map((ref, index) => ` <a href="#${prefix}ref-${id}-${index + 1}" data-footnote-backref aria-label="返回引用 ${id}${index ? `（${index + 1}）` : ""}">↩${index ? `<sup>${index + 1}</sup>` : ""}</a>`).join("");
+        return `<li id="${prefix}note-${id}">${body.endsWith("</p>") ? body.slice(0, -4) + links + "</p>" : body + links}</li>`;
+      }).join("\n");
+      return `<section class="footnotes" data-footnotes><h2 id="${prefix}label" class="sr-only">脚注</h2><ol>${notes}</ol></section>`;
+    };
+    return extension;
+  }
+
   function render(source) {
     const text = String(source ?? "");
     if (!init()) return `<pre class="md-fallback">${escapeHtml(text)}</pre>`;
     // Footnotes are scoped per message, including repeated renders during streaming.
     const parser = global.markedFootnote && text.includes("[^")
-      ? new global.marked.Marked(markdownOptions, ...(mathExtension ? [mathExtension] : []), global.markedFootnote({ prefixId: `md-fn-${++renderSequence}-`, description: "脚注", refMarkers: true }))
+      ? new global.marked.Marked(markdownOptions, ...(mathExtension ? [mathExtension] : []), scopedFootnotes(`md-fn-${++renderSequence}-`))
       : global.marked;
-    let raw = parser.parse(text);
-    // The pinned footnote extension repeats reference IDs for repeated citations.
-    // Give each citation and its corresponding return link a distinct target.
-    for (const pattern of [/\bid="(md-fn-\d+-ref-[^"]+)"/g, /\bhref="#(md-fn-\d+-ref-[^"]+)"/g]) {
-      const occurrences = new Map();
-      raw = raw.replace(pattern, (attribute, id) => {
-        const count = (occurrences.get(id) || 0) + 1;
-        occurrences.set(id, count);
-        return count === 1 ? attribute : attribute.slice(0, -1) + `-${count}"`;
-      });
-    }
+    const raw = parser.parse(text);
     return global.DOMPurify.sanitize(raw, {
       USE_PROFILES: { html: true, mathMl: true, svg: true },
       ADD_ATTR: ["target", "rel", "class", "data-lang", "data-mermaid-state"],

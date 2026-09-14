@@ -1,11 +1,13 @@
 // Only identifiers and query conditions belong in diagnostic URLs. Content,
 // identity credentials and return snapshots are deliberately memory-only.
 export const DIAGNOSTIC_PREFIX = "#/diagnostics";
-export const COMMON_FILTER_KEYS = ["start", "end", "timezone", "agent_id", "user_id", "source", "period"];
+export const COMMON_FILTER_KEYS = ["start", "end", "timezone", "agent_id", "user_id", "period"];
 export const OVERVIEW_FILTER_KEYS = COMMON_FILTER_KEYS.filter(key => key !== "user_id");
 export const overviewFilters = filters => Object.fromEntries(OVERVIEW_FILTER_KEYS.filter(key => filters[key] != null).map(key => [key, filters[key]]));
 export const LIST_FILTER_KEYS = [...COMMON_FILTER_KEYS, "query", "has_questions", "has_execution_error", "latest_status", "limit", "offset"];
 export const LOG_FILTER_KEYS = ["start", "end", "source", "level", "q", "session_id", "period"];
+export const CHANNEL_FILTER_KEYS = ["period", "start", "end", "timezone", "account_id", "kind", "query", "offset", "peer_id", "filter_peer_id", "channel_user_id", "channel_group_id"];
+export const channelEntryFilters = filters => ({ period: ["24", "168", "720"].includes(String(filters.period)) ? String(filters.period) : "168" });
 export const DETAIL_KEYS = ["view", "event_id", "run_id"];
 
 export function parseDiagnosticRoute(hash = "") {
@@ -16,17 +18,17 @@ export function parseDiagnosticRoute(hash = "") {
   let tail;
   try { tail = decodeURIComponent(match[2] || ""); } catch { return null; }
   if (kind === "logs" && tail) return null;
-  const view = kind === "logs" ? "logs" : !tail || ["overview", "list"].includes(tail) ? tail || "overview" : "detail";
+  const view = kind === "logs" ? "logs" : !tail || ["overview", "list", "channels"].includes(tail) ? tail || "overview" : "detail";
   if (view === "detail" && (!tail || tail.length > 128 || /[\x00-\x1f/\\]/.test(tail))) return null;
-  const allowed = view === "logs" ? LOG_FILTER_KEYS : view === "detail" ? DETAIL_KEYS : view === "overview" ? OVERVIEW_FILTER_KEYS : LIST_FILTER_KEYS;
+  const allowed = view === "channels" ? CHANNEL_FILTER_KEYS : view === "logs" ? LOG_FILTER_KEYS : view === "detail" ? DETAIL_KEYS : view === "overview" ? OVERVIEW_FILTER_KEYS : LIST_FILTER_KEYS;
   const params = new URLSearchParams(search);
   const filters = Object.fromEntries(allowed.filter(key => params.has(key)).map(key => [key, params.get(key)]));
   return { kind, view, id: view === "detail" ? tail : null, filters };
 }
 
 export function diagnosticHash(view, filters = {}, id = null) {
-  const keys = view === "logs" ? LOG_FILTER_KEYS : view === "detail" ? DETAIL_KEYS : view === "overview" ? OVERVIEW_FILTER_KEYS : LIST_FILTER_KEYS;
-  const path = view === "logs" ? "/logs" : view === "detail" ? `/sessions/${encodeURIComponent(id || "")}` : `/sessions/${view === "list" ? "list" : "overview"}`;
+  const keys = view === "channels" ? CHANNEL_FILTER_KEYS : view === "logs" ? LOG_FILTER_KEYS : view === "detail" ? DETAIL_KEYS : view === "overview" ? OVERVIEW_FILTER_KEYS : LIST_FILTER_KEYS;
+  const path = view === "logs" ? "/logs" : view === "detail" ? `/sessions/${encodeURIComponent(id || "")}` : `/sessions/${["list", "channels"].includes(view) ? view : "overview"}`;
   const params = new URLSearchParams();
   for (const key of keys) if (filters[key] !== undefined && filters[key] !== null && filters[key] !== "" && filters[key] !== false) params.set(key, String(filters[key]));
   return `${DIAGNOSTIC_PREFIX}${path}${params.size ? `?${params}` : ""}`;

@@ -272,7 +272,7 @@ class ProjectLayoutTest(unittest.TestCase):
                 self.assertIn("usage:", result.stdout.lower())
                 self.assertIn("--help", result.stdout)
 
-    def test_migration_directory_retains_the_same_two_revision_chain(self):
+    def test_migration_directory_retains_the_published_revision_chain(self):
         revision_chain = {}
         for path in sorted((REPO_ROOT / "migrations/versions").glob("*.py")):
             values = {}
@@ -288,7 +288,7 @@ class ProjectLayoutTest(unittest.TestCase):
                         values[target.id] = ast.literal_eval(statement.value)
             if "revision" in values:
                 revision_chain[values["revision"]] = values["down_revision"]
-        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003", "005": "004"})
+        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003", "005": "004", "006": "005"})
         configuration = configparser.ConfigParser(defaults={"here": str(REPO_ROOT)})
         configuration.read(REPO_ROOT / "alembic.ini", encoding="utf-8")
         self.assertEqual(

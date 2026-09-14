@@ -3,7 +3,7 @@ import { channelOriginPresentation } from "./session-display.js?v=20260912-21";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20260914-title-edit";
+const WORKSPACE_ASSET_VERSION = "20260915-release-audit";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -105,7 +105,7 @@ function installLegacyDom(source) {
     toolbar.className = "session-toolbar";
     const search = document.createElement("label");
     search.className = "compact-search session-search";
-    search.innerHTML = '<i data-lucide="search" aria-hidden="true"></i><input type="search" id="sessionSearchInput" maxlength="256" placeholder="搜索会话名称或 ID" aria-label="搜索当前 Agent 会话：名称模糊匹配，会话 ID 精确匹配" title="名称模糊匹配，完整会话 ID 精确匹配；仅搜索当前 Agent 的本人会话" />';
+    search.innerHTML = '<i data-lucide="search" aria-hidden="true"></i><input autocomplete="off" type="search" id="sessionSearchInput" maxlength="256" placeholder="搜索会话名称或 ID" aria-label="搜索当前 Agent 会话：名称模糊匹配，会话 ID 精确匹配" title="名称模糊匹配，完整会话 ID 精确匹配；仅搜索当前 Agent 的本人会话" />';
     const newChatButton = document.createElement("button");
     newChatButton.type = "button";
     newChatButton.id = "newChatBtn";

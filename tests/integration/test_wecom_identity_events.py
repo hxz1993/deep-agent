@@ -81,6 +81,6 @@ class WecomIdentityEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["userid"] for row in sources], ["FirstMember", "SecondMember"])
         self.assertEqual([row["peer_id"] for row in sources], ["isolated-group", "isolated-group"])
         events = await ctx.stores.coordinator.list_events(requests[0]["session_id"], event_type="session/title")
-        self.assertEqual(events[-1].payload["title"], "user/成员甲/sender-test")
+        self.assertEqual(events[-1].payload["title"], "User｜成员甲(sender-test)")
         events = await ctx.stores.coordinator.list_events(requests[2]["session_id"], event_type="session/title")
         self.assertEqual(events[-1].payload["title"], "Group｜isolated-group")

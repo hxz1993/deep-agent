@@ -1,0 +1,102 @@
+{
+  "base": "v0.0.23",
+  "head": "8dc16a6324a10cee68ef3138aeede591d3cdd581",
+  "commits": [
+    {
+      "sha": "af272c3116e2525249103f960b79086fd250bcef",
+      "date": "2026-09-06T06:42:52Z",
+      "title": "Drop the experimental framing ahead of v1 (#811)",
+      "url": "https://github.com/pydantic/monty/commit/af272c3116e2525249103f960b79086fd250bcef"
+    },
+    {
+      "sha": "2a97fe60166b56d02f14ec0996e8e3ecd96c2e19",
+      "date": "2026-09-06T11:09:57Z",
+      "title": "Percent formatting: `'...' % foo` and `b'...' % bar` (#825)",
+      "url": "https://github.com/pydantic/monty/commit/2a97fe60166b56d02f14ec0996e8e3ecd96c2e19"
+    },
+    {
+      "sha": "077de0dee5e4875103cad6f043ddaff1556df887",
+      "date": "2026-09-06T11:26:07Z",
+      "title": "fix flakey js test (#826)",
+      "url": "https://github.com/pydantic/monty/commit/077de0dee5e4875103cad6f043ddaff1556df887"
+    },
+    {
+      "sha": "d7b74ef8c45ebda666dfe96b67ccb19464e7aa15",
+      "date": "2026-09-06T15:00:07Z",
+      "title": "Implement the `format()` builtin (#827)",
+      "url": "https://github.com/pydantic/monty/commit/d7b74ef8c45ebda666dfe96b67ccb19464e7aa15"
+    },
+    {
+      "sha": "6db3c0402712fc85b83493adb9a434f7a120483c",
+      "date": "2026-09-08T08:36:03Z",
+      "title": "Answer `date.today()` / `datetime.now()` in standard execution (#812)",
+      "url": "https://github.com/pydantic/monty/commit/6db3c0402712fc85b83493adb9a434f7a120483c"
+    },
+    {
+      "sha": "83d2b48279dabf8fe6ef51e13a39e191360f0542",
+      "date": "2026-09-08T11:41:44Z",
+      "title": "Implement remaining math aggregation functions and `fma` (#831)",
+      "url": "https://github.com/pydantic/monty/commit/83d2b48279dabf8fe6ef51e13a39e191360f0542"
+    },
+    {
+      "sha": "378096f5d228e7bbe7321b178c2ce6383ecac5e1",
+      "date": "2026-09-08T13:58:11Z",
+      "title": "fix telemetry context propagation (#830)",
+      "url": "https://github.com/pydantic/monty/commit/378096f5d228e7bbe7321b178c2ce6383ecac5e1"
+    },
+    {
+      "sha": "4d8f4469240ba9d728e04280c1e2af325c877f1e",
+      "date": "2026-09-09T09:14:06Z",
+      "title": "Support `print(file=sys.stderr)` (#818)",
+      "url": "https://github.com/pydantic/monty/commit/4d8f4469240ba9d728e04280c1e2af325c877f1e"
+    },
+    {
+      "sha": "be1936641a71daf7e9d63a062711109308fe4e2f",
+      "date": "2026-09-09T11:09:48Z",
+      "title": "Finish `binascii` with the uu, quoted-printable and CRC-16 conversions (#816)",
+      "url": "https://github.com/pydantic/monty/commit/be1936641a71daf7e9d63a062711109308fe4e2f"
+    },
+    {
+      "sha": "f7e39549bb1855be7da392a362a34121ec22b6a6",
+      "date": "2026-09-09T11:25:05Z",
+      "title": "Build Python 3.14t wheels (#832)",
+      "url": "https://github.com/pydantic/monty/commit/f7e39549bb1855be7da392a362a34121ec22b6a6"
+    },
+    {
+      "sha": "cba3354c919f89945ad8cb781fb0f19db952a8a8",
+      "date": "2026-09-10T19:30:59Z",
+      "title": "make it possible to run smoke test from npm (#619)",
+      "url": "https://github.com/pydantic/monty/commit/cba3354c919f89945ad8cb781fb0f19db952a8a8"
+    },
+    {
+      "sha": "5ca0dd4e512fb8d401c9526f2cfc6dfd7ef1bfe6",
+      "date": "2026-09-11T16:05:52Z",
+      "title": "fix browser smoke test install (#844)",
+      "url": "https://github.com/pydantic/monty/commit/5ca0dd4e512fb8d401c9526f2cfc6dfd7ef1bfe6"
+    },
+    {
+      "sha": "cf29f2c558662e66228a4cf2c78b064dce18b781",
+      "date": "2026-09-12T17:16:19Z",
+      "title": "Move examples-only Python deps out of the dev group (#849)",
+      "url": "https://github.com/pydantic/monty/commit/cf29f2c558662e66228a4cf2c78b064dce18b781"
+    },
+    {
+      "sha": "1106b421d81b892bed5bc743d1995bc19c80eb1d",
+      "date": "2026-09-12T17:51:37Z",
+      "title": "Match CPython for int/float arithmetic on long ints and float pow overflow (#834)",
+      "url": "https://github.com/pydantic/monty/commit/1106b421d81b892bed5bc743d1995bc19c80eb1d"
+    },
+    {
+      "sha": "c2aa12ff309fb6b191a8c99f5b0710c03586f377",
+      "date": "2026-09-12T17:54:35Z",
+      "title": "Make the `examples` dependency group opt-in (#852)",
+      "url": "https://github.com/pydantic/monty/commit/c2aa12ff309fb6b191a8c99f5b0710c03586f377"
+    },
+    {
+      "sha": "8dc16a6324a10cee68ef3138aeede591d3cdd581",
+      "date": "2026-09-12T18:38:01Z",
+      "title": "CWD support (#828)",
+      "url": "https://github.com/pydantic/monty/commit/8dc16a6324a10cee68ef3138aeede591d3cdd581"
+    }
+  ]
+}

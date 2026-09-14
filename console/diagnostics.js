@@ -1,10 +1,10 @@
 import { createDiagnosticsExport, logExportSummary } from "./diagnostics-export.js?v=20260912-21";
 import { createDiagnosticsQuery } from "./diagnostics-query.js?v=20260912-21";
-import { escapeHtml as escape, icon, icons, localInput, diagnosticRequest, bindDiagnosticResizer, bindDiagnosticSelects, selectHtml } from "./diagnostics-ui.js?v=20260912-21";
+import { escapeHtml as escape, icon, icons, localInput, diagnosticRequest, bindDiagnosticResizer, bindDiagnosticSelects, selectHtml } from "./diagnostics-ui.js?v=20260915-release-audit";
 
 const SOURCES = { api: "API", gateway: "网关" };
 const OPTIONS = {
-  period: [["24", "最近 24 小时"], ["1", "最近 1 小时"], ["6", "最近 6 小时"], ["168", "最近 7 天"], ["custom", "自定义时间"]],
+  period: [["24", "最近 1 天"], ["1", "最近 1 小时"], ["6", "最近 6 小时"], ["168", "最近 7 天"], ["custom", "自定义时间"]],
   source: [["", "全部来源"], ["api", "API"], ["gateway", "网关"]],
   level: [["", "全部等级"], ["CRITICAL", "CRITICAL"], ["ERROR", "ERROR"], ["WARNING", "WARNING"], ["INFO", "INFO"], ["DEBUG", "DEBUG"]],
 };

@@ -34,12 +34,14 @@ EXPECTED_TABLES = {
     "skill_packages",
     "ui_tool_definitions",
     "ui_tool_packages",
+    "wecom_applications",
+    "wecom_user_profiles",
 }
 
 
 class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
     async def test_migrate_and_create_stores(self) -> None:
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-bootstrap-", ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "bootstrap.db"
             url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
 
@@ -76,7 +78,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 await engine.dispose()
 
     async def test_single_production_baseline_round_trip(self) -> None:
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-bootstrap-", ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "baseline.db"
             url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
 
@@ -93,7 +95,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self._assert_current_baseline(db_path)
 
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "005")
+        self.assertEqual(self._revision(db_path), "006")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertEqual(self._primary_key(db_path, "chat_sessions"), ["session_id"])
         self.assertEqual(self._primary_key(db_path, "chat_session_events"), ["event_id"])
@@ -122,6 +124,8 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             "skill_packages",
             "mcp_servers",
             "ui_tool_packages",
+            "wecom_applications",
+            "wecom_user_profiles",
             "ui_tool_definitions",
         ):
             self.assertNotIn("enabled", self._columns(db_path, table))
@@ -130,6 +134,9 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._row_count(db_path, "llm_models"), 1)
         self.assertEqual(self._row_count(db_path, "agents"), 1)
         self.assertEqual(self._row_count(db_path, "mcp_servers"), 1)
+        # 006 creates configuration/cache structures without seeding real accounts.
+        self.assertEqual(self._row_count(db_path, "wecom_applications"), 0)
+        self.assertEqual(self._row_count(db_path, "wecom_user_profiles"), 0)
         self.assertEqual(
             self._scalar(db_path, "SELECT value FROM global_settings WHERE key='web_search'"),
             '{"mode":"native"}',

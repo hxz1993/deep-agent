@@ -13,7 +13,7 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
 from deep_agent.db import migrate
-from deep_agent.db.reference_schema import LOGICAL_REFERENCES, assert_logical_references
+from deep_agent.db.reference_schema import LOGICAL_REFERENCES, Relation, assert_logical_references
 
 
 class ApplicationReferenceMigrationTests(unittest.TestCase):
@@ -112,7 +112,12 @@ class ApplicationReferenceMigrationTests(unittest.TestCase):
         self.assertEqual(before, self.snapshot())
 
     def test_all_ten_orphan_relations_refuse_upgrade_and_downgrade_without_changes(self):
-        for relation in LOGICAL_REFERENCES:
+        # This fixture is revision 002: exercise exactly the ten references
+        # governed by the frozen 003 migration, not later additions to runtime.
+        historical = tuple(Relation(*value) for value in self.migration._REFERENCES)
+        self.assertEqual(len(historical), 10)
+        self.assertTrue(set(historical).issubset(set(LOGICAL_REFERENCES)))
+        for relation in historical:
             with self.subTest(relation=relation):
                 with sqlite3.connect(self.path) as db:
                     original = db.execute(f'SELECT "{relation.column}" FROM "{relation.table}" LIMIT 1').fetchone()[0]
@@ -132,6 +137,21 @@ class ApplicationReferenceMigrationTests(unittest.TestCase):
             command.downgrade(self.config, "002")
         self.assertEqual(before, self.snapshot())
         self.assertEqual(self.fk_count(), 0)
+
+    def test_current_wecom_orphan_is_detected_and_cannot_be_downgraded_away(self):
+        command.upgrade(self.config, "006")
+        with self.engine.begin() as db:
+            db.execute(sa.text("INSERT INTO wecom_user_profiles(id,wecom_application_id,userid,userid_key) VALUES('profile','missing','User','user')"))
+        before = self.snapshot()
+        with self.engine.connect() as db:
+            with self.assertRaisesRegex(RuntimeError, "wecom_user_profiles.wecom_application_id"):
+                assert_logical_references(db)
+        self.assertEqual(before, self.snapshot())
+        with self.assertRaisesRegex(RuntimeError, "Cannot downgrade"):
+            command.downgrade(self.config, "005")
+        self.assertEqual(before, self.snapshot())
+        with self.engine.connect() as db:
+            self.assertEqual(db.scalar(sa.text("SELECT version_num FROM alembic_version")), "006")
 
     def test_sqlite_mid_rebuild_failure_rolls_back_and_can_retry(self):
         before = self.snapshot()

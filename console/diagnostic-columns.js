@@ -1,5 +1,5 @@
 // Resize neighboring columns together; no persistence or change to row data.
-export const COLUMN_BOUNDS = [[240, 720], [80, 220], [64, 200], [48, 110], [56, 130], [120, 220]];
+export const COLUMN_BOUNDS = [[240, 720], [80, 220], [64, 200], [56, 130], [120, 220]];
 export function resizeColumns(widths, index, delta) {
   if (index < 0 || index >= widths.length - 1) return [...widths];
   const [lower, upper] = COLUMN_BOUNDS[index], [nextLower, nextUpper] = COLUMN_BOUNDS[index + 1];
@@ -21,10 +21,10 @@ export function bindDiagnosticColumns(table, saved, onChange) {
   });
   const apply = values => {
     table.style.setProperty('--diagnostic-columns', values.map(width => `${width}px`).join(' '));
-    table.style.minWidth = `${values.reduce((a, b) => a + b, 0) + 60}px`;
+    table.style.minWidth = `${values.reduce((a, b) => a + b, 0) + (values.length - 1) * 8 + 20}px`;
     announce(values);
   };
-  if (saved) apply(saved);
+  if (saved?.length === header.children.length) apply(saved);
   else announce(widths());
   const move = event => {
     if (!drag || event.pointerId !== drag.pointer) return;

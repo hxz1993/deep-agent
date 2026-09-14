@@ -9,8 +9,9 @@ export function localInput(utc) {
 }
 export function selectHtml(name, label, value, options) {
   const e = escapeHtml;
+  const badge = decoration => decoration ? `<span class="diagnostic-select-badge" title="${e(decoration.label)}" aria-label="${e(decoration.label)}">${icon(decoration.icon)}</span>` : "";
   const selected = options.find(([id]) => String(id) === String(value));
-  return `<div class="console-select" data-diagnostic-control="${e(name)}"><button type="button" class="console-select-trigger" aria-label="${e(label)}" aria-haspopup="listbox" aria-expanded="false"><span>${e(selected?.[1] || value || label)}</span>${icon("chevron-down")}</button><div class="console-select-menu hidden" role="listbox" aria-label="${e(label)}">${options.map(([id, text]) => `<button type="button" role="option" class="console-select-option${String(id) === String(value) ? " selected" : ""}" aria-selected="${String(id) === String(value)}" data-value="${e(id)}">${e(text)}</button>`).join("")}</div></div>`;
+  return `<div class="console-select" data-diagnostic-control="${e(name)}"><button type="button" class="console-select-trigger" aria-label="${e(label)}" aria-haspopup="listbox" aria-expanded="false"><span>${e(selected?.[1] || value || label)}</span>${badge(selected?.[2])}${icon("chevron-down")}</button><div class="console-select-menu hidden" role="listbox" aria-label="${e(label)}">${options.map(([id, text, decoration]) => `<button type="button" role="option" class="console-select-option${String(id) === String(value) ? " selected" : ""}" aria-selected="${String(id) === String(value)}" data-value="${e(id)}">${decoration ? `<span>${e(text)}</span>${badge(decoration)}` : e(text)}</button>`).join("")}</div></div>`;
 }
 
 // Delegate from a stable host. Mirrors the Console select's keyboard contract.

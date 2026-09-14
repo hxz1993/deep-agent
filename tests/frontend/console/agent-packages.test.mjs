@@ -204,3 +204,10 @@ test('覆盖目标模型在预检期间改变，要求重新确认而不直接�
  const h=harness(async p=>response(p==='/api/v1/agents'?[updated]:data));staged(h,data);upload(h);h.admin.step=2;h.admin.operationMode='overwrite';h.admin.agents=[old];h.admin.targetAgentId='target';
  await h.admin.next();assert.equal(h.admin.step,2);assert.match(h.node('agentPackageStatus').textContent,/默认模型已变化/);assert.doesNotMatch(h.node('agentPackageContent').innerHTML,/id="agentPackageModel"/);
 });
+
+test('预制目录只显示存在的提示词版本',async()=>{
+ const h=harness(async()=>response({items:[{code:'versioned',name:'电子表格',prompt_version:'V85'},{code:'plain',name:'无版本'}]}));await h.admin.open();
+ const html=h.node('agentPackageContent').innerHTML;
+ assert.match(html,/提示词 V85/);
+ assert.equal((html.match(/class="agent-package-version"/g)||[]).length,1);
+});

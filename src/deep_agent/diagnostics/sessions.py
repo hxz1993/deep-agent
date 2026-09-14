@@ -14,13 +14,11 @@ from typing import Any
 from weakref import WeakKeyDictionary
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import Integer, String, and_, case, cast, exists, func, literal, or_, select
-from sqlalchemy.ext.compiler import compiles
+from sqlalchemy import and_, case, exists, func, literal, or_, select
 from sqlalchemy.orm import aliased
-from sqlalchemy.sql.functions import FunctionElement
 
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
-from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent
+from deep_agent.db.models import Agent, ChannelAccount, ChatSession, ChatSessionEvent
 from deep_agent.db.session_scope import agent_scope_to_api
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.time import ensure_utc, utc_rfc3339
@@ -63,7 +61,6 @@ class SessionFilters:
     timezone: str = "UTC"
     agent_id: str | None = None
     user_id: str | None = None
-    source: str | None = None
     query: str | None = None
     has_questions: bool | None = None
     has_execution_error: bool | None = None
@@ -80,8 +77,6 @@ class SessionFilters:
             ZoneInfo(self.timezone)
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise DiagnosticQueryError("无效的时区") from exc
-        if self.source not in (None, "direct", "channel"):
-            raise DiagnosticQueryError("无效的会话来源")
         if self.latest_status not in (None, *STATUSES):
             raise DiagnosticQueryError("无效的会话状态")
         if not 1 <= self.limit <= 200 or self.offset < 0:
@@ -111,40 +106,6 @@ class SessionFilters:
 
 def _range(column, filters):
     return and_(column >= filters.start, column < filters.end)
-
-
-class _StringPosition(FunctionElement):
-    type = Integer()
-    inherit_cache = True
-
-
-@compiles(_StringPosition)
-def _position_default(element, compiler, **kw):
-    haystack, needle = list(element.clauses)
-    return f"instr({compiler.process(haystack, **kw)}, {compiler.process(needle, **kw)})"
-
-
-@compiles(_StringPosition, "postgresql")
-def _position_postgres(element, compiler, **kw):
-    haystack, needle = list(element.clauses)
-    return f"strpos({compiler.process(haystack, **kw)}, {compiler.process(needle, **kw)})"
-
-
-def _channel_exists():
-    # TextJSON's canonical representation is shared across every supported
-    # dialect, including MySQL installations without native JSON functions.
-    # _append_title writes title then the top-level source before any details.
-    # Inspect only its first unescaped key; a nested property called "source"
-    # in channel details can never override the title's provenance. Quotes
-    # inside a title string are JSON escaped and cannot match this key token.
-    origin = aliased(ChatSessionEvent)
-    compact = func.replace(func.replace(func.replace(cast(origin.payload, String), " ", ""), "\n", ""), "\t", "")
-    source_token = '"source":"channel"'
-    source = func.substr(compact, _StringPosition(compact, literal('"source":')), len(source_token))
-    return exists(select(origin.event_id).where(origin.session_id == ChatSession.session_id,
-        origin.event_type == "session/title",
-        source == source_token,
-        compact.contains('"channel":{', autoescape=True)))
 
 
 def _active_condition(entries):
@@ -261,9 +222,23 @@ class DiagnosticSessionQueries(SessionBoundMixin):
         super().__init__(session_factory)
         self.active_entries = active_entries
 
+    async def user_option_ids(self, f, *, after=None):
+        # One bounded identity page, independent of the session table's page and user filter.
+        scoped = SessionFilters(f.start, f.end, timezone=f.timezone,
+                                agent_id=f.agent_id)
+        identity = ChatSession.user_id
+        stmt = select(identity).where(*self._filters(scoped), identity != "")
+        if after is not None:
+            stmt = stmt.where(identity > after)
+        stmt = stmt.distinct().order_by(identity).limit(101)
+        async with self._read() as db:
+            ids = list((await db.scalars(stmt)).all())
+        return {"ids": ids[:100], "next_after": ids[99] if len(ids) > 100 else None}
+
     async def _agent_options(self, db):
-        rows = (await db.execute(select(Agent.id, Agent.name).order_by(Agent.name, Agent.id))).all()
-        return [{"agent_id": agent_scope_to_api(row[0]), "agent_name": row[1]} for row in rows]
+        has_channel = exists(select(ChannelAccount.id).where(ChannelAccount.agent_id == Agent.id))
+        rows = (await db.execute(select(Agent.id, Agent.name, has_channel).order_by(Agent.name, Agent.id))).all()
+        return [{"agent_id": agent_scope_to_api(row[0]), "agent_name": row[1], "has_channel": bool(row[2])} for row in rows]
 
     def _filters(self, f, *, activity=True):
         conditions = []
@@ -271,8 +246,6 @@ class DiagnosticSessionQueries(SessionBoundMixin):
             conditions.append(ChatSession.agent_id == f.agent_id)
         if f.user_id:
             conditions.append(ChatSession.user_id == f.user_id)
-        if f.source:
-            conditions.append(_channel_exists() if f.source == "channel" else ~_channel_exists())
         if activity:
             event = aliased(ChatSessionEvent)
             real = exists(select(event.event_id).where(event.session_id == ChatSession.session_id,

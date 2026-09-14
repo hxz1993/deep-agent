@@ -45,3 +45,7 @@ Thumbs.db
 _bmad/
 _bmad-output/
 debug/
+
+# Local review logs and browser automation evidence
+/TMP to delete*
+/.playwright-cli/

@@ -1319,9 +1319,9 @@ body.console-nav-collapsed .console-rail-header .console-brand-copy { display: n
   place-items: center;
   flex: 0 0 auto;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 9%, var(--console-surface));
+  background: transparent;
 }
-.console-brand-icon img { width: 25px; height: 25px; display: block; }
+.console-brand-icon img { width: 30px; height: 30px; display: block; }
 .console-brand-copy { flex-direction: column !important; align-items: flex-start !important; gap: 0; }
 .console-brand-copy > span { color: var(--text-faint); }
 .breadcrumb-chevron { width: 13px; height: 13px; color: var(--text-faint); }

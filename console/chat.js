@@ -1706,15 +1706,26 @@ function restoreHistoryDisclosure(oldRow, nextRow) {
   }
 }
 
+const sessionDeletesInFlight = new Set();
 async function deleteSession(session) {
   const normalized = normalizeSession(session);
   const key = sessionLookupKey(normalized);
+  if (sessionDeletesInFlight.has(key)) return;
+  sessionDeletesInFlight.add(key);
+  try {
+    const response = await daFetch(sessionApiUrl(normalized), { method: "DELETE" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(typeof body?.detail === "string" ? body.detail : `HTTP ${response.status}`);
+    }
+  } catch (error) {
+    addSystemNote(`删除失败：${error.message}`);
+    return;
+  } finally {
+    sessionDeletesInFlight.delete(key);
+  }
   state.sessions = state.sessions.filter((s) => sessionLookupKey(s) !== key);
   if (sessionPage.agentId === normalized.agentId) sessionPage.offset = Math.max(0, sessionPage.offset - 1);
-  renderSessions();
-  try {
-    await daFetch(sessionApiUrl(normalized), { method: "DELETE" });
-  } catch (_) { /* 忽略 */ }
   if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) newChat();
   else renderSessions();
 }

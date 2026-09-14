@@ -40,7 +40,6 @@ def filters(
     timezone: str = Query(default="UTC", max_length=64),
     agent_id: str | None = Query(default=None, max_length=256),
     user_id: str | None = Query(default=None, max_length=128),
-    source: Literal["direct", "channel"] | None = Query(default=None),
     query: str | None = Query(default=None, max_length=256),
     has_questions: bool | None = Query(default=None), has_execution_error: bool | None = Query(default=None),
     latest_status: Literal["running", "waiting", "completed", "stopped", "error", "unknown", "not_started"] | None = Query(default=None),
@@ -48,7 +47,7 @@ def filters(
 ):
     actual_end = end or datetime.now(UTC)
     return SessionFilters(start=start or actual_end - timedelta(days=7), end=actual_end, timezone=timezone,
-        agent_id=agent_id, user_id=user_id, source=source, query=query, has_questions=has_questions,
+        agent_id=agent_id, user_id=user_id, query=query, has_questions=has_questions,
         has_execution_error=has_execution_error, latest_status=latest_status, limit=limit, offset=offset)
 
 
@@ -81,6 +80,22 @@ async def list_diagnostic_sessions(request: Request, ctx: AppContextDep, caller_
     async with query_budget():
         result = await service(ctx).list(selected)
     return await with_users(request, caller_user_id, result, {row["user_id"] for row in result["items"]})
+
+
+@router.get("/users")
+async def search_diagnostic_users(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep,
+                                  selected: FiltersDep, after: str | None = Query(default=None, max_length=128)):
+    async with query_budget():
+        page = await service(ctx).user_option_ids(selected, after=after)
+    result = await with_users(request, caller_user_id, {}, page["ids"])
+    query = (selected.query or "").strip().casefold()
+    items = [{"user_id": uid, "display_name": result["users"][uid]["display_name"]}
+             for uid in page["ids"]
+             if not query or query in uid.casefold()
+             or query in result["users"][uid]["display_name"].casefold()]
+    if query and not items and any(profile.get("resolution") == "unavailable" for profile in result["users"].values()):
+        raise HTTPException(503, "用户名查询暂不可用，请稍后重试或使用完整 User ID")
+    return {"items": items, "next_after": page["next_after"]}
 
 
 @router.get("/{session_id}")

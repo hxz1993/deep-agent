@@ -1,0 +1,87 @@
+{
+  "baseline": "0.26.0",
+  "pypi_latest": "0.31.0",
+  "requires_dist": [
+    "genai-prices>=0.0.71",
+    "httpx>=0.28.1",
+    "pydantic-ai-slim>=2.40.0",
+    "agent-client-protocol<0.12,>=0.11; extra == \"acp\"",
+    "pydantic-ai-slim[anthropic]>=2.40.0; extra == \"anthropic\"",
+    "aws-durable-execution-sdk-python>=1.7.0; python_full_version >= \"3.11\" and extra == \"aws-lambda\"",
+    "pydantic-ai-slim>=2.40.0; extra == \"aws-lambda\"",
+    "browser-use<0.14,>=0.13.6; python_full_version >= \"3.11\" and extra == \"browser-use\"",
+    "pydantic-ai-slim[cli]>=2.40.0; extra == \"cli\"",
+    "pydantic-ai-slim[duckduckgo]>=2.40.0; extra == \"code-mode\"",
+    "pydantic-monty>=0.0.23; extra == \"code-mode\"",
+    "pydantic-ai-slim[duckduckgo]>=2.40.0; extra == \"codemode\"",
+    "pydantic-monty>=0.0.23; extra == \"codemode\"",
+    "pydantic-ai-slim[dbos]; extra == \"dbos\"",
+    "pydantic-monty>=0.0.23; extra == \"dynamic-workflow\"",
+    "exa-py>=2.16.0; extra == \"exa\"",
+    "logfire>=4.31.0; extra == \"logfire\"",
+    "pydantic-ai-slim[spec]>=2.18.0; extra == \"logfire\"",
+    "modal>=1.5.0; extra == \"modal\"",
+    "pymongo>=4.17.0; extra == \"mongodb\"",
+    "idna>=3.4; extra == \"playwright\"",
+    "playwright>=1.61.0; extra == \"playwright\"",
+    "stackone-defender<0.8,>=0.7.3; python_full_version >= \"3.11\" and extra == \"prompt-injection-defender\"",
+    "stackone-defender[onnx]<0.8,>=0.7.3; python_full_version >= \"3.11\" and extra == \"prompt-injection-defender-ml\"",
+    "pydantic-ai-slim[duckduckgo,web-fetch]>=2.40.0; extra == \"researcher\"",
+    "pyyaml>=6.0.2; extra == \"skills\"",
+    "fastmcp<4,>=3.4.5; extra == \"stackone\"",
+    "pydantic-ai-slim[mcp]>=2.18.0; extra == \"stackone\"",
+    "pydantic-ai-slim[temporal]; extra == \"temporal\"",
+    "youdotcom<4,>=3.1.2; extra == \"youdotcom\""
+  ],
+  "releases": [
+    {
+      "tag_name": "v0.31.0",
+      "published_at": "2026-09-12T00:54:49Z",
+      "prerelease": false,
+      "html_url": "https://github.com/pydantic/pydantic-ai-harness/releases/tag/v0.31.0",
+      "body": "<!-- Release notes generated using configuration in .github/release.yml at main -->\n\n## What's Changed\n* Add `eager` streamed execution to `CodeMode` by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/746\n* Fix `PlanStore` `get_items` and `set_items` docstrings by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/843\n* Add `tool_return_max_chars` to `SummarizingCompaction` by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/842\n* Drop the unfulfilled 0.28.0 removal date from `SpendStore` deprecations by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/841\n* Document the escaped-keys marker format in `step_persistence` docs by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/840\n* Add an async and concurrency guide to `agent_docs`, ported from core by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/835\n* Add optional tail-line retention to `Truncate` by @Quiyyy in https://github.com/pydantic/pydantic-ai-harness/pull/836\n* Anchor `Planning` cache breakpoint on the last durable user content by [@pydanty](https://github.com/apps/pydanty) in https://github.com/pydantic/pydantic-ai-harness/pull/833\n* Make `FileSystem` content hashes agree across `read_file`, `write_file`, and `edit_file` by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/847\n* Correct for_run()-built approval-required tool calls to pending in ACP by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/849\n* Stop `SnapshotHistorySource.run_history` duplicating messages with serializing stores by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/848\n* Floor on released `pydantic-ai` 2.40.0 by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/851\n* Emit `DelegationStartEvent` and `DelegationEndEvent` from `SubAgents` by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/855\n* Fix the `aws-lambda` docs install line, which named a `bedrock` extra that does not exist by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/854\n* Offer `pip` and `uv` installation commands throughout the Harness docs by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/858\n* Give the `CodeMode` sandbox the value shape its own stubs declare by @bohdanhr in https://github.com/pydantic/pydantic-ai-harness/pull/681\n\n## New Contributors\n* @bohdanhr made their first contribution in https://github.com/pydantic/pydantic-ai-harness/pull/681\n\n**Full Changelog**: https://github.com/pydantic/pydantic-ai-harness/compare/v0.30.0...v0.31.0\n"
+    },
+    {
+      "tag_name": "v0.30.0",
+      "published_at": "2026-09-09T03:33:33Z",
+      "prerelease": false,
+      "html_url": "https://github.com/pydantic/pydantic-ai-harness/releases/tag/v0.30.0",
+      "body": "<!-- Release notes generated using configuration in .github/release.yml at main -->\n\n## What's Changed\n* Re-export `MCPToolsetClient` from `pydantic_ai_harness.stackone._toolset` so CI lint passes again by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/725\n* Frame the `media` docs as Step Persistence plumbing, not a capability by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/751\n* Name the internal `Agent` in `SummarizingCompaction`, `ToolOutputLimits`, `SystemReminders`, `Advisor` and `PydanticAIChatModel` so Logfire attributes their runs by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/774\n* Shield the cancel+`gather` teardown in `guardrails` parallel mode and `MontyExecutor` by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/758\n* Add `TrajectoryJudge`: review the live run with a second model on a cadence and steer it mid-run by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/724\n* Register TrajectoryJudge in the capability combination policy by @adtyavrdhn in https://github.com/pydantic/pydantic-ai-harness/pull/817\n* Deprecate `on_spend`, `on_usage`, `on_fire`, and `PlanEventEmitter` toward capability event subscriptions by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/714\n* Emit `FileSystem` traversal events and subscribe `RepoContext` with `@on_event`, deprecating `traversal_tool_names` sniffing by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/712\n* Require every capability to decide what OpenTelemetry it emits by @dsfaccini in https://github.com/pydantic/pydantic-ai-harness/pull/604\n* Require `youdotcom>=3.1.2` and pass attribution kwargs to `You()` so outbound requests carry an `X-Client-Info` header by @tyler5673 in https://github.com/pydantic/pydantic-ai-harness/pull/786\n* Run your own Pydantic AI agent in GitHub Agentic Workflows: the `pydantic-ai` gh-aw engine definition is now hosted here, and `PAI_AGENT` points a workflow at an agent your repository defines by @dsfaccini in https://github.com/pydantic/pydantic-ai-harness/pull/708\n* Count truncation markers within `Truncate.max_chars` by @Quiyyy in https://github.com/pydantic/pydantic-ai-harness/pull/816\n\n## New Contributors\n* @tyler5673 made their first contribution in https://github.com/pydantic/pydantic-ai-harness/pull/786\n* @Quiyyy made their first contribution in https://github.com/pydantic/pydantic-ai-harness/pull/816\n\n**Full Changelog**: https://github.com/pydantic/pydantic-ai-harness/compare/v0.29.1...v0.30.0\n"
+    },
+    {
+      "tag_name": "v0.29.1",
+      "published_at": "2026-09-08T04:15:22Z",
+      "prerelease": false,
+      "html_url": "https://github.com/pydantic/pydantic-ai-harness/releases/tag/v0.29.1",
+      "body": "<!-- Release notes generated using configuration in .github/release.yml at main -->\n\n## What's Changed\n* Handle instruction updates in token estimates and conversation search by @dsfaccini in https://github.com/pydantic/pydantic-ai-harness/pull/815\n* Bump `pydantic-monty` floor to 0.0.23 by @adtyavrdhn in https://github.com/pydantic/pydantic-ai-harness/pull/813\n\n\n**Full Changelog**: https://github.com/pydantic/pydantic-ai-harness/compare/v0.29.0...v0.29.1\n"
+    },
+    {
+      "tag_name": "v0.29.0",
+      "published_at": "2026-09-04T02:56:13Z",
+      "prerelease": false,
+      "html_url": "https://github.com/pydantic/pydantic-ai-harness/releases/tag/v0.29.0",
+      "body": "<!-- Release notes generated using configuration in .github/release.yml at main -->\n\n## What's Changed\n* Floor on released `pydantic-ai` 2.38.0 by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/780\n* Let `SummarizingCompaction` stream nested summary requests by @JayGhiya in https://github.com/pydantic/pydantic-ai-harness/pull/620\n* Preserve caller-owned `media` marker keys and match the escape stash by shape by @dsfaccini in https://github.com/pydantic/pydantic-ai-harness/pull/700\n* feat(aws-lambda): AWSLambdaDurability for AWS Lambda durable functions by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/417\n* Say how repeated capabilities compose, and give `SubAgents` and `StackOne` the ids that decide it by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/767\n\n## New Contributors\n* @JayGhiya made their first contribution in https://github.com/pydantic/pydantic-ai-harness/pull/620\n\n**Full Changelog**: https://github.com/pydantic/pydantic-ai-harness/compare/v0.28.1...v0.29.0\n"
+    },
+    {
+      "tag_name": "v0.28.1",
+      "published_at": "2026-09-03T03:29:40Z",
+      "prerelease": false,
+      "html_url": "https://github.com/pydantic/pydantic-ai-harness/releases/tag/v0.28.1",
+      "body": "<!-- Release notes generated using configuration in .github/release.yml at main -->\n\n## What's Changed\n* Make `StepPersistence` replay-safe under durable execution by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/749\n* Make `SpendLimits` replay-safe under durable execution by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/748\n* Accept inline durable-operation dispatch in the spend composition test by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/766\n* Floor on released `pydantic-ai` 2.37.0 and drop the version straddle by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/769\n* Propagate a sub-agent's first-party `RunCancelled` past `contain_errors` by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/754\n* Scrub ambient Logfire credentials in `tests/logfire_variables` so a local `.env` cannot reach the real Logfire API by @mpfaffenberger in https://github.com/pydantic/pydantic-ai-harness/pull/752\n* Declare `Advisor`'s default `id` on the class by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/776\n\n\n**Full Changelog**: https://github.com/pydantic/pydantic-ai-harness/compare/v0.28.0...v0.28.1\n"
+    },
+    {
+      "tag_name": "v0.28.0",
+      "published_at": "2026-09-01T01:48:29Z",
+      "prerelease": false,
+      "html_url": "https://github.com/pydantic/pydantic-ai-harness/releases/tag/v0.28.0",
+      "body": "<!-- Release notes generated using configuration in .github/release.yml at main -->\n\n## What's Changed\n* Separate instruction parts from different capabilities with a blank line by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/698\n* Floor on released `pydantic-ai` 2.36.0 and drop the version straddle by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/743\n* Add a `Further reading` section to the `PlaywrightBrowser` docs and README by @dsfaccini in https://github.com/pydantic/pydantic-ai-harness/pull/654\n* Make `SummarizingCompaction` summarization a durable operation by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/707\n* Journal replay-safe capability reads and model calls by @DouweM in https://github.com/pydantic/pydantic-ai-harness/pull/710\n\n\n**Full Changelog**: https://github.com/pydantic/pydantic-ai-harness/compare/v0.27.0...v0.28.0\n"
+    },
+    {
+      "tag_name": "v0.27.0",
+      "published_at": "2026-08-27T23:55:59Z",
+      "prerelease": false,
+      "html_url": "https://github.com/pydantic/pydantic-ai-harness/releases/tag/v0.27.0",
+      "body": "<!-- Release notes generated using configuration in .github/release.yml at main -->\n\n## What's Changed\n* Allow compaction summaries to override model settings by @thomwebb in https://github.com/pydantic/pydantic-ai-harness/pull/650\n* Check the marked `spend` doc snippets for undefined names, so they stay runnable on the 3.10 floor by @Neallin-917 in https://github.com/pydantic/pydantic-ai-harness/pull/701\n\n## New Contributors\n* @thomwebb made their first contribution in https://github.com/pydantic/pydantic-ai-harness/pull/650\n* @Neallin-917 made their first contribution in https://github.com/pydantic/pydantic-ai-harness/pull/701\n\n**Full Changelog**: https://github.com/pydantic/pydantic-ai-harness/compare/v0.26.0...v0.27.0\n"
+    }
+  ]
+}

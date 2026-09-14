@@ -62,6 +62,12 @@ def make_package(**kwargs):
 
 
 class AgentPackageArchiveTests(unittest.TestCase):
+    def test_prompt_version_only_reads_explicit_title_version(self):
+        self.assertEqual(archive.prompt_version('# 电子表格智能助手 · deeptable-unified-agent-v85\n正文'), 'V85')
+        self.assertEqual(archive.prompt_version('# DeepCube 助手系统提示词 V34\n正文'), 'V34')
+        for prompt in ('', '# 无版本\n正文 V85', '正文 v85', '# 助手 v85 的用法'):
+            self.assertIsNone(archive.prompt_version(prompt))
+
     def test_install_options_reject_empty_model_and_invalid_resource_actions(self):
         for fields in ({'model_id': ''}, {'model_id': '   '}, {'name': '  '},
                        {'resources': {'skill:example': 'overwrite'}}, {'future_behavior': True}):

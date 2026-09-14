@@ -96,3 +96,5 @@ dialog#agentPackageModal { width: 860px; height: 650px; max-width: calc(100vw - 
  .agent-package-steps li::after { margin: 0 5px; }
  .agent-package-acknowledge { flex-basis: 100%; }
 }
+
+.agent-package-choice-copy .agent-package-version { display:inline-block; margin-left:8px; padding:1px 6px; border-radius:4px; background:color-mix(in srgb,var(--accent) 8%,var(--console-surface)); color:var(--text-dim); font-size:11px; font-weight:400; vertical-align:middle; }

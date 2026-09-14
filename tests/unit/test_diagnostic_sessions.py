@@ -18,7 +18,7 @@ from deep_agent.api.v1.diagnostic_sessions import router
 from deep_agent.api.v1.sessions import router as ordinary_router
 from deep_agent.capabilities.registry import ToolPackageRegistry
 from deep_agent.core.context import get_app_context
-from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent
+from deep_agent.db.models import Agent, ChannelAccount, ChatSession, ChatSessionEvent
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, DiagnosticSessionQueries, SessionFilters, detail_event_metadata
 from deep_agent.security import ConsoleAdminAccess
 from tests.unit import test_session_event_store as fixture
@@ -79,11 +79,11 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(overview["metrics"], {"session_count": 4, "question_count": 4, "active_user_count": 2, "error_session_count": 0})
         self.assertEqual(sum(day["question_count"] for day in overview["trend"]), 4)
         self.assertEqual(overview["active_users"][0], {"user_id": "user-one", "question_count": 3})
-        channel_filter = SessionFilters(self.filters.start, self.filters.end, source="channel")
-        channels = await self.queries.list(channel_filter)
-        self.assertEqual(channels["total"], 1)
-        self.assertEqual(channels["items"][0]["user_id"], "user-one")
-        self.assertEqual(channels["items"][0]["source"], "channel")
+        listing = await self.queries.list(self.filters)
+        self.assertEqual(listing["total"], 4)
+        channel = next(item for item in listing["items"] if item["session_id"] == "channel")
+        self.assertEqual(channel["user_id"], "user-one")
+        self.assertEqual(channel["source"], "channel")
 
     async def test_nested_or_quoted_source_does_not_create_channel_origin(self):
         await self.question("direct")
@@ -92,9 +92,7 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
             await self.stores.events._append_title(db, session, title='Question "source":"channel"',
                 source="user", source_event_id=None, turn_id=None, run_id=None,
                 details={"channel": {"source": "channel", "source_event_id": None}})
-        channel = await self.queries.list(SessionFilters(self.filters.start, self.filters.end, source="channel"))
-        self.assertEqual(channel["total"], 0)
-        direct = await self.queries.list(SessionFilters(self.filters.start, self.filters.end, source="direct"))
+        direct = await self.queries.list(self.filters)
         self.assertEqual(direct["total"], 1)
         self.assertEqual(direct["items"][0]["source"], "direct")
 
@@ -103,17 +101,17 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         listing = await self.queries.list(self.filters)
         self.assertEqual(overview["metrics"]["session_count"], 0)
         self.assertEqual(overview["agents"], [])
-        self.assertEqual(overview["agent_options"], [{"agent_id": self.agent_id, "agent_name": "Agent"}])
+        self.assertEqual(overview["agent_options"], [{"agent_id": self.agent_id, "agent_name": "Agent", "has_channel": False}])
         self.assertEqual(listing["agent_options"], overview["agent_options"])
 
-    def test_source_and_calendar_sql_compile_on_supported_dialects(self):
-        from sqlalchemy.dialects import mysql, postgresql, sqlite
-        from deep_agent.diagnostics.sessions import _channel_exists
-        statement = select(ChatSession.session_id).where(_channel_exists())
-        for dialect, lookup in ((mysql.dialect(), "instr("), (sqlite.dialect(), "instr("), (postgresql.dialect(), "strpos(")):
-            sql = str(statement.compile(dialect=dialect))
-            self.assertIn(lookup, sql)
-            self.assertNotIn("json_extract", sql.lower())
+    async def test_agent_options_mark_channel_bindings_without_exposing_account_secrets(self):
+        async with self.factory() as db:
+            db.add(ChannelAccount(id="binding", name="WeCom", bot_id="bot", secret="never-expose",
+                agent_id=self.agent_id, session_user_id="owner", enabled=False))
+            await db.commit()
+        options = (await self.queries.overview(self.filters))["agent_options"]
+        self.assertEqual(options, [{"agent_id": self.agent_id, "agent_name": "Agent", "has_channel": True}])
+        self.assertNotIn("never-expose", str(options))
 
     async def test_event_first_record_time_empty_and_nonquestions(self):
         old = await self.question("old", at=self.now - timedelta(days=20))
@@ -308,6 +306,8 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         app = FastAPI()
         app.include_router(router, prefix="/api/v1")
         app.include_router(ordinary_router, prefix="/api/v1")
+        for path in ("/api/v1/diagnostics/sessions", "/api/v1/diagnostics/sessions/overview", "/api/v1/diagnostics/sessions/users"):
+            self.assertNotIn("source", [p["name"] for p in app.openapi()["paths"][path]["get"].get("parameters", [])])
         app.dependency_overrides[get_app_context] = lambda: ctx
         app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=True, roles=("enterprise_admin",))
         async def profiles(_request, _caller, ids):
@@ -351,7 +351,47 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
                 app.dependency_overrides.pop(resolve_console_admin_access)
                 self.assertEqual((await client.get("/api/v1/diagnostics/sessions/private/events")).status_code, 401)
 
-    def test_invalid_range_zone_source_status(self):
-        for kwargs in ({"end": self.filters.start}, {"end": self.filters.start + timedelta(days=32)}, {"timezone": "invalid"}, {"source": "arbitrary"}, {"latest_status": "success"}):
+    async def test_user_search_is_deduplicated_bounded_and_independent_of_session_page(self):
+        async with self.factory() as db:
+            db.add_all([ChatSession(session_id=f"candidate-{i}", agent_id=self.agent_id,
+                user_id=f"user-{i:03}", created_at=self.now - timedelta(hours=1),
+                updated_at=self.now - timedelta(hours=1)) for i in range(102)])
+            db.add(ChatSession(session_id="duplicate-user", agent_id=self.agent_id,
+                user_id="user-000", created_at=self.now - timedelta(hours=1)))
+            await db.commit()
+        statements = []
+        def capture(_conn, _cursor, statement, *_args): statements.append(statement)
+        sql_event.listen(self.engine.sync_engine, "before_cursor_execute", capture)
+        try:
+            first = await self.queries.user_option_ids(SessionFilters(self.filters.start, self.filters.end,
+                user_id="unrelated", query="LY", limit=1, offset=999))
+        finally:
+            sql_event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
+        self.assertEqual(len(statements), 1)
+        self.assertEqual(len(first["ids"]), 100)
+        self.assertEqual(first["next_after"], "user-099")
+        self.assertNotIn(".payload", statements[0])
+        second = await self.queries.user_option_ids(self.filters, after=first["next_after"])
+        self.assertEqual(second, {"ids": ["user-100", "user-101"], "next_after": None})
+        app = FastAPI(); app.include_router(router, prefix="/api/v1")
+        app.dependency_overrides[get_app_context] = lambda: SimpleNamespace(db_session_factory=self.factory, active_runs=self.active)
+        app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=True, roles=("enterprise_admin",))
+        async def profiles(_request, _caller, ids):
+            self.assertLessEqual(len(ids), 100)
+            return {uid: {"display_name": "LY" if uid == "user-101" else "Alice"} for uid in ids}
+        with patch("deep_agent.security.diagnostic_users.resolve_diagnostic_users", profiles):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                params = {"start": self.filters.start.isoformat(), "end": self.filters.end.isoformat(), "after": "user-099", "query": "ly"}
+                response = await client.get("/api/v1/diagnostics/sessions/users", params=params, headers={"user": "admin"})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["items"], [{"user_id":"user-101", "display_name":"LY"}])
+                params["query"] = "user-100"
+                response = await client.get("/api/v1/diagnostics/sessions/users", params=params, headers={"user":"admin"})
+                self.assertEqual(response.json()["items"][0]["user_id"], "user-100")
+                app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=False, roles=())
+                self.assertEqual((await client.get("/api/v1/diagnostics/sessions/users", params=params, headers={"user":"other"})).status_code, 403)
+
+    def test_invalid_range_zone_status(self):
+        for kwargs in ({"end": self.filters.start}, {"end": self.filters.start + timedelta(days=32)}, {"timezone": "invalid"}, {"latest_status": "success"}):
             with self.assertRaises(DiagnosticQueryError):
                 SessionFilters(**{"start": self.filters.start, "end": self.filters.end, **kwargs})

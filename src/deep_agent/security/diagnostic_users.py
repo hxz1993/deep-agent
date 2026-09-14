@@ -146,17 +146,16 @@ def _normalize_profiles(
 
 
 class PlatformDiagnosticUserFetcher:
-    """Use the existing space-service batch adapter for platform account data.
+    """Use System's cross-space account adapter, as other business services do.
 
-    ``batch/query`` resolves account profiles without requiring an App/Space.
-    The similarly named ``query/batch`` route requires Space and is not suitable
-    for diagnostics. The old account ``info/by-user-ids`` URL failed in the
-    verified Test deployment; do not use the frontend's stale route as evidence.
+    ``/user/get-user-detail-list`` accepts only the requested user IDs and the
+    caller's authentication. System owns the downstream Account integration;
+    diagnostics must not supply or infer an App, Space, or enterprise identity.
     """
 
-    def __init__(self, *, space_service: str | None = None) -> None:
+    def __init__(self, *, system_service: str | None = None) -> None:
         self._profile_service = str(
-            PLATFORM_OPTION.server.space if space_service is None else space_service
+            PLATFORM_OPTION.server.system if system_service is None else system_service
         ).strip()
         # The namespace is deployment-specific; never retain a configured secret as a key.
         self.cache_namespace = hashlib.sha256(self._profile_service.encode()).hexdigest()
@@ -172,7 +171,7 @@ class PlatformDiagnosticUserFetcher:
             if (parsed.scheme not in {"http", "https"} or not parsed.netloc
                     or parsed.username or parsed.password or parsed.query or parsed.fragment):
                 raise DiagnosticUserUnavailableError("account service URL is invalid")
-            return concat_url(target, "api", "space", "user-info", "batch", "query", "by-user-ids"), None, None
+            return concat_url(target, "user", "get-user-detail-list"), None, None
         try:
             discovery = ServiceDiscovery.instantiate()
             if discovery.closed:
@@ -180,7 +179,7 @@ class PlatformDiagnosticUserFetcher:
             on_success, on_failure, base_url = await discovery.get_url(target)
         except Exception as exc:
             raise DiagnosticUserUnavailableError("account service is unavailable") from exc
-        return concat_url(base_url, "api", "space", "user-info", "batch", "query", "by-user-ids"), on_success, on_failure
+        return concat_url(base_url, "user", "get-user-detail-list"), on_success, on_failure
 
     async def __call__(
         self, user_ids: tuple[str, ...], headers: Mapping[str, str],

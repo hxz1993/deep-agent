@@ -347,3 +347,7 @@
 #diagnosticsLogPage .diagnostics-search-row { gap:4px; }
 #diagnosticsLogPage .diagnostics-search-row > .diagnostics-button { height:28px; min-height:28px; padding:0 8px; gap:4px; font-size:12px; }
 #diagnosticsLogPage .diagnostics-search-row > .diagnostics-button svg { width:14px; height:14px; }
+
+/* Keep log coordinates separate from the message without a strong accent. */
+#diagnosticsLogPage .diagnostics-sequence { justify-self:end; min-width:22px; padding:0 3px; box-sizing:border-box; border-radius:3px; text-align:center; background:var(--diag-inset,var(--bg-hover)); color:var(--text-faint); font-variant-numeric:tabular-nums; }
+#diagnosticsLogPage .diagnostics-row time { color:var(--text-faint); padding-right:6px; border-right:1px solid var(--diag-border,var(--border)); font-variant-numeric:tabular-nums; }

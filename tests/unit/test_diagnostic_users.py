@@ -54,13 +54,26 @@ class Response:
 
 
 class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_uses_system_configuration_without_space_dependency(self):
+        options = Mock()
+        options.server.system = "https://system.example/deepfos-server/system-server"
+        options.server.space = "http://unreachable-space-server"
+        with patch("deep_agent.security.diagnostic_users.PLATFORM_OPTION", options):
+            fetcher = PlatformDiagnosticUserFetcher()
+        with patch("deep_agent.security.diagnostic_users.ServiceDiscovery.instantiate") as discovery:
+            url, success, failure = await fetcher._resolve_url()
+        self.assertEqual(url, "https://system.example/deepfos-server/system-server/user/get-user-detail-list")
+        self.assertIsNone(success)
+        self.assertIsNone(failure)
+        discovery.assert_not_called()
+
     async def test_lookup_logs_http_failure_without_credentials_or_user_data(self):
         response = Response(status=404, payload={"message": "secret-upstream-body"})
         with patch("deep_agent.security.diagnostic_users.AioHttpCli.post", AsyncMock(return_value=response)), patch(
             "deep_agent.security.diagnostic_users.log_event"
         ) as log:
             with self.assertRaises(DiagnosticUserUnavailableError):
-                await PlatformDiagnosticUserFetcher(space_service="https://platform.example/private-config-path")(
+                await PlatformDiagnosticUserFetcher(system_service="https://platform.example/private-config-path")(
                     ("sensitive-user-id",), {"authorization": "Bearer secret-token"})
         event, = log.call_args.args
         facts = log.call_args.kwargs
@@ -82,11 +95,11 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.security.diagnostic_users.log_event"
         ) as log:
             with self.assertRaises(DiagnosticUserUnavailableError):
-                await PlatformDiagnosticUserFetcher(space_service="space-server")(("owner",), {})
+                await PlatformDiagnosticUserFetcher(system_service="system-server")(("owner",), {})
         facts = log.call_args.kwargs
         self.assertEqual((facts["phase"], facts["reason"], facts["error_type"]),
                          ("discovery", "service_discovery_failed", "LookupError"))
-        self.assertEqual(facts["profile_service"], "space-server")
+        self.assertEqual(facts["profile_service"], "system-server")
         self.assertNotIn("secret", json.dumps(facts))
 
     async def test_business_failure_and_success_logs_are_distinct(self):
@@ -95,7 +108,7 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(outcome=expected), patch("deep_agent.security.diagnostic_users.AioHttpCli.post",
                 AsyncMock(return_value=Response(payload=payload))), patch("deep_agent.security.diagnostic_users.log_event") as log:
                 try:
-                    await PlatformDiagnosticUserFetcher(space_service="https://platform.example")(("owner",), {})
+                    await PlatformDiagnosticUserFetcher(system_service="https://platform.example")(("owner",), {})
                 except DiagnosticUserUnavailableError:
                     self.assertEqual(expected, "failed")
                 self.assertEqual(log.call_args.args, (f"diagnostic_users_{expected}",))
@@ -108,7 +121,7 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("private body", json.dumps(facts))
 
     async def test_overall_deadline_logs_the_interrupted_stage(self):
-        fetcher = PlatformDiagnosticUserFetcher(space_service="space-server")
+        fetcher = PlatformDiagnosticUserFetcher(system_service="system-server")
         async def delayed_discovery():
             await asyncio.sleep(1)
         with patch.object(fetcher, "_resolve_url", delayed_discovery), patch(
@@ -129,7 +142,7 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
             {"userId": True, "userName": "invalid boolean id"},
         ]})
         with patch("deep_agent.security.diagnostic_users.AioHttpCli.post", AsyncMock(return_value=response)):
-            result = await PlatformDiagnosticUserFetcher(space_service="https://platform.example")(
+            result = await PlatformDiagnosticUserFetcher(system_service="https://platform.example")(
                 ("0", "4", "5", "no-name", "True"), {"user": "admin"},
             )
         self.assertEqual(result["0"]["display_name"], "zero")
@@ -148,7 +161,7 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
             {"userId": "unrequested", "userName": "not-returned"},
         ]})
         post = AsyncMock(return_value=response)
-        fetcher = PlatformDiagnosticUserFetcher(space_service="https://platform.example/deepfos-server/space-server")
+        fetcher = PlatformDiagnosticUserFetcher(system_service="https://platform.example/deepfos-server/system-server")
         with patch("deep_agent.security.diagnostic_users.AioHttpCli.post", post):
             result = await fetcher(("owner-1", "owner-2", "owner-3"), {"user": "admin-caller"})
         self.assertEqual(set(result), {"owner-1", "owner-2", "owner-3"})
@@ -159,14 +172,14 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(result["owner-1"]), {
             "id", "user_id", "display_name", "email", "avatar_url", "resolution",
         })
-        self.assertEqual(post.await_args.args, ("https://platform.example/deepfos-server/space-server/api/space/user-info/batch/query/by-user-ids",))
+        self.assertEqual(post.await_args.args, ("https://platform.example/deepfos-server/system-server/user/get-user-detail-list",))
         self.assertEqual(post.await_args.kwargs["json"], ["owner-1", "owner-2", "owner-3"])
         self.assertEqual(post.await_args.kwargs["headers"], {"user": "admin-caller"})
         self.assertFalse(post.await_args.kwargs["allow_redirects"])
         self.assertEqual(post.await_args.kwargs["timeout"].total, 2)
         self.assertTrue(response.released)
 
-    async def test_uses_existing_space_service_discovery(self):
+    async def test_uses_existing_system_service_discovery(self):
         success, failure = Mock(), Mock()
         discovery = Mock(closed=False)
         discovery.get_url = AsyncMock(return_value=(success, failure, "http://account.internal:8000"))
@@ -174,15 +187,15 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
         with patch("deep_agent.security.diagnostic_users.ServiceDiscovery.instantiate", return_value=discovery), patch(
             "deep_agent.security.diagnostic_users.AioHttpCli.post", AsyncMock(return_value=response)
         ) as post:
-            result = await PlatformDiagnosticUserFetcher(space_service="space-service")(("owner",), {"user": "caller"})
-        discovery.get_url.assert_awaited_once_with("space-service")
+            result = await PlatformDiagnosticUserFetcher(system_service="system-service")(("owner",), {"user": "caller"})
+        discovery.get_url.assert_awaited_once_with("system-service")
         success.assert_called_once()
         failure.assert_not_called()
-        self.assertEqual(post.await_args.args[0], "http://account.internal:8000/api/space/user-info/batch/query/by-user-ids")
+        self.assertEqual(post.await_args.args[0], "http://account.internal:8000/user/get-user-detail-list")
         self.assertEqual(result["owner"]["display_name"], "Account")
 
     async def test_auth_errors_are_distinct_and_responses_are_released(self):
-        fetcher = PlatformDiagnosticUserFetcher(space_service="https://platform.example")
+        fetcher = PlatformDiagnosticUserFetcher(system_service="https://platform.example")
         for status in (401, 403):
             response = Response(status, {"sensitive": "not-returned"})
             with self.subTest(status=status), patch(
@@ -200,7 +213,7 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
                 await fetcher(("owner",), {"user": "caller"})
 
     async def test_malformed_oversized_and_redirect_responses_never_leak(self):
-        fetcher = PlatformDiagnosticUserFetcher(space_service="https://platform.example")
+        fetcher = PlatformDiagnosticUserFetcher(system_service="https://platform.example")
         for response in (
             Response(302, {}), Response(503, {}), Response(body=b"not-json"),
             Response(payload={"status": False, "data": []}),
@@ -217,10 +230,10 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
     async def test_batch_size_and_unsafe_service_url_rejected_before_network(self):
         post = AsyncMock()
         with patch("deep_agent.security.diagnostic_users.AioHttpCli.post", post):
-            for space_service in ("", "file:///tmp/account", "https://name:secret@account.example", "https://account.example?token=secret"):
-                with self.subTest(space_service=space_service), self.assertRaises(DiagnosticUserUnavailableError):
-                    await PlatformDiagnosticUserFetcher(space_service=space_service)(("owner",), {})
-            fetcher = PlatformDiagnosticUserFetcher(space_service="https://platform.example")
+            for system_service in ("", "file:///tmp/account", "https://name:secret@account.example", "https://account.example?token=secret"):
+                with self.subTest(system_service=system_service), self.assertRaises(DiagnosticUserUnavailableError):
+                    await PlatformDiagnosticUserFetcher(system_service=system_service)(("owner",), {})
+            fetcher = PlatformDiagnosticUserFetcher(system_service="https://platform.example")
             for ids in ((), tuple(str(number) for number in range(101))):
                 with self.assertRaises(ValueError):
                     await fetcher(ids, {})

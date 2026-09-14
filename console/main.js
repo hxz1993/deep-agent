@@ -6,7 +6,7 @@ import {
   rememberConfigurationTab,
 } from "./configuration.js?v=20260914-wecom-placeholder";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260913-49";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260913-49";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260914-v0102";
 import { initWorkspace } from "./workspace.js?v=20260914-title-edit";
 import "./time.js?v=20260913-49";
 

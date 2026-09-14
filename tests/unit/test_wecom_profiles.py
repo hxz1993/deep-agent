@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
 from deep_agent.services.wecom_client import WecomClient, WecomError
@@ -130,8 +130,11 @@ class WecomProfileTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_failure_negative_cache_and_no_placeholder(self):
         self.client.convert.side_effect = WecomError("convert", 60020)
-        await self.resolve()
-        await self.resolve()
+        with patch("deep_agent.services.wecom_profiles.log_event") as log:
+            await self.resolve()
+            await self.resolve()
+        log.assert_called_once_with("wecom_profile_failed", wecom_application_id=self.app.id,
+                                    phase="convert", error_code="60020")
         self.assertEqual(self.client.convert.await_count, 1)
         self.client.member.assert_not_awaited()
         self.assertEqual((await self.stores.wecom.cache_stats(self.app.id))["total"], 0)

@@ -192,7 +192,9 @@ class ChannelService:
                             peer_type=job.message.peer_type, peer_id=job.message.peer_id,
                             session_id=job.session_id,
                         )
-                except Exception:
+                except Exception as exc:
+                    _log_job("channel_identity_unavailable", job, error_type=type(exc).__name__,
+                             reason="timeout" if isinstance(exc, TimeoutError) else "lookup_error")
                     # Identity is optional; auth/network/permission failures
                     # must not turn an otherwise valid chat into a failed Run.
                     identity = None

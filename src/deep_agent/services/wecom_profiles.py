@@ -7,6 +7,7 @@ import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
 
+from deep_agent.agent.observability import log_event
 from deep_agent.services.wecom_client import WecomClient, WecomError
 from deep_agent.channels.metadata import wecom_application_id
 
@@ -128,6 +129,7 @@ class WecomProfileService:
         except (WecomError, TimeoutError, ValueError) as exc:
             stage = exc.stage if isinstance(exc, WecomError) else "resolve"
             code = exc.code if isinstance(exc, WecomError) else ("timeout" if isinstance(exc, TimeoutError) else "mapping_conflict")
+            log_event("wecom_profile_failed", wecom_application_id=app.id, phase=stage, error_code=code)
             if userid and profile is not None:
                 await self.store.record_failure(app.id, app.revision, userid, stage, code)
             else:

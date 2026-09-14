@@ -2,14 +2,14 @@
 
 这里保存随部署交付的完整 Agent ZIP，属于 Agent 安装功能的自带资源，与解析和安装服务一起维护。每个 ZIP 集中保存 Agent、关联的上传 Skill 和自定义 UI 工具，与 Console 导出、上传安装使用同一种格式。
 
-当前两个包均为**暂行版**，用于先跑通安装和使用流程；后续由用户提供正式版本后整包替换。它们不会在启动时自动安装，只有用户显式选择覆盖安装才更新目标 Agent；替换 ZIP 文件本身不修改数据库。
+当前两个包于 **2026-09-14** 从 Test 环境对应 Agent 的官方导出接口同步，导出服务版本为 `0.10.0`。它们不会在启动时自动安装，只有用户显式选择覆盖安装才更新目标 Agent；替换 ZIP 文件本身不修改数据库。
 
 | 安装包 | Agent | 包内 Skill | UI 工具 |
 | --- | --- | --- | --- |
 | `deeptable-assistant.zip` | 电子表格智能助手 | `deeptable-assistant-workflows` 1.4.4、`deeptable-intelligent-analysis` 2.10.1 | `ui:deeptable`：澄清、分析导航、个人报表确认 |
 | `deepcube-assistant.zip` | DeepCube助手 | `deepcube-script-authoring` 1.0.2 | `ui:deepcube`：澄清、配置填充 |
 
-电子表格另引用运行环境内置的 `deepfos-readonly-analysis` Skill。两个包均引用通用工具和 Python 沙箱；包内模型参考为空，安装按目标环境模型列表选择首项或留空；MCP 只保留编码参考，没有对应项也不影响安装。内置资源不复制进安装包；UI 工具携带完整定义，实际 widget 渲染由目标组件提供。
+电子表格另引用运行环境内置的 `deepfos-readonly-analysis` Skill。两个包均引用通用工具和 Python 沙箱；包内模型参考为 `deepseek-flash`（Provider 类型 `deepseek`），安装优先匹配目标环境同名可用模型，无匹配时选择首项或留空；MCP 只保留编码参考，没有对应项也不影响安装。内置资源不复制进安装包；UI 工具携带完整定义，实际 widget 渲染由目标组件提供。
 
 ## 目录和格式
 
@@ -38,15 +38,23 @@ ZIP 文件名去掉 `.zip` 后就是自带包编码：小写字母开头，允�
 2. 将验证后的 ZIP 原子替换到相同文件名；先写同目录的临时文件，再重命名，避免读取到半写入内容。
 3. 再次打开“安装 Agent → 自带安装包”检查目录与内容。替换只影响后续安装；已打开的旧预检在包内容变化后会返回冲突，要求重新预检。
 
-未来正式包替换后更新本说明的版本、来源和清单，并运行 `tests/integration/test_builtin_agent_packages.py`。测试包使用隔离测试目录，不进入此目录。
+每次同步后更新本说明的版本、来源和清单，并运行 `tests/integration/test_builtin_agent_packages.py`。测试包使用隔离测试目录，不进入此目录。
 
-## 暂行资产来源
+## 当前来源及校验
 
-这两个暂行包取自业务组件仓库维护的通用资产，不从本地私人 Agent 或客户配置拼装：
+源环境：`https://test.deepfos.com/deepfos-server/deep-agent-server1-0`。
+通过 `GET /api/v1/agents/{id}/export` 获取完整 ZIP，原样保存；不手工拼装或修改包内文件。来源 Agent ID 只用于追溯，不是安装目标 ID。
 
-- 电子表格：`element-deep-table` 提交 `7c0213b71b3d0a27f364d6e9d3826cc806a9ad34`，`src/pages/sheet/use/components/aiPanel/agentAssets/`；提示词 `deeptable-unified-agent-v82`，UI 清单 `deeptable-ui-tools-v3.6.0`。
-- DeepCube：`element-python3` 提交 `0605cb57a8f19f1edf68ed3530962c43d7b74032`，`packages/page/src/components/layout/content/DeepCubeChatbot/agent-config/`；提示词 V34，资产清单版本 7。
+| 安装包 | Test Agent ID | SHA-256 |
+| --- | --- | --- |
+| `deepcube-assistant.zip` | `39e5a100-72d4-4a0a-8558-05f0c3af6bc2` | `5f35ce440e95f30709b9b8d8e99d9f61022ff018e09e3be006b0103bac1190bb` |
+| `deeptable-assistant.zip` | `812dba72-458b-474c-bb5f-ed684eac0f69` | `aca42bb5079c36b51aaea91b3582dd39c5275cafcdabe736828c9a54720cfa3d` |
 
-提示词、Skill 正文、运行脚本、资源文件和 UI 定义保持来源内容，不携带固定 Agent ID、环境地址、模型 UUID 或认证信息。Skill ZIP 保存受版本控制的运行文件，不包含测试夹具、`.DS_Store` 和 Python 缓存。此次目录调整已核对旧目录与 ZIP 中每个文件的字节一致。
+本次同步包含 Test 当前提示词、上传 Skill 原包、完整 UI 工具定义和 `ui_tool_selection`，保留模型名称参考。Skill 版本号与原包相同，但文件内容以当前 Test 导出为准。包不带 Provider/MCP 凭据、会话或渠道配置。
+
+### 原暂行版来源（已替换）
+
+- 电子表格原取自 `element-deep-table` 提交 `7c0213b71b3d0a27f364d6e9d3826cc806a9ad34` 的 `src/pages/sheet/use/components/aiPanel/agentAssets/`；提示词 `deeptable-unified-agent-v82`，UI 清单 `deeptable-ui-tools-v3.6.0`。
+- DeepCube 原取自 `element-python3` 提交 `0605cb57a8f19f1edf68ed3530962c43d7b74032` 的 `packages/page/src/components/layout/content/DeepCubeChatbot/agent-config/`；提示词 V34，资产清单版本 7。
 
 完整包协议和接口见[Agent 安装包](../../../../../docs/guides/agent-packages.md)。

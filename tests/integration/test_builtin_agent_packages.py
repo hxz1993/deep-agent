@@ -50,7 +50,8 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(raw_builtin, (archive.BUILTIN_PACKAGES_ROOT / f'{code}.zip').read_bytes())
                             package = archive.parse_package(raw_builtin)
                             self.assertNotIn('temperature', package.agent.model_dump())
-                            self.assertIsNone(package.agent.model_reference)
+                            self.assertEqual(package.agent.model_reference.name, "deepseek-flash")
+                            self.assertEqual(package.agent.model_reference.provider_type, "deepseek")
                             self.assertEqual(set(package.skills), expected_skills)
                             self.assertEqual(sum(len(ui.tools) for ui in package.ui), tool_count)
                             # The package carries component assets, not deployment identity or credentials.
@@ -84,7 +85,11 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                                 self.assertEqual(runtime.state(skill).status, RUNTIME_READY)
                                 with zipfile.ZipFile(io.BytesIO(raw)) as z:
                                     for name in z.namelist():
-                                        relative = Path(name).relative_to(skill)
+                                        if name.endswith("/"):
+                                            continue
+                                        relative = Path(name)
+                                        if relative.parts[0] == skill:
+                                            relative = relative.relative_to(skill)
                                         self.assertNotIn('__pycache__', relative.parts)
                                         self.assertNotIn('tests', relative.parts)
                                         self.assertEqual((runtime.root / skill / relative).read_bytes(), z.read(name))

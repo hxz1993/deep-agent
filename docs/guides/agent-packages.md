@@ -45,7 +45,7 @@ skills/<skill-code>.zip
 
 唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`。文件名去掉 `.zip` 即包编码。目录与安装功能同属一个模块；以模块相对位置读取，随完整源码发布，启动不安装。README、子目录不列为安装包。
 
-当前电子表格和 DeepCube 为暂行包，后续正式版整包替换。详见[目录与来源说明](../../src/deep_agent/agent_packages/builtin/README.md)。两份 ZIP 从旧部署目录移动时 SHA-256 保持一致。替换 ZIP 不更新数据库；预检后内容变化会拒绝继续安装。
+当前电子表格和 DeepCube 包于 2026-09-14 从 Test 对应 Agent 的官方导出接口同步，原样保存完整 ZIP。来源 Agent、服务版本和 SHA-256 见[目录与来源说明](../../src/deep_agent/agent_packages/builtin/README.md)。替换 ZIP 不更新数据库；预检后内容变化会拒绝继续安装。
 
 ## 管理员 API
 

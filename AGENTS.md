@@ -26,7 +26,7 @@
 
 集成入口见[集成配置](docs/guides/integrations.md)：固定目录由后端定义，`004`新增`integration_settings`但不插入初始记录。仅保存非空配置才落库；清空删除配置记录。普通组件按集成编码读取JSON，未配置返回409；管理操作仍需企业管理员。
 
-Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格和 DeepCube 两包为暂行版，后续正式资产整包替换。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。Agent.ui_tool_selection 保存单工具范围（缺省整包、显式名单限定）。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型并保存工具范围；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
+Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格和 DeepCube 两包于 2026-09-14 从 Test 对应 Agent 官方导出接口同步，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。Agent.ui_tool_selection 保存单工具范围（缺省整包、显式名单限定）。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型并保存工具范围；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
 
 
 企微应用与成员资料见[使用指南](docs/guides/wecom-applications.md)及[渠道接入](docs/guides/wecom-channel.md)。本次 v0.10.1 功能增量 `006` 新增企业应用配置和可重建成员缓存，保留已发布 `005`。渠道页面在标题同行切换账户与应用；应用采用左侧列表、右侧应用标题及合并企业信息的配置卡与精简缓存统计，成员表只由后端维护。渠道 `settings.wecom.user_details_enabled` 默认为关闭，开启必须引用有效应用；查询开关独立于渠道启停，关闭时不访问资料接口。

@@ -9,7 +9,7 @@
           <span class="brand-dot"></span>
           <span class="brand-name">deep-agent</span>
         </div>
-        <button class="icon-btn" id="newChatBtn" title="新建会话" aria-label="新建会话"><i data-lucide="plus"></i></button>
+        <button class="icon-btn" id="newChatBtn" title="新建会话" aria-label="新建会话"><i data-lucide="message-circle-plus"></i></button>
       </div>
 
       <button type="button" class="new-chat" id="newChatBtnWide" aria-haspopup="menu" aria-expanded="false">
@@ -61,9 +61,11 @@
 
       <div class="messages" id="messages">
         <div class="empty-state" id="emptyState">
-          <div class="empty-logo"><i data-lucide="bot" aria-hidden="true"></i></div>
-          <h1>deep-agent 对话</h1>
-          <p>输入消息开始与智能体对话。支持工具调用的实时流式输出。</p>
+          <div class="empty-heading">
+            <img class="empty-logo" src="./favicon.svg?v=20260914-d-robot-wide-long-eyes" alt="" />
+            <h1 id="emptyAgentName">请选择 Agent</h1>
+          </div>
+          <p class="empty-context" aria-live="polite"><span data-empty-context-prefix>当前</span><button type="button" class="empty-context-link" data-open-context aria-haspopup="dialog"><span data-empty-context-label>不分应用</span></button><span data-empty-context-note>，无法调用 DeepFOS MCP 及相关平台工具。</span></p>
         </div>
       </div>
 

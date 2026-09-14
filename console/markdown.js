@@ -4,6 +4,80 @@
   let ready = false;
   let mermaidLoader = null;
   let diagramSequence = 0;
+  let renderSequence = 0;
+  let markdownOptions;
+  let mathExtension;
+
+  function codeIcon(name) {
+    const definition = global.lucide?.icons?.[name];
+    if (!definition) return "";
+    // Serialize only the trusted bundled Lucide definition, never message HTML.
+    const serialize = ([tag, attributes, children = []]) => `<${tag} ${Object.entries(attributes).map(([key, value]) => `${key}="${escapeHtml(value)}"`).join(" ")}>${children.map(serialize).join("")}</${tag}>`;
+    return serialize([definition[0], { ...definition[1], "aria-hidden": "true", class: "markdown-code-icon" }, definition[2]]);
+  }
+
+  function codeBlock(highlighted, language) {
+    const label = language || "纯文本";
+    return `<div class="markdown-code-block"><div class="markdown-code-header"><button type="button" class="markdown-code-toggle" aria-expanded="true" aria-label="折叠代码">${codeIcon("Code")}<span title="代码语言：${escapeHtml(label)}">${escapeHtml(label)}</span><span class="markdown-code-chevron">${codeIcon("ChevronDown")}</span></button><div class="markdown-code-actions"><button type="button" class="markdown-code-wrap" aria-label="自动换行" title="自动换行" aria-pressed="false">${codeIcon("WrapText")}</button><button type="button" class="markdown-code-copy" aria-label="复制代码" title="复制代码">${codeIcon("Copy")}</button></div></div><pre><code class="hljs${language ? ` language-${escapeHtml(language)}` : ""}">${highlighted}</code></pre></div>`;
+  }
+
+  async function handleMarkdownClick(event) {
+    const toggle = event.target.closest?.(".markdown-code-toggle, .markdown-code-wrap");
+    if (toggle?.closest(".markdown-body")) {
+      const block = toggle.closest(".markdown-code-block");
+      event.preventDefault();
+      event.stopPropagation();
+      if (toggle.classList.contains("markdown-code-wrap")) {
+        const wrapped = block.classList.toggle("is-wrapped");
+        toggle.setAttribute("aria-pressed", String(wrapped));
+        toggle.title = wrapped ? "关闭自动换行" : "自动换行";
+      } else {
+        const pre = block.querySelector("pre");
+        pre.hidden = !pre.hidden;
+        toggle.setAttribute("aria-expanded", String(!pre.hidden));
+        toggle.setAttribute("aria-label", pre.hidden ? "展开代码" : "折叠代码");
+      }
+      return;
+    }
+    const button = event.target.closest?.(".markdown-code-copy, .markdown-table-copy");
+    if (button?.closest(".markdown-body")) {
+      const code = button.closest(".markdown-code-block")?.querySelector("pre > code");
+      const tableSource = button.closest(".markdown-table-block")?.getAttribute("data-table-source");
+      const isTable = button.classList.contains("markdown-table-copy");
+      if ((isTable ? tableSource == null : !code) || button.disabled) return;
+      const copyLabel = isTable ? "复制表格 Markdown" : "复制代码";
+      event.preventDefault();
+      event.stopPropagation();
+      button.disabled = true;
+      try {
+        await global.navigator.clipboard.writeText(isTable ? JSON.parse(tableSource) : (code.textContent || ""));
+        button.innerHTML = codeIcon("Check");
+        button.setAttribute("aria-label", "已复制");
+        button.title = "已复制";
+      } catch (_) {
+        button.innerHTML = codeIcon("CircleAlert");
+        button.setAttribute("aria-label", "复制失败，请重试");
+        button.title = "复制失败，请重试";
+      } finally {
+        global.setTimeout(() => { button.innerHTML = codeIcon("Copy"); button.setAttribute("aria-label", copyLabel); button.title = copyLabel; button.disabled = false; }, 1500);
+      }
+      return;
+    }
+    // Hash links in Markdown must scroll locally, never replace the Console route.
+    const link = event.target.closest?.('.markdown-body a[href^="#"]');
+    if (!link) return;
+    event.preventDefault();
+    const id = link.getAttribute("href").slice(1);
+    const target = [...link.closest(".markdown-body").querySelectorAll("[id]")].find(node => node.id === id);
+    if (target) {
+      for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+        if (parent.tagName === "DETAILS") parent.open = true;
+      }
+      target.scrollIntoView({ block: "nearest" });
+      target.setAttribute("tabindex", "-1");
+      target.focus({ preventScroll: true });
+    }
+  }
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -24,15 +98,34 @@
       return false;
     }
 
-    global.marked.use({
+    markdownOptions = {
       gfm: true,
       breaks: false,
+      extensions: [{ name: "table", renderer(token) {
+        // Marked 12 passes rendered strings to renderer.table; use its token
+        // extension to retain the source, including alignment and inline syntax.
+        const row = (cells, header) => this.parser.renderer.tablerow(cells.map((cell, i) =>
+          this.parser.renderer.tablecell(this.parser.parseInline(cell.tokens), { header, align: token.align[i] })
+        ).join(""));
+        const table = this.parser.renderer.table(row(token.header, true), token.rows.map(cells => row(cells, false)).join(""));
+        return `<div class="markdown-table-block" data-table-source="${escapeHtml(JSON.stringify(token.raw))}">${table}<button type="button" class="markdown-table-copy" aria-label="复制表格 Markdown" title="复制表格 Markdown">${codeIcon("Copy")}</button></div>\n`;
+      } }],
       renderer: {
+        blockquote(quote) {
+          const match = /^<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\n|<br\s*\/?>|<\/p>)/.exec(quote);
+          if (!match) return `<blockquote>\n${quote}</blockquote>\n`;
+          const labels = { NOTE: "备注", TIP: "提示", IMPORTANT: "重要", WARNING: "警告", CAUTION: "注意" };
+          const body = match[0].endsWith("</p>") ? quote.slice(match[0].length) : `<p>${quote.slice(match[0].length)}`;
+          return `<blockquote class="markdown-alert markdown-alert-${match[1].toLowerCase()}"><p class="markdown-alert-title">${labels[match[1]]}</p>${body}</blockquote>\n`;
+        },
+        table(header, body) {
+          return `<div class="markdown-table-scroll" tabindex="0" role="region" aria-label="表格，可横向滚动"><table><thead>${header}</thead>${body ? `<tbody>${body}</tbody>` : ""}</table></div>\n`;
+        },
         code(codeText, lang) {
           const text = String(codeText ?? "");
           const language = normalizeLanguage(lang);
           if (language === "mermaid") {
-            return `<div class="mermaid-diagram" data-mermaid-state="pending"><pre><code class="language-mermaid">${escapeHtml(text)}</code></pre></div>\n`;
+            return `<div class="mermaid-diagram" data-mermaid-state="pending">${codeBlock(escapeHtml(text), language)}</div>\n`;
           }
 
           let highlighted = escapeHtml(text);
@@ -41,20 +134,42 @@
               try {
                 highlighted = global.hljs.highlight(text, { language, ignoreIllegals: true }).value;
               } catch (_) { /* keep escaped fallback */ }
-            } else {
-              try {
-                highlighted = global.hljs.highlightAuto(text).value;
-              } catch (_) { /* keep escaped fallback */ }
             }
           }
-          const langAttr = language ? ` class="hljs language-${escapeHtml(language)}"` : ' class="hljs"';
-          return `<pre><code${langAttr}>${highlighted}</code></pre>\n`;
+          return `${codeBlock(highlighted, language)}\n`;
         },
       },
-    });
+    };
+    global.marked.use(markdownOptions);
+
+    if (global.markedKatex && global.katex) {
+      const options = { throwOnError: false, trust: false, strict: "ignore", maxExpand: 1000, maxSize: 20 };
+      mathExtension = global.markedKatex(options);
+      const inlineMath = mathExtension.extensions.find(extension => extension.name === "inlineKatex");
+      const tokenizeMath = inlineMath.tokenizer;
+      inlineMath.tokenizer = function(src, tokens) {
+        const token = tokenizeMath.call(this, src, tokens);
+        // "$5 and $10" is a pair of prices, not an inline formula.
+        if (token && /^\$\d/.test(token.raw) && /\s\$$/.test(token.raw)) return;
+        return token;
+      };
+      // Also accept the TeX delimiters commonly emitted by assistants.
+      for (const [name, level, pattern, start] of [
+        ["bracketMath", "block", /^\\\[\s*\n?([\s\S]*?)\\\](?:\n|$)/, "\\["],
+        ["parenMath", "inline", /^\\\(([^\n]*?)\\\)/, "\\("],
+      ]) {
+        mathExtension.extensions.push({ name, level,
+          start(src) { const index = src.indexOf(start); return index < 0 ? undefined : index; },
+          tokenizer(src) { const match = pattern.exec(src); if (match) return { type: name, raw: match[0], text: match[1] }; },
+          renderer(token) { return global.katex.renderToString(token.text, { ...options, displayMode: level === "block" }); },
+        });
+      }
+      global.marked.use(mathExtension);
+    }
+    global.document?.addEventListener("click", handleMarkdownClick);
 
     global.DOMPurify.addHook("afterSanitizeAttributes", (node) => {
-      if (node.tagName === "A" && node.hasAttribute("href")) {
+      if (node.tagName === "A" && node.hasAttribute("href") && !node.getAttribute("href").startsWith("#")) {
         node.setAttribute("target", "_blank");
         node.setAttribute("rel", "noopener noreferrer");
       }
@@ -66,9 +181,23 @@
   function render(source) {
     const text = String(source ?? "");
     if (!init()) return `<pre class="md-fallback">${escapeHtml(text)}</pre>`;
-    const raw = global.marked.parse(text);
+    // Footnotes are scoped per message, including repeated renders during streaming.
+    const parser = global.markedFootnote && text.includes("[^")
+      ? new global.marked.Marked(markdownOptions, ...(mathExtension ? [mathExtension] : []), global.markedFootnote({ prefixId: `md-fn-${++renderSequence}-`, description: "脚注", refMarkers: true }))
+      : global.marked;
+    let raw = parser.parse(text);
+    // The pinned footnote extension repeats reference IDs for repeated citations.
+    // Give each citation and its corresponding return link a distinct target.
+    for (const pattern of [/\bid="(md-fn-\d+-ref-[^"]+)"/g, /\bhref="#(md-fn-\d+-ref-[^"]+)"/g]) {
+      const occurrences = new Map();
+      raw = raw.replace(pattern, (attribute, id) => {
+        const count = (occurrences.get(id) || 0) + 1;
+        occurrences.set(id, count);
+        return count === 1 ? attribute : attribute.slice(0, -1) + `-${count}"`;
+      });
+    }
     return global.DOMPurify.sanitize(raw, {
-      USE_PROFILES: { html: true },
+      USE_PROFILES: { html: true, mathMl: true, svg: true },
       ADD_ATTR: ["target", "rel", "class", "data-lang", "data-mermaid-state"],
     });
   }
@@ -108,6 +237,10 @@
         ADD_ATTR: ["class", "style", "target"],
       });
       node.dataset.mermaidState = "rendered";
+      const source = document.createElement("details");
+      source.className = "markdown-diagram-source";
+      source.innerHTML = `<summary>Mermaid 源码</summary>${codeBlock(escapeHtml(definition), "mermaid")}`;
+      node.appendChild(source);
       result.bindFunctions?.(node);
     } catch (error) {
       node.dataset.mermaidState = "error";

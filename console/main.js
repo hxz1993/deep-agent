@@ -4,10 +4,10 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260915-release-audit";
-import { bindContextControls, refreshIdentity } from "./context.js?v=20260913-49";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260915-release-audit";
-import { initWorkspace } from "./workspace.js?v=20260915-release-audit";
+} from "./configuration.js?v=20260915-capability-icons";
+import { bindContextControls, refreshIdentity } from "./context.js?v=20260915-context-hint";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260915-scroll-focus";
+import { initWorkspace } from "./workspace.js?v=20260915-scroll-focus";
 import "./time.js?v=20260913-49";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);

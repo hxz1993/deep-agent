@@ -43,6 +43,8 @@
 观察流 `/live` 不接入发送连接的取消观察。回归见 `test_cancel_diagnostics.py` 和 `test_session_live_api.py`。
 
 OpenAI 兼容协议的 HTTP 日志在 `agent/model_api_diagnostics.py`；只记录安全地址、状态与工具名清单。
+原 HTTP 字节流透明包装额外记录首字节、累计传输量、最近字节年龄与消费状态，响应头后30秒、之后60秒
+快照不随心跳重置；不读正文、不解析协议、不加超时。字节到达不能证明模型已输出有效内容。
 流式请求在 SDK 消费者任务中延迟发出，须在透明模型包装器的实际调用边界建立 ContextVar，
 不能仅依赖 `wrap_model_request` 的任务上下文。测试须覆盖真实 SDK 的流式成功/400及请求体等价。
 
@@ -570,6 +572,11 @@ single-flight。Spill失败时Event保存完整`inline_fallback`并标记失败�
 `publish_path()`登记的零到多个产物只在成功执行后上传FileStore，模型与Event只获得文件引用。
 两者都通过当前`SubprocessBackend`启动全新的`.venv-sandbox`Python子进程；结束后销毁进程和
 临时目录，不跨调用保留状态。脚本工具的额外权限来自Agent选择的Skill。
+
+沙箱中文绘图使用随源码发布的完整 Noto Sans CJK SC 2.004 字体及 OFL 许可证。
+`plotting.py` 仅在首次导入 Matplotlib 时注册并设置 Agg/默认中文 sans-serif，
+普通 Python 调用不加载绘图库，脚本可自行覆盖字体。不能用宿主已有中文字体冒充部署可用；
+回归用真实独立沙箱检查字形、PNG 和中文文件名，部署需保留 `sandbox/fonts/`。
 
 沙箱预装常用网络、网页、图片、图表、PDF和Office库，默认允许公网访问；Worker连接层尽力阻断
 回环、私网、链路本地与云元数据地址，重定向连接也重新校验。Landlock、资源限制、环境变量白名单

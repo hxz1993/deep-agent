@@ -68,6 +68,16 @@ function renderContext() {
     button.setAttribute("aria-label", `调试：${appId}，查看或修改调试上下文`);
   });
 
+  document.querySelectorAll("[data-empty-context-prefix]").forEach((prefix) => {
+    prefix.textContent = effectiveContext.app ? "在应用 " : "当前";
+  });
+  document.querySelectorAll("[data-empty-context-label]").forEach((label) => {
+    label.textContent = effectiveContext.app || "不分应用";
+  });
+  document.querySelectorAll("[data-empty-context-note]").forEach((note) => {
+    note.textContent = effectiveContext.app ? " 的上下文中开始新对话。" : "，无法调用 DeepFOS MCP 及相关平台工具。";
+  });
+
   const appInput = document.getElementById("contextAppInput");
   if (appInput) {
     appInput.value = overrides.app || "";

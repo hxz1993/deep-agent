@@ -5,7 +5,7 @@ import {
   parseSseBlock,
   readSse,
 } from "./protocol.js?v=20260912-21";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260912-21";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260915-session-icons";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import {
   applyAssistantPresentationActions,
@@ -16,7 +16,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20260912-21";
-import { createTrajectoryController } from "./trajectory.js?v=20260912-21";
+import { createTrajectoryController } from "./trajectory.js?v=20260915-scroll-focus";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260912-21";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
@@ -323,6 +323,7 @@ function hideEmptyState() {
 }
 
 function showEmptyState() {
+  updateEmptyAgentName();
   el.emptyState.classList.remove("hidden");
   if (!el.messages.contains(el.emptyState)) {
     el.messages.appendChild(el.emptyState);
@@ -1003,7 +1004,7 @@ function renderSessions() {
     const activity = formatSessionActivity(s);
     const origin = channelOriginPresentation(s.channel);
     const sourceMarker = origin ? `<span class="session-channel-source" title="${escapeHtml(origin.description)}" aria-label="${escapeHtml(origin.description)}">${lucideIcon("radio")}</span>` : "";
-    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title-row"><span class="session-title">${escapeHtml(s.title)}</span>${sourceMarker}</span><span class="session-meta"><span class="session-activity">${escapeHtml(activity)}</span><span class="session-stat-group"><span title="回合数">${lucideIcon("messages-square")}${escapeHtml(String(s.turnCount || 0))}</span><span title="附件数">${lucideIcon("paperclip")}${escapeHtml(String(s.attachmentCount || 0))}</span></span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title-row"><span class="session-title">${escapeHtml(s.title)}</span>${sourceMarker}</span><span class="session-meta"><span class="session-activity">${escapeHtml(activity)}</span><span class="session-stat-group"><span title="提问数">${lucideIcon("message-circle-more")}${escapeHtml(String(s.turnCount || 0))}</span></span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -1864,11 +1865,18 @@ async function loadAgents() {
   } catch (e) {
     el.agentSelect.innerHTML = `<option value="">加载失败</option>`;
     console.warn("[deep-agent] 加载 Agent 失败", e);
+  } finally {
+    updateEmptyAgentName();
   }
 }
 
 function currentAgent() {
   return state.agents.find((a) => a.id === state.agentId) || null;
+}
+
+function updateEmptyAgentName() {
+  const heading = el.emptyState.querySelector("#emptyAgentName");
+  if (heading) heading.textContent = currentAgent()?.name || "请选择 Agent";
 }
 
 function defaultLlmModelId() {
@@ -2095,6 +2103,7 @@ function updateComposerModelInfo() {
 }
 
 function updateChatHeader() {
+  updateEmptyAgentName();
   el.sessionBadge.textContent = formatSessionIdSubtitle(state.sessionId);
   if (el.copySessionIdBtn) {
     el.copySessionIdBtn.hidden = !state.sessionId;

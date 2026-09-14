@@ -70,6 +70,7 @@
     }
   ],
   "model_notes": [
+    "Matplotlib 默认使用内置 Noto Sans CJK SC 中文字体和 Agg 后端，可直接绘制中文图表；自定义样式如覆盖字体需保留该字体；Pillow 等库可从 deep_agent.sandbox.plotting 导入 FONT_PATH 取得字体文件。",
     "不支持 pip install；未列出的三方库会 ModuleNotFoundError。",
     "标准库可用；普通公网 HTTP(S) 可访问，非公网地址会阻断。",
     "deepagent_files.input_path 读取本次授权输入，publish_path 登记需上传的执行产物。",

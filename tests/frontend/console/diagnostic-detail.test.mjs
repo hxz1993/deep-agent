@@ -156,7 +156,7 @@ test("missing saved timestamps and corrupt metadata remain unknown, not current 
   assert.equal(row.querySelector("time").textContent, "—");
   assert.equal(row.querySelector("time").dateTime, "");
   const html = renderSessionInspector({ diagnostic: true, activeSession: { turnCount: null, messageCount: null, attachmentCount: null } });
-  assert.match(html, /title="回合数"[^]*?未记录/);
+  assert.match(html, /title="提问数"[^]*?未记录/);
   assert.match(html, /title="消息事件数"[^]*?未记录/);
   assert.match(html, /title="附件数"[^]*?未记录/);
 });
@@ -183,6 +183,6 @@ test("empty fields retain their original labels and styles while values and zero
   const filled = renderSessionInspector({ diagnostic: true, agentName: "Agent name", state: { agentId: "hidden-id" }, activeSession: { appId: "<app>", spaceId: "space", turnCount: 0 }, contextStatus: { estimator_source: "conservative_fallback" } });
   assert.match(filled, /&lt;app&gt;/);
   assert.match(filled, /<code>space<\/code>/);
-  assert.match(filled, /title="回合数"><i[^]*?<\/i>0<\/span>/);
+  assert.match(filled, /title="提问数"><i[^]*?<\/i>0<\/span>/);
   assert.doesNotMatch(filled, /hidden-id|conservative_fallback/);
 });

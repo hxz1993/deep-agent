@@ -19,6 +19,12 @@
       link.href = `${root}/vendor/${file}`;
     }
     const select = document.getElementById("themeSelect");
+    const markdownLink = document.getElementById("markdownTheme");
+    if (markdownLink) {
+      const root = (window.__DEEP_AGENT_APP_ROOT__ || "/").replace(/\/$/, "");
+      const variant = id === "dark" ? "dark" : "light";
+      markdownLink.href = `${root}/vendor/github-markdown-${variant}.min.css`;
+    }
     if (select && select.value !== id) select.value = id;
   }
 

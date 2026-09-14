@@ -82,6 +82,8 @@ History 中运行工具一律只读，不能因工具目录补齐 widget 自动�
 | 诊断会话 | `diagnostics-center.js`／`diagnostics-sessions.js`使用管理员`/diagnostics/sessions`五个GET接口，跨用户概览、列表和完整只读详情；统计按平台账号归属，含渠道会话但不解析企微发送人 |
 | 会话轨迹 | 工作台“对话 / 轨迹”页签；普通对话读History/SSE ConversationItem，只有轨迹按Sequence读取Event API |
 
+Markdown 排版加载本地 `github-markdown-css`，由 `theme.js` 随 Console 主题切换浅色/深色版本；`workspace.css` 适配字号、主题 token 和滚动，不另写一套解析器。代码围栏保留等宽、空格与换行，宽代码/ASCII 图在块内横向滚动；仅对已知语言高亮，未知或未标记的围栏不自动猜测语言。Mermaid 单独渲染，其他图表标签按普通代码显示，语法错误保留原文。升级 vendor 时同步其 README 与许可证。
+
 v0.6.7起，轨迹把`run_code`显示为独立`PTC`类型，并在详情中提供带Python高亮与复制能力的
 Code页签；用户输入详情中的附件与Context Reference分区展示。这里只改变Event的Console投影，
 不增加Event字段或普通ConversationItem类型。
@@ -267,6 +269,7 @@ Headers JSON使用透明输入层与语法高亮层重叠，两层及高亮token
   提交处理器，不调用普通用户接口伪装所有者，不订阅SSE/轮询。Events仅在轨迹或轮次定位需要时按500条分页，
   History投影失败保留显式错误及轨迹入口。上下文仅按需估算并标注当前配置，不拿管理员测试Header补历史。
   元数据/上下文迟到后重绘正文必须保留已定位消息的高亮与滚动，不重复滚动或遗失定位。
+  消息/轨迹定位通过 `scroll.js` 仅滚动所属正文/列表容器；不要用默认 `scrollIntoView`，它会连带滚动外层 `overflow:hidden` 的页面，裁掉顶部并留下底部空白。
 - 所有诊断下钻和返回按[联动矩阵](../docs/guides/diagnostic-sessions.md#页面联动)维护并测试。
   会话详情按最新要求不新增反向查日志按钮，完整骨架复用对话测试；日志跳会话不受旧列表条件限制。
   完整ID用于查询，缩略仅展示；日志Run ID保留原值，不支持页面筛选/跳转，日志跳会话只传Session ID，旧log路由run_id忽略。
@@ -500,3 +503,9 @@ App Secret 的短说明位于标签同行，标题右侧复用 API Key 的 `fiel
 会话诊断时间框将预设选择与右侧信息/设置入口合为一个控件：预设显示 info，自定义显示 settings；自定义起止时间只在浮层编辑，应用前保留当前查询范围。状态枚举菜单完整展开；搜索输入关闭浏览器 autocomplete，页面自身筛选状态仍保留。
 
 会话列表及渠道用户/群聊列表的第二行为“Session ID · 最新提问”。分隔点与复制按钮共用固定 16px 位置，两侧留空；行悬停或键盘聚焦时点变为复制图标，复制成功显示短暂对勾，文字不位移。无悬停设备直接显示复制图标；不在 ID 前额外放复制按钮。
+
+会话与提问图标统一：完整会话、会话数和发起对话使用 `messages-square`；提问、提问数（用户回合数）使用 `message-circle-more`。工作台左侧列表仅显示提问数，不显示附件数。标题栏显示无前缀的完整 Session ID；右侧概览/渠道页签缩写为前 8 位，悬停和复制仍使用完整 ID。
+
+Markdown 正文采用 12px，标题依次 20/16/14/12px。表格透明背景、无外框与竖线，仅保留表头和行间横线。代码块透明背景、保留细外框，左侧语言标题可折叠（默认展开），右侧为自动换行和复制图标；默认不换行，复制仅取代码正文。新建对话按钮使用 `message-circle-plus`；Mermaid 渲染后提供可折叠源码及复制。脚注使用每次渲染独立命名空间；正文锚点仅在当前 Markdown 容器内滚动，不修改 Console hash 路由。公式通过本地 KaTeX 与 Marked 扩展解析，不处理代码中的公式标记；GitHub 提示引用支持 NOTE/TIP/IMPORTANT/WARNING/CAUTION。数学、脚注、代码和普通 HTML 统一保持净化流程。
+
+新对话欢迎语将上下文嵌入同一句副标题，仅 App ID 或“不分应用”为主题色链接，复用标题栏调试浮层与有效上下文刷新。Markdown 表格右侧复制图标在悬停或键盘焦点时出现，复制解析器保留的该表格 Markdown 原文，不能从表格 DOM 文本重建；触屏保持入口可见。

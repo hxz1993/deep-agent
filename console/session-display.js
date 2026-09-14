@@ -1,6 +1,6 @@
 export function formatSessionIdSubtitle(sessionId) {
   if (sessionId == null || sessionId === "") return "";
-  return `会话 ID：${String(sessionId)}`;
+  return String(sessionId);
 }
 
 /** Read-only presentation of the Session's persisted channel origin snapshot. */

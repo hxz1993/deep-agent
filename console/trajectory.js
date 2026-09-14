@@ -1,4 +1,5 @@
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
+import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { attachmentPreviewAttributes } from "./attachment-preview.js?v=20260912-21";
@@ -1432,7 +1433,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     mode = "sequence"; if (search) search.value = "";
     queryAll("[data-trajectory-mode]").forEach((button) => button.classList.toggle("active", button.dataset.trajectoryMode === mode));
     selectView("trajectory", { notify: false }); render();
-    [...list.querySelectorAll("[data-trajectory-id]")].find((row) => row.dataset.trajectoryId === target.id)?.scrollIntoView?.({ block: "center" });
+    centerInScrollContainer(list, [...list.querySelectorAll("[data-trajectory-id]")].find((row) => row.dataset.trajectoryId === target.id));
     return true;
   }
   function snapshot() {

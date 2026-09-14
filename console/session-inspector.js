@@ -64,8 +64,9 @@ export function renderContextBudgetOverview(contextStatus) {
 export function inspectorFact(label, value, options = {}) {
   const classes = [options.mono ? "mono" : "", options.wide ? "wide" : ""].filter(Boolean).join(" ");
   const text = escapeHtml(value ?? "—");
+  const displayText = escapeHtml(options.displayValue ?? value ?? "—");
   const copy = options.copy && value ? `<button type="button" class="inspector-copy-btn" data-inspector-copy="${text}" title="复制 ${escapeHtml(options.copyLabel || label)}" aria-label="复制 ${escapeHtml(options.copyLabel || label)}"><i data-lucide="copy" aria-hidden="true"></i></button>` : "";
-  return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong${copy ? ' class="inspector-copy-value"' : ""}>${copy ? `<span class="inspector-id-text">${text}</span>${copy}` : text}</strong></div>`;
+  return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong${copy ? ' class="inspector-copy-value"' : ""}>${copy ? `<span class="inspector-id-text" title="${text}">${displayText}</span>${copy}` : text}</strong></div>`;
 }
 
 export function inspectorFactHtml(label, valueHtml, options = {}) {
@@ -130,7 +131,7 @@ export function renderSessionInspector({
   </section>`;
   const diagnosticCount = (value) => value == null ? "未记录" : String(value);
   const sessionCounts = `<span class="inspector-inline-metrics">
-    <span title="回合数"><i data-lucide="messages-square"></i>${escapeHtml(diagnostic ? diagnosticCount(activeSession.turnCount) : String(activeSession.turnCount || 0))}</span>
+    <span title="提问数"><i data-lucide="message-circle-more"></i>${escapeHtml(diagnostic ? diagnosticCount(activeSession.turnCount) : String(activeSession.turnCount || 0))}</span>
     <span title="消息事件数"><i data-lucide="repeat-2"></i>${escapeHtml(diagnostic ? diagnosticCount(activeSession.messageCount) : String(activeSession.messageCount ?? contextStatus.raw_message_count ?? state.modelMessageCount ?? 0))}</span>
     <span title="附件数"><i data-lucide="paperclip"></i>${escapeHtml(diagnostic ? diagnosticCount(activeSession.attachmentCount) : String(activeSession.attachmentCount || 0))}</span>
   </span>`;
@@ -143,7 +144,7 @@ export function renderSessionInspector({
       ${channelOrigin.displayName ? inspectorFact("会话对象", channelOrigin.peerName, { wide: true }) : ""}
       ${inspectorFact(channelOrigin.conversationType, channelOrigin.peerId, { mono: true, wide: true, copy: true, copyLabel: channelOrigin.peerKey })}
       ${channelOrigin.peerKey === "User ID" && channelOrigin.chatId ? inspectorFact("Chat ID", channelOrigin.chatId, { mono: true, wide: true, copy: true }) : ""}
-      ${inspectorFact("会话 ID", state.sessionId, { mono: true, wide: true, copy: true })}
+      ${inspectorFact("会话 ID", state.sessionId, { mono: true, wide: true, copy: true, displayValue: state.sessionId?.slice(0, 8) })}
     </div></section>` : `<section class="inspector-section">
       <p class="inspector-channel-note">${state.sessionId ? "当前会话不是由渠道发起的。" : "尚未选择渠道会话。"}</p>
       <header><strong>Agent 关联渠道</strong></header>
@@ -151,7 +152,7 @@ export function renderSessionInspector({
     </section>`;
   const sessionContent = `<section class="inspector-section inspector-session-group">
     <div class="inspector-facts">
-      ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true, copy: Boolean(state.sessionId) })}
+      ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true, copy: Boolean(state.sessionId), displayValue: state.sessionId?.slice(0, 8) })}
       ${inspectorFact("Agent", agentName, { wide: true })}
       ${inspectorFact("模型", model?.name || model?.model || (diagnostic ? "未记录" : "—"))}
       ${inspectorFactHtml("App / Space", sessionScope, { wide: true })}

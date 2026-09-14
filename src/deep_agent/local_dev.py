@@ -107,9 +107,12 @@ class LocalIdentity:
 class LocalIdentityAdapter:
     """Apply a trusted local identity before requests enter the FastAPI app."""
 
-    def __init__(self, app: ASGIApp, identity: LocalIdentity) -> None:
+    def __init__(
+        self, app: ASGIApp, identity: LocalIdentity, *, read_only_preview: bool = False,
+    ) -> None:
         self.app = app
         self.identity = identity
+        self.read_only_preview = read_only_preview
 
     async def __call__(
         self,
@@ -120,6 +123,19 @@ class LocalIdentityAdapter:
         if scope.get("type") not in {"http", "websocket"}:
             await self.app(scope, receive, send)
             return
+
+        if self.read_only_preview:
+            if scope.get("type") == "websocket":
+                await send({"type": "websocket.close", "code": 1008})
+                return
+            if scope.get("method", "GET").upper() not in {"GET", "HEAD", "OPTIONS"}:
+                from starlette.responses import JSONResponse
+
+                await JSONResponse(
+                    {"detail": "当前为本地 Test 只读预览，不支持删除、修改或执行会话。"}, status_code=403,
+                    headers={"X-Deep-Agent-Read-Only": "1"},
+                )(scope, receive, send)
+                return
 
         forwarded_scope = dict(scope)
         incoming_headers = scope.get("headers") or []
@@ -190,12 +206,19 @@ def load_local_config(path: str | Path) -> LocalIdentity:
     return identity
 
 
-def build_local_app(config_file: str | Path) -> LocalIdentityAdapter:
+def build_local_app(
+    config_file: str | Path, *, read_only_preview: bool = False,
+) -> LocalIdentityAdapter:
     identity = load_local_config(config_file)
     enable_local_runtime()
     from deep_agent.main import app
 
-    return LocalIdentityAdapter(app, identity)
+    if read_only_preview:
+        from deep_agent.local_preview import preview_lifespan
+        from deep_agent.diagnostics.runtime import observe_lifespan
+
+        app.router.lifespan_context = observe_lifespan(preview_lifespan, "api")
+    return LocalIdentityAdapter(app, identity, read_only_preview=read_only_preview)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -208,6 +231,10 @@ def _parser() -> argparse.ArgumentParser:
         help="External chmod-600 dotenv file containing runtime and identity settings.",
     )
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--read-only-preview", action="store_true",
+        help="Read existing data only: no migrations, recovery, gateway, or write requests.",
+    )
     parser.add_argument(
         "--no-sandbox-env",
         action="store_true",
@@ -223,8 +250,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     from deep_agent.sandbox.venv import preflight_sandbox_interpreter
 
     args = _parser().parse_args(argv)
-    local_app = build_local_app(args.config)
-    preflight_sandbox_interpreter(ensure=not args.no_sandbox_env)
+    local_app = build_local_app(args.config, read_only_preview=args.read_only_preview)
+    if not args.read_only_preview:
+        preflight_sandbox_interpreter(ensure=not args.no_sandbox_env)
 
     import uvicorn
 

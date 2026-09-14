@@ -142,6 +142,8 @@ async def update_channel_account(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=404, detail="Channel account not found")
+    if (current.settings or {}).get("wecom") != (row.settings or {}).get("wecom"):
+        await store.refresh_wecom_titles(account_id)
     return await _response(row, ctx)
 
 

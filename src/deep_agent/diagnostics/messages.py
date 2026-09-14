@@ -16,6 +16,13 @@ def describe(record: dict) -> str:
     state = _STATE.get(suffix, "")
     message = record["summary"]
     details = []
+    if event.startswith("diagnostic_users_"):
+        for key, label in (("profile_service", "服务"), ("discovery_type", "发现方式"),
+                           ("discovery_namespace", "命名空间"), ("target_origin", "目标"),
+                           ("http_status", "HTTP"), ("requested_count", "请求人数"),
+                           ("resolved_count", "解析人数")):
+            if key in record:
+                details.append(f"{label} {record[key]}")
     tool, model, agent = (record.get(key) for key in ("tool", "model_name", "agent_name"))
     if event.startswith("agent_tool_"):
         state = "仍在等待" if event.endswith("_still_waiting") else state

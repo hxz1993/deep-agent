@@ -12,12 +12,13 @@ function loadApi(
 ) {
   const values = new Map(Object.entries(initial));
   const parsedUrl = new URL(pageUrl);
+  const events = [];
   const window = {
-    dispatchEvent() {},
+    dispatchEvent(event) { events.push(event); },
   };
   const context = vm.createContext({
     AbortController,
-    CustomEvent: class CustomEvent {},
+    CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     clearTimeout,
     document: { baseURI: pageUrl },
     DOMException,
@@ -38,7 +39,7 @@ function loadApi(
     window,
   });
   vm.runInContext(source, context);
-  return { api: window.DeepAgentConsoleAPI, values };
+  return { api: window.DeepAgentConsoleAPI, values, events, daFetch: window.daFetch };
 }
 
 test("请求上下文只保存 app 并清理旧格式缓存", () => {
@@ -260,4 +261,14 @@ test("控制台权限检查超时统一映射为503", async () => {
     api.adminAccess({ timeoutMs: 5 }),
     (error) => error.code === "admin_access_timeout" && error.status === 503,
   );
+});
+
+
+test("readonly preview errors carry their reason without changing permission errors", async () => {
+  const preview = loadApi({}, async () => ({ status: 403, headers: new Headers({ "X-Deep-Agent-Read-Only": "1" }) }));
+  await preview.daFetch("/probe");
+  assert.equal(preview.events[0].detail.reason, "read_only_preview");
+  const denied = loadApi({}, async () => ({ status: 403, headers: new Headers() }));
+  await denied.daFetch("/probe");
+  assert.equal(denied.events[0].detail.reason, undefined);
 });

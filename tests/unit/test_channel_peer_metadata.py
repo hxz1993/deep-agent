@@ -96,7 +96,7 @@ class ChannelPeerMetadataRepairTests(unittest.TestCase):
             self.assertEqual(metadata, expected)
             self.assertEqual(old, new)
         titles = [row["title"] for row in after["chat_sessions"]]
-        self.assertEqual(titles, ["User｜小明（peer-0）", "Group｜peer-1", "用户人工改名"])
+        self.assertEqual(titles, ["User｜小明(peer-0)", "Group｜peer-1", "用户人工改名"])
         for old, new in zip(before["chat_sessions"], after["chat_sessions"]):
             old.pop("title")
             new.pop("title")

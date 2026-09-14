@@ -23,6 +23,7 @@ from deep_agent.db.models import Base
 from deep_agent.db.configuration_transfer import (
     BACKUP_SCOPE_SCHEMA_VERSION,
     SESSION_TABLES,
+    CACHE_TABLES,
     backup_scope_manifest,
     configuration_table_names,
     order_configuration_tables,
@@ -228,7 +229,7 @@ async def _discover_copied_tables(engine: AsyncEngine) -> tuple[str, ...]:
             + ", ".join(sorted(missing_session_tables))
         )
 
-    copied_names = table_names - set(SESSION_TABLES) - {"alembic_version"}
+    copied_names = table_names - set(SESSION_TABLES) - set(CACHE_TABLES) - {"alembic_version"}
     return order_configuration_tables(tuple(copied_names))
 
 

@@ -167,6 +167,26 @@ def _deferred_results(body: StreamChatRequest):
     return build_deferred_tool_results(body.deferred_tool_results)
 
 
+async def _current_channel_context(ctx, body, account):
+    """Recheck optional enrichment at the API boundary after gateway I/O."""
+    if account is None or not body.context_refs:
+        return
+    from deep_agent.services.wecom_profiles import application_for_account
+    current = await ctx.stores.channel.get_account(account.id)
+    app_id = application_for_account(current) if current and current.enabled else None
+    for reference in body.context_refs:
+        if reference.type != "channel.message_source":
+            continue
+        payload = reference.payload
+        if "userid" not in payload and "name" not in payload:
+            continue
+        payload.pop("userid", None)
+        payload.pop("name", None)
+        if app_id:
+            profile = await ctx.stores.wecom.find_profile(app_id, str(payload.get("sender_id", "")))
+            payload.update(userid=profile.userid if profile else None, name=profile.name if profile else None)
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     request: Request,
@@ -203,6 +223,7 @@ async def chat(
         request_headers=request_headers,
     )
     try:
+        await _current_channel_context(ctx, body, channel_account)
         result = await runner.run(
             session_id,
             body.message or "",
@@ -305,6 +326,7 @@ async def chat_stream(
             # asynchronous history/input preparation and incorrectly return 404.
             ctx.session_live.publish(live_key, deps.run_id, "session", session_data)
             yield {"event": "session", "data": json.dumps(session_data)}
+            await _current_channel_context(ctx, body, channel_account)
             async with aclosing(runner.run_stream(
                 session_id,
                 message,

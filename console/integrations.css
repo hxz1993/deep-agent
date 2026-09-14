@@ -21,3 +21,10 @@ dialog#integrationConfigModal { width: min(920px, calc(100vw - 40px)); height: m
   .integration-example-pane, .integration-editor-pane { overflow: visible; padding: 18px; }
   .integration-example-pane { min-height: 320px; border-left: 0; border-top: 1px solid var(--border); }
 }
+
+/* Empty configuration is a placeholder; only real Agents appear in the menu. */
+.integration-unconfigured, .integration-agent-field:has(option[value=""]:checked) .da-select-trigger { color: var(--text-faint); }
+.integration-agent-label { display: flex; align-items: center; justify-content: space-between; }
+.integration-agent-label .btn-link { padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.integration-agent-label .btn-link:hover { text-decoration: underline; }
+.integration-agent-label .btn-link:disabled { color: var(--text-faint); cursor: default; }

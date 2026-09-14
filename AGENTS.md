@@ -12,21 +12,28 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.0`，数据库Head为`005` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.3`，数据库Head为`006` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
 
 诊断中心分「日志 / 会话」两个入口：见[日志指南](docs/guides/diagnostic-logs.md)和[会话指南](docs/guides/diagnostic-sessions.md)。
 会话概览、列表和跨用户只读详情统一使用管理员 `/diagnostics/sessions` 接口；统计只读取现有会话与真实事件，
-用户维度为平台账号（包含渠道会话的归属账号），不解析企微发送人，不新增统计表或事件。
+平台会话概览/列表的用户维度为平台账号（包含渠道会话的归属账号）；新增渠道详情独立按渠道账户、用户/群聊和发言人统计，读取已有渠道台账与会话事件，不新增统计表或事件。
 `diagnostics/` 是独立、尽力写入的管道分隔文本日志模块（`.log`），不写会话事件、不改变业务执行。
 日志查询限当前实例 API/网关；所有诊断接口均校验管理员，普通 Session 权限保持不变。
 日志消息在后端写入时生成，格式为 `时间 | 进程 | 等级 | request-id | 来源 - 消息 | key=value`，管道、换行和反斜杠统一转义；查询返回真实 `raw`。旧行只保留原文，不增加 JSON 兼容解析。新增日志仍只提交安全白名单字段，禁止业务正文、完整参数、结果、凭据和异常原文。消息从已校验的工具名、模型名、Agent名称、状态和耗时生成；查询的message/summary只返回实际写入正文，附加字段独立返回。
 
 集成入口见[集成配置](docs/guides/integrations.md)：固定目录由后端定义，`004`新增`integration_settings`但不插入初始记录。仅保存非空配置才落库；清空删除配置记录。普通组件按集成编码读取JSON，未配置返回409；管理操作仍需企业管理员。
 
-Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格和 DeepCube 两包为暂行版，后续正式资产整包替换。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。Agent.ui_tool_selection 保存单工具范围（缺省整包、显式名单限定）。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型并保存工具范围；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
+Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格包取自 View Planning V85 资产，DeepCube 保留 2026-09-14 Test 官方导出包，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。Agent.ui_tool_selection 保存单工具范围（缺省整包、显式名单限定）。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型并保存工具范围；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
+
+
+企微应用与成员资料见[使用指南](docs/guides/wecom-applications.md)及[渠道接入](docs/guides/wecom-channel.md)。本次 v0.10.1 功能增量 `006` 新增企业应用配置和可重建成员缓存，保留已发布 `005`。渠道页面在标题同行切换账户与应用；应用采用左侧列表、右侧应用标题及合并企业信息的配置卡与精简缓存统计，成员表只由后端维护。渠道 `settings.wecom.user_details_enabled` 默认为关闭，开启必须引用有效应用；查询开关独立于渠道启停，关闭时不访问资料接口。
+
+身份服务位于 `services/wecom_client.py`、`services/wecom_profiles.py`，由 API 进程统一持有 HTTP／Token／任务；Gateway 使用内部鉴权解析接口，不能自行选择应用。密文转换及明文回退以官方结果确认，同应用合并到一份 User ID 资料；原始 `sender_id/peer_id` 不变。资料有效期一周，缓存失效保留姓名与映射，迟到结果受应用 revision 和渠道配置保护。开启后私聊标题为 `User｜姓名(原始 ID)`，来源上下文仅额外增加 `userid/name`；群标题为 `Group｜chat_id`，平台归属／权限不变，私聊首轮、群聊每轮规则不变。
+
+`wecom_applications` 是配置备份的一部分（含敏感凭据），`wecom_user_profiles` 是缓存，仅导出空结构；Token、任务和负缓存不备份，Agent 整包也不包含这些数据。表分类与逻辑顺序由 `db/configuration_transfer.py` 显式维护。`006` 降级遇到应用、成员或渠道企微设置时拒绝，不自动删除。2026-09-14 已核验本地超管机器人“先胜小D”：明文入口与普通机器人共用一条成员映射，真实标题及首轮来源上下文正确；另外只读验证了无缓存时的官方明文回退。无需超管配置，按映射或接口明确结果解析，不按前缀猜测。
 
 
 ### 本地 Test 联调固定启动命令
@@ -213,7 +220,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
   只有`channels/adapters/wecom/`调用官方`wecom-aibot-python-sdk==1.0.2`，不重写连接/认证/心跳/重连/解密/回复协议。
   API固定一个worker，Gateway按环境部署一个副本；`channel_accounts`保存配置，`channel_session_bindings`映射企微Peer到
   Session，`channel_message_runs`负责幂等和生命周期。企微Session固定归属Account的管理员配置的会话用户，
-  外部Peer不冒充平台用户。Gateway不执行迁移，数据库必须先由API升级到当前Head（`005`）。
+  外部Peer不冒充平台用户。Gateway不执行迁移，数据库必须先由 API 升级到当前代码 Head（本次增量为 `006`）。
   v0.9.7新增`003`移除数据库外键；先停止旧API/Gateway写入、迁移核验，再启动新版，不能只改版本号。
   五个命令`/help /new /stop /status /whoami`仅在渠道入口处理；没有`/reset`或共享Chat全局拦截。
   控制命令绕过普通队列，15秒等待真实停止；`/new`原子换绑，旧历史保留，投递失败不重复命令副作用。

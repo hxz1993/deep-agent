@@ -1,18 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#6366f1"/>
-  <g
-    transform="translate(4 4)"
-    fill="none"
-    stroke="#fff"
-    stroke-width="2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  >
-    <path d="M12 8V4H8"/>
-    <rect width="16" height="12" x="4" y="8" rx="2"/>
-    <path d="M2 14h2"/>
-    <path d="M20 14h2"/>
-    <path d="M15 13v2"/>
-    <path d="M9 13v2"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="34 17 446 446" role="img" aria-labelledby="title desc">
+  <title id="title">DeepAgent</title>
+  <desc id="desc">蓝紫色 D 形机器人，带圆头天线和双竖线眼睛，背景透明。</desc>
+  <g fill="#6254FF">
+    <rect x="234" y="74" width="26" height="66"/>
+    <circle cx="247" cy="66" r="27"/>
+    <path transform="translate(257 0) scale(1.16 1) translate(-257 0)" fill-rule="evenodd" d="M126 132H250C354 132 410 193 410 287C410 381 354 442 250 442H126Q104 442 104 420V154Q104 132 126 132Z M203 200H297C329 200 349 220 349 252V306C349 338 329 358 297 358H203C171 358 157 338 157 306V252C157 220 171 200 203 200Z"/>
+    <rect x="186" y="232" width="30" height="94" rx="15"/>
+    <rect x="282" y="232" width="30" height="94" rx="15"/>
   </g>
 </svg>

@@ -40,6 +40,7 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(listing.status_code, 200, listing.text)
                     self.assertEqual(listing.json()['errors'], [])
                     self.assertEqual({item['code'] for item in listing.json()['items']}, {'deeptable-assistant', 'deepcube-assistant'})
+                    self.assertEqual({item['code']: item['prompt_version'] for item in listing.json()['items']}, {'deeptable-assistant': 'V85', 'deepcube-assistant': 'V34'})
                     self.assertEqual(await stores.agent.list_all(), [])
                     for code, expected_skills, tool_count in (
                         ('deeptable-assistant', {'deeptable-assistant-workflows', 'deeptable-intelligent-analysis'}, 3),
@@ -50,7 +51,8 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(raw_builtin, (archive.BUILTIN_PACKAGES_ROOT / f'{code}.zip').read_bytes())
                             package = archive.parse_package(raw_builtin)
                             self.assertNotIn('temperature', package.agent.model_dump())
-                            self.assertIsNone(package.agent.model_reference)
+                            self.assertEqual(package.agent.model_reference.name, "deepseek-flash")
+                            self.assertEqual(package.agent.model_reference.provider_type, "deepseek")
                             self.assertEqual(set(package.skills), expected_skills)
                             self.assertEqual(sum(len(ui.tools) for ui in package.ui), tool_count)
                             # The package carries component assets, not deployment identity or credentials.
@@ -84,7 +86,11 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                                 self.assertEqual(runtime.state(skill).status, RUNTIME_READY)
                                 with zipfile.ZipFile(io.BytesIO(raw)) as z:
                                     for name in z.namelist():
-                                        relative = Path(name).relative_to(skill)
+                                        if name.endswith("/"):
+                                            continue
+                                        relative = Path(name)
+                                        if relative.parts[0] == skill:
+                                            relative = relative.relative_to(skill)
                                         self.assertNotIn('__pycache__', relative.parts)
                                         self.assertNotIn('tests', relative.parts)
                                         self.assertEqual((runtime.root / skill / relative).read_bytes(), z.read(name))
@@ -92,7 +98,16 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(exported.status_code, 200)
                             parsed_export = archive.parse_package(exported.content)
                             self.assertEqual(parsed_export.agent.prompt, package.agent.prompt)
-                            self.assertEqual(parsed_export.ui, package.ui)
+                            # Export sorts tools by name; source packages may use workflow order.
+                            def ui_by_code(packages):
+                                return {ui.code: {**ui.model_dump(exclude={'tools'}),
+                                    'tools': {tool.name: tool.model_dump() for tool in ui.tools}}
+                                    for ui in packages}
+                            self.assertEqual(ui_by_code(parsed_export.ui), ui_by_code(package.ui))
+                            expected_selection = {ui.code: package.agent.ui_tool_selection.get(ui.code,
+                                [tool.name for tool in ui.tools]) for ui in package.ui}
+                            self.assertEqual({code: set(names) for code, names in parsed_export.agent.ui_tool_selection.items()},
+                                {code: set(names) for code, names in expected_selection.items()})
                             self.assertEqual(parsed_export.skills, package.skills)
                     self.assertEqual(len(await stores.agent.list_all()), 2)
             finally:

@@ -362,6 +362,45 @@ class ChatSessionEvent(Base):
     )
 
 
+class WecomApplication(Base):
+    __tablename__ = "wecom_applications"
+    __table_args__ = (UniqueConstraint("corp_id", "wecom_agent_id", name="uq_wecom_application_identity"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(KeyText, nullable=False)
+    corp_id: Mapped[str] = mapped_column(String(191).with_variant(String(191, collation="utf8mb4_bin"), "mysql"), nullable=False)
+    wecom_agent_id: Mapped[str] = mapped_column(String(191).with_variant(String(191, collation="utf8mb4_bin"), "mysql"), nullable=False)
+    app_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    settings: Mapped[dict] = mapped_column(JSONType(), default=dict, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class WecomUserProfile(Base):
+    __tablename__ = "wecom_user_profiles"
+    __table_args__ = (
+        UniqueConstraint("wecom_application_id", "userid_key", name="uq_wecom_profile_userid"),
+        UniqueConstraint("wecom_application_id", "open_userid", name="uq_wecom_profile_open_userid"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    wecom_application_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    # MySQL's usual case-insensitive collation must not fold opaque Open User IDs.
+    open_userid: Mapped[str | None] = mapped_column(String(191).with_variant(String(191, collation="utf8mb4_bin"), "mysql"), nullable=True)
+    userid: Mapped[str] = mapped_column(KeyText, nullable=False)
+    userid_key: Mapped[str] = mapped_column(String(191).with_variant(String(191, collation="utf8mb4_bin"), "mysql"), nullable=False)
+    name: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    profile_synced_at: Mapped[datetime | None] = mapped_column(UtcTimestamp(), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(UtcTimestamp(), nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(UtcTimestamp(), nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(UtcTimestamp(), nullable=True)
+    last_error_stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class ChannelAccount(Base):
     __tablename__ = "channel_accounts"
     __table_args__ = (

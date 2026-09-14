@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 import sqlalchemy as sa
+import json
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class Relation:
 
 
 LOGICAL_REFERENCES = (
+    Relation("wecom_user_profiles", "wecom_application_id", "wecom_applications", "id", "CASCADE"),
     Relation("llm_models", "provider_id", "llm_providers", "id", "RESTRICT"),
     Relation("agents", "model_id", "llm_models", "id", "RESTRICT"),
     Relation("chat_sessions", "agent_id", "agents", "id", "RESTRICT"),
@@ -34,7 +36,10 @@ def logical_reference_violations(connection, tables: Iterable[str] | None = None
     """Count orphans, excluding nullable references; never return customer values."""
     selected = None if tables is None else set(tables)
     violations = []
+    existing = set(sa.inspect(connection).get_table_names())
     for relation in LOGICAL_REFERENCES:
+        if relation.table not in existing or relation.parent_table not in existing:
+            continue
         if selected is not None and relation.table not in selected:
             continue
         child = sa.table(relation.table, sa.column(relation.column))
@@ -52,6 +57,19 @@ def logical_reference_violations(connection, tables: Iterable[str] | None = None
             violations.append({"table": relation.table, "column": relation.column,
                                "parent_table": relation.parent_table,
                                "parent_column": relation.parent_column, "count": int(count)})
+    if "channel_accounts" in existing and (selected is None or "channel_accounts" in selected):
+        app_ids = set(connection.execute(sa.text("SELECT id FROM wecom_applications")).scalars()) if "wecom_applications" in existing else set()
+        invalid = 0
+        from deep_agent.db.stores.wecom import wecom_settings
+        for raw in connection.execute(sa.text("SELECT settings FROM channel_accounts")).scalars():
+            try:
+                settings = json.loads(raw) if isinstance(raw, str) else raw
+                _, app_id = wecom_settings(settings)
+                invalid += int(bool(app_id) and app_id not in app_ids)
+            except (ValueError, TypeError):
+                invalid += 1
+        if invalid:
+            violations.append({"table": "channel_accounts", "column": "settings.wecom.application_id", "parent_table": "wecom_applications", "parent_column": "id", "count": invalid})
     return violations
 
 

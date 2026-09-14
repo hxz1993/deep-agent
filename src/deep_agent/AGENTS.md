@@ -34,7 +34,7 @@
 日志失败不改变模型、工具、SSE 或持久化行为。诊断文件不是会话 Event Store，不新增 RUN 回执。
 管理员查询只读取当前实例受控文件，与普通会话所有者权限分开；不增加 MCP 容器日志或自动探测。
 新增日志点先注册事件名与基础描述，由 `diagnostics/messages.py` 从安全事实生成可读正文；不传用户或模型正文、完整参数、结果、异常原文或凭据。查询保留实际写入正文。详见
-[`诊断日志指南`](../../../docs/guides/diagnostic-logs.md)。
+[`诊断日志指南`](../../docs/guides/diagnostic-logs.md)。
 
 取消诊断按 Session/Run 关联停止接口入口、活动执行首次取消来源和发送连接结束记录。
 `http_disconnect` 只在实际收到 ASGI 断连消息时使用，不能由 `CancelledError` 推断；
@@ -46,11 +46,13 @@ OpenAI 兼容协议的 HTTP 日志在 `agent/model_api_diagnostics.py`；只记�
 流式请求在 SDK 消费者任务中延迟发出，须在透明模型包装器的实际调用边界建立 ContextVar，
 不能仅依赖 `wrap_model_request` 的任务上下文。测试须覆盖真实 SDK 的流式成功/400及请求体等价。
 
-诊断账号资料使用 `security/diagnostic_users.py` 批量读取平台用户：通过现有 Space 服务发现，
-调用 `POST /api/space/user-info/batch/query/by-user-ids`（不需要 App / Space；不要误用需要
-Space 的 `query/batch` 路由）。只传管理员当前认证和本次涉及的 ID，每批最多100个、总预算2秒，
-显示名优先用户名。2026-09-10 Test 已通过真实凭证只读联调；旧账号 `info/by-user-ids` 在该环境
-返回业务失败，不再依赖。仅无平台凭证的 local bypass 才使用本地资料；缓存仍按调用者权限隔离。
+诊断账号资料使用 `security/diagnostic_users.py`，沿用其他业务组件的 System 跨空间接口
+`POST /user/get-user-detail-list`，由 System 转查 Account。读取 `PLATFORM_OPTION.server.system`
+（`EXPORT_SYSTEM_SERVER_NAME`），只传管理员当前认证和本次涉及的 ID，不传 App / Space。
+每批最多100个、总预算2秒，显示名优先用户名；仅无平台凭证的 local bypass 才使用本地资料，
+缓存按调用者权限隔离。2026-09-14 Test 公网 System 接口已验证；原部署 Space 入口失败为
+`http://space-server` DNS 解析错误。公网成功不能替代部署内可达性验收；完整 URL 直接请求，
+服务名走现有服务发现，不给普通 HTTP 请求增加隐式注册中心回退。
 
 ### 历史工具结果匹配
 
@@ -68,7 +70,7 @@ Deferred 续跑可能把用户输入单独先入库，再写工具结果；不�
 半段流式文本仅保留在当前 SSE；正常取消/异常时尽力保存 SDK 已返回的部分内容，强杀不承诺半段恢复。
 异常终止只记一次有原因的 `execution/error`，工具可恢复失败只记录自身结果，主动停止不新增异常。
 已发布旧 RUN 数据原样保留，不增加解析/恢复兼容；Deferred 仅正式待操作状态可交互。详见
-[`真实事件保存说明`](../../../docs/guides/message-event-persistence.md)。
+[`真实事件保存说明`](../../docs/guides/message-event-persistence.md)。
 
 `core/session_live.py`只在API进程内有界转发已有POST SSE，`GET /sessions/{id}/live`必须指定当前
 `run_id`并校验会话归属。订阅只活到该轮结束；观察连接断开不触发CancellationToken，空闲不订阅。
@@ -144,7 +146,7 @@ Jenkins网关启动版`Jenkinsfile.gateway`可由`combined_runtime.py`在同一�
 平台可信身份鉴权。企微Peer类型沿用原生`single/group`，ID分别取`from.userid/chatid`；Binding的
 `peer_metadata` JSON保存来源会话的`user_id/chat_id/display_name`白名单，缺失名称不造值。
 私聊身份直接从Binding读取；群发送者不作为群身份。仅Session改绑或来源信息确实变化时更新Binding。
-默认标题为`User｜User ID`或`Group｜Chat ID`，有实际名称时为`User｜名称（User ID）`等，保留定位ID。
+私聊标题为 `User｜名称(原始 ID)`，无姓名时为 `User｜原始 ID`；群标题固定为 `Group｜Chat ID`，不附加群名。括号使用半角，保留原始定位 ID。
 Run只保留created_at/finished_at，接收即认领再排队；调用前必须落running以防未收到SSE Run ID时误重跑。
 处理终态与投递状态分别更新，不能因最后回复失败重跑Agent或`/new`。不按SSE片段/心跳写台账。
 

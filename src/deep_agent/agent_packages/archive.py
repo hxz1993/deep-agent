@@ -121,6 +121,15 @@ class Package:
     digest: str
 
 
+def prompt_version(prompt: str) -> str | None:
+    """Read an explicit V-number from the prompt title, never the service version."""
+    heading = prompt.lstrip().splitlines()[0] if prompt.strip() else ''
+    if not heading.startswith('# '):
+        return None
+    match = re.search(r'(?:\bV|[-_]v)([0-9]+(?:\.[0-9]+)*)\s*$', heading, re.IGNORECASE)
+    return f'V{match.group(1)}' if match else None
+
+
 def canonical(value) -> bytes:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
 

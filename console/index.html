@@ -16,32 +16,33 @@
     })();
   </script>
   <title>DeepAgent 一体化控制台</title>
-  <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260728-1" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260914-d-robot-wide-long-eyes" />
   <link id="hljsTheme" rel="stylesheet" href="/vendor/highlight-github-dark.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260913-49" />
-  <link rel="stylesheet" href="./workspace.css?v=20260913-49" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=20260913-49" />
-  <link rel="stylesheet" href="./console.css?v=20260913-49" />
-  <link rel="stylesheet" href="./diagnostics.css?v=20260913-49" />
+  <link rel="stylesheet" href="./workspace.css?v=20260914-diagnostic-density" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20260914-wecom-placeholder" />
+  <link rel="stylesheet" href="./console.css?v=20260915-release-audit" />
+  <link rel="stylesheet" href="./diagnostics.css?v=20260915-release-audit" />
   <link rel="stylesheet" href="./diagnostics-design.css?v=20260913-49" />
-  <link rel="stylesheet" href="./diagnostics-sessions.css?v=20260913-49" />
+  <link rel="stylesheet" href="./diagnostics-sessions.css?v=20260915-release-audit" />
+  <link rel="stylesheet" href="./diagnostics-channels.css?v=20260915-release-audit" />
   <link rel="stylesheet" href="./diagnostic-detail.css?v=20260913-49" />
   <link rel="stylesheet" href="./ui-select.css?v=20260913-49" />
-  <link rel="stylesheet" href="./ui-channel-hints.css?v=20260913-49" />
+  <link rel="stylesheet" href="./ui-channel-hints.css?v=20260913-channel-heading" />
   <link rel="stylesheet" href="./ui-dialogs.css?v=20260913-49" />
   <link rel="stylesheet" href="./ui-tool-catalog.css?v=20260913-49" />
   <link rel="stylesheet" href="./ui-tool-editor.css?v=20260913-49" />
   <link rel="stylesheet" href="./ui-resource-layout.css?v=20260913-49" />
-  <link rel="stylesheet" href="./agent-packages.css?v=20260913-49" />
+  <link rel="stylesheet" href="./agent-packages.css?v=20260915-release-audit" />
   <link rel="stylesheet" href="./agent-package-export.css?v=20260913-49" />
-  <link rel="stylesheet" href="./integrations.css?v=20260913-49" />
+  <link rel="stylesheet" href="./integrations.css?v=20260914-wecom-placeholder" />
 </head>
 <body data-console-page="workspace">
   <div class="console-shell">
     <aside class="console-rail" aria-label="控制台主导航">
       <header class="console-rail-header">
         <div class="console-brand">
-          <button type="button" class="console-brand-icon" id="expandConsoleNavBtn" aria-label="DeepAgent" title="DeepAgent"><img src="./favicon.svg?v=20260728-1" alt="" /></button>
+          <button type="button" class="console-brand-icon" id="expandConsoleNavBtn" aria-label="DeepAgent" title="DeepAgent"><img src="./favicon.svg?v=20260914-d-robot-wide-long-eyes" alt="" /></button>
           <div class="console-brand-copy"><strong>DeepAgent</strong><span class="connection-pill" id="connStatus" title="后端服务连接状态"><span class="dot"></span><span class="conn-text">连接中</span></span></div>
         </div>
         <button type="button" class="console-rail-toggle" id="toggleConsoleNavBtn" aria-label="收起导航" title="收起导航" aria-expanded="true" aria-controls="consoleResourceNav"><i data-lucide="panel-left-close" aria-hidden="true"></i></button>
@@ -71,7 +72,7 @@
         </div>
         </div>
         <button type="button" class="user-pill" id="currentUserBtn" aria-label="当前平台用户" aria-expanded="false">
-          <i data-lucide="circle-user-round"></i>
+          <i data-lucide="circle-user-round" aria-hidden="true"></i>
           <span class="console-user-name" id="consoleUserName">当前用户</span>
           <span class="user-popover user-account-popover" role="tooltip">
             <span class="user-popover-heading">
@@ -110,8 +111,8 @@
         <div class="configuration-shell">
           <template id="configurationNavigation">
             <button class="tab resource-btn active" data-tab="agents"><i data-lucide="bot"></i><span>Agent</span></button>
-            <button class="tab resource-btn" data-tab="channels"><i data-lucide="rss"></i><span>渠道</span></button>
             <button class="tab resource-btn" data-tab="integrations"><i data-lucide="puzzle"></i><span>集成</span></button>
+            <button class="tab resource-btn" data-tab="channels"><i data-lucide="rss"></i><span>渠道</span></button>
             <div class="resource-group-label">设置</div>
             <button class="tab resource-btn" data-tab="llm-providers"><svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-sparkles" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/></svg><span>模型</span></button>
             <button class="tab resource-btn" data-tab="tools"><i data-lucide="hammer"></i><span>工具</span></button>
@@ -145,7 +146,7 @@
               <label class="compact-search diagnostics-keyword diagnostics-session-search"><i data-lucide="messages-square" aria-hidden="true"></i><input type="text" id="diagnosticsSession" placeholder="会话 ID" aria-label="会话 ID" maxlength="128" spellcheck="false" /></label>
             </div>
             <div class="diagnostics-search-row">
-              <label class="compact-search diagnostics-keyword"><i data-lucide="search" aria-hidden="true"></i><input type="search" id="diagnosticsKeyword" placeholder="搜索日志内容" aria-label="搜索日志内容" maxlength="200" /></label>
+              <label class="compact-search diagnostics-keyword"><i data-lucide="search" aria-hidden="true"></i><input autocomplete="off" type="search" id="diagnosticsKeyword" placeholder="搜索日志内容" aria-label="搜索日志内容" maxlength="200" /></label>
             <div class="agent-view-switch diagnostics-view-switch" role="group" aria-label="日志视图"><button type="button" id="diagnosticsListView" class="active" aria-pressed="true" aria-label="列表" title="列表"><i data-lucide="list" aria-hidden="true"></i></button><button type="button" id="diagnosticsRawView" aria-pressed="false" aria-label="原始" title="原始"><i data-lucide="file-text" aria-hidden="true"></i></button></div>
             <button type="button" class="diagnostics-button" id="diagnosticsExport"><i data-lucide="download" aria-hidden="true"></i><span>导出</span></button>
             <button type="submit" class="diagnostics-button primary" id="diagnosticsQuery"><i data-lucide="search" aria-hidden="true"></i><span>查询</span></button>
@@ -181,6 +182,7 @@
         </div>
 
         <div id="diagnosticsSessionsPage" class="hidden"></div>
+        <div id="diagnosticsChannelsPage" class="hidden"></div>
       </section>
     </main>
   </div>
@@ -204,13 +206,13 @@
   </div>
 
   <script src="../vendor/lucide.min.js"></script>
-  <script src="./api.js?v=20260913-49"></script>
+  <script src="./api.js?v=20260915-release-audit"></script>
   <script src="./theme.js?v=20260913-49"></script>
   <script src="../vendor/marked.min.js"></script>
   <script src="../vendor/purify.min.js"></script>
   <script src="../vendor/highlight.min.js"></script>
   <script src="./json-view.js?v=20260913-49"></script>
   <script src="./markdown.js?v=20260913-49"></script>
-  <script type="module" src="./main.js?v=20260913-49"></script>
+  <script type="module" src="./main.js?v=20260915-release-audit"></script>
 </body>
 </html>

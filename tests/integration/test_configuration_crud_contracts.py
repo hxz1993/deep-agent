@@ -174,19 +174,25 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(model_response.status_code, 201, model_response.text)
             self.assertEqual(tool_response.status_code, 201, tool_response.text)
 
-            for field in ("name", "model_id", "prompt"):
+            for field in ("name", "prompt"):
                 response = await client.patch(
                     f"/api/v1/agents/{agent_response.json()['id']}",
                     json={field: None},
                 )
                 self.assertEqual(response.status_code, 422, response.text)
+            response = await client.patch(
+                f"/api/v1/agents/{agent_response.json()['id']}",
+                json={"model_id": None},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIsNone(response.json()["model_id"])
             for field in ("name", "model"):
                 response = await client.patch(
                     f"/api/v1/llm-models/{model_response.json()['id']}",
                     json={field: None},
                 )
                 self.assertEqual(response.status_code, 422, response.text)
-            for field in ("description", "parameters_json_schema", "enabled"):
+            for field in ("package_code", "description", "parameters_json_schema", "enabled"):
                 response = await client.patch(
                     "/api/v1/ui-tools/contract_tool",
                     json={field: None},
@@ -198,6 +204,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         tool_row = await self.stores.ui_tool.get_by_name("contract_tool")
         self.assertEqual(agent_row.name, "contract-agent")
         self.assertEqual(agent_row.prompt, "keep prompt")
+        self.assertIsNone(agent_row.model_id)
         self.assertEqual(model_row.name, "contract-model")
         self.assertEqual(model_row.model, "test:contract")
         self.assertEqual(tool_row.description, "keep description")

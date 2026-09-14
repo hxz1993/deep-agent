@@ -31,6 +31,7 @@ from maintenance.config_backup import (
     BACKUP_SCOPE_SCHEMA_VERSION,
     CONFIG_TABLES,
     SESSION_TABLES,
+    CACHE_TABLES,
     _backup_scope_manifest,
     _validate_table_classification,
     database_url_from_config,
@@ -59,13 +60,13 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(
                 result.path.name,
-                "deep-agent-config-test-v005-20260723-131415.db",
+                "deep-agent-config-test-v006-20260723-131415.db",
             )
             self.assertEqual(
                 [path.resolve() for path in (output_root / "test").iterdir()],
                 [result.path.resolve()],
             )
-            self.assertEqual(result.revision, "005")
+            self.assertEqual(result.revision, "006")
             self.assertEqual(result.row_counts["agents"], 1)
             self.assertEqual(result.row_counts["integration_settings"], 1)
             self.assertEqual(result.row_counts["chat_sessions"], 0)
@@ -88,7 +89,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     connection.execute(
                         "SELECT version_num FROM alembic_version"
                     ).fetchone(),
-                    ("005",),
+                    ("006",),
                 )
                 config = connection.execute("SELECT settings FROM integration_settings WHERE code='deeptable-assistant'").fetchone()[0]
                 self.assertEqual(json.loads(config), {"enabled": True, "options": [1, None, "中文"]})
@@ -185,7 +186,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT environment, source_dialect, alembic_revision, "
                         "git_commit FROM _backup_info"
                     ).fetchone(),
-                    ("test", "sqlite", "005", "abc123"),
+                    ("test", "sqlite", "006", "abc123"),
                 )
                 scope_manifest = json.loads(
                     str(
@@ -338,7 +339,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
         _validate_table_classification()
         self.assertEqual(
             set(CONFIG_TABLES),
-            set(Base.metadata.tables) - set(SESSION_TABLES),
+            set(Base.metadata.tables) - set(SESSION_TABLES) - set(CACHE_TABLES),
         )
 
     def test_reads_sqlite_database_from_external_config(self) -> None:
@@ -354,16 +355,18 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 f"sqlite+aiosqlite:///{(root / 'source.db').resolve().as_posix()}",
             )
 
-    async def _create_source(self, path: Path, *, revision: str = "005") -> None:
+    async def _create_source(self, path: Path, *, revision: str = "006") -> None:
         await asyncio.to_thread(_upgrade_target_schema, self._url(path), revision)
         engine = create_async_engine(self._url(path))
         try:
             async with engine.begin() as connection:
                 for name in ("channel_message_runs", "channel_session_bindings",
                              "chat_session_events", "chat_sessions", *reversed(CONFIG_TABLES)):
-                    if name != "integration_settings" or revision in {"004", "005"}:
+                    if name == "wecom_applications" and revision != "006":
+                        continue
+                    if name != "integration_settings" or revision in {"004", "005", "006"}:
                         await connection.execute(Base.metadata.tables[name].delete())
-                if revision in {"004", "005"}:
+                if revision in {"004", "005", "006"}:
                     await connection.execute(insert(IntegrationSettings.__table__), {"code": "deeptable-assistant", "settings": {"enabled": True, "options": [1, None, "中文"]}})
                 await connection.execute(
                     insert(GlobalSetting.__table__),
@@ -443,7 +446,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
                 await connection.execute(
-                    insert(Agent.__table__ if revision == "005" else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
+                    insert(Agent.__table__ if revision in {"005", "006"} else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
                     {
                         "id": "agent-1",
                         "name": "agent",

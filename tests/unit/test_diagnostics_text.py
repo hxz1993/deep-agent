@@ -29,6 +29,17 @@ class DiagnosticsTextTests(unittest.TestCase):
                 self.assertFalse(line.startswith("{"))
                 self.assertNotIn("\n", line)
 
+    def test_platform_user_lookup_fields_survive_wire_format(self):
+        payload = self.payload("diagnostic_users_failed", level="ERROR", profile_service="space-server",
+            discovery_type="k8s", discovery_namespace="test", target_origin="http://10.0.0.2:8080",
+            http_status=404, phase="request", reason="http_error", requested_count=3, duration_ms=12)
+        record = parse_record(format_record(payload))
+        self.assertEqual(record["target_origin"], payload["target_origin"])
+        self.assertEqual(record["profile_service"], "space-server")
+        self.assertIn("HTTP 404", record["message"])
+        self.assertIn("命名空间 test", record["message"])
+        self.assertNotIn("target_origin", safe_fields({"target_origin": "https://u:secret@host/private?token=secret"}))
+
     def test_special_characters_are_reversible_and_cannot_inject_columns(self):
         original = "中文 | key=a=b\nsecond\r\n\\pipe\\|"
         self.assertEqual(unescape(escape(original)), original)

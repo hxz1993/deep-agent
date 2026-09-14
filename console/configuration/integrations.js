@@ -10,7 +10,7 @@
     render(settings, agents) {
       const selected = settings?.agent_id || '';
       const missing = selected && !agents.some(agent => agent.id === selected);
-      return `<label class="field"><span>Agent</span><select id="integrationAgentId" aria-label="Agent"><option value="">未配置</option>${missing ? `<option value="${escapeHtml(selected)}" selected disabled>Agent 已不可用（${escapeHtml(String(selected).slice(0, 8))}）</option>` : ''}${agents.map(agent => `<option value="${escapeHtml(agent.id)}" ${agent.id === selected ? 'selected' : ''}>${escapeHtml(agent.name)}</option>`).join('')}</select></label>${!agents.length ? '<p class="field-hint">暂无 Agent，请先在 Agent 页面创建。</p>' : ''}`;
+      return `<div class="field integration-agent-field"><span class="integration-agent-label"><label for="integrationAgentId">Agent</label><button type="button" id="clearIntegrationAgentBtn" class="btn-link">清空</button></span><select id="integrationAgentId" aria-label="Agent"><option value="" hidden disabled ${!selected ? 'selected' : ''}>未配置</option>${missing ? `<option value="${escapeHtml(selected)}" selected disabled hidden>Agent 已不可用（${escapeHtml(String(selected).slice(0, 8))}）</option>` : ''}${agents.map(agent => `<option value="${escapeHtml(agent.id)}" ${agent.id === selected ? 'selected' : ''}>${escapeHtml(agent.name)}</option>`).join('')}</select></div>${!agents.length ? '<p class="field-hint">暂无 Agent，请先在 Agent 页面创建。</p>' : ''}`;
     },
     read(settings, agents) {
       const id = el('integrationAgentId').value;
@@ -48,7 +48,7 @@
       }
     },
     render() {
-      el('integrationTableBody').innerHTML = this.items.length ? this.items.map(item => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td><code>${escapeHtml(item.code)}</code></td><td>${escapeHtml(editors[item.code]?.summary(item.settings, this.agents) || '—')}</td><td><div class="row-actions integration-row-actions"><button type="button" class="btn" data-integration-configure="${escapeHtml(item.code)}"><i data-lucide="settings-2"></i>配置</button></div></td></tr>`).join('') : '<tr><td colspan="4" class="empty-cell">暂无集成</td></tr>';
+      el('integrationTableBody').innerHTML = this.items.length ? this.items.map(item => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td><code>${escapeHtml(item.code)}</code></td><td class="${!item.settings?.agent_id ? 'integration-unconfigured' : ''}">${escapeHtml(editors[item.code]?.summary(item.settings, this.agents) || '—')}</td><td><div class="row-actions integration-row-actions"><button type="button" class="btn" data-integration-configure="${escapeHtml(item.code)}"><i data-lucide="settings-2"></i>配置</button></div></td></tr>`).join('') : '<tr><td colspan="4" class="empty-cell">暂无集成</td></tr>';
       window.lucide?.createIcons();
     },
     find(code) { return this.items.find(item => item.code === code); },
@@ -145,6 +145,12 @@ ${escapeHtml(JSON.stringify(spec.response_example, null, 2))}</code></pre>`;
     el('integrationConfigModal')?.querySelectorAll('[data-integration-close]').forEach(button => button.addEventListener('click', () => admin.closeConfig()));
     el('integrationConfigModal')?.addEventListener('cancel', event => { event.preventDefault(); admin.closeConfig(); });
     el('retryIntegrationApiBtn')?.addEventListener('click', () => admin.loadApi());
+    el('integrationEditor')?.addEventListener('click', event => {
+      if (!event.target.closest('#clearIntegrationAgentBtn') || admin.busy) return;
+      const select = el('integrationAgentId');
+      select.value = '';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     el('integrationEditor')?.addEventListener('change', () => AdminFormFeedback.clear(el('integrationConfigForm')));
   });
 })();

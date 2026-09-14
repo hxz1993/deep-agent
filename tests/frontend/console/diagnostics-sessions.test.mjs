@@ -4,7 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import {
   parseDiagnosticRoute, diagnosticHash, sessionRange, sessionDrilldown,
-  createDiagnosticNavigation, overviewFilters,
+  createDiagnosticNavigation, overviewFilters, channelEntryFilters,
 } from "../../../console/diagnostics-navigation.js";
 import {
   buildSessionQuery, sessionQueryError, createSessionReader,
@@ -21,7 +21,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const filters = {
   period: "custom", start: "2026-09-01T00:00:00Z", end: "2026-09-08T00:00:00Z",
-  timezone: "Asia/Shanghai", agent_id: "agent-a", user_id: "platform-owner", source: "channel",
+  timezone: "Asia/Shanghai", agent_id: "agent-a", user_id: "platform-owner",
 };
 const overview = () => ({
   metrics: { session_count: 5, question_count: 9, active_user_count: 2, error_session_count: 1 },
@@ -62,7 +62,7 @@ function sessionHarness(request = async () => overview()) {
     FormData: class { constructor(form) { this.values = form.values; } [Symbol.iterator]() { return Object.entries(this.values)[Symbol.iterator](); } },
     e: escapeHtml, icon, shortId: value => value, icons() {}, localInput, selectHtml,
     bindDiagnosticSelects(_root, callback) { selectCallback = callback; return { dispose() {}, close() {} }; },
-    diagnosticTime: value => value || "未记录", diagnosticHash, sessionRange, sessionDrilldown, overviewFilters,
+    diagnosticTime: value => value || "未记录", diagnosticHash, sessionRange, sessionDrilldown, overviewFilters, channelEntryFilters,
     COLUMN_BOUNDS, bindDiagnosticColumns: () => () => {},
     buildSessionQuery, sessionQueryError, createSessionReader,
     diagnosticRequest: (path, signal) => { requests.push({ path, signal }); return request(path, signal); },
@@ -105,6 +105,7 @@ function centerHarness(initialHash = diagnosticHash("logs", { q: "original", lev
   const node = () => ({ classList: { toggle() {} }, setAttribute() {}, removeAttribute() {} });
   const logs = { activated: [], saved: { scroll: 88, selectedId: "log-record" }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const sessions = { activated: [], saved: { scroll: 321, filters: { ...filters, offset: 50 } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
+  const channels = { activated: [], saved: { filters: { period: "720", account_id: "account-a" } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const context = vm.createContext({
     location: { get hash() { return navigation.hash; } }, history: navigation.history,
     document: { getElementById: () => node(), querySelectorAll: () => [] },
@@ -112,11 +113,12 @@ function centerHarness(initialHash = diagnosticHash("logs", { q: "original", lev
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute,
     initDiagnosticLogs(options) { logs.options = options; return logs; },
+    initDiagnosticChannels(options) { channels.options = options; return channels; },
     initDiagnosticSessions(options) { sessions.options = options; return sessions; },
   });
   vm.runInContext(centerSource.replace(/^import .*;\n/gm, "").replace(/^export /gm, ""), context);
   context.initDiagnostics();
-  return { context, logs, sessions, navigation, handlers, navCalls };
+  return { context, logs, sessions, channels, navigation, handlers, navCalls };
 }
 
 test("diagnostic routes accept only internal views and preserve complete IDs without content or credentials", () => {
@@ -269,7 +271,7 @@ test("overview session, question and exception metrics drill to correctly labell
   const h = sessionHarness(); h.activate(); await settle();
   for (const [key, expected] of [["session_count", {}], ["question_count", { has_questions: "true" }], ["error_session_count", { has_execution_error: "true" }]]) {
     await h.click({ stat: key }); const route = parseDiagnosticRoute(h.navigations.at(-1));
-    assert.equal(route.view, "list"); assert.equal(route.filters.user_id, undefined); assert.equal(route.filters.source, "channel");
+    assert.equal(route.view, "list"); assert.equal(route.filters.user_id, undefined); assert.equal(route.filters.source, undefined);
     for (const [name, value] of Object.entries(expected)) assert.equal(route.filters[name], value);
   }
 });
@@ -603,4 +605,79 @@ test("diagnostic request uses same-origin API helper, no App, no cache and propa
   assert.equal(calls[0].path, "/prefix/api/v1/diagnostics/sessions");
   assert.equal(calls[0].options.includeContext, false); assert.equal(calls[0].options.cache, "no-store"); assert.equal(calls[0].options.reportStatus, false);
   assert.equal(events[0].type, "deep-agent-diagnostics-denied"); assert.equal(events[0].detail.status, 403);
+});
+
+
+test("channel statistics mounts its own controller and keeps the channel snapshot on return from readonly detail", () => {
+  const h = centerHarness(diagnosticHash("channels", { period: "720", account_id: "account-a" }));
+  h.context.setDiagnosticsActive(true);
+  assert.equal(h.channels.activated.length, 1);
+  assert.equal(h.sessions.activated.length, 0);
+  h.channels.options.navigate(diagnosticHash("detail", { view: "conversation" }, "session-a"));
+  assert.equal(h.sessions.activated.at(-1)[0].id, "session-a");
+  h.navigation.history.back();
+  h.context.setDiagnosticsActive(true);
+  assert.equal(h.channels.activated.length, 2);
+  assert.deepEqual(plain(h.channels.activated.at(-1)[1]), { filters: { period: "720", account_id: "account-a" } });
+});
+
+test("typed username resolves an unloaded account across user pages before querying sessions", async () => {
+  const h=sessionHarness(async path => {
+    if (path.includes("/users?")) return path.includes("after=cursor") ? {items:[{user_id:"native-ly-id",display_name:"LY"}],next_after:null} : {items:[],next_after:"cursor"};
+    return {items:[],total:0};
+  });
+  h.activate("list"); await settle();
+  h.submit({user_id:"LY"},"search"); await settle();
+  const query = new URL(h.requests.at(-1).path,"http://localhost").searchParams;
+  assert.equal(query.get("user_id"),"native-ly-id");
+  assert.equal(h.requests.filter(x=>x.path.includes("/users?")).length,2);
+  assert.ok(h.requests.filter(x=>x.path.includes("/users?")).every(x=>!new URL(x.path,"http://localhost").searchParams.has("user_id")));
+});
+
+test("late username searches cannot overwrite a newer submitted user", async () => {
+  const pending=deferred();
+  const h=sessionHarness(async path => {
+    if (path.includes("/users?")) return path.includes("query=Alice") ? pending.promise : {items:[{user_id:"ly-id",display_name:"LY"}],next_after:null};
+    return {items:[],total:0};
+  });
+  h.activate("list"); await settle();
+  h.submit({user_id:"Alice"},"search"); await settle();
+  const old=h.requests.at(-1);
+  h.submit({user_id:"LY"},"search"); await settle();
+  assert.equal(old.signal.aborted,true);
+  pending.resolve({items:[{user_id:"alice-id",display_name:"Alice"}],next_after:null}); await settle();
+  assert.equal(new URL(h.requests.at(-1).path,"http://localhost").searchParams.get("user_id"),"ly-id");
+});
+
+test("legacy session source filters are discarded while log source remains supported", () => {
+  assert.equal(parseDiagnosticRoute("#/diagnostics/sessions/list?source=channel&period=168").filters.source,undefined);
+  assert.equal(new URLSearchParams(buildSessionQuery({...filters,source:"channel"})).has("source"),false);
+  assert.equal(new URLSearchParams(buildSessionQuery({...filters,source:"channel"},true)).has("source"),false);
+  assert.equal(parseDiagnosticRoute("#/diagnostics/logs?source=api").filters.source,"api");
+});
+
+test("agent picker marks configured channels in options and selected value", async () => {
+  const h=sessionHarness(async()=>({...overview(),agent_options:[{agent_id:"agent-a",agent_name:"Agent A",has_channel:true}]}));
+  h.activate(); await settle();
+  assert.doesNotMatch(h.root.innerHTML,/全部来源/);
+  assert.match(h.root.innerHTML,/diagnostic-select-badge/);
+  assert.match(h.root.innerHTML,/已关联渠道/);
+});
+
+test("switching to custom time keeps the applied range until the popup is submitted", async () => {
+  const h = sessionHarness();
+  h.activate("list", { ...filters, period: "168" }); await settle();
+  const before = h.controller.snapshot().filters;
+  const requests = h.requests.length;
+  h.select("period", "custom"); await settle();
+  const draft = h.controller.snapshot().filters;
+  assert.equal(draft.start, before.start);
+  assert.equal(draft.end, before.end);
+  assert.equal(h.requests.length, requests);
+  assert.match(h.root.innerHTML, /diagnostic-range-settings/);
+  assert.doesNotMatch(h.root.innerHTML, /diagnostic-filter-meta/);
+  h.submit({ start: "2026-09-02T08:00", end: "2026-09-03T08:00" }); await settle();
+  const query = new URL(h.requests.at(-1).path, "http://local").searchParams;
+  assert.equal(query.get("start"), new Date("2026-09-02T08:00").toISOString());
+  assert.equal(query.get("end"), new Date("2026-09-03T08:00").toISOString());
 });

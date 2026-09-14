@@ -63,6 +63,7 @@ async def list_agent_packages():
         try:
             p = await source(None, package_file.stem)
             items.append({'code': package_file.stem, 'name': p.agent.name,
+                          'prompt_version': archive.prompt_version(p.agent.prompt),
                           'description': f'{len(p.agent.skills)} Skill · {sum(len(u.tools) for u in p.ui)} UI 工具',
                           'manifest': p.manifest.model_dump()})
         except (ValueError, OSError) as exc:

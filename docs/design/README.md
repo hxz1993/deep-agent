@@ -28,7 +28,8 @@
 | `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | v0.6.6显式`builtin:web`、搜索路由、SSRF-safe Fetch与按需Web图片读取已实现 |
 | `22` | [`渠道网关与企微 Channel`](22-wecom-channel/README.md) | 2026-09 | v0.7.0公共Gateway/官方SDK Adapter、三表、五个渠道命令与来源标题；002不变 |
 | `23` | [`诊断中心与日志`](23-diagnostics-and-logs/README.md) | 2026-09 | 四种导航布局与日志、会话排查、会话统计的可混搭 HTML 原型；管理态会话能力待确认 |
-| `24` | [`业务助手初始化与升级`](24-assistant-installation/README.md) | 2026-09 | 讨论稿：固定 ID、业务发行包、管理员安装升级与 Skill File Store；未实施 |
+| `24` | [`业务助手初始化与升级`](24-assistant-installation/README.md) | 2026-09 | 历史讨论稿；固定 ID 方案已由正式 Agent 安装包方案替代，当前见安装包指南 |
+| `26` | [`定时任务`](26-scheduled-tasks/README.md) | 2026-09-14 | 上游调研与初步设计；独立配置、Cron、会话归属及停机补跑，尚未开发 |
 
 ## 文档命名
 

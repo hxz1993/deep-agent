@@ -91,7 +91,7 @@ tests/
 | `test_tool_package_registry.py` | ToolPackage Registry 的显式整包选择和空列表语义 |
 | `test_sqlite_bootstrap.py` | 生产基线001、Channel增量002及逻辑引用003的空库创建、默认数据、完整结构及升降往返 |
 | `test_baseline_migration_dialects.py` | 历史001→002离线DDL编译，以及003必须在线迁移 |
-| `test_channel_migration.py` | 确认Head为004，Channel物理字段与ORM一致，重复升级保留数据，临时库降升往返 |
+| `test_channel_migration.py` | 确认当前Head，Channel物理字段与ORM一致，重复升级保留数据，临时库降升往返 |
 | `test_channel_gateway.py` | Account/Binding/Run Store、消息解析、幂等、SSE文本投影与Agent换代 |
 | `test_channel_commands.py` | 公共命令识别、非企微测试Adapter、队列与独立停止/新建、超时及投递失败 |
 | `test_channel_store_commands.py` | 无Session Binding、命令认领、新建会话原子换绑、来源标题、归属和重复执行保护 |
@@ -150,9 +150,11 @@ tests/
   插 JSON。场景随当前模型 trigger 动态扩展，断言不能写死消息条数或 Token 值。
 - 附件集成测试必须验证 `file_id` 只来自当前原始会话、同页去重键包含
   `tool/file/sheet/offset/limit`，并至少用真实生成的 TXT、DOCX、XLSX 字节覆盖解析器。
-- 配置备份按源Alembic Revision自动复制全部业务表，只排除`chat_sessions`和
-  `chat_session_events`；新增配置表无需维护白名单，但必须在`test_config_backup.py`覆盖新Revision
-  与旧Revision兼容，防止源库尚未升级时误要求未来表。
+- 配置备份按源 Alembic Revision 复制配置表，会话与渠道运行表只保留空结构；`006` 新增的
+  `wecom_applications` 包含凭据及配置，`wecom_user_profiles` 属于可重建缓存，只保留空结构。
+  分类以 `db/configuration_transfer.py` 的 `CONFIGURATION_TABLE_ORDER/SESSION_TABLES/CACHE_TABLES`
+  为准，新增表必须显式归类，不能把未知表自动当配置导出。`test_config_backup.py` 验证新旧
+  Revision、配置主键及 JSON 引用保留、缓存排除；旧源库不得被要求包含尚未迁移的新表。
 - 配置初始化只允许备份/目标Revision完全一致且两侧会话为空；测试必须断言主键原样保留、失败事务
   回滚、Skill只改目标File ID，并确认数据库上传文件不进入平台File Store。
 
@@ -163,3 +165,17 @@ tests/
 `integration/test_logical_references.py`、`test_channel_reference_transactions.py`、`test_reference_migration_databases.py`、`test_configuration_import_databases.py`提供隔离MySQL/PostgreSQL的opt-in回归。环境变量及防误用数据库名见各文件首部。未提供URL必须报告skip，不能当作真实数据库通过；SQLite无法替代记录锁验证。MySQL真实schema通过Alembic创建，不使用metadata.create_all替代部署结构。
 
 集成配置回归：`unit/test_integration_configuration.py`覆盖空库目录、JSON值、首次保存/并发与清空，`integration/test_integration_runtime_api.py`覆盖登录/管理权限、未配置错误及弹窗与OpenAPI示例一致性。`004`只建表不种数据；迁移往返与配置备份/导入均使用隔离库。
+
+
+### 企微应用与成员资料验收（006）
+
+- `unit/test_wecom_store.py`：应用身份不可变、成员 User ID 去重与密文补全、缓存统计和失效、引用删除及迟到写入保护。
+- `unit/test_wecom_migration.py`：隔离库 `005 → 006` 数据保留、受限降级及 DDL 方言编译。方言编译不等于真实 MySQL/PostgreSQL 事务验收。
+- `unit/test_wecom_profiles.py`：Token 缓存／失效、默认关闭、密文明文兼容、负缓存、姓名失效和并发查询。
+- `unit/test_wecom_identity_channel.py`、`integration/test_wecom_identity_events.py`：标题及私聊首轮／群聊每轮身份字段、关闭兼容和真实持久化事件；页面出现姓名不能代替模型上下文验证。
+- `integration/test_wecom_applications_api.py`：管理员与内部鉴权、配置 CRUD、掩码、不变身份、缓存任务 API。
+- `frontend/console/wecom-applications.test.mjs` 与 `channels.test.mjs`：默认关闭和 Settings 保留、应用编辑／缓存操作、迟到请求与结果待确认。
+
+刷新及重置只针对已知用户，不触发全通讯录同步。测试必须区分 Token 获取、ID 转换和姓名读取三个环节；可信 IP／权限错误不可被当作明文 User ID 的证据。真实凭据不写夹具、日志或提交。
+
+发布前非超管真实链路结果单独记录，待当前本地 8000 验收填入；超管真实机器人尚未提供，真实验收待补，不能用隔离分支测试冒充。真实机器人消息由用户触发，不主动向他人或群发送。浏览器只做必要桌面流程，不扩展移动端或 Agent 安装全组合矩阵。迁移和备份破坏性验证使用隔离库，既有本地 SQLite 和文件不清空、不另建 8002 验收环境。

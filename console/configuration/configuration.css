@@ -2763,6 +2763,17 @@ dialog.console-action-dialog::backdrop {
   background: var(--danger-text);
 }
 
+.channel-type-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.channel-type-label img {
+  flex: none;
+  object-fit: contain;
+}
+
 .channel-type-cell {
   white-space: nowrap;
 }
@@ -3447,3 +3458,48 @@ code {
 #configurationHost .channel-table .channel-enabled-cell { width:50px; min-width:50px; padding-left:12px; padding-right:8px; text-align:left; }
 
 #configurationHost .channel-table th:last-child { text-align:right; }
+
+/* Channel applications reuse directory typography, controls and resource layout. */
+.channel-view-actions { display: flex; align-items: center; gap: 8px; }
+#panel-channels .channel-view-switch { display: inline-flex; flex-shrink: 0; }
+#panel-channels .channel-view-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; padding: 0 10px; white-space: nowrap; font-size: 12px; }
+#panel-channels .channel-view-switch :is(svg, img) { width: 14px; height: 14px; flex-shrink: 0; }
+#panel-channels [hidden], #channelAccountModal [hidden] { display: none !important; }
+#panel-channels .channel-create-menu { background: var(--console-surface); }
+#panel-channels .channel-create-menu img { width: 16px; height: 16px; flex-shrink: 0; }
+#configurationHost #panel-channels .wecom-application-list-item { grid-template-columns: minmax(0, 1fr); }
+.wecom-detail-content { max-width: 760px; display: grid; gap: 16px; }
+.wecom-detail-heading, .wecom-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.wecom-detail-content h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.wecom-detail-heading > h3 { min-width: 0; font-size: 16px; overflow-wrap: anywhere; }
+.wecom-detail-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+#panel-channels .wecom-detail-actions .btn { background: var(--console-surface); }
+#panel-channels .wecom-detail-actions .btn.primary { background: var(--accent); }
+.wecom-info-card { padding: 16px; border: 1px solid var(--border); border-radius: var(--config-radius); background: var(--console-surface); }
+.wecom-detail-fields { display: grid; gap: 12px; margin: 16px 0 0; font-size: 12px; }
+.wecom-info-card > .wecom-detail-fields { margin: 0; }
+.wecom-detail-fields > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
+.wecom-detail-fields dt { color: var(--text-dim); }
+.wecom-detail-fields dd { margin: 0; overflow-wrap: anywhere; }
+.wecom-linked-channels { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.wecom-placeholder { color: var(--text-faint, var(--text-dim)); }
+.wecom-cache-region { padding-top: 4px; }
+.wecom-inline-status { width: fit-content; max-width: 100%; box-sizing: border-box; color: var(--accent); background: var(--accent-soft); border-radius: var(--config-radius); padding: 8px 12px; font-size: 12px; line-height: 1.5; margin: 12px 0 0; }
+.wecom-inline-status:empty { display: none; }
+.wecom-inline-status.error { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--console-surface)); }
+.wecom-cache-confirm { position: fixed; inset: auto; box-sizing: border-box; width: min(340px, calc(100vw - 24px)); max-width: none; margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--config-radius); background: var(--console-surface); color: var(--text); box-shadow: 0 6px 20px color-mix(in srgb, var(--text) 12%, transparent); }
+.wecom-cache-confirm::backdrop { background: transparent; }
+.wecom-cache-confirm p { margin: 0 0 12px; font-size: 12px; line-height: 1.6; }
+.wecom-cache-confirm .wecom-detail-actions { justify-content: flex-end; }
+dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
+.wecom-application-modal .modal-body { display: grid; gap: 18px; }
+.wecom-application-modal input[readonly] { background: var(--console-readonly-surface); border-color: transparent; }
+.channel-extension-heading { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; font-size: 13px; font-weight: 500; color: var(--text-dim); }
+.channel-extension-heading::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.channel-profile-toggle-field { align-content: start; }
+.channel-profile-toggle-field .model-enabled-switch { margin-top: 7px; }
+#channelWecomApplicationField { max-width: 100%; }
+#channelWecomApplicationField .field-label-row { justify-content: space-between; }
+#channelWecomApplicationField .btn-link { border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+
+#channelWecomApplicationField .da-select-placeholder { font-style: normal; }

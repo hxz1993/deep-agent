@@ -1,13 +1,13 @@
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
-import { initConsoleSelects } from "./ui-select.js?v=20260913-49";
+import { initConsoleSelects } from "./ui-select.js?v=20260914-wecom-placeholder";
 import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260913-49";
+} from "./configuration.js?v=20260915-release-audit";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260913-49";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260913-49";
-import { initWorkspace } from "./workspace.js?v=20260913-49";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260915-release-audit";
+import { initWorkspace } from "./workspace.js?v=20260915-release-audit";
 import "./time.js?v=20260913-49";
 
 const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
@@ -76,6 +76,7 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
     if (!(await window.mcpAdmin.requestCloseEditor())) return;
   }
   if (next !== "configuration" && window.integrationsAdmin?.deactivate() === false) return;
+  if (next !== "configuration" && window.wecomApplicationsAdmin?.deactivate() === false) return;
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);
   });
@@ -185,10 +186,10 @@ function bindNavigation() {
   if (resourceNav && template) resourceNav.append(template.content);
   const agentTab = resourceNav?.querySelector('[data-tab="agents"]');
   if (agentTab) document.querySelector(".console-rail .console-nav")?.append(agentTab);
-  const channelTab = resourceNav?.querySelector('[data-tab="channels"]');
-  if (channelTab) document.querySelector(".console-rail .console-nav")?.append(channelTab);
   const integrationTab = resourceNav?.querySelector('[data-tab="integrations"]');
   if (integrationTab) document.querySelector(".console-rail .console-nav")?.append(integrationTab);
+  const channelTab = resourceNav?.querySelector('[data-tab="channels"]');
+  if (channelTab) document.querySelector(".console-rail .console-nav")?.append(channelTab);
   document.querySelectorAll(".console-rail [data-tab]").forEach((button) => {
     const label = button.querySelector("span")?.textContent.trim();
     if (label) { button.title = label; button.setAttribute("aria-label", label); }
@@ -264,7 +265,7 @@ function bindThemes() {
   apply(localStorage.getItem("da_theme") || "paper");
 }
 
-function showApiBanner(status) {
+function showApiBanner(status, reason) {
   const banner = document.getElementById("consoleBanner");
   if (!banner) return;
   const messages = {
@@ -272,7 +273,7 @@ function showApiBanner(status) {
     403: "当前用户没有执行该操作的权限。",
     503: "数据库或依赖服务尚未配置，请检查后端环境。",
   };
-  banner.textContent = messages[status] || `请求失败（HTTP ${status}）`;
+  banner.textContent = reason === "read_only_preview" ? "当前为本地 Test 只读预览，不支持删除、修改或执行会话。" : messages[status] || `请求失败（HTTP ${status}）`;
   banner.className = `console-banner status-${status}`;
 }
 
@@ -315,7 +316,7 @@ async function boot() {
   bindThemes();
   bindContextControls();
   loadProductVersion();
-  window.addEventListener("deep-agent-console-api-status", (event) => showApiBanner(event.detail?.status));
+  window.addEventListener("deep-agent-console-api-status", (event) => showApiBanner(event.detail?.status, event.detail?.reason));
   window.addEventListener("deep-agent-diagnostics-denied", event => {
     consoleAllowed = false;
     showAccessLock({ title: event.detail?.status === 401 ? "平台登录状态已失效" : "无诊断查询权限", message: "请重新验证平台管理员身份后再打开诊断中心。", icon: "shield-x" });

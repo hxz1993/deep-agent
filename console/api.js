@@ -133,7 +133,7 @@
     if (reportStatus && [401, 403, 503].includes(response.status)) {
       window.dispatchEvent(
         new CustomEvent("deep-agent-console-api-status", {
-          detail: { status: response.status, url: String(url) },
+          detail: { status: response.status, url: String(url), ...(response.headers?.get?.("X-Deep-Agent-Read-Only") === "1" ? { reason: "read_only_preview" } : {}) },
         }),
       );
     }

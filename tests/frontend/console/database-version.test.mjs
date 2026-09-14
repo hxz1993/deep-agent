@@ -67,20 +67,14 @@ test("顶部连接状态不可展开且版本位于用户详情", () => {
   assert.match(consoleCss, /\.runtime-schema-version\s*\{/);
 });
 
-test("浏览器图标复用标题栏机器人图标", () => {
-  assert.match(
-    indexHtml,
-    /rel="icon" type="image\/svg\+xml" href="\.\/favicon\.svg\?v=20260728-1"/,
-  );
-  assert.match(faviconSvg, /fill="#6366f1"/i);
-  for (const botPath of [
-    "M12 8V4H8",
-    "M2 14h2",
-    "M20 14h2",
-    "M15 13v2",
-    "M9 13v2",
-  ]) {
-    assert.ok(faviconSvg.includes(botPath));
-  }
-  assert.match(faviconSvg, /<rect width="16" height="12" x="4" y="8" rx="2"\/>/);
+test("浏览器图标与标题栏共用 D 形机器人资源", () => {
+  const favicon = indexHtml.match(/rel="icon" type="image\/svg\+xml" href="([^"]+)"/)[1];
+  const brandIcon = indexHtml.match(/id="expandConsoleNavBtn"[^>]*><img src="([^"]+)"/)[1];
+  assert.equal(brandIcon, favicon);
+  assert.match(favicon, /^\.\/favicon\.svg\?v=.+/);
+  assert.match(faviconSvg, /<title id="title">DeepAgent<\/title>/);
+  assert.match(faviconSvg, /fill-rule="evenodd"/);
+  assert.match(faviconSvg, /<circle[^>]+r="27"/);
+  assert.equal((faviconSvg.match(/width="30" height="94" rx="15"/g) || []).length, 2);
+  assert.doesNotMatch(faviconSvg, /<script|<image|href=/);
 });

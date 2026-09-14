@@ -1,0 +1,156 @@
+/* Channel diagnostics uses the same text, surfaces and controls as session diagnostics. */
+#diagnosticsChannelsPage { height:100%; min-width:0; }
+.diagnostic-channels-page .diagnostics-head { grid-template-rows:auto; min-height:54px; margin-bottom:16px; }
+.diagnostic-channels-page .channel-content { display:flex; flex:1; flex-direction:column; min-height:0; overflow:auto; scrollbar-width:thin; }
+.diagnostic-channels-page .channel-top { display:grid; grid-template-columns:minmax(480px,1fr) minmax(250px,.5fr); gap:18px; align-items:stretch; padding-bottom:18px; flex-shrink:0; }
+.diagnostic-channels-page h2 { font-size:14px; line-height:24px; font-weight:600; margin:0 0 8px; color:var(--diag-text); }
+.diagnostic-channels-page img { object-fit:contain; flex-shrink:0; }
+.diagnostic-channels-page .channel-analytics-card { min-width:0; }
+.diagnostic-channels-page .channel-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:0; }
+.diagnostic-channels-page .channel-metric { display:flex; align-items:center; gap:10px; color:var(--diag-muted); font-size:12px; }
+.diagnostic-channels-page .channel-metrics strong { display:block; font-size:20px; line-height:24px; color:var(--diag-text); font-weight:600; font-variant-numeric:tabular-nums; }
+.diagnostic-channels-page .channel-account-card,.diagnostic-channels-page .channel-analytics-card,.diagnostic-channels-page .channel-metric,.diagnostic-channels-page .channel-session-inspector { border:1px solid var(--diag-border); border-radius:8px; background:var(--diag-surface); padding:16px; min-width:0; box-sizing:border-box; }
+.diagnostic-channels-page .channel-account-heading { display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:10px; }
+.diagnostic-channels-page .channel-account-heading strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.diagnostic-channels-page .channel-enabled { margin-left:auto; font-size:12px; flex-shrink:0; color:var(--diag-muted); }
+.diagnostic-channels-page dl { margin:0; font-size:12px; line-height:20px; display:grid; gap:4px 12px; }
+.diagnostic-channels-page dt { color:var(--diag-muted); }
+.diagnostic-channels-page dd { margin:0; color:var(--diag-text); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.diagnostic-channels-page .channel-app-heading > svg { color:var(--diag-accent); }
+.diagnostic-channels-page .channel-app-heading strong { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.diagnostic-channels-page .channel-active-users { min-height:0; flex:1; overflow:auto; }
+.diagnostic-channels-page .channel-active-user { display:grid; grid-template-columns:16px minmax(0,1fr) 32px; align-items:center; gap:8px; width:100%; min-height:28px; font-size:12px; text-align:left; }
+
+.diagnostic-channels-page .channel-ranking-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.diagnostic-channels-page .channel-active-user .diagnostic-bar-track { height:6px; border-radius:3px; }
+.diagnostic-channels-page .channel-active-user .diagnostic-bar-track i { display:block; height:100%; }
+.diagnostic-channels-page .channel-active-user .diagnostic-user-count { text-align:right; font-size:12px; color:var(--diag-text); }
+.diagnostic-channels-page .diagnostic-list-toolbar { border:0; padding:0 0 12px; flex-shrink:0; }
+.diagnostic-channels-page .diagnostic-list-search { flex:0 1 340px; }
+.diagnostic-channels-page .channel-workbench { display:grid; grid-template-columns:minmax(0,1fr) 0px var(--channel-inspector-width,420px); gap:0; flex:1; min-height:360px; }
+.diagnostic-channels-page .channel-table-area { display:flex; flex-direction:column; min-height:0; min-width:0; }
+.diagnostic-channels-page .channel-table-scroll { min-height:300px; flex:1; overflow:auto; scrollbar-width:thin; }
+.diagnostic-channels-page .channel-identity { display:flex; gap:8px; align-items:center; min-width:0; }
+.diagnostic-channels-page .channel-avatar { display:grid; place-items:center; width:24px; height:24px; flex:0 0 24px; border-radius:50%; background:var(--diag-inset); color:var(--diag-muted); }
+.diagnostic-channels-page .channel-avatar.group { border-radius:8px; }
+.diagnostic-channels-page .selected .channel-avatar { color:var(--diag-accent); background:color-mix(in srgb,var(--diag-accent) 12%,transparent); }
+.diagnostic-channels-page .channel-avatar svg { width:14px; height:14px; }
+.diagnostic-channels-page .channel-identity-copy { min-width:0; flex:1; }
+.diagnostic-channels-page .channel-peer-name { gap:5px; color:var(--text-faint); }
+.diagnostic-channels-page .channel-peer-name strong { font-weight:500; max-width:40%; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.diagnostic-channels-page .channel-peer-name span:last-child { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.diagnostic-channels-page .channel-open:hover,.diagnostic-channels-page .channel-copy:hover { color:var(--diag-accent); }
+.diagnostic-channels-page .channel-session-inspector { min-width:0; min-height:0; display:flex; flex-direction:column; }
+.diagnostic-channels-page .channel-inspector-heading { display:flex; align-items:center; gap:10px; margin-bottom:10px; padding:0 0 10px; border-bottom:1px solid var(--diag-border); }
+.diagnostic-channels-page .channel-inspector-heading strong { font-size:13px; line-height:20px; font-weight:600; overflow-wrap:anywhere; }
+.diagnostic-channels-page .channel-inspector-identity > span { color:var(--diag-muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.diagnostic-channels-page .channel-session-list { flex:1; min-height:0; overflow:auto; scrollbar-width:thin; }
+.diagnostic-channels-page .channel-session-item { padding:6px 0 10px; }
+.diagnostic-channels-page .channel-session-meta { display:flex; gap:8px; align-items:center; color:var(--text-faint); font-size:12px; margin-top:3px; }
+.diagnostic-channels-page .channel-session-meta code { color:inherit; }
+.diagnostic-channels-page .channel-question-count { display:flex; align-items:center; gap:3px; }
+.diagnostic-channels-page .channel-question-count svg { width:12px; height:12px; }
+.diagnostic-channels-page .channel-session-meta time { margin-left:auto; white-space:nowrap; font-size:12px; }
+.diagnostic-channels-page .channel-latest-label { padding:1px 5px; font-size:11px; line-height:16px; color:var(--diag-accent); background:var(--diag-accent-soft); border-radius:8px; }
+.diagnostic-channels-page .channel-last-question { display:block; width:100%; text-align:left; font-size:13px; font-weight:400; line-height:20px; color:var(--diag-text); padding:0; overflow-wrap:anywhere; }
+.diagnostic-channels-page .channel-last-question:hover { color:var(--diag-accent); }
+.diagnostic-channels-page .channel-history-more { margin-top:8px; }
+.diagnostic-channels-page .channel-read-status { position:absolute; bottom:5px; font-size:12px; color:var(--diag-muted); }
+.diagnostic-channels-page .diagnostics-empty { font-size:13px; padding:30px 12px; color:var(--diag-muted); }
+.diagnostic-channels-page .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+@container (max-width:1080px) {
+  .diagnostic-channels-page .channel-top { grid-template-columns:minmax(0,1fr) minmax(240px,.48fr); gap:12px; }
+  .diagnostic-channels-page .channel-metrics { gap:14px; }
+}
+@container (max-width:760px) {
+  .diagnostic-channels-page .channel-top { grid-template-columns:minmax(0,1fr); }
+  .diagnostic-channels-page .channel-active-users { grid-column:1; margin-top:0; }
+  .diagnostic-channels-page .channel-workbench { display:flex; flex-direction:column; }
+  .diagnostic-channels-page .channel-resizer { display:none; }
+  .diagnostic-channels-page .channel-session-inspector { min-height:240px; }
+}
+.diagnostic-channels-page .diagnostic-list-footer { justify-content:flex-end; }
+
+.diagnostic-channel-entry { gap:6px; }
+.diagnostic-channels-page .channel-page-title { display:flex; align-items:center; gap:16px; }
+.diagnostic-channels-page .channel-page-title h1 { margin:0; }
+.diagnostic-channels-page .channel-page-title .diagnostics-button { padding-left:0; }
+.diagnostic-channels-page .diagnostic-list-toolbar { justify-content:space-between; gap:12px; }
+.diagnostic-channels-page .channel-peer-table { --diagnostic-columns:minmax(180px,1fr) 66px 56px 100px 74px; min-width:550px; }
+.diagnostic-channels-page .channel-peer-table [data-channel-peer] { cursor:pointer; }
+.diagnostic-channels-page .channel-peer-table .selected { background:var(--diag-accent-soft); }
+.diagnostic-channels-page .channel-peer-table [role="cell"] { min-width:0; }
+.diagnostic-channels-page .channel-peer-table time { font-size:12px; color:var(--diag-muted); white-space:nowrap; }
+.diagnostic-channels-page .channel-open { display:inline-flex; align-items:center; justify-content:center; padding:1px; color:var(--text-faint); border-radius:4px; }
+.diagnostic-channels-page .channel-open svg { width:14px; height:14px; }
+.diagnostic-channels-page .channel-session-meta .channel-open { margin-left:2px; }
+.diagnostic-channels-page .channel-resizer { position:relative; width:10px; margin-left:-5px; z-index:2; cursor:col-resize; touch-action:none; outline:none; }
+.diagnostic-channels-page .channel-resizer::after { content:""; position:absolute; top:0; bottom:0; left:4px; width:1px; background:transparent; }
+.diagnostic-channels-page .channel-resizer:hover::after,.diagnostic-channels-page .channel-resizer:focus-visible::after { width:2px; background:var(--diag-accent); }
+
+.diagnostic-channels-page .channel-page-title { height:20px; }
+.diagnostic-channels-page .channel-page-title .diagnostics-button { height:20px; min-height:20px; line-height:20px; padding-top:0; padding-bottom:0; }
+.diagnostic-channels-page .channel-account-select { width:200px; }
+.diagnostic-channels-page .channel-account-select > img { position:absolute; left:12px; top:7px; width:18px; height:18px; z-index:1; pointer-events:none; }
+.diagnostic-channels-page .channel-account-select .console-select-option { display:flex; align-items:center; gap:8px; }
+.diagnostic-channels-page .channel-account-select .console-select-option img { width:18px; height:18px; }
+.diagnostic-channels-page .channel-account-card { display:grid; grid-template-columns:1fr 1fr; height:144px; min-height:144px; padding:12px 16px; box-sizing:border-box; gap:24px; }
+.diagnostic-channels-page .channel-account-column,.diagnostic-channels-page .channel-application-column { min-width:0; display:flex; flex-direction:column; justify-content:center; }
+.diagnostic-channels-page .channel-application-column { border-left:1px solid var(--diag-border); padding-left:24px; }
+.diagnostic-channels-page .channel-account-heading,.diagnostic-channels-page .channel-app-heading { height:24px; margin:0 0 12px; display:flex; align-items:center; gap:8px; font-size:13px; }
+.diagnostic-channels-page .channel-account-fields,.diagnostic-channels-page .channel-app-fields { grid-template-columns:84px minmax(0,1fr); gap:6px 12px; }
+
+.diagnostic-channels-page .channel-analytics-card { height:228px; display:flex; flex-direction:column; }
+.diagnostic-channels-page .channel-active-users h2 { font-size:14px; line-height:24px; margin:0 0 12px; font-weight:600; color:var(--diag-text); }
+.diagnostic-channels-page .channel-table-scroll { border:1px solid var(--diag-border); border-radius:8px; background:var(--diag-surface); }
+.diagnostic-channels-page .channel-session-meta button { color:inherit; }
+
+.diagnostic-channels-page .channel-summary-stack { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.diagnostic-channels-page .channel-metric { height:72px; padding:10px 12px; }
+.diagnostic-channels-page .channel-inspector-identity { display:flex; flex:1; flex-direction:column; gap:2px; min-width:0; }
+.diagnostic-channels-page .channel-inspector-heading .channel-avatar { width:30px; height:30px; flex-basis:30px; color:var(--diag-accent); background:var(--diag-accent-soft); }
+.diagnostic-channels-page .channel-inspector-heading .channel-avatar svg { width:18px; height:18px; }
+.diagnostic-channels-page .channel-history-heading { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.diagnostic-channels-page .channel-history-heading h2 { margin:0; font-size:13px; font-weight:500; }
+.diagnostic-channels-page .channel-history-heading > span { padding:1px 6px; border-radius:4px; background:var(--diag-inset); color:var(--diag-muted); font-size:12px; }
+.diagnostic-channels-page .channel-session-inspector,.diagnostic-channels-page .channel-resizer { margin-bottom:0; }
+.diagnostic-channels-page .diagnostic-list-footer { height:40px; box-sizing:border-box; flex-shrink:0; }
+
+.diagnostic-channels-page .channel-metric-copy { min-width:0; }
+.diagnostic-channels-page .channel-metric-copy small { display:block; font-size:12px; color:var(--diag-secondary); margin-bottom:3px; }
+.diagnostic-channels-page .channel-metric .diagnostic-stat-icon { width:32px; height:32px; flex-basis:32px; border-radius:7px; }
+.diagnostic-channels-page .channel-metric .diagnostic-stat-icon svg { width:18px; height:18px; }
+.diagnostic-channels-page .channel-enabled { border-radius:10px; padding:1px 7px; line-height:18px; background:var(--diag-inset); }
+.diagnostic-channels-page .channel-enabled.enabled { color:var(--diag-green); background:color-mix(in srgb,var(--diag-green) 11%,var(--diag-surface)); }
+.diagnostic-channels-page .channel-table-scroll { border-right:0; border-radius:8px 0 0 8px; }
+.diagnostic-channels-page .channel-session-inspector { border-radius:0 8px 8px 0; padding:12px 16px; }
+.diagnostic-channels-page .channel-row-open { gap:4px; font-size:12px; white-space:nowrap; color:var(--diag-accent); }
+.diagnostic-channels-page .channel-session-meta .channel-copy { margin-right:4px; }
+
+.diagnostic-channels-page .channel-active-user { border-bottom:1px solid var(--diag-border); padding:4px 2px; }
+.diagnostic-channels-page .channel-active-user:last-child { border-bottom:0; }
+.diagnostic-channels-page .channel-peer-table [role="cell"]:last-child { display:flex; justify-content:flex-end; }
+.diagnostic-channels-page .channel-peer-table .diagnostic-session-row { padding-right:6px; }
+.diagnostic-channels-page .channel-peer-picker { position:relative; width:300px; max-width:55%; flex-shrink:0; }
+.diagnostic-channels-page .channel-peer-picker summary { display:flex; align-items:center; gap:8px; height:32px; padding:0 10px; border:1px solid var(--diag-border-strong); border-radius:8px; background:var(--diag-surface); cursor:pointer; font-size:13px; list-style:none; }
+.diagnostic-channels-page .channel-peer-picker summary::-webkit-details-marker { display:none; }
+.diagnostic-channels-page .channel-peer-picker summary span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.diagnostic-channels-page .channel-peer-picker summary svg { width:14px; height:14px; flex-shrink:0; color:var(--diag-muted); }
+.diagnostic-channels-page .channel-peer-popover { position:absolute; z-index:55; top:38px; right:0; width:340px; max-width:80vw; padding:8px; border:1px solid var(--diag-border); border-radius:8px; background:var(--diag-surface); box-shadow:var(--diag-popover-shadow); }
+.diagnostic-channels-page .channel-peer-popover input { width:100%; height:32px; font-size:13px; padding:0 8px; border:1px solid var(--diag-border); border-radius:6px; margin-bottom:6px; }
+.diagnostic-channels-page .channel-peer-popover [role="listbox"] { max-height:260px; overflow:auto; }
+.diagnostic-channels-page .channel-peer-popover button { display:flex; flex-direction:column; width:100%; text-align:left; padding:7px 8px; border-radius:4px; font-size:13px; }
+.diagnostic-channels-page .channel-peer-popover button span,.diagnostic-channels-page .channel-peer-popover small { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.diagnostic-channels-page .channel-peer-popover small { color:var(--diag-muted); font-size:12px; margin-top:2px; }
+.diagnostic-channels-page .channel-peer-popover button:hover,.diagnostic-channels-page .channel-peer-popover [aria-selected="true"] { background:var(--diag-accent-soft); color:var(--diag-accent); }
+.diagnostic-channels-page .channel-peer-popover p { color:var(--diag-muted); font-size:12px; padding:8px; margin:0; }
+
+.diagnostic-channels-page .channel-peer-filters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; min-width:0; flex:0 1 610px; }
+.diagnostic-channels-page .channel-peer-filters .channel-peer-picker { width:100%; min-width:0; max-width:100%; }
+.diagnostic-channels-page .channel-session-meta > svg { width:12px; height:12px; flex-shrink:0; }
+
+.diagnostic-channels-page .channel-peer-filters [data-picker-kind="user"] { grid-column:2; grid-row:1; }
+.diagnostic-channels-page .channel-peer-filters [data-picker-kind="group"] { grid-column:1; grid-row:1; }
+
+.diagnostic-channels-page .channel-active-user[aria-pressed="true"] { background:var(--diag-accent-soft); border-radius:5px; }
+.diagnostic-channels-page .channel-active-user:focus-visible { outline:2px solid var(--diag-accent); outline-offset:-2px; }

@@ -600,12 +600,17 @@ function init() {
 
   // 聊天标题点击编辑
   el.chatTitle.addEventListener("click", () => {
-    if (state.streaming || !state.sessionId) return;
+    if (state.streaming || !state.sessionId || el.chatTitle.querySelector("input")) return;
+    const sessionId = state.sessionId;
+    const agentId = state.agentId;
     const currentTitle = el.chatTitle.textContent;
+    const titleWidth = el.chatTitle.getBoundingClientRect().width;
     const input = document.createElement("input");
     input.type = "text";
     input.className = "chat-title-input";
-    input.value = currentTitle === "新对话" || currentTitle === "对话" ? "" : currentTitle;
+    input.value = currentTitle;
+    input.setAttribute("aria-label", "会话标题");
+    input.style.width = `${Math.max(180, titleWidth)}px`;
     input.maxLength = 40;
     input.placeholder = "输入会话名称…";
 
@@ -614,8 +619,13 @@ function init() {
     input.focus();
     input.select();
 
+    let finished = false;
     const finishEdit = async (save) => {
-      const newTitle = save ? input.value.trim() : currentTitle;
+      if (finished) return;
+      finished = true;
+      if (!el.chatTitle.contains(input) || state.sessionId !== sessionId || state.agentId !== agentId) return;
+      const newTitle = input.value.trim();
+      save = save && Boolean(newTitle);
       el.chatTitle.removeChild(input);
       if (save && newTitle && newTitle !== currentTitle) {
         el.chatTitle.textContent = newTitle;
@@ -630,8 +640,10 @@ function init() {
       }
     };
 
+    input.addEventListener("click", (event) => event.stopPropagation());
     input.addEventListener("blur", () => finishEdit(true));
     input.addEventListener("keydown", (e) => {
+      if (e.isComposing) return;
       if (e.key === "Enter") {
         e.preventDefault();
         finishEdit(true);

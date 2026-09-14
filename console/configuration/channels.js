@@ -78,7 +78,7 @@ async function prepareChannelApplicationEditor(settings = {}) {
     const items = await apiFetch("/api/v1/wecom-applications");
     if (generation !== channelAdminState.applicationLoadGeneration) return;
     channelAdminState.applications = items;
-    select.innerHTML = `<option value="" hidden disabled ${!selectedId ? "selected" : ""}>选择企微应用</option>${selectedId && !items.some(item => item.id === selectedId) ? `<option value="${escapeHtml(selectedId)}" hidden disabled selected>应用已不可用</option>` : ""}${items.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === selectedId ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}`;
+    select.innerHTML = `<option value="" hidden disabled ${!selectedId ? "selected" : ""}>请选择</option>${selectedId && !items.some(item => item.id === selectedId) ? `<option value="${escapeHtml(selectedId)}" hidden disabled selected>应用已不可用</option>` : ""}${items.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === selectedId ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}`;
     select.disabled = !items.length;
     hint.textContent = !items.length ? "暂无企微应用，请先在渠道 → 企微应用中新建。" : "";
   } catch (error) {

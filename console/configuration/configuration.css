@@ -3501,3 +3501,5 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 #channelWecomApplicationField { max-width: 100%; }
 #channelWecomApplicationField .field-label-row { justify-content: space-between; }
 #channelWecomApplicationField .btn-link { border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+
+#channelWecomApplicationField .da-select-placeholder { font-style: normal; }

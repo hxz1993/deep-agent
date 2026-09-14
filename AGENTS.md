@@ -33,7 +33,7 @@ Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包�
 
 身份服务位于 `services/wecom_client.py`、`services/wecom_profiles.py`，由 API 进程统一持有 HTTP／Token／任务；Gateway 使用内部鉴权解析接口，不能自行选择应用。密文转换及明文回退以官方结果确认，同应用合并到一份 User ID 资料；原始 `sender_id/peer_id` 不变。资料有效期一周，缓存失效保留姓名与映射，迟到结果受应用 revision 和渠道配置保护。开启后私聊标题为 `User｜姓名(原始 ID)`，来源上下文仅额外增加 `userid/name`；群标题为 `Group｜chat_id`，平台归属／权限不变，私聊首轮、群聊每轮规则不变。
 
-`wecom_applications` 是配置备份的一部分（含敏感凭据），`wecom_user_profiles` 是缓存，仅导出空结构；Token、任务和负缓存不备份，Agent 整包也不包含这些数据。表分类与逻辑顺序由 `db/configuration_transfer.py` 显式维护。`006` 降级遇到应用、成员或渠道企微设置时拒绝，不自动删除。发布验收必须区分非超管真实链路与超管模拟分支；超管真实机器人待提供，真实结果由本次验收记录补充。
+`wecom_applications` 是配置备份的一部分（含敏感凭据），`wecom_user_profiles` 是缓存，仅导出空结构；Token、任务和负缓存不备份，Agent 整包也不包含这些数据。表分类与逻辑顺序由 `db/configuration_transfer.py` 显式维护。`006` 降级遇到应用、成员或渠道企微设置时拒绝，不自动删除。2026-09-14 已核验本地超管机器人“先胜小D”：明文入口与普通机器人共用一条成员映射，真实标题及首轮来源上下文正确；另外只读验证了无缓存时的官方明文回退。无需超管配置，按映射或接口明确结果解析，不按前缀猜测。
 
 
 ### 本地 Test 联调固定启动命令

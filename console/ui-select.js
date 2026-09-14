@@ -133,7 +133,9 @@ export function enhanceSelect(select) {
     for (const [option, restore] of optionRestores) if (!current.includes(option)) { restore(); optionRestores.delete(option); }
     current.forEach(option => { if (!optionRestores.has(option)) optionRestores.set(option, observeSelectProperty(option, "selected", refresh)); });
     text.textContent = current.filter(option => option.selected).map(option => option.label).join("、") || "—";
-    text.classList.toggle("da-select-placeholder", select.selectedIndex < 0);
+    const selectedOption = current.find(option => option.selected);
+    text.classList.toggle("da-select-placeholder", select.selectedIndex < 0
+      || Boolean(selectedOption && selectedOption.value === "" && selectedOption.hidden && selectedOption.disabled));
     trigger.disabled = select.disabled || select.matches(":disabled");
     trigger.title = select.title || text.textContent;
     trigger.setAttribute("aria-required", String(select.required));

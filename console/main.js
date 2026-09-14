@@ -1,10 +1,10 @@
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
-import { initConsoleSelects } from "./ui-select.js?v=20260913-49";
+import { initConsoleSelects } from "./ui-select.js?v=20260914-wecom-placeholder";
 import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260914-wecom-review6";
+} from "./configuration.js?v=20260914-wecom-placeholder";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260913-49";
 import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260913-49";
 import { initWorkspace } from "./workspace.js?v=20260914-title-edit";

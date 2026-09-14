@@ -36,9 +36,10 @@ def normalize_peer_metadata(
 
 
 def channel_session_title(peer_type: str, peer_id: str, metadata: Mapping[str, Any] | None) -> str:
-    prefix = "Group" if peer_type in {"group", "chatid"} else "User"
+    if peer_type in {"group", "chatid"}:
+        return f"Group｜{peer_id}"
     name = normalize_peer_metadata(peer_type, peer_id, metadata).get("display_name")
-    return f"{prefix}｜{name}（{peer_id}）" if name else f"{prefix}｜{peer_id}"
+    return f"User｜{name}({peer_id})" if name else f"User｜{peer_id}"
 
 
 def normalize_channel_origin(origin: Mapping[str, Any]) -> dict[str, Any]:

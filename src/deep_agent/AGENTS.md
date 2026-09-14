@@ -144,7 +144,7 @@ Jenkins网关启动版`Jenkinsfile.gateway`可由`combined_runtime.py`在同一�
 平台可信身份鉴权。企微Peer类型沿用原生`single/group`，ID分别取`from.userid/chatid`；Binding的
 `peer_metadata` JSON保存来源会话的`user_id/chat_id/display_name`白名单，缺失名称不造值。
 私聊身份直接从Binding读取；群发送者不作为群身份。仅Session改绑或来源信息确实变化时更新Binding。
-默认标题为`User｜User ID`或`Group｜Chat ID`，有实际名称时为`User｜名称（User ID）`等，保留定位ID。
+私聊标题为 `User｜名称(原始 ID)`，无姓名时为 `User｜原始 ID`；群标题固定为 `Group｜Chat ID`，不附加群名。括号使用半角，保留原始定位 ID。
 Run只保留created_at/finished_at，接收即认领再排队；调用前必须落running以防未收到SSE Run ID时误重跑。
 处理终态与投递状态分别更新，不能因最后回复失败重跑Agent或`/new`。不按SSE片段/心跳写台账。
 

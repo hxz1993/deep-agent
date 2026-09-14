@@ -31,7 +31,7 @@ Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包�
 
 企微应用与成员资料见[使用指南](docs/guides/wecom-applications.md)及[渠道接入](docs/guides/wecom-channel.md)。本次 v0.10.1 功能增量 `006` 新增企业应用配置和可重建成员缓存，保留已发布 `005`。渠道页面在标题同行切换账户与应用；应用采用左侧列表、右侧应用标题及合并企业信息的配置卡与精简缓存统计，成员表只由后端维护。渠道 `settings.wecom.user_details_enabled` 默认为关闭，开启必须引用有效应用；查询开关独立于渠道启停，关闭时不访问资料接口。
 
-身份服务位于 `services/wecom_client.py`、`services/wecom_profiles.py`，由 API 进程统一持有 HTTP／Token／任务；Gateway 使用内部鉴权解析接口，不能自行选择应用。密文转换及明文回退以官方结果确认，同应用合并到一份 User ID 资料；原始 `sender_id/peer_id` 不变。资料有效期一周，缓存失效保留姓名与映射，迟到结果受应用 revision 和渠道配置保护。开启后私聊标题为 `user/姓名/原始 ID`，来源上下文仅额外增加 `userid/name`；群标题与平台归属／权限不变，私聊首轮、群聊每轮规则不变。
+身份服务位于 `services/wecom_client.py`、`services/wecom_profiles.py`，由 API 进程统一持有 HTTP／Token／任务；Gateway 使用内部鉴权解析接口，不能自行选择应用。密文转换及明文回退以官方结果确认，同应用合并到一份 User ID 资料；原始 `sender_id/peer_id` 不变。资料有效期一周，缓存失效保留姓名与映射，迟到结果受应用 revision 和渠道配置保护。开启后私聊标题为 `User｜姓名(原始 ID)`，来源上下文仅额外增加 `userid/name`；群标题为 `Group｜chat_id`，平台归属／权限不变，私聊首轮、群聊每轮规则不变。
 
 `wecom_applications` 是配置备份的一部分（含敏感凭据），`wecom_user_profiles` 是缓存，仅导出空结构；Token、任务和负缓存不备份，Agent 整包也不包含这些数据。表分类与逻辑顺序由 `db/configuration_transfer.py` 显式维护。`006` 降级遇到应用、成员或渠道企微设置时拒绝，不自动删除。发布验收必须区分非超管真实链路与超管模拟分支；超管真实机器人待提供，真实结果由本次验收记录补充。
 

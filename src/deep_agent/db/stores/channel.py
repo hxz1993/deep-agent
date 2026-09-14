@@ -252,7 +252,7 @@ class ChannelStore(SessionBoundMixin):
         if application_id and binding.peer_type in {"single", "userid"}:
             metadata = binding.peer_metadata or {}
             name = metadata.get("wecom_name") if metadata.get("wecom_application_id") == application_id else None
-            return f"user/{name}/{binding.peer_id}" if name else f"user/{binding.peer_id}"
+            return channel_session_title(binding.peer_type, binding.peer_id, {"display_name": name})
         return channel_session_title(binding.peer_type, binding.peer_id, binding.peer_metadata)
 
     async def refresh_wecom_titles(

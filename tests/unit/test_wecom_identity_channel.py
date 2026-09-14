@@ -43,16 +43,16 @@ class WecomIdentityChannelTests(unittest.IsolatedAsyncioTestCase):
         await self.enable()
         single = await self.bind()
         group = await self.bind(peer_id="group-id", peer_type="group")
-        self.assertEqual(await self.title(single.session.session_id), "user/open-member")
+        self.assertEqual(await self.title(single.session.session_id), "User｜open-member")
         self.assertEqual(await self.enrich(session_id=single.session.session_id), 1)
-        self.assertEqual(await self.title(single.session.session_id), "user/成员姓名/open-member")
-        self.assertEqual(await self.title(group.session.session_id), "Group｜回调名称（group-id）")
+        self.assertEqual(await self.title(single.session.session_id), "User｜成员姓名(open-member)")
+        self.assertEqual(await self.title(group.session.session_id), "Group｜group-id")
         refreshed = await self.bind()
         self.assertEqual(refreshed.binding.peer_metadata["display_name"], "回调名称")
         self.assertEqual(refreshed.binding.peer_metadata["wecom_name"], "成员姓名")
         await self.enable(enabled=False)
         await self.store.refresh_wecom_titles(self.account.id)
-        self.assertEqual(await self.title(single.session.session_id), "User｜回调名称（open-member）")
+        self.assertEqual(await self.title(single.session.session_id), "User｜回调名称(open-member)")
         self.assertEqual(await self.enrich(), 0)
         self.assertNotIn("wecom_name", (await self.bind()).binding.peer_metadata)
 
@@ -81,8 +81,8 @@ class WecomIdentityChannelTests(unittest.IsolatedAsyncioTestCase):
         changed = await self.store.refresh_wecom_titles(self.account.id, application_id="application",
             userid="member", name="更名后", revision=1)
         self.assertEqual(changed, 1)
-        self.assertEqual(await self.title(matched.session.session_id), "user/更名后/open-member")
-        self.assertEqual(await self.title(other.session.session_id), "user/another-member")
+        self.assertEqual(await self.title(matched.session.session_id), "User｜更名后(open-member)")
+        self.assertEqual(await self.title(other.session.session_id), "User｜another-member")
 
     async def test_new_application_partial_identity_never_reuses_old_application_name(self):
         await self.enable()
@@ -91,7 +91,7 @@ class WecomIdentityChannelTests(unittest.IsolatedAsyncioTestCase):
         await self.enable(application_id="different-application")
         await self.store.refresh_wecom_titles(self.account.id, application_id="different-application",
             sender_id="open-member", userid="AnotherMember", name=None, revision=1)
-        self.assertEqual(await self.title(bound.session.session_id), "user/open-member")
+        self.assertEqual(await self.title(bound.session.session_id), "User｜open-member")
         self.assertNotIn("wecom_name", (await self.bind()).binding.peer_metadata)
 
     async def _send(self, *, sender="open-member", group=False, lookup=None, persisted=False):

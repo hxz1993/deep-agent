@@ -14,6 +14,8 @@ const FIELD_LABELS = {
   instance_id: "实例 ID", process_id: "进程 ID", session_id: "会话 ID", run_id: "执行 ID", agent_id: "Agent ID",
   agent_name: "Agent 名称", conversation_id: "对话 ID", channel_run_id: "渠道执行 ID", account_id: "渠道账号 ID", wecom_application_id: "企微应用 ID",
   tool_call_id: "工具调用 ID", tool: "工具", model_id: "模型 ID", model_name: "模型", provider_name: "供应商",
+  profile_service: "用户资料服务", discovery_type: "服务发现方式", discovery_namespace: "发现命名空间",
+  auth_context: "认证头类型（不含值）", target_origin: "请求目标", requested_count: "请求用户数", resolved_count: "解析用户数",
   phase: "阶段", status: "状态", result_status: "执行结果", error_type: "错误类型", error_code: "错误码", command: "命令", mode: "模式",
   finish_reason: "结束原因", compaction: "压缩", reason: "原因", duration_ms: "耗时（ms）", request_index: "请求轮次",
   attempt: "尝试次数", queue_depth: "队列长度", input_tokens: "输入 Token", output_tokens: "输出 Token",

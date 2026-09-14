@@ -54,6 +54,72 @@ class Response:
 
 
 class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lookup_logs_http_failure_without_credentials_or_user_data(self):
+        response = Response(status=404, payload={"message": "secret-upstream-body"})
+        with patch("deep_agent.security.diagnostic_users.AioHttpCli.post", AsyncMock(return_value=response)), patch(
+            "deep_agent.security.diagnostic_users.log_event"
+        ) as log:
+            with self.assertRaises(DiagnosticUserUnavailableError):
+                await PlatformDiagnosticUserFetcher(space_service="https://platform.example/private-config-path")(
+                    ("sensitive-user-id",), {"authorization": "Bearer secret-token"})
+        event, = log.call_args.args
+        facts = log.call_args.kwargs
+        self.assertEqual(event, "diagnostic_users_failed")
+        self.assertEqual((facts["phase"], facts["reason"], facts["http_status"]), ("request", "http_error", 404))
+        self.assertEqual(facts["target_origin"], "https://platform.example")
+        from deep_agent.diagnostics.schema import safe_fields
+        saved = safe_fields(facts)
+        self.assertEqual(saved["target_origin"], facts["target_origin"])
+        self.assertEqual(saved["profile_service"], "configured_url")
+        for secret in ("sensitive-user-id", "secret-token", "secret-upstream-body", "private-config-path"):
+            self.assertNotIn(secret, json.dumps(facts))
+        self.assertTrue(response.released)
+
+    async def test_discovery_failure_log_preserves_cause_type_without_exception_text(self):
+        discovery = Mock(closed=False)
+        discovery.get_url = AsyncMock(side_effect=LookupError("secret service payload"))
+        with patch("deep_agent.security.diagnostic_users.ServiceDiscovery.instantiate", return_value=discovery), patch(
+            "deep_agent.security.diagnostic_users.log_event"
+        ) as log:
+            with self.assertRaises(DiagnosticUserUnavailableError):
+                await PlatformDiagnosticUserFetcher(space_service="space-server")(("owner",), {})
+        facts = log.call_args.kwargs
+        self.assertEqual((facts["phase"], facts["reason"], facts["error_type"]),
+                         ("discovery", "service_discovery_failed", "LookupError"))
+        self.assertEqual(facts["profile_service"], "space-server")
+        self.assertNotIn("secret", json.dumps(facts))
+
+    async def test_business_failure_and_success_logs_are_distinct(self):
+        for payload, expected in (({"status": False, "code": 987, "message": "private body"}, "failed"),
+                                  ({"status": True, "data": [{"userId": "owner", "userName": "Private Name"}]}, "completed")):
+            with self.subTest(outcome=expected), patch("deep_agent.security.diagnostic_users.AioHttpCli.post",
+                AsyncMock(return_value=Response(payload=payload))), patch("deep_agent.security.diagnostic_users.log_event") as log:
+                try:
+                    await PlatformDiagnosticUserFetcher(space_service="https://platform.example")(("owner",), {})
+                except DiagnosticUserUnavailableError:
+                    self.assertEqual(expected, "failed")
+                self.assertEqual(log.call_args.args, (f"diagnostic_users_{expected}",))
+                facts = log.call_args.kwargs
+                if expected == "failed":
+                    self.assertEqual((facts["reason"], facts["error_code"]), ("business_failure", "987"))
+                else:
+                    self.assertEqual(facts["resolved_count"], 1)
+                self.assertNotIn("Private Name", json.dumps(facts))
+                self.assertNotIn("private body", json.dumps(facts))
+
+    async def test_overall_deadline_logs_the_interrupted_stage(self):
+        fetcher = PlatformDiagnosticUserFetcher(space_service="space-server")
+        async def delayed_discovery():
+            await asyncio.sleep(1)
+        with patch.object(fetcher, "_resolve_url", delayed_discovery), patch(
+            "deep_agent.security.diagnostic_users.log_event"
+        ) as log:
+            with self.assertRaises(TimeoutError):
+                async with asyncio.timeout(0.01):
+                    await fetcher(("owner",), {})
+        self.assertEqual(log.call_args.kwargs["phase"], "discovery")
+        self.assertEqual(log.call_args.kwargs["reason"], "deadline_or_cancelled")
+
     async def test_numeric_legacy_ids_and_username_priority(self):
         response = Response(payload={"status": True, "data": [
             {"userId": 0, "userName": "zero"},

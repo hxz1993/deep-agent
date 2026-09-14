@@ -36,6 +36,9 @@ EVENTS = {
     "channel_preview_failed": "渠道进度预览投递失败", "channel_delivery_sent": "渠道最终回复投递成功",
     "channel_delivery_failed": "渠道最终回复投递失败", "channel_adapter_started": "渠道连接已启动",
     "channel_adapter_stopped": "渠道连接已停止", "channel_adapter_start_failed": "渠道连接启动失败",
+    "diagnostic_users_completed": "平台用户名批量查询完成",
+    "diagnostic_users_failed": "平台用户名批量查询失败",
+    "diagnostic_users_fallback": "平台用户名查询降级为 ID",
     "wecom_profile_failed": "企微成员资料查询失败",
     "channel_identity_unavailable": "渠道成员资料暂不可用，继续对话",
     "channel_reconcile_failed": "渠道配置同步失败",
@@ -57,9 +60,11 @@ for prefix, label in (("model_request", "模型请求"), ("agent_tool", "工具�
 IDENTIFIER_FIELDS = frozenset({
     "request_id", "session_id", "run_id", "agent_id", "conversation_id", "channel_run_id", "account_id", "wecom_application_id",
     "tool_call_id", "tool", "model_id", "model_name", "provider_name", "phase", "status",
+    "profile_service", "discovery_type", "discovery_namespace", "auth_context",
     "error_type", "error_code", "result_status", "command", "mode", "finish_reason", "compaction", "reason",
 })
 NUMBER_FIELDS = frozenset({
+    "requested_count", "resolved_count",
     "duration_ms", "request_index", "attempt", "queue_depth", "input_tokens", "output_tokens",
     "total_tokens", "requests", "tool_calls", "tool_search_calls", "cache_read_tokens",
     "cache_write_tokens", "spill_count", "spill_failures", "byte_size", "spilled_bytes",
@@ -155,6 +160,9 @@ def safe_fields(fields: dict) -> dict:
     if type(name) is str and re.fullmatch(r"[\w .:/()\-|\\]{1,100}", name) and "://" not in name:
         result["agent_name"] = name
     _model_api_fields(fields, result)
+    origin = _safe_model_origin(fields.get("target_origin"))
+    if origin is not None:
+        result["target_origin"] = origin
     return result
 
 

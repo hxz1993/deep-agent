@@ -151,3 +151,15 @@ Events 支持 `after_sequence`、`limit`（1–500，默认 100）及 `event_typ
 
 首版不含渠道发送人资料、全企业姓名搜索、成功率 / 满意度、问题自动分类、历史卡死判定、实时订阅、
 对话正文导出、跨环境日志聚合或新的文件授权。测试入口不代表本机服务或全量验收已完成，实际结果以当次交付记录为准。
+
+### 用户名补齐诊断日志（v0.10.2）
+
+在“日志”选择 API，搜索“平台用户名”。发布后重新打开会话列表或概览触发读取；成功缓存最多保留 60 秒，缓存命中不重复记录批量请求日志。
+
+- `diagnostic_users_completed`：实际批量请求成功，包含请求人数、得到姓名的人数；`partial` 表示仍有 ID 没有得到姓名。
+- `diagnostic_users_failed`：按 `phase` 区分 `discovery / request / response / decode / normalize`；查看 `profile_service`、`discovery_type`、`discovery_namespace`、`target_origin`、HTTP 状态及安全业务错误码。
+- `diagnostic_users_fallback`：整体查询不可用，显示回退为 ID；`deadline_exceeded` 表示整个补齐流程超过 2 秒。
+
+`auth_context` 仅记录 Cookie/Authorization 等认证头是否存在及其类型，不记录值。`target_origin` 只包含协议、主机和端口，不包含路径、查询参数或认证信息；不写入用户 ID、姓名、Cookie、Token、请求/响应正文或异常原文。缺少目标且停在 `discovery` 时优先查服务注册、服务名与 namespace；HTTP 404 优先核对部署路由，401/403 为认证拒绝。日志不会改变已有请求目标、超时预算、缓存或降级行为。
+
+本地验证：同版本 `v0.10.0`、同 Test MySQL `005`、同鉴权下，8000 列表和概览均成功；本地使用公网网关 Local Discovery。平台源码已合并到 `deepfos-platform`，但是否需要修改 Test 的旧 `space-server` 服务名仍以部署后上述日志为准。

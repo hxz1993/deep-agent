@@ -23,6 +23,7 @@ from deepfos_platform.lib.httpcli import AioHttpCli
 from deepfos_platform.lib.utils import concat_url
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
+from deep_agent.agent.observability import log_event
 from deep_agent.local_security import (
     LOCAL_CONSOLE_ADMIN_SCOPE_KEY,
     LOCAL_CURRENT_USERNAME_SCOPE_KEY,
@@ -188,31 +189,79 @@ class PlatformDiagnosticUserFetcher:
             raise ValueError("account lookup batch must contain 1 to 100 user IDs")
         response = None
         on_failure: Callable[[], None] | None = None
+        started = time.monotonic()
+        phase, reason, outcome = "discovery", "unavailable", "failed"
+        facts = {"profile_service": "configured_url" if "://" in self._profile_service else self._profile_service,
+                 "discovery_type": str(PLATFORM_OPTION.srvdis.implementation),
+                 "discovery_namespace": str(PLATFORM_OPTION.k8s.namespace or "unset"),
+                 "requested_count": len(user_ids),
+                 "auth_context": ".".join(name for name in ("cookie", "authorization", "token", "x-user-token")
+                                          if headers.get(name)) or "none"}
         try:
             url, on_success, on_failure = await self._resolve_url()
+            # Retain only the network origin, never configured path/query credentials.
+            parsed = urlsplit(url)
+            if not parsed.username and not parsed.password:
+                facts["target_origin"] = f"{parsed.scheme}://{parsed.netloc}"
+            phase = "request"
             response = await AioHttpCli.post(
                 url, json=list(user_ids), headers=dict(headers),
                 timeout=aiohttp.ClientTimeout(connect=2.0, total=2.0),
                 allow_redirects=False,
             )
+            facts["http_status"] = response.status
             if response.status in {401, 403}:
+                reason = "authentication_rejected"
                 raise DiagnosticUserAuthenticationError(response.status)
             if not 200 <= response.status < 300:
+                reason = "http_error"
                 raise DiagnosticUserUnavailableError("account lookup returned an error")
+            phase = "response"
             chunks: list[bytes] = []
             size = 0
             async for chunk in response.content.iter_chunked(16384):
                 size += len(chunk)
                 if size > _MAX_RESPONSE_BYTES:
+                    reason = "response_too_large"
                     raise DiagnosticUserUnavailableError("account lookup response is too large")
                 chunks.append(chunk)
-            result = _normalize_profiles(json.loads(b"".join(chunks)), user_ids)
+            phase, reason = "decode", "invalid_json"
+            payload = json.loads(b"".join(chunks))
+            phase, reason = "normalize", "invalid_payload"
+            if isinstance(payload, Mapping):
+                code = payload.get("code", payload.get("statusCode"))
+                if isinstance(code, (str, int)) and not isinstance(code, bool):
+                    # Only numeric upstream codes are safe to retain.
+                    candidate = str(code)
+                    if candidate.lstrip("-").isdigit() and len(candidate) <= 12:
+                        facts["error_code"] = candidate
+                if payload.get("status") is False:
+                    reason = "business_failure"
+            result = _normalize_profiles(payload, user_ids)
+            facts["resolved_count"] = sum(v["display_name"] != key for key, v in result.items())
             if on_success is not None:
                 on_success()
+            outcome, reason = "completed", "resolved" if facts["resolved_count"] == len(user_ids) else "partial"
+            facts.pop("error_code", None)
             return result
-        except DiagnosticUserAuthenticationError:
+        except DiagnosticUserAuthenticationError as exc:
+            reason = "authentication_rejected"
+            facts["error_type"] = type(exc).__name__
+            raise
+        except asyncio.CancelledError:
+            reason = "deadline_or_cancelled"
             raise
         except Exception as exc:
+            cause = exc.__cause__ or exc
+            facts["error_type"] = type(cause).__name__
+            if phase == "discovery" and type(getattr(cause, "status", None)) is int:
+                facts["http_status"] = cause.status
+            if isinstance(exc, TimeoutError):
+                reason = "timeout"
+            elif phase == "discovery":
+                reason = "service_discovery_failed"
+            elif phase == "request":
+                reason = "http_error" if response is not None else "network_error"
             if on_failure is not None:
                 on_failure()
             if isinstance(exc, DiagnosticUserUnavailableError):
@@ -221,6 +270,8 @@ class PlatformDiagnosticUserFetcher:
         finally:
             if response is not None:
                 response.release()
+            log_event(f"diagnostic_users_{outcome}", phase=phase, reason=reason,
+                      duration_ms=round((time.monotonic() - started) * 1000), **facts)
 
 
 class DiagnosticUserProfileResolver:
@@ -304,9 +355,11 @@ class DiagnosticUserProfileResolver:
                 if key[:3] == scope[:3]:
                     self._cache.pop(key, None)
             raise
-        except Exception:
-            # Availability affects display only. Never return upstream text or credentials.
-            pass
+        except Exception as exc:
+            # Covers the overall deadline, including discovery and all batches.
+            log_event("diagnostic_users_fallback", phase="resolve",
+                      reason="deadline_exceeded" if isinstance(exc, TimeoutError) else "lookup_unavailable",
+                      error_type=type(exc).__name__, requested_count=len(missing))
         return result
 
 

@@ -120,6 +120,7 @@ Events 支持 `after_sequence`、`limit`（1–500，默认 100）及 `event_typ
 此入口不要求 App / Space；不要误用名称相近、需要 Space 的 `query/batch/by-user-ids`。
 2026-09-10 使用现有管理员凭证、未传 App / Space，在 Test 实测该接口成功返回用户资料，
 并通过诊断资料 Resolver 的完整配置 / 服务发现链路得到真实用户名。
+2026-09-14 再次核验：Test 部署仍报告 `0.10.0`，列表与概览的 `users` 均返回 `resolution=unavailable`；同一管理员凭证直连 Test 公网 Space 批量接口及本项目 `PlatformDiagnosticUserFetcher` 指定该地址均能返回用户名。当前证据只能定位为部署内账号补齐链路失败，不能仅凭版本或 ID 回显判断具体根因。需在 Test 容器核对 `PLATFORM_OPTION.server.space`、服务发现结果及内部请求状态；现有 Resolver 会吞掉可用性异常，公网诊断响应没有保留这些细节。
 旧前端引用的 `POST /api/user/info/by-user-ids` 在本次 Test 核验返回业务失败，
 诊断不再依赖它；此结论不代表所有历史部署均无此路由。
 每批最多 100 个不同 ID，整个补齐最多 2 秒、无自动重试。映射仅含 ID、显示名、邮箱、安全头像地址和解析状态。

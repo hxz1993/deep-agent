@@ -7,7 +7,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260915-agent-skill-cards";
+const CONFIGURATION_ASSET_VERSION = "20260916-delete-emphasis";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",

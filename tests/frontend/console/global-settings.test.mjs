@@ -57,6 +57,28 @@ function loadGlobalSettingsUi() {
   return window.__GlobalSettingsUI;
 }
 
+test("旧搜索配置失效不阻止展示运行设置和打开修复草稿", async () => {
+  const summary = {}, window = {};
+  const context = vm.createContext({
+    window,
+    document: { addEventListener() {}, getElementById: id => id === 'webSearchSummaryValue' ? summary : null },
+    apiFetch: async path => {
+      if (path.endsWith('/web-search')) throw Object.assign(new Error('旧凭据失效'), { status: 409 });
+      return { groups: [{ label: '运行配置', items: [] }] };
+    },
+    loadLlmProviders: async () => {},
+    showToast: () => assert.fail('可修复状态不应阻止整个配置页'),
+  });
+  vm.runInContext(source, context);
+  context.renderGlobalSettings = () => {};
+  context.renderWebSearchSettings = value => assert.equal(value, null);
+  window.globalSettingsAdmin.webSearch = { value: { mode: 'provider', api_key_set: true } };
+  await window.globalSettingsAdmin.refresh();
+  assert.equal(window.globalSettingsAdmin.groups.length, 1);
+  assert.equal(window.globalSettingsAdmin.webSearch, null);
+  assert.equal(summary.textContent, '配置不可用，请重新配置');
+});
+
 test("Agent 是配置中心默认页，系统分组包含全局配置和模型目录", () => {
   assert.match(
     indexHtml,

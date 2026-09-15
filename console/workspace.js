@@ -3,7 +3,7 @@ import { channelOriginPresentation } from "./session-display.js?v=20260915-sessi
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20260915-scroll-focus";
+const WORKSPACE_ASSET_VERSION = "20260916-delete0109";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },

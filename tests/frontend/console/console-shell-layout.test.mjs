@@ -148,7 +148,7 @@ test("MCP 详情沿用独立页面层级并在导航前确认未保存修改", (
 test("Agent 编辑采用左右工作台并在右侧顶部统一切换四类资源", () => {
   assert.match(template, /class="agent-editor-workbench"/);
   assert.match(template, /class="agent-editor-primary"[\s\S]*id="agentName"[\s\S]*id="agentModelId"[\s\S]*id="agentPrompt"/);
-  assert.match(template, /class="cap-tabs agent-resource-tabs"[\s\S]*data-kind="builtin"[\s\S]*data-kind="mcp"[\s\S]*data-kind="ui"[\s\S]*data-kind="skills"/);
+  assert.match(template, /class="cap-tabs agent-resource-tabs"[\s\S]*data-kind="builtin"[\s\S]*data-kind="ui"[\s\S]*data-kind="mcp"[\s\S]*data-kind="skills"/);
   assert.match(template, /id="agentCapGroups"[\s\S]*data-kind-panel="skills"[\s\S]*id="agentSkillChoices"/);
   assert.match(agents, /this\.switchCapTab\("builtin"\)/);
   assert.match(styles, /\.agent-editor-workbench\s*\{[\s\S]*grid-template-columns: minmax\(310px, \.82fr\) minmax\(450px, 1\.18fr\)/);

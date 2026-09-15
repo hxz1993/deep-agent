@@ -22,6 +22,7 @@ let agentEditorDirty = false;
 let agentsLoadedOnce = false;
 let agentListRecords = [];
 let agentChannelNames = new Map();
+const agentDeletesInFlight = new Set();
 
 function renderAgentChannelBadge(agentId) {
   const names = agentChannelNames.get(agentId) || [];
@@ -514,7 +515,7 @@ const agentsAdmin = {
       ...unavailable.map((code) => ({
         code,
         label: code,
-        description: "该 Skill 当前不存在，保存时将保留原引用。",
+        description: "该 Skill 当前不存在，可关闭开关解除关联。",
         source: "unknown",
         missing: true,
         reference_count: 0,
@@ -528,12 +529,12 @@ const agentsAdmin = {
     }
     container.innerHTML = skills.map((skill) => {
       const checked = selectedSet.has(skill.code);
-      const disabled = skill.missing === true;
+      const disabled = skill.missing === true && !checked;
       const source = skill.source === "builtin" ? "内置" : skill.source === "upload" ? "自定义" : "不可用";
       return `<label class="cap-card agent-skill-card${disabled ? " is-disabled" : ""}">
         <span class="cap-card-header">
           <span class="cap-switch">
-            <input type="checkbox" name="agentSkill" role="switch" aria-label="${escapeHtml(skill.label)}" value="${escapeHtml(skill.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
+            <input type="checkbox" name="agentSkill" role="switch" aria-label="${escapeHtml(skill.label)}" value="${escapeHtml(skill.code)}" ${skill.missing ? 'data-missing="true"' : ""} ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
             <span class="cap-switch-ui"></span>
           </span>
           <span class="cap-card-info">
@@ -703,23 +704,33 @@ const agentsAdmin = {
   },
 
   async remove(agentId, name) {
-    const msg =
-      name === "default"
-        ? `确定删除默认 Agent "${name}"？这可能导致部分会话失去关联。`
-        : `确定删除 Agent "${name}"？`;
-    if (!(await confirmAction({
-      title: name === "default" ? "删除默认 Agent？" : "删除 Agent？",
-      message: msg,
-      icon: "trash-2",
-      tone: "danger",
-      confirmLabel: "删除",
-    }))) return;
+    if (agentDeletesInFlight.has(agentId)) return;
+    agentDeletesInFlight.add(agentId);
     try {
-      await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
+      if (!(await confirmAction({
+        title: "删除 Agent？",
+        message: `确定删除 Agent“${name}”？`,
+        icon: "trash-2",
+        tone: "danger",
+        confirmLabel: "删除",
+      }))) return;
+      if (!(await deleteWithImpactConfirmation(`/api/v1/agents/${encodeURIComponent(agentId)}`, {
+        title: "删除 Agent 及全部历史会话？",
+        describeImpact: (impact) => [
+          `Agent“${name}”共有 `, { text: `${impact.session_count} 个历史会话` },
+          "。\n其中：你本人的 ", { text: `${impact.own_session_count} 个` },
+          "，其他所有用户合计 ", { text: `${impact.other_session_count} 个` },
+          "。\n确认后将停止相关运行，并", { text: "永久删除该 Agent、上述全部会话及消息记录", danger: true },
+          "。", { text: "此操作不可撤销。", danger: true },
+        ],
+        confirmLabel: "删除 Agent 及全部会话",
+      }))) return;
       showToast("Agent 已删除");
       await refreshAfterSuccessfulMutation("Agent 已删除", () => this.refresh());
     } catch (err) {
       showToast(err.message, true);
+    } finally {
+      agentDeletesInFlight.delete(agentId);
     }
   },
 
@@ -761,6 +772,10 @@ const agentsAdmin = {
         this.updateCapCounter();
       }
       if (e.target.matches('input[name="agentSkill"]')) {
+        if (e.target.dataset.missing === "true" && !e.target.checked) {
+          e.target.disabled = true;
+          e.target.closest(".agent-skill-card")?.classList.add("is-disabled");
+        }
         this.updateSkillCounter();
       }
     });

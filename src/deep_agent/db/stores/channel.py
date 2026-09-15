@@ -23,6 +23,7 @@ from deep_agent.db.reference_integrity import (
     ReferenceConflict, is_unique_conflict, lock_optional, lock_reference,
 )
 from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.stores.wecom import validate_channel_wecom_settings
 from deep_agent.db.stores.event.base import SessionEventStore
 from deep_agent.channels.metadata import channel_session_title, normalize_channel_origin, normalize_peer_metadata, wecom_application_id
@@ -114,28 +115,33 @@ class ChannelStore(SessionBoundMixin):
                 raise
             raise ValueError("同一企微 Bot 只能配置一次") from exc
 
-    async def delete_account(self, account_id: str) -> bool:
+    async def _deletion_impact(self, db, account_id: str, user_id: str) -> DeletionImpact | None:
+        if await self._lock_account_for_write(db, account_id) is None:
+            return None
+        bindings = (await db.execute(select(ChannelSessionBinding.id, ChannelSessionBinding.session_id)
+            .where(ChannelSessionBinding.account_id == account_id).order_by(ChannelSessionBinding.id).with_for_update())).all()
+        runs = (await db.execute(select(ChannelMessageRun.id, ChannelMessageRun.session_id)
+            .where(ChannelMessageRun.account_id == account_id).order_by(ChannelMessageRun.id).with_for_update())).all()
+        session_ids = {sid for _, sid in [*bindings, *runs] if sid}
+        sessions = (await db.execute(select(ChatSession.session_id, ChatSession.user_id, ChatSession.created_at)
+            .where(ChatSession.session_id.in_(session_ids)))).all() if session_ids else []
+        return DeletionImpact.build("channel", account_id, user_id, sessions=[tuple(row) for row in sessions],
+                                    bindings=[tuple(row) for row in bindings], runs=[tuple(row) for row in runs])
+
+    async def deletion_impact(self, account_id: str, *, user_id: str) -> DeletionImpact | None:
         async with self._write() as db:
-            row = (
-                await db.execute(
-                    select(ChannelAccount)
-                    .where(
-                        ChannelAccount.id == account_id,
-                    )
-                    .with_for_update()
-                )
-            ).scalar_one_or_none()
-            if row is None:
+            return await self._deletion_impact(db, account_id, user_id)
+
+    async def delete_account(self, account_id: str, *, user_id: str = "", confirmation_token: str | None = None) -> bool:
+        async with self._write() as db:
+            impact = await self._deletion_impact(db, account_id, user_id)
+            if impact is None:
                 return False
-            # Locking reads see newly committed children under MySQL REPEATABLE READ.
-            binding = await db.scalar(select(ChannelSessionBinding.id).where(
-                ChannelSessionBinding.account_id == account_id,
-            ).limit(1).with_for_update())
-            run = await db.scalar(select(ChannelMessageRun.id).where(
-                ChannelMessageRun.account_id == account_id,
-            ).limit(1).with_for_update())
-            if binding is not None or run is not None:
-                raise ValueError("渠道已经产生会话或运行记录，请停用后保留配置")
+            if (impact.counts["binding_count"] or impact.counts["run_count"] or confirmation_token) and confirmation_token != impact.token:
+                raise DeletionConfirmationRequired(impact)
+            # Keep Agent and ChatSession history; only remove the channel ledger.
+            await db.execute(delete(ChannelMessageRun).where(ChannelMessageRun.account_id == account_id))
+            await db.execute(delete(ChannelSessionBinding).where(ChannelSessionBinding.account_id == account_id))
             await db.execute(delete(ChannelAccount).where(ChannelAccount.id == account_id))
             return True
 

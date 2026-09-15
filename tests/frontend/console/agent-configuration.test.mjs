@@ -147,7 +147,7 @@ test("Agent 将 Skill 与工具包分开配置", () => {
   assert.match(template, /id="agentSkillChoices"/);
   assert.match(source, /skills: this\.getSelectedSkills\(\)/);
   assert.match(source, /input type="checkbox" name="agentSkill"/);
-  assert.match(source, /该 Skill 当前不存在，保存时将保留原引用/);
+  assert.match(source, /该 Skill 当前不存在，可关闭开关解除关联/);
 });
 
 test("Agent 资源在顶部按内置、UI、MCP、Skill 排列四个 Tab", () => {

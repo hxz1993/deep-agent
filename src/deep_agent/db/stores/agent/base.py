@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.db.models import Agent, LlmModel, UiToolPackage, UiToolDefinition, ChatSession, ChannelAccount
+from deep_agent.db.models import Agent, LlmModel, UiToolPackage, UiToolDefinition, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
+from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate
@@ -30,6 +31,7 @@ class AgentStoreBase(SessionBoundMixin):
                 if data.model_id is not None:
                     await lock_reference(db, LlmModel, LlmModel.id, data.model_id, "LLM model")
                 await self._lock_ui_packages(db, data.capabilities)
+                await self._lock_mcp_servers(db, data.capabilities)
                 await self._validate_ui_selection(db, data.ui_tool_selection, data.capabilities)
                 if await self._get_by_name(db, data.name) is not None:
                     raise ValueError(f"Agent already exists: {data.name}")
@@ -61,6 +63,8 @@ class AgentStoreBase(SessionBoundMixin):
                 for model_id in sorted(value for value in {old_model, new_model} if value is not None):
                     await lock_reference(db, LlmModel, LlmModel.id, model_id, "LLM model")
                 await self._lock_ui_packages(db, old_caps + (data.capabilities or []))
+                await self._lock_mcp_servers(db, data.capabilities if data.capabilities is not None else old_caps,
+                                             old_capabilities=old_caps)
                 row = await lock_optional(db, Agent, Agent.id, agent_id)
                 if row is None:
                     return None
@@ -97,19 +101,43 @@ class AgentStoreBase(SessionBoundMixin):
             rows = await self._list_all(db)
             return [row for row in rows if skill_code in (row.skills or [])]
 
-    async def delete(self, agent_id: str) -> bool:
+    async def _deletion_impact(self, db, agent_id: str, user_id: str) -> DeletionImpact | None:
+        if await lock_optional(db, Agent, Agent.id, agent_id) is None:
+            return None
+        if (await db.execute(select(ChannelAccount.id).where(
+            ChannelAccount.agent_id == agent_id).limit(1).with_for_update())).first():
+            raise ReferenceConflict("Agent 正被渠道配置使用，请先将对应渠道改绑到其他 Agent 或删除渠道；仅停用渠道不会解除关联")
+        sessions = (await db.execute(select(ChatSession.session_id, ChatSession.user_id, ChatSession.created_at)
+            .where(ChatSession.agent_id == agent_id).order_by(ChatSession.session_id).with_for_update())).all()
+        return DeletionImpact.build("agent", agent_id, user_id, sessions=[tuple(row) for row in sessions])
+
+    async def deletion_impact(self, agent_id: str, *, user_id: str) -> DeletionImpact | None:
         async with self._write() as db:
-            if await lock_optional(db, Agent, Agent.id, agent_id) is None:
+            return await self._deletion_impact(db, agent_id, user_id)
+
+    async def delete(self, agent_id: str, *, user_id: str = "", confirmation_token: str | None = None) -> bool:
+        async with self._write() as db:
+            impact = await self._deletion_impact(db, agent_id, user_id)
+            if impact is None:
                 return False
-            for model, key, message in (
-                (ChatSession, ChatSession.session_id, "Agent 存在历史会话，请先删除相关会话"),
-                (ChannelAccount, ChannelAccount.id, "Agent 正被渠道配置使用，请先调整对应渠道"),
-            ):
-                if (await db.execute(select(key).where(model.agent_id == agent_id).limit(1).with_for_update())).first():
-                    raise ReferenceConflict(message)
+            if (impact.counts["session_count"] or confirmation_token) and confirmation_token != impact.token:
+                raise DeletionConfirmationRequired(impact)
+            sessions = select(ChatSession.session_id).where(ChatSession.agent_id == agent_id)
+            await db.execute(update(ChannelSessionBinding).where(ChannelSessionBinding.session_id.in_(sessions)).values(session_id=None))
+            await db.execute(delete(ChatSessionEvent).where(ChatSessionEvent.session_id.in_(sessions)))
+            await db.execute(delete(ChatSession).where(ChatSession.agent_id == agent_id))
             result = await db.execute(delete(Agent).where(Agent.id == agent_id))
             await db.flush()
             return result.rowcount > 0
+
+    @staticmethod
+    async def _lock_mcp_servers(db: AsyncSession, capabilities: list[str], *, old_capabilities=()) -> None:
+        from deep_agent.capabilities.mcp.builtin_config import is_shipped_builtin
+        names = {code.removeprefix("mcp:") for code in [*old_capabilities, *capabilities] if code.startswith("mcp:")}
+        for name in sorted(names):
+            row = await lock_optional(db, McpServer, McpServer.name, name)
+            if row is None and f"mcp:{name}" in capabilities and not is_shipped_builtin(name):
+                raise ReferenceConflict(f"MCP not found: {name}")
 
     @staticmethod
     async def _validate_ui_selection(db: AsyncSession, selection, capabilities) -> None:

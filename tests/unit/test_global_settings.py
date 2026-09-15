@@ -246,6 +246,37 @@ class GlobalSettingsApiTests(unittest.TestCase):
         self.assertEqual(switched.status_code, 422, switched.text)
         self.assertIn("API key is required for exa", switched.text)
 
+    def test_invalid_stored_configuration_can_be_replaced_and_draft_tested(self) -> None:
+        headers = {"user": "enterprise-admin"}
+        cases = (
+            (1, {"mode": "broken"}),
+            (2, {"mode": "native"}),
+            (1, {"mode": "provider", "provider": "tavily"}),
+            (1, {"mode": "provider", "provider": "deepseek",
+                 "credential_source": "llm_provider", "llm_provider_id": "missing"}),
+        )
+        for version, value in cases:
+            with self.subTest(value=value, version=version):
+                asyncio.run(self.stores.global_setting.upsert("web_search", value=value, version=version))
+                invalid = self.client.get("/api/v1/global-settings/web-search", headers=headers)
+                self.assertEqual(invalid.status_code, 409, invalid.text)
+                draft = {"version": 1, "value": {"mode": "provider", "provider": "tavily", "api_key": "new-test-key"}}
+                with patch("deep_agent.api.v1.global_settings.probe_web_search_config", new=AsyncMock()) as probe:
+                    tested = self.client.post("/api/v1/global-settings/web-search/test", headers=headers, json=draft)
+                self.assertEqual(tested.status_code, 200, tested.text)
+                self.assertEqual(probe.call_args.args[0].api_key, "new-test-key")
+                self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, value)
+                saved = self.client.put("/api/v1/global-settings/web-search", headers=headers, json={"version": 1, "value": {"mode": "native"}})
+                self.assertEqual(saved.status_code, 200, saved.text)
+                self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, {"mode": "native"})
+
+    def test_invalid_old_credentials_do_not_allow_invalid_replacement(self) -> None:
+        asyncio.run(self.stores.global_setting.upsert("web_search", value={"mode": "broken"}, version=1))
+        response = self.client.put("/api/v1/global-settings/web-search", headers={"user": "enterprise-admin"},
+                                   json={"version": 1, "value": {"mode": "provider", "provider": "tavily"}})
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, {"mode": "broken"})
+
     def test_duckduckgo_requires_no_key_or_model(self) -> None:
         response = self.client.put(
             "/api/v1/global-settings/web-search",

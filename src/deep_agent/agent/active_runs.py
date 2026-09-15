@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import asyncio
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from threading import RLock
 
@@ -21,6 +23,9 @@ class ActiveRun:
     status: str = "running"
     # Diagnostic only: never drives cancellation or persistence decisions.
     cancel_reason: str | None = None
+    channel_account_id: str | None = None
+    request_owned: bool = False
+    finished: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
 
     def observe_cancellation(self, reason: str) -> None:
         if self.cancel_reason is None:
@@ -39,6 +44,10 @@ class ActiveRunRegistry:
     def __init__(self) -> None:
         self._runs: dict[tuple[str | None, str], ActiveRun] = {}
         self._lock = RLock()
+        self._deletion_lock = asyncio.Lock()
+        self._deletion_scope: tuple[str | None, str | None, str | None] | None = None
+        self.generation = 0
+        self._deletion_versions: dict[tuple, int] = {}
 
     def register(
         self,
@@ -48,6 +57,9 @@ class ActiveRunRegistry:
         user_id: str | None,
         conversation_id: str | None = None,
         run_id: str | None = None,
+        channel_account_id: str | None = None,
+        expected_generation: int | None = None,
+        request_owned: bool = False,
     ) -> ActiveRun:
         key = (agent_id, session_id)
         entry = ActiveRun(
@@ -58,8 +70,19 @@ class ActiveRunRegistry:
             started_at=datetime.now(timezone.utc),
             conversation_id=conversation_id,
             run_id=run_id,
+            channel_account_id=channel_account_id,
+            request_owned=request_owned,
         )
         with self._lock:
+            relevant_scopes = ((agent_id, None, None), (agent_id, session_id, None),
+                               (None, session_id, None), (None, None, channel_account_id))
+            if (expected_generation is not None and any(
+                self._deletion_versions.get(scope, 0) > expected_generation
+                for scope in relevant_scopes
+            )) or (
+                self._deletion_scope is not None and self._matches(entry, self._deletion_scope)
+            ):
+                raise RuntimeError("资源正在删除或已发生变化，请刷新后重试")
             if key in self._runs:
                 raise RuntimeError(f"Agent run already registered: {key!r}")
             self._runs[key] = entry
@@ -70,6 +93,38 @@ class ActiveRunRegistry:
         with self._lock:
             if self._runs.get(key) is entry:
                 self._runs.pop(key, None)
+                entry.finished.set()
+
+    @staticmethod
+    def _matches(entry: ActiveRun, scope) -> bool:
+        agent_id, session_id, channel_id = scope
+        return ((agent_id is None or entry.agent_id == agent_id)
+                and (session_id is None or entry.session_id == session_id)
+                and (channel_id is None or entry.channel_account_id == channel_id))
+
+    @asynccontextmanager
+    async def deleting(self, *, agent_id=None, session_id=None, channel_account_id=None, timeout=15.0):
+        """Fence admission and await actual run cleanup without holding DB locks."""
+        async with self._deletion_lock:
+            scope = (agent_id, session_id, channel_account_id)
+            with self._lock:
+                self.generation += 1
+                self._deletion_versions[scope] = self.generation
+                self._deletion_scope = scope
+                entries = [entry for entry in self._runs.values() if self._matches(entry, scope)]
+            try:
+                for entry in entries:
+                    entry.status = "cancel_requested"
+                    entry.observe_cancellation("resource_delete")
+                    entry.cancellation_token.cancel()
+                if entries:
+                    await asyncio.wait_for(asyncio.gather(*(entry.finished.wait() for entry in entries)), timeout)
+                yield entries
+            finally:
+                with self._lock:
+                    self.generation += 1
+                    self._deletion_versions[scope] = self.generation
+                    self._deletion_scope = None
 
     def request_cancel(
         self,

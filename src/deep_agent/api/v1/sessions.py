@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any, Literal, Optional
 
@@ -463,8 +464,15 @@ async def delete_session(
     scope, resolved_session_id = resolved
     from deep_agent.db.session_scope import agent_scope_to_api
 
-    api_agent_id = agent_id or agent_scope_to_api(scope)
-    await ctx.store.delete(resolved_session_id, agent_id=api_agent_id)
+    api_agent_id = agent_scope_to_api(scope)
+    try:
+        async with ctx.active_runs.deleting(agent_id=api_agent_id, session_id=resolved_session_id):
+            await ctx.event_persister.flush(resolved_session_id, agent_id=api_agent_id, ignore_errors=True)
+            async with asyncio.timeout(15):
+                async with ctx.store.lock(resolved_session_id, agent_id=api_agent_id):
+                    await ctx.store.delete(resolved_session_id, agent_id=api_agent_id)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=409, detail="会话仍在停止中，本次未删除，请稍后重试") from exc
 
 
 class SessionRenameRequest(BaseModel):

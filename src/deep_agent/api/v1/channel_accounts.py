@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
+from deep_agent.services.resource_deletion import DeleteConfirmation, delete_resource
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.deps import get_channel_store
 from deep_agent.db.ids import normalize_agent_id
@@ -155,14 +156,11 @@ async def update_channel_account(
 async def delete_channel_account(
     account_id: str,
     user: RequestUserDep,
+    ctx: AppContextDep,
+    body: DeleteConfirmation | None = None,
     store: ChannelStore = Depends(get_channel_store),
 ) -> dict[str, bool]:
-    try:
-        deleted = await store.delete_account(account_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Channel account not found")
+    await delete_resource(ctx, store, account_id, user, body, channel=True)
     return {"deleted": True}
 
 

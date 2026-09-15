@@ -465,7 +465,7 @@ def _web_search_response(row, config: WebSearchRuntimeConfig) -> WebSearchSettin
     )
 
 
-async def _current_web_search(ctx: AppContextDep):
+async def _current_web_search(ctx: AppContextDep, *, for_write: bool = False):
     store = ctx.stores.global_setting
     if store is None:
         raise HTTPException(
@@ -480,12 +480,18 @@ async def _current_web_search(ctx: AppContextDep):
             raise WebSearchConfigurationError(
                 f"Unsupported Web Search settings version: {row.version}"
             )
-        config = resolve_web_search_config(row.value)
+        config = resolve_web_search_config(row.value, require_credentials=not for_write)
+        if for_write:
+            # A draft replaces the stored configuration. Retain a same-provider
+            # key when parseable, but do not resolve a broken old provider first.
+            return row, config
         return row, await resolve_web_search_credentials(
             config,
             ctx.stores.llm_configuration,
         )
     except WebSearchConfigurationError as exc:
+        if for_write:
+            return row, WebSearchRuntimeConfig(mode="native")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Stored Web Search configuration is invalid: {exc}",
@@ -531,7 +537,7 @@ async def put_web_search_settings(
     body: WebSearchSettingsWrite,
     ctx: AppContextDep,
 ) -> WebSearchSettingsResponse:
-    _row, existing = await _current_web_search(ctx)
+    _row, existing = await _current_web_search(ctx, for_write=True)
     config = await _resolve_web_search_write(body, existing=existing, ctx=ctx)
     store = ctx.stores.global_setting
     if store is None:  # pragma: no cover - guarded by _current_web_search
@@ -560,7 +566,7 @@ async def test_web_search_settings(
     body: WebSearchSettingsWrite,
     ctx: AppContextDep,
 ) -> WebSearchTestResponse:
-    _row, existing = await _current_web_search(ctx)
+    _row, existing = await _current_web_search(ctx, for_write=True)
     config = await _resolve_web_search_write(body, existing=existing, ctx=ctx)
     started = time.monotonic()
     provider = config.provider or "current-model"

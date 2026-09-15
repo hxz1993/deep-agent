@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import Agent, McpServer
+from deep_agent.db.reference_integrity import ReferenceConflict, lock_optional
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.mcp import McpServerCreate, McpServerUpdate
 
@@ -128,7 +129,7 @@ class McpServerStoreBase(SessionBoundMixin):
                 old_capability = f"mcp:{old_name}"
                 new_capability = f"mcp:{new_name}"
                 agent_result = await db.execute(
-                    select(Agent).order_by(Agent.name).with_for_update()
+                    select(Agent).order_by(Agent.id).with_for_update()
                 )
                 updated_agent_names: list[str] = []
                 for agent in agent_result.scalars().all():
@@ -146,13 +147,20 @@ class McpServerStoreBase(SessionBoundMixin):
                 await db.refresh(row)
                 return McpRenameStoreResult(
                     row=row,
-                    updated_agent_names=updated_agent_names,
+                    updated_agent_names=sorted(updated_agent_names),
                 )
         except IntegrityError as exc:
             raise ValueError(f"MCP server already exists: {new_name}") from exc
 
     async def delete(self, name: str) -> bool:
         async with self._write() as db:
+            if await lock_optional(db, McpServer, McpServer.name, name) is None:
+                return False
+            refs = (await db.execute(
+                select(Agent.capabilities).order_by(Agent.id).with_for_update()
+            )).scalars().all()
+            if any(f"mcp:{name}" in (caps or []) for caps in refs):
+                raise ReferenceConflict("MCP 正在被 Agent 引用，不能删除")
             result = await db.execute(delete(McpServer).where(McpServer.name == name))
             await db.flush()
             return result.rowcount > 0

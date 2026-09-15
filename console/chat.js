@@ -1727,7 +1727,18 @@ async function deleteSession(session) {
   }
   state.sessions = state.sessions.filter((s) => sessionLookupKey(s) !== key);
   if (sessionPage.agentId === normalized.agentId) sessionPage.offset = Math.max(0, sessionPage.offset - 1);
-  if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) newChat();
+  if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) {
+    // DELETE has waited for the server run to stop. Detach any buffered SSE
+    // before clearing the UI so late frames cannot restore the deleted session.
+    const controller = state.abortController;
+    state.abortController = null;
+    controller?.abort();
+    state.stopController?.abort();
+    state.stopController = null;
+    stopHistoryObservation();
+    setStreaming(false);
+    newChat();
+  }
   else renderSessions();
 }
 

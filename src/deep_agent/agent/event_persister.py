@@ -86,9 +86,13 @@ class EventPersister:
         *,
         agent_id: str | None = None,
         timeout: float = 5.0,
+        ignore_errors: bool = False,
     ) -> None:
         key = runtime_session_key(session_id, agent_id=agent_id)
-        self._raise_write_error(key)
+        # Deletion still drains queued writes, but a past failed write must not
+        # make an otherwise deletable session permanently impossible to remove.
+        if not ignore_errors:
+            self._raise_write_error(key)
         q = self._queues.get(key)
         if q is None:
             return
@@ -110,7 +114,8 @@ class EventPersister:
                 await worker
             else:
                 await marker_waiter
-            self._raise_write_error(key)
+            if not ignore_errors:
+                self._raise_write_error(key)
         finally:
             if not marker_waiter.done():
                 marker_waiter.cancel()

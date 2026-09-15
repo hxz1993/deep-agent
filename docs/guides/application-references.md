@@ -8,16 +8,16 @@ v0.9.7 使用 Alembic `003`。移除原有 10 条外键，保留关联 ID、主�
 | --- | --- |
 | 模型 → Provider | 验证 Provider；删除 Provider 时先确认其模型没有 Agent 引用，再同事务删除模型和 Provider |
 | Agent → 模型 | 验证模型；被 Agent 使用的模型不能删除 |
-| 会话 → Agent | 验证 Agent；有历史会话的 Agent 不能删除 |
+| 会话 → Agent | 验证 Agent；v0.10.9 起确认本人、他人及总会话数量后，级联删除 Agent、会话和事件 |
 | UI 工具 → 工具包 | 验证包；包有工具或 Agent 引用不能删除 |
 | 事件 → 会话 | 写事件持有会话锁；删除会话同事务删除事件 |
 | 渠道账号 → Agent | 验证 Agent；有渠道引用的 Agent 不能删除 |
-| 渠道绑定 → 账号 | 验证账号；账号有绑定或运行记录不能删除 |
+| 渠道绑定 → 账号 | 验证账号；v0.10.9 起确认绑定及运行记录数量后，同事务清理账号与台账，保留 Agent 和聊天历史 |
 | 渠道绑定 → 会话 | 绑定验证会话；删除会话同事务将绑定 session_id 置空 |
 | 渠道运行 → 账号 | 接收、重试均校验账号 |
 | 渠道运行 → 绑定 | 验证绑定存在且属于账号 |
 
-`channel_message_runs.session_id` 等原有无外键的历史字段保持弱引用，不增加强制约束，也不新增删除渠道历史的入口。
+`channel_message_runs.session_id` 等原有无外键的历史字段保持弱引用，不增加强制约束，删除渠道仅清理运行台账，不删除对应聊天历史。
 
 关联检查和写入必须在同一事务。先锁父记录再锁子记录，同类多条记录按 ID 排序；修改引用先锁旧、新父记录，再锁子记录重新核对。MySQL 使用锁定读取避免旧快照漏掉新引用。SQLite 使用 `BEGIN IMMEDIATE`。
 
@@ -43,3 +43,17 @@ v0.9.7 使用 Alembic `003`。移除原有 10 条外键，保留关联 ID、主�
 当前库的 `foreign_key_check` 为空没有证明作用。维护检查使用 `deep_agent.db.reference_schema.assert_logical_references`，传入 SQLAlchemy 同步 Connection；异步连接通过 `run_sync` 执行。历史维护命令仍受各自 Revision 限制。
 
 验收范围和实际结果见 [v0.9.7 回归记录](../reports/v0.9.7-application-references.md)。
+
+## v0.10.9 管理删除确认
+
+Agent、渠道删除仍要求控制台管理员。无关联记录可直接删除；存在关联记录时，首次 `DELETE /api/v1/agents/{id}` 或 `DELETE /api/v1/channel-accounts/{id}` 返回 HTTP 409：
+
+```json
+{"detail":{"code":"delete_confirmation_required","message":"删除会同时清理关联记录，请确认影响范围后再次删除","impact":{"session_count":2,"own_session_count":1,"other_session_count":1,"binding_count":0,"run_count":0},"confirmation_token":"..."}}
+```
+
+Console 保留初次确认，再显示上述数量、不可撤销说明及红色删除按钮，默认聚焦取消。确认后重新 DELETE，JSON body 为 `{"confirmation_token":"..."}`。token 绑定资源、当前用户及实际关联记录集合；事务内再次核对，范围改变重新返回 409，不能自动确认重试。仍绑定渠道的 Agent 需先改绑或删除渠道，仅停用不能解除引用。
+
+确认删除先阻止本实例同资源新运行、等待相关聊天或手动压缩停止及事件落盘，再执行数据库事务。超时返回 409，本次不删除；普通会话删除也等待相关运行结束。此运行协调沿用单 API 实例部署边界，不能保证跨 Pod 取消已经执行的工具副作用。MySQL/PostgreSQL 的父子记录引用仍由数据库事务锁维护。
+
+Agent 清理会话及 Events；渠道清理账号、绑定与运行台账，保留 Agent、聊天历史。引用规范中的 `ondelete` 保留旧外键恢复所需的历史元数据，本版是显式的应用层级联，不修改旧迁移，也不新增 Revision。

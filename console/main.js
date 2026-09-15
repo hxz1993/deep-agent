@@ -4,7 +4,7 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260916-delete0109";
+} from "./configuration.js?v=20260916-delete-emphasis";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260915-context-hint";
 import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260915-session-title";
 import { initWorkspace } from "./workspace.js?v=20260916-delete0109";

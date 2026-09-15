@@ -82,8 +82,19 @@ function openActionDialog({
   dialog.dataset.variant = variant;
   dialog.querySelector(".console-action-dialog-icon i")?.setAttribute("data-lucide", icon);
   dialog.querySelector("#consoleActionDialogTitle").textContent = title || "请确认";
-  dialog.querySelector("#consoleActionDialogMessage").textContent = message;
-  dialog.querySelector("#consoleActionDialogMessage").classList.toggle("hidden", !message);
+  const messageHost = dialog.querySelector("#consoleActionDialogMessage");
+  messageHost.replaceChildren();
+  for (const part of Array.isArray(message) ? message : [message]) {
+    if (typeof part === "string") {
+      messageHost.append(document.createTextNode(part));
+    } else {
+      const emphasis = document.createElement("strong");
+      emphasis.textContent = part.text;
+      if (part.danger) emphasis.classList.add("console-action-dialog-warning");
+      messageHost.append(emphasis);
+    }
+  }
+  messageHost.classList.toggle("hidden", !messageHost.textContent);
 
   const fieldsHost = dialog.querySelector("#consoleActionDialogFields");
   fieldsHost.replaceChildren();

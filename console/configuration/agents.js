@@ -716,7 +716,13 @@ const agentsAdmin = {
       }))) return;
       if (!(await deleteWithImpactConfirmation(`/api/v1/agents/${encodeURIComponent(agentId)}`, {
         title: "删除 Agent 及全部历史会话？",
-        describeImpact: (impact) => `Agent“${name}”共有 ${impact.session_count} 个历史会话。\n其中：你本人的 ${impact.own_session_count} 个，其他所有用户合计 ${impact.other_session_count} 个。\n确认后将停止相关运行，并永久删除该 Agent、上述全部会话及消息记录。此操作不可撤销。`,
+        describeImpact: (impact) => [
+          `Agent“${name}”共有 `, { text: `${impact.session_count} 个历史会话` },
+          "。\n其中：你本人的 ", { text: `${impact.own_session_count} 个` },
+          "，其他所有用户合计 ", { text: `${impact.other_session_count} 个` },
+          "。\n确认后将停止相关运行，并", { text: "永久删除该 Agent、上述全部会话及消息记录", danger: true },
+          "。", { text: "此操作不可撤销。", danger: true },
+        ],
         confirmLabel: "删除 Agent 及全部会话",
       }))) return;
       showToast("Agent 已删除");

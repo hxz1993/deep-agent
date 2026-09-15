@@ -34,6 +34,7 @@ async def compact_session_context(
     body: ManualContextCompactionRequest,
     agent_id: str | None = None,
 ) -> EventSourceResponse:
+    admission_generation = ctx.active_runs.generation
     normalized_agent_id: str | None = None
     if agent_id is not None:
         try:
@@ -102,11 +103,23 @@ async def compact_session_context(
     )
 
     async def event_generator():
-        async with aclosing(runner.run_manual_compaction(resolved_session_id, deps)) as stream:
-            async for event in stream:
-                yield {
-                    "event": event["type"],
-                    "data": json.dumps(event, ensure_ascii=False, default=str),
-                }
+        try:
+            active_run = ctx.active_runs.register(agent_id=api_agent_id, session_id=resolved_session_id,
+                user_id=user_id, conversation_id=deps.conversation_id, run_id=deps.run_id,
+                expected_generation=admission_generation)
+        except RuntimeError as exc:
+            yield {"event": "error", "data": json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False)}
+            return
+        deps.cancellation_token = active_run.cancellation_token
+        try:
+            async with aclosing(runner.run_manual_compaction(resolved_session_id, deps, run_id=deps.run_id)) as stream:
+                async for event in stream:
+                    yield {
+                        "event": event["type"],
+                        "data": json.dumps(event, ensure_ascii=False, default=str),
+                    }
+        finally:
+            active_run.cancellation_token.cancel()
+            ctx.active_runs.unregister(active_run)
 
     return EventSourceResponse(event_generator())

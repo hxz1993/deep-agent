@@ -209,10 +209,10 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.store.delete_account(empty.id))
         self.assertFalse(await self.store.delete_account(empty.id))
         await self.store.ensure_binding(**self.peer)
-        with self.assertRaisesRegex(ValueError, "请停用后保留配置"):
+        with self.assertRaisesRegex(ValueError, "确认影响范围"):
             await self.store.delete_account(self.account.id)
         await self._claim()
-        with self.assertRaisesRegex(ValueError, "请停用后保留配置"):
+        with self.assertRaisesRegex(ValueError, "确认影响范围"):
             await self.store.delete_account(self.account.id)
         self.assertIsNotNone(await self.store.get_account(self.account.id))
         self.assertEqual(await self._count(ChannelSessionBinding), 1)

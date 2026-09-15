@@ -227,7 +227,10 @@ async def delete_mcp_server(
                 "referenced_by": [agent.name for agent in referenced_by],
             },
         )
-    deleted = await store.delete(name)
+    try:
+        deleted = await store.delete(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
 

@@ -377,22 +377,30 @@ const channelsAdmin = {
     }
   },
 
+  deletingAccounts: new Set(),
   async remove(accountId) {
     const account = channelAdminState.accounts.find((item) => item.id === accountId);
-    if (!account) return;
+    if (!account || this.deletingAccounts.has(accountId)) return;
+    this.deletingAccounts.add(accountId);
+    try {
     if (!(await confirmAction({
       title: "删除渠道配置？",
-      message: `只有尚未产生会话和运行记录的渠道可以删除。当前对象：${account.name}`,
+      message: `确定删除渠道“${account.name}”？删除后机器人将停止接收消息。`,
       icon: "trash-2",
       tone: "danger",
       confirmLabel: "删除",
     }))) return;
-    try {
-      await apiFetch(`/api/v1/channel-accounts/${accountId}`, { method: "DELETE" });
+      if (!(await deleteWithImpactConfirmation(`/api/v1/channel-accounts/${encodeURIComponent(accountId)}`, {
+        title: "删除渠道及运行记录？",
+        describeImpact: (impact) => `渠道“${account.name}”有 ${impact.binding_count} 条会话绑定、${impact.run_count} 条运行记录。\n确认后将停止该渠道的运行，并永久删除渠道及这些记录。Agent 和历史会话会保留。此操作不可撤销。`,
+        confirmLabel: "删除渠道及运行记录",
+      }))) return;
       showToast("渠道已删除");
-      await this.refresh();
+      await refreshAfterSuccessfulMutation("渠道已删除", () => this.refresh());
     } catch (error) {
       showToast(error.message, true);
+    } finally {
+      this.deletingAccounts.delete(accountId);
     }
   },
 };

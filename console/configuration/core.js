@@ -149,12 +149,39 @@ function openActionDialog({
     dialog.addEventListener("close", onClose);
     activeActionDialogCancel = onCancel;
     dialog.showModal();
-    (fieldsHost.querySelector("input, textarea, select") || confirmButton).focus();
+    (fieldsHost.querySelector("input, textarea, select") || (tone === "danger" ? cancelButton : confirmButton)).focus();
   });
 }
 
 async function confirmAction(options) {
   return (await openActionDialog(options)) === true;
+}
+
+// The server supplies current impact and binds the confirmation to that set.
+// A changed set requires another explicit confirmation, never an automatic retry.
+async function deleteWithImpactConfirmation(path, { title, describeImpact, confirmLabel }) {
+  let confirmationToken;
+  for (;;) {
+    try {
+      await apiFetch(path, {
+        method: "DELETE",
+        ...(confirmationToken ? { body: JSON.stringify({ confirmation_token: confirmationToken }) } : {}),
+      });
+      return true;
+    } catch (error) {
+      const detail = error.detail;
+      if (error.status !== 409 || detail?.code !== "delete_confirmation_required"
+          || !detail.confirmation_token || !detail.impact) throw error;
+      if (!(await confirmAction({
+        title,
+        message: describeImpact(detail.impact),
+        icon: "triangle-alert",
+        tone: "danger",
+        confirmLabel,
+      }))) return false;
+      confirmationToken = detail.confirmation_token;
+    }
+  }
 }
 
 async function requestActionFields(options) {
@@ -189,11 +216,6 @@ async function apiFetch(path, options = {}) {
     headers: { "Content-Type": "application/json", ...optionHeaders },
   });
 
-  if (resp.status === 503 && !String(path).includes("channel") && !String(path).startsWith("/api/v1/integrations") && !String(path).startsWith("/api/v1/wecom-applications")) {
-    showDbBanner(true);
-    throw new Error("数据库未配置 (503)");
-  }
-
   if (!resp.ok) {
     let detail = resp.statusText;
     try {
@@ -202,7 +224,11 @@ async function apiFetch(path, options = {}) {
     } catch {
       /* ignore */
     }
-    throw new Error(window.AdminFormFeedback?.formatDetail(detail) || String(detail));
+    if (resp.status === 503 && typeof detail === "string" && detail.startsWith("Database is not configured.")) showDbBanner(true);
+    const error = new Error(window.AdminFormFeedback?.formatDetail(detail) || String(detail));
+    error.status = resp.status;
+    error.detail = detail;
+    throw error;
   }
 
   if (resp.status === 204) return null;

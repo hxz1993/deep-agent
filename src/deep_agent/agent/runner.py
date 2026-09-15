@@ -510,11 +510,12 @@ class AgentRunner:
         self,
         session_id: str,
         deps: AgentDeps,
+        *, run_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Force one persisted compaction Event without appending a chat turn."""
 
         deps.agent_name = self.agent_name
-        self._start_run_identity(session_id, deps)
+        self._start_run_identity(session_id, deps, run_id=run_id)
         self._prepare_skill_runtime(deps)
         started_at = time.perf_counter()
 
@@ -648,8 +649,11 @@ class AgentRunner:
             queue_task: asyncio.Task[Any] | None = asyncio.create_task(event_queue.get())
             try:
                 while not task.done():
+                    if deps.cancellation_token is not None and deps.cancellation_token.cancelled:
+                        raise RunCancelled("Manual compaction cancelled", usage=usage)
                     done, _ = await asyncio.wait(
                         {task, queue_task},
+                        timeout=0.1 if deps.cancellation_token is not None else None,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
                     if queue_task in done:
@@ -697,12 +701,15 @@ class AgentRunner:
                     target_tokens=target_tokens,
                 )
                 return
-            except (asyncio.CancelledError, GeneratorExit):
+            except (asyncio.CancelledError, GeneratorExit, RunCancelled) as exc:
                 with anyio.CancelScope(shield=True):
                     task.cancel()
                     with suppress(asyncio.CancelledError, SummaryUnavailable, RunCancelled):
                         await task
                     await state.finish_compaction("cancelled", "cancelled")
+                if isinstance(exc, RunCancelled):
+                    yield manual_result("cancelled", "cancelled", usage=exc.usage)
+                    return
                 raise
             except Exception as exc:  # provider errors must preserve the prior surface
                 await state.finish_compaction("failed", type(exc).__name__)
@@ -1535,9 +1542,10 @@ class AgentRunner:
         context_refs: list[ContextReference] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         branch_from: int | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         deps.agent_name = self.agent_name
-        self._start_run_identity(session_id, deps)
+        self._start_run_identity(session_id, deps, run_id=run_id)
         await self._ensure_turn_identity(
             session_id, deps, message=message, attachments=attachments,
             context_refs=context_refs, deferred_tool_results=deferred_tool_results,
@@ -1631,6 +1639,7 @@ class AgentRunner:
                     model_settings=self.model_settings,
                     conversation_id=deps.conversation_id,
                     run_id=deps.run_id,
+                    cancellation_token=deps.cancellation_token,
                     **({"capabilities": [progress]} if progress is not None else {}),
                 )
             except BaseException as exc:
@@ -2050,6 +2059,7 @@ class AgentRunner:
             result = None
             run_published = False
             progress = None
+            owns_active_run = active_run is None or not active_run.request_owned
             active_run = active_run or self._active_runs.register(
                 agent_id=deps.agent_id,
                 session_id=session_id,
@@ -2369,7 +2379,8 @@ class AgentRunner:
                                 run_event, status="cancelled", started_at=started_at,
                                 usage=cancelled_run.usage,
                             )
-                self._active_runs.unregister(active_run)
+                if owns_active_run:
+                    self._active_runs.unregister(active_run)
 
         if cancelled_run is not None:
             await self._cancel_title_task(title_task)

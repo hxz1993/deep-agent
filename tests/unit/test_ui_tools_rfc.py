@@ -38,6 +38,9 @@ from deep_agent.schemas.ui_tools import (
     UiToolPackageUpdate,
     UiToolUpdate,
 )
+from deep_agent.schemas.agent import AgentCreate, AgentUpdate
+from deep_agent.db.reference_integrity import ReferenceConflict
+from fastapi import HTTPException
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.api.v1.tools import list_tool_packages
@@ -140,6 +143,37 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         rows = await self.store.list_all(source="manual")
         self.assertEqual(row.name, "myapp__custom_form")
         self.assertEqual(len(rows), 1)
+
+    async def test_delete_only_blocks_effectively_selected_tool(self) -> None:
+        for name in ("demo__selected", "demo__unselected"):
+            await self.store.create_manual(UiToolCreate(name=name, package_code="ui:demo", description="test", parameters_json_schema={"type": "object"}))
+        agent = await self.stores.agent.create_unique(AgentCreate(name="Scoped UI", prompt="test", capabilities=["ui:demo"], ui_tool_selection={"ui:demo": ["demo__selected"]}))
+        await delete_ui_tool("demo__unselected", store=self.store, agent_store=self.stores.agent)
+        self.assertIsNone(await self.store.get_by_name("demo__unselected"))
+        with self.assertRaises(ReferenceConflict):
+            await self.store.delete("demo__selected")
+        with self.assertRaises(HTTPException) as caught:
+            await delete_ui_tool("demo__selected", store=self.store, agent_store=self.stores.agent)
+        self.assertEqual(caught.exception.status_code, 409)
+        await self.stores.agent.update_unique(agent.id, AgentUpdate(ui_tool_selection={}))
+        with self.assertRaises(ReferenceConflict):
+            await self.store.delete("demo__selected")
+        await self.stores.agent.update_unique(agent.id, AgentUpdate(ui_tool_selection={"ui:demo": []}))
+        await delete_ui_tool("demo__selected", store=self.store, agent_store=self.stores.agent)
+        self.assertIsNone(await self.store.get_by_name("demo__selected"))
+
+    async def test_move_cannot_leave_explicit_agent_selection_dangling(self) -> None:
+        await self.stores.ui_tool_package.create_manual(UiToolPackageCreate(code="ui:target", label="Target"))
+        await self.store.create_manual(UiToolCreate(name="demo__move", package_code="ui:demo", description="test", parameters_json_schema={"type": "object"}))
+        agent = await self.stores.agent.create_unique(AgentCreate(name="Scoped UI", prompt="test", capabilities=["ui:demo"], ui_tool_selection={"ui:demo": ["demo__move"]}))
+        with self.assertRaises(ReferenceConflict):
+            await self.store.update("demo__move", UiToolUpdate(package_code="ui:target"))
+        self.assertEqual((await self.store.get_by_name("demo__move")).package_code, "ui:demo")
+        # Whole-package scope follows the package contents, without a stored tool reference.
+        await self.stores.agent.update_unique(agent.id, AgentUpdate(ui_tool_selection={}))
+        moved = await self.store.update("demo__move", UiToolUpdate(package_code="ui:target"))
+        self.assertEqual(moved.package_code, "ui:target")
+        await self.stores.agent.update_unique(agent.id, AgentUpdate(prompt="still valid"))
 
     async def test_ui_tool_package_crud_and_builtin_protection(self) -> None:
         listed = await list_ui_tool_packages(store=self.stores.ui_tool_package)

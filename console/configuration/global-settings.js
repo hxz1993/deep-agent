@@ -382,13 +382,20 @@ const globalSettingsAdmin = {
     try {
       const [runtime, webSearch] = await Promise.all([
         apiFetch("/api/v1/global-settings"),
-        apiFetch("/api/v1/global-settings/web-search"),
+        apiFetch("/api/v1/global-settings/web-search").catch((error) => {
+          if (error.status !== 409) throw error;
+          return { invalid: true };
+        }),
         loadLlmProviders(),
       ]);
       this.groups = Array.isArray(runtime?.groups) ? runtime.groups : [];
-      this.webSearch = webSearch;
+      this.webSearch = webSearch?.invalid ? null : webSearch;
       renderGlobalSettings(this.groups, this.query);
-      renderWebSearchSettings(webSearch);
+      renderWebSearchSettings(this.webSearch);
+      if (webSearch?.invalid) {
+        const summary = document.getElementById("webSearchSummaryValue");
+        if (summary) summary.textContent = "配置不可用，请重新配置";
+      }
     } catch (error) {
       renderGlobalSettingsError(error);
       showToast(error?.message || "全局配置加载失败", true);

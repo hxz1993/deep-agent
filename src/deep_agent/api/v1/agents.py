@@ -10,6 +10,8 @@ from deep_agent.models.provider_registry import (
     load_provider_for_model,
 )
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
+from deep_agent.api.v1.request_identity import RequestUserDep
+from deep_agent.services.resource_deletion import DeleteConfirmation, delete_resource
 from deep_agent.core.context import AppContextDep
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.db.deps import get_agent_store, get_llm_model_store
@@ -246,19 +248,9 @@ async def update_agent(
 async def delete_agent(
     agent_id: str,
     ctx: AppContextDep,
+    user: RequestUserDep,
+    body: DeleteConfirmation | None = None,
     store: AgentStoreBase = Depends(get_agent_store),
 ) -> None:
     normalized_id = _parse_agent_id(agent_id)
-    assert ctx.stores.channel is not None
-    channel_accounts = await ctx.stores.channel.list_referencing_agent(normalized_id)
-    if channel_accounts:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Agent 正被渠道配置使用，请先调整或停用对应渠道",
-        )
-    try:
-        deleted = await store.delete(normalized_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")
+    await delete_resource(ctx, store, normalized_id, user, body)

@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.8`，数据库Head为`006` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.9`，数据库Head为`006` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -306,7 +306,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - 不新增数据库外键。ID、主键、唯一约束和索引保留，10类逻辑引用见 `db/reference_schema.py`。
 - 在 Store/Service 同一事务锁父记录、重新校验后写子记录；同类父记录按 ID 排序。不可仅在 HTTP 层或进程内保证引用。
 - 普通写事务先持数据库 Revision 行共享锁，配置替换持独占锁；SQLite 使用 BEGIN IMMEDIATE。绕过公共事务入口的维护写入必须显式协调或停服务。
-- 会话删除原子删除 Events 并将 Channel Binding.session_id 置空；Agent 有历史会话/渠道引用、模型有 Agent 引用时禁止删除。
+- 会话删除等待本实例运行收尾，原子删除 Events 并将 Channel Binding.session_id 置空。v0.10.9 Agent 有历史会话时返回影响数量及确认 token，确认后级联删除全部用户会话；渠道有绑定/运行记录时同样确认后清理台账，保留 Agent 与历史会话。范围改变必须重新确认；仍有渠道引用的 Agent、仍有 Agent 引用的模型禁止删除，停用不解除引用。取消协调限单 API 实例，不能宣称跨 Pod 停止运行。
 - `PRAGMA foreign_key_check` 为空不代表逻辑引用有效，必须执行 `assert_logical_references`。
 - 升级/降级需要实际数据库结构检查，不支持生成003离线SQL；001/002保留历史离线编译。
 - 备份按源Revision输出，导入要求同版；测试必须使用隔离库，不能改共享Alpha/Test或稳定本地SQLite。

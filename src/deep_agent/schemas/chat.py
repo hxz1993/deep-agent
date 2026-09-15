@@ -89,7 +89,7 @@ class ChatResponse(BaseModel):
     run_id: str | None = None
     output: Any
     usage: dict[str, Any] = Field(default_factory=dict)
-    status: str = Field(default="completed", description="completed or pending (awaiting UI input).")
+    status: str = Field(default="completed", description="completed, pending (awaiting UI input), or cancelled.")
     deferred: dict[str, Any] | None = Field(
         default=None,
         description="Pending tool calls when status is pending.",

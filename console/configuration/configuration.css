@@ -1274,6 +1274,7 @@ dialog.console-action-dialog::backdrop {
 .console-action-dialog-copy h3 { margin: 1px 0 6px; font-size: 15px; line-height: 1.4; }
 .console-action-dialog-copy > p {
   margin: 0;
+  white-space: pre-line;
   color: var(--text-dim);
   font-size: 13px;
   line-height: 1.6;

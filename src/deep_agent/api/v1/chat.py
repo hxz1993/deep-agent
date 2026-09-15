@@ -10,10 +10,12 @@ import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.routing import APIRoute
 from loguru import logger
+from pydantic_ai import RunCancelled
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from deep_agent.agent.deferred import build_deferred_tool_results
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.observability import usage_dict
 from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
@@ -178,12 +180,14 @@ def _deferred_results(body: StreamChatRequest):
 
 async def _current_channel_context(ctx, body, account):
     """Recheck optional enrichment at the API boundary after gateway I/O."""
-    if account is None or not body.context_refs:
+    if account is None:
         return
     from deep_agent.services.wecom_profiles import application_for_account
     current = await ctx.stores.channel.get_account(account.id)
+    if current is None or not current.enabled or current.agent_id != account.agent_id or current.session_user_id != account.session_user_id:
+        raise HTTPException(status_code=409, detail="渠道已删除、停用或变更，请刷新渠道配置")
     app_id = application_for_account(current) if current and current.enabled else None
-    for reference in body.context_refs:
+    for reference in body.context_refs or []:
         if reference.type != "channel.message_source":
             continue
         payload = reference.payload
@@ -204,6 +208,7 @@ async def chat(
     user: ChannelRequestUserDep,
     channel_account: ChannelAccountDep,
 ) -> ChatResponse:
+    admission_generation = ctx.active_runs.generation
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
     request_headers = extract_forward_headers(request, channel_account=channel_account)
@@ -232,6 +237,16 @@ async def chat(
         request_headers=request_headers,
     )
     try:
+        active_run = ctx.active_runs.register(
+            agent_id=agent_id, session_id=session_id, user_id=user,
+            conversation_id=deps.conversation_id, run_id=deps.run_id,
+            channel_account_id=channel_account.id if channel_account else None,
+            expected_generation=admission_generation,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    deps.cancellation_token = active_run.cancellation_token
+    try:
         await _adopt_channel_session_scope(ctx, channel_account, deps)
         await _current_channel_context(ctx, body, channel_account)
         result = await runner.run(
@@ -241,12 +256,17 @@ async def chat(
             attachments=body.attachments,
             context_refs=body.context_refs,
             branch_from=body.branch_from,
+            run_id=deps.run_id,
         )
     except ContextWindowExceededError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except RunCancelled as exc:
+        result = {"output": "", "usage": usage_dict(exc.usage), "status": "cancelled"}
+    finally:
+        ctx.active_runs.unregister(active_run)
     return ChatResponse(
         session_id=session_id,
         conversation_id=deps.conversation_id,
@@ -268,6 +288,7 @@ async def chat_stream(
     user: ChannelRequestUserDep,
     channel_account: ChannelAccountDep,
 ) -> DiagnosticEventSourceResponse:
+    admission_generation = ctx.active_runs.generation
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
     deferred_tool_results = _deferred_results(body)
@@ -311,13 +332,20 @@ async def chat_stream(
 
     async def event_generator():
         nonlocal stream_run
-        active_run = ctx.active_runs.register(
-            agent_id=deps.agent_id,
-            session_id=session_id,
-            user_id=deps.user,
-            conversation_id=deps.conversation_id,
-            run_id=deps.run_id,
-        )
+        try:
+            active_run = ctx.active_runs.register(
+                agent_id=deps.agent_id,
+                session_id=session_id,
+                user_id=deps.user,
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
+                channel_account_id=channel_account.id if channel_account else None,
+                expected_generation=admission_generation,
+                request_owned=True,
+            )
+        except RuntimeError as exc:
+            yield {"event": "error", "data": json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False)}
+            return
         stream_run = active_run
         live_key = (deps.agent_id, session_id, deps.user)
         try:
@@ -360,7 +388,6 @@ async def chat_stream(
             raise
         finally:
             active_run.cancellation_token.cancel()
-            ctx.active_runs.unregister(active_run)
             # Ensure background persistence finishes before the client refreshes session list.
             try:
                 with anyio.move_on_after(5, shield=True):
@@ -372,6 +399,7 @@ async def chat_stream(
                                      session_id, type(exc).__name__)
             finally:
                 ctx.session_live.end(live_key, deps.run_id)
+                ctx.active_runs.unregister(active_run)
 
     return DiagnosticEventSourceResponse(
         event_generator(), fields={**session_data, "agent_name": getattr(runner, "agent_name", None)},

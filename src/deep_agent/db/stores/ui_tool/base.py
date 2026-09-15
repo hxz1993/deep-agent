@@ -62,6 +62,12 @@ class UiToolStoreBase(SessionBoundMixin):
                 return None
             if row.package_code != previous_package:
                 raise ReferenceConflict("UI tool package changed concurrently; refresh and retry")
+            if data.package_code is not None and data.package_code != previous_package:
+                refs = (await db.execute(
+                    select(Agent.ui_tool_selection).order_by(Agent.id).with_for_update()
+                )).scalars().all()
+                if any(name in (selection or {}).get(previous_package, []) for selection in refs):
+                    raise ReferenceConflict("UI 工具已被 Agent 单独选择，请先取消选择后再移动工具包")
             updates = data.model_dump(exclude_unset=True)
             if "metadata" in updates:
                 updates["metadata_"] = updates.pop("metadata")
@@ -83,8 +89,11 @@ class UiToolStoreBase(SessionBoundMixin):
                 return False
             if row.package_code != code:
                 raise ReferenceConflict("UI tool package changed concurrently; refresh and retry")
-            refs = (await db.execute(select(Agent.name, Agent.capabilities).order_by(Agent.id).with_for_update())).all()
-            if any(code in (caps or []) for _, caps in refs):
+            refs = (await db.execute(select(Agent.capabilities, Agent.ui_tool_selection).order_by(Agent.id).with_for_update())).all()
+            if any(
+                code in (caps or []) and (code not in (selection or {}) or name in selection[code])
+                for caps, selection in refs
+            ):
                 raise ReferenceConflict("UI 工具正在被 Agent 引用，不能删除")
             result = await db.execute(delete(UiToolDefinition).where(UiToolDefinition.name == name))
             await db.flush()

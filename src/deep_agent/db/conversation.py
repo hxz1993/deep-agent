@@ -682,7 +682,7 @@ class SqlConversationCoordinator:
         scope = normalize_agent_scope(agent_id)
         async with self._write() as db:
             await self._chat_sessions._delete(db, scope, session_id)
-        self._locks.pop(runtime_session_key(session_id, agent_id=agent_id), None)
+        # Keep the lock identity: waiters may already hold a reference to it.
 
     async def get_session_title(
         self, session_id: str, *, agent_id: str | None = None,

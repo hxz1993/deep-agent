@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.7`，数据库Head为`006` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.8`，数据库Head为`006` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -193,6 +193,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
   摘要、搜索文本或Token估算。被压缩前缀生成确定性Context Evidence，精确事实仍从原Event回读。
 - 新的运行时横切能力优先评估 Core 的 `PrepareTools`、Hooks、`ToolSearch` 和 Harness 的 Compaction/Overflow；不要默认把逻辑继续写入 `AgentRunner`。
 - v0.3.12 对已授权 MCP 使用 Pydantic AI ToolSearch 渐进披露；当前全局候选不超过 10 个时全部直接披露，超过 10 个时词法预选最多 3 个完整 Schema，其余只列稳定协议名并可搜索加载。检索不扩大 ToolPackage 权限。
+- v0.10.8 搜索先在当前授权目录中匹配，再排除已可用工具；本地结果区分已加载、已可用和精确名称缺失。协议名保留前缀及分隔符，不把不存在的协议名回退为其他保存工具。搜索不刷新 MCP 检测快照；远端新增工具后需在 MCP 配置中重新检测，后续 Run 才使用新目录。
 - v0.4.1 将检索器升级为 `lexical_v2`：复用独立的字段化词法内核，按协议名、MCP标准 `title`、参数和描述分级匹配，并支持拼音与受限错字回退；查询明确写出协议工具名时只返回精确工具。不得加入业务词典或把词法匹配描述成中英文语义翻译。
 - v0.4.2 引导本地 `search_tools` 在一次调用中提交最多 3 个互补查询：用户原始语言、简洁英文能力描述和可选协议名。后端只做确定性词法检索，不调用翻译模型；首轮 Top 3仍只依赖原始问题和 MCP元数据。
 - v0.4.4～v0.4.5完成下线内置MCP清理；Alembic 005和006依次清理对应预制Server记录与Agent能力引用，历史会话不改写。当前代码内置MCP只保留DeepCube；真实MCP进程回归改用`tests/fixtures/`下的测试专用Server，禁止测试Fixture进入生产扫描目录。

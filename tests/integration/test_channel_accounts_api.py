@@ -53,6 +53,52 @@ class ChannelAccountsApiTests(unittest.IsolatedAsyncioTestCase):
             "enabled": False,
         }
 
+    async def test_space_key_is_private_and_supports_keep_replace_clear(self) -> None:
+        key = "fixture-only-space-key-0001"
+        payload = {**self.payload(), "settings": {"deepfos": {
+            "enabled": True, "app_id": "fixture007", "api_key": key,
+        }}}
+        created = await self.request("POST", "/api/v1/channel-accounts", json=payload)
+        self.assertEqual(created.status_code, 201, created.text)
+        account_id = created.json()["id"]
+        path = f"/api/v1/channel-accounts/{account_id}"
+        for response in (created, await self.request("GET", path),
+                         await self.request("GET", "/api/v1/channel-accounts")):
+            self.assertNotIn(key, response.text)
+            self.assertNotIn('"api_key":', response.text)
+        config = created.json()["settings"]["deepfos"]
+        self.assertTrue(config["api_key_set"])
+        self.assertEqual(config["api_key_masked"], "fixtur********0001")
+        for patch_config in (config, {**config, "api_key": ""}, {**config, "enabled": False}):
+            saved = await self.request("PUT", path, json={"settings": {"deepfos": patch_config}})
+            self.assertEqual(saved.status_code, 200, saved.text)
+            self.assertTrue(saved.json()["settings"]["deepfos"]["api_key_set"])
+            row = await self.stores.channel.get_account(account_id)
+            self.assertEqual(row.settings["deepfos"]["api_key"], key)
+            self.assertNotIn("api_key_masked", row.settings["deepfos"])
+        changed_key = "fixture-only-space-key-0002"
+        replaced = await self.request("PUT", path, json={"settings": {"deepfos": {
+            **config, "api_key": changed_key,
+        }}})
+        self.assertEqual(replaced.json()["settings"]["deepfos"]["api_key_masked"], "fixtur********0002")
+        cleared = await self.request("PUT", path, json={"settings": {"deepfos": {
+            **config, "clear_api_key": True,
+        }}})
+        self.assertFalse(cleared.json()["settings"]["deepfos"]["api_key_set"])
+        self.assertNotIn("api_key", (await self.stores.channel.get_account(account_id)).settings["deepfos"])
+
+    async def test_space_key_rejects_header_injection(self) -> None:
+        for key in ("fixture\r\nInjected: value", "含中文", 123):
+            response = await self.request("POST", "/api/v1/channel-accounts", json={
+                **self.payload(), "settings": {"deepfos": {"enabled": True, "app_id": "fixture007", "api_key": key}},
+            })
+            self.assertEqual(response.status_code, 422)
+        response = await self.request("POST", "/api/v1/channel-accounts", json={
+            **self.payload(), "settings": {"deepfos": {"enabled": True, "app_id": "fixture007",
+                "api_key": "fixture-key", "clear_api_key": True}},
+        })
+        self.assertEqual(response.status_code, 422)
+
     async def test_admin_configures_session_user_without_returning_secret(self) -> None:
         created = await self.request("POST", "/api/v1/channel-accounts", json=self.payload())
         self.assertEqual(created.status_code, 201, created.text)
@@ -184,6 +230,7 @@ class ChannelAccountsApiTests(unittest.IsolatedAsyncioTestCase):
                                      json={**self.payload(), "settings": settings})
         self.assertEqual(created.status_code, 201, created.text)
         path = f"/api/v1/channel-accounts/{created.json()['id']}"
+        settings["deepfos"].update(api_key_set=False, api_key_masked=None)
         self.assertEqual(created.json()["settings"], settings)
         for config in ({"enabled": True}, {"enabled": "false"}, {"enabled": True, "app_id": "bad"}):
             invalid = await self.request("PUT", path, json={"settings": {"deepfos": config}})

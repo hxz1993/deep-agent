@@ -17,6 +17,7 @@ from deep_agent.schemas.channel import (
     ChannelRuntimeResponse,
 )
 from deep_agent.schemas.llm_provider import mask_api_key
+from deep_agent.channels.app_context import public_channel_settings
 from deep_agent.services.channel_gateway_client import (
     ChannelGatewayClient,
     ChannelGatewayUnavailableError,
@@ -57,7 +58,7 @@ async def _response(row, ctx: AppContextDep) -> ChannelAccountResponse:
         agent_name=agent.name if agent else None,
         session_user_id=row.session_user_id,
         enabled=row.enabled,
-        settings=row.settings or {},
+        settings=public_channel_settings(row.settings),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

@@ -1,5 +1,5 @@
 // Resize neighboring columns together; no persistence or change to row data.
-export const COLUMN_BOUNDS = [[240, 720], [80, 220], [64, 200], [56, 130], [120, 220]];
+export const COLUMN_BOUNDS = [[240, 720], [80, 220], [64, 200], [90, 240], [56, 130], [120, 220]];
 export function resizeColumns(widths, index, delta) {
   if (index < 0 || index >= widths.length - 1) return [...widths];
   const [lower, upper] = COLUMN_BOUNDS[index], [nextLower, nextUpper] = COLUMN_BOUNDS[index + 1];

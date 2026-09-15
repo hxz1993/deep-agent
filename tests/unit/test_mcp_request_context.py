@@ -9,6 +9,20 @@ from deep_agent.mcp_request_context import (
 
 
 class McpRequestContextPolicyTests(unittest.TestCase):
+    def test_inherited_space_key_excludes_login_headers_and_internal_user(self):
+        config = {"headers": {"Authorization": "static-auth", "Cookie": "static-cookie",
+                              "User": "static-owner", "X-Deepfos-Key": "static-key",
+                              "x-mcp-token": "separate-service"}}
+        request = {"user": "session-owner", "app": "fixture007", "space": "fixture",
+                   "language": "zh-cn", "x-deepfos-key": "fixture-space-key"}
+        self.assertEqual(resolve_mcp_headers("url", config, request), {
+            "app": "fixture007", "space": "fixture", "language": "zh-cn",
+            "x-deepfos-key": "fixture-space-key", "x-mcp-token": "separate-service",
+        })
+        self.assertEqual(request["user"], "session-owner")
+        config["request_context"] = {"mode": "isolated"}
+        self.assertEqual(resolve_mcp_headers("url", config, request), config["headers"])
+
     def test_legacy_url_rows_continue_to_inherit(self) -> None:
         config = {"url": "http://example.test/mcp", "headers": {"user": "static"}}
         self.assertEqual(resolve_mcp_request_context_mode("url", config), "inherit")

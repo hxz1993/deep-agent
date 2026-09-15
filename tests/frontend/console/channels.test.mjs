@@ -168,6 +168,7 @@ function secretEditorHarness() {
     document: {
       addEventListener(type, listener) { if (type === "DOMContentLoaded") ready.push(listener); },
       getElementById: getElement,
+      querySelector() { return null; },
       querySelectorAll() { return []; },
     },
     apiFetch: async (path, options) => { if (!options?.body) return []; requests.push({ path, ...options, payload: JSON.parse(options.body) }); },
@@ -297,6 +298,29 @@ test("新建渠道先选择企微，支持键盘和外部关闭且不提前创�
   assert.match(templateHtml, /id="createWecomChannelBtn" role="menuitem"[^\n]*<span>企微（WS）<\/span>/);
 });
 
+
+test("渠道Key草稿脱敏回显，保存发送原值，显式清空不回传掩码", async () => {
+  const { admin, getElement, requests } = secretEditorHarness();
+  admin.openEdit("channel-1");
+  const key = getElement("channelDeepfosApiKey");
+  key.value = "demo-only-key-123456";
+  key.listeners.input();
+  key.listeners.blur();
+  assert.equal(key.value, "demo-o********3456");
+  const submit = () => admin.save({ preventDefault() {}, currentTarget: getElement("channelAccountForm") });
+  await submit();
+  assert.equal(requests.at(-1).payload.settings.deepfos.api_key, "demo-only-key-123456");
+  getElement("clearChannelDeepfosApiKeyBtn").listeners.click();
+  key.listeners.blur();
+  assert.equal(key.value, "");
+  await submit();
+  assert.equal(requests.at(-1).payload.settings.deepfos.clear_api_key, true);
+  assert.equal(requests.at(-1).payload.settings.deepfos.api_key, undefined);
+  admin.openEdit("channel-2");
+  await submit();
+  assert.equal(requests.at(-1).payload.settings.deepfos.clear_api_key, undefined);
+  assert.equal(requests.at(-1).payload.settings.deepfos.api_key, undefined);
+});
 
 test("应用关联默认关闭，开启显示必填配置，关闭保留内容且隐藏并禁用", async () => {
   const { admin, getElement, requests } = secretEditorHarness();

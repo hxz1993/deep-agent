@@ -51,38 +51,61 @@ class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
         from deep_agent.core.context import get_context
         from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
 
-        model = TestModel(call_tools=["echo_echo_request_headers"], custom_output_text="ok")
+        from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, UserPromptPart
+        from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+
+        def response(messages, info):
+            if any(isinstance(part, UserPromptPart) for part in messages[-1].parts):
+                return ModelResponse(parts=[ToolCallPart("echo_echo_request_headers", {})])
+            return ModelResponse(parts=[TextPart("ok")])
+
+        async def stream(messages, info):
+            if any(isinstance(part, UserPromptPart) for part in messages[-1].parts):
+                yield {0: DeltaToolCall(name="echo_echo_request_headers", json_args="{}")}
+            else:
+                yield "ok"
+
+        model = FunctionModel(function=response, stream_function=stream)
         async with async_echo_chat_app() as (app, record_file):
             store = get_context().stores.channel
             account = await store.create_account(ChannelAccountCreate(
                 name="scope test", bot_id="scope-fixture", secret="fixture",
                 agent_id=app.state.test_agent_id, session_user_id="channel-owner", enabled=True,
-                settings={"deepfos": {"enabled": True, "app_id": "first001"}},
+                settings={"deepfos": {"enabled": False}},
             ))
+            binding = await store.resolve_binding(account_id=account.id, peer_type="single", peer_id="scope-fixture")
+            session_id = binding.session.session_id
+            self.assertEqual((binding.session.app_id, binding.session.space_id), (None, None))
             headers = {"user": "forged-owner", "app": "invalid", "space": "invalid",
                        "authorization": "Bearer fixture-platform", "cookie": "fixture-platform=1",
                        "language": "en",
                        "x-deep-agent-app": "forged001", "x-deep-agent-space": "forged",
                        "x-deep-agent-channel-account": account.id,
                        "x-deep-agent-channel-token": "fixture-internal"}
-            body = {"agent_id": app.state.test_agent_id, "message": "inspect headers", "capabilities": ["mcp:echo"]}
+            body = {"agent_id": app.state.test_agent_id, "session_id": session_id, "message": "inspect headers", "capabilities": ["mcp:echo"]}
             with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "fixture-internal"}), patch(
                 "deep_agent.agent.factory._resolve_model", return_value=model
             ):
-                for app_id in ("first001", "second002", None):
+                for app_id, key in (("first001", None), ("second002", "fixture-only-space-key"), (None, None)):
                     await store.update_account(account.id, ChannelAccountUpdate(settings={
-                        "deepfos": {"enabled": app_id is not None, "app_id": app_id},
+                        "deepfos": {"enabled": app_id is not None, "app_id": app_id, "api_key": key},
                     }))
                     expected = {"language": "en", "user": "channel-owner",
                                 "authorization": "Bearer fixture-platform", "cookie": "fixture-platform=1"}
                     if app_id:
                         expected.update(app=app_id, space=app_id[:-3])
+                    if key:
+                        expected = {"app": app_id, "space": app_id[:-3], "language": "en", "x-deepfos-key": key}
                     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                         response = await client.post("/api/v1/chat", json=body, headers=headers)
                         self.assertEqual(response.status_code, 200, response.text)
                     self.assertEqual(json.loads(record_file.read_text()), expected)
+                    self.assertEqual(await get_context().stores.chat_session.get_initial_scope(
+                        app.state.test_agent_id, session_id), (app_id, app_id[:-3] if app_id else None))
                     await read_chat_stream(app, json_body=body, headers=headers)
                     self.assertEqual(json.loads(record_file.read_text()), expected)
+                    self.assertEqual(await get_context().stores.chat_session.get_initial_scope(
+                        app.state.test_agent_id, session_id), (app_id, app_id[:-3] if app_id else None))
 
 
 class ChatHeaderForwardingTests(unittest.TestCase):

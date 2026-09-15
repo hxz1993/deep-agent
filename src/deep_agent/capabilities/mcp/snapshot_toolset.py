@@ -12,6 +12,8 @@ from pydantic_ai.toolsets import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.observability import log_event
+from deep_agent.agent.tool_errors import native_error_details
 from deep_agent.capabilities.mcp.errors import classify_terminal_mcp_request_failure
 from deep_agent.mcp_request_context import resolve_mcp_headers
 from deep_agent.schemas.mcp import McpToolSnapshot
@@ -116,7 +118,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
             raise ToolFailed(self._connection_failure)
 
         try:
-            inner = await self._ensure_connection()
+            inner = await self._ensure_connection(ctx)
             return await inner.call_tool(name, tool_args, ctx, tool)
         except BaseExceptionGroup as exc:
             if _contains_cancellation(exc):
@@ -149,7 +151,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
 
         raise AssertionError("unreachable")
 
-    async def _ensure_connection(self) -> MCPToolset[AgentDeps]:
+    async def _ensure_connection(self, ctx: RunContext[AgentDeps] | None = None) -> MCPToolset[AgentDeps]:
         if self._inner is not None:
             return self._inner
         async with self._connect_lock:
@@ -163,6 +165,18 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                 self.config,
                 self.request_headers,
             )
+            # Record the effective transport scope, never header values or credentials.
+            if ctx is not None:
+                lowered = {key.lower(): value for key, value in (headers or {}).items()}
+                log_event(
+                    "mcp_request_context_resolved",
+                    session_id=ctx.deps.session_id, agent_id=ctx.deps.agent_id,
+                    run_id=ctx.deps.run_id or ctx.run_id, mcp_server=self.server_name,
+                    app_id=lowered.get("app"), space_id=lowered.get("space"),
+                    language=lowered.get("language"),
+                    auth_context=".".join(key for key in ("authorization", "cookie", "token", "x-user-token", "x-deepfos-key")
+                                          if lowered.get(key)) or "none",
+                )
             inner = MCPToolset(
                 self.config["url"],
                 id=self.server_name,
@@ -193,4 +207,12 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
         self._connection_failure = (
             f"MCP server {self.server_name!r} is temporarily unavailable ({error_type})"
         )
+        failure = native_error_details(exc)
+        if failure.get("http_status") in (401, 403):
+            self._connection_failure = (
+                f"MCP server {self.server_name!r} rejected authentication or access "
+                f"(HTTP {failure['http_status']}). Check the platform credentials "
+                "forwarded by this channel/request and the application permissions. "
+                "A configured user ID or App ID is not an authentication credential."
+            )
         raise ToolFailed(self._connection_failure) from exc

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import httpx
 
 from fastmcp.exceptions import ToolError
 from mcp import McpError
@@ -92,6 +93,39 @@ class BuildRawUrlMcpToolsetTests(unittest.TestCase):
 
 
 class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auth_failure_retains_status_and_logs_only_effective_context(self):
+        from deep_agent.diagnostics.schema import safe_fields
+        for mode, credential_header in (("inherit", "cookie"), ("inherit", "x-deepfos-key"), ("isolated", "x-deepfos-key")):
+            with self.subTest(mode=mode, credential_header=credential_header):
+                ctx = RunContext(deps=AgentDeps(session_id="channel-session", run_id="run-context",
+                    request_headers={"app": "scope001", "space": "scope", "language": "zh-cn",
+                                     credential_header: "credential-never-log"}), model=TestModel(), usage=RunUsage())
+                inner = unittest.mock.MagicMock()
+                response = httpx.Response(401, request=httpx.Request("POST", "https://example.invalid/mcp"))
+                inner.__aenter__ = unittest.mock.AsyncMock(side_effect=httpx.HTTPStatusError(
+                    "credential-never-log", request=response.request, response=response))
+                inner.__aexit__ = unittest.mock.AsyncMock(return_value=None)
+                with unittest.mock.patch("deep_agent.capabilities.mcp.snapshot_toolset.MCPToolset", return_value=inner), \
+                     unittest.mock.patch("deep_agent.capabilities.mcp.snapshot_toolset.log_event") as log:
+                    toolset = build_mcp_toolset("biz", "url", {
+                        "url": "https://example.invalid/mcp", "request_context": {"mode": mode},
+                    }, inspection=self._inspection())
+                    run = await toolset.for_run(ctx)
+                    tools = await run.get_tools(ctx)
+                    for _ in range(2):
+                        with self.assertRaises(ToolFailed) as failure:
+                            await run.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                        self.assertIn("HTTP 401", str(failure.exception))
+                        self.assertNotIn("temporarily unavailable", str(failure.exception))
+                        self.assertNotIn("credential-never-log", str(failure.exception))
+                log.assert_called_once()
+                fields = log.call_args.kwargs
+                self.assertNotIn("credential-never-log", str(fields))
+                self.assertEqual(fields["auth_context"], credential_header if mode == "inherit" else "none")
+                self.assertEqual(fields["app_id"], "scope001" if mode == "inherit" else None)
+                self.assertEqual(safe_fields(fields)["auth_context"], fields["auth_context"])
+                inner.__aenter__.assert_awaited_once()
+
     def setUp(self) -> None:
         self._original_retries = OPTION.agent.request_retries
         OPTION.agent.request_retries = 2

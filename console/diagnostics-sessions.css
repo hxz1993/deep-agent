@@ -126,13 +126,14 @@
 .diagnostic-sessions-page .diagnostic-list-options > span { font-size:13px; white-space:nowrap; }
 .diagnostic-sessions-page .diagnostic-list-options .console-select { width:118px; }
 .diagnostic-sessions-page .diagnostic-list-options .console-select-trigger { height:32px; font-size:13px; }
-.diagnostic-sessions-page .diagnostic-list-options [data-diagnostic-control="latest_status"] .console-select-trigger { border-color:transparent; color:var(--diag-muted); }
+.diagnostic-sessions-page .diagnostic-list-options :is([data-diagnostic-control="app_id"], [data-diagnostic-control="latest_status"]) .console-select-trigger { border-color:transparent; color:var(--diag-muted); }
 .diagnostic-sessions-page .diagnostic-filter-chips { display:flex; gap:8px; flex-shrink:0; padding:0; margin:0; }
 .diagnostic-sessions-page .diagnostic-filter-chips:empty { display:none; }
 .diagnostic-sessions-page .diagnostic-filter-chip { color:var(--diag-accent); background:var(--diag-accent-soft); padding:4px 8px; border-radius:6px; font-size:12px; white-space:nowrap; }
 .diagnostic-sessions-page .diagnostic-session-table-scroll { flex:1; overflow:auto; min-height:0; border:1px solid var(--diag-border); border-radius:8px; }
-.diagnostic-sessions-page .diagnostic-session-table { min-width:792px; border:0; border-radius:0; overflow:visible; }
-.diagnostic-sessions-page .diagnostic-session-row { display:grid; grid-template-columns:var(--diagnostic-columns,minmax(240px,1fr) 140px 120px 80px 160px); align-items:center; gap:8px; min-height:50px; padding:5px 10px; border-bottom:1px solid var(--diag-border); font-size:13px; }
+.diagnostic-sessions-page .diagnostic-session-table { min-width:920px; border:0; border-radius:0; overflow:visible; }
+.diagnostic-sessions-page .diagnostic-session-row { display:grid; grid-template-columns:var(--diagnostic-columns,minmax(240px,1fr) 140px 120px 120px 80px 160px); align-items:center; gap:8px; min-height:50px; padding:5px 10px; border-bottom:1px solid var(--diag-border); font-size:13px; }
+.diagnostic-session-app { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono,monospace); }
 .diagnostic-sessions-page .diagnostic-session-row:last-child { border-bottom:0; }
 .diagnostic-sessions-page .diagnostic-session-columns { position:sticky; top:0; z-index:1; min-height:34px; padding-top:6px; padding-bottom:6px; background:var(--diag-inset); color:var(--diag-muted); font-size:12px; border-bottom:1px solid var(--diag-border); cursor:default; }
 .diagnostic-sessions-page .diagnostic-session-columns > span { position:relative; display:flex; align-items:center; gap:4px; min-width:0; }

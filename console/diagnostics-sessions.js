@@ -1,8 +1,8 @@
 import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260915-release-audit";
 import { diagnosticTime } from "./diagnostics.js?v=20260915-ui-polish";
-import { diagnosticHash, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260915-release-audit";
-import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260915-release-audit";
-import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260915-release-audit";
+import { diagnosticHash, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260915-app-filter";
+import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260915-app-filter";
+import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260915-app-filter";
 import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260915-scroll-focus";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
@@ -139,22 +139,24 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   function listHtml(data) {
     const f = state.filters, total = Number(data?.total ?? state.listTotal ?? 0), offset = Number(f.offset || 0), limit = PAGE_SIZE, items = data?.items || [];
     const currentPage = Math.floor(offset / limit) + 1, pageCount = Math.max(1, Math.ceil(total / limit));
+    const appOptions = [...new Set([...(data?.app_options || []), f.app_id].filter(Boolean))];
     return `<section class="diagnostic-list-workbench" aria-label="会话列表">
       <form autocomplete="off" class="diagnostic-list-toolbar" data-session-form="search"><div class="diagnostic-list-search"><label class="diagnostics-field"><button class="diagnostic-search-submit" type="submit" aria-label="查询会话">${icon("search")}</button><input autocomplete="off" type="search" name="query" value="${e(f.query || "")}" placeholder="搜索会话名称或 ID" aria-label="搜索会话名称或 ID" maxlength="200"/></label></div>
-        <div class="diagnostic-list-options">${userFilterHtml()}${selectHtml("latest_status", "全部状态", f.latest_status || "", [["", "全部状态"], ...Object.entries(SESSION_STATUSES).filter(([key]) => !["pending", "failed"].includes(key))])}
+        <div class="diagnostic-list-options">${userFilterHtml()}${selectHtml("app_id", "全部应用", f.app_id || "", [["", "全部应用"], ...appOptions.map(id => [id, id])])}${selectHtml("latest_status", "全部状态", f.latest_status || "", [["", "全部状态"], ...Object.entries(SESSION_STATUSES).filter(([key]) => !["pending", "failed"].includes(key))])}
         </div>
       </form>
       <div class="diagnostic-session-table-scroll"><div class="diagnostic-session-table" role="table" aria-label="会话查询列表">
-        <div class="diagnostic-session-row diagnostic-session-columns" role="row">${["会话", "Agent", "用户", "状态", "最近活动"].map((label, i) => `<span role="columnheader">${label}${i === 4 ? icon("arrow-down") : `<span class="diagnostic-column-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整${label}列宽" aria-valuemin="${COLUMN_BOUNDS[i][0]}" aria-valuemax="${COLUMN_BOUNDS[i][1]}" data-resize-column="${i}"></span>`}</span>`).join("")}</div>
+        <div class="diagnostic-session-row diagnostic-session-columns" role="row">${["会话", "Agent", "用户", "App ID", "状态", "最近活动"].map((label, i) => `<span role="columnheader">${label}${i === 5 ? icon("arrow-down") : `<span class="diagnostic-column-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整${label}列宽" aria-valuemin="${COLUMN_BOUNDS[i][0]}" aria-valuemax="${COLUMN_BOUNDS[i][1]}" data-resize-column="${i}"></span>`}</span>`).join("")}</div>
         ${items.map(item => `<div class="diagnostic-session-row" role="row" tabindex="0" data-session-id="${e(item.session_id)}">
-          <div class="diagnostic-session-name" role="cell"><div class="diagnostic-session-title"><span class="diagnostic-session-icon">${icon("messages-square")}</span><strong title="${e(item.title || "未命名会话")}">${e(item.title || "未命名会话")}</strong></div><div class="diagnostic-session-id"><code title="${e(item.session_id)}">${e(String(item.session_id).slice(0, 8))}</code><button type="button" class="diagnostic-copy-separator" data-copy-session="${e(item.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${e(item.session_id)}">${icon("copy")}</button><p title="${e(item.recent_question?.summary || "当前范围暂无提问")}">${e(item.recent_question?.summary || "当前范围暂无提问")}</p></div></div>
+          <div class="diagnostic-session-name" role="cell"><div class="diagnostic-session-title"><strong title="${e(item.title || "未命名会话")}">${e(item.title || "未命名会话")}</strong></div><div class="diagnostic-session-id"><code title="${e(item.session_id)}">${e(String(item.session_id).slice(0, 8))}</code><button type="button" class="diagnostic-copy-separator" data-copy-session="${e(item.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${e(item.session_id)}">${icon("copy")}</button><p title="${e(item.recent_question?.summary || "当前范围暂无提问")}">${e(item.recent_question?.summary || "当前范围暂无提问")}</p></div></div>
           <span class="diagnostic-agent-name" role="cell">${sessionAgentIconHtml(item)}<span title="${e(item.agent_name || item.agent_id)}">${e(item.agent_name || item.agent_id || "未记录")}</span></span>
           <span role="cell">${userCardHtml(item.user_id, state.users)}</span>
+          <span class="diagnostic-session-app" role="cell" title="${e(item.app_id || "")}">${e(item.app_id || "—")}</span>
           <span role="cell"><span class="diagnostic-status ${e(item.latest_status)}">${e(SESSION_STATUSES[item.latest_status] || "未确认")}</span></span>
           <time role="cell">${e(diagnosticTime(item.last_activity_at || item.updated_at))}</time>
         </div>`).join("")}
       </div>
-      ${!items.length && !state.busy ? empty("没有匹配会话，可重置时间、Agent 或用户条件后再查询。") : ""}
+      ${!items.length && !state.busy ? empty("没有匹配会话，可重置筛选条件后再查询。") : ""}
       </div>
       <footer class="diagnostic-list-footer"><nav class="diagnostic-pagination" aria-label="会话分页" title="共 ${total.toLocaleString()} 个会话">${button("上一页", "previous", `aria-label="上一页" ${offset <= 0 || state.busy ? "disabled" : ""}`, "btn-sm")}<span class="diagnostic-page-current models-page-info" aria-live="polite" aria-label="第 ${currentPage} 页，共 ${pageCount} 页">第 ${currentPage} / ${pageCount} 页 · 共 ${total.toLocaleString()} 项</span>${button("下一页", "next", `aria-label="下一页" ${offset + limit >= total || state.busy ? "disabled" : ""}`, "btn-sm")}</nav></footer>
     </section>`;
@@ -293,7 +295,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     }
     if (target.dataset.loadedUser !== undefined) { state.filters.user_id = target.dataset.loadedUser; state.filters.offset = 0; void loadCurrent(); return; }
     if (target.dataset.sessionView) {
-      if (state.route.view === "list") listFilters = Object.fromEntries(Object.entries(state.filters).filter(([key]) => ["user_id", "query", "latest_status", "has_questions", "has_execution_error", "limit"].includes(key)));
+      if (state.route.view === "list") listFilters = Object.fromEntries(Object.entries(state.filters).filter(([key]) => ["user_id", "app_id", "query", "latest_status", "has_questions", "has_execution_error", "limit"].includes(key)));
       const common = overviewFilters(state.filters);
       navigate(diagnosticHash(target.dataset.sessionView, target.dataset.sessionView === "overview" ? common : { ...listFilters, ...common, offset: 0 })); return;
     }

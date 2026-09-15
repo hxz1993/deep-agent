@@ -61,6 +61,7 @@ class SessionFilters:
     timezone: str = "UTC"
     agent_id: str | None = None
     user_id: str | None = None
+    app_id: str | None = None
     query: str | None = None
     has_questions: bool | None = None
     has_execution_error: bool | None = None
@@ -81,7 +82,7 @@ class SessionFilters:
             raise DiagnosticQueryError("无效的会话状态")
         if not 1 <= self.limit <= 200 or self.offset < 0:
             raise DiagnosticQueryError("无效的分页参数")
-        for name in ("query", "agent_id", "user_id"):
+        for name in ("query", "agent_id", "user_id", "app_id"):
             value = getattr(self, name)
             if value is not None:
                 value = value.strip()
@@ -240,12 +241,21 @@ class DiagnosticSessionQueries(SessionBoundMixin):
         rows = (await db.execute(select(Agent.id, Agent.name, has_channel).order_by(Agent.name, Agent.id))).all()
         return [{"agent_id": agent_scope_to_api(row[0]), "agent_name": row[1], "has_channel": bool(row[2])} for row in rows]
 
+    async def _app_options(self, db):
+        # Keep choices independent of the selected app and current table page.
+        identity = ChatSession.app_id
+        return list((await db.scalars(select(identity).where(
+            identity.is_not(None), func.trim(identity) != ""
+        ).distinct().order_by(identity).limit(200))).all())
+
     def _filters(self, f, *, activity=True):
         conditions = []
         if f.agent_id:
             conditions.append(ChatSession.agent_id == f.agent_id)
         if f.user_id:
             conditions.append(ChatSession.user_id == f.user_id)
+        if f.app_id:
+            conditions.append(ChatSession.app_id == f.app_id)
         if activity:
             event = aliased(ChatSessionEvent)
             real = exists(select(event.event_id).where(event.session_id == ChatSession.session_id,
@@ -329,8 +339,9 @@ class DiagnosticSessionQueries(SessionBoundMixin):
                 .order_by(activity.desc(), ChatSession.session_id.desc()).limit(f.limit).offset(f.offset))).all()
             items = await self._items(db, rows, f)
             agent_options = await self._agent_options(db)
+            app_options = await self._app_options(db)
         return {"items": items, "total": total, "limit": f.limit, "offset": f.offset,
-            "range": f.public_range(), "agent_options": agent_options}
+            "range": f.public_range(), "agent_options": agent_options, "app_options": app_options}
 
     async def detail(self, session_id):
         async with self._read() as db:
@@ -385,6 +396,7 @@ class DiagnosticSessionQueries(SessionBoundMixin):
             active = next((entry for entry in self.active_entries if entry.session_id == session.session_id
                 and (entry.agent_id or "") == session.agent_id and entry.user_id == session.user_id), None)
             items.append({"session_id": session.session_id, "title": session.title,
+                "app_id": session.app_id,
                 "agent_id": agent_scope_to_api(session.agent_id), "agent_name": name, "user_id": session.user_id,
                 "source": "channel" if session.session_id in origins else "direct", "channel": origins.get(session.session_id),
                 "created_at": utc_rfc3339(session.created_at), "updated_at": utc_rfc3339(activity),

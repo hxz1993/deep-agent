@@ -1,4 +1,4 @@
-import { LIST_FILTER_KEYS } from "./diagnostics-navigation.js?v=20260915-release-audit";
+import { LIST_FILTER_KEYS } from "./diagnostics-navigation.js?v=20260915-app-filter";
 export function buildSessionQuery(filters, overview = false) {
   const params = new URLSearchParams();
   const keys = overview ? ["start", "end", "timezone", "agent_id"] : LIST_FILTER_KEYS.filter(key => key !== "period");

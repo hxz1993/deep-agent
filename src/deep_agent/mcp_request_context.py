@@ -33,4 +33,14 @@ def resolve_mcp_headers(
     if resolve_mcp_request_context_mode(transport, config) == "isolated":
         return static_headers or None
     merged = {**static_headers, **dict(request_headers or {})}
+    # Runtime identity is still used internally for file/session ownership.
+    # At the MCP transport boundary a space key supplies its own bound user,
+    # and must not be mixed with login headers (including static MCP headers).
+    inherited_key = next((value for name, value in (request_headers or {}).items()
+                          if name.lower() == "x-deepfos-key" and value), None)
+    if inherited_key:
+        excluded = {"authorization", "cookie", "token", "x-user-token", "user",
+                    "x-user-id", "x-deepfos-token", "x-deepfos-user", "apptoken", "x-deepfos-key"}
+        merged = {name: value for name, value in merged.items() if name.lower() not in excluded}
+        merged["x-deepfos-key"] = inherited_key
     return merged or None

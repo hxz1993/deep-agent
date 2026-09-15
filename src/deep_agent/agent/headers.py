@@ -9,7 +9,7 @@ from deep_agent.agent.request_context import (
     resolve_request_context,
     resolve_request_context_overrides,
 )
-from deep_agent.channels.app_context import channel_deepfos_app
+from deep_agent.channels.app_context import channel_deepfos_app, channel_deepfos_key
 from deep_agent.options import OPTION
 
 
@@ -105,4 +105,15 @@ def extract_forward_headers(
         value = getattr(context, name)
         if value is not None and _is_allowed_header(name, exact, wildcard_prefixes):
             selected[name] = value
+    if channel_account is not None:
+        # A channel key is owned by its trusted configuration, never by an
+        # inbound browser/gateway header. Disabled associations send no key.
+        selected = {name: value for name, value in selected.items() if name.lower() != "x-deepfos-key"}
+        key = channel_deepfos_key(getattr(channel_account, "settings", None))
+        if key:
+            login_headers = {"authorization", "cookie", "token", "x-user-token", "user",
+                             "x-user-id", "x-deepfos-token", "x-deepfos-user", "apptoken"}
+            selected = {name: value for name, value in selected.items() if name.lower() not in login_headers}
+            if _is_allowed_header("x-deepfos-key", exact, wildcard_prefixes):
+                selected["x-deepfos-key"] = key
     return selected

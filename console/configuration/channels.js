@@ -7,6 +7,8 @@ const channelAdminState = {
   applications: [],
   applicationLoadGeneration: 0,
   saving: false,
+  apiKeyDraft: "",
+  clearApiKey: false,
 };
 
 const CHANNEL_STATE_LABELS = {
@@ -52,12 +54,38 @@ function channelUserDetailsSettings(settings, enabled, applicationId) {
   return { ...settings, wecom: { ...(settings?.wecom || {}), user_details_enabled: enabled, application_id: applicationId || null } };
 }
 
+function selectChannelExtension(key) {
+  document.querySelectorAll("[data-channel-extension]").forEach(button => {
+    const selected = button.dataset.channelExtension === key;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    document.getElementById(button.getAttribute("aria-controls")).hidden = !selected;
+  });
+}
+
+function setChannelApiKeyEditor(settings = {}) {
+  const input = document.getElementById("channelDeepfosApiKey");
+  channelAdminState.apiKeyDraft = "";
+  channelAdminState.clearApiKey = false;
+  input.dataset.maskedValue = settings.api_key_masked || "";
+  input.value = input.dataset.maskedValue;
+  input.type = input.value ? "text" : "password";
+}
+
+function channelApiKeySettings(previous = {}) {
+  const { api_key, api_key_set, api_key_masked, clear_api_key, ...settings } = previous;
+  if (channelAdminState.apiKeyDraft) settings.api_key = channelAdminState.apiKeyDraft;
+  else if (channelAdminState.clearApiKey) settings.clear_api_key = true;
+  return settings;
+}
+
 function setChannelUserDetailsEnabled(enabled) {
   const button = document.getElementById("channelUserDetailsEnabled");
   if (!button) return;
   button.setAttribute("aria-checked", String(enabled));
   button.classList.toggle("on", enabled);
   button.classList.toggle("off", !enabled);
+  document.querySelector('#channelMemberTab .channel-extension-dot')?.classList.toggle("on", enabled);
   document.getElementById("channelWecomApplicationField").hidden = !enabled;
   document.getElementById("channelWecomApplicationId").required = enabled;
 }
@@ -67,13 +95,17 @@ function setChannelDeepfosEnabled(enabled) {
   button.setAttribute("aria-checked", String(enabled));
   button.classList.toggle("on", enabled);
   button.classList.toggle("off", !enabled);
+  document.querySelector('#channelDeepfosTab .channel-extension-dot')?.classList.toggle("on", enabled);
   document.getElementById("channelDeepfosAppField").hidden = !enabled;
   const input = document.getElementById("channelDeepfosAppId");
   input.required = enabled;
   input.disabled = !enabled;
+  document.getElementById("channelDeepfosApiKey").disabled = !enabled;
 }
 
 async function prepareChannelApplicationEditor(settings = {}) {
+  selectChannelExtension("deepfos");
+  setChannelApiKeyEditor(settings?.deepfos || {});
   document.getElementById("channelDeepfosAppId").value = settings?.deepfos?.app_id || "";
   setChannelDeepfosEnabled(settings?.deepfos?.enabled === true);
   const select = document.getElementById("channelWecomApplicationId");
@@ -283,7 +315,7 @@ const channelsAdmin = {
       settings: {
         ...channelUserDetailsSettings(account?.settings || {}, enabled, applicationId),
         deepfos: {
-          ...(account?.settings?.deepfos || {}),
+          ...channelApiKeySettings(account?.settings?.deepfos),
           enabled: document.getElementById("channelDeepfosEnabled").getAttribute("aria-checked") === "true",
           app_id: document.getElementById("channelDeepfosAppId").value.trim() || null,
         },
@@ -413,6 +445,44 @@ window.channelsAdmin = channelsAdmin;
 
 document.addEventListener("DOMContentLoaded", () => {
   bindChannelCreateMenu();
+  const extensionTabs = Array.from(document.querySelectorAll("[data-channel-extension]"));
+  extensionTabs.forEach((button, index) => {
+    button.addEventListener("click", () => selectChannelExtension(button.dataset.channelExtension));
+    button.addEventListener("keydown", event => {
+      const next = event.key === "Home" ? 0 : event.key === "End" ? extensionTabs.length - 1 : event.key === "ArrowDown" ? (index + 1) % extensionTabs.length : event.key === "ArrowUp" ? (index + extensionTabs.length - 1) % extensionTabs.length : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      selectChannelExtension(extensionTabs[next].dataset.channelExtension);
+      extensionTabs[next].focus();
+    });
+  });
+  document.getElementById("channelAccountForm")?.addEventListener("invalid", event => {
+    const panel = event.target.closest(".channel-extension-panel");
+    if (panel) selectChannelExtension(panel.id === "channelDeepfosPanel" ? "deepfos" : "member");
+  }, true);
+  const keyInput = document.getElementById("channelDeepfosApiKey");
+  keyInput?.addEventListener("focus", () => {
+    if (channelAdminState.apiKeyDraft) {
+      keyInput.type = "password";
+      keyInput.value = channelAdminState.apiKeyDraft;
+    }
+    keyInput.select();
+  });
+  keyInput?.addEventListener("input", () => {
+    channelAdminState.apiKeyDraft = keyInput.value === keyInput.dataset.maskedValue ? "" : keyInput.value.trim();
+    keyInput.type = "password";
+  });
+  keyInput?.addEventListener("blur", () => {
+    const key = channelAdminState.apiKeyDraft;
+    keyInput.value = key ? (key.length > 10 ? `${key.slice(0, 6)}********${key.slice(-4)}` : "********") : channelAdminState.clearApiKey ? "" : keyInput.dataset.maskedValue;
+    keyInput.type = keyInput.value ? "text" : "password";
+  });
+  document.getElementById("clearChannelDeepfosApiKeyBtn")?.addEventListener("click", () => {
+    channelAdminState.apiKeyDraft = "";
+    channelAdminState.clearApiKey = true;
+    keyInput.value = "";
+    keyInput.type = "password";
+  });
   const viewButtons = Array.from(document.querySelectorAll("[data-channel-view]"));
   viewButtons.forEach((button, index) => {
     button.addEventListener("click", () => channelsAdmin.selectView(button.dataset.channelView));
@@ -447,5 +517,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("closeChannelAccountModal")?.addEventListener("click", closeAccount);
   document.getElementById("cancelChannelAccountBtn")?.addEventListener("click", closeAccount);
   document.getElementById("channelAccountModal")?.addEventListener("cancel", event => { event.preventDefault(); closeAccount(); });
-  document.getElementById("channelAccountModal")?.addEventListener("close", () => { channelAdminState.applicationLoadGeneration++; document.getElementById("channelSecret").value = ""; });
+  document.getElementById("channelAccountModal")?.addEventListener("close", () => {
+    channelAdminState.applicationLoadGeneration++;
+    document.getElementById("channelSecret").value = "";
+    channelAdminState.apiKeyDraft = "";
+    channelAdminState.clearApiKey = false;
+    keyInput.value = "";
+    keyInput.dataset.maskedValue = "";
+  });
 });

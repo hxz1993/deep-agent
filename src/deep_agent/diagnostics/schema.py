@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from .messages import describe
 
 EVENTS = {
+    "mcp_request_context_resolved": "MCP 请求上下文已组装",
     "history_tool_result_matched": "历史工具已匹配后续结果",
     "history_tool_result_synthesized": "历史缺失工具结果已补齐",
     "title_generation_started": "会话标题生成开始",
@@ -61,6 +62,7 @@ for prefix, label in (("model_request", "模型请求"), ("agent_tool", "工具�
         EVENTS[f"{prefix}_{suffix}"] = label + detail
 
 IDENTIFIER_FIELDS = frozenset({
+    "mcp_server", "app_id", "space_id", "language",
     "request_id", "session_id", "run_id", "agent_id", "conversation_id", "channel_run_id", "account_id", "wecom_application_id",
     "tool_call_id", "tool", "model_id", "model_name", "provider_name", "phase", "status",
     "profile_service", "discovery_type", "discovery_namespace", "auth_context",

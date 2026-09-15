@@ -71,6 +71,39 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
         async with self.factory() as db:
             return (await db.execute(select(func.count()).select_from(model))).scalar_one()
 
+    async def test_channel_session_scope_created_and_adopted_only_for_owned_runs(self):
+        await self.store.update_account(self.account.id, ChannelAccountUpdate(settings={
+            "deepfos": {"enabled": True, "app_id": "first001"},
+        }))
+        created = await self.store.resolve_binding(**self.peer)
+        sid = created.session.session_id
+        self.assertEqual((created.session.app_id, created.session.space_id), ("first001", "first"))
+        adopt = dict(account_id=self.account.id, session_id=sid,
+                     agent_id=self.agent_id, user_id=self.account.session_user_id)
+        # Old sessions without a saved context acquire it on the next authorized
+        # request, and turning off association clears the previous value.
+        for app_id in (None, "first001", "second002", None):
+            changed = await self.store.adopt_session_scope(**adopt, app_id=app_id,
+                                                           space_id=app_id[:-3] if app_id else None)
+            self.assertTrue(changed)
+            self.assertEqual(await self.stores.chat_session.get_initial_scope(self.agent_id, sid),
+                             (app_id, app_id[:-3] if app_id else None))
+        for changed_identity in ({"account_id": "unrelated"}, {"user_id": "unrelated"},
+                                 {"agent_id": "unrelated"}):
+            self.assertFalse(await self.store.adopt_session_scope(
+                **{**adopt, **changed_identity}, app_id="forged001", space_id="forged"))
+        self.assertEqual(await self.stores.chat_session.get_initial_scope(self.agent_id, sid), (None, None))
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+        await self.stores.coordinator.append(
+            "ordinary", [ModelRequest(parts=[UserPromptPart(content="fixture")])],
+            agent_id=self.agent_id, user_id=self.account.session_user_id,
+            app_id="original001", space_id="original", turn_id="fixture", run_id="fixture",
+        )
+        self.assertFalse(await self.store.adopt_session_scope(
+            **{**adopt, "session_id": "ordinary"}, app_id="forged001", space_id="forged"))
+        self.assertEqual(await self.stores.chat_session.get_initial_scope(self.agent_id, "ordinary"),
+                         ("original001", "original"))
+
     async def test_commands_can_be_claimed_without_creating_session(self):
         claimed = await self._claim()
         self.assertTrue(claimed.claimed)

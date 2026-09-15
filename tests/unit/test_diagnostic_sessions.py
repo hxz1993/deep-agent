@@ -113,6 +113,38 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(options, [{"agent_id": self.agent_id, "agent_name": "Agent", "has_channel": True}])
         self.assertNotIn("never-expose", str(options))
 
+    async def test_app_filter_metadata_and_total_are_independent_of_pagination(self):
+        for sid, app_id in (("app-one-a", "app-one"), ("app-one-b", "app-one"),
+                            ("app-two", "app-two"), ("unscoped", None)):
+            await self.question(sid)
+            async with self.factory() as db:
+                await db.execute(update(ChatSession).where(ChatSession.session_id == sid).values(app_id=app_id))
+                await db.commit()
+        ctx = SimpleNamespace(db_session_factory=self.factory, active_runs=self.active)
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        app.dependency_overrides[get_app_context] = lambda: ctx
+        app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=True, roles=("enterprise_admin",))
+        async def profiles(_request, _caller, ids):
+            return {uid: {"id": uid, "display_name": uid} for uid in ids}
+        bounds = {"start": self.filters.start.isoformat(), "end": self.filters.end.isoformat()}
+        with patch("deep_agent.security.diagnostic_users.resolve_diagnostic_users", profiles):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                pages = []
+                for offset in (0, 1, 2):
+                    response = await client.get("/api/v1/diagnostics/sessions",
+                        params={**bounds, "app_id": "app-one", "limit": 1, "offset": offset}, headers={"user": "admin-user"})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    page = response.json()
+                    self.assertEqual(page["total"], 2)
+                    self.assertEqual(page["app_options"], ["app-one", "app-two"])
+                    self.assertTrue(all(item["app_id"] == "app-one" for item in page["items"]))
+                    pages.extend(item["session_id"] for item in page["items"])
+                self.assertEqual(pages, ["app-one-b", "app-one-a"])
+                response = await client.get("/api/v1/diagnostics/sessions",
+                    params={**bounds, "app_id": "app"}, headers={"user": "admin-user"})
+                self.assertEqual(response.json()["total"], 0)
+
     async def test_event_first_record_time_empty_and_nonquestions(self):
         old = await self.question("old", at=self.now - timedelta(days=20))
         async with self.factory() as db:
@@ -221,7 +253,7 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         sql_event.listen(self.engine.sync_engine, "before_cursor_execute", capture)
         try:
             await self.queries.list(self.filters)
-            self.assertLessEqual(len(statements), 7)
+            self.assertLessEqual(len(statements), 8)
             self.assertTrue(all(sql.lstrip().upper().startswith("SELECT") for sql in statements))
         finally:
             sql_event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
@@ -263,7 +295,7 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page["total"], count)
         self.assertEqual(len(page["items"]), 50)
         self.assertLessEqual(overview_count, 8)
-        self.assertLessEqual(len(statements) - overview_count, 7)
+        self.assertLessEqual(len(statements) - overview_count, 8)
         plans = []
         async with self.engine.connect() as connection:
             for statement, params in (statements[0], statements[overview_count + 1]):

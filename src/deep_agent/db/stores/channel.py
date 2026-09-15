@@ -26,6 +26,8 @@ from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.stores.wecom import validate_channel_wecom_settings
 from deep_agent.db.stores.event.base import SessionEventStore
 from deep_agent.channels.metadata import channel_session_title, normalize_channel_origin, normalize_peer_metadata, wecom_application_id
+from deep_agent.channels.app_context import channel_deepfos_app, merge_channel_settings
+from deep_agent.agent.request_context import derive_space_from_app
 from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
 
 
@@ -75,7 +77,7 @@ class ChannelStore(SessionBoundMixin):
                 await validate_channel_wecom_settings(db, data.settings)
                 row = ChannelAccount(
                     id=uuid4().hex,
-                    **data.model_dump(),
+                    **{**data.model_dump(), "settings": merge_channel_settings(data.settings)},
                 )
                 db.add(row)
                 await db.flush()
@@ -100,6 +102,8 @@ class ChannelStore(SessionBoundMixin):
                     return None
                 await validate_channel_wecom_settings(db, data.settings if "settings" in data.model_fields_set else row.settings)
                 for field, value in data.model_dump(exclude_unset=True).items():
+                    if field == "settings":
+                        value = merge_channel_settings(value, row.settings)
                     setattr(row, field, value)
                 row.updated_at = datetime.now(timezone.utc)
                 await db.flush()
@@ -339,9 +343,11 @@ class ChannelStore(SessionBoundMixin):
     ) -> ChatSession:
         now = datetime.now(timezone.utc)
         self._update_peer_metadata(binding, peer_metadata)
+        app_id = channel_deepfos_app(account.settings)
         session = ChatSession(
             session_id=uuid4().hex, agent_id=account.agent_id,
             user_id=account.session_user_id, next_sequence=1,
+            app_id=app_id, space_id=derive_space_from_app(app_id) if app_id else None,
             created_at=now, updated_at=now,
         )
         db.add(session)
@@ -458,6 +464,33 @@ class ChannelStore(SessionBoundMixin):
             return (await db.execute(select(ChatSession).where(
                 ChatSession.session_id == session_id, or_(bindings, runs),
             ))).scalar_one_or_none()
+
+    async def adopt_session_scope(
+        self, *, account_id: str, session_id: str, agent_id: str, user_id: str,
+        app_id: str | None, space_id: str | None,
+    ) -> bool:
+        """Record the effective scope adopted by an authenticated channel Run.
+
+        Only a session belonging to this channel and the authorized Run identity
+        can change. Ordinary sessions keep their original scope semantics. Values
+        come from the same request snapshot used by MCP, not a later config read.
+        """
+        bindings = select(ChannelSessionBinding.id).where(
+            ChannelSessionBinding.account_id == account_id,
+            ChannelSessionBinding.session_id == session_id,
+        ).exists()
+        runs = select(ChannelMessageRun.id).where(
+            ChannelMessageRun.account_id == account_id,
+            ChannelMessageRun.session_id == session_id,
+        ).exists()
+        async with self._write() as db:
+            result = await db.execute(update(ChatSession).where(
+                ChatSession.session_id == session_id,
+                ChatSession.agent_id == agent_id,
+                ChatSession.user_id == user_id,
+                or_(bindings, runs),
+            ).values(app_id=app_id, space_id=space_id))
+            return bool(result.rowcount)
 
     async def get_session_origin(self, session_id: str) -> dict[str, Any] | None:
         return (await self.get_session_origins([session_id])).get(session_id)

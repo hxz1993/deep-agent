@@ -4,7 +4,7 @@ export const DIAGNOSTIC_PREFIX = "#/diagnostics";
 export const COMMON_FILTER_KEYS = ["start", "end", "timezone", "agent_id", "user_id", "period"];
 export const OVERVIEW_FILTER_KEYS = COMMON_FILTER_KEYS.filter(key => key !== "user_id");
 export const overviewFilters = filters => Object.fromEntries(OVERVIEW_FILTER_KEYS.filter(key => filters[key] != null).map(key => [key, filters[key]]));
-export const LIST_FILTER_KEYS = [...COMMON_FILTER_KEYS, "query", "has_questions", "has_execution_error", "latest_status", "limit", "offset"];
+export const LIST_FILTER_KEYS = [...COMMON_FILTER_KEYS, "app_id", "query", "has_questions", "has_execution_error", "latest_status", "limit", "offset"];
 export const LOG_FILTER_KEYS = ["start", "end", "source", "level", "q", "session_id", "period"];
 export const CHANNEL_FILTER_KEYS = ["period", "start", "end", "timezone", "account_id", "kind", "query", "offset", "peer_id", "filter_peer_id", "channel_user_id", "channel_group_id"];
 export const channelEntryFilters = filters => ({ period: ["24", "168", "720"].includes(String(filters.period)) ? String(filters.period) : "168" });

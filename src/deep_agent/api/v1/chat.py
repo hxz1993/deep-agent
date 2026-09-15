@@ -78,6 +78,15 @@ def _agent_deps(
     )
 
 
+async def _adopt_channel_session_scope(ctx, account, deps: AgentDeps) -> None:
+    if account is not None:
+        await ctx.stores.channel.adopt_session_scope(
+            account_id=account.id, session_id=deps.session_id,
+            agent_id=deps.agent_id, user_id=deps.user,
+            app_id=deps.app_id, space_id=deps.space_id,
+        )
+
+
 async def _ensure_session_access(
     ctx: AppContextDep,
     session_id: str,
@@ -223,6 +232,7 @@ async def chat(
         request_headers=request_headers,
     )
     try:
+        await _adopt_channel_session_scope(ctx, channel_account, deps)
         await _current_channel_context(ctx, body, channel_account)
         result = await runner.run(
             session_id,
@@ -326,6 +336,7 @@ async def chat_stream(
             # asynchronous history/input preparation and incorrectly return 404.
             ctx.session_live.publish(live_key, deps.run_id, "session", session_data)
             yield {"event": "session", "data": json.dumps(session_data)}
+            await _adopt_channel_session_scope(ctx, channel_account, deps)
             await _current_channel_context(ctx, body, channel_account)
             async with aclosing(runner.run_stream(
                 session_id,

@@ -75,6 +75,81 @@ class ToolDiscoveryResumeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(search_deferred_tools(ctx, [SAVE], tools), [SAVE])
         self.assertEqual(search_deferred_tools(ctx, [SAVE], []), [])
 
+    def test_exact_available_tool_does_not_reveal_unrelated_tools(self):
+        ctx = self._ctx()
+        ctx.discovered_tool_names.add(SAVE)
+        tools = [self._definition(), self._definition("deepfos_pipeline_save")]
+        self.assertEqual(search_deferred_tools(ctx, [SAVE], tools), [])
+        self.assertIn("已可用", next(iter(ctx.deps.tool_discovery.search_feedback.values())))
+
+    def test_missing_identifier_does_not_fall_back_to_other_save_tools(self):
+        ctx = self._ctx()
+        tools = [self._definition("deepfos_pipeline_save"), self._definition("deepfos_script_save")]
+        for queries in ([SAVE], ["保存个人报表", SAVE, "save personal report"]):
+            self.assertEqual(search_deferred_tools(ctx, queries, tools), [])
+        self.assertTrue(all("精确名称不在" in text for text in ctx.deps.tool_discovery.search_feedback.values()))
+
+    def test_fuzzy_search_does_not_rank_only_remaining_tools(self):
+        ctx = self._ctx()
+        tools = [self._definition(f"deepfos_report_save_{i}") for i in range(9)]
+        first = search_deferred_tools(ctx, ["report save"], tools)
+        ctx.discovered_tool_names.update(first)
+        self.assertEqual(search_deferred_tools(ctx, ["save report"], tools), [])
+
+    def test_wrong_server_prefix_is_not_an_exact_match(self):
+        ctx = self._ctx()
+        ctx.deps.tool_discovery = ToolDiscoveryTelemetry(server_names=("deepfos",))
+        self.assertEqual(search_deferred_tools(ctx, ["other_personal_report_save"], [self._definition()]), [])
+        self.assertEqual(search_deferred_tools(ctx, ["personal_report_save"], [self._definition()]), [SAVE])
+
+    def test_exact_match_and_missing_name_are_reported_together(self):
+        ctx = self._ctx()
+        self.assertEqual(search_deferred_tools(ctx, [SAVE, "deepfos_missing_get"], [self._definition()]), [SAVE])
+        feedback = next(iter(ctx.deps.tool_discovery.search_feedback.values()))
+        self.assertIn("已加载", feedback)
+        self.assertIn("deepfos_missing_get", feedback)
+
+    def test_distinct_protocol_actions_do_not_share_cached_matches(self):
+        ctx = self._ctx()
+        tools = [self._definition(SAVE), self._definition("deepfos_personal_report_create")]
+        self.assertEqual(search_deferred_tools(ctx, [SAVE], tools), [SAVE])
+        self.assertEqual(search_deferred_tools(ctx, ["deepfos_personal_report_create"], tools), ["deepfos_personal_report_create"])
+
+    async def test_preselected_and_missing_search_feedback_survives_real_sdk(self):
+        calls = 0
+        executions = []
+
+        def model(messages, info):
+            nonlocal calls
+            calls += 1
+            self.assertIn(SAVE, {tool.name for tool in info.function_tools})
+            if calls == 1:
+                return ModelResponse(parts=[
+                    ToolCallPart("search_tools", {"queries": [SAVE]}, "available"),
+                    ToolCallPart("search_tools", {"queries": ["deepfos_missing_report_save"]}, "missing"),
+                ])
+            if calls == 2:
+                results = {part.tool_call_id: part for message in messages for part in message.parts
+                           if isinstance(part, ToolSearchReturnPart)}
+                self.assertEqual(set(results), {"available", "missing"})
+                self.assertIn("已可用", results["available"].content["message"])
+                self.assertIn("精确名称不在", results["missing"].content["message"])
+                for part in results.values():
+                    self.assertEqual(part.discovered_tools, [])
+                # Feedback and typed evidence survive the real event persistence codec.
+                reloaded = [deserialize_message(serialize_message(message)) for message in messages]
+                self.assertTrue(any("已可用" in str(part.content)
+                                    for message in reloaded for part in message.parts
+                                    if isinstance(part, ToolSearchReturnPart)))
+                return ModelResponse(parts=[ToolCallPart(SAVE, {}, "save")])
+            return ModelResponse(parts=[TextPart("complete")])
+
+        result = await self._agent(model, executions).run(
+            "保存个人报表 Save personal report", deps=AgentDeps(session_id="discovery-test", agent_id="test"),
+        )
+        self.assertEqual(result.output, "complete")
+        self.assertEqual(executions, [SAVE])
+
     def _agent(self, model_fn, executions):
         def save() -> str:
             executions.append(SAVE)

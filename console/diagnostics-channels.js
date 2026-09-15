@@ -3,7 +3,7 @@ import { escapeHtml as e, icon, icons, selectHtml, bindDiagnosticSelects, diagno
 import { diagnosticHash, sessionRange, channelEntryFilters } from "./diagnostics-navigation.js?v=20260915-release-audit";
 import { createSessionReader, sessionQueryError } from "./diagnostics-session-query.js?v=20260915-release-audit";
 import { bindChannelResizer } from "./channel-resizer.js?v=20260915-release-audit";
-import { shortQuestionTime } from "./diagnostics-sessions.js?v=20260915-release-audit";
+import { shortQuestionTime } from "./diagnostics-sessions.js?v=20260915-app-filter";
 
 const PERIODS = [["24", "最近 1 天"], ["168", "最近 7 天"], ["720", "最近 30 天"]];
 const PAGE_SIZE = 25;
@@ -23,7 +23,7 @@ export function channelSessionHtml(session) {
   const id = session.session_id || "";
   return `<article class="channel-session-item">
     <button type="button" class="channel-last-question" data-channel-open="${e(id)}">${e(session.latest_question || "暂无提问")}</button>
-    <div class="diagnostic-session-id channel-session-meta"><span class="channel-session-time"><time>${e(shortQuestionTime(session.last_activity))}</time>${session.is_latest ? '<span class="channel-latest-label">最近</span>' : ""}</span><span class="channel-session-stats"><span class="channel-session-reference"><code>${e(id.slice(0, 8))}</code>${copy(id)}</span>${session.is_question ? icon("message-circle-more") : `<span class="channel-question-count" title="提问数" aria-label="${count(session.question_count)} 条提问">${icon("message-circle-more")}${count(session.question_count)}</span>`}</span></div>
+    <div class="diagnostic-session-id channel-session-meta"><span class="channel-session-time"><time>${e(shortQuestionTime(session.last_activity))}</time><span aria-hidden="true">·</span>${session.is_question ? icon("message-circle-more") : `<span class="channel-question-count" title="提问数" aria-label="${count(session.question_count)} 条提问">${icon("message-circle-more")}${count(session.question_count)}</span>`}</span><span class="channel-session-stats">${session.is_latest ? '<span class="channel-latest-label">最近</span>' : ""}<span class="channel-session-reference">${copy(id)}<code>${e(id.slice(0, 8))}</code></span></span></div>
   </article>`;
 }
 

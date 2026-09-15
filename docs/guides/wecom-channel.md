@@ -66,12 +66,24 @@ PYTHONPATH=src python3.12 -m deep_agent.combined_runtime \
 
 Token、Cookie、Bot Secret 不得写入源码、日志、文档或测试夹具。
 
+渠道请求没有浏览器登录态，`session_user_id` 也不签发平台凭据。可以在“关联 DeepFOS 应用”
+中保存 App ID 和该 App 对应空间的 API Key（字段显示为 `X-Deepfos-Key`）。Key 应在平台
+对应空间的 API Key 设置中创建，并授权当前 App。服务端推导 Space 并带上 Language；调用
+继承上下文的 MCP 时使用 `X-Deepfos-Key`，移除 Cookie、Authorization、Token 和 user 等登录头。
+平台按 Key 绑定的用户校验业务权限；DeepAgent 内部 Session 归属仍使用配置的会话用户。
+未配置 Key 的旧渠道仍兼容上述私有运行凭据，但不会自动保存管理员浏览器登录态。
+
+本地 `local_dev` 会注入私有 Profile 的登录态，因此仅从本地聊天成功不能证明线上 Gateway
+已配置凭据。排查时对照 `mcp_request_context_resolved` 日志的 App、Space、Language 和
+鉴权载体名称（不记录凭据内容）；HTTP 401/403 是鉴权或权限失败，不应解释为服务宕机。
+渠道会话创建时记录应用范围，已有渠道会话在下一次请求采纳新配置时同步，关闭关联会清空。
+
 ## Console 配置
 
 在“配置中心 → 渠道”创建企微账号：填写渠道名称，选择 Agent，并填写 Bot ID、Secret、会话用户。
 “会话用户”直接输入平台 User ID，对应 `session_user_id`；只有企业管理员可以配置。
-它决定 DeepAgent Session 的归属，不负责签发平台权限或 Token。平台凭据仍由私有运行环境提供，
-应与实际业务访问账号匹配；渠道可独立关联 DeepFOS App，Space 由 App ID 自动推导，不单独配置 Language。
+它决定 DeepAgent Session 的归属，不负责签发平台权限或 Token。渠道可独立关联 DeepFOS App
+和空间 API Key，Space 由 App ID 自动推导，不单独配置 Language。
 Secret 按当前产品约定明文入库，
 但管理接口只返回 `secret_set/secret_masked`，不返回原值；编辑时以首尾字符和中间星号回显，
 留空或保留原掩码即保持原配置，实际输入新值才替换。配置备份仍必须按敏感文件保护。
@@ -81,16 +93,19 @@ App Secret，可以供多个机器人共用。渠道编辑器新增“查询用�
 企微应用。关闭时不查询用户资料，允许保留应用引用，不影响原有连接和对话。成员缓存统计、刷新／重置、
 身份兼容与完整接口见[企微应用与成员资料](wecom-applications.md)。
 
-v0.10.5 起，扩展设置使用两项之间无分割线的两行布局，开关位于标题左侧：
+扩展设置使用左侧纵向 Tab、右侧配置布局，开关位于详情标题左侧：
 
-- **关联deepfos应用**：第一行，默认关闭。开启时填写 App ID（例如 `iirjgi005`），自动推导 Space `iirjgi`。此配置决定渠道聊天、工具调用及附件上传的应用上下文。
-- **查询用户详情**：第二行，独立控制企微成员查询，仍使用企微应用配置。
+- **关联deepfos应用**：默认关闭。开启时填写 App ID 和该空间的 `X-Deepfos-Key`；例如 `iirjgi005` 自动推导 Space `iirjgi`。此配置决定渠道请求的应用上下文。
+- **查询用户详情**：独立控制企微成员查询，仍使用企微应用配置。
 
 关闭后隐藏对应输入区域并保留已填配置。应用关联存于
-`settings.deepfos = {"enabled": true, "app_id": "iirjgi005"}`；缺省或关闭均为不分应用。
+`settings.deepfos` 中的 `enabled/app_id/api_key`；缺省或关闭均为不分应用，不向 MCP 发送配置 Key。
+管理 API 只返回 `api_key_set/api_key_masked`。编辑时省略 `api_key` 或传空字符串保留旧值，
+`clear_api_key: true` 显式清空；该指令和脱敏回显字段不持久化。Key 随 Bot Secret 一样保存于
+私有配置数据库，完整配置备份含凭据，应按敏感文件保护；Agent 安装包与日志不包含 Key。
 配置变更从后续请求生效，进行中的请求保持开始时的上下文；历史消息和会话归属不会改写。
 服务端使用内部鉴权通过后的渠道配置确定 App/Space，不采信渠道请求中的临时应用覆盖头。
-关联应用仅设置业务上下文，不授予额外平台权限；实际访问仍受会话用户和平台凭据约束。
+实际平台权限以配置 Key 的空间、App 授权、绑定用户、启停状态和有效期为准。
 复用现有 JSON 字段，数据库 Head 继续为 `006`，无需新增迁移。
 
 渠道是否启用只在列表 Switch 中维护，不放在新建或编辑弹框中。新建渠道默认关闭，管理员确认配置后

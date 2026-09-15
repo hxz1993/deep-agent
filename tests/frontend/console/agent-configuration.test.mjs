@@ -150,10 +150,10 @@ test("Agent 将 Skill 与工具包分开配置", () => {
   assert.match(source, /该 Skill 当前不存在，保存时将保留原引用/);
 });
 
-test("Agent 资源在顶部合并为内置、MCP、UI 工具和 Skill 四个 Tab", () => {
-  assert.match(template, /id="capTabs"[\s\S]*data-kind="builtin"[\s\S]*data-kind="mcp"[\s\S]*data-kind="ui"[\s\S]*data-kind="skills"/);
+test("Agent 资源在顶部按内置、UI、MCP、Skill 排列四个 Tab", () => {
+  assert.match(template, /id="capTabs"[\s\S]*data-kind="builtin"[\s\S]*data-kind="ui"[\s\S]*data-kind="mcp"[\s\S]*data-kind="skills"/);
   assert.doesNotMatch(template, /id="capSearch"|data-agent-editor-tab|data-agent-editor-pane/);
-  assert.match(source, /counter\.textContent = `\$\{selected\}\/\$\{total\}`/);
+  assert.match(source, /counter\.textContent = String\(selected\)/);
   assert.doesNotMatch(source, /未选择|capabilityDisclosureLabel|filterCaps/);
 });
 

@@ -37,7 +37,7 @@ MCP_DIRECT_DISCLOSURE_LIMIT = 10
 MCP_PRESELECT_LIMIT = 3
 MCP_SEARCH_RESULT_LIMIT = 5
 MCP_SEARCH_QUERY_LIMIT = 3
-TOOL_DISCOVERY_RETRIEVER = "lexical_v2"
+TOOL_DISCOVERY_RETRIEVER = "lexical_v3"
 MCP_RETURN_SCHEMA_TOOLS = frozenset({"cube_query_data", "dimension_query_members"})
 _TOOL_DESCRIPTION_SUPPLEMENTS = {
     "wecom-doc_media_upload": (
@@ -64,6 +64,7 @@ TOOL_SEARCH_DESCRIPTION = (
     "若名称目录中存在疑似工具，再把完整协议名作为单独一个查询项原样复制，"
     "不要在该协议名查询项前后拼接说明或同义词。"
     "返回匹配工具后，下一次模型请求会获得这些工具的完整参数。"
+    "已可用的工具无需再次加载；精确名称不在当前目录时，不会用其他工具替代。"
 )
 TOOL_SEARCH_PARAMETER_DESCRIPTION = (
     "提供 2～3 个互补查询：用户原始语言的能力描述、简洁英文能力描述，"
@@ -116,6 +117,7 @@ class ToolDiscoveryTelemetry:
     estimated_return_schema_tokens: int = 0
     candidate_tools: list[str] = field(default_factory=list, repr=False)
     search_query_matches: dict[str, tuple[str, ...]] = field(default_factory=dict, repr=False)
+    search_feedback: dict[str, str] = field(default_factory=dict, repr=False)
     server_names: tuple[str, ...] = field(default_factory=tuple, repr=False)
 
     def as_dict(self) -> dict[str, Any]:
@@ -312,6 +314,26 @@ class DeepAgentToolSearch(ToolSearch[AgentDeps]):
     disclosure, so reuse it here before validation instead of starting that fragile
     retry exchange.
     """
+
+    async def after_tool_execute(
+        self,
+        ctx: RunContext[AgentDeps],
+        *,
+        call: ToolCallPart,
+        tool_def: ToolDefinition,
+        args: Any,
+        result: Any,
+    ) -> Any:
+        if call.tool_name != self.function_tool_name or not isinstance(result, dict):
+            return result
+        telemetry = ctx.deps.tool_discovery
+        queries = args.get("queries", []) if isinstance(args, dict) else []
+        feedback = (
+            telemetry.search_feedback.get(_search_fingerprint(queries))
+            if telemetry else None
+        )
+        # Keep the SDK's typed disclosure payload intact, including resume evidence.
+        return {**result, "message": feedback} if feedback else result
 
     async def before_tool_validate(
         self,
@@ -561,6 +583,14 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
             parts.extend(str(part.content if hasattr(part, "content") else part) for part in original)
 
         telemetry = ctx.deps.tool_discovery
+        if telemetry is not None:
+            parts.append(
+                "使用当前工具 Schema 和下方 MCP 名称目录核实能力。"
+                "搜索只加载当前 Agent 已授权目录中的工具，不会刷新远端 MCP 目录。"
+                "发起执行确认前，先确认后续执行工具已可用，并完成流程要求的读取校验；"
+                "确认卡片本身不代表执行能力已具备。必要工具缺失时说明缺口，"
+                "不要反复改写名称搜索，也不要用其他对象的保存工具替代。"
+            )
         if telemetry is None or telemetry.deferred_count <= 0:
             return parts or None
         deferred_names = sorted(
@@ -605,6 +635,13 @@ def build_mcp_discovery_toolset(
     return wrapper
 
 
+def _search_fingerprint(queries: Sequence[str]) -> str:
+    # Preserve identifiers: action aliases would conflate distinct get/list or save/create tools.
+    return "\n".join(sorted({
+        query.strip().casefold() for query in queries if query.strip()
+    }))
+
+
 def search_deferred_tools(
     ctx: RunContext[AgentDeps],
     queries: Sequence[str],
@@ -621,46 +658,40 @@ def search_deferred_tools(
         if query.strip()
     ][:MCP_SEARCH_QUERY_LIMIT]
     query_text = "\n".join(effective_queries)
-    query_fingerprint = " ".join(sorted(set(lexical_tokens(query_text)))) or normalize_text(
-        query_text
-    )
+    query_fingerprint = _search_fingerprint(effective_queries)
     # Telemetry is cumulative, while SDK availability reflects the current
     # history/tool definitions (including deferred resume and compaction).
     # Never let an old successful search permanently hide a now-unavailable tool.
     available_names = ctx.available_tool_names
-    searchable_tools = [
-        tool for tool in tools
-        if tool.name not in available_names
-    ]
+    corpus = {tool.name: tool for tool in tools}
+    # SDK search corpus excludes preselected (non-deferred) tools. Reintroduce
+    # only currently available MCP definitions from this run's authorized catalog.
+    current_tools = ctx.tools
+    for name in set(telemetry.candidate_tools) & available_names:
+        if name in current_tools:
+            corpus[name] = current_tools[name]
+    searchable_tools = [tool for tool in tools if tool.name not in available_names]
+    missing_names: list[str] = []
     try:
         previous_matches = telemetry.search_query_matches.get(query_fingerprint)
-        if previous_matches:
-            # Repeat queries may restore lost disclosure evidence, but must not
-            # progressively disclose the next Top N batch on every repetition.
-            searchable_names = {tool.name for tool in searchable_tools}
-            restored = [name for name in previous_matches if name in searchable_names]
-            logger.info(
-                "MCP tool search catalog={} call={} repeated_query=true restored={}",
-                telemetry.catalog_hash, telemetry.search_calls, restored,
-            )
-            return restored
         # Protocol names are stable identifiers, not fuzzy prose.  When the
         # model copies one from the catalog, disclose that exact tool first;
         # otherwise a broad multi-query search can bury the requested tool
         # below semantically related entries.
         exact_names: list[str] = []
         for query in effective_queries:
-            normalized_query = normalize_text(query)
-            for tool in searchable_tools:
+            normalized_query = query.casefold()
+            query_matches: list[str] = []
+            for tool in corpus.values():
                 original_name = mcp_original_tool_name(tool.name, telemetry.server_names)
-                candidates = {normalize_text(tool.name)}
+                candidates = {tool.name.casefold()}
                 if original_name:
-                    candidates.add(normalize_text(original_name))
+                    candidates.add(original_name.casefold())
                 if not any(
                     normalized_query == candidate
                     or bool(
                         re.search(
-                            rf"(?<![a-z0-9]){re.escape(candidate)}(?![a-z0-9])",
+                            rf"(?<![a-z0-9_-]){re.escape(candidate)}(?![a-z0-9_-])",
                             normalized_query,
                         )
                     )
@@ -668,13 +699,22 @@ def search_deferred_tools(
                     if candidate
                 ):
                     continue
-                exact_names.append(tool.name)
+                query_matches.append(tool.name)
+            exact_names.extend(query_matches)
+            if not query_matches and re.fullmatch(
+                r"[a-zA-Z][a-zA-Z0-9-]*(?:_[a-zA-Z0-9-]+)+", query,
+            ):
+                missing_names.append(query)
 
         if exact_names:
             ranked = list(dict.fromkeys(exact_names))[:MCP_SEARCH_RESULT_LIMIT]
+        elif missing_names:
+            ranked = []
+        elif previous_matches:
+            ranked = [name for name in previous_matches if name in corpus]
         else:
             documents = build_search_documents(
-                searchable_tools,
+                list(corpus.values()),
                 server_names=telemetry.server_names,
             )
             ranked = rank_tool_documents(
@@ -690,6 +730,27 @@ def search_deferred_tools(
     finally:
         telemetry.retrieval_ms += (time.perf_counter() - started) * 1_000
     telemetry.search_query_matches[query_fingerprint] = tuple(ranked)
+    already_available = [name for name in ranked if name in available_names]
+    ranked = [name for name in ranked if name not in available_names]
+    feedback: list[str] = []
+    if already_available:
+        feedback.append(
+            "已可用，无需重复加载：" + ", ".join(already_available)
+            + "。请直接使用当前工具 Schema。"
+        )
+    if missing_names:
+        feedback.append(
+            "精确名称不在当前 Agent 的 MCP 工具目录：" + ", ".join(missing_names)
+            + "。不会返回其他工具作为替代；请核对目录名称、Agent 关联及 MCP 检测快照。"
+        )
+    if ranked:
+        feedback.append("已加载匹配工具，下一次请求可使用其完整参数。")
+    if not feedback:
+        feedback.append(
+            "当前 MCP 目录没有匹配工具。不要反复改写相同查询；"
+            "请核对所需能力及 MCP 检测快照。"
+        )
+    telemetry.search_feedback[query_fingerprint] = "\n".join(feedback)
     telemetry.discovered_tools = list(
         dict.fromkeys([*telemetry.discovered_tools, *ranked])
     )

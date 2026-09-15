@@ -16,6 +16,11 @@ def describe(record: dict) -> str:
     state = _STATE.get(suffix, "")
     message = record["summary"]
     details = []
+    if event == "mcp_request_context_resolved":
+        for key, label in (("mcp_server", "MCP"), ("app_id", "App"), ("space_id", "Space"),
+                           ("language", "Language"), ("auth_context", "鉴权载体")):
+            if key in record:
+                details.append(f"{label} {record[key]}")
     if event.startswith("diagnostic_users_"):
         for key, label in (("profile_service", "服务"), ("discovery_type", "发现方式"),
                            ("discovery_namespace", "命名空间"), ("target_origin", "目标"),

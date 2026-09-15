@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -20,6 +21,21 @@ def _request(headers: list[tuple[bytes, bytes]]) -> Request:
 
 
 class ForwardHeaderAllowlistTests(unittest.TestCase):
+    def test_channel_space_key_overrides_inbound_auth_and_disabled_sends_no_key(self):
+        request = _request([(b"cookie", b"browser=secret"), (b"authorization", b"Bearer browser"),
+                            (b"user", b"browser-owner"), (b"x-deepfos-key", b"inbound-key"),
+                            (b"x-deepfos-token", b"legacy-token"), (b"app", b"other001")])
+        config = {"enabled": True, "app_id": "fixture007", "api_key": "fixture-only-space-key"}
+        account = SimpleNamespace(settings={"deepfos": config})
+        self.assertEqual(extract_forward_headers(request, channel_account=account), {
+            "app": "fixture007", "space": "fixture", "language": "zh-cn",
+            "x-deepfos-key": "fixture-only-space-key",
+        })
+        config["enabled"] = False
+        headers = extract_forward_headers(request, channel_account=account)
+        self.assertNotIn("x-deepfos-key", headers)
+        self.assertNotIn("app", headers)
+
     def test_extract_forward_headers_uses_allowlist(self) -> None:
         request = _request(
             [

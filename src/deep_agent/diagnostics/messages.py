@@ -32,6 +32,17 @@ def describe(record: dict) -> str:
     elif event.startswith("model_request_"):
         state = "仍在等待" if event.endswith("_still_waiting") else state
         message = f"模型 {model} 请求{state}" if model else message
+    elif event.startswith("model_api_stream_"):
+        if model:
+            message = f"模型 {model} " + message
+        for key, label, unit in (("stream_bytes", "已收传输字节", "B"),
+                                  ("stream_chunks", "传输块", ""),
+                                  ("first_byte_ms", "首字节耗时", "ms"),
+                                  ("last_byte_age_ms", "距上次字节", "ms")):
+            if key in record:
+                details.append(f"{label} {record[key]}{unit}")
+        if "stream_state" in record:
+            details.append(f"流状态 {record['stream_state']}")
     elif event in ("model_api_request", "model_api_response"):
         message = f"模型 {model} API " if model else "模型 API "
         message += "请求开始" if event == "model_api_request" else "响应头已收到"

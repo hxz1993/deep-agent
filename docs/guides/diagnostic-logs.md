@@ -168,7 +168,26 @@ DeepSeek 原生能力限制为其支持的 Web Search，工具搜索使用 SDK �
 采集使用现有 HTTP 客户端的事件钩子，不更换客户端、重试或超时策略。
 SDK 流式请求延迟到消费者任务执行，因此通过透明 `WrapperModel` 在实际
 `request` / `request_stream` 调用边界建立隔离上下文，不能只在 Capability 外层设置 ContextVar。
-请求与流对象原样委托，日志失败不能改变业务结果；不会写入会话 Event Store，也不涉及迁移。
+请求和字节迭代原样委托，日志失败不能改变业务结果；不会写入会话 Event Store，也不涉及迁移。
+
+对于尚未消费的 OpenAI HTTP 响应，透明包装原 `httpx2.AsyncByteStream`，补充：
+
+- `model_api_stream_first_byte`：消费者实际拿到首批非空传输字节。
+- `model_api_stream_progress`：收到响应头后 30 秒、此后每 60 秒的快照；每次收到字节不会重置周期。
+- `model_api_stream_finished`：自然读尽 `eof`、读取取消 `cancelled`、读取失败 `failed`、提前关闭
+  `closed`、未消费关闭 `closed_unconsumed` 或关闭失败 `close_failed`。传输已结束后不重复报告关闭。
+- `stream_bytes/stream_chunks` 是消费者实际从 HTTP 传输层取得的累计字节/块，包含心跳及协议开销；
+  `first_byte_ms` 从本次 HTTP 请求开始计时，`last_byte_age_ms` 是距最近非空字节的时间。没有首字节
+  时这两个字段缺省。预先完整缓冲的响应没有流观测记录，不能据此断言没有响应正文。
+- 进度的 `stream_state` 区分 `unconsumed`（还未开始读取）、`reading`（正在等下一传输块）与
+  `consumer_idle`（上层消费者尚未索取下一块）。这些是本地消费状态，不能用于断言上游排队。
+
+计时器只读计数，不读取正文、不创建后台消费任务、不解析 SSE/JSON、不更改原超时、重试、关闭或取消。
+收到传输字节不等于模型已生成有效内容或 Token；例如只有 SSE 心跳也会增长。SDK 在传输层之外的
+JSON/SSE 解析失败可能仅表现为 `closed`，需结合模型请求失败事件。HTTP 200 头后零字节等待则能与
+持续有字节但没有模型事件的情况分开；旧版本日志不能补出这些事实。
+回归：`test_model_api_stream_diagnostics.py` 使用真实 HTTPX/OpenAI SDK 验证无预读、周期快照、
+输出/请求体等价、取消、读取/解析/关闭异常及坏日志出口，不用线上模型请求代替契约测试。
 
 统一入口是 `deep_agent.diagnostics.emit`；Agent 代码可沿用 `agent.observability.log_event`。
 先在 `diagnostics/schema.py` 注册稳定事件名与兜底中文摘要，通过 `diagnostics/messages.py` 从已校验字段生成可读正文，再提交白名单中的标识、数值、阶段和错误分类；未知字段直接丢弃。

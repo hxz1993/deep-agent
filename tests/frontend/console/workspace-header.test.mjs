@@ -37,9 +37,9 @@ const { calculateInspectorPaneWidth } = await import(
   new URL("../../../console/workspace.js", import.meta.url)
 );
 
-test("会话标题第二行显示带前缀的完整会话 ID", () => {
+test("会话标题第二行只显示完整会话 ID", () => {
   const sessionId = "019f1857-9463-7db3-a9d3-654a4ac24b24";
-  assert.equal(formatSessionIdSubtitle(sessionId), `会话 ID：${sessionId}`);
+  assert.equal(formatSessionIdSubtitle(sessionId), sessionId);
   assert.equal(formatSessionIdSubtitle(null), "");
   assert.match(
     template,
@@ -91,7 +91,7 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.match(workspaceSource, /inspector-tab-status[\s\S]*\$\{statusText\}/);
   assert.match(workspaceSource, /inspectorFact\("Agent", agentName/);
   assert.match(workspaceSource, /inspectorFactHtml\("会话统计", sessionCounts/);
-  assert.match(workspaceSource, /title="回合数"[\s\S]*title="消息事件数"[\s\S]*title="附件数"/);
+  assert.match(workspaceSource, /title="提问数"[\s\S]*title="消息事件数"[\s\S]*title="附件数"/);
   assert.match(workspaceSource, /inspectorFactHtml\("App \/ Space", sessionScope/);
   assert.match(workspaceSource, /inspectorFact\("User ID"[\s\S]*identity\?\.user/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
@@ -360,11 +360,11 @@ test("会话标题由持久化 Event 实时更新且不再轮询或自动重命�
   assert.doesNotMatch(chatSource, /auto-rename-btn|自动重命名|JSON\.stringify\(\{ auto: true \}\)/);
 });
 
-test("会话列表保留活动时间、回合与附件统计，不展示中间Loop计数", () => {
+test("会话列表只展示活动时间和单气泡提问统计", () => {
   assert.match(chatSource, /class="session-activity">\$\{escapeHtml\(activity\)\}/);
-  assert.match(chatSource, /title="回合数"[^\n]*messages-square/);
+  assert.match(chatSource, /title="提问数"[^\n]*message-circle-more/);
   assert.doesNotMatch(chatSource, /title="消息事件数"[^\n]*repeat-2/);
-  assert.match(chatSource, /title="附件数"[^\n]*paperclip/);
+  assert.doesNotMatch(chatSource, /title="附件数"[^\n]*paperclip/);
   assert.match(consoleCss, /\.session-item:not\(\.active\):hover\s*\{[^}]*border-color: color-mix[^}]*background:\s*var\(--bg\)[^}]*box-shadow:/);
 });
 
@@ -408,7 +408,7 @@ test("正常终态保留直播结果且只有异常断流恢复 History", () => 
 
 test("搜索框旁只保留带文字的普通新建入口", () => {
   assert.doesNotMatch(workspaceSource, /contextTestChatBtn|flask-conical|testChatButton/);
-  assert.match(workspaceSource, /newChatButton\.innerHTML = '<i data-lucide="square-pen"><\/i><span>新建<\/span>'/);
+  assert.match(workspaceSource, /newChatButton\.innerHTML = '<i data-lucide="message-circle-plus"><\/i><span>新建<\/span>'/);
   assert.match(
     workspaceSource,
     /toolbar\.append\(search, newChatButton\)/,

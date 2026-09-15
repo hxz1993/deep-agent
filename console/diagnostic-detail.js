@@ -1,9 +1,10 @@
 import { createConversationPresenter } from "./conversation-presenter.js?v=20260912-21";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20260912-21";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260912-21";
-import { buildTrajectory, createTrajectoryController, redactTrajectoryValue } from "./trajectory.js?v=20260912-21";
-import { renderSessionInspector } from "./session-inspector.js?v=20260912-21";
-import { channelOriginPresentation } from "./session-display.js?v=20260912-21";
+import { buildTrajectory, createTrajectoryController, redactTrajectoryValue } from "./trajectory.js?v=20260915-scroll-focus";
+import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
+import { renderSessionInspector } from "./session-inspector.js?v=20260915-session-icons";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260915-session-icons";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { bindAttachmentImagePreviews } from "./attachment-preview.js?v=20260912-21";
@@ -219,7 +220,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
       found.row.querySelector(".assistant-process")?.classList.add("open");
       found.row.querySelector(".assistant-process-summary")?.setAttribute("aria-expanded", "true");
     }
-    found.row.scrollIntoView({ block: "center", behavior: "instant" }); renderInspector();
+    centerInScrollContainer(messages, found.row); renderInspector();
     return true;
   }
 
@@ -264,7 +265,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     state.sessionId = data.session.session_id; state.conversationId = data.session.conversation_id;
     if (!sameSession) { inspectorTab = "session"; selectedRunId = null; selectedReference = null; lastFocusKey = null; }
     role("chatTitle").textContent = data.session.title || data.session.name || "未命名会话";
-    role("sessionBadge").textContent = state.sessionId ? `会话 ID：${state.sessionId}` : "";
+    role("sessionBadge").textContent = formatSessionIdSubtitle(state.sessionId);
     find("[data-detail-refresh]").title = ["running", "pending", "waiting", "awaiting_input"].includes(data.session.latest_status) ? "仅展示已保存内容，点击刷新更新" : "刷新会话";
     root.removeAttribute("aria-busy");
     showNotice();

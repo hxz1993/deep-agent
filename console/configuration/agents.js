@@ -89,6 +89,21 @@ function formatSkillsPreview(skills) {
   return skills.join(", ");
 }
 
+function renderAgentCapabilityCounts(agent) {
+  const capabilities = [...new Set(agent.capabilities || [])];
+  const groups = [
+    ["builtin", "内置工具", "hammer", "个工具包"],
+    ["ui", "UI 工具", "monitor-check", "个工具包"],
+    ["mcp", "MCP", "plug", "个服务"],
+    ["skills", "Skill", "book-open-check", "个 Skill"],
+  ];
+  return `<div class="agent-capability-counts">${groups.map(([kind, label, icon, unit]) => {
+    const count = kind === "skills" ? new Set(agent.skills || []).size : capabilities.filter(code => code.startsWith(`${kind}:`)).length;
+    const description = `${label}：${count} ${unit}`;
+    return `<span class="agent-capability-count${count === 0 ? " is-empty" : ""}" title="${escapeHtml(description)}" aria-label="${escapeHtml(description)}"><i data-lucide="${icon}" aria-hidden="true"></i><span>${count}</span></span>`;
+  }).join("")}</div>`;
+}
+
 function buildCapabilitySelectionSet(selected) {
   return new Set(selected || []);
 }
@@ -152,16 +167,15 @@ const agentsAdmin = {
       return `<article class="agent-card" data-agent-search="${escapeHtml(search)}" data-open-agent="${escapeHtml(agent.id)}" tabindex="0">
         <header class="agent-card-head">
           <span class="agent-card-icon tone-${tone}"><i data-lucide="bot"></i></span>
-          <div><div class="agent-name-line"><strong>${escapeHtml(agent.name)}</strong>${renderAgentChannelBadge(agent.id)}</div><span>${escapeHtml(agent.model?.name || "未配置模型")}</span></div>
+          <div><div class="agent-name-line"><strong title="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</strong>${renderAgentChannelBadge(agent.id)}</div><span>${escapeHtml(agent.model?.name || "未配置模型")}</span></div>
         </header>
         <div class="agent-card-body">
-          <div class="agent-card-fact"><span>能力</span><strong>${escapeHtml(capabilities)}</strong></div>
-          <div class="agent-card-fact"><span>Skill</span><strong>${escapeHtml(skills)}</strong></div>
+          ${renderAgentCapabilityCounts(agent)}
         </div>
         <footer class="agent-card-footer">
           <span><i data-lucide="clock-3"></i>${escapeHtml(formatDate(agent.updated_at))}</span>
           <div class="row-actions agent-row-actions">
-            <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
+            <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="messages-square"></i></a>
             <button type="button" class="row-action icon-only" data-export-agent="${escapeHtml(agent.id)}" title="导出安装包" aria-label="导出安装包"><i data-lucide="download"></i></button>
             <button type="button" class="row-action icon-only" data-copy-agent="${escapeHtml(agent.id)}" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>
             <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>
@@ -175,12 +189,12 @@ const agentsAdmin = {
       const skills = formatSkillsPreview(agent.skills);
       const search = `${agent.name || ""} ${agent.model?.name || ""} ${capabilities} ${skills}`.toLowerCase();
       return `<tr class="agent-list-row" data-agent-search="${escapeHtml(search)}" data-open-agent="${escapeHtml(agent.id)}" tabindex="0">
-        <td><div class="agent-name-line"><strong>${escapeHtml(agent.name)}</strong>${renderAgentChannelBadge(agent.id)}</div></td>
-        <td>${escapeHtml(agent.model?.name || "未配置模型")}</td>
-        <td><div class="cap-preview">${escapeHtml(capabilities)}</div><div class="skill-preview">Skill：${escapeHtml(skills)}</div></td>
-        <td>${escapeHtml(formatDate(agent.updated_at))}</td>
+        <td><div class="agent-name-line"><strong title="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</strong>${renderAgentChannelBadge(agent.id)}</div></td>
+        <td title="${escapeHtml(agent.model?.name || "未配置模型")}">${escapeHtml(agent.model?.name || "未配置模型")}</td>
+        <td>${renderAgentCapabilityCounts(agent)}</td>
+        <td title="${escapeHtml(formatDate(agent.updated_at))}">${escapeHtml(formatDate(agent.updated_at))}</td>
         <td><div class="row-actions agent-row-actions">
-          <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="message-square"></i></a>
+          <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="messages-square"></i></a>
           <button type="button" class="row-action icon-only" data-export-agent="${escapeHtml(agent.id)}" title="导出安装包" aria-label="导出安装包"><i data-lucide="download"></i></button>
             <button type="button" class="row-action icon-only" data-copy-agent="${escapeHtml(agent.id)}" title="复制" aria-label="复制"><i data-lucide="copy"></i></button>
           <button type="button" class="danger row-action icon-only" data-delete="${escapeHtml(agent.id)}" data-name="${escapeHtml(agent.name)}" title="删除" aria-label="删除"><i data-lucide="trash-2"></i></button>

@@ -1,9 +1,9 @@
-import { renderSessionInspector } from "./session-inspector.js?v=20260912-21";
-import { channelOriginPresentation } from "./session-display.js?v=20260912-21";
+import { renderSessionInspector } from "./session-inspector.js?v=20260915-session-icons";
+import { channelOriginPresentation } from "./session-display.js?v=20260915-session-icons";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20260915-release-audit";
+const WORKSPACE_ASSET_VERSION = "20260915-scroll-focus";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -113,7 +113,7 @@ function installLegacyDom(source) {
     newChatButton.dataset.consoleDirectNewChat = "true";
     newChatButton.title = "为当前 Agent 新建对话";
     newChatButton.setAttribute("aria-label", "为当前 Agent 新建对话");
-    newChatButton.innerHTML = '<i data-lucide="square-pen"></i><span>新建</span>';
+    newChatButton.innerHTML = '<i data-lucide="message-circle-plus"></i><span>新建</span>';
     toolbar.append(search, newChatButton);
     sessionSection.insertBefore(toolbar, sessionSection.querySelector("#sessionList"));
   }

@@ -45,6 +45,9 @@ EVENTS = {
     "tool_validation_retry": "工具参数校验要求重试",
     "model_api_request": "模型 API 请求开始",
     "model_api_response": "模型 API 响应头已收到",
+    "model_api_stream_first_byte": "模型 API 首批传输字节已收到",
+    "model_api_stream_progress": "模型 API 传输流进度",
+    "model_api_stream_finished": "模型 API 传输流结束",
     "builtin_operation_started": "内置工具处理步骤开始",
     "builtin_operation_completed": "内置工具处理步骤完成",
     "builtin_operation_failed": "内置工具处理步骤失败",
@@ -69,6 +72,7 @@ NUMBER_FIELDS = frozenset({
     "total_tokens", "requests", "tool_calls", "tool_search_calls", "cache_read_tokens",
     "cache_write_tokens", "spill_count", "spill_failures", "byte_size", "spilled_bytes",
     "tool_count", "unique_tool_count",
+    "stream_chunks", "stream_bytes", "first_byte_ms", "last_byte_age_ms",
 })
 TOKEN = re.compile(r"[A-Za-z0-9_.:/-]{1,180}\Z")
 ISSUE_CODES = frozenset({
@@ -102,6 +106,7 @@ def _model_api_fields(fields: dict, result: dict) -> None:
     if origin is not None:
         result["model_api"] = origin
     for name, allowed in (("api_path", API_PATHS), ("tool_manifest_status", MANIFEST_STATUSES),
+                          ("stream_state", ("unconsumed", "reading", "consumer_idle", "eof", "cancelled", "failed", "closed", "closed_unconsumed", "close_failed")),
                           ("http_method", ("POST", "GET", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))):
         value = fields.get(name)
         if type(value) is str and value in allowed:

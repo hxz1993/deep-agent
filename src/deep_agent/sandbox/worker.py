@@ -14,6 +14,7 @@ from deepagent_files import collect_published_files
 
 from deep_agent.sandbox.framing import FramingError, read_frame, write_frame
 from deep_agent.sandbox.network_guard import install_public_network_guard
+from deep_agent.sandbox.plotting import install_plotting_defaults
 from deep_agent.sandbox.serialization import serialize_result, truncate_utf8
 from deep_agent.sandbox.types import (
     ExecuteRequest,
@@ -279,6 +280,8 @@ def main() -> None:
         write_frame(sys.stdout.buffer, response)
         return
 
+    # Each invocation is a fresh process, so font registration is per worker.
+    install_plotting_defaults()
     response = handle_request(request_frame)
     write_frame(sys.stdout.buffer, response)
 

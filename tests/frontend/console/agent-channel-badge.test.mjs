@@ -23,6 +23,26 @@ function harness(fetcher) {
   return { context, elements, requests, admin: context.window.agentsAdmin };
 }
 
+test("卡片与列表按已配置的包和服务去重计数，零配置整体标记为空", async () => {
+  const configured = { ...agent,
+    capabilities: ["builtin:general", "builtin:sandbox", "builtin:general", "ui:forms", "mcp:finance", "mcp:finance"],
+    skills: ["analysis", "analysis"],
+    ui_tool_selection: { "ui:forms": ["form-a", "form-b"] },
+  };
+  const { admin, elements } = harness(path => path.endsWith("/agents") ? [configured, { ...agent, id: "empty" }] : []);
+  await admin.refresh();
+  for (const id of ["agentsCardGrid", "agentsTableBody"]) {
+    const [populated, empty] = elements[id].innerHTML.split('data-open-agent="empty"');
+    for (const description of ["内置工具：2 个工具包", "UI 工具：1 个工具包", "MCP：1 个服务", "Skill：1 个 Skill"]) {
+      assert.ok(populated.includes(`aria-label="${description}"`));
+    }
+    assert.doesNotMatch(populated, /agent-capability-count is-empty/);
+    assert.equal((empty.match(/agent-capability-count is-empty/g) || []).length, 4);
+    assert.match(empty, /data-lucide="hammer"/);
+    assert.match(empty, /data-lucide="monitor-check"/);
+  }
+});
+
 test("首次加载 Agent 的卡片和列表都回显真实渠道关联，停用渠道仍有关联", async () => {
   const { admin, elements, requests } = harness((path) => path.endsWith("/agents") ? [agent] : [
     { agent_id: agent.id, name: "财务群", enabled: true },

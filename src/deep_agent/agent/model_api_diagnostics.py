@@ -6,6 +6,7 @@ remain entirely with the provider. No response body is consumed by observation.
 """
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
@@ -17,6 +18,7 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from httpx2 import AsyncByteStream
 from pydantic_ai.models.wrapper import WrapperModel
 
 from deep_agent.agent.observability import log_event
@@ -133,8 +135,115 @@ async def _response_hook(response: Any) -> None:
         fields, started = pending
         _emit("model_api_response", **fields, http_status=response.status_code,
               duration_ms=max(0, round((time.monotonic() - started) * 1000)))
+        if not response.is_stream_consumed and isinstance(response.stream, AsyncByteStream):
+            response.stream = _ObservedByteStream(response.stream, {**fields, "http_status": response.status_code}, started)
     except Exception:
         pass
+
+
+STREAM_FIRST_REPORT_SECONDS = 30
+STREAM_REPORT_SECONDS = 60
+
+
+class _ObservedByteStream(AsyncByteStream):
+    """Count transport bytes when consumed, without buffering or background reads.
+
+    Timer callbacks only snapshot counters. Their cadence is independent of
+    incoming chunks, so heartbeats cannot indefinitely suppress diagnostics.
+    Closing and iteration stay in the SDK's task and propagate unchanged.
+    """
+
+    def __init__(self, stream, fields, started):
+        self._stream = stream
+        self._fields = fields
+        self._started = started
+        self._chunks = self._bytes = 0
+        self._first = self._last = None
+        self._state = "unconsumed"
+        self._timer = None
+        self._schedule(STREAM_FIRST_REPORT_SECONDS)
+
+    def _schedule(self, delay):
+        try:
+            self._timer = asyncio.get_running_loop().call_later(delay, self._report)
+        except Exception:
+            pass
+
+    def _snapshot(self, event):
+        try:
+            now = time.monotonic()
+            fields = dict(self._fields, stream_state=self._state,
+                          stream_chunks=self._chunks, stream_bytes=self._bytes,
+                          duration_ms=max(0, round((now - self._started) * 1000)))
+            if self._first is not None:
+                fields["first_byte_ms"] = max(0, round((self._first - self._started) * 1000))
+                fields["last_byte_age_ms"] = max(0, round((now - self._last) * 1000))
+            _emit(event, **fields)
+        except Exception:
+            pass
+
+    def _report(self):
+        self._timer = None
+        self._snapshot("model_api_stream_progress")
+        self._schedule(STREAM_REPORT_SECONDS)
+
+    def _finish(self, state):
+        try:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            if self._state not in {"eof", "cancelled", "failed", "closed", "closed_unconsumed", "close_failed"}:
+                self._state = state
+                self._snapshot("model_api_stream_finished")
+        except Exception:
+            pass
+
+    def _record_chunk(self, chunk):
+        try:
+            self._chunks += 1
+            self._bytes += len(chunk)
+            if chunk:
+                self._last = time.monotonic()
+                if self._first is None:
+                    self._first = self._last
+                    self._snapshot("model_api_stream_first_byte")
+        except Exception:
+            pass
+
+    async def __aiter__(self):
+        try:
+            iterator = self._stream.__aiter__()
+            while True:
+                self._state = "reading"
+                try:
+                    chunk = await anext(iterator)
+                except StopAsyncIteration:
+                    self._finish("eof")
+                    return
+                self._record_chunk(chunk)
+                self._state = "consumer_idle"
+                yield chunk
+        except asyncio.CancelledError:
+            self._finish("cancelled")
+            raise
+        except GeneratorExit:
+            self._finish("closed")
+            raise
+        except BaseException:
+            self._finish("failed")
+            raise
+
+    async def aclose(self):
+        try:
+            await self._stream.aclose()
+        except asyncio.CancelledError:
+            self._finish("cancelled")
+            raise
+        except BaseException:
+            self._finish("close_failed")
+            raise
+        else:
+            self._finish("closed_unconsumed" if self._state == "unconsumed" else "closed")
 
 
 @contextmanager

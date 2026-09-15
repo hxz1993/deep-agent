@@ -27,19 +27,19 @@
     {"name": "deepfos_model_delete", "description": "删除领域模型", "parameters": {"model_id": "模型 ID"}}
   ],
   "cases": [
-    {"query": "列出平台文件夹结构", "required": ["deepfos_platform_folder_list"], "forbidden": ["deepfos_element_delete"]},
-    {"query": "platform_folder_list", "required": ["deepfos_platform_folder_list"], "forbidden": []},
-    {"query": "pingtaiwenjianjialiebiao", "required": ["deepfos_platform_folder_list"], "forbidden": []},
-    {"query": "平台文件加列表", "required": ["deepfos_platform_folder_list"], "forbidden": []},
-    {"query": "查询当前财务模型", "required": ["deepfos_platform_element_search"], "forbidden": ["deepfos_element_delete", "deepfos_model_delete"]},
-    {"query": "列出这个 Cube 的维度", "required": ["deepfos_cube_list_dimensions"], "forbidden": []},
-    {"query": "查找科目和期间成员", "required": ["deepfos_cube_resolve_members"], "forbidden": []},
-    {"query": "读取预算工作版数据", "required": ["deepfos_cube_read_data"], "forbidden": ["deepfos_cube_delete_data"]},
-    {"query": "查询数据流的来源和血缘", "required": ["deepfos_dataflow_lineage"], "forbidden": []},
-    {"query": "获取维度成员树", "required": ["deepfos_dimension_get_tree"], "forbidden": []},
-    {"query": "搜索产品文档", "required": ["deepfos_document_search"], "forbidden": []},
-    {"query": "读取电子表格选区", "required": ["deepfos_table_get_selection"], "forbidden": ["deepfos_table_write_cells"]},
-    {"query": "获取工作流运行状态", "required": ["deepfos_workflow_status"], "forbidden": ["deepfos_workflow_cancel"]},
-    {"query": "检查元素访问权限", "required": ["deepfos_permission_check"], "forbidden": []}
+    {"query": "列出平台文件夹结构", "required": ["deepfos_platform_folder_list"]},
+    {"query": "platform_folder_list", "required": ["deepfos_platform_folder_list"]},
+    {"query": "pingtaiwenjianjialiebiao", "required": ["deepfos_platform_folder_list"]},
+    {"query": "平台文件加列表", "required": ["deepfos_platform_folder_list"]},
+    {"query": "查询当前财务模型", "required": ["deepfos_platform_element_search"]},
+    {"query": "列出这个 Cube 的维度", "required": ["deepfos_cube_list_dimensions"]},
+    {"query": "查找科目和期间成员", "required": ["deepfos_cube_resolve_members"]},
+    {"query": "读取预算工作版数据", "required": ["deepfos_cube_read_data"]},
+    {"query": "查询数据流的来源和血缘", "required": ["deepfos_dataflow_lineage"]},
+    {"query": "获取维度成员树", "required": ["deepfos_dimension_get_tree"]},
+    {"query": "搜索产品文档", "required": ["deepfos_document_search"]},
+    {"query": "读取电子表格选区", "required": ["deepfos_table_get_selection"]},
+    {"query": "获取工作流运行状态", "required": ["deepfos_workflow_status"]},
+    {"query": "检查元素访问权限", "required": ["deepfos_permission_check"]}
   ]
 }

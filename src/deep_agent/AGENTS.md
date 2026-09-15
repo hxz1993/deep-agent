@@ -723,3 +723,7 @@ SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protoco
 
 新增引用必须在事务内锁定父记录，删除方持相同父记录锁后检查子引用；变更父ID时先锁旧/新父记录，再锁子记录并核对快照。公共入口为 `db/reference_integrity.py`。ORM Agent→Model 和 UI Tool→Package 使用显式 join，不能重新增加 ForeignKey。
 配置替换用 Revision 行独占锁协调所有正常写入的共享锁；数据库异常不可笼统当作重复消息。数据库逻辑引用审计见 `db/reference_schema.py`，部署与验收见 `docs/guides/application-references.md`。
+
+### MCP 工具发现范围
+
+MCP 工具合计不超过 10 个时全部直接披露，超过 10 个时预选最多 3 个，其余通过 `search_tools`（显示名“搜索MCP工具”）按需搜索，每次最多返回 5 个。预选、搜索及异常回退不按用户提问、上下文数据或工具名推断读写权限，也不因关键词排除写入/删除工具；候选范围始终受 Agent 显式关联的 MCP 限定。保留相关性排序、已披露工具去重和重复查询去重。

@@ -22,7 +22,6 @@ class ShadowReport:
     case_count: int
     recall_at_3: float
     recall_at_5: float
-    forbidden_at_3: int
     estimated_schema_reduction: float
 
 
@@ -55,16 +54,13 @@ def evaluate_fixture(path: Path) -> ShadowReport:
     required_hits_3 = 0
     required_hits_5 = 0
     required_total = 0
-    forbidden_hits = 0
     for case in payload["cases"]:
         ranked_5 = rank_tool_documents(case["query"], documents, limit=5)
         ranked_3 = ranked_5[:3]
         required = set(case["required"])
-        forbidden = set(case.get("forbidden", []))
         required_total += len(required)
         required_hits_3 += len(required & set(ranked_3))
         required_hits_5 += len(required & set(ranked_5))
-        forbidden_hits += len(forbidden & set(ranked_3))
 
     estimator = TokenEstimator.conservative()
     tool_tokens = [
@@ -77,7 +73,6 @@ def evaluate_fixture(path: Path) -> ShadowReport:
         case_count=len(payload["cases"]),
         recall_at_3=required_hits_3 / max(1, required_total),
         recall_at_5=required_hits_5 / max(1, required_total),
-        forbidden_at_3=forbidden_hits,
         estimated_schema_reduction=1 - disclosed_tokens / max(1, full_tokens),
     )
 

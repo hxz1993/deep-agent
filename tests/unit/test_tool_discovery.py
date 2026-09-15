@@ -143,7 +143,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         ranked = rank_tool_documents(ctx.prompt or "", documents, limit=3)
 
         self.assertEqual(ranked[0], "deepfos_search_financial_model")
-        self.assertNotIn("deepfos_delete_financial_model", ranked)
+        self.assertEqual(len(ranked), 3)
 
     def test_chinese_query_does_not_invent_cross_language_synonyms(self) -> None:
         tools = [
@@ -316,67 +316,32 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertGreater(deps.tool_discovery.estimated_return_schema_tokens, 0)
 
-    async def test_read_only_negations_do_not_preselect_side_effect_tools(self) -> None:
-        ctx = self._ctx("查询当前财务模型，只读即可，不要刷新、生成或上传任何内容")
-        toolset = FunctionToolset(
-            tools=[
-                search_financial_model,
-                refresh_financial_model_cache,
-                generate_financial_model_report,
-                upload_financial_model_template,
-                list_cube_dimensions,
-                resolve_members,
-                cube_query_data,
-                dimension_query_members,
-                cube_describe,
-                platform_folder_list,
-                platform_element_search,
-            ]
-        ).prefixed("deepfos")
-        tools = list((await toolset.get_tools(ctx)).values())
+    async def test_context_and_read_only_words_do_not_filter_tool_search(self) -> None:
+        for prompt in ('{"dimensionName":"View"}', "只读查询，不要修改"):
+            for query, expected in (
+                ("deepfos_delete_financial_model", "deepfos_delete_financial_model"),
+                ("查询上传财务模型模板", "deepfos_upload_financial_model_template"),
+            ):
+                with self.subTest(prompt=prompt, query=query):
+                    ctx = self._ctx(prompt)
+                    wrapper = build_mcp_discovery_toolset(
+                        [self._toolset()], server_names=["deepfos"],
+                        estimator=TokenEstimator.conservative(),
+                    )
+                    tools = await wrapper.get_tools(ctx)
+                    result = search_deferred_tools(
+                        ctx, [query], [item.tool_def for item in tools.values()],
+                    )
+                    self.assertIn(expected, result)
 
-        ranked = rank_tool_documents(
-            ctx.prompt or "",
-            build_search_documents([item.tool_def for item in tools]),
-            limit=5,
-        )
-
-        self.assertEqual(ranked, ["deepfos_search_financial_model"])
-
-    async def test_run_read_only_policy_filters_later_side_effect_searches(self) -> None:
-        ctx = self._ctx(
-            "对比当前财务模型，不要创建、保存、刷新缓存、上传、发布、同步、导入或修改"
-        )
-        toolset = FunctionToolset(tools=DISCOVERY_TEST_TOOLS).prefixed("deepfos")
+    async def test_read_only_words_do_not_filter_preselection(self) -> None:
+        ctx = self._ctx("只读 deepfos_delete_financial_model")
         wrapper = build_mcp_discovery_toolset(
-            [toolset],
-            server_names=["deepfos"],
+            [self._toolset()], server_names=["deepfos"],
             estimator=TokenEstimator.conservative(),
         )
-        assert wrapper is not None
-
         tools = await wrapper.get_tools(ctx)
-        search_result = search_deferred_tools(
-            ctx,
-            ["上传模板、创建报表、刷新缓存"],
-            [item.tool_def for item in tools.values()],
-        )
-
-        self.assertTrue(ctx.deps.tool_discovery.read_only_intent)
-        direct = {
-            name for name, item in tools.items() if not item.tool_def.defer_loading
-        }
-        self.assertIn("deepfos_search_financial_model", direct)
-        self.assertTrue(
-            direct.isdisjoint(
-                {
-                    "deepfos_refresh_financial_model_cache",
-                    "deepfos_generate_financial_model_report",
-                    "deepfos_upload_financial_model_template",
-                }
-            )
-        )
-        self.assertEqual(search_result, [])
+        self.assertFalse(tools["deepfos_delete_financial_model"].tool_def.defer_loading)
 
     async def test_url_query_path_does_not_hide_explicit_send_tools(self) -> None:
         def media_upload(base64_content: str) -> str:
@@ -403,7 +368,6 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
 
         tools = await wrapper.get_tools(ctx)
 
-        self.assertFalse(ctx.deps.tool_discovery.read_only_intent)
         direct = {
             name for name, item in tools.items() if not item.tool_def.defer_loading
         }
@@ -617,7 +581,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertLessEqual(len(direct), 3)
         self.assertIn("deepfos_search_financial_model", direct)
-        self.assertIn("deepfos_delete_financial_model", deferred)
+        self.assertEqual(len(direct) + len(deferred), 11)
         self.assertEqual(ctx.deps.tool_discovery.candidate_count, 11)
         self.assertGreater(
             ctx.deps.tool_discovery.estimated_saved_schema_tokens,
@@ -625,7 +589,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         )
         instructions = await wrapper.get_instructions(ctx)
         instruction_text = "\n".join(instructions or [])
-        self.assertIn("deepfos_delete_financial_model", instruction_text)
+        self.assertIn(deferred[0], instruction_text)
         self.assertIn("用户原始语言和简洁英文能力描述", instruction_text)
         self.assertIn("协议名必须原样复制", instruction_text)
 
@@ -709,7 +673,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(item.tool_def.defer_loading for item in tools.values()))
         self.assertEqual(ctx.deps.tool_discovery.preselected_tools, [])
 
-    async def test_retriever_failure_preserves_read_only_policy(self) -> None:
+    async def test_retriever_failure_preserves_authorized_catalog(self) -> None:
         ctx = self._ctx("查询财务模型")
         wrapper = build_mcp_discovery_toolset(
             [self._toolset()],
@@ -724,7 +688,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         ):
             tools = await wrapper.get_tools(ctx)
 
-        self.assertNotIn("deepfos_delete_financial_model", tools)
+        self.assertIn("deepfos_delete_financial_model", tools)
         self.assertTrue(all(not item.tool_def.defer_loading for item in tools.values()))
         self.assertEqual(ctx.deps.tool_discovery.direct_count, len(tools))
         self.assertEqual(ctx.deps.tool_discovery.fallback_reason, "RuntimeError")

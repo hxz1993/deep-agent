@@ -34,7 +34,7 @@ async def upload_file(
     except MediaPipelineError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-    request_headers = extract_forward_headers(request)
+    request_headers = extract_forward_headers(request, channel_account=channel_account)
     if channel_account is not None:
         request_headers["user"] = channel_account.session_user_id
     try:

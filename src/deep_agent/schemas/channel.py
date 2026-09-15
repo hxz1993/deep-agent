@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from deep_agent.time import UtcDatetime
+from deep_agent.channels.app_context import channel_deepfos_app
 
 
 ChannelRuntimeState = Literal[
@@ -31,6 +32,12 @@ class ChannelAccountCreate(BaseModel):
     session_user_id: str = Field(..., max_length=128)
     enabled: bool = False
     settings: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("settings")
+    @classmethod
+    def validate_deepfos_settings(cls, value: dict[str, Any]) -> dict[str, Any]:
+        channel_deepfos_app(value)
+        return value
 
     @field_validator("name", "bot_id", "secret", "agent_id", "session_user_id")
     @classmethod
@@ -62,6 +69,12 @@ class ChannelAccountUpdate(BaseModel):
     session_user_id: str | None = Field(default=None, max_length=128)
     enabled: bool | None = None
     settings: dict[str, Any] | None = None
+
+    @field_validator("settings")
+    @classmethod
+    def validate_deepfos_settings(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        channel_deepfos_app(value)
+        return value
 
     @model_validator(mode="before")
     @classmethod

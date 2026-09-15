@@ -197,7 +197,7 @@ async def chat(
 ) -> ChatResponse:
     _validate_chat_body(body)
     session_id = body.session_id or uuid.uuid4().hex
-    request_headers = extract_forward_headers(request)
+    request_headers = extract_forward_headers(request, channel_account=channel_account)
     request_headers["user"] = user
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user
@@ -262,7 +262,7 @@ async def chat_stream(
     session_id = body.session_id or uuid.uuid4().hex
     deferred_tool_results = _deferred_results(body)
     message = body.message or ""
-    request_headers = extract_forward_headers(request)
+    request_headers = extract_forward_headers(request, channel_account=channel_account)
     request_headers["user"] = user
 
     agent_id = await _resolve_chat_agent_id(

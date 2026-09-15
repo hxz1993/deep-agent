@@ -92,6 +92,38 @@ class LocalFileApiTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(denied.status_code, 404)
 
+    async def test_channel_upload_uses_verified_current_application_and_owner(self):
+        import os
+        from unittest.mock import patch
+        from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
+        from tests.helpers.sqlite_stores import seed_default_agent
+
+        agent_id = await seed_default_agent(self.stores)
+        account = await self.stores.channel.create_account(ChannelAccountCreate(
+            name="file scope", bot_id="file-scope-fixture", secret="fixture", agent_id=agent_id,
+            session_user_id="channel-owner", enabled=True,
+        ))
+        headers = {"user": "forged-owner", "app": "bad", "space": "bad",
+                   "x-deep-agent-app": "forged001", "x-deep-agent-space": "forged",
+                   "x-deep-agent-channel-account": account.id,
+                   "x-deep-agent-channel-token": "fixture-internal"}
+        with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "fixture-internal"}):
+            async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+                for app_id in ("first001", "second002", None):
+                    await self.stores.channel.update_account(account.id, ChannelAccountUpdate(settings={
+                        "deepfos": {"enabled": app_id is not None, "app_id": app_id},
+                    }))
+                    response = await client.post("/api/v1/uploads", headers=headers,
+                                                 files={"file": ("log.txt", b"sample", "text/plain")})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    metadata = await self.file_store.describe(response.json()["id"], {"user": "channel-owner"})
+                    self.assertEqual(metadata.app, app_id)
+                    self.assertEqual(metadata.space, app_id[:-3] if app_id else None)
+                headers["x-deep-agent-channel-token"] = "wrong"
+                denied = await client.post("/api/v1/uploads", headers=headers,
+                                           files={"file": ("log.txt", b"sample", "text/plain")})
+                self.assertEqual(denied.status_code, 401)
+
     async def test_platform_backend_never_exposes_local_route(self) -> None:
         get_context().file_store = PlatformFileStore()
         async with AsyncClient(

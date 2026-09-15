@@ -691,16 +691,28 @@
         </div>
         <div class="channel-extension-settings">
           <h4 class="channel-extension-heading">扩展设置</h4>
-          <div class="channel-form-grid">
-          <div class="field channel-profile-toggle-field">
-            <span class="field-label-row"><label for="channelUserDetailsEnabled">查询用户详情</label><small class="field-subtitle">获取企微成员账号和姓名。</small></span>
-            <button type="button" id="channelUserDetailsEnabled" class="model-enabled-switch off" role="switch" aria-checked="false" aria-label="查询用户详情"><span></span></button>
-          </div>
-          <div class="field channel-application-field" id="channelWecomApplicationField" hidden>
-            <span class="field-label-row"><label for="channelWecomApplicationId">企微应用</label><button type="button" class="btn-link" id="clearChannelWecomApplicationBtn">清空</button></span>
-            <select id="channelWecomApplicationId" aria-describedby="channelWecomApplicationHint"><option value="" hidden disabled selected>请选择</option></select>
-            <small class="field-hint" id="channelWecomApplicationHint"></small>
-          </div>
+          <div class="channel-extension-rows">
+            <div class="channel-extension-row">
+              <div class="channel-extension-label">
+                <button type="button" id="channelDeepfosEnabled" class="model-enabled-switch off" role="switch" aria-checked="false" aria-label="关联deepfos应用" aria-controls="channelDeepfosAppField"><span></span></button>
+                <div><label for="channelDeepfosEnabled">关联deepfos应用</label><small class="field-subtitle">为渠道会话设置应用上下文</small></div>
+              </div>
+              <label class="field" id="channelDeepfosAppField" hidden>
+                <span>App ID</span>
+                <input type="text" id="channelDeepfosAppId" maxlength="191" pattern="[^\s]+[0-9]{3}" placeholder="例如：iirjgi005" autocomplete="off" title="填写 Space 编码加三位数字组成的 App ID" />
+              </label>
+            </div>
+            <div class="channel-extension-row">
+              <div class="channel-extension-label">
+                <button type="button" id="channelUserDetailsEnabled" class="model-enabled-switch off" role="switch" aria-checked="false" aria-label="查询用户详情" aria-controls="channelWecomApplicationField"><span></span></button>
+                <div><label for="channelUserDetailsEnabled">查询用户详情</label><small class="field-subtitle">获取企微成员账号和姓名</small></div>
+              </div>
+              <div class="field channel-application-field" id="channelWecomApplicationField" hidden>
+                <span class="field-label-row"><label for="channelWecomApplicationId">企微应用</label><button type="button" class="btn-link" id="clearChannelWecomApplicationBtn">清空</button></span>
+                <select id="channelWecomApplicationId" aria-describedby="channelWecomApplicationHint"><option value="" hidden disabled selected>请选择</option></select>
+                <small class="field-hint" id="channelWecomApplicationHint"></small>
+              </div>
+            </div>
           </div>
         </div>
       </div>

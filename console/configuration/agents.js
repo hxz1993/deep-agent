@@ -362,7 +362,7 @@ const agentsAdmin = {
   renderCapCard(cap, selectedSet) {
     const checked = isCapabilitySelected(cap, selectedSet);
     const displayName = cap.label || capDisplayName(cap.code, cap.category);
-    const kindLabel = capKindLabel(cap);
+    const kindLabel = cap.category === "ui" ? "UI" : capKindLabel(cap);
     const toolCount = Number(cap.tool_count ?? cap.tools?.length ?? 0);
     const toolsHtml = cap.category === "ui" || cap.code.startsWith("ui:")
       ? this.renderUiToolChoices(cap)
@@ -492,7 +492,7 @@ const agentsAdmin = {
       const groupSelected = groupCapabilities.filter((capability) =>
         selectedSet.has(capability.code),
       ).length;
-      badge.textContent = `${groupSelected}/${groupCapabilities.length}`;
+      badge.textContent = String(groupSelected);
     });
   },
 
@@ -523,23 +523,29 @@ const agentsAdmin = {
     ];
     if (!skills.length) {
       container.innerHTML = `<div class="cap-empty">暂无可配置 Skill</div>`;
-      counter.textContent = "0/0";
+      counter.textContent = "0";
       return;
     }
     container.innerHTML = skills.map((skill) => {
       const checked = selectedSet.has(skill.code);
       const disabled = skill.missing === true;
       const source = skill.source === "builtin" ? "内置" : skill.source === "upload" ? "自定义" : "不可用";
-      return `<label class="agent-skill-card${disabled ? " is-disabled" : ""}">
-        <input type="checkbox" name="agentSkill" value="${escapeHtml(skill.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
-        <span class="agent-skill-card-copy">
-          <span class="agent-skill-card-title">${escapeHtml(skill.label)} <small>${escapeHtml(source)}</small></span>
-          <span class="agent-skill-card-meta">
-            <span title="References">${Number(skill.reference_count || 0)} <i data-lucide="book-open"></i></span>
-            <span title="Assets">${Number(skill.asset_count || 0)} <i data-lucide="paperclip"></i></span>
-            ${disabled ? '<span class="agent-skill-unavailable">不可用</span>' : ""}
+      return `<label class="cap-card agent-skill-card${disabled ? " is-disabled" : ""}">
+        <span class="cap-card-header">
+          <span class="cap-switch">
+            <input type="checkbox" name="agentSkill" role="switch" aria-label="${escapeHtml(skill.label)}" value="${escapeHtml(skill.code)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
+            <span class="cap-switch-ui"></span>
+          </span>
+          <span class="cap-card-info">
+            <span class="cap-card-title"><span class="kind-badge kind-builtin">${escapeHtml(source)}</span><span>${escapeHtml(skill.label)}</span></span>
+            ${skill.description ? `<span class="cap-card-desc" title="${escapeHtml(skill.description)}">${escapeHtml(skill.description)}</span>` : ""}
           </span>
         </span>
+          <span class="agent-skill-card-meta">
+            <span title="参考文件">${Number(skill.reference_count || 0)} <i data-lucide="book-open"></i></span>
+            <span title="附件">${Number(skill.asset_count || 0)} <i data-lucide="paperclip"></i></span>
+            ${disabled ? '<span class="agent-skill-unavailable">不可用</span>' : ""}
+          </span>
       </label>`;
     }).join("");
     this.updateSkillCounter();
@@ -550,8 +556,7 @@ const agentsAdmin = {
     const counter = document.getElementById("agentSkillCounter");
     if (!counter) return;
     const selected = document.querySelectorAll('#agentSkillChoices input[name="agentSkill"]:checked').length;
-    const total = document.querySelectorAll('#agentSkillChoices input[name="agentSkill"]').length;
-    counter.textContent = `${selected}/${total}`;
+    counter.textContent = String(selected);
   },
 
   getSelectedSkills() {

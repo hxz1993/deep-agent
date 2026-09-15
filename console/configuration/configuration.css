@@ -2641,6 +2641,8 @@ dialog.console-action-dialog::backdrop {
   background: var(--bg-elev);
 }
 
+.cap-tab svg { width: 14px; height: 14px; flex-shrink: 0; }
+
 .cap-tab.active {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -2919,13 +2921,20 @@ dialog.console-detail-dialog.modal.channel-commands-modal {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
-  background: var(--bg-soft);
+  background: var(--bg);
   transition: border-color 0.15s, background 0.15s;
 }
 
-.cap-card:has(input:checked) {
-  border-color: rgba(99, 102, 241, 0.45);
-  background: rgba(99, 102, 241, 0.06);
+.cap-card:has(input[name="cap"]:checked),
+.cap-card:has(input[name="agentSkill"]:checked) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg));
+}
+
+.cap-card:hover,
+.cap-card:focus-within {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
 }
 
 .cap-card.is-filtered-out {
@@ -2997,14 +3006,14 @@ dialog.console-detail-dialog.modal.channel-commands-modal {
 }
 
 .kind-badge.kind-mcp {
-  background: rgba(163, 113, 247, 0.15);
-  color: #d2a8ff;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: color-mix(in srgb, var(--accent) 65%, var(--text));
 }
 
 .kind-badge.kind-ui,
 .kind-badge.kind-ui-client {
-  background: rgba(99, 102, 241, 0.15);
-  color: #a5b4fc;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: color-mix(in srgb, var(--accent) 65%, var(--text));
 }
 
 .kind-badge.kind-ui-client.source-manual {

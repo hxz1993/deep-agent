@@ -4,7 +4,7 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260915-channel-help";
+} from "./configuration.js?v=20260915-agent-skill-cards";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260915-context-hint";
 import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260915-session-title";
 import { initWorkspace } from "./workspace.js?v=20260915-v0104-audit";

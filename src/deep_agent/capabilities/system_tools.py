@@ -111,7 +111,7 @@ _SYSTEM_TOOL_DOMAINS = (
         tools=(
             SystemToolDescription(
                 name="search_tools",
-                display_name="查找可用工具",
+                display_name="搜索MCP工具",
                 source="Pydantic AI",
                 injection_condition="已授权 MCP 存在尚未完整披露的工具",
                 description="搜索延迟披露的 MCP 工具，并在后续模型请求中加载命中工具。",

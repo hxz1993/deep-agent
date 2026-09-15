@@ -114,7 +114,6 @@ class ToolDiscoveryTelemetry:
     return_schema_tools: list[str] = field(default_factory=list)
     return_schema_unavailable: list[str] = field(default_factory=list)
     estimated_return_schema_tokens: int = 0
-    read_only_intent: bool = field(default=False, repr=False)
     candidate_tools: list[str] = field(default_factory=list, repr=False)
     search_query_matches: dict[str, tuple[str, ...]] = field(default_factory=dict, repr=False)
     server_names: tuple[str, ...] = field(default_factory=tuple, repr=False)
@@ -225,91 +224,19 @@ def build_search_documents(
     return documents
 
 
-def _is_read_only_query(query_text: str, query_tokens: set[str]) -> bool:
-    explicit_read_only = "只读" in query_text or bool(
-        re.search(r"\b(?:read\s*only|readonly)\b", query_text)
-    )
-    explicit_negative_side_effect = bool(
-        re.search(
-            r"(?:不要|不需要|无需|禁止|不得|不可)[^，。；\n]*(?:保存|写入|创建|更新|"
-            r"设置|新增|修改|刷新|重载|重建|生成|上传|发布|同步|导入|提交|审批|"
-            r"触发|运行|执行|启动|停止|取消|删除|移除|清除)",
-            query_text,
-        )
-        or re.search(
-            r"\b(?:do\s+not|don't|without|never)\b[^,.;\n]*(?:write|save|create|"
-            r"update|set|insert|delete|remove|drop|clear|stop|cancel|modify|refresh|"
-            r"reload|rebuild|generate|upload|publish|sync|import|submit|approve|trigger|"
-            r"run|execute|start)",
-            query_text,
-        )
-    )
-    if "query" not in query_tokens and not explicit_read_only and not explicit_negative_side_effect:
-        return False
-    affirmative_text = re.sub(
-        r"(?:不要|不需要|无需|禁止|不得|不可)[^，。；\n]*",
-        " ",
-        query_text,
-    )
-    affirmative_text = re.sub(
-        r"\b(?:do\s+not|don't|without|never)\b[^,.;\n]*",
-        " ",
-        affirmative_text,
-    )
-    if re.search(
-        r"\b(?:write|save|create|update|set|insert|delete|remove|drop|clear|stop|cancel|"
-        r"modify|refresh|reload|rebuild|generate|upload|publish|sync|import|submit|approve|trigger|"
-        r"send|relay|forward)\b",
-        affirmative_text,
-    ) or any(
-        term in affirmative_text
-        for term in (
-            "保存", "写入", "创建", "更新", "设置", "新增", "修改", "刷新", "重载",
-            "重建", "生成", "上传", "发布", "同步", "导入", "提交", "审批", "触发",
-            "删除", "移除", "清除", "停止", "取消", "发送", "发到", "转发",
-        )
-    ):
-        return False
-    run_terms = {"run", "execute", "start", "运行", "执行", "启动"}
-    readback_terms = {"status", "result", "log", "detail", "状态", "结果", "日志", "详情"}
-    if any(term in affirmative_text for term in run_terms) and not any(
-        term in affirmative_text for term in readback_terms
-    ):
-        return False
-    return True
-
-
-def _document_has_side_effect(document: ToolSearchDocument) -> bool:
-    # Preserve the existing product rule: side effects are inferred from the
-    # stable protocol identifier, never from descriptive prose that may mention
-    # an operation only to deny or contrast it.
-    return any(
-        bool(set(tokenize(field.value, _ACTION_ALIASES)) & {"write", "delete"})
-        for field in document.fields
-        if field.role is FieldRole.CODE
-    )
-
-
 def rank_tool_documents(
     query: str,
     documents: Sequence[ToolSearchDocument],
     *,
     limit: int,
-    enforce_read_only: bool = False,
 ) -> list[str]:
     query_text = normalize_text(query)
     query_tokens = set(lexical_tokens(query_text))
     if not query_tokens or not documents:
         return []
-    read_only_intent = enforce_read_only or _is_read_only_query(query_text, query_tokens)
-    eligible_documents = [
-        document
-        for document in documents
-        if not (read_only_intent and _document_has_side_effect(document))
-    ]
-    result = SearchIndex(eligible_documents, _SEARCH_CONFIG).search(
+    result = SearchIndex(documents, _SEARCH_CONFIG).search(
         query_text,
-        top_k=max(limit, len(eligible_documents)),
+        top_k=max(limit, len(documents)),
     )
     if result.hits and result.hits[0].rank_tier >= 920:
         return [hit.document_id for hit in result.hits if hit.rank_tier >= 920][:limit]
@@ -527,11 +454,6 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
         telemetry.server_names = self.server_names
         try:
             primary_query, supplemental_query = search_inputs_for_run(ctx)
-            primary_text = normalize_text(primary_query)
-            telemetry.read_only_intent = _is_read_only_query(
-                primary_text,
-                set(lexical_tokens(primary_text)),
-            )
             all_documents = build_search_documents(
                 definitions,
                 server_names=self.server_names,
@@ -544,7 +466,6 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                     primary_query,
                     documents,
                     limit=MCP_PRESELECT_LIMIT,
-                    enforce_read_only=telemetry.read_only_intent,
                 )
                 if (
                     not selected
@@ -555,7 +476,6 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                         supplemental_query,
                         documents,
                         limit=MCP_PRESELECT_LIMIT,
-                        enforce_read_only=telemetry.read_only_intent,
                     )
                     selected = list(
                         dict.fromkeys([*selected, *supplemental_selected])
@@ -617,12 +537,6 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
         except Exception as exc:
             telemetry.fallback_reason = type(exc).__name__
             fallback_definitions = definitions
-            if telemetry.read_only_intent:
-                fallback_definitions = [
-                    tool
-                    for tool in definitions
-                    if not (set(lexical_tokens(tool.name)) & {"write", "delete"})
-                ]
             telemetry.candidate_count = len(fallback_definitions)
             telemetry.candidate_tools = [tool.name for tool in fallback_definitions]
             telemetry.direct_count = len(fallback_definitions)
@@ -632,8 +546,7 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
             )
             telemetry.estimated_disclosed_schema_tokens = telemetry.estimated_full_schema_tokens
             logger.exception(
-                "MCP tool preselection failed; disclosing the authorized catalog "
-                "within the run read-only policy"
+                "MCP tool preselection failed; disclosing the authorized catalog"
             )
             return [replace(tool, defer_loading=False) for tool in fallback_definitions]
         finally:
@@ -718,10 +631,6 @@ def search_deferred_tools(
     searchable_tools = [
         tool for tool in tools
         if tool.name not in available_names
-        and not (
-            telemetry.read_only_intent
-            and set(lexical_tokens(tool.name)) & {"write", "delete"}
-        )
     ]
     try:
         previous_matches = telemetry.search_query_matches.get(query_fingerprint)
@@ -759,10 +668,6 @@ def search_deferred_tools(
                     if candidate
                 ):
                     continue
-                if telemetry.read_only_intent and (
-                    set(lexical_tokens(tool.name)) & {"write", "delete"}
-                ):
-                    continue
                 exact_names.append(tool.name)
 
         if exact_names:
@@ -776,20 +681,11 @@ def search_deferred_tools(
                 query_text,
                 documents,
                 limit=MCP_SEARCH_RESULT_LIMIT,
-                enforce_read_only=telemetry.read_only_intent,
             )
     except Exception as exc:  # reveal the authorized corpus instead of dropping access
         telemetry.fallback_reason = type(exc).__name__
         logger.exception("MCP tool search failed; returning the authorized deferred catalog")
         fallback_tools = searchable_tools
-        if telemetry.read_only_intent:
-            fallback_tools = [
-                tool
-                for tool in searchable_tools
-                if not (
-                    set(lexical_tokens(tool.name)) & {"write", "delete"}
-                )
-            ]
         ranked = sorted(tool.name for tool in fallback_tools)[:MCP_SEARCH_RESULT_LIMIT]
     finally:
         telemetry.retrieval_ms += (time.perf_counter() - started) * 1_000

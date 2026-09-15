@@ -218,7 +218,7 @@
 #diagnosticsLogPage #diagnosticsCopyStatus:empty { display:none; }
 #diagnosticsLogPage #diagnosticsCopyStatus { position:absolute; right:20px; padding:5px 9px; background:var(--diag-surface,var(--bg)); color:var(--diag-accent,var(--accent)); }
 #diagnosticsLogPage .diagnostics-log-view { padding:2px 0 0; border:0; }
-#diagnosticsLogPage .diagnostics-row { height:24px; padding:0 2px; grid-template-columns:30px 150px 52px 48px minmax(120px,1fr) 72px; gap:6px; min-width:580px; border:0; border-radius:4px; font-size:12px; line-height:18px; }
+#diagnosticsLogPage .diagnostics-row { height:24px; padding:0 2px; grid-template-columns:30px 150px 52px 48px minmax(120px,1fr) 90px; gap:6px; min-width:580px; border:0; border-radius:4px; font-size:12px; line-height:18px; }
 #diagnosticsLogPage .diagnostics-sequence { color:var(--diag-muted,var(--text-dim)); font:12px var(--mono); text-align:right; font-variant-numeric:tabular-nums; }
 #diagnosticsLogPage .diagnostics-row time { color:var(--diag-muted,var(--text-dim)); font:12px var(--mono); }
 #diagnosticsLogPage .diagnostics-row:hover { background:color-mix(in srgb,var(--diag-accent,var(--accent)) 5%,var(--diag-surface,var(--bg))); }
@@ -230,7 +230,7 @@
 #diagnosticsLogPage .diagnostics-level.warning { color:var(--diag-amber,var(--hitl-pending-border)); background:color-mix(in srgb,var(--diag-amber,var(--hitl-pending-border)) 11%,var(--diag-surface,var(--bg))); }
 #diagnosticsLogPage .diagnostics-summary { font-family:inherit; font-size:12px; color:var(--diag-text,var(--text)); }
 #diagnosticsLogPage .diagnostics-summary mark { background:color-mix(in srgb,var(--diag-accent,var(--accent)) 16%,var(--diag-surface,var(--bg))); color:inherit; }
-#diagnosticsLogPage .diagnostics-session button { font:12px var(--mono); width:8ch; padding:0; color:var(--diag-muted,var(--text-dim)); }
+#diagnosticsLogPage .diagnostics-session button { display:inline-flex; align-items:center; justify-content:flex-end; gap:4px; font:12px var(--mono); padding:0; color:var(--diag-muted,var(--text-dim)); }
 #diagnosticsLogPage .diagnostics-session button:hover { color:var(--diag-accent,var(--accent)); text-decoration:underline; text-underline-offset:3px; }
 #diagnosticsLogPage .diagnostics-resizer { flex-basis:1px; z-index:1; }
 #diagnosticsLogPage .diagnostics-resizer::before { content:""; position:absolute; top:0; bottom:0; left:-4px; width:9px; }
@@ -351,3 +351,6 @@
 /* Keep log coordinates separate from the message without a strong accent. */
 #diagnosticsLogPage .diagnostics-sequence { justify-self:end; min-width:22px; padding:0 3px; box-sizing:border-box; border-radius:3px; text-align:center; background:var(--diag-inset,var(--bg-hover)); color:var(--text-faint); font-variant-numeric:tabular-nums; }
 #diagnosticsLogPage .diagnostics-row time { color:var(--text-faint); padding-right:6px; border-right:1px solid var(--diag-border,var(--border)); font-variant-numeric:tabular-nums; }
+
+#diagnosticsLogPage .diagnostics-session button svg { width:12px; height:12px; flex:0 0 auto; }
+#diagnosticsLogPage .diagnostics-session button span { width:8ch; flex:0 0 auto; }

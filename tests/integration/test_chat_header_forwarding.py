@@ -45,6 +45,45 @@ class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_channel_chat_and_stream_use_current_account_scope_for_mcp(self):
+        import os
+        from httpx import ASGITransport, AsyncClient
+        from deep_agent.core.context import get_context
+        from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
+
+        model = TestModel(call_tools=["echo_echo_request_headers"], custom_output_text="ok")
+        async with async_echo_chat_app() as (app, record_file):
+            store = get_context().stores.channel
+            account = await store.create_account(ChannelAccountCreate(
+                name="scope test", bot_id="scope-fixture", secret="fixture",
+                agent_id=app.state.test_agent_id, session_user_id="channel-owner", enabled=True,
+                settings={"deepfos": {"enabled": True, "app_id": "first001"}},
+            ))
+            headers = {"user": "forged-owner", "app": "invalid", "space": "invalid",
+                       "authorization": "Bearer fixture-platform", "cookie": "fixture-platform=1",
+                       "language": "en",
+                       "x-deep-agent-app": "forged001", "x-deep-agent-space": "forged",
+                       "x-deep-agent-channel-account": account.id,
+                       "x-deep-agent-channel-token": "fixture-internal"}
+            body = {"agent_id": app.state.test_agent_id, "message": "inspect headers", "capabilities": ["mcp:echo"]}
+            with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "fixture-internal"}), patch(
+                "deep_agent.agent.factory._resolve_model", return_value=model
+            ):
+                for app_id in ("first001", "second002", None):
+                    await store.update_account(account.id, ChannelAccountUpdate(settings={
+                        "deepfos": {"enabled": app_id is not None, "app_id": app_id},
+                    }))
+                    expected = {"language": "en", "user": "channel-owner",
+                                "authorization": "Bearer fixture-platform", "cookie": "fixture-platform=1"}
+                    if app_id:
+                        expected.update(app=app_id, space=app_id[:-3])
+                    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                        response = await client.post("/api/v1/chat", json=body, headers=headers)
+                        self.assertEqual(response.status_code, 200, response.text)
+                    self.assertEqual(json.loads(record_file.read_text()), expected)
+                    await read_chat_stream(app, json_body=body, headers=headers)
+                    self.assertEqual(json.loads(record_file.read_text()), expected)
+
 
 class ChatHeaderForwardingTests(unittest.TestCase):
     """HTTP → AgentRunner → MCP 全链路；见 integration/README.md。"""

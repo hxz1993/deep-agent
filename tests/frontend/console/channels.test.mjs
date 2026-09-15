@@ -135,7 +135,7 @@ test("渠道表单绑定Agent且Secret只展示脱敏值并支持留空保留", 
   assert.doesNotMatch(templateHtml, /id="channelWelcomeMessage"|id="channelEnabled"/);
   assert.doesNotMatch(templateHtml, /owner_user_id|platform_token|cookie/i);
   assert.doesNotMatch(templateHtml, /channelAppId|channelSpaceId|channelLanguage|欢迎语/);
-  assert.doesNotMatch(source, /app_id|space_id|language|welcome/i);
+  assert.doesNotMatch(source, /space_id|language|welcome/i);
   assert.match(source, /setChannelSecretEditor\(\{ maskedValue: account\.secret_masked, secretSet: account\.secret_set \}\)/);
   assert.match(source, /channelAccountModalTitle"\)\.textContent = account\.name/);
   assert.doesNotMatch(source, /编辑企微渠道 ·/);
@@ -295,4 +295,37 @@ test("新建渠道先选择企微，支持键盘和外部关闭且不提前创�
   documentEvents.click({ target: {} });
   assert.equal(menu.hidden, true);
   assert.match(templateHtml, /id="createWecomChannelBtn" role="menuitem"[^\n]*<span>企微（WS）<\/span>/);
+});
+
+
+test("应用关联默认关闭，开启显示必填配置，关闭保留内容且隐藏并禁用", async () => {
+  const { admin, getElement, requests } = secretEditorHarness();
+  admin.openEdit("channel-1");
+  const toggle = getElement("channelDeepfosEnabled");
+  const input = getElement("channelDeepfosAppId");
+  const field = getElement("channelDeepfosAppField");
+  const switchToggle = () => toggle.listeners.click({ currentTarget: toggle });
+  assert.equal(toggle.getAttribute("aria-checked"), "false");
+  assert.equal(field.hidden, true);
+  assert.equal(input.disabled, true);
+  switchToggle();
+  assert.equal(field.hidden, false);
+  assert.equal(input.required, true);
+  assert.equal(input.disabled, false);
+  input.value = "fixture005";
+  switchToggle();
+  assert.equal(field.hidden, true);
+  assert.equal(input.required, false);
+  assert.equal(input.disabled, true);
+  assert.equal(input.value, "fixture005");
+  const submit = () => admin.save({ preventDefault() {}, currentTarget: getElement("channelAccountForm") });
+  await submit();
+  assert.deepEqual(requests.at(-1).payload.settings.deepfos, { enabled: false, app_id: "fixture005" });
+  switchToggle();
+  await submit();
+  assert.deepEqual(requests.at(-1).payload.settings.deepfos, { enabled: true, app_id: "fixture005" });
+  assert.equal(getElement("channelUserDetailsEnabled").getAttribute("aria-checked"), "false");
+  admin.openCreate();
+  assert.equal(toggle.getAttribute("aria-checked"), "false");
+  assert.equal(input.value, "");
 });

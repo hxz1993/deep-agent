@@ -50,7 +50,7 @@
 .diagnostic-channels-page .channel-session-meta code { color:inherit; }
 .diagnostic-channels-page .channel-question-count { display:flex; align-items:center; gap:3px; }
 .diagnostic-channels-page .channel-question-count svg { width:12px; height:12px; }
-.diagnostic-channels-page .channel-session-meta time { margin-left:auto; white-space:nowrap; font-size:12px; }
+.diagnostic-channels-page .channel-session-meta time { white-space:nowrap; font-size:12px; }
 .diagnostic-channels-page .channel-latest-label { padding:1px 5px; font-size:11px; line-height:16px; color:var(--diag-accent); background:var(--diag-accent-soft); border-radius:8px; }
 .diagnostic-channels-page .channel-last-question { display:block; width:100%; text-align:left; font-size:13px; font-weight:400; line-height:20px; color:var(--diag-text); padding:0; overflow-wrap:anywhere; }
 .diagnostic-channels-page .channel-last-question:hover { color:var(--diag-accent); }
@@ -125,7 +125,7 @@
 .diagnostic-channels-page .channel-table-scroll { border-right:0; border-radius:8px 0 0 8px; }
 .diagnostic-channels-page .channel-session-inspector { border-radius:0 8px 8px 0; padding:12px 16px; }
 .diagnostic-channels-page .channel-row-open { gap:4px; font-size:12px; white-space:nowrap; color:var(--diag-accent); }
-.diagnostic-channels-page .channel-session-meta .channel-copy { margin-right:4px; }
+.diagnostic-channels-page .channel-session-meta .channel-copy { display:inline-flex; align-items:center; justify-content:center; width:12px; height:16px; padding:0; margin:0; }
 
 .diagnostic-channels-page .channel-active-user { border-bottom:1px solid var(--diag-border); padding:4px 2px; }
 .diagnostic-channels-page .channel-active-user:last-child { border-bottom:0; }
@@ -154,3 +154,9 @@
 
 .diagnostic-channels-page .channel-active-user[aria-pressed="true"] { background:var(--diag-accent-soft); border-radius:5px; }
 .diagnostic-channels-page .channel-active-user:focus-visible { outline:2px solid var(--diag-accent); outline-offset:-2px; }
+
+.diagnostic-channels-page .channel-session-meta { flex-wrap:wrap; }
+.diagnostic-channels-page .channel-session-time { display:inline-flex; align-items:center; gap:6px; }
+.diagnostic-channels-page .channel-session-stats { display:inline-flex; align-items:center; gap:8px; margin-left:auto; }
+.diagnostic-channels-page .channel-session-reference { display:inline-flex; align-items:center; gap:3px; }
+.diagnostic-channels-page .channel-session-stats svg { width:12px; height:12px; flex-shrink:0; }

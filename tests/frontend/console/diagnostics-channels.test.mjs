@@ -61,7 +61,7 @@ test("switching peers rejects late history responses from the previous peer",asy
 });
 test("session markup escapes question content and ID; latest uses compact tag without status",()=>{
  const h=harness(response);const html=h.context.channelSessionHtml({session_id:'<id"',is_latest:true,latest_question:'<img onerror="x">',question_count:4});
- assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img|已完成|最近会话/);assert.match(html,/channel-latest-label">最新/);assert.match(html,/4 条提问/);
+ assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img|已完成|最近会话/);assert.match(html,/channel-latest-label">最近/);assert.match(html,/4 条提问/);
 });
 
 test("user selection and search survive tab switches; group selection stays independent", async () => {

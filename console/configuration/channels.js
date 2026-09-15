@@ -62,7 +62,20 @@ function setChannelUserDetailsEnabled(enabled) {
   document.getElementById("channelWecomApplicationId").required = enabled;
 }
 
+function setChannelDeepfosEnabled(enabled) {
+  const button = document.getElementById("channelDeepfosEnabled");
+  button.setAttribute("aria-checked", String(enabled));
+  button.classList.toggle("on", enabled);
+  button.classList.toggle("off", !enabled);
+  document.getElementById("channelDeepfosAppField").hidden = !enabled;
+  const input = document.getElementById("channelDeepfosAppId");
+  input.required = enabled;
+  input.disabled = !enabled;
+}
+
 async function prepareChannelApplicationEditor(settings = {}) {
+  document.getElementById("channelDeepfosAppId").value = settings?.deepfos?.app_id || "";
+  setChannelDeepfosEnabled(settings?.deepfos?.enabled === true);
   const select = document.getElementById("channelWecomApplicationId");
   if (!select) return;
   const generation = ++channelAdminState.applicationLoadGeneration;
@@ -267,7 +280,14 @@ const channelsAdmin = {
       return;
     }
     const payload = {
-      settings: channelUserDetailsSettings(account?.settings || {}, enabled, applicationId),
+      settings: {
+        ...channelUserDetailsSettings(account?.settings || {}, enabled, applicationId),
+        deepfos: {
+          ...(account?.settings?.deepfos || {}),
+          enabled: document.getElementById("channelDeepfosEnabled").getAttribute("aria-checked") === "true",
+          app_id: document.getElementById("channelDeepfosAppId").value.trim() || null,
+        },
+      },
       name: document.getElementById("channelName").value.trim(),
       bot_id: document.getElementById("channelBotId").value.trim(),
       agent_id: document.getElementById("channelAgentId").value,
@@ -402,6 +422,7 @@ document.addEventListener("DOMContentLoaded", () => {
       event.preventDefault(); channelsAdmin.selectView(viewButtons[next].dataset.channelView); viewButtons[next].focus();
     });
   });
+  document.getElementById("channelDeepfosEnabled")?.addEventListener("click", event => setChannelDeepfosEnabled(event.currentTarget.getAttribute("aria-checked") !== "true"));
   document.getElementById("channelUserDetailsEnabled")?.addEventListener("click", event => setChannelUserDetailsEnabled(event.currentTarget.getAttribute("aria-checked") !== "true"));
   document.getElementById("clearChannelWecomApplicationBtn")?.addEventListener("click", () => {
     const select = document.getElementById("channelWecomApplicationId");

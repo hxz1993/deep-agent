@@ -23,7 +23,7 @@ export function channelSessionHtml(session) {
   const id = session.session_id || "";
   return `<article class="channel-session-item">
     <button type="button" class="channel-last-question" data-channel-open="${e(id)}">${e(session.latest_question || "暂无提问")}</button>
-    <div class="diagnostic-session-id channel-session-meta">${copy(id)}<code>${e(id.slice(0, 8))}</code><span aria-hidden="true">·</span>${session.is_question ? icon("message-circle-more") : `<span class="channel-question-count" title="提问数" aria-label="${count(session.question_count)} 条提问">${icon("message-circle-more")}${count(session.question_count)}</span>`}${session.is_latest ? '<span class="channel-latest-label">最新</span>' : ""}<time>${e(shortQuestionTime(session.last_activity))}</time></div>
+    <div class="diagnostic-session-id channel-session-meta"><span class="channel-session-time"><time>${e(shortQuestionTime(session.last_activity))}</time>${session.is_latest ? '<span class="channel-latest-label">最近</span>' : ""}</span><span class="channel-session-stats"><span class="channel-session-reference"><code>${e(id.slice(0, 8))}</code>${copy(id)}</span>${session.is_question ? icon("message-circle-more") : `<span class="channel-question-count" title="提问数" aria-label="${count(session.question_count)} 条提问">${icon("message-circle-more")}${count(session.question_count)}</span>`}</span></div>
   </article>`;
 }
 

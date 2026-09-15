@@ -177,6 +177,25 @@ class ChannelAccountsApiTests(unittest.IsolatedAsyncioTestCase):
             response = await self.request("POST", "/api/v1/channel-accounts", json=payload)
             self.assertEqual(response.status_code, 422, response.text)
 
+    async def test_deepfos_settings_validate_and_round_trip_without_affecting_extensions(self):
+        settings = {"deepfos": {"enabled": True, "app_id": "demo001", "future": "keep"},
+                    "wecom": {"user_details_enabled": False}, "custom": {"keep": 1}}
+        created = await self.request("POST", "/api/v1/channel-accounts",
+                                     json={**self.payload(), "settings": settings})
+        self.assertEqual(created.status_code, 201, created.text)
+        path = f"/api/v1/channel-accounts/{created.json()['id']}"
+        self.assertEqual(created.json()["settings"], settings)
+        for config in ({"enabled": True}, {"enabled": "false"}, {"enabled": True, "app_id": "bad"}):
+            invalid = await self.request("PUT", path, json={"settings": {"deepfos": config}})
+            self.assertEqual(invalid.status_code, 422, invalid.text)
+            self.assertEqual((await self.request("GET", path)).json()["settings"], settings)
+        settings["deepfos"]["enabled"] = False
+        disabled = await self.request("PUT", path, json={"settings": settings})
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+        self.assertEqual(disabled.json()["settings"], settings)
+        rename = await self.request("PUT", path, json={"name": "renamed"})
+        self.assertEqual(rename.json()["settings"], settings)
+
     async def test_runtime_reports_not_deployed_and_connection_test_is_503(self) -> None:
         created = await self.request("POST", "/api/v1/channel-accounts", json=self.payload())
         account_id = created.json()["id"]

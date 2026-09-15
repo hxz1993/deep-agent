@@ -4,9 +4,9 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260915-channel-app";
+} from "./configuration.js?v=20260915-ui-polish";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260915-context-hint";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260915-scroll-focus";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260915-ui-polish";
 import { initWorkspace } from "./workspace.js?v=20260915-v0104-audit";
 import "./time.js?v=20260913-49";
 

@@ -349,7 +349,7 @@ test("dense log rows highlight literal text safely and details never duplicate f
   const row = diagnosticRowsHtml([data]);
   assert.doesNotMatch(row, /50|duration|data-filter-id|<details/);
   assert.match(row, /data-open-session="complete-session"/);
-  assert.match(row, />complete<\/button>/);
+  assert.match(row, />complete<\/span><\/button>/);
   assert.match(row, /class="diagnostics-sequence" aria-label="当前查询第 1 条">1<\/span>/);
   const detail = diagnosticDetailHtml(data);
   assert.equal((detail.match(/<dt title="session_id">会话 ID<\/dt>/g) || []).length, 1);
@@ -399,7 +399,7 @@ test("compact Console log composition places its header above the split workbenc
   assert.doesNotMatch(section, /aria-label="更多筛选"/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-head h1[^}]*font-size:16px/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*height:24px/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*grid-template-columns:30px 150px 52px 48px minmax\(120px,1fr\) 72px; gap:6px/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-row[^}]*grid-template-columns:30px 150px 52px 48px minmax\(120px,1fr\) 90px; gap:6px/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-summary[^}]*font-size:12px/);
   assert.doesNotMatch(section, /diagnostics-footer|id="diagnosticsRange"/);
   assert.match(section, /diagnostics-result-title[\s\S]*diagnosticsMeta[\s\S]*diagnosticsMore/);
@@ -495,9 +495,9 @@ test("detail fields use Chinese labels with unknown scalar fallback and no dupli
 
 test("session preview preserves exactly eight characters and raw detail is collapsed on every render", () => {
   const row = diagnosticRowsHtml([record("preview", { session_id: "b662a978abcdefghijklmnop" })]);
-  assert.match(row, /title="打开会话 b662a978abcdefghijklmnop">b662a978<\/button>/);
+  assert.match(row, /title="打开会话 b662a978abcdefghijklmnop">.*messages-square.*<span>b662a978<\/span><\/button>/);
   assert.match(css, /\.diagnostics-session button[^}]*text-overflow:clip/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-session button[^}]*width:8ch; padding:0/);
+  assert.match(css, /#diagnosticsLogPage \.diagnostics-session button span[^}]*width:8ch;/);
   for (const id of ["one", "two"]) {
     const detail = diagnosticDetailHtml(record(id, { raw: "literal <markup> | value=a\\|b" }));
     assert.match(detail, /<details class="diagnostics-raw-details"><summary>/);

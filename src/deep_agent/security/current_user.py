@@ -12,6 +12,7 @@ from fastapi import Request
 from loguru import logger
 
 from deepfos_platform.discovery import ServiceDiscovery
+from deepfos_platform.discovery.target import normalize_service_target
 from deepfos_platform.lib.httpcli import AioHttpCli
 from deepfos_platform.lib.utils import concat_url
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
@@ -74,7 +75,7 @@ class PlatformCurrentUserFetcher:
             if account_service is None
             else account_service
         )
-        self._account_service = str(target).strip()
+        self._account_service = normalize_service_target(str(target))
         self._timeout = aiohttp.ClientTimeout(
             connect=min(3.0, timeout_seconds),
             total=timeout_seconds,

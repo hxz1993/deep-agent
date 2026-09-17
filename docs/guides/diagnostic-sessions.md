@@ -120,15 +120,14 @@ Events 支持 `after_sequence`、`limit`（1–500，默认 100）及 `event_typ
 `POST /user/get-user-detail-list`，由 System 服务转查 Account 账号中心。
 使用 `PLATFORM_OPTION.server.system`（环境变量 `EXPORT_SYSTEM_SERVER_NAME`），请求体为 User ID 数组，
 仅转发当前管理员认证，不需要 App、Space 或额外企业参数。
-配置为服务名时走现有服务发现；配置为完整 HTTP(S) 地址时直接请求，不隐式执行注册中心回退。
+服务地址遵循[平台接入基础](platform-integration.md)：`system-server` 和
+`http://system-server` 都按逻辑服务名进入现有服务发现；显式端口、真实域名和网关路径仍直连。
+不把所有带 `http://` 的配置都当成 DNS 地址，也不在普通 HTTP 失败后回退注册中心。
 
-2026-09-14 Test v0.10.2 部署日志确认：原 Space 入口 `http://space-server` 在容器内发生
-`gaierror`，请求未到达上游，并非用户不存在或用户名字段解析错误。公网 Space 接口能成功，
-不代表部署内地址可达。现改用其他业务组件已使用的 System 跨空间入口；同一 Test 管理员凭证、
-同一组 3 个会话用户 ID，公网 System 接口已实测返回全部用户名。
-部署使用截图中已有的 `EXPORT_SYSTEM_SERVER_NAME=http://system-server`；仍需发布后从实际
-DeepAgent 容器确认该内部地址可达。若内部 DNS 不可达，应修正部署的 System 服务地址或服务发现配置，
-不能仅凭本机公网验证宣称容器问题已解决。
+2026-09-17 已定位 Test 部署 `http://system-server` 的 `gaierror`：此适配器曾绕过
+平台 `BaseAPI` 的服务名归一化。此前从 Space 切换 System 没有解决该遗漏；现与平台客户端
+共用规则，无需运维修改 `EXPORT_SYSTEM_SERVER_NAME=http://system-server`。
+公网 System 成功不代表容器内服务发现成功，发布后仍应检查最终实例地址和实际回显。
 旧前端引用的 `POST /api/user/info/by-user-ids` 在 Test 核验返回业务失败，诊断不依赖该旧路由。
 每批最多 100 个不同 ID，整个补齐最多 2 秒、无自动重试。映射仅含 ID、显示名、邮箱、安全头像地址和解析状态。
 

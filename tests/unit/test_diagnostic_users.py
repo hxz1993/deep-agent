@@ -194,6 +194,25 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(post.await_args.args[0], "http://account.internal:8000/user/get-user-detail-list")
         self.assertEqual(result["owner"]["display_name"], "Account")
 
+    async def test_service_url_uses_discovery_instead_of_dns(self):
+        for target in ("http://system-server", "https://system-server"):
+            with self.subTest(target=target):
+                success, failure = Mock(), Mock()
+                discovery = Mock(closed=False)
+                discovery.get_url = AsyncMock(return_value=(success, failure, "http://127.0.0.1:8099"))
+                response = Response(payload=[{"userId": 4, "userName": "legacy-user"}])
+                with patch("deep_agent.security.diagnostic_users.ServiceDiscovery.instantiate", return_value=discovery), patch(
+                    "deep_agent.security.diagnostic_users.AioHttpCli.post", AsyncMock(return_value=response)
+                ) as post, patch("deep_agent.security.diagnostic_users.log_event") as log:
+                    result = await PlatformDiagnosticUserFetcher(system_service=target)(("4",), {"cookie": "test-login"})
+                discovery.get_url.assert_awaited_once_with("system-server")
+                self.assertEqual(post.await_args.args[0], "http://127.0.0.1:8099/user/get-user-detail-list")
+                self.assertEqual(post.await_args.kwargs["headers"], {"cookie": "test-login"})
+                self.assertEqual(result["4"]["display_name"], "legacy-user")
+                self.assertEqual(log.call_args.kwargs["profile_service"], "system-server")
+                success.assert_called_once()
+                failure.assert_not_called()
+
     async def test_auth_errors_are_distinct_and_responses_are_released(self):
         fetcher = PlatformDiagnosticUserFetcher(system_service="https://platform.example")
         for status in (401, 403):

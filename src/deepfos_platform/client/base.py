@@ -24,9 +24,9 @@ from ..errors.classes import (
     APIResponseModelError
 )
 from ..discovery.discovery import ServiceDiscovery
+from ..discovery.target import normalize_service_target
 
 _RE_TRIM_HOST = re.compile(r"http[s]?://(.*?)/(.*)")
-_RE_SERVER_URL = re.compile('http[s]?://([A-Za-z-]+server)$', re.IGNORECASE)
 
 _PUBLIC_MODULE = (
     'SpaceAPI',
@@ -374,10 +374,7 @@ class BaseAPI(metaclass=APIMeta):
         else:
             self.header = header.copy()
 
-        if mat := _RE_SERVER_URL.match(server_name):
-            self.server_name = mat.group(1)
-        else:
-            self.server_name = server_name
+        self.server_name = normalize_service_target(server_name)
         self.log = logger.info
 
     def _parse_content_type(self, header):

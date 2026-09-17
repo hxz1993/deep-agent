@@ -19,6 +19,7 @@ import aiohttp
 from fastapi import Request
 
 from deepfos_platform.discovery import ServiceDiscovery
+from deepfos_platform.discovery.target import normalize_service_target
 from deepfos_platform.lib.httpcli import AioHttpCli
 from deepfos_platform.lib.utils import concat_url
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
@@ -154,9 +155,9 @@ class PlatformDiagnosticUserFetcher:
     """
 
     def __init__(self, *, system_service: str | None = None) -> None:
-        self._profile_service = str(
+        self._profile_service = normalize_service_target(str(
             PLATFORM_OPTION.server.system if system_service is None else system_service
-        ).strip()
+        ))
         # The namespace is deployment-specific; never retain a configured secret as a key.
         self.cache_namespace = hashlib.sha256(self._profile_service.encode()).hexdigest()
 

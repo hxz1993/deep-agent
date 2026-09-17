@@ -17,6 +17,11 @@
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
 
+平台接入基础见[服务地址与账号链路](docs/guides/platform-integration.md)：
+`http://system-server` 是平台逻辑服务配置，须先归一化再走服务发现；禁止仅凭 URL 协议直接绕过 Eureka。
+新增平台身份适配必须复用 `deepfos_platform.discovery.target.normalize_service_target`，
+保留显式 IP/端口、真实域名及网关路径的直连语义。
+
 诊断中心分「日志 / 会话」两个入口：见[日志指南](docs/guides/diagnostic-logs.md)和[会话指南](docs/guides/diagnostic-sessions.md)。
 会话概览、列表和跨用户只读详情统一使用管理员 `/diagnostics/sessions` 接口；统计只读取现有会话与真实事件，
 平台会话概览/列表的用户维度为平台账号（包含渠道会话的归属账号）；新增渠道详情独立按渠道账户、用户/群聊和发言人统计，读取已有渠道台账与会话事件，不新增统计表或事件。

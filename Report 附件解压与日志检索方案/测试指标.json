@@ -1,0 +1,54 @@
+{
+  "agent_id": "a2991605-3d20-4b74-9d8d-dfb47532c557",
+  "cases": [
+    {
+      "case": "original-zip",
+      "session_id": "281c47f6c9a043cfa3c88d71d8899ec7",
+      "elapsed_ms": 22206,
+      "tool_calls": 5,
+      "python_calls": 5,
+      "python_error_calls": 0,
+      "python_ms": 2409,
+      "input_tokens": 36622,
+      "cached_input_tokens": 27776,
+      "output_tokens": 3956
+    },
+    {
+      "case": "plain-log",
+      "session_id": "0617d552842643cb837edd602f005347",
+      "elapsed_ms": 24234,
+      "tool_calls": 5,
+      "python_calls": 5,
+      "python_error_calls": 0,
+      "python_ms": 2568,
+      "input_tokens": 50142,
+      "cached_input_tokens": 38528,
+      "output_tokens": 3913
+    },
+    {
+      "case": "large-zip",
+      "session_id": "b3f9e491f5b24ba9ba878e5ce5754f16",
+      "elapsed_ms": 27555,
+      "tool_calls": 6,
+      "python_calls": 4,
+      "python_error_calls": 0,
+      "python_ms": 2401,
+      "input_tokens": 45416,
+      "cached_input_tokens": 36096,
+      "output_tokens": 4377
+    },
+    {
+      "case": "v2-retry",
+      "session_id": "271109f953484864a4135d18a63ceefc",
+      "elapsed_ms": 27676,
+      "tool_calls": 10,
+      "python_calls": 8,
+      "python_error_calls": 2,
+      "python_ms": 4036,
+      "input_tokens": 69447,
+      "cached_input_tokens": 57728,
+      "output_tokens": 3987
+    }
+  ],
+  "excluded_model_timeouts": 2
+}

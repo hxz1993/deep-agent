@@ -7,7 +7,8 @@
 | ID | 事项 | 当前边界 | 启动条件 |
 | --- | --- | --- | --- |
 | `CLIENT-EVENTS-001` | 电子表格助手与DeepCube助手适配Event API | 本仓只审计和交接，不跨仓修改 | 客户端维护方按v0.6.0契约排期 |
-| `SCHEDULE-001` | [定时任务](26-scheduled-tasks/README.md) | 已调研上游与数据流 Dagster；方案收敛为 Agent＋平台用户、每次新会话、错过合并补一次，未开发 | 确定首个业务验收场景，核验平台后台授权及所需工具/投递能力后开发 |
+| `SCHEDULE-001` | [平台自动化 Agent 任务](26-scheduled-tasks/README.md) | 2026-09-16 调整为平台触发＋后台身份＋Agent 执行＋业务投递；会话为执行记录，新建/复用按场景评估，跨周期去重与聊天记忆分开；未开发 | 以工单清单发群为候选核验触发、凭据与主动发送链路，再决定独立定时入口及任务状态范围 |
+| `SANDBOX-001` | [会话级 Sandbox](07-python-sandbox/session-sandbox-design.md) | 活跃会话复用工作目录，支持 Python/Shell；允许到期清理并明确告知；长期目录保留、内存恢复非硬要求；尚未开发 | 验证候选运行时的部署、隔离及生命周期成本，确定有效期与最小验收；不要求用户预先锁定永久存储方案 |
 | `OPS-SSE-001` | 网关SSE Read Timeout至少330秒、建议360秒并关闭缓冲 | 应用已每约10秒发送压缩进度；网关由部署平台维护 | 发布0.6.0 Test镜像时同步调整并验证 |
 | `ATT-CONFIG-001` | 平台附件扩展名白名单补充MD/HTML/XML/WEBP/GIF/WAV | 只改环境配置，不扩展`read_file`或Provider模态 | 各环境完成六种最小文件上传验证 |
 | `WEB-PROVIDER-VERIFY-001` | Kimi、Tavily、Exa、You.com真实Key联调 | v0.6.5已完成协议、Mock全链路和测试入口；不再改架构 | 获得各Provider Key后补真实搜索验收 |

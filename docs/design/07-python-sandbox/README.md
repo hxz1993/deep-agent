@@ -1,4 +1,13 @@
-# 无状态 Python 沙箱
+# Python Sandbox 与会话运行环境
+
+最近讨论：2026-09-16。**当前实现仍为无状态 Python 子进程；会话级 Sandbox 尚未开发。**
+
+本轮产品方向：优先让活跃会话中的文件、工作目录、Python 与 Shell 操作连续可用；允许按成本设置有效期并到期清理，不要求工作区永久保留，也不把内存快照恢复作为首版前提。Agent 可申请使用、主动释放，系统负责超时回收。首次调用自动创建、后续复用是当前建议，尚未锁定实现。
+
+- [会话级 Sandbox：产品与架构讨论](session-sandbox-design.md)：需求澄清、简单架构、生命周期及上游研究结论。
+- [统一研发台账](../TODO.md)：`SANDBOX-001`。
+
+## 已实现：无状态 Python 沙箱
 
 DeepAgent 的完整 CPython 计算只有一套链路：`SubprocessBackend`。`execute_python` 与
 `execute_skill_script` 都通过这套 Backend 在全新的 Python 子进程中执行；每次调用结束后进程和

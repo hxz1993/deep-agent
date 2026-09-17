@@ -14,6 +14,9 @@
 - [`Prototype DeepAgent 用户字段三方案/index.html`](<Prototype DeepAgent 用户字段三方案/index.html>)：头像、昵称、用户名和邮箱的一列展示方案；可切换列表、卡片与列宽。采用 A 后的[局部确认](<Prototype DeepAgent 用户字段三方案/scenes.html>)保留 ID 查看与复制、缺失兜底和搜索交互。
 - [`../../guides/console-ui-guidelines.md`](../../guides/console-ui-guidelines.md)：后续修改 Console UI 时必须执行的实施与验收规范。
 
+- [渠道应用鉴权三方案](<Prototype 渠道应用鉴权三方案/index.html>)：渠道应用关联与鉴权的历史原型。
+- [渠道扩展设置三方案](<Prototype 渠道扩展设置三方案/index.html>)：渠道扩展设置的历史原型。
+
 ## 一句话方向
 
 **企业控制台 + 轻 Bento 卡片 + 高密度业务列表**：使用浅蓝灰画布、大圆角白色表面、

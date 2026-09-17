@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.10`，数据库Head为`006` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.11`，数据库Head为`006` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -147,7 +147,10 @@ v0.8.3 完成目录收敛，本地与线上都从同一份 `src/` 加载 Python 
 
 目录按职责命名，不为外观一致移动公开 CLI、协议名或持久化字段。共享模型支持在
 `src/deep_agent/models/`，程序编排在 `ptc/`，通用工具在 `capabilities/general/`；
-Gateway 不保留指向企微 Adapter 的旧转发模块。原型不得放在生产 `console/` 静态目录，
+Gateway 不保留指向企微 Adapter 的旧转发模块。Alpha 制品流水线仍按根目录 `ls` 分词后搬移打包；根目录受 Git 管理的名称不得包含空白或 Shell 通配符。
+设计原型统一放到 `docs/design/`，报告放到 `docs/reports/`，带空格的主题目录只能出现在这些子目录中。
+新增根目录条目前运行 `tests.unit.test_release_packaging`，不通过修改流水线绕过该约束。
+原型不得放在生产 `console/` 静态目录，
 跨 unit/integration 的公共模型替身使用 `tests/helpers/models.py`。调整路径后同时检查
 真实空目录、导入/子进程路径、文档和 `test_project_layout.py`，不要只看 Git 的文件状态。
 

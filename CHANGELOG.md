@@ -3,6 +3,11 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.10.11
+
+- 修复 Alpha 原有制品打包失败：将根目录四个带空格的原型和报告目录归档到 `docs/design/` 与 `docs/reports/`，同步资料链接。
+- 增加原有根目录搬移打包逻辑的回归检查；Jenkins 流水线、业务代码、依赖和数据库结构均不变，Head 保持 `006`。
+
 ## v0.10.10
 
 - 修复平台逻辑服务地址的归一化与 Eureka 发现，统一 Account 用户资料链路，避免 Test/Alpha 诊断页面仅回显 User ID。

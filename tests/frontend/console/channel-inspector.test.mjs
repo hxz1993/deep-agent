@@ -1,3 +1,4 @@
+import { savedRunPresentation, sessionStatusLabels, renderContextReferenceContent } from "../../../console/session-presentation.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -17,6 +18,7 @@ function inspector({ accounts = [], channel = null, tab = "channel" } = {}) {
     window: { DeepAgentConsoleChat: { state } },
     document: { getElementById: () => host, querySelector: () => null },
     channelOriginPresentation, renderSessionInspector, accounts, activeTab: tab,
+    savedRunPresentation, sessionStatusLabels, renderContextReferenceContent,
   });
   vm.runInContext(source.replace(/^import .*;\n/gm, "").replaceAll("import.meta.url", '"http://localhost/console/workspace.js"').replace(/^export /gm, ""), context);
   vm.runInContext("workspaceChannelAccounts = accounts; inspectorActiveTab = activeTab; renderInspector();", context);

@@ -51,10 +51,12 @@ OpenAI 兼容协议的 HTTP 日志在 `agent/model_api_diagnostics.py`；只记�
 诊断账号资料使用 `security/diagnostic_users.py`，沿用其他业务组件的 System 跨空间接口
 `POST /user/get-user-detail-list`，由 System 转查 Account。读取 `PLATFORM_OPTION.server.system`
 （`EXPORT_SYSTEM_SERVER_NAME`），只传管理员当前认证和本次涉及的 ID，不传 App / Space。
-每批最多100个、总预算2秒，显示名优先用户名；仅无平台凭证的 local bypass 才使用本地资料，
-缓存按调用者权限隔离。2026-09-14 Test 公网 System 接口已验证；原部署 Space 入口失败为
-`http://space-server` DNS 解析错误。公网成功不能替代部署内可达性验收；完整 URL 直接请求，
-服务名走现有服务发现，不给普通 HTTP 请求增加隐式注册中心回退。
+每批最多100个、总预算2秒；独立返回 username/nickname/email/avatar_url，兼容 display_name 仍优先用户名；仅无平台凭证的 local bypass 才使用本地资料，
+缓存按调用者权限隔离。服务地址与 `BaseAPI` 共用
+`deepfos_platform.discovery.target.normalize_service_target`：`http://system-server` 先变成
+逻辑服务名再走发现；不能因包含协议就绕过 Eureka。真实域名、显式端口与网关路径仍直连，
+失败不隐式回退。当前用户与管理员校验同步遵循此规则。历史原因和验收边界见
+[平台接入基础](../../docs/guides/platform-integration.md)。
 
 ### 历史工具结果匹配
 
@@ -432,9 +434,12 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `chat_sessions` | 全局唯一会话、Agent/User归属、可空App/Space来源、标题与Sequence分配 |
 | `chat_session_events` | Message、Title、Compaction、Tool、Plan和Context的唯一有序事实源 |
 
-配置备份按源Alembic Revision自动发现并复制全部业务表，只把`chat_sessions`和
-`chat_session_events`两张会话事实表和`channel_session_bindings/channel_message_runs`两张Channel
-运行事实表留空；`channel_accounts`作为配置复制。新增配置表不得再依赖手工白名单。上传Skill原ZIP属于
+备份脚本的行数汇总与空表校验统一覆盖当前 Revision 实际存在的全部结构保留表（当前五张），
+日志单独列出 `Structure only (no data copied)`；旧 Revision 不报告尚未创建的缓存表。
+配置备份按源Alembic Revision生成结构，按统一表分类和逻辑依赖顺序复制配置。
+`chat_sessions/chat_session_events`两张会话事实表、`channel_session_bindings/channel_message_runs`
+两张Channel运行表及`wecom_user_profiles`缓存表只保留结构；`channel_accounts/wecom_applications`
+作为配置复制。新增表必须同步维护分类和配置依赖顺序。上传Skill原ZIP属于
 平台外部文件，不进入SQLite配置备份，完整留存需另外执行Skill“导出全部”。
 
 无会话新环境可通过企业管理员接口`POST /api/v1/configuration/import`做同Revision初始化：默认

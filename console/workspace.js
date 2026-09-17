@@ -1,9 +1,11 @@
-import { renderSessionInspector } from "./session-inspector.js?v=20260915-session-icons";
-import { channelOriginPresentation } from "./session-display.js?v=20260915-session-icons";
+import { sessionLoadingHtml, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
+import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentation } from "./session-presentation.js?v=20260918-release01012";
+import { renderSessionInspector } from "./session-inspector.js?v=20260918-release01012";
+import { channelOriginPresentation } from "./session-display.js?v=20260918-release01012";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20260916-delete0109";
+const WORKSPACE_ASSET_VERSION = "20260918-release01012";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -465,33 +467,21 @@ function toggleContextReferenceInspector(reference, branchPoint) {
 }
 
 function renderContextReferenceInspector(state) {
-  if (!selectedContextReference) {
-    return `<div class="inspector-tab-empty">
-      <i data-lucide="braces"></i>
-      <strong>尚未选择上下文引用</strong>
-      <span>点击对话中上下文标签旁的信息图标后，可在这里查看只读 JSON。</span>
-    </div>`;
-  }
-  if (selectedContextReference.sessionId !== (state.sessionId || null)) {
+  if (selectedContextReference && selectedContextReference.sessionId !== (state.sessionId || null)) {
     selectedContextReference = null;
     syncContextReferenceButtons();
-    return renderContextReferenceInspector(state);
   }
-  const reference = selectedContextReference.reference;
-  const json = window.DeepAgentJson?.renderBlock(reference, {
-    className: "inspector-json",
-    ariaLabel: "上下文引用 JSON",
-  }) || `<pre class="inspector-json" aria-label="上下文引用 JSON">${escapeHtml(JSON.stringify(reference, null, 2))}</pre>`;
-  return `<section class="inspector-section context-reference-inspector">
-      <header><strong>上下文引用</strong></header>
-      <div class="inspector-facts compact">
-        <div><span>名称</span><strong>${escapeHtml(reference.label || "—")}</strong></div>
-        <div><span>Key</span><strong class="mono">${escapeHtml(reference.key || "—")}</strong></div>
-        <div><span>类型</span><strong class="mono">${escapeHtml(reference.type || "—")}</strong></div>
-        <div><span>版本</span><strong>${escapeHtml(reference.schema_version || "—")}</strong></div>
-      </div>
-      ${json}
-    </section>`;
+  return renderContextReferenceContent(selectedContextReference?.reference);
+}
+
+function setHistoryLoading(active) {
+  const grid = document.getElementById("workspaceGrid");
+  if (!grid) return;
+  if (!grid.querySelector(".session-loading")) {
+    grid.insertAdjacentHTML("beforeend", sessionLoadingHtml());
+  }
+  setSessionLoading(grid, grid.querySelectorAll("main.chat, #inspectorPane, #inspectorPaneResizer"), active);
+  if (!active) renderInspector();
 }
 
 function setInspectorTab(tab) {
@@ -530,19 +520,25 @@ function renderInspector() {
   const state = api.state;
   const activeSession = state.sessions.find((session) => session.id === state.sessionId && (session.agentId || "") === (state.agentId || "")) || {};
   const run = state.lastRunMetrics || {};
+  const saved = savedRunPresentation({ model_name: run.model_name, run_id: run.run_id, runs: [{ ...run, usage: state.lastRunUsage || run.usage }], latest_status: run.status });
+  const historicalModel = saved.runModel || (run.model_id
+    ? state.llmModels.find(item => item.id === run.model_id || item.model === run.model_id) : null);
+  const requestedModel = !state.sessionId || (state.streaming && !state.observingRun)
+    ? state.llmModels.find(item => item.id === state.llmModelId) : null;
+  const model = historicalModel || requestedModel || (activeSession.modelName ? { name: activeSession.modelName } : null);
   const channelOrigin = channelOriginPresentation(activeSession.channel);
   const agentChannels = workspaceChannelAccounts.filter((account) => account.agent_id === state.agentId);
   if (!channelOrigin && !agentChannels.length && inspectorActiveTab === "channel") inspectorActiveTab = "session";
   host.innerHTML = renderSessionInspector({
-    state, activeSession, run, channelOrigin, agentChannels,
-    model: state.llmModels.find((item) => item.id === state.llmModelId),
-    runModel: state.llmModels.find((item) => item.id === run.model_id || item.model === run.model_id),
-    context: window.DeepAgentConsoleContext?.effectiveContext || {},
+    state, activeSession: state.sessionId ? activeSession : { ...activeSession, turnCount: 0, messageCount: 0, attachmentCount: 0 }, run, channelOrigin, agentChannels,
+    model,
+    runModel: historicalModel,
+    context: { language: activeSession.language },
     identity: window.DeepAgentConsoleContext?.identity || {},
-    contextStatus: state.contextStatus || {}, usage: state.lastRunUsage || {},
+    contextStatus: state.contextStatus || {}, usage: saved.usage,
     agentName: currentAgentName(state), activeTab: inspectorActiveTab,
     contextContent: renderContextReferenceInspector(state),
-    statusText: state.streaming ? "生成中" : state.awaitingHitl ? "等待用户" : "空闲",
+    statusText: state.awaitingHitl ? "待操作" : state.streaming ? "进行中" : sessionStatusLabels[run.status] || (state.sessionId ? "未开始" : "空闲"),
     statusClass: state.streaming ? "running" : state.awaitingHitl ? "waiting" : "idle",
   });
   bindInspectorTabs(host);
@@ -565,10 +561,11 @@ function startStateMonitor() {
       contextStatus: api.state.contextStatus,
       lastRunUsage: api.state.lastRunUsage,
       lastRunMetrics: api.state.lastRunMetrics,
+      identity: window.DeepAgentConsoleContext?.identity,
       conversationId: api.state.conversationId,
       sessionMetrics: api.state.sessions
         .filter((session) => session.id === api.state.sessionId && (session.agentId || "") === (api.state.agentId || ""))
-        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount, session.channel, session.appId, session.spaceId]),
+        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount, session.channel, session.modelName, session.appId, session.spaceId]),
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;
@@ -600,6 +597,7 @@ function bindWorkspaceControls() {
 }
 
 window.DeepAgentConsoleWorkspace = {
+  setHistoryLoading,
   refreshChannelAccounts,
   isContextReferenceSelected,
   openInspectorPane,

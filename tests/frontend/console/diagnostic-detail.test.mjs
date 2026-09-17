@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { diagnosticRunPresentation, findConversationFocus, savedRunFacts } from "../../../console/diagnostic-detail.js";
+import { findConversationFocus } from "../../../console/diagnostic-detail.js";
+import { savedRunPresentation, savedRunFacts } from "../../../console/session-presentation.js";
 import { createConversationPresenter } from "../../../console/conversation-presenter.js";
 import { applyAssistantPresentationActions, assistantActionsFromHistoryItems } from "../../../console/assistant-presentation.js";
 import { renderSessionInspector } from "../../../console/session-inspector.js";
@@ -76,11 +77,11 @@ test("lazy trace does not erase saved per-run facts or borrow another run's mode
     { run_id: "earlier", model_name: "earlier-model", usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 } },
     { run_id: "pending", status: "running" },
   ] };
-  const current = diagnosticRunPresentation(session);
+  const current = savedRunPresentation(session);
   assert.equal(current.model.name, "last-response-model");
   assert.equal(current.runModel, null);
   assert.deepEqual(current.usage, {});
-  const prior = diagnosticRunPresentation(session, [], "earlier");
+  const prior = savedRunPresentation(session, [], "earlier");
   assert.equal(prior.runModel.name, "earlier-model");
   assert.equal(prior.usage.total_tokens, 5);
   const html = renderSessionInspector({ diagnostic: true, activeTab: "run", ...current });
@@ -169,7 +170,8 @@ test("session inspector shows persisted scope, never current test request header
     context: { app: "current002", space: "current" }, identity: { user: "test-user" },
   });
   assert.match(html, /模型[\s\S]*App \/ Space[\s\S]*original001[\s\S]*original[\s\S]*会话统计/);
-  assert.doesNotMatch(html, /current002|test-user|请求 Header/);
+  assert.doesNotMatch(html, /current002|请求 Header/);
+  assert.match(html, /data-user-copy="test-user"/);
   const missing = renderSessionInspector({ context: { app: "current002" } });
   assert.doesNotMatch(missing, /current002/);
   assert.match(missing, /App \/ Space[\s\S]*—/);

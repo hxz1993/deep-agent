@@ -1,3 +1,5 @@
+import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
+import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260918-release01012";
 import { createConversationPresenter } from "./conversation-presenter.js?v=20260912-21";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
@@ -5,7 +7,7 @@ import {
   parseSseBlock,
   readSse,
 } from "./protocol.js?v=20260912-21";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260915-session-icons";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260918-release01012";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import {
   applyAssistantPresentationActions,
@@ -1090,11 +1092,15 @@ async function loadSessionHistory(session, { signal, isCurrent = () => true } = 
     && state.historyController === controller
     && state.sessionId === normalized.id && state.agentId === normalized.agentId;
   state.historyLoading = true;
+  state.historyReady = false;
+  globalThis.DeepAgentConsoleWorkspace?.setHistoryLoading?.(true);
   updateHitlInputState();
   clearMessages();
   trajectory?.setHistory({ session_id: normalized.id, items: [] });
   hideEmptyState();
   try {
+    await prepareSessionRender();
+    if (!current()) return;
     await boundedStreamRequest((requestSignal) => loadUiTools(normalized.agentId, {
       signal: requestSignal, isCurrent: current,
     }), { signal: controller.signal }).catch(() => {});
@@ -1119,13 +1125,17 @@ async function loadSessionHistory(session, { signal, isCurrent = () => true } = 
   } catch (e) {
     if (!current()) return;
     addSystemNote(`加载历史失败：${e.message}`);
+    globalThis.DeepAgentConsoleWorkspace?.setHistoryLoading?.(false);
     if (state.abortController) state.historyObservationPending = true;
   } finally {
     signal?.removeEventListener("abort", abort);
+    await prepareSessionRender();
+    if (state.historyController === controller && (state.historyReady || controller.signal.aborted)) globalThis.DeepAgentConsoleWorkspace?.setHistoryLoading?.(false);
   }
 }
 
 function stopHistoryObservation() {
+  globalThis.DeepAgentConsoleWorkspace?.setHistoryLoading?.(false);
   state.historyFollower?.stop();
   state.historyFollower = null;
   state.historyController?.abort();
@@ -1335,7 +1345,7 @@ async function observePersistedSessionHistory(session, controller, current, {
       }
       if (status.status === "idle") onIdle?.();
     },
-    onHistory: ({ history, signature, changed }, status) => {
+    onHistory: async ({ history, signature, changed }, status) => {
       if (changed) {
         applyObservedHistory(history, status);
         refreshTrajectory();
@@ -1344,10 +1354,15 @@ async function observePersistedSessionHistory(session, controller, current, {
       lastStatus = status.status;
       lastError = null;
       if (status.status === "idle") void loadContextStatus(session, { signal: controller.signal, isCurrent: current });
+      // Initial failures retry after start() has returned. Only an actual History
+      // render can release the opening transition, including an empty session.
+      await prepareSessionRender();
+      if (current()) globalThis.DeepAgentConsoleWorkspace?.setHistoryLoading?.(false);
     },
     onError: (error) => {
       // An unavailable status/history endpoint does not prove the Run ended.
       // Keep the draft and last visible history, then retry without overlap.
+      if (!state.historyReady) globalThis.DeepAgentConsoleWorkspace?.setHistoryLoading?.("加载失败，正在重试…");
       if (error.message !== lastError) showConsoleToast(`会话同步失败，正在重试：${error.message}`, true);
       lastError = error.message;
     },
@@ -1361,13 +1376,16 @@ async function observePersistedSessionHistory(session, controller, current, {
 function updateObservedSessionMetrics(session, events) {
   const selected = state.sessions.find((item) => item.id === session.id && item.agentId === session.agentId);
   if (!selected) return;
-  // Match Session list aggregation: a progress checkpoint, compaction or title
-  // is not a Message Event. One assistant Event may project to several items.
-  const messages = events.filter((event) => [
-    "user/message", "assistant/message", "tool/results", "model/request",
-  ].includes(event.event_type));
-  const messageCount = messages.length;
-  const turnCount = new Set(messages.map((event) => event.turn_id).filter((id) => id != null)).size;
+  const { messageCount, turnCount } = savedSessionCounts(events);
+  // Saved events aggregate a whole Run; a projected assistant is only one message.
+  if (!state.abortController) {
+    const saved = savedRunState(events);
+    const facts = savedRunFacts(events.filter(event => (event.run_id ?? null) === saved.run_id));
+    const previous = state.lastRunMetrics?.run_id === saved.run_id ? state.lastRunMetrics : {};
+    state.lastRunUsage = facts.usage;
+    state.lastRunMetrics = { ...previous, ...facts, ...saved, detailed: false };
+    selected.modelName = [...events].reverse().find(event => event.event_type === "assistant/message" && event.payload?.message?.model_name)?.payload.message.model_name || null;
+  }
   if (selected.messageCount === messageCount && selected.turnCount === turnCount) return;
   Object.assign(selected, { messageCount, turnCount });
   // Inspector observes these counters directly; do not dismiss an inline title
@@ -1377,9 +1395,11 @@ function updateObservedSessionMetrics(session, events) {
 
 function applyObservedHistory(history, status) {
   const latestAssistant = [...history.items].reverse().find((item) => item.kind === "assistant_message");
+  if (state.lastRunMetrics?.run_id !== latestAssistant?.run_id) state.lastRunUsage = null;
   state.conversationId = latestAssistant?.conversation_id || null;
   state.lastRunMetrics = latestAssistant ? {
     usage: latestAssistant.usage || null,
+    conversation_id: latestAssistant.conversation_id || null,
     model_name: latestAssistant.model_name || null,
     provider_name: latestAssistant.provider_name || null,
     run_id: latestAssistant.run_id,
@@ -1392,6 +1412,7 @@ function applyObservedHistory(history, status) {
     running: status.status !== "idle" || status.read_only === true,
   });
   if (!history.items.length) showEmptyState();
+  state.historyReady = true;
 }
 
 async function loadContextStatus(session, { signal, isCurrent = () => true } = {}) {
@@ -2598,6 +2619,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       updateHitlInputState();
       break;
     case "error":
+      state.lastRunMetrics = { ...state.lastRunMetrics, status: "error" };
       failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
       applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       // Error is transient SSE only — refreshing history would wipe the bubble.

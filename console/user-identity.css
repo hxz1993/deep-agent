@@ -1,0 +1,29 @@
+.da-user-identity { display:block; min-width:0; width:100%; font-weight:400; text-align:left; }
+.da-user-top { display:flex; align-items:center; min-width:0; gap:8px; }
+.da-user-symbol { width:32px; height:32px; flex:0 0 32px; }
+.da-user-symbol svg { width:16px; height:16px; }
+.da-user-text { display:flex; flex-direction:column; flex:1; min-width:0; gap:2px; }
+.da-user-identity .da-user-name { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font:500 12px/1.5 var(--font); color:var(--text); }
+.da-user-identity .da-user-secondary { color:var(--text-faint); font-weight:400; font-style:italic; }
+.da-user-identity .da-user-contact { display:block; color:var(--text-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:400 11px/1.5 var(--font); }
+.da-user-identity .da-user-contact.is-id { font-family:var(--mono); }
+.da-user-identity .da-user-action { display:inline-grid; place-items:center; padding:0; width:24px; height:24px; flex:0 0 24px; border:0; border-radius:4px; color:var(--text-faint); background:transparent; cursor:pointer; opacity:0; }
+.da-user-identity .da-user-action:hover { color:var(--accent); background:var(--accent-soft); }
+.da-user-action svg { width:13px; height:13px; }
+.da-user-action:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.da-user-identity:hover .da-user-action,.da-user-identity:focus-within .da-user-action,.da-user-identity .da-user-action.is-copied { opacity:1; }
+.da-user-action > span { display:grid; place-items:center; }
+.da-user-action .da-user-copied-icon,.da-user-action.is-copied .da-user-copy-icon { display:none; }
+.da-user-action.is-copied .da-user-copied-icon { display:grid; }
+@media (hover:none) { .da-user-identity .da-user-action { opacity:1; } }
+.da-user-compact { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:inherit; }
+.inspector-facts > .inspector-user-fact { align-items:start; }
+.inspector-user-fact > span:first-child { padding-top:5px; }
+.user-account-host { position:relative; grid-column:1; grid-row:2; min-width:0; }
+.user-account-host > .user-account-popover { width:310px; max-width:calc(100vw - 24px); }
+.user-pill.popover-open + .user-popover { opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0); }
+.user-account-host .user-popover[hidden] { display:none; }
+.user-account-profile { display:block; width:100%; padding-bottom:4px; }
+.diagnostic-sessions-page .diagnostic-user-options .da-user-contact { margin:0; }
+.diagnostic-sessions-page .diagnostic-session-row { grid-template-columns:var(--diagnostic-columns,minmax(240px,1fr) 140px 260px 100px 70px 150px); }
+.diagnostic-sessions-page .diagnostic-session-table { min-width:1020px; }

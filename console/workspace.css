@@ -496,7 +496,6 @@ html, body {
   background: var(--bg);
   color: var(--text-faint);
 }
-.trajectory-search:focus-within { border-color: var(--accent); }
 .trajectory-search input {
   min-width: 0;
   flex: 1;

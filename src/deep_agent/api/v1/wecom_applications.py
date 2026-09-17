@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -54,6 +55,26 @@ class ApplicationUpdate(BaseModel):
     app_secret: str | None = Field(default=None, max_length=1024)
     clear_app_secret: bool = False
     settings: dict[str, Any] | None = None
+
+
+class CacheMember(BaseModel):
+    id: str
+    name: str | None
+    userid: str
+    open_userid: str | None
+    profile_synced_at: datetime | None
+    expires_at: datetime | None
+    created_at: datetime
+    last_error_stage: str | None
+    last_error_code: str | None
+    status: Literal["valid", "stale"]
+
+
+class CacheMembersPage(BaseModel):
+    items: list[CacheMember]
+    total: int
+    limit: int
+    offset: int
 
 
 class ResolveUser(BaseModel):
@@ -158,6 +179,22 @@ async def test_connection(application_id: str, ctx: AppContextDep):
 async def cache_stats(application_id: str, ctx: AppContextDep):
     await _get(ctx, application_id)
     return await ctx.stores.wecom.cache_stats(application_id)
+
+
+@router.get("/wecom-applications/{application_id}/cache/members", response_model=CacheMembersPage, dependencies=CONSOLE_ADMIN_DEPENDENCIES)
+async def cache_members(
+    application_id: str, ctx: AppContextDep,
+    q: str = Query(default="", max_length=512),
+    status: Literal["all", "valid", "stale"] = "all",
+    synced: Literal["all", "day", "week", "older", "never"] = "all",
+    sort: Literal["desc", "asc"] = "desc",
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    await _get(ctx, application_id)
+    return await ctx.stores.wecom.list_cache_members(
+        application_id, q=q, status=status, synced=synced, sort=sort, limit=limit, offset=offset,
+    )
 
 
 @router.post("/wecom-applications/{application_id}/cache/invalidate", dependencies=CONSOLE_ADMIN_DEPENDENCIES)

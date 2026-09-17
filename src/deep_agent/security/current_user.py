@@ -12,11 +12,13 @@ from fastapi import Request
 from loguru import logger
 
 from deepfos_platform.discovery import ServiceDiscovery
+from deepfos_platform.discovery.target import normalize_service_target
 from deepfos_platform.lib.httpcli import AioHttpCli
 from deepfos_platform.lib.utils import concat_url
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 from deep_agent.local_security import LOCAL_CURRENT_USERNAME_SCOPE_KEY
+from deep_agent.security.diagnostic_users import safe_avatar_url
 from deep_agent.security.console_admin import (
     forwarded_platform_auth_headers,
     platform_credential_digest,
@@ -37,6 +39,10 @@ class CurrentUserUnavailableError(RuntimeError):
 class CurrentUserProfile:
     user_id: str
     username: str
+    nickname: str | None = None
+    email: str | None = None
+    avatar_url: str | None = None
+    resolution: str = "resolved"
 
 
 CurrentUserFetcher = Callable[
@@ -74,7 +80,7 @@ class PlatformCurrentUserFetcher:
             if account_service is None
             else account_service
         )
-        self._account_service = str(target).strip()
+        self._account_service = normalize_service_target(str(target))
         self._timeout = aiohttp.ClientTimeout(
             connect=min(3.0, timeout_seconds),
             total=timeout_seconds,
@@ -182,7 +188,14 @@ class PlatformCurrentUserFetcher:
             raise CurrentUserUnavailableError(
                 "current-user profile does not contain a username"
             )
-        return CurrentUserProfile(user_id=user_id, username=username)
+        nickname = payload.get("nickname") or payload.get("nickName")
+        email = payload.get("email")
+        return CurrentUserProfile(
+            user_id=user_id, username=username,
+            nickname=nickname.strip()[:256] or None if isinstance(nickname, str) else None,
+            email=email.strip()[:320] or None if isinstance(email, str) else None,
+            avatar_url=safe_avatar_url(payload.get("avatar")),
+        )
 
 
 class CurrentUserProfileResolver:
@@ -216,6 +229,7 @@ class CurrentUserProfileResolver:
             return CurrentUserProfile(
                 user_id=normalized_user,
                 username=local_username,
+                resolution="local",
             )
 
         headers = forwarded_platform_auth_headers(request, normalized_user)

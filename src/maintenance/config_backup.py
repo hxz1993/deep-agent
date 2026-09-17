@@ -23,7 +23,7 @@ from deep_agent.db.models import Base
 from deep_agent.db.configuration_transfer import (
     BACKUP_SCOPE_SCHEMA_VERSION,
     SESSION_TABLES,
-    CACHE_TABLES,
+    STRUCTURE_ONLY_TABLES,
     backup_scope_manifest,
     configuration_table_names,
     order_configuration_tables,
@@ -145,6 +145,8 @@ async def export_backup(
         await asyncio.to_thread(_upgrade_target_schema, target_url, revision)
         target_engine = create_async_engine(target_url)
         copied_tables = await _discover_copied_tables(target_engine)
+        target_tables = await _database_table_names(target_engine)
+        structure_only_tables = tuple(name for name in STRUCTURE_ONLY_TABLES if name in target_tables)
         await _validate_source_tables(source_engine, copied_tables)
         await _create_backup_info_table(target_engine)
         await _clear_seed_configuration(target_engine, copied_tables)
@@ -182,7 +184,7 @@ async def export_backup(
             revision=revision,
             row_counts={
                 **row_counts,
-                **{table_name: 0 for table_name in SESSION_TABLES},
+                **{table_name: 0 for table_name in structure_only_tables},
             },
         )
     except Exception:
@@ -229,7 +231,7 @@ async def _discover_copied_tables(engine: AsyncEngine) -> tuple[str, ...]:
             + ", ".join(sorted(missing_session_tables))
         )
 
-    copied_names = table_names - set(SESSION_TABLES) - set(CACHE_TABLES) - {"alembic_version"}
+    copied_names = table_names - set(STRUCTURE_ONLY_TABLES) - {"alembic_version"}
     return order_configuration_tables(tuple(copied_names))
 
 
@@ -379,9 +381,10 @@ async def _validate_backup(
                     f"Backup row count mismatch for {table_name}: "
                     f"expected {expected}, got {actual}"
                 )
-        for table_name in SESSION_TABLES:
-            if await _table_count(connection, table_name) != 0:
-                raise ValueError(f"Session table must be empty: {table_name}")
+        table_names = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names()))
+        for table_name in STRUCTURE_ONLY_TABLES:
+            if table_name in table_names and await _table_count(connection, table_name) != 0:
+                raise ValueError(f"Structure-only table must be empty: {table_name}")
 
         # PRAGMA foreign_key_check is insufficient after 003. Audit the
         # logical relations, including the configured channel Agent reference.
@@ -507,6 +510,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"Backup created: {result.path}")
     print(f"Alembic revision: {result.revision}")
     print(f"Rows: {counts}")
+    structure_only = ", ".join(table for table in STRUCTURE_ONLY_TABLES if table in result.row_counts)
+    print(f"Structure only (no data copied): {structure_only}")
     print(
         "External Skill ZIP files are not embedded; use Console Skill > "
         "Export all for a portable companion package."

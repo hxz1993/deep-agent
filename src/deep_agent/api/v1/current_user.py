@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 from pydantic import BaseModel
 
+from deep_agent.api.v1.diagnostic_routes import NoStoreRoute
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.security.current_user import (
     CurrentUserAuthenticationError,
@@ -13,12 +14,17 @@ from deep_agent.security.current_user import (
     CurrentUserUnavailableError,
 )
 
-router = APIRouter()
+router = APIRouter(route_class=NoStoreRoute)
 
 
 class CurrentUserResponse(BaseModel):
     user_id: str
     username: str
+    nickname: str | None = None
+    display_name: str
+    email: str | None = None
+    avatar_url: str | None = None
+    resolution: str
 
 
 _CURRENT_USER_PROFILE_RESOLVER = CurrentUserProfileResolver()
@@ -57,6 +63,11 @@ async def get_current_user(
     return CurrentUserResponse(
         user_id=profile.user_id,
         username=profile.username,
+        nickname=profile.nickname,
+        display_name=profile.username,
+        email=profile.email,
+        avatar_url=profile.avatar_url,
+        resolution=profile.resolution,
     )
 
 

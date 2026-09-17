@@ -1,3 +1,4 @@
+import { savedSessionCounts, savedRunFacts, savedRunState } from "../../../console/session-presentation.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -190,15 +191,17 @@ const presenterSource = readFileSync(new URL("../../../console/conversation-pres
 test("Console checks the selected session identity after asynchronous UI tool loading", async () => {
   const gates = { a: deferred(), b: deferred() };
   const observed = [];
+  const loading = [];
   const state = { sessionId: "a", agentId: "agent", historyController: null };
   const context = {
-    state, AbortController, boundedStreamRequest,
+    state, AbortController, boundedStreamRequest, prepareSessionRender: async () => {},
+    DeepAgentConsoleWorkspace: { setHistoryLoading(active) { loading.push([state.sessionId, active]); } },
     normalizeSession: (value) => value,
     stopHistoryObservation() { state.historyController?.abort(); state.historyController = null; },
     clearMessages() {}, hideEmptyState() {}, updateHitlInputState() {},
     trajectory: { setHistory() {} },
     loadUiTools: async () => gates[state.sessionId].promise,
-    observeSessionHistory: async (session) => observed.push(session.id),
+    observeSessionHistory: async (session) => { observed.push(session.id); state.historyReady = true; },
     loadContextStatus() {}, addSystemNote() {},
   };
   vm.createContext(context);
@@ -213,6 +216,26 @@ test("Console checks the selected session identity after asynchronous UI tool lo
   gates.a.resolve();
   await first;
   assert.deepEqual(observed, ["b"]);
+  assert.deepEqual(loading, [["a", true], ["b", true], ["b", false]], "late old requests never unlock another session");
+});
+
+test("initial history retry keeps the opening transition until a real history result", async () => {
+  const loading = [];
+  const state = { sessionId: "s", agentId: "a" };
+  const context = { state, AbortController, boundedStreamRequest, prepareSessionRender: async () => {},
+    normalizeSession: value => value, stopHistoryObservation() {},
+    DeepAgentConsoleWorkspace: { setHistoryLoading: value => loading.push(value) },
+    clearMessages() {}, hideEmptyState() {}, updateHitlInputState() {}, trajectory: { setHistory() {} },
+    loadUiTools: async () => {}, loadContextStatus() {}, addSystemNote() {},
+    // HistoryFollower.start returns after a failed first poll while its retry is pending.
+    observeSessionHistory: async () => {},
+  };
+  vm.createContext(context);
+  const fn = source.slice(source.indexOf("async function loadSessionHistory("), source.indexOf("\nfunction stopHistoryObservation("));
+  vm.runInContext(`${fn}\nthis.load = loadSessionHistory;`, context);
+  await context.load({ id: "s", agentId: "a" });
+  assert.deepEqual(loading, [true]);
+  assert.equal(state.historyReady, false);
 });
 
 test("Console observed cancellation only requests control and final reconciliation, never a new chat stream", async () => {
@@ -289,7 +312,7 @@ async function observedMetricsFixture(options = {}) {
   let editingTitle = false;
   const controller = new AbortController();
   const context = {
-    state, boundedStreamRequest, historyThroughRun,
+    state, boundedStreamRequest, historyThroughRun, savedSessionCounts, savedRunFacts, savedRunState, prepareSessionRender: async () => {},
     createHistoryFollower(options) { callbacks = options; return { start: async () => {}, stop() {} }; },
     loadAllSessionEvents() { const gate = deferred(); requests.push(gate); return gate.promise; },
     trajectory: { setHistory(history) { trajectoryUpdates += 1; trajectoryItems = history.items; } },
@@ -304,7 +327,7 @@ async function observedMetricsFixture(options = {}) {
   return {
     selected, state, requests, controller,
     history(status) { callbacks.onHistory({ history: { items: [] }, signature: status, changed: true }, { status }); },
-    finish(index, items) { requests[index].resolve({ response: { ok: true }, data: { items } }); },
+    finish(index, items) { requests[index].resolve({ response: { ok: true }, data: { items: items.map((item, index) => ({ event_id: `event-${index}`, ...item })) } }); },
     get renders() { return renders; }, get trajectoryUpdates() { return trajectoryUpdates; },
     get trajectoryItems() { return trajectoryItems; },
     editTitle() { editingTitle = true; },
@@ -332,7 +355,7 @@ test("observed terminal reuses serialized event reads to refresh canonical Sessi
   await turn();
   await turn();
   assert.equal(h.selected.messageCount, 4);
-  assert.equal(h.selected.turnCount, 2);
+  assert.equal(h.selected.turnCount, 1);
   assert.equal(h.renders, 1);
   assert.equal(h.requests.length, 2, "metrics add no request or polling loop");
   h.controller.abort();

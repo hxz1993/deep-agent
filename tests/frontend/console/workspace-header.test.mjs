@@ -2,6 +2,8 @@ import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
+import { savedRunPresentation, sessionStatusLabels } from "../../../console/session-presentation.js";
 
 import { formatSessionIdSubtitle } from "../../../console/session-display.js";
 
@@ -37,9 +39,10 @@ const { calculateInspectorPaneWidth } = await import(
   new URL("../../../console/workspace.js", import.meta.url)
 );
 
-test("会话标题第二行只显示完整会话 ID", () => {
+test("会话标题第二行显示前八位，复制保留完整会话 ID", () => {
   const sessionId = "019f1857-9463-7db3-a9d3-654a4ac24b24";
-  assert.equal(formatSessionIdSubtitle(sessionId), sessionId);
+  assert.equal(formatSessionIdSubtitle(sessionId), "019f1857");
+  assert.equal(formatSessionIdSubtitle("short"), "short");
   assert.equal(formatSessionIdSubtitle(null), "");
   assert.match(
     template,
@@ -93,7 +96,7 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.match(workspaceSource, /inspectorFactHtml\("会话统计", sessionCounts/);
   assert.match(workspaceSource, /title="提问数"[\s\S]*title="消息事件数"[\s\S]*title="附件数"/);
   assert.match(workspaceSource, /inspectorFactHtml\("App \/ Space", sessionScope/);
-  assert.match(workspaceSource, /inspectorFact\("User ID"[\s\S]*identity\?\.user/);
+  assert.match(workspaceSource, /inspector-user-fact[\s\S]*renderUserIdentity[\s\S]*userId: identity\?\.user[\s\S]*copyable: true/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
   assert.doesNotMatch(workspaceSource, /<strong>当前回合<\/strong>/);
   assert.match(workspaceSource, /Conv\. ID/);
@@ -424,4 +427,35 @@ test("Console 完整移除压缩测试会话生成器", () => {
   assert.doesNotMatch(consoleCss, /context-test|session-test-action/);
   assert.match(chatSource, /async openSession\(session\)/);
   assert.match(chatSource, /setComposerText\(text\)/);
+});
+
+
+test("Inspector keeps the latest actual model ahead of old session metadata or the next composer selection", () => {
+  const state = {
+    sessionId: "session", agentId: "agent", sessions: [{id: "session", agentId: "agent", modelName: "old-model"}],
+    llmModels: [{id: "next", name: "next-model"}], llmModelId: "next", lastRunUsage: null,
+    lastRunMetrics: {run_id: "run", model_name: "actual-model", usage: {total_tokens: 42}},
+  };
+  let rendered;
+  const context = {
+    window: {DeepAgentConsoleChat: {state}}, document: {getElementById: () => ({}), querySelector: () => null},
+    savedRunPresentation, sessionStatusLabels, channelOriginPresentation: () => null,
+    workspaceChannelAccounts: [], inspectorActiveTab: "session", currentAgentName: () => "Agent",
+    renderContextReferenceInspector: () => "", bindInspectorTabs() {},
+    renderSessionInspector: options => {rendered = options; return "";},
+  };
+  vm.createContext(context);
+  const source = workspaceSource.slice(workspaceSource.indexOf("function renderInspector()"), workspaceSource.indexOf("function startStateMonitor()"));
+  vm.runInContext(`${source}\nthis.render = renderInspector;`, context);
+  context.render();
+  assert.equal(rendered.model.name, "actual-model");
+  assert.equal(rendered.runModel.name, "actual-model");
+  assert.equal(rendered.usage.total_tokens, 42, "History usage remains visible when the optional event read is unavailable");
+  state.lastRunMetrics = {run_id: "new-run", status: "running"};
+  state.streaming = true;
+  context.render();
+  assert.equal(rendered.model.name, "next-model", "a locally started Run can show its requested model");
+  state.observingRun = true;
+  context.render();
+  assert.equal(rendered.model.name, "old-model", "observing someone else's Run must not claim the local composer selection");
 });

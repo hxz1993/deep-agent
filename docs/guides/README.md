@@ -9,6 +9,7 @@
 
 | 文档 | 用途 |
 | --- | --- |
+| [`platform-integration.md`](platform-integration.md) | 平台接入基础：服务名 URL、Eureka/本地发现、System 与 Account 账号链路 |
 | [`sse-protocol.md`](sse-protocol.md) | 对话 SSE 事件、历史与 Deferred 续跑协议 |
 | [`session-event-client-migration.md`](session-event-client-migration.md) | DeepCube、电子表格和通用 AI 客户端迁移到 Session Event 的精确清单 |
 | [`client-adaptation/README.md`](client-adaptation/README.md) | DeepCube 与 DeepTable 两个外部客户端的逐仓库、逐文件适配说明 |

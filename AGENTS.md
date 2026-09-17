@@ -12,10 +12,15 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.9`，数据库Head为`006` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.12`，数据库Head为`006` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
+
+平台接入基础见[服务地址与账号链路](docs/guides/platform-integration.md)：
+`http://system-server` 是平台逻辑服务配置，须先归一化再走服务发现；禁止仅凭 URL 协议直接绕过 Eureka。
+新增平台身份适配必须复用 `deepfos_platform.discovery.target.normalize_service_target`，
+保留显式 IP/端口、真实域名及网关路径的直连语义。
 
 诊断中心分「日志 / 会话」两个入口：见[日志指南](docs/guides/diagnostic-logs.md)和[会话指南](docs/guides/diagnostic-sessions.md)。
 会话概览、列表和跨用户只读详情统一使用管理员 `/diagnostics/sessions` 接口；统计只读取现有会话与真实事件，
@@ -29,7 +34,7 @@
 Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格包取自 View Planning V85 资产，DeepCube 保留 2026-09-14 Test 官方导出包，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。Agent.ui_tool_selection 保存单工具范围（缺省整包、显式名单限定）。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型并保存工具范围；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
 
 
-企微应用与成员资料见[使用指南](docs/guides/wecom-applications.md)及[渠道接入](docs/guides/wecom-channel.md)。本次 v0.10.1 功能增量 `006` 新增企业应用配置和可重建成员缓存，保留已发布 `005`。渠道页面在标题同行切换账户与应用；应用采用左侧列表、右侧应用标题及合并企业信息的配置卡与精简缓存统计，成员表只由后端维护。渠道 `settings.wecom.user_details_enabled` 默认为关闭，开启必须引用有效应用；查询开关独立于渠道启停，关闭时不访问资料接口。
+企微应用与成员资料见[使用指南](docs/guides/wecom-applications.md)及[渠道接入](docs/guides/wecom-channel.md)。本次 v0.10.1 功能增量 `006` 新增企业应用配置和可重建成员缓存，保留已发布 `005`。渠道页面在标题同行切换账户与应用；应用采用左侧列表、右侧应用标题及合并企业信息的配置卡、缓存统计与按需加载的只读成员分页表。渠道 `settings.wecom.user_details_enabled` 默认为关闭，开启必须引用有效应用；查询开关独立于渠道启停，关闭时不访问资料接口。
 
 身份服务位于 `services/wecom_client.py`、`services/wecom_profiles.py`，由 API 进程统一持有 HTTP／Token／任务；Gateway 使用内部鉴权解析接口，不能自行选择应用。密文转换及明文回退以官方结果确认，同应用合并到一份 User ID 资料；原始 `sender_id/peer_id` 不变。资料有效期一周，缓存失效保留姓名与映射，迟到结果受应用 revision 和渠道配置保护。开启后私聊标题为 `User｜姓名(原始 ID)`，来源上下文仅额外增加 `userid/name`；群标题为 `Group｜chat_id`，平台归属／权限不变，私聊首轮、群聊每轮规则不变。
 
@@ -142,7 +147,10 @@ v0.8.3 完成目录收敛，本地与线上都从同一份 `src/` 加载 Python 
 
 目录按职责命名，不为外观一致移动公开 CLI、协议名或持久化字段。共享模型支持在
 `src/deep_agent/models/`，程序编排在 `ptc/`，通用工具在 `capabilities/general/`；
-Gateway 不保留指向企微 Adapter 的旧转发模块。原型不得放在生产 `console/` 静态目录，
+Gateway 不保留指向企微 Adapter 的旧转发模块。Alpha 制品流水线仍按根目录 `ls` 分词后搬移打包；根目录受 Git 管理的名称不得包含空白或 Shell 通配符。
+设计原型统一放到 `docs/design/`，报告放到 `docs/reports/`，带空格的主题目录只能出现在这些子目录中。
+新增根目录条目前运行 `tests.unit.test_release_packaging`，不通过修改流水线绕过该约束。
+原型不得放在生产 `console/` 静态目录，
 跨 unit/integration 的公共模型替身使用 `tests/helpers/models.py`。调整路径后同时检查
 真实空目录、导入/子进程路径、文档和 `test_project_layout.py`，不要只看 Git 的文件状态。
 

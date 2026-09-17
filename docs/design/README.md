@@ -11,7 +11,7 @@
 | `04` | [`模型目录`](04-model-catalog/README.md)            | 2026-07 | 数据库目录与手工刷新已落地，结构并入 v0.3.0 基线 001 |
 | `05` | [`工具优化`](05-tool-optimization/README.md)        | 2026-07 | 工具体系映射、错误语义、Return Schema与v0.4.0大工具结果外置已落地；大型 MCP 检索见 13 课题 |
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |
-| `07` | [`Python Sandbox`](07-python-sandbox/README.md) | 2026-07 起 | A 已落地（subprocess-dev + soft guardrails）；B 探针代码已有、节点选型未完成；C 阻塞于 B |
+| `07` | [`Python Sandbox 与会话运行环境`](07-python-sandbox/README.md) | 2026-07 起 | 无状态子进程已落地；2026-09-16 收敛活跃会话复用、可过期清理与 Shell 方向，长期持久化及快照非硬要求，尚未开发 |
 | `08` | [`Artifact 与出站产物`](08-artifact-export/README.md) | 2026-08 | v0.4.0实现会话内大工具结果Artifact；v0.4.18支持主动发布文件到下载中心 |
 | `09` | [`结构化最终输出`](09-structured-output/README.md) | 2026-08 | 0805 实验实现已归档；产品边界未锁定，当前暂缓正式实施 |
 | `10` | [`上下文引用`](10-context-reference/README.md) | 2026-08 | v0.3.5 已完成公共协议；DeepCube/DeepTable业务前端已迁移并验证 |

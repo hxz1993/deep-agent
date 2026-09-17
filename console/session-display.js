@@ -1,6 +1,6 @@
 export function formatSessionIdSubtitle(sessionId) {
   if (sessionId == null || sessionId === "") return "";
-  return String(sessionId);
+  return String(sessionId).slice(0, 8);
 }
 
 /** Read-only presentation of the Session's persisted channel origin snapshot. */

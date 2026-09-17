@@ -19,7 +19,7 @@ function harness(custom) {
     return nodes.get(id);
   };
   const context = vm.createContext({
-    window: { addEventListener() {} },
+    window: { addEventListener() {}, loadWecomMemberTable: async () => ({ createWecomMemberTable: () => ({ load: async () => {}, dispose() {} }) }) },
     document: { getElementById: get, querySelectorAll() { return []; }, addEventListener(type, cb) { if (type === 'DOMContentLoaded') ready.push(cb); } },
     AbortController, Map, Set, Number, Object, Array, String, Promise,
     setTimeout(fn, ms) { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout(id) { timers.delete(id); },
@@ -41,13 +41,14 @@ function harness(custom) {
 }
 async function select(h) { await h.admin.refresh(); await h.admin.select('app-1'); }
 
-test('渠道仅增加标题同行切换和应用主从视图，不增加成员表', () => {
+test('渠道标题同行切换，成员表模块在应用详情中按需加载', () => {
   const section = template.split('id="panel-channels">')[1].split('<!-- MCP panel -->')[0];
   assert.match(section, /channelAccountActions[\s\S]*newWecomApplicationBtn[\s\S]*channel-view-switch/);
   assert.match(section, /data-channel-view="accounts"/);
   assert.match(section, /data-channel-view="applications"/);
   assert.match(section, /id="wecomApplicationList"[\s\S]*id="wecomApplicationDetail"/);
-  assert.doesNotMatch(source, /<table|\/users\b|\/members\b/);
+  assert.match(source, /await window.loadWecomMemberTable\(\)/);
+  assert.match(source, /id="wecomMemberTable"/);
 });
 
 test('旧渠道设置默认关闭，修改保留未知 settings 和企微扩展值', () => {
@@ -96,7 +97,7 @@ test('读取详情只显示后端掩码并转义名称，不输出原始凭据',
   assert.match(h.get('wecomApplicationDetail').innerHTML, /&lt;script&gt;bad&lt;\/script&gt;/);
   assert.match(h.get('wecomApplicationDetail').innerHTML, /sample\*{6}last/);
   assert.doesNotMatch(h.get('wecomApplicationDetail').innerHTML, /should-not-render/);
-  assert.match(h.get('wecomApplicationCache').innerHTML, /1 人待更新/);
+  assert.match(h.get('wecomApplicationCache').innerHTML, /待更新 <b>1<\/b> 人/);
 });
 
 test('重置缓存保留资料，仅调用应用失效并重新读取统计', async () => {
@@ -106,7 +107,7 @@ test('重置缓存保留资料，仅调用应用失效并重新读取统计', as
     if (request.path.endsWith('/cache')) return { total: 2, pending };
   });
   await select(h); await h.admin.invalidate();
-  assert.match(h.get('wecomApplicationCache').innerHTML, /2 人待更新/);
+  assert.match(h.get('wecomApplicationCache').innerHTML, /待更新 <b>2<\/b> 人/);
   assert.match(h.get('wecomCacheStatus').textContent, /姓名和 ID 映射保留/);
   assert.equal(h.requests.filter(request => request.method === 'DELETE').length, 0);
   assert.equal(h.requests.filter(request => request.path.endsWith('/cache/invalidate')).length, 1);
@@ -124,7 +125,7 @@ test('批量刷新运行中忽略重复提交，轮询结束后读取统计', as
   assert.match(h.get('wecomCacheStatus').textContent, /正在刷新 0 \/ 2/);
   await Array.from(h.timers.values()).find(timer => timer.ms === 1500).fn();
   assert.match(h.get('wecomCacheStatus').textContent, /成功 2，失败 0/);
-  assert.match(h.get('wecomApplicationCache').innerHTML, /0 人待更新/);
+  assert.match(h.get('wecomApplicationCache').innerHTML, /待更新 <b>0<\/b> 人/);
 });
 
 test('任务丢失时结果待确认，不推断刷新成功', async () => {
@@ -169,13 +170,14 @@ test('服务端返回 unknown 任务状态同样显示结果待确认', async ()
 });
 
 
-test('应用标题和边框操作位于单个配置卡外，关联渠道展示名称', async () => {
+test('应用标题和边框操作位于单个配置卡外，卡片只展示三个配置字段', async () => {
   const h = harness(); await select(h);
   const html = h.get('wecomApplicationDetail').innerHTML;
   assert.match(html, /wecom-detail-heading[\s\S]*成员应用[\s\S]*class="btn" data-wecom-action="edit"/);
   assert.equal((html.match(/class="wecom-info-card"/g) || []).length, 1);
   assert.doesNotMatch(html, /<h3>企业信息|<h3>应用信息/);
-  assert.match(html, /<li>测试机器人<\/li><li>业务助手<\/li>/);
+  assert.doesNotMatch(html, /wecom-linked-|关联渠道|测试机器人|业务助手/);
+  assert.match(html, /<dt>企业 ID<\/dt>[\s\S]*<dt>企微 Agent ID<\/dt>[\s\S]*<dt>App Secret<\/dt>/);
   assert.match(html, /class="field-help"[\s\S]*资料有效期为一周/);
 });
 
@@ -246,5 +248,21 @@ test('应用与缓存反馈分别紧跟自己的操作栏，缓存失败不占�
   assert.equal(h.get('wecomApplicationStatus').textContent, previous);
   const html = h.get('wecomApplicationDetail').innerHTML;
   assert.match(html, /<\/header>\s*<p id="wecomApplicationStatus"[\s\S]*<section class="wecom-info-card"/);
-  assert.match(html, /data-wecom-action="invalidate"[\s\S]*id="wecomCacheStatus"[\s\S]*id="wecomApplicationCache"/);
+  assert.match(html, /id="wecomApplicationCache"[\s\S]*data-wecom-action="invalidate"[\s\S]*id="wecomCacheStatus"[\s\S]*id="wecomMemberTable"/);
+});
+
+
+test('成员模块尚未加载时重置缓存，仍会恢复成员列表读取', async () => {
+  const h = harness();
+  let resolveModule;
+  const modulePromise = new Promise(resolve => { resolveModule = resolve; });
+  let requested = false, reads = 0;
+  h.context.window.loadWecomMemberTable = () => { requested = true; return modulePromise; };
+  const refresh = h.admin.refresh();
+  while (!requested) await new Promise(setImmediate);
+  const invalidate = h.admin.invalidate();
+  resolveModule({ createWecomMemberTable: () => ({ load: async () => { reads++; }, dispose() {} }) });
+  await Promise.all([refresh, invalidate]);
+  assert.equal(reads, 1);
+  assert.match(h.get('wecomCacheStatus').textContent, /已标记为过期/);
 });

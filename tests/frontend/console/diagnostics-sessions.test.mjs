@@ -1,3 +1,4 @@
+import { renderUserIdentity } from "../../../console/user-identity.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -54,7 +55,7 @@ function sessionHarness(request = async () => overview()) {
   };
   let selectCallback;
   const copied = [], toasts = [];
-  const context = vm.createContext({
+  const context = vm.createContext({ renderUserIdentity,
     URL, URLSearchParams, Date, Intl, AbortController, setTimeout, clearTimeout,
     document: { baseURI: "https://console.example/console/", addEventListener(name, handler) { documentListeners.set(name, handler); } },
     window: { location: { href: "https://console.example/console/" }, DeepAgentConsole: { toast: (...args) => toasts.push(args) } },
@@ -106,7 +107,7 @@ function centerHarness(initialHash = diagnosticHash("logs", { q: "original", lev
   const logs = { activated: [], saved: { scroll: 88, selectedId: "log-record" }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const sessions = { activated: [], saved: { scroll: 321, filters: { ...filters, offset: 50 } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const channels = { activated: [], saved: { filters: { period: "720", account_id: "account-a" } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
-  const context = vm.createContext({
+  const context = vm.createContext({ renderUserIdentity,
     location: { get hash() { return navigation.hash; } }, history: navigation.history,
     document: { getElementById: () => node(), querySelectorAll: () => [] },
     window: { addEventListener(name, callback) { handlers.set(name, callback); }, dispatchEvent() {}, DeepAgentConsole: { showPage(page, options) { navCalls.push({ page, options }); } } },
@@ -392,6 +393,41 @@ test("detail loads admin metadata/history/events only and passes exact event/run
   assert.equal(data.events[0].event_id, "event-question"); assert.equal(data.history.items[0].id, "question");
 });
 
+test("detail loading stays active through history read and the final render paint", async () => {
+  const historyGate = deferred(), beforePaint = deferred(), afterPaint = deferred();
+  const h = sessionHarness(path => path.includes("/history") ? historyGate.promise : Promise.resolve(session()));
+  h.activate("detail", {}); await settle();
+  const view = h.views[0]; let paints = 0;
+  view.prepareRender = () => ++paints === 1 ? beforePaint.promise : afterPaint.promise;
+  assert.deepEqual(view.loading, [true]);
+  historyGate.resolve({ items: [{ id: "long-history" }] }); await settle();
+  assert.equal(view.loads.at(-1).history, null, "render waits for loading transition to paint");
+  assert.equal(view.loading.at(-1), "正在整理会话内容…");
+  beforePaint.resolve(); await settle();
+  assert.equal(view.loads.at(-1).history.items[0].id, "long-history");
+  assert.notEqual(view.loading.at(-1), false, "content is still locked until its render is painted");
+  afterPaint.resolve(); await settle();
+  assert.equal(view.loading.at(-1), false);
+});
+
+test("leaving detail during the render transition ignores late content", async () => {
+  const historyGate = deferred(), paintGate = deferred();
+  const h = sessionHarness(path => path.includes("/history") ? historyGate.promise : Promise.resolve(session()));
+  h.activate("detail", {}); await settle();
+  const view = h.views[0]; view.prepareRender = () => paintGate.promise;
+  historyGate.resolve({ items: [{ id: "late-history" }] }); await settle();
+  h.controller.deactivate(); const count = view.loads.length;
+  paintGate.resolve(); await settle();
+  assert.equal(view.destroyed, true); assert.equal(view.loads.length, count);
+});
+
+test("detail metadata failure ends loading and surfaces an actionable error", async () => {
+  const h = sessionHarness(async () => { throw { status: 503 }; });
+  h.activate("detail", {}); await settle();
+  assert.equal(h.views[0].loading.at(-1), false);
+  assert.ok(h.views[0].errors.length);
+});
+
 test("readonly detail does not receive a new linked-log action", async () => {
   const h = sessionHarness(async path => path.includes("/history") ? { items: [] } : path.includes("/events") ? { items: [], next_after_sequence: null } : session());
   h.activate("detail", {}); await settle();
@@ -494,7 +530,8 @@ test("overview matches image workbench: separate metrics, question feed, usernam
   assert.match(h.root.innerHTML, /diagnostic-question-icon/);
   assert.match(h.root.innerHTML, /diagnostic-question-meta/);
   assert.equal((h.root.innerHTML.match(/data-stat=/g) || []).length, 4);
-  assert.match(h.root.innerHTML, /<h2>活跃用户<\/h2>/);
+  assert.match(h.root.innerHTML, /<h2>平台活跃用户<\/h2>/);
+  assert.match(h.root.innerHTML, /diagnostic-ranking-identity"><span class="diagnostic-identity-icon">/);
   assert.doesNotMatch(h.root.innerHTML, /diagnostic-avatar|owner@example.test|diagnostic-question-columns/);
   assert.doesNotMatch(h.root.innerHTML, /diagnostic-eyebrow|DIAGNOSTICS/);
   const chart = h.context.questionTrendHtml([{ date: "2026-09-01", question_count: 1 }]);
@@ -596,7 +633,7 @@ test("production session controller does not import live workspace state or writ
 
 test("diagnostic request uses same-origin API helper, no App, no cache and propagates permission loss", async () => {
   const calls = [], events = [];
-  const context = vm.createContext({ AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ renderUserIdentity,  AbortController, setTimeout, clearTimeout,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     window: { serviceUrl: path => `/prefix/${path}`, daFetch: async (path, options) => { calls.push({ path, options }); return { ok: false, status: 403, json: async () => ({ detail: "denied" }) }; }, dispatchEvent: event => events.push(event) },
   });
@@ -680,4 +717,57 @@ test("switching to custom time keeps the applied range until the popup is submit
   const query = new URL(h.requests.at(-1).path, "http://local").searchParams;
   assert.equal(query.get("start"), new Date("2026-09-02T08:00").toISOString());
   assert.equal(query.get("end"), new Date("2026-09-03T08:00").toISOString());
+});
+
+
+test("returning to a detail left during history loading resumes the unfinished read", async () => {
+  const staleHistory = deferred(); let reads = 0;
+  const h = sessionHarness(async path => path.includes("/history")
+    ? (++reads === 1 ? staleHistory.promise : { items: [{ id: "complete-history" }] }) : session());
+  h.activate("detail", {}); await settle();
+  const saved = h.controller.snapshot();
+  assert.equal(saved.detailData.history, null);
+  h.controller.deactivate();
+  h.activate("detail", {}, saved); await settle();
+  const view = h.views.at(-1);
+  assert.equal(reads, 2);
+  assert.equal(view.loads.at(-1).history.items[0].id, "complete-history");
+  assert.equal(view.loading.at(-1), false);
+  staleHistory.resolve({ items: [{ id: "stale-history" }] }); await settle();
+  assert.equal(view.loads.at(-1).history.items[0].id, "complete-history");
+});
+
+test("cached history resumes interrupted context reads but does not repeat completed reads", async () => {
+  const staleContext = deferred(); let contextReads = 0;
+  const h = sessionHarness(async path => path.includes("include_context")
+    ? (++contextReads === 1 ? staleContext.promise : { ...session(), context_status: { total_tokens: 77 } })
+    : path.includes("/history") ? { items: [{ id: "saved-history" }] } : session());
+  h.activate("detail", {}); await settle();
+  const saved = h.controller.snapshot(); h.controller.deactivate();
+  h.activate("detail", {}, saved); await settle();
+  assert.equal(contextReads, 2);
+  assert.equal(h.requests.filter(call => call.path.includes("/history")).length, 1);
+  assert.equal(h.views.at(-1).loads.at(-1).session.context_status.total_tokens, 77);
+  staleContext.resolve({ ...session(), title: "stale context" }); await settle();
+  assert.notEqual(h.views.at(-1).loads.at(-1).session.title, "stale context");
+  const complete = h.controller.snapshot(); h.controller.deactivate();
+  h.activate("detail", {}, complete); await settle();
+  assert.equal(contextReads, 2);
+  assert.equal(h.views.at(-1).loading.at(-1), false);
+});
+
+
+test("restoring a run-only conversation target resumes its interrupted event lookup", async () => {
+  const staleEvents = deferred(); let eventReads = 0;
+  const h = sessionHarness(async path => path.includes("/events")
+    ? (++eventReads === 1 ? staleEvents.promise : { items: [{ event_id: "target", run_id: "run-target" }], next_after_sequence: null })
+    : path.includes("/history") ? { items: [{ id: "saved-history" }] } : session());
+  h.activate("detail", { run_id: "run-target" }); await settle();
+  const saved = h.controller.snapshot(); h.controller.deactivate();
+  h.activate("detail", { run_id: "run-target" }, saved); await settle();
+  assert.equal(eventReads, 2);
+  assert.equal(h.views.at(-1).loads.at(-1).events[0].event_id, "target");
+  assert.equal(h.views.at(-1).loads.at(-1).focus.runId, "run-target");
+  staleEvents.resolve({ items: [], next_after_sequence: null }); await settle();
+  assert.equal(h.views.at(-1).loads.at(-1).events[0].event_id, "target");
 });

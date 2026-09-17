@@ -434,9 +434,12 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `chat_sessions` | 全局唯一会话、Agent/User归属、可空App/Space来源、标题与Sequence分配 |
 | `chat_session_events` | Message、Title、Compaction、Tool、Plan和Context的唯一有序事实源 |
 
-配置备份按源Alembic Revision自动发现并复制全部业务表，只把`chat_sessions`和
-`chat_session_events`两张会话事实表和`channel_session_bindings/channel_message_runs`两张Channel
-运行事实表留空；`channel_accounts`作为配置复制。新增配置表不得再依赖手工白名单。上传Skill原ZIP属于
+备份脚本的行数汇总与空表校验统一覆盖当前 Revision 实际存在的全部结构保留表（当前五张），
+日志单独列出 `Structure only (no data copied)`；旧 Revision 不报告尚未创建的缓存表。
+配置备份按源Alembic Revision生成结构，按统一表分类和逻辑依赖顺序复制配置。
+`chat_sessions/chat_session_events`两张会话事实表、`channel_session_bindings/channel_message_runs`
+两张Channel运行表及`wecom_user_profiles`缓存表只保留结构；`channel_accounts/wecom_applications`
+作为配置复制。新增表必须同步维护分类和配置依赖顺序。上传Skill原ZIP属于
 平台外部文件，不进入SQLite配置备份，完整留存需另外执行Skill“导出全部”。
 
 无会话新环境可通过企业管理员接口`POST /api/v1/configuration/import`做同Revision初始化：默认

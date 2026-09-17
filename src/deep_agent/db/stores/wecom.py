@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from deep_agent.db.models import ChannelAccount, WecomApplication, WecomUserProfile
@@ -38,6 +38,11 @@ async def validate_channel_wecom_settings(db, settings: dict | None) -> None:
     _, app_id = wecom_settings(settings)
     if app_id:
         await lock_reference(db, WecomApplication, WecomApplication.id, app_id, "企微应用")
+
+
+def _stale_profile(now: datetime):
+    p = WecomUserProfile
+    return or_(p.profile_synced_at.is_(None), p.expires_at.is_(None), p.expires_at <= now)
 
 
 class WecomStore(SessionBoundMixin):
@@ -124,8 +129,49 @@ class WecomStore(SessionBoundMixin):
         now = datetime.now(timezone.utc)
         async with self._read() as db:
             total, created, synced = (await db.execute(select(func.count(), func.min(p.created_at), func.min(p.profile_synced_at)).where(p.wecom_application_id == application_id))).one()
-            pending = await db.scalar(select(func.count()).select_from(p).where(p.wecom_application_id == application_id, or_(p.profile_synced_at.is_(None), p.expires_at.is_(None), p.expires_at <= now)))
+            pending = await db.scalar(select(func.count()).select_from(p).where(p.wecom_application_id == application_id, _stale_profile(now)))
             return dict(total=total, pending=pending, earliest_created_at=created, earliest_synced_at=synced)
+
+    async def list_cache_members(
+        self, application_id: str, *, q: str = "", status: str = "all",
+        synced: str = "all", sort: str = "desc", limit: int = 10, offset: int = 0,
+    ):
+        """Read a bounded page of known members without refreshing their profiles."""
+        p = WecomUserProfile
+        now = datetime.now(timezone.utc)
+        stale = _stale_profile(now)
+        predicates = [p.wecom_application_id == application_id]
+        if q.strip():
+            # Treat %, _ and the escape character as literal search text on all DBs.
+            pattern = "%" + q.strip().replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+            predicates.append(or_(*(column.ilike(pattern, escape="!") for column in (p.name, p.userid, p.open_userid))))
+        if status == "valid":
+            predicates.append(~stale)
+        elif status == "stale":
+            predicates.append(stale)
+        if synced == "day":
+            predicates.append(p.profile_synced_at >= now - timedelta(days=1))
+        elif synced == "week":
+            predicates.append(p.profile_synced_at >= now - timedelta(days=7))
+        elif synced == "older":
+            predicates.append(p.profile_synced_at < now - timedelta(days=7))
+        elif synced == "never":
+            predicates.append(p.profile_synced_at.is_(None))
+        columns = (
+            p.id, p.name, p.userid, p.open_userid, p.profile_synced_at, p.expires_at,
+            p.created_at, p.last_error_stage, p.last_error_code,
+            case((stale, "stale"), else_="valid").label("status"),
+        )
+        # CASE keeps null timestamps last on SQLite, PostgreSQL and MySQL alike.
+        order = (
+            case((p.profile_synced_at.is_(None), 1), else_=0),
+            p.profile_synced_at.asc() if sort == "asc" else p.profile_synced_at.desc(),
+            p.id.asc(),
+        )
+        async with self._read() as db:
+            total = await db.scalar(select(func.count()).select_from(p).where(*predicates))
+            rows = (await db.execute(select(*columns).where(*predicates).order_by(*order).limit(limit).offset(offset))).mappings().all()
+            return {"items": [dict(row) for row in rows], "total": total, "limit": limit, "offset": offset}
 
     async def invalidate_cache(self, application_id: str):
         async with self._write() as db:

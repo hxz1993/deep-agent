@@ -100,7 +100,7 @@ export function renderRunUsageOverview(run, usage, contextStatus) {
 export function renderSessionInspector({
   state = {}, activeSession = {}, model = null, context = {}, identity = {}, contextStatus = {},
   usage = {}, run = {}, runModel = null, agentName = "—", channelOrigin = null, agentChannels = [],
-  activeTab = "session", contextContent = "", statusText = "", statusClass = "idle", diagnostic = false,
+  activeTab = "session", contextContent = "", statusText = "", statusClass = "idle",
 } = {}) {
   const compaction = contextStatus.last_compaction || {};
   const strategyLabels = {
@@ -130,11 +130,11 @@ export function renderSessionInspector({
       ${inspectorFact("更新时间", contextStatus.compaction_updated_at || "—")}
     </div>
   </section>`;
-  const diagnosticCount = (value) => value == null ? "未记录" : String(value);
+  const savedCount = (value) => value == null ? "未记录" : String(value);
   const sessionCounts = `<span class="inspector-inline-metrics">
-    <span title="提问数"><i data-lucide="message-circle-more"></i>${escapeHtml(diagnostic ? diagnosticCount(activeSession.turnCount) : String(activeSession.turnCount || 0))}</span>
-    <span title="消息事件数"><i data-lucide="repeat-2"></i>${escapeHtml(diagnostic ? diagnosticCount(activeSession.messageCount) : String(activeSession.messageCount ?? contextStatus.raw_message_count ?? state.modelMessageCount ?? 0))}</span>
-    <span title="附件数"><i data-lucide="paperclip"></i>${escapeHtml(diagnostic ? diagnosticCount(activeSession.attachmentCount) : String(activeSession.attachmentCount || 0))}</span>
+    <span title="提问数"><i data-lucide="message-circle-more"></i>${escapeHtml(savedCount(activeSession.turnCount))}</span>
+    <span title="消息事件数"><i data-lucide="repeat-2"></i>${escapeHtml(savedCount(activeSession.messageCount))}</span>
+    <span title="附件数"><i data-lucide="paperclip"></i>${escapeHtml(savedCount(activeSession.attachmentCount))}</span>
   </span>`;
   const sessionScope = `<span class="inspector-scope-value"><code>${escapeHtml(activeSession.appId || "—")}</code><span>/</span><code>${escapeHtml(activeSession.spaceId || "—")}</code></span>`;
   const hasChannelTab = Boolean(channelOrigin || agentChannels.length);
@@ -155,14 +155,15 @@ export function renderSessionInspector({
     <div class="inspector-facts">
       ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true, copy: Boolean(state.sessionId), displayValue: state.sessionId?.slice(0, 8) })}
       ${inspectorFact("Agent", agentName, { wide: true })}
-      ${inspectorFact("模型", model?.name || model?.model || (diagnostic ? "未记录" : "—"))}
+      ${inspectorFact("模型", model?.name || model?.model || "未记录")}
       ${inspectorFactHtml("App / Space", sessionScope, { wide: true })}
       ${inspectorFactHtml("会话统计", sessionCounts)}
-      ${diagnostic ? inspectorFact("Language", context.language || "未记录") + `<div class="wide inspector-user-fact"><span>用户</span>${renderUserIdentity(identity?.profile || {}, {userId: identity?.user || "", copyable: true})}</div>` : ""}
+      ${inspectorFact("Language", context.language || "未记录")}
+      <div class="wide inspector-user-fact"><span>用户</span>${renderUserIdentity(identity?.profile || {}, {userId: identity?.user || "", copyable: true})}</div>
     </div>
   </section>
   <section class="inspector-section inspector-budget-section">
-    <header${diagnostic ? ` title="${escapeHtml(contextStatus.unavailable_reason || "按当前配置估算，非历史快照")}"` : ""}><strong>上下文预算</strong></header>
+    <header title="${escapeHtml(contextStatus.unavailable_reason || "按当前配置估算，非历史快照")}"><strong>上下文预算</strong></header>
     ${renderContextBudgetOverview(contextStatus)}
   </section>
   ${compactionContent}`;
@@ -174,13 +175,13 @@ export function renderSessionInspector({
       ${inspectorFact("请求", run.requests ?? usage.requests ?? "—")}
       ${inspectorFact("工具调用", run.tool_calls ?? usage.tool_calls ?? "—")}
       ${inspectorFact("Tool Search", run.tool_search_calls ?? "—")}
-      ${inspectorFact("缓存读取", formatTokens(run.cache_read_tokens ?? (diagnostic ? usage.cache_read_tokens : null)))}
-      ${inspectorFact("缓存写入", formatTokens(run.cache_write_tokens ?? (diagnostic ? usage.cache_write_tokens : null)))}
+      ${inspectorFact("缓存读取", formatTokens(run.cache_read_tokens ?? usage.cache_read_tokens))}
+      ${inspectorFact("缓存写入", formatTokens(run.cache_write_tokens ?? usage.cache_write_tokens))}
       ${inspectorFact("耗时", run.duration_ms != null && Number.isFinite(Number(run.duration_ms)) ? `${Number(run.duration_ms).toLocaleString("zh-CN")} ms` : "—")}
       ${inspectorFact("压缩", run.compaction || "—")}
-      ${inspectorFact("Conv. ID", (diagnostic ? run.conversation_id : state.conversationId || run.conversation_id) || "—", { mono: true, wide: true })}
+      ${inspectorFact("Conv. ID", run.conversation_id || "—", { mono: true, wide: true })}
       ${inspectorFact("Run ID", run.run_id || "—", { mono: true, wide: true, copy: Boolean(run.run_id) })}
-      ${inspectorFact("模型", runModel?.name || runModel?.model || (!diagnostic && (model?.name || model?.model)) || run.model_id || (diagnostic ? "未记录" : "—"), { wide: true })}
+      ${inspectorFact("模型", runModel?.name || runModel?.model || run.model_id || "未记录", { wide: true })}
     </div>
   </section>`;
 

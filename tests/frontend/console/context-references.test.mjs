@@ -29,10 +29,10 @@ test("上下文引用使用线性信息图标切换到右栏上下文页签", ()
   assert.match(chatSource, /refreshLucideIcons\(\)/);
   assert.match(chatSource, /onContextReference\(ref, branchPoint\)/);
   assert.match(workspaceSource, /function toggleContextReferenceInspector/);
-  assert.match(workspaceSource, /JSON\.stringify\(reference, null, 2\)/);
+  assert.match(workspaceSource, /renderContextReferenceContent\(selectedContextReference\?\.reference\)/);
   assert.match(workspaceSource, /inspectorActiveTab = "context";[\s\S]*openInspectorPane\(\)[\s\S]*renderInspector\(\)/);
   assert.match(workspaceSource, /data-inspector-tab="context"/);
-  assert.match(workspaceSource, /尚未选择上下文引用/);
+
   assert.doesNotMatch(workspaceSource, /contextReferenceDialog/);
 });
 

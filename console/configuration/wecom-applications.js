@@ -1,13 +1,14 @@
-/* WeCom application configuration is shared by channels; member rows stay backend-only. */
+/* WeCom application configuration; member-table code and reads are lazy. */
 (() => {
   const el = id => document.getElementById(id);
   const path = id => `/api/v1/wecom-applications${id ? `/${encodeURIComponent(id)}` : ''}`;
-  const state = { items: [], selectedId: null, editingId: null, cache: null, active: false, busy: false, jobs: new Map(), cacheMessages: new Map(), generation: 0 };
+  const state = { items: [], selectedId: null, editingId: null, cache: null, active: false, busy: false, jobs: new Map(), cacheMessages: new Map(), generation: 0, members: null };
   const requestControllers = new Set();
   let pollTimer = null;
   let cacheConfirmation = null;
-  function stopReads() {
+  function stopReads({ members = true } = {}) {
     closeCacheConfirmation();
+    if (members) { state.members?.dispose(); state.members = null; }
     state.generation++;
     clearTimeout(pollTimer);
     requestControllers.forEach(controller => controller.abort());
@@ -38,7 +39,7 @@
   function setBusy(value) {
     state.busy = value;
     el('wecomApplicationForm')?.querySelectorAll('input, button').forEach(node => { node.disabled = value; });
-    el('wecomApplicationDetail')?.querySelectorAll('button').forEach(node => { node.disabled = value; });
+    el('wecomApplicationDetail')?.querySelectorAll('[data-wecom-action]').forEach(node => { node.disabled = value; });
     if (!value) renderJob();
   }
   function renderSecretHint() {
@@ -62,14 +63,12 @@
     closeCacheConfirmation();
     const item = current();
     if (!item) { el('wecomApplicationDetail').innerHTML = '<p class="provider-detail-empty">选择一个企微应用查看详情</p>'; return; }
-    const channels = Array.isArray(item.channels) ? item.channels : [];
-    const linked = channels.length ? `<ul class="wecom-linked-channels">${channels.map(channel => `<li>${escapeHtml(channel.name)}</li>`).join('')}</ul>` : '<span class="wecom-placeholder">未关联</span>';
     el('wecomApplicationDetail').innerHTML = `<div class="wecom-detail-content">
-      <header class="wecom-detail-heading"><h3>${escapeHtml(item.name)}</h3><div class="wecom-detail-actions"><button type="button" class="btn" data-wecom-action="edit"><i data-lucide="pencil"></i>编辑</button><button type="button" class="btn" data-wecom-action="test"><i data-lucide="plug-zap"></i>测试连接</button><button type="button" class="btn danger" data-wecom-action="delete"><i data-lucide="trash-2"></i>删除</button></div></header>
+      <header class="wecom-detail-heading"><h3><img src="./assets/channel-logos/wecom.png" width="22" height="22" alt="企业微信" /><span>${escapeHtml(item.name)}</span></h3><div class="wecom-detail-actions"><button type="button" class="btn" data-wecom-action="edit"><i data-lucide="pencil"></i>编辑</button><button type="button" class="btn" data-wecom-action="test"><i data-lucide="plug-zap"></i>测试连接</button><button type="button" class="btn danger" data-wecom-action="delete"><i data-lucide="trash-2"></i>删除</button></div></header>
       <p id="wecomApplicationStatus" class="wecom-inline-status" role="status"></p>
-      <section class="wecom-info-card" aria-label="应用配置"><dl class="wecom-detail-fields"><div><dt>企业 ID</dt><dd>${escapeHtml(item.corp_id)}</dd></div><div><dt>企微 Agent ID</dt><dd>${escapeHtml(item.wecom_agent_id)}</dd></div><div><dt>App Secret</dt><dd>${escapeHtml(item.app_secret_masked || '未配置')}</dd></div><div><dt>关联渠道</dt><dd>${linked}</dd></div></dl></section>
-      <section class="wecom-cache-region" aria-label="成员缓存"><div class="wecom-card-heading"><span class="field-label-row"><h3>成员缓存</h3><span class="field-help" tabindex="0" aria-label="成员缓存说明" aria-describedby="wecomCacheHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="wecomCacheHelp" role="tooltip">仅缓存已遇到的用户，姓名资料有效期为一周；过期后在收到消息时按需刷新。</span></span></span><div class="wecom-detail-actions"><button type="button" class="btn" data-wecom-action="invalidate" aria-haspopup="dialog" aria-expanded="false"><i data-lucide="rotate-ccw"></i>重置缓存</button></div></div>
-        <p id="wecomCacheStatus" class="wecom-inline-status" role="status"></p><dl class="wecom-detail-fields" id="wecomApplicationCache"><div><dt>已缓存用户</dt><dd class="wecom-placeholder">正在读取…</dd></div></dl>
+      <section class="wecom-info-card" aria-label="应用配置"><dl class="wecom-detail-fields"><div><dt>企业 ID</dt><dd>${escapeHtml(item.corp_id)}</dd></div><div><dt>企微 Agent ID</dt><dd>${escapeHtml(item.wecom_agent_id)}</dd></div><div><dt>App Secret</dt><dd>${escapeHtml(item.app_secret_masked || '未配置')}</dd></div></dl></section>
+      <section class="wecom-cache-region" aria-label="成员缓存"><div class="wecom-card-heading"><span class="field-label-row"><h3>成员缓存</h3><span class="field-help" tabindex="0" aria-label="成员缓存说明" aria-describedby="wecomCacheHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="wecomCacheHelp" role="tooltip">仅缓存已遇到的用户，姓名资料有效期为一周；过期后在收到消息时按需刷新。</span></span></span><div class="wecom-cache-summary" id="wecomApplicationCache">正在读取…</div><div class="wecom-detail-actions"><button type="button" class="btn" data-wecom-action="invalidate" aria-haspopup="dialog" aria-expanded="false"><i data-lucide="rotate-ccw"></i>重置缓存</button></div></div>
+        <p id="wecomCacheStatus" class="wecom-inline-status" role="status"></p><div id="wecomMemberTable"></div>
       </section>
     </div>`;
     el('wecomApplicationDetail').querySelectorAll('[data-wecom-action]').forEach(button => button.addEventListener('click', () => {
@@ -126,8 +125,7 @@
     const target = el('wecomApplicationCache');
     if (!target || !state.cache) return;
     const value = state.cache;
-    const time = date => date ? escapeHtml(formatDate(date)) : '<span class="wecom-placeholder">—</span>';
-    target.innerHTML = `<div><dt>已缓存用户</dt><dd>${Number(value.total) || 0} 人 <span class="wecom-placeholder">（${Number(value.pending) || 0} 人待更新）</span></dd></div><div><dt>最早创建</dt><dd>${time(value.earliest_created_at)}</dd></div><div><dt>最早更新</dt><dd>${time(value.earliest_synced_at)}</dd></div>`;
+    target.innerHTML = `<span>已缓存 <b>${Number(value.total) || 0}</b> 人</span><span>待更新 <b>${Number(value.pending) || 0}</b> 人</span>`;
   }
   function running(job) { return !!job && ['queued', 'pending', 'running'].includes(job.status); }
   function cacheStatus(message, error = false) {
@@ -152,6 +150,21 @@
     } catch (error) {
       if (state.generation === generation && state.selectedId === id) cacheStatus(`缓存统计读取失败：${error.message}`, true);
       return false;
+    }
+  }
+  async function loadMembers(id, generation) {
+    try {
+      const { createWecomMemberTable } = await window.loadWecomMemberTable();
+      if (!state.active || state.selectedId !== id || state.generation !== generation) return;
+      state.members?.dispose();
+      state.members = createWecomMemberTable({ host: el('wecomMemberTable'), applicationId: id, request: apiFetch, escapeHtml, formatDate });
+      await state.members.load();
+    } catch (error) {
+      if (state.active && state.selectedId === id && state.generation === generation) {
+        const host = el('wecomMemberTable');
+        host.innerHTML = `<p class="wecom-inline-status error">成员列表加载失败：${escapeHtml(error.message)}</p><button type="button" class="btn" data-members-retry>重试</button>`;
+        host.querySelector('[data-members-retry]')?.addEventListener('click', () => void loadMembers(id, generation));
+      }
     }
   }
   function schedulePoll(id) {
@@ -206,7 +219,7 @@
         if (generation !== state.generation || state.selectedId !== id) return;
         state.items = state.items.map(old => old.id === id ? item : old);
         renderList(); renderDetail();
-        await loadCache(id, generation);
+        await Promise.all([loadCache(id, generation), loadMembers(id, generation)]);
         if (generation === state.generation) schedulePoll(id);
       } catch (error) { if (generation === state.generation) status(error.message, true); }
     },
@@ -308,13 +321,15 @@
     async invalidate() {
       if (state.busy || !current() || running(state.jobs.get(state.selectedId))) return;
       const id = state.selectedId;
-      stopReads();
+      stopReads({ members: false });
       state.jobs.delete(id);
       setBusy(true); cacheStatus('正在重置缓存…');
       try {
         await mutate(`${path(id)}/cache/invalidate`, 'POST');
         state.jobs.delete(id); renderJob();
         if (await loadCache(id, state.generation)) cacheStatus('成员资料已标记为过期，姓名和 ID 映射保留。');
+        if (state.members) await state.members.load();
+        else await loadMembers(id, state.generation);
       } catch (error) { cacheStatus(error.message, true); }
       finally { setBusy(false); }
     },

@@ -31,7 +31,8 @@ from maintenance.config_backup import (
     BACKUP_SCOPE_SCHEMA_VERSION,
     CONFIG_TABLES,
     SESSION_TABLES,
-    CACHE_TABLES,
+    STRUCTURE_ONLY_TABLES,
+    _validate_backup,
     _backup_scope_manifest,
     _validate_table_classification,
     database_url_from_config,
@@ -335,11 +336,37 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             repository_root().parent,
         )
 
-    def test_only_session_tables_are_excluded_from_configuration_copy(self) -> None:
+    async def test_cache_is_reported_empty_and_rejected_if_backup_is_contaminated(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_cache_") as tmpdir:
+            source = Path(tmpdir) / "source.db"
+            await self._create_source(source)
+            profile_sql = "INSERT INTO wecom_user_profiles (id,wecom_application_id,userid,userid_key,name) VALUES ('profile','app','user','user','fixture')"
+            with sqlite3.connect(source) as db:
+                db.execute("INSERT INTO wecom_applications (id,name,corp_id,wecom_agent_id,app_secret,settings,revision) VALUES ('app','fixture','corp','100','fixture-secret','{}',1)")
+                db.execute(profile_sql)
+            result = await export_backup(self._url(source), environment="fixture",
+                                         output_root=Path(tmpdir) / "backups", git_commit="test")
+            for name in STRUCTURE_ONLY_TABLES:
+                self.assertEqual(result.row_counts[name], 0)
+            with sqlite3.connect(source) as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM wecom_user_profiles").fetchone(), (1,))
+            with sqlite3.connect(result.path) as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM wecom_user_profiles").fetchone(), (0,))
+                db.execute(profile_sql)
+            engine = create_async_engine(self._url(result.path))
+            try:
+                with self.assertRaisesRegex(ValueError, "Structure-only table must be empty: wecom_user_profiles"):
+                    await _validate_backup(engine, revision=result.revision,
+                                           expected_counts={name: result.row_counts[name] for name in CONFIG_TABLES},
+                                           copied_tables=CONFIG_TABLES)
+            finally:
+                await engine.dispose()
+
+    def test_session_and_cache_tables_are_excluded_from_configuration_copy(self) -> None:
         _validate_table_classification()
         self.assertEqual(
             set(CONFIG_TABLES),
-            set(Base.metadata.tables) - set(SESSION_TABLES) - set(CACHE_TABLES),
+            set(Base.metadata.tables) - set(STRUCTURE_ONLY_TABLES),
         )
 
     def test_reads_sqlite_database_from_external_config(self) -> None:

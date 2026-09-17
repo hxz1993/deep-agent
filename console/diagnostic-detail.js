@@ -1,10 +1,12 @@
+import { sessionLoadingHtml, prepareSessionRender, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
+import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20260918-release01012";
 import { createConversationPresenter } from "./conversation-presenter.js?v=20260912-21";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20260912-21";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260912-21";
-import { buildTrajectory, createTrajectoryController, redactTrajectoryValue } from "./trajectory.js?v=20260915-scroll-focus";
+import { createTrajectoryController } from "./trajectory.js?v=20260915-scroll-focus";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20260917-release01010";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260915-session-icons";
+import { renderSessionInspector } from "./session-inspector.js?v=20260918-release01012";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260918-release01012";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { bindAttachmentImagePreviews } from "./attachment-preview.js?v=20260912-21";
@@ -12,7 +14,6 @@ import { createReadonlySessionShell } from "./session-view-shell.js?v=20260912-2
 
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const icon = (name) => `<i data-lucide="${name}" aria-hidden="true"></i>`;
-const statusLabels = { running: "进行中", pending: "待操作", waiting: "待操作", awaiting_input: "待操作", completed: "已完成", stopped: "已停止", interrupted: "已停止", error: "异常", failed: "异常", unknown: "未确认", unconfirmed: "未确认", not_started: "未开始", empty: "未开始" };
 
 /** Locate a saved Conversation item, never guess from visible text or truncated IDs. */
 export function findConversationFocus(items = [], events = [], { eventId, runId } = {}) {
@@ -23,44 +24,6 @@ export function findConversationFocus(items = [], events = [], { eventId, runId 
   return ordered.find((item) => item.source_event_ids?.some((id) => ids.has(id))) || null;
 }
 
-/** Shared trajectory grouping contains complete message usage, not one count per part. */
-export function savedRunFacts(events = [], runId = null) {
-  const messages = buildTrajectory({ items: events }).filter((item) => item.kind === "assistant" && (!runId || item.run_id === runId));
-  const usage = {};
-  for (const item of messages) {
-    for (const key of ["input_tokens", "output_tokens", "total_tokens", "cache_read_tokens", "cache_write_tokens"]) {
-      const value = item.native?.usage?.[key];
-      if (value != null && Number.isFinite(Number(value))) usage[key] = (usage[key] || 0) + Number(value);
-    }
-  }
-  if (usage.total_tokens == null && (usage.input_tokens != null || usage.output_tokens != null)) {
-    usage.total_tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0);
-  }
-  const latest = messages.at(-1)?.native || {};
-  return { usage, model_name: latest.model_name || null, model_id: latest.model_id || null, finish_reason: latest.finish_reason || null };
-}
-
-/** Metadata is authoritative and available before the lazy trace has loaded. */
-export function diagnosticRunPresentation(session = {}, events = [], selectedRunId = null) {
-  const runId = selectedRunId || session.run_id || session.runs?.at(-1)?.run_id;
-  const storedRun = session.runs?.find((item) => item.run_id === runId) || {};
-  const facts = events.length ? savedRunFacts(events, runId) : {};
-  return {
-    run: { ...facts, ...storedRun, run_id: runId, status: storedRun.status || session.latest_status },
-    usage: storedRun.usage || facts.usage || {},
-    model: session.model_name ? { name: session.model_name } : null,
-    // The last model of the whole session need not be the model of this run.
-    runModel: storedRun.model_name || facts.model_name ? { name: storedRun.model_name || facts.model_name } : null,
-  };
-}
-
-function contextReferenceContent(reference) {
-  if (!reference) return `<div class="inspector-tab-empty">${icon("braces")}<strong>尚未选择上下文引用</strong><span>点击对话中引用旁的信息图标查看已保存内容。</span></div>`;
-  const safe = redactTrajectoryValue(reference);
-  const json = globalThis.DeepAgentJson?.renderBlock(safe, { className: "inspector-json", ariaLabel: "上下文引用 JSON" })
-    || `<pre class="inspector-json">${escapeHtml(JSON.stringify(safe, null, 2))}</pre>`;
-  return `<section class="inspector-section context-reference-inspector"><header><strong>${escapeHtml(reference.label || reference.type || "上下文引用")}</strong></header>${json}</section>`;
-}
 
 /**
  * No request, execution controller, widget or observer is initialized here.
@@ -76,7 +39,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   <div class="diagnostic-detail-grid">
     <div class="workspace-resizer workspace-resizer-inspector diagnostic-detail-resizer" role="separator" aria-label="调整会话详情宽度" aria-orientation="vertical" aria-valuemin="260" aria-valuemax="720" aria-valuenow="320" tabindex="0"></div>
     <aside class="inspector-pane" data-session-role="inspectorPane"><div class="inspector-content" data-session-role="inspectorContent"></div></aside>
-    <div class="diagnostic-detail-loading hidden" data-detail-loading role="status" aria-live="polite"><span class="loading-spinner" aria-hidden="true"></span><strong data-detail-loading-label>正在加载会话…</strong><span>内容较多时需要稍候，加载完成后即可操作。</span></div>
+    ${sessionLoadingHtml()}
   </div>
   <dialog class="attachment-image-dialog" data-detail-image-dialog><header class="attachment-image-dialog-header"><strong data-detail-image-title></strong><button type="button" class="icon-btn" data-detail-image-close aria-label="关闭图片预览">${icon("x")}</button></header><div class="attachment-image-dialog-content"><img data-detail-image alt="附件预览" referrerpolicy="no-referrer"><p class="hidden" data-detail-image-error>图片无法加载，可能无权限或链接已失效。</p></div><footer><a data-detail-image-open target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">打开原图</a></footer></dialog>`;
   root.prepend(header);
@@ -116,13 +79,12 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   function renderInspector() {
     if (disposed || currentView === "trajectory") return;
     const session = data.session;
-    const { run, usage, model, runModel } = diagnosticRunPresentation(session, data.events, selectedRunId);
+    const { run, usage, model, runModel } = savedRunPresentation(session, data.events, selectedRunId);
     const contextStatus = { ...(session.context_status || {}) };
     if (session.context_error) contextStatus.unavailable_reason = typeof session.context_error === "string" ? session.context_error : session.context_error.message || "当前配置无法估算";
     const status = session.latest_status?.status || session.latest_status || "unknown";
     const userId = session.user_id;
     role("inspectorContent").innerHTML = renderSessionInspector({
-      diagnostic: true,
       state: { sessionId: session.session_id, agentId: session.agent_id, conversationId: session.conversation_id, modelMessageCount: data.history.items?.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length },
       activeSession: { appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
       model, runModel,
@@ -305,13 +267,8 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     if (section === "events") { const host = find("[data-detail-events-notice]"); host.textContent = String(message); host.classList.remove("hidden"); return; }
     pageLoading = message !== false;
     if (pageLoading && !state.sessionId) role("chatTitle").textContent = "加载会话…";
-    root.toggleAttribute("aria-busy", pageLoading);
-    if (pageLoading) root.setAttribute("aria-busy", "true");
-    find("[data-detail-loading]").classList.toggle("hidden", !pageLoading);
-    find("[data-detail-loading-label]").textContent = message === true ? "正在加载会话…" : String(message || "");
-    for (const element of find(".diagnostic-detail-grid").children) {
-      if (!element.hasAttribute("data-detail-loading")) element.inert = pageLoading;
-    }
+    const targets = [...find(".diagnostic-detail-grid").children].filter(element => !element.hasAttribute("data-detail-loading"));
+    setSessionLoading(root, targets, message);
     for (const button of header.querySelectorAll("button:not([data-detail-back])")) {
       if (pageLoading && !disabledBeforeLoading.has(button)) disabledBeforeLoading.set(button, button.disabled);
       button.disabled = pageLoading || Boolean(disabledBeforeLoading.get(button));
@@ -335,17 +292,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     else showNotice(message);
   }
 
-  // Allow the transition to paint before synchronous Markdown/trajectory work.
-  // The timeout also releases background tabs where animation frames are paused.
-  function prepareRender() {
-    return new Promise(resolve => {
-      if (disposed || !globalThis.requestAnimationFrame) { resolve(); return; }
-      let frame;
-      const done = () => { clearTimeout(timer); globalThis.cancelAnimationFrame?.(frame); resolve(); };
-      const timer = setTimeout(done, 150);
-      frame = globalThis.requestAnimationFrame(() => { frame = globalThis.requestAnimationFrame(done); });
-    });
-  }
+  const prepareRender = prepareSessionRender;
 
   listen(root, "click", (event) => {
     if (pageLoading && !event.target.closest("[data-detail-back]")) {

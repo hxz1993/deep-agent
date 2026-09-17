@@ -50,13 +50,9 @@ API 进程统一持有企微 HTTP 客户端、Token 缓存和刷新任务，Gate
 
 ### 应用级操作
 
-右侧只展示三项统计，不开放成员明细表：
+右侧展示已缓存人数与待更新人数，以及分页成员表：姓名、企微 User ID、Open User ID、缓存状态、首次缓存、最近同步、有效期至和最近错误。时间以 `MM-DD HH:mm` 短格式展示，悬停查看完整时间；没有操作列或详情弹框。
 
-| 统计 | 含义 |
-| --- | --- |
-| 已缓存用户 | 成员记录总数及待更新人数；未成功取得姓名的用户也计入待更新 |
-| 最早创建 | 最早一条成员映射的创建时间 |
-| 最早更新 | 各成员最近一次成功取得资料时间中的最早值；无成功资料显示“—” |
+支持按姓名 / User ID / Open User ID 搜索，按缓存状态和最近同步时间筛选，按最近同步排序。待更新表示尚未同步、缺少有效期或已过期，不代表成员已删除。列表仅读取现有缓存，不查询企微；进入企微应用页才加载模块和数据，切换应用或离页取消未完成读取。
 
 Console 仅提供“重置缓存”，不再提供主动批量刷新入口；资料在收到消息时按需刷新。已有后台刷新 API 保留兼容，但页面不会发起该任务。
 
@@ -105,6 +101,7 @@ Console 仅提供“重置缓存”，不再提供主动批量刷新入口；资
 | `GET /wecom-applications/{id}/cache` | 返回 `total/pending/earliest_created_at/earliest_synced_at` |
 | `POST /wecom-applications/{id}/cache/refresh` | 返回 202 和任务状态 |
 | `GET /wecom-applications/{id}/cache/refresh/{task_id}` | 查询任务；不存在时 404，结果待确认 |
+| `GET /wecom-applications/{id}/cache/members` | 管理员只读分页；`q/status/synced/sort/limit/offset`；返回 `items/total/limit/offset` |
 | `POST /wecom-applications/{id}/cache/invalidate` | 标记资料过期，返回最新统计 |
 
 应用更新时，显式 `clear_app_secret:true` 清空已有凭据；不能与非空 `app_secret` 同时提交。省略、空字符串或原掩码仍保留凭据。凭据为空时，测试连接明确提示未配置，不发起企微请求。

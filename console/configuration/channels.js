@@ -11,6 +11,58 @@ const channelAdminState = {
   clearApiKey: false,
 };
 
+const channelUserQuery = { generation: 0, controller: null };
+
+function clearChannelUserQuery() {
+  channelUserQuery.generation++;
+  channelUserQuery.controller?.abort();
+  channelUserQuery.controller = null;
+  const result = document.getElementById("channelSessionUserResult");
+  if (result) { result.hidden = true; result.innerHTML = ""; }
+  document.getElementById("queryChannelSessionUserBtn")?.setAttribute("aria-expanded", "false");
+}
+
+function showChannelUserQuery(state, content) {
+  const result = document.getElementById("channelSessionUserResult");
+  if (!result) return;
+  result.dataset.state = state;
+  result.innerHTML = content;
+  result.hidden = false;
+  document.getElementById("queryChannelSessionUserBtn")?.setAttribute("aria-expanded", "true");
+}
+
+async function queryChannelSessionUser() {
+  clearChannelUserQuery();
+  const input = document.getElementById("channelSessionUserId");
+  const userId = input.value.trim();
+  if (!userId) { showChannelUserQuery("error", "请先输入平台 User ID"); input.focus(); return; }
+  const generation = channelUserQuery.generation;
+  const controller = new AbortController();
+  channelUserQuery.controller = controller;
+  showChannelUserQuery("loading", "正在查询用户…");
+  const stillCurrent = () => generation === channelUserQuery.generation
+    && input.value.trim() === userId && document.getElementById("channelAccountModal")?.open;
+  try {
+    const data = await apiFetch(`/api/v1/diagnostics/sessions/user-profile?user_id=${encodeURIComponent(userId)}`, { signal: controller.signal });
+    if (!stillCurrent()) return;
+    const user = data?.user;
+    if (!user || user.user_id !== userId || user.resolution === "unavailable") {
+      showChannelUserQuery("error", "查询暂不可用，请稍后重试");
+    } else if (user.resolution !== "resolved") {
+      showChannelUserQuery("missing", "查不到这个用户<small>请核对 User ID 与当前环境。</small>");
+    } else {
+      showChannelUserQuery("resolved", `<strong>${escapeHtml(user.username || userId)}</strong>${escapeHtml(user.email || "未设置邮箱")}<small>已查到用户。</small>`);
+    }
+  } catch (error) {
+    if (!stillCurrent() || error.name === "AbortError") return;
+    const message = error.status === 401 ? "登录已失效，请重新登录" : error.status === 403
+      ? "无权查询用户资料" : "查询暂不可用，请稍后重试";
+    showChannelUserQuery("error", message);
+  } finally {
+    if (generation === channelUserQuery.generation) channelUserQuery.controller = null;
+  }
+}
+
 const CHANNEL_STATE_LABELS = {
   not_deployed: "未部署",
   unreachable: "运行时不可达",
@@ -271,6 +323,7 @@ const channelsAdmin = {
   },
 
   openCreate() {
+    clearChannelUserQuery();
     channelAdminState.editingId = null;
     document.getElementById("channelAccountModalTitle").textContent = "新建企微渠道";
     document.getElementById("channelName").value = "";
@@ -286,6 +339,7 @@ const channelsAdmin = {
   openEdit(accountId) {
     const account = channelAdminState.accounts.find((item) => item.id === accountId);
     if (!account) return;
+    clearChannelUserQuery();
     channelAdminState.editingId = accountId;
     document.getElementById("channelAccountModalTitle").textContent = account.name;
     document.getElementById("channelName").value = account.name;
@@ -452,6 +506,16 @@ function bindChannelCreateMenu() {
 window.channelsAdmin = channelsAdmin;
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("queryChannelSessionUserBtn")?.addEventListener("click", queryChannelSessionUser);
+  document.getElementById("channelSessionUserId")?.addEventListener("input", clearChannelUserQuery);
+  document.addEventListener("click", event => {
+    if (!event.target.closest(".channel-user-query")) clearChannelUserQuery();
+  });
+  document.getElementById("channelAccountModal")?.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !document.getElementById("channelSessionUserResult").hidden) {
+      event.preventDefault(); event.stopPropagation(); clearChannelUserQuery();
+    }
+  });
   bindChannelCreateMenu();
   const extensionTabs = Array.from(document.querySelectorAll("[data-channel-extension]"));
   extensionTabs.forEach((button, index) => {
@@ -526,6 +590,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("cancelChannelAccountBtn")?.addEventListener("click", closeAccount);
   document.getElementById("channelAccountModal")?.addEventListener("cancel", event => { event.preventDefault(); closeAccount(); });
   document.getElementById("channelAccountModal")?.addEventListener("close", () => {
+    clearChannelUserQuery();
     channelAdminState.applicationLoadGeneration++;
     document.getElementById("channelSecret").value = "";
     channelAdminState.apiKeyDraft = "";

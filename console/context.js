@@ -1,3 +1,4 @@
+import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 const api = window.DeepAgentConsoleAPI;
 
 let inheritedContext = { app: null, space: null, language: null };
@@ -85,7 +86,11 @@ function renderContext() {
   }
 
   const currentUser = identity?.username || identity?.user || "未认证";
-  document.getElementById("currentUserFull").textContent = currentUser;
+  const profileHost = document.getElementById("currentUserProfile");
+  if (profileHost) {
+    profileHost.innerHTML = renderUserIdentity(identity?.profile || {}, {userId:identity?.user || "", userIcon:true});
+    window.lucide?.createIcons({root:profileHost});
+  }
   const sidebarUser = document.getElementById("consoleUserName");
   if (sidebarUser) sidebarUser.textContent = currentUser;
   const currentUserButton = document.getElementById("currentUserBtn");
@@ -108,7 +113,7 @@ export async function refreshIdentity() {
       api.currentUser().catch(() => null),
     ]);
     const username = profile?.user_id === inherited.user ? valueOrNull(profile.username) : null;
-    identity = { ...inherited, username };
+    identity = { ...inherited, username, profile: profile?.user_id === inherited.user ? profile : {resolution:"unavailable"} };
     inheritedContext = {
       app: inherited.app || null,
       space: inherited.space || null,
@@ -161,6 +166,9 @@ function closeUserPopover() {
   const button = document.getElementById("currentUserBtn");
   button?.classList.remove("popover-open");
   button?.setAttribute("aria-expanded", "false");
+  const popover = document.getElementById("currentUserPopover");
+  if (popover?.contains?.(document.activeElement)) button?.focus?.();
+  if (popover) popover.hidden = true;
 }
 
 function toggleUserPopover() {
@@ -169,6 +177,8 @@ function toggleUserPopover() {
   const open = !button.classList.contains("popover-open");
   button.classList.toggle("popover-open", open);
   button.setAttribute("aria-expanded", String(open));
+  const popover = document.getElementById("currentUserPopover");
+  if (popover) popover.hidden = !open;
 }
 
 function currentFormContext() {
@@ -231,7 +241,7 @@ export function bindContextControls() {
       else closeContextPopover();
       return;
     }
-    if (!target?.closest("#currentUserBtn")) closeUserPopover();
+    if (!target?.closest(".user-account-host")) closeUserPopover();
   });
   document.addEventListener("pointerdown", (event) => {
     const target = event.target instanceof Element ? event.target : null;

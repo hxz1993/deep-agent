@@ -1,7 +1,7 @@
 /* Body, header, actions, trajectory and inspector share workspace styles.
    Only the independent two-column host and diagnostic notices live here. */
 .diagnostic-session-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; color: var(--text); background: var(--console-surface); }
-.diagnostic-detail-grid { --diagnostic-inspector-width: 320px; display: grid; grid-template-columns: minmax(0, 1fr) var(--console-resizer-width) minmax(260px, var(--diagnostic-inspector-width)); flex: 1; min-height: 0; min-width: 0; }
+.diagnostic-detail-grid { position:relative; --diagnostic-inspector-width: 320px; display: grid; grid-template-columns: minmax(0, 1fr) var(--console-resizer-width) minmax(260px, var(--diagnostic-inspector-width)); flex: 1; min-height: 0; min-width: 0; }
 .diagnostic-detail-grid > .chat { height: 100%; min-height: 0; overflow: hidden; background: var(--console-surface); }
 .diagnostic-detail-grid .messages { min-height: 0; }
 .diagnostic-detail-grid .inspector-pane { min-height: 0; min-width: 0; padding-top: 0; }
@@ -22,3 +22,8 @@
 @media (max-width: 620px) {
   .diagnostic-detail-grid { grid-template-columns: minmax(180px, 1fr) var(--console-resizer-width) 200px; }
 }
+
+.diagnostic-detail-loading { position:absolute; inset:0; z-index:10; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; background:var(--console-surface); color:var(--text); }
+.diagnostic-detail-loading > span:last-child { color:var(--text-dim); font-size:12px; }
+.diagnostic-detail-loading.hidden { display:none; }
+.diagnostic-detail-loading .loading-spinner { width:24px; height:24px; }

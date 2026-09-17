@@ -58,6 +58,8 @@ class DiagnosticUserProfile(TypedDict):
     id: str
     user_id: str
     display_name: str
+    username: str | None
+    nickname: str | None
     email: str | None
     avatar_url: str | None
     resolution: str
@@ -107,7 +109,7 @@ def safe_avatar_url(value: object) -> str | None:
 def _fallback(user_id: str, resolution: str = "unavailable") -> DiagnosticUserProfile:
     return {
         "id": user_id, "user_id": user_id, "display_name": user_id,
-        "email": None, "avatar_url": None, "resolution": resolution,
+        "username": None, "nickname": None, "email": None, "avatar_url": None, "resolution": resolution,
     }
 
 
@@ -133,12 +135,12 @@ def _normalize_profiles(
         user_id = str(raw_id) if isinstance(raw_id, int) and not isinstance(raw_id, bool) else _text(raw_id)
         if user_id not in allowed:
             continue
-        display_name = (
-            _text(item.get("userName")) or _text(item.get("username"))
-            or _text(item.get("nickName")) or _text(item.get("nickname")) or user_id
-        )
+        username = _text(item.get("userName")) or _text(item.get("username"))
+        nickname = _text(item.get("nickName")) or _text(item.get("nickname"))
+        display_name = username or nickname or user_id
         result[user_id] = {
             "id": user_id, "user_id": user_id, "display_name": display_name,
+            "username": username or None, "nickname": nickname or None,
             "email": _text(item.get("email"), 320) or None,
             "avatar_url": safe_avatar_url(item.get("avatar")),
             "resolution": "resolved",
@@ -315,7 +317,7 @@ class DiagnosticUserProfileResolver:
             # Only trusted local_dev scope enables this. A user-supplied header cannot.
             local_name = _text(request.scope.get(LOCAL_CURRENT_USERNAME_SCOPE_KEY))
             if caller in result and local_name:
-                result[caller] = {**_fallback(caller, "local"), "display_name": local_name}
+                result[caller] = {**_fallback(caller, "local"), "display_name": local_name, "username": local_name}
             return result
 
         scope = (str(self._scope), str(request.base_url), caller, platform_credential_digest(headers))

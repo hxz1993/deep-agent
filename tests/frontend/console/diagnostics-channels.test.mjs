@@ -1,3 +1,4 @@
+import { renderUserIdentity } from "../../../console/user-identity.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -13,7 +14,7 @@ const history = id => ({items:[{session_id:`${id}-session`,question_count:2,is_l
 function harness(request) {
  const pickerCallbacks={}, listeners={}, calls=[], navigations=[], copies=[], inspector={innerHTML:"",querySelector:()=>null};
  const root={innerHTML:"",addEventListener:(n,f)=>listeners[n]=f,querySelector:()=>inspector,replaceChildren(){this.innerHTML="";}};
- const context=vm.createContext({URLSearchParams,Date,Intl,AbortController,e,icon,icons(){},selectHtml,
+ const context=vm.createContext({ renderUserIdentity, URLSearchParams,Date,Intl,AbortController,e,icon,icons(){},selectHtml,
   peerPickerHtml(){return "";},bindPeerPicker(root, options){pickerCallbacks[options.kind]=options;return()=>{};},bindChannelResizer(){return()=>{};},bindDiagnosticSelects(){return{dispose(){}};},diagnosticHash,sessionRange,channelEntryFilters,createSessionReader,sessionQueryError,
   shortQuestionTime:v=>v||"—",navigator:{clipboard:{writeText:async id=>copies.push(id)}},
   diagnosticRequest:(path,signal)=>{calls.push({path,signal});return request(path,signal);}});

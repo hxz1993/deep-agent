@@ -29,7 +29,7 @@
 .diagnostic-sessions-page .diagnostic-user-combobox { position:relative; }
 .diagnostic-sessions-page .diagnostic-user-combobox > svg { position:absolute; left:12px; top:8px; width:16px; height:16px; color:var(--diag-muted); pointer-events:none; }
 .diagnostic-sessions-page .diagnostic-user-combobox > input { height:32px; padding:0 31px 0 35px; border:1px solid var(--diag-border-strong); border-radius:8px; font-size:13px; text-overflow:ellipsis; background:var(--diag-surface); }
-.diagnostic-sessions-page .diagnostic-user-combobox > input::placeholder { color:var(--diag-text); opacity:1; }
+.diagnostic-sessions-page .diagnostic-user-combobox > input::placeholder { color:var(--diag-muted); opacity:1; }
 .diagnostic-sessions-page .diagnostic-user-combobox > input:focus { border-color:var(--diag-accent); }
 .diagnostic-sessions-page .diagnostic-user-picker { position:absolute; top:1px; right:1px; width:28px; height:30px; display:grid; place-items:center; border-radius:0 7px 7px 0; color:var(--diag-muted); }
 .diagnostic-sessions-page .diagnostic-user-picker > svg { width:13px; height:13px; }

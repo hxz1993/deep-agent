@@ -1,3 +1,4 @@
+import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 // Pure shared inspector markup. Hosts supply identity, historical data and tab state.
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -157,7 +158,7 @@ export function renderSessionInspector({
       ${inspectorFact("模型", model?.name || model?.model || (diagnostic ? "未记录" : "—"))}
       ${inspectorFactHtml("App / Space", sessionScope, { wide: true })}
       ${inspectorFactHtml("会话统计", sessionCounts)}
-      ${diagnostic ? inspectorFact("Language", context.language || "未记录") + inspectorFact("User ID", identity?.user || "未认证", { mono: true, wide: true }) : ""}
+      ${diagnostic ? inspectorFact("Language", context.language || "未记录") + `<div class="wide inspector-user-fact"><span>用户</span>${renderUserIdentity(identity?.profile || {}, {userId: identity?.user || "", copyable: true})}</div>` : ""}
     </div>
   </section>
   <section class="inspector-section inspector-budget-section">

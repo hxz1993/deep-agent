@@ -3,7 +3,7 @@ import { projectConversationItems, sortConversationItems } from "./conversation-
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260912-21";
 import { buildTrajectory, createTrajectoryController, redactTrajectoryValue } from "./trajectory.js?v=20260915-scroll-focus";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20260915-session-icons";
+import { renderSessionInspector } from "./session-inspector.js?v=20260917-release01010";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260915-session-icons";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
@@ -76,6 +76,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   <div class="diagnostic-detail-grid">
     <div class="workspace-resizer workspace-resizer-inspector diagnostic-detail-resizer" role="separator" aria-label="调整会话详情宽度" aria-orientation="vertical" aria-valuemin="260" aria-valuemax="720" aria-valuenow="320" tabindex="0"></div>
     <aside class="inspector-pane" data-session-role="inspectorPane"><div class="inspector-content" data-session-role="inspectorContent"></div></aside>
+    <div class="diagnostic-detail-loading hidden" data-detail-loading role="status" aria-live="polite"><span class="loading-spinner" aria-hidden="true"></span><strong data-detail-loading-label>正在加载会话…</strong><span>内容较多时需要稍候，加载完成后即可操作。</span></div>
   </div>
   <dialog class="attachment-image-dialog" data-detail-image-dialog><header class="attachment-image-dialog-header"><strong data-detail-image-title></strong><button type="button" class="icon-btn" data-detail-image-close aria-label="关闭图片预览">${icon("x")}</button></header><div class="attachment-image-dialog-content"><img data-detail-image alt="附件预览" referrerpolicy="no-referrer"><p class="hidden" data-detail-image-error>图片无法加载，可能无权限或链接已失效。</p></div><footer><a data-detail-image-open target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">打开原图</a></footer></dialog>`;
   root.prepend(header);
@@ -97,16 +98,16 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   let selectedRunId = null;
   let currentView = "conversation";
   let disposed = false;
-  let notice = "";
   let lastFocusKey = null;
   let loadingSnapshot = null;
+  let pageLoading = false;
+  const disabledBeforeLoading = new Map();
   const listeners = [];
   const listen = (element, name, handler, options) => { element.addEventListener(name, handler, options); listeners.push(() => element.removeEventListener(name, handler, options)); };
   const refreshIcons = () => globalThis.lucide?.createIcons();
   const toast = (message, error = false) => globalThis.DeepAgentConsole?.toast?.(message, error);
 
   function showNotice(message = "") {
-    notice = message;
     const host = find("[data-detail-notice]");
     host.textContent = message;
     host.classList.toggle("hidden", !message);
@@ -126,7 +127,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
       activeSession: { appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
       model, runModel,
       run, usage, contextStatus, agentName: session.agent_name || session.agent_id || "未记录",
-      context: { app: session.app_id, space: session.space_id, language: session.language }, identity: { user: userId || "未记录" },
+      context: { app: session.app_id, space: session.space_id, language: session.language }, identity: { user: userId || "", profile: data.users[userId] || {} },
       channelOrigin: channelOriginPresentation(session.channel), activeTab: inspectorTab,
       contextContent: contextReferenceContent(selectedReference?.reference),
       statusText: statusLabels[status] || "未确认", statusClass: status === "running" ? "running" : ["pending", "waiting", "awaiting_input"].includes(status) ? "waiting" : "idle",
@@ -259,17 +260,22 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   function load(next = {}) {
     if (disposed) return;
     const sameSession = state.sessionId && state.sessionId === next.session?.session_id;
+    const historyChanged = !sameSession || data.history !== next.history;
+    const nextEvents = Array.isArray(next.events) ? next.events : next.events?.items || [];
+    const eventsChanged = !sameSession || data.events !== nextEvents;
     const previous = sameSession ? (loadingSnapshot || snapshot()) : null;
     loadingSnapshot = next.history == null ? previous : null;
-    data = { session: next.session || {}, history: next.history || { items: [] }, events: Array.isArray(next.events) ? next.events : next.events?.items || [], users: next.users || next.session?.users || {} };
+    data = { session: next.session || {}, history: next.history || { items: [] }, events: nextEvents, users: next.users || next.session?.users || {} };
     state.sessionId = data.session.session_id; state.conversationId = data.session.conversation_id;
     if (!sameSession) { inspectorTab = "session"; selectedRunId = null; selectedReference = null; lastFocusKey = null; }
     role("chatTitle").textContent = data.session.title || data.session.name || "未命名会话";
     role("sessionBadge").textContent = formatSessionIdSubtitle(state.sessionId);
     find("[data-detail-refresh]").title = ["running", "pending", "waiting", "awaiting_input"].includes(data.session.latest_status) ? "仅展示已保存内容，点击刷新更新" : "刷新会话";
-    root.removeAttribute("aria-busy");
     showNotice();
-    renderConversation(); trajectory.setHistory({ session_id: state.sessionId, items: data.events }, { preserveView: Boolean(previous) });
+    // Context/profile refreshes reuse the same history: keep existing message DOM
+    // and disclosure state instead of parsing every long reply again.
+    if (historyChanged) renderConversation();
+    if (eventsChanged) trajectory.setHistory({ session_id: state.sessionId, items: data.events }, { preserveView: Boolean(previous) });
     trajectory.setExportReady(next.eventsComplete === true && !next.eventsError);
     if (previous) restore(previous); else { currentView = "conversation"; trajectory.selectView("conversation", { notify: false }); renderInspector(); }
     if (next.history == null && !next.historyError) messages.innerHTML = `<div class="diagnostic-detail-error" role="status"><p>正在读取已保存对话…</p></div>`;
@@ -296,9 +302,21 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
       if (message.events) setLoading(message.events, { section: "events" });
       return;
     }
-    if (message === false) { root.removeAttribute("aria-busy"); if (notice === "加载会话…") showNotice(); return; }
     if (section === "events") { const host = find("[data-detail-events-notice]"); host.textContent = String(message); host.classList.remove("hidden"); return; }
-    root.setAttribute("aria-busy", "true"); showNotice(message === true ? "加载会话…" : String(message || ""));
+    pageLoading = message !== false;
+    if (pageLoading && !state.sessionId) role("chatTitle").textContent = "加载会话…";
+    root.toggleAttribute("aria-busy", pageLoading);
+    if (pageLoading) root.setAttribute("aria-busy", "true");
+    find("[data-detail-loading]").classList.toggle("hidden", !pageLoading);
+    find("[data-detail-loading-label]").textContent = message === true ? "正在加载会话…" : String(message || "");
+    for (const element of find(".diagnostic-detail-grid").children) {
+      if (!element.hasAttribute("data-detail-loading")) element.inert = pageLoading;
+    }
+    for (const button of header.querySelectorAll("button:not([data-detail-back])")) {
+      if (pageLoading && !disabledBeforeLoading.has(button)) disabledBeforeLoading.set(button, button.disabled);
+      button.disabled = pageLoading || Boolean(disabledBeforeLoading.get(button));
+    }
+    if (!pageLoading) disabledBeforeLoading.clear();
   }
 
   function setError(error, { section = "page" } = {}) {
@@ -309,7 +327,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
       if (error.context) { data.session.context_error = error.context; renderInspector(); }
       return;
     }
-    root.removeAttribute("aria-busy");
+    if (section === "page") setLoading(false);
     const message = typeof error === "string" ? error : error?.message || "读取失败，请重试。";
     if (section === "history") {
       messages.innerHTML = `<div class="diagnostic-detail-error" role="alert">${icon("circle-alert")}<strong>对话读取失败</strong><p>${escapeHtml(message)}</p><span>可切换轨迹继续排查；不会把读取失败显示为空会话。</span></div>`;
@@ -317,6 +335,23 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     else showNotice(message);
   }
 
+  // Allow the transition to paint before synchronous Markdown/trajectory work.
+  // The timeout also releases background tabs where animation frames are paused.
+  function prepareRender() {
+    return new Promise(resolve => {
+      if (disposed || !globalThis.requestAnimationFrame) { resolve(); return; }
+      let frame;
+      const done = () => { clearTimeout(timer); globalThis.cancelAnimationFrame?.(frame); resolve(); };
+      const timer = setTimeout(done, 150);
+      frame = globalThis.requestAnimationFrame(() => { frame = globalThis.requestAnimationFrame(done); });
+    });
+  }
+
+  listen(root, "click", (event) => {
+    if (pageLoading && !event.target.closest("[data-detail-back]")) {
+      event.preventDefault(); event.stopImmediatePropagation();
+    }
+  }, true);
   listen(root, "click", async (event) => {
     const button = event.target.closest("button"); if (!button) return;
     if (button.hasAttribute("data-detail-back")) onBack();
@@ -362,8 +397,9 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     if (imageDialog.open) imageDialog.close();
     find("[data-detail-image]").removeAttribute("src");
     data = { session: {}, history: { items: [] }, events: [], users: {} }; selectedReference = null;
+    root.removeAttribute("aria-busy"); disabledBeforeLoading.clear();
     root.replaceChildren(); root.classList.remove("diagnostic-session-detail");
   }
   renderInspector(); refreshIcons();
-  return { load, focus, snapshot, restore, setLoading, setError, destroy };
+  return { load, focus, snapshot, restore, setLoading, prepareRender, setError, destroy };
 }

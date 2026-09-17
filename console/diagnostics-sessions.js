@@ -1,9 +1,10 @@
+import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260915-release-audit";
 import { diagnosticTime } from "./diagnostics.js?v=20260915-ui-polish";
 import { diagnosticHash, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260915-app-filter";
-import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260915-app-filter";
+import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260915-app-filter";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260915-scroll-focus";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260917-release01010";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PERIODS = [["24", "最近 1 天"], ["168", "最近 7 天"], ["720", "最近 30 天"], ["custom", "自定义时间"]];
@@ -11,7 +12,7 @@ const PAGE_SIZE = 50;
 const button = (label, action, extra = "", kind = "") => `<button type="button" class="btn diagnostics-button ${kind}" data-session-action="${action}" ${extra}>${label}</button>`;
 const empty = message => `<div class="diagnostics-empty">${e(message)}</div>`;
 export function userCardHtml(id, profiles = {}) {
-  const user = profiles[id] || {}, name = user.display_name || id || "未记录";
+  const user = profiles[id] || {}, name = user.username || user.display_name || id || "未记录";
   return `<span class="diagnostic-user diagnostic-username" title="${e(id)}">${e(name)}</span>`;
 }
 export function sessionAgentIconHtml(item) {
@@ -83,7 +84,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   function userFilterHtml() {
     const f = state.filters;
     return `<div class="diagnostics-field diagnostic-user-filter"><div class="diagnostic-user-combobox">
-        ${icon("user-round")}<input autocomplete="off" name="user_id" value="${e(state.users[f.user_id]?.display_name || f.user_id || "")}" placeholder="全部用户" aria-label="平台用户" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="diagnosticLoadedUsers" title="搜索 User ID 或 Username，选择用户或回车查询" spellcheck="false"/>
+        ${icon("user-round")}<input autocomplete="off" name="user_id" value="${e(state.users[f.user_id]?.display_name || f.user_id || "")}" placeholder="全部用户" aria-label="平台用户" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="diagnosticLoadedUsers" title="搜索用户名、昵称、邮箱或 User ID，选择用户或回车查询" spellcheck="false"/>
         <button type="button" data-session-action="user-picker" class="diagnostic-user-picker" aria-label="选择平台用户">${icon("chevron-down")}</button>
         <div class="diagnostic-user-options hidden" id="diagnosticLoadedUsers" role="listbox" aria-label="平台用户查询结果"></div>
       </div></div>`;
@@ -132,7 +133,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
         </section>
         <div class="diagnostic-dashboard-side">
           <section><header><h2>最近异常</h2></header>${errors.map((error, index) => `<button type="button" class="diagnostic-error-item" data-error-index="${index}"><span class="diagnostic-error-icon">${icon("triangle-alert")}</span><span class="diagnostic-error-copy"><strong>${e(error.message || error.summary || error.code || "执行异常")}</strong><small><span title="${e(error.agent_name || error.agent_id)}">${e(error.agent_name || error.agent_id)}</span><time title="${e(diagnosticTime(error.created_at))}">${e(shortQuestionTime(error.created_at))}</time></small></span></button>`).join("") || empty("当前范围没有执行异常")}</section>
-          <section id="diagnosticActiveUsers" tabindex="-1"><header><h2>活跃用户</h2>${users.length > 5 ? button(state.showUsers ? "收起" : `展开${icon("arrow-right")}`, "users", "", "text") : ""}</header>${users.slice(0, state.showUsers ? 20 : 5).map((user, index) => `<button type="button" class="diagnostic-active-user" data-user-drill="${e(user.user_id)}"><span class="diagnostic-user-rank">${index + 1}</span><span class="diagnostic-ranking-identity"><span class="diagnostic-identity-icon">${icon("user-round")}</span>${userCardHtml(user.user_id, state.users)}</span><span class="diagnostic-user-count" title="范围内提问数">${Number(user.question_count)}</span></button>`).join("") || empty("暂无活跃账号")}</section>
+          <section id="diagnosticActiveUsers" tabindex="-1"><header><h2>平台活跃用户</h2>${users.length > 5 ? button(state.showUsers ? "收起" : `展开${icon("arrow-right")}`, "users", "", "text") : ""}</header>${users.slice(0, state.showUsers ? 20 : 5).map((user, index) => `<button type="button" class="diagnostic-active-user" data-user-drill="${e(user.user_id)}"><span class="diagnostic-user-rank">${index + 1}</span><span class="diagnostic-ranking-identity"><span class="diagnostic-identity-icon">${icon("user-round")}</span>${renderUserIdentity(state.users[user.user_id] || {}, {userId:user.user_id, compact:true, copyable:false})}</span><span class="diagnostic-user-count" title="范围内提问数">${Number(user.question_count)}</span></button>`).join("") || empty("暂无活跃账号")}</section>
         </div>
       </div>`;
   }
@@ -150,7 +151,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
         ${items.map(item => `<div class="diagnostic-session-row" role="row" tabindex="0" data-session-id="${e(item.session_id)}">
           <div class="diagnostic-session-name" role="cell"><div class="diagnostic-session-title"><strong title="${e(item.title || "未命名会话")}">${e(item.title || "未命名会话")}</strong></div><div class="diagnostic-session-id"><code title="${e(item.session_id)}">${e(String(item.session_id).slice(0, 8))}</code><button type="button" class="diagnostic-copy-separator" data-copy-session="${e(item.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${e(item.session_id)}">${icon("copy")}</button><p title="${e(item.recent_question?.summary || "当前范围暂无提问")}">${e(item.recent_question?.summary || "当前范围暂无提问")}</p></div></div>
           <span class="diagnostic-agent-name" role="cell">${sessionAgentIconHtml(item)}<span title="${e(item.agent_name || item.agent_id)}">${e(item.agent_name || item.agent_id || "未记录")}</span></span>
-          <span role="cell">${userCardHtml(item.user_id, state.users)}</span>
+          <span role="cell">${renderUserIdentity(state.users[item.user_id] || {}, {userId:item.user_id, copyable:false})}</span>
           <span class="diagnostic-session-app" role="cell" title="${e(item.app_id || "")}">${e(item.app_id || "—")}</span>
           <span role="cell"><span class="diagnostic-status ${e(item.latest_status)}">${e(SESSION_STATUSES[item.latest_status] || "未确认")}</span></span>
           <time role="cell">${e(diagnosticTime(item.last_activity_at || item.updated_at))}</time>
@@ -203,8 +204,23 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   function mountDetail(saved) {
     detail?.destroy(); selectBinding?.dispose(); detailData = saved?.detailData || null;
     detail = createReadonlySessionView({ root, onBack, onRefresh: () => void loadDetail(), onViewChange: view => { state.route.filters.view = view; replace(diagnosticHash("detail", state.route.filters, state.route.id)); if (view === "trajectory") void loadEvents(); } });
-    if (detailData) { detailData.focus.view = state.route.filters.view || "conversation"; detail.load(detailData); detail.restore?.(saved.detailSnapshot); if (state.route.filters.view === "trajectory") void loadEvents(); }
+    if (detailData && (detailData.history != null || detailData.historyError)) void restoreDetail(saved);
     else void loadDetail();
+  }
+  async function restoreDetail(saved) {
+    const view = detail;
+    view.setLoading?.(true);
+    try {
+      await view.prepareRender?.();
+      if (!state.active || detail !== view || !detailData) return;
+      detailData.focus.view = state.route.filters.view || "conversation";
+      view.load(detailData); view.restore?.(saved.detailSnapshot);
+      await view.prepareRender?.();
+      if (!state.active || detail !== view) return;
+      if (state.route.filters.view === "trajectory" || (detailData.focus.runId && !detailData.focus.eventId)) void loadEvents();
+      if (!detailData.historyError && !detailData.contextComplete) void loadContext();
+    } catch (error) { if (state.active && detail === view) view.setError?.(sessionQueryError(error)); }
+    finally { if (state.active && detail === view) view.setLoading?.(false); }
   }
   async function loadDetail() {
     contextReader.cancel(); eventsReader.cancel(); eventsLoading = false;
@@ -219,7 +235,12 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       const historyTask = scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}/history`).then(history => ({ history })).catch(error => ({ historyError: sessionQueryError(error) }));
       const results = await Promise.all([historyTask]);
       if (!scope.current() || state.route.id !== id || !state.active) return;
+      detail.setLoading?.("正在整理会话内容…");
+      await detail.prepareRender?.();
+      if (!scope.current() || state.route.id !== id || !state.active) return;
       Object.assign(detailData, ...results); detailData.focus.view = state.route.filters.view || "conversation"; detail.load(detailData);
+      await detail.prepareRender?.();
+      if (!scope.current() || state.route.id !== id || !state.active) return;
       if (detailData.historyError || detailData.eventsError) detail.setError?.({ history: detailData.historyError, events: detailData.eventsError });
       if (state.route.filters.view === "trajectory" || (focus.runId && !focus.eventId)) void loadEvents();
       if (!detailData.historyError) void loadContext();
@@ -240,8 +261,8 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   async function loadContext() {
     if (!detailData) return;
     const id = state.route.id, scope = contextReader.begin();
-    try { const session = await scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}?include_context=true`); if (!scope.current() || state.route.id !== id || !state.active) return; detailData.session = session; detailData.focus.view = state.route.filters.view || "conversation"; detail.load(detailData); }
-    catch (error) { if (scope.current()) detail.setError?.({ context: sessionQueryError(error) }); }
+    try { const session = await scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}?include_context=true`); if (!scope.current() || state.route.id !== id || !state.active) return; detailData.session = session; detailData.contextComplete = true; detailData.focus.view = state.route.filters.view || "conversation"; detail.load(detailData); }
+    catch (error) { if (scope.current() && state.active && detailData) { detailData.contextComplete = true; detailData.session.context_error = sessionQueryError(error); detail.setError?.({ context: detailData.session.context_error }); } }
   }
   async function submit(event) {
     const form = event.target.closest("[data-session-form]"); if (!form || !root.contains(form)) return;
@@ -254,7 +275,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
         const matches = userSearchSucceeded && !userSearchBusy && userSearchQuery.toLowerCase() === lower ? userMatches : await searchUserOptions(value);
         if (!matches) return;
         const exactId = matches.find(user => user.user_id === value);
-        const names = matches.filter(user => user.display_name.toLowerCase() === lower);
+        const names = matches.filter(user => [user.display_name, user.username, user.nickname, user.email].some(name => String(name || "").toLowerCase() === lower));
         if (exactId) values.user_id = exactId.user_id;
         else if (names.length === 1 && !userAfter) values.user_id = names[0].user_id;
         else if (matches.length || userAfter) { window.DeepAgentConsole?.toast("请从搜索结果中选择用户"); return; }
@@ -331,7 +352,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   function paintUserOptions(message = "") {
     const menu = root.querySelector("#diagnosticLoadedUsers");
     if (!menu) return;
-    menu.innerHTML = `<button type="button" role="option" data-loaded-user="">全部用户</button>${userMatches.map(user => `<button type="button" role="option" data-loaded-user="${e(user.user_id)}"><span>${e(user.display_name)}</span><small>${e(user.user_id)}</small></button>`).join("")}${message ? `<p role="status">${e(message)}</p>` : ""}${userAfter && !userSearchBusy ? button("继续查找", "more-users", "", "text") : ""}`;
+    menu.innerHTML = `<button type="button" role="option" data-loaded-user="">全部用户</button>${userMatches.map(user => `<button type="button" role="option" data-loaded-user="${e(user.user_id)}" title="${e(user.user_id)}">${renderUserIdentity(user,{userId:user.user_id,copyable:false})}</button>`).join("")}${message ? `<p role="status">${e(message)}</p>` : ""}${userAfter && !userSearchBusy ? button("继续查找", "more-users", "", "text") : ""}`;
     menu.classList.remove("hidden");
     root.querySelector('input[name="user_id"]')?.setAttribute("aria-expanded", "true");
   }
@@ -352,7 +373,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
         const seen = new Set(userMatches.map(user => user.user_id));
         for (const user of data.items || []) if (!seen.has(user.user_id)) {
           seen.add(user.user_id); userMatches.push(user);
-          state.users[user.user_id] = {...state.users[user.user_id], display_name:user.display_name};
+          state.users[user.user_id] = {...state.users[user.user_id], ...user};
         }
         const next = data.next_after || null;
         if (next && next === userAfter) throw new Error("User cursor did not advance");

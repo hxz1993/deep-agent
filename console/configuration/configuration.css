@@ -3531,3 +3531,25 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 #channelWecomApplicationField .btn-link { border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
 
 #channelWecomApplicationField .da-select-placeholder { font-style: normal; }
+
+/* Account lookup floats above the extension panel without changing form height. */
+.channel-user-query { position: relative; min-width: 0; }
+.channel-user-query > input { width: 100%; padding-right: 36px; }
+.channel-user-query-button {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px;
+  color: var(--text-dim); background: transparent; cursor: pointer;
+}
+.channel-user-query-button:hover, .channel-user-query-button:focus-visible { color: var(--accent); background: var(--accent-soft); }
+.channel-user-query-button svg { width: 15px; height: 15px; }
+.channel-user-query-result {
+  position: absolute; z-index: 12; top: calc(100% + 6px); left: 0; right: 0;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elev); box-shadow: var(--shadow); color: var(--text-dim);
+  font-size: 12px; line-height: 1.6; overflow-wrap: anywhere;
+}
+.channel-user-query-result[hidden] { display: none; }
+.channel-user-query-result strong { display: block; color: var(--text); font-weight: 600; }
+.channel-user-query-result small { display: block; color: var(--text-faint); }
+.channel-user-query-result[data-state="missing"], .channel-user-query-result[data-state="error"] { color: var(--danger-text); }

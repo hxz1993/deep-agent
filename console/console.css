@@ -242,21 +242,12 @@ textarea {
   background: var(--console-surface);
   box-shadow: 0 12px 34px color-mix(in srgb, #24384a 14%, transparent);
 }
-.user-popover-heading { width: 100%; display: flex; align-items: center; gap: 9px; padding-bottom: 10px; border: 0; }
-.user-popover-heading > span:last-child { min-width: 0; display: grid; gap: 2px; }
-.user-popover-heading strong { font-family: var(--font); }
-.user-popover-heading small,
 .user-popover-runtime small { color: var(--text-faint); font-size: 12px; font-weight: 500; }
 .user-popover-icon { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 8px; color: var(--accent); background: var(--accent-soft); }
 .user-popover-icon svg { width: 15px; height: 15px; }
 .user-popover-runtime { width: 100%; display: grid; gap: 0; }
 .user-popover-runtime > span { min-width: 0; min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; }
 .user-popover-runtime strong { color: var(--text); font-size: 12px; font-weight: 650; }
-.user-pill.popover-open .user-popover {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
 
 .theme-switch {
   height: 32px;

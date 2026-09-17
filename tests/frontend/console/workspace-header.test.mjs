@@ -93,7 +93,7 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.match(workspaceSource, /inspectorFactHtml\("会话统计", sessionCounts/);
   assert.match(workspaceSource, /title="提问数"[\s\S]*title="消息事件数"[\s\S]*title="附件数"/);
   assert.match(workspaceSource, /inspectorFactHtml\("App \/ Space", sessionScope/);
-  assert.match(workspaceSource, /inspectorFact\("User ID"[\s\S]*identity\?\.user/);
+  assert.match(workspaceSource, /inspector-user-fact[\s\S]*renderUserIdentity[\s\S]*userId: identity\?\.user[\s\S]*copyable: true/);
   assert.match(workspaceSource, /<strong>上下文预算<\/strong>/);
   assert.doesNotMatch(workspaceSource, /<strong>当前回合<\/strong>/);
   assert.match(workspaceSource, /Conv\. ID/);

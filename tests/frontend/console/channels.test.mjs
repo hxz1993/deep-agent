@@ -353,3 +353,61 @@ test("应用关联默认关闭，开启显示必填配置，关闭保留内容�
   assert.equal(toggle.getAttribute("aria-checked"), "false");
   assert.equal(input.value, "");
 });
+
+function userQueryHarness(fetchProfile) {
+  const listeners = {};
+  const element = (value = "") => ({ value, hidden: true, innerHTML: "", dataset: {}, attributes: {},
+    addEventListener() {}, setAttribute(name, value) { this.attributes[name] = value; }, focus() {} });
+  const elements = { channelSessionUserId: element("4"), channelSessionUserResult: element(),
+    queryChannelSessionUserBtn: element(), channelAccountModal: { ...element(), open: true } };
+  const requests = [];
+  const context = vm.createContext({ AbortController, window: {}, document: {
+    addEventListener(name, callback) { listeners[name] = callback; }, getElementById(id) { return elements[id]; }
+  }, apiFetch(path, options) { requests.push({ path, options }); return fetchProfile(path, options); },
+  escapeHtml(value) { return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); } });
+  vm.runInContext(source, context);
+  return { elements, requests, query: () => vm.runInContext("queryChannelSessionUser()", context),
+    clear: () => vm.runInContext("clearChannelUserQuery()", context) };
+}
+
+test("会话用户仅手动查询且通过浮层展示资料，不影响保存规则", async () => {
+  const h = userQueryHarness(async () => ({user: {user_id: "4", resolution: "resolved", username: "<admin>", email: "a@example.com"}}));
+  assert.equal(h.requests.length, 0);
+  await h.query();
+  assert.equal(h.requests[0].path, "/api/v1/diagnostics/sessions/user-profile?user_id=4");
+  assert.match(h.elements.channelSessionUserResult.innerHTML, /&lt;admin&gt;.*a@example.com/);
+  assert.equal(h.elements.channelSessionUserResult.dataset.state, "resolved");
+  assert.match(styles, /\.channel-user-query-result\s*\{\s*position: absolute;/);
+  assert.match(templateHtml, /type="button"[^>]*id="queryChannelSessionUserBtn"/);
+});
+
+test("查询未命中、服务失败和认证失败分别展示", async () => {
+  for (const [result, expected, state] of [
+    [{user: {user_id: "4", resolution: "missing"}}, /查不到这个用户/, "missing"],
+    [{user: {user_id: "4", resolution: "unavailable"}}, /查询暂不可用/, "error"],
+    [Object.assign(new Error("secret"), {status: 401}), /登录已失效/, "error"],
+    [Object.assign(new Error("secret"), {status: 403}), /无权查询/, "error"],
+  ]) {
+    const h = userQueryHarness(async () => { if (result instanceof Error) throw result; return result; });
+    await h.query();
+    assert.match(h.elements.channelSessionUserResult.innerHTML, expected);
+    assert.equal(h.elements.channelSessionUserResult.dataset.state, state);
+    assert.doesNotMatch(h.elements.channelSessionUserResult.innerHTML, /secret/);
+  }
+});
+
+test("改值或关闭时清除并中止查询，迟到结果不覆盖下一个账号", async () => {
+  let finish;
+  const h = userQueryHarness(() => new Promise(resolve => { finish = resolve; }));
+  const pending = h.query();
+  assert.equal(h.elements.channelSessionUserResult.dataset.state, "loading");
+  h.elements.channelSessionUserId.value = "another";
+  h.clear();
+  assert.equal(h.requests[0].options.signal.aborted, true);
+  finish({user: {user_id: "4", resolution: "resolved", username: "old"}});
+  await pending;
+  assert.equal(h.elements.channelSessionUserResult.hidden, true);
+  assert.equal(h.elements.channelSessionUserResult.innerHTML, "");
+  assert.match(source, /channelSessionUserId"\)\?\.addEventListener\("input", clearChannelUserQuery\)/);
+  assert.match(source, /addEventListener\("close", \(\) => \{\s*clearChannelUserQuery\(\)/);
+});

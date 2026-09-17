@@ -1,8 +1,8 @@
 import { initDiagnosticLogs } from "./diagnostics.js?v=20260915-ui-polish";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260915-session-title";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260917-release01010";
 import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260915-app-filter";
 
-import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260915-app-filter";
+import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260917-release01010";
 
 let center = null;
 export function initDiagnostics() {

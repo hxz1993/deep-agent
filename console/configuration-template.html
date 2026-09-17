@@ -684,10 +684,14 @@
             <span>Secret</span>
             <input type="password" id="channelSecret" autocomplete="new-password" />
           </label>
-          <label class="field">
-            <span class="field-label-row"><span>会话用户</span><small class="field-subtitle" id="channelSessionUserHint">使用此平台账号记录渠道会话。</small></span>
-            <input type="text" id="channelSessionUserId" maxlength="128" required autocomplete="off" placeholder="平台 User ID" aria-describedby="channelSessionUserHint" />
-          </label>
+          <div class="field">
+            <label class="field-label-row" for="channelSessionUserId"><span>会话用户</span><small class="field-subtitle" id="channelSessionUserHint">使用此平台账号记录渠道会话。</small></label>
+            <div class="channel-user-query">
+              <input type="text" id="channelSessionUserId" maxlength="128" required autocomplete="off" placeholder="平台 User ID" aria-describedby="channelSessionUserHint" />
+              <button type="button" class="channel-user-query-button" id="queryChannelSessionUserBtn" title="查询平台用户" aria-label="查询平台用户" aria-controls="channelSessionUserResult" aria-expanded="false"><i data-lucide="search" aria-hidden="true"></i></button>
+              <div class="channel-user-query-result" id="channelSessionUserResult" role="status" aria-live="polite" hidden></div>
+            </div>
+          </div>
         </div>
         <div class="channel-extension-settings">
           <h4 class="channel-extension-heading">扩展设置</h4>

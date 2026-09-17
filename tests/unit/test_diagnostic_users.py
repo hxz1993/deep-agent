@@ -166,11 +166,14 @@ class PlatformDiagnosticUserFetcherTests(unittest.IsolatedAsyncioTestCase):
             result = await fetcher(("owner-1", "owner-2", "owner-3"), {"user": "admin-caller"})
         self.assertEqual(set(result), {"owner-1", "owner-2", "owner-3"})
         self.assertEqual(result["owner-1"]["display_name"], "username")
+        self.assertEqual(result["owner-1"]["username"], "username")
+        self.assertEqual(result["owner-1"]["nickname"], "昵称")
+        self.assertIsNone(result["owner-3"]["username"])
         self.assertEqual(result["owner-2"]["display_name"], "old user")
         self.assertEqual(result["owner-3"]["display_name"], "owner-3")
         self.assertEqual(result["owner-1"]["avatar_url"], "/avatars/one.png")
         self.assertEqual(set(result["owner-1"]), {
-            "id", "user_id", "display_name", "email", "avatar_url", "resolution",
+            "id", "user_id", "display_name", "username", "nickname", "email", "avatar_url", "resolution",
         })
         self.assertEqual(post.await_args.args, ("https://platform.example/deepfos-server/system-server/user/get-user-detail-list",))
         self.assertEqual(post.await_args.kwargs["json"], ["owner-1", "owner-2", "owner-3"])
@@ -329,6 +332,7 @@ class DiagnosticUserProfileResolverTests(unittest.IsolatedAsyncioTestCase):
         result = await resolver.profiles_for(local, "local-id", ["local-id", "channel-owner"])
         self.assertEqual(result["local-id"]["display_name"], "本地账号")
         self.assertEqual(result["local-id"]["resolution"], "local")
+        self.assertEqual(result["local-id"]["username"], "本地账号")
         self.assertEqual(result["channel-owner"]["display_name"], "channel-owner")
         self.assertIsNone(result["channel-owner"]["email"])
         fetcher.assert_not_awaited()

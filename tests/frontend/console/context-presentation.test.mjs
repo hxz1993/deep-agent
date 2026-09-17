@@ -1,10 +1,11 @@
+import { renderUserIdentity } from "../../../console/user-identity.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
 const source = (await readFile(new URL("../../../console/context.js", import.meta.url), "utf8"))
-  .replace(/export /g, "");
+  .replace(/^import .*;\n/gm, "").replace(/export /g, "");
 
 test("应用覆盖、平台继承和无应用切换后，标题与欢迎语同步显示有效上下文", async () => {
   let overrides = {};
@@ -14,7 +15,7 @@ test("应用覆盖、平台继承和无应用切换后，标题与欢迎语同�
   const trigger = { ...node(), querySelector: () => label };
   const prefix = node(), welcomeLabel = node(), note = node();
   const fields = new Map();
-  const context = vm.createContext({
+  const context = vm.createContext({ renderUserIdentity,
     window: { DeepAgentConsoleAPI: {
       loadContext: () => overrides,
       deriveSpaceFromApp: app => app.slice(0, -3),

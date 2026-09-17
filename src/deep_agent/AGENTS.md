@@ -51,7 +51,7 @@ OpenAI 兼容协议的 HTTP 日志在 `agent/model_api_diagnostics.py`；只记�
 诊断账号资料使用 `security/diagnostic_users.py`，沿用其他业务组件的 System 跨空间接口
 `POST /user/get-user-detail-list`，由 System 转查 Account。读取 `PLATFORM_OPTION.server.system`
 （`EXPORT_SYSTEM_SERVER_NAME`），只传管理员当前认证和本次涉及的 ID，不传 App / Space。
-每批最多100个、总预算2秒，显示名优先用户名；仅无平台凭证的 local bypass 才使用本地资料，
+每批最多100个、总预算2秒；独立返回 username/nickname/email/avatar_url，兼容 display_name 仍优先用户名；仅无平台凭证的 local bypass 才使用本地资料，
 缓存按调用者权限隔离。服务地址与 `BaseAPI` 共用
 `deepfos_platform.discovery.target.normalize_service_target`：`http://system-server` 先变成
 逻辑服务名再走发现；不能因包含协议就绕过 Eureka。真实域名、显式端口与网关路径仍直连，

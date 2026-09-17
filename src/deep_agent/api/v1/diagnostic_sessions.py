@@ -90,13 +90,26 @@ async def search_diagnostic_users(request: Request, ctx: AppContextDep, caller_u
         page = await service(ctx).user_option_ids(selected, after=after)
     result = await with_users(request, caller_user_id, {}, page["ids"])
     query = (selected.query or "").strip().casefold()
-    items = [{"user_id": uid, "display_name": result["users"][uid]["display_name"]}
-             for uid in page["ids"]
+    items = [{**result["users"][uid], "user_id": uid} for uid in page["ids"]
              if not query or query in uid.casefold()
-             or query in result["users"][uid]["display_name"].casefold()]
+             or any(query in str(result["users"][uid].get(field) or "").casefold()
+                    for field in ("username", "nickname", "display_name", "email"))]
     if query and not items and any(profile.get("resolution") == "unavailable" for profile in result["users"].values()):
         raise HTTPException(503, "用户名查询暂不可用，请稍后重试或使用完整 User ID")
     return {"items": items, "next_after": page["next_after"]}
+
+
+@router.get("/user-profile")
+async def get_diagnostic_user_profile(
+    request: Request, caller_user_id: RequestUserDep,
+    user_id: str = Query(min_length=1, max_length=128),
+):
+    """Manually inspect one platform account without requiring a session."""
+    if (len(request.query_params.getlist("user_id")) != 1 or not user_id.strip()
+            or user_id != user_id.strip() or any(ord(char) < 32 for char in user_id)):
+        raise HTTPException(422, "请输入有效的平台 User ID")
+    result = await with_users(request, caller_user_id, {}, [user_id])
+    return {"user": result["users"][user_id]}
 
 
 @router.get("/{session_id}")

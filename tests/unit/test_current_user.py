@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import json
 from collections.abc import Mapping
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -13,6 +14,7 @@ from deep_agent.api.v1.current_user import (
 )
 from deep_agent.local_dev import LocalIdentity, LocalIdentityAdapter
 from deep_agent.security.current_user import (
+    CurrentUserAuthenticationError,
     CurrentUserProfile,
     CurrentUserProfileResolver,
     CurrentUserUnavailableError,
@@ -55,7 +57,7 @@ class PlatformCurrentUserFetcherTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             profile,
-            CurrentUserProfile(user_id="user-1", username="周文俊"),
+            CurrentUserProfile(user_id="user-1", username="周文俊", nickname="乳鸽"),
         )
         self.assertTrue(response.released)
         request.assert_awaited_once()
@@ -67,6 +69,20 @@ class PlatformCurrentUserFetcherTests(unittest.IsolatedAsyncioTestCase):
             request.await_args.kwargs["headers"],
             {"authorization": "Bearer token", "user": "user-1"},
         )
+
+    async def test_projects_profile_fields_and_rejects_sensitive_avatar_url(self) -> None:
+        fetcher = PlatformCurrentUserFetcher(account_service="https://account.test")
+        for avatar, expected in (("/avatars/user.png", "/avatars/user.png"),
+                                 ("https://cdn.test/avatar?token=secret", None)):
+            payload = {"id": 4, "userName": " account ", "nickName": " 昵称 ",
+                       "email": " user@example.test ", "avatar": avatar,
+                       "mobilePhone": "private", "password": "private"}
+            with self.subTest(avatar=avatar), patch(
+                "deep_agent.security.current_user.AioHttpCli.get",
+                new=AsyncMock(return_value=_FakeResponse(200, json.dumps({"data": payload}))),
+            ):
+                profile = await fetcher("4", {"user": "4"})
+            self.assertEqual(profile, CurrentUserProfile("4", "account", "昵称", "user@example.test", expected))
 
     async def test_rejects_missing_username_or_mismatched_user(self) -> None:
         fetcher = PlatformCurrentUserFetcher(account_service="https://account.test")
@@ -101,19 +117,35 @@ class CurrentUserApiTests(unittest.TestCase):
             headers={"user": "user-1", "authorization": "Bearer token"},
         )
 
-    def test_returns_only_current_user_id_and_username(self) -> None:
+    def test_returns_only_safe_current_user_profile_fields(self) -> None:
         response = self.client.get("/api/v1/current-user")
 
         self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertEqual(
             response.json(),
-            {"user_id": "user-1", "username": "周文俊"},
+            {"user_id": "user-1", "username": "周文俊", "display_name": "周文俊",
+             "nickname": None, "email": None, "avatar_url": None, "resolution": "resolved"},
         )
         self.fetcher.assert_awaited_once()
         user_id, headers = self.fetcher.await_args.args
         self.assertEqual(user_id, "user-1")
         self.assertEqual(headers["authorization"], "Bearer token")
         self.assertEqual(headers["user"], "user-1")
+
+    def test_account_errors_and_missing_identity_are_not_cached(self) -> None:
+        for error, expected in (
+            (CurrentUserAuthenticationError("expired"), 401),
+            (CurrentUserUnavailableError("unavailable"), 503),
+        ):
+            with self.subTest(status=expected):
+                self.fetcher.side_effect = error
+                response = self.client.get("/api/v1/current-user")
+                self.assertEqual(response.status_code, expected)
+                self.assertEqual(response.headers["cache-control"], "no-store")
+        response = self.client.get("/api/v1/current-user", headers={"user": ""})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers["cache-control"], "no-store")
 
     def test_local_adapter_uses_same_api_contract_without_account_call(self) -> None:
         app = FastAPI()
@@ -135,7 +167,8 @@ class CurrentUserApiTests(unittest.TestCase):
 
         self.assertEqual(
             response.json(),
-            {"user_id": "local-user-id", "username": "本地测试用户"},
+            {"user_id": "local-user-id", "username": "本地测试用户", "display_name": "本地测试用户",
+             "nickname": None, "email": None, "avatar_url": None, "resolution": "local"},
         )
         self.fetcher.assert_not_awaited()
 

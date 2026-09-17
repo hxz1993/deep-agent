@@ -331,6 +331,41 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(overview["metrics"]["question_count"], 2)
         self.assertEqual(detail_event_metadata(await self.store.list_all_events("legacy"))["message_count"], 0)
 
+    async def test_single_user_profile_is_admin_only_validated_and_no_store(self):
+        from deep_agent.security.diagnostic_users import DiagnosticUserAuthenticationError
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=True, roles=("enterprise_admin",))
+        calls = []
+        async def profiles(request, caller, ids):
+            calls.append((caller, ids, request.headers.get("authorization")))
+            return {uid: {"user_id": uid, "username": "tester", "email": "test@example.com", "resolution": "resolved"} for uid in ids}
+        path = "/api/v1/diagnostics/sessions/user-profile"
+        with patch("deep_agent.security.diagnostic_users.resolve_diagnostic_users", profiles):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.get(path, params={"user_id": "4"}, headers={"user": "caller", "authorization": "test-only"})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers["cache-control"], "no-store")
+                self.assertEqual(response.json()["user"]["user_id"], "4")
+                self.assertEqual(calls, [("caller", ["4"], "test-only")])
+                for params in ({}, {"user_id": ""}, {"user_id": " "}, {"user_id": "x" * 129}, {"user_id": " x"}, [("user_id", "4"), ("user_id", "5")]):
+                    invalid = await client.get(path, params=params, headers={"user": "caller"})
+                    self.assertEqual(invalid.status_code, 422)
+                    self.assertEqual(invalid.headers["cache-control"], "no-store")
+                app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=False, roles=())
+                denied = await client.get(path, params={"user_id": "4"}, headers={"user": "caller"})
+                self.assertEqual(denied.status_code, 403)
+                self.assertEqual(denied.headers["cache-control"], "no-store")
+                self.assertEqual(len(calls), 1)
+        app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=True, roles=("enterprise_admin",))
+        async def expired(*args):
+            raise DiagnosticUserAuthenticationError(401)
+        with patch("deep_agent.security.diagnostic_users.resolve_diagnostic_users", expired):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                expired_result = await client.get(path, params={"user_id": "4"}, headers={"user": "caller"})
+                self.assertEqual(expired_result.status_code, 401)
+                self.assertEqual(expired_result.headers["cache-control"], "no-store")
+
     async def test_admin_cross_owner_history_event_permissions_and_no_store(self):
         await self.question("private", user="other-user", terminal="completed")
         ctx = SimpleNamespace(db_session_factory=self.factory, active_runs=self.active, store=self.store,
@@ -410,13 +445,21 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=True, roles=("enterprise_admin",))
         async def profiles(_request, _caller, ids):
             self.assertLessEqual(len(ids), 100)
-            return {uid: {"display_name": "LY" if uid == "user-101" else "Alice"} for uid in ids}
+            return {uid: {"display_name": "LY" if uid == "user-101" else "Alice",
+                          "username": "LY" if uid == "user-101" else "Alice",
+                          "nickname": "李亚" if uid == "user-101" else None,
+                          "email": "ly@example.test" if uid == "user-101" else None} for uid in ids}
         with patch("deep_agent.security.diagnostic_users.resolve_diagnostic_users", profiles):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
                 params = {"start": self.filters.start.isoformat(), "end": self.filters.end.isoformat(), "after": "user-099", "query": "ly"}
                 response = await client.get("/api/v1/diagnostics/sessions/users", params=params, headers={"user": "admin"})
                 self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.json()["items"], [{"user_id":"user-101", "display_name":"LY"}])
+                self.assertEqual(response.json()["items"], [{"user_id":"user-101", "display_name":"LY",
+                    "username": "LY", "nickname": "李亚", "email": "ly@example.test"}])
+                for query in ("李亚", "LY@EXAMPLE"):
+                    params["query"] = query
+                    response = await client.get("/api/v1/diagnostics/sessions/users", params=params, headers={"user":"admin"})
+                    self.assertEqual([item["user_id"] for item in response.json()["items"]], ["user-101"])
                 params["query"] = "user-100"
                 response = await client.get("/api/v1/diagnostics/sessions/users", params=params, headers={"user":"admin"})
                 self.assertEqual(response.json()["items"][0]["user_id"], "user-100")

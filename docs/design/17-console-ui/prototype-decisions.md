@@ -1,13 +1,6 @@
 # Console UI 原型与取舍记录
 
-> 本文件沉淀可复用结论。保留的统一侧边栏与 0825 单层导航原型位于本课题目录；一次性 HTML、OpenDesign 工程副本和截图缓存仍在任务结束清理。
-
-保留原型：
-
-- [`Prototype DeepAgent 统一侧边栏/`](<Prototype DeepAgent 统一侧边栏/>)：从仓库根迁入。
-- [`Prototype DeepAgent 0825 单层导航方案/`](<Prototype DeepAgent 0825 单层导航方案/>)：从 `console/prototypes/` 迁入，保留四种导航方案的对比与折叠演示。
-
-这些目录作为设计交付材料保存，不作为并行产品页面或生产实现依据；原型内容不随目录整理改写。
+> 本文件沉淀可复用结论。已落地的导航、用户字段、渠道与企微原型及截图已清理，历史版本可从 Git 恢复；尚未实施的数据流 AI 集成原型继续保留。以下视觉取舍为阶段记录，当前规范见 `console-ui-design.md` 与 Console UI 指南。
 
 ## 1. 参考来源
 

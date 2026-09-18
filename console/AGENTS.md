@@ -279,8 +279,8 @@ Headers JSON使用透明输入层与语法高亮层重叠，两层及高亮token
   完整ID用于查询，缩略仅展示；日志Run ID保留原值，不支持页面筛选/跳转，日志跳会话只传Session ID，旧log路由run_id忽略。
   会话内部的真实问题/异常事件定位不受影响。复制不得冒泡触发跳转，返回恢复分页和滚动。
 - 这两个查询页面使用限定作用域的`diagnostics-design.css`（直接映射Console主题变量）以及各自CSS；不全局导入
-  DevBox样式，也不影响会话详情和其他目录。旧视觉依据、生成提示词、合成截图/逐点比较保存在
-  `docs/design/23-diagnostics-and-logs/visual-rebuild-20260910/`；图片中的演示计数不能进入生产。
+  DevBox样式，也不影响会话详情和其他目录。旧视觉依据和截图已清理，历史可从 Git 恢复；回归夹具位于
+  `tests/frontend/console/fixtures/diagnostics-visual-fixtures.mjs`，其中的演示计数不能进入生产。
   可复跑`node tests/frontend/console/diagnostics-visual-review.mjs`：默认隔离路由夹具；`--mode live`
   仅同源GET/HEAD，禁止执行请求和外网。浏览器必须finally关闭，截图通过不等于像素完全相等。
 
@@ -377,7 +377,7 @@ Console会话渲染模块边界：
 - `session-inspector.js`：共用概览/当前/上下文与已有渠道信息，只读取注入的会话数据；不取管理员当前测试身份替代历史。
 - `chat.js`：保留工作台请求编排、SSE、Session/附件/Context状态和执行副作用，使用共享Presenter，不维护第二套事件投影。
 - `diagnostic-detail.js`：独立只读宿主，复用以上呈现与轨迹，不复制整页工作台或挂载可写工具widget。
-- 诊断页面视觉以 `docs/design/23-diagnostics-and-logs/interactive-prototype` 的 L4/S1/S2 为基线；
+- 诊断页面视觉以当前 Console UI 指南与正式实现为准；旧 L4/S1/S2 原型已清理，历史可从 Git 恢复；
   表格保留外框、表头与行分隔，图表保留坐标与参考线，不把减少装饰理解成全面去边框。
   用户信息只显示用户名，资料缺失回退真实 ID，不再显示头像或邮箱。详情严格复用对话测试模板与信息栏，
   不新增用户卡、轮次日志栏或跳日志按钮。日志右上筛选首行时间/来源/等级/Session ID，次行关键词/查询/重置，不提供Run筛选；

@@ -183,13 +183,6 @@ class ProjectLayoutTest(unittest.TestCase):
                 self.assertFalse(path.is_symlink())
 
     def test_console_prototypes_are_kept_outside_the_production_static_root(self):
-        prototype_root = REPO_ROOT / "docs/design/17-console-ui"
-        for name in (
-            "Prototype DeepAgent 0825 单层导航方案",
-            "Prototype DeepAgent 统一侧边栏",
-        ):
-            with self.subTest(prototype=name):
-                self.assertTrue((prototype_root / name / "index.html").is_file())
         self.assertFalse(any((REPO_ROOT / "console").rglob("*Prototype*")))
 
     def test_gateway_imports_only_the_canonical_modules_without_starting_lifespan(self):

@@ -212,6 +212,5 @@ Compose 显式保留仓库根作为项目目录，避免配置文件移位后改
 进入系统废纸篓。后续验证按需创建 `tmp/`，产物标记 `TMP_to_delete`，在测试结束或任务收尾时清理。
 稳定数据库、本地文件、依赖环境与用户交付材料不得作为临时产物清理。
 
-保留的侧边栏原型统一放在 `docs/design/17-console-ui/`，包括 0825 单层导航方案和
-[`docs/design/17-console-ui/Prototype DeepAgent 统一侧边栏/`](<../design/17-console-ui/Prototype DeepAgent 统一侧边栏/>)。
-生产界面只从 `console/` 发布，原型不进入产品运行链路。
+已落地的侧边栏、渠道、诊断与安装界面原型及截图已清理；历史材料可从 Git 恢复。
+尚未实施的设计材料继续放在 `docs/design/`。生产界面只从 `console/` 发布。

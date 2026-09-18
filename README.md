@@ -64,7 +64,7 @@ v0.8.3 将本地与线上统一到上述源码目录，业务逻辑和接口不�
 `migrations/` 与 `deploy/`，不依赖符号链接，也不增加 `pyproject.toml`、Python wheel 或前端构建。
 
 稳定 `data/`、`.venv` 和 `.venv-sandbox` 保留；临时产物只在验证期间存放于 `tmp/`，任务结束清理。
-统一侧边栏原型归入 `docs/design/17-console-ui/`，Jenkins 原始脚本只在 `docs/archive/jenkins/` 归档。
+已落地原型已清理，尚未实施的设计保留在 `docs/design/`，Jenkins 原始脚本只在 `docs/archive/jenkins/` 归档。
 
 完整边界见
 [`docs/guides/project-structure.md`](docs/guides/project-structure.md)。

@@ -50,7 +50,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workers',type=int,default=4)
     parser.add_argument('--limit',type=int)
-    parser.add_argument('--report-dir',type=Path,default=Path('docs/reports/agent-package-matrix'))
+    parser.add_argument('--report-dir',type=Path,default=Path('output/TMP_to_delete-agent-package-matrix'))
     args=parser.parse_args()
     cases=list(all_cases()); assert len(cases)==TOTAL_CASES
     if args.limit: cases=cases[:args.limit]

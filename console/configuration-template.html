@@ -24,7 +24,7 @@
               <span class="global-settings-section-copy">配置 Agent 的搜索供应商。</span>
             </div>
             <div class="global-settings-section-actions">
-              <span class="global-settings-summary-value" id="webSearchSummaryValue">会话原生搜索</span>
+              <span class="global-settings-summary-value" id="webSearchSummaryValue">会话模型原生搜索</span>
               <button class="btn" id="openWebSearchSettingsBtn" type="button"><i data-lucide="pencil"></i>编辑</button>
             </div>
           </div>
@@ -297,7 +297,7 @@
             <label class="web-search-mode-card">
               <input type="radio" name="webSearchMode" value="native" checked />
               <span class="web-search-mode-dot" aria-hidden="true"></span>
-              <span><strong>会话原生搜索</strong></span>
+              <span><strong>会话模型原生搜索</strong></span>
             </label>
             <label class="web-search-mode-card">
               <input type="radio" name="webSearchMode" value="provider" />
@@ -308,7 +308,26 @@
         </fieldset>
 
         <div class="web-search-native-copy" data-web-search-detail="native">
-          <p>支持 DeepSeek、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter。</p>
+          <p>使用当前会话模型及其供应商提供的搜索能力，实际可用性以测试结果为准。</p>
+          <details class="web-search-support-details">
+            <summary>更多：已知支持情况</summary>
+            <div>
+              <p>已实测：DeepSeek V4 Pro；Kimi K3、K2.7 Code Highspeed、K2.6。</p>
+              <p>已接入：OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter，具体模型可在下方测试。</p>
+              <p>已知不支持：DeepSeek Flash。可改用指定供应商提供搜索。</p>
+            </div>
+          </details>
+          <div class="field web-search-native-test">
+            <span>测试模型</span>
+            <div class="web-search-native-test-row">
+              <div class="console-select" data-console-select="webSearchTestModel">
+                <button class="console-select-trigger" id="webSearchTestModelTrigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="webSearchTestModelLabel">请选择模型</span><i data-lucide="chevron-down"></i></button>
+                <div class="console-select-menu hidden" id="webSearchTestModelMenu" role="listbox" aria-label="选择测试模型"></div>
+                <select class="hidden" id="webSearchTestModel" tabindex="-1" aria-hidden="true"></select>
+              </div>
+              <button class="btn" id="testWebSearchModelBtn" type="button"><i data-lucide="plug-zap"></i>测试</button>
+            </div>
+          </div>
         </div>
 
         <div class="web-search-provider-fields hidden" data-web-search-detail="provider">
@@ -332,10 +351,10 @@
             </div>
             <div class="field" data-web-search-field="model">
               <span>模型</span>
-              <div class="console-combobox" id="webSearchModelCombobox">
-                <input id="webSearchModel" name="model" type="text" autocomplete="off" />
-                <button class="console-combobox-toggle" id="webSearchModelToggle" type="button" title="选择模型" aria-label="选择模型" aria-expanded="false"><i data-lucide="chevron-down"></i></button>
+              <div class="console-select" data-console-select="webSearchModel">
+                <button class="console-select-trigger" id="webSearchModelTrigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="webSearchModelLabel"></span><i data-lucide="chevron-down"></i></button>
                 <div class="console-select-menu hidden" id="webSearchModelMenu" role="listbox" aria-label="选择搜索模型"></div>
+                <select class="hidden" id="webSearchModel" tabindex="-1" aria-hidden="true"></select>
               </div>
             </div>
           </div>
@@ -374,12 +393,11 @@
               <button class="btn" id="testWebSearchKeylessBtn" type="button"><i data-lucide="plug-zap"></i>测试连接</button>
             </div>
           </div>
-
-          <div class="web-search-test-feedback hidden" id="webSearchTestFeedback" role="status" aria-live="polite">
+        </div>
+        <div class="web-search-test-feedback hidden" id="webSearchTestFeedback" role="status" aria-live="polite">
             <span class="web-search-test-feedback-dot" aria-hidden="true"></span>
             <span id="webSearchTestFeedbackText"></span>
           </div>
-        </div>
       </div>
 
       <footer class="modal-footer">
@@ -975,7 +993,14 @@
       <div class="modal-header"><h3 id="integrationConfigTitle">集成配置</h3><button type="button" class="icon-btn" data-integration-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <div class="modal-body integration-dialog-columns">
         <section class="integration-editor-pane" aria-label="配置"><h4 id="integrationConfigCode"></h4><p class="field-hint" id="integrationConfigDescription"></p><div id="integrationEditor"></div><div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div></section>
-        <section class="integration-example-pane" aria-label="接口示例"><h4>接口示例</h4><div id="integrationApiContent"></div><button type="button" class="btn" id="retryIntegrationApiBtn" hidden>重试</button></section>
+        <section class="integration-example-pane" aria-label="集成说明">
+          <div class="integration-detail-tabs" id="integrationDetailTabs" role="tablist" aria-label="集成说明">
+            <button type="button" id="integrationApiTab" role="tab" aria-selected="true" aria-controls="integrationApiPanel" data-integration-tab="api">接口示例</button>
+            <button type="button" id="integrationFeaturesTab" role="tab" aria-selected="false" aria-controls="integrationFeaturesPanel" tabindex="-1" data-integration-tab="features">适用功能</button>
+          </div>
+          <div id="integrationApiPanel" class="integration-detail-panel" role="tabpanel" aria-labelledby="integrationApiTab"><div id="integrationApiContent"></div><button type="button" class="btn" id="retryIntegrationApiBtn" hidden>重试</button></div>
+          <div id="integrationFeaturesPanel" class="integration-detail-panel" role="tabpanel" aria-labelledby="integrationFeaturesTab" hidden></div>
+        </section>
       </div>
       <div class="modal-footer"><button type="button" class="btn" data-integration-close>取消</button><button type="submit" class="btn primary" id="saveIntegrationConfigBtn">保存</button></div>
     </form>

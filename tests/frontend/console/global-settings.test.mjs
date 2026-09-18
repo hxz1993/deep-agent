@@ -57,6 +57,79 @@ function loadGlobalSettingsUi() {
   return window.__GlobalSettingsUI;
 }
 
+function webSearchOperationHarness() {
+  const nodes = new Map();
+  const requests = [];
+  const node = (id) => {
+    if (!nodes.has(id)) nodes.set(id, {
+      value: "", disabled: false, open: true, dataset: {},
+      classList: { toggle() {} }, close() { this.open = false; },
+    });
+    return nodes.get(id);
+  };
+  const context = vm.createContext({
+    window: {}, AbortController, escapeHtml,
+    document: { addEventListener() {}, getElementById: node },
+    apiFetch: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })),
+    showToast() {},
+  });
+  vm.runInContext(source, context);
+  vm.runInContext(`
+    selectedWebSearchMode = () => "native";
+    currentWebSearchDraft = () => ({ version: 1, value: { mode: "native" } });
+    renderConsoleSelect = () => {};
+    closeWebSearchMenus = () => {};
+    renderWebSearchSettings = () => setWebSearchTestFeedback();
+    renderWebSearchTestModels([{ id: "model-a", name: "Model A" }]);
+  `, context);
+  return { context, node, requests, admin: context.window.globalSettingsAdmin };
+}
+
+test("迟到的模型列表不能解锁当前测试，测试和保存均拒绝重复调用", async () => {
+  const h = webSearchOperationHarness();
+  const pending = h.admin.testWebSearch();
+  vm.runInContext('renderWebSearchTestModels([{ id: "model-a", name: "Model A" }])', h.context);
+  assert.equal(h.node("testWebSearchModelBtn").disabled, true);
+  await h.admin.testWebSearch();
+  await h.admin.saveWebSearch();
+  assert.equal(h.requests.length, 1);
+  h.requests[0].resolve({ ok: true, message: "搜索成功" });
+  await pending;
+  assert.equal(h.node("testWebSearchModelBtn").disabled, false);
+});
+
+test("关闭重开后的旧测试结果和 finally 不得覆盖或解锁新测试", async () => {
+  const h = webSearchOperationHarness();
+  const old = h.admin.testWebSearch();
+  vm.runInContext("closeWebSearchSettings()", h.context);
+  assert.equal(h.requests[0].options.signal.aborted, true);
+  h.node("webSearchSettingsDialog").open = true;
+  const next = h.admin.testWebSearch();
+  h.requests[0].resolve({ ok: true, message: "旧结果" });
+  await old;
+  assert.equal(h.node("webSearchTestFeedback").dataset.status, "testing");
+  assert.equal(h.node("testWebSearchModelBtn").disabled, true);
+  assert.equal(h.node("saveWebSearchBtn").disabled, true);
+  h.requests[1].resolve({ ok: true, message: "新结果" });
+  await next;
+  assert.equal(h.node("webSearchTestFeedbackText").textContent, "新结果");
+  assert.equal(h.node("saveWebSearchBtn").disabled, false);
+});
+
+test("保存期间阻止关闭和重复提交，失败后保留编辑器并解锁", async () => {
+  const h = webSearchOperationHarness();
+  const pending = h.admin.saveWebSearch();
+  vm.runInContext("closeWebSearchSettings()", h.context);
+  await h.admin.saveWebSearch();
+  await h.admin.testWebSearch();
+  assert.equal(h.node("webSearchSettingsDialog").open, true);
+  assert.equal(h.requests.length, 1);
+  h.requests[0].reject(new Error("保存失败"));
+  await pending;
+  assert.equal(h.node("webSearchSettingsDialog").open, true);
+  assert.equal(h.node("saveWebSearchBtn").disabled, false);
+});
+
 test("旧搜索配置失效不阻止展示运行设置和打开修复草稿", async () => {
   const summary = {}, window = {};
   const context = vm.createContext({
@@ -119,7 +192,7 @@ test("Agent 是配置中心默认页，系统分组包含全局配置和模型�
 test("Web Search 配置采用两个显式模式并列出原生供应商", () => {
   assert.match(templateHtml, /value="native" checked/);
   assert.match(templateHtml, /value="provider"/);
-  assert.match(templateHtml, /DeepSeek、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter/);
+  assert.match(templateHtml, /已实测：DeepSeek V4 Pro[\s\S]*已接入：OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter/);
   assert.doesNotMatch(templateHtml, /Kimi 请选择|当前模型搜索|无需额外配置/);
   assert.doesNotMatch(templateHtml, /Web Fetch/);
   assert.match(templateHtml, /id="testWebSearchBtn"/);
@@ -139,7 +212,7 @@ test("Web Search 配置采用两个显式模式并列出原生供应商", () => 
   assert.match(source, /webSearchSettingsDialog[\s\S]*showModal\(\)/);
   assert.match(source, /this\.webSearch = saved;[\s\S]*webSearchSettingsDialog"\)\?\.close\(\)/);
   assert.match(templateHtml, /class="console-select-trigger" id="webSearchProviderTrigger"/);
-  assert.match(templateHtml, /id="webSearchModelToggle"/);
+  assert.match(templateHtml, /id="webSearchModelTrigger"/);
   assert.match(templateHtml, /name="webSearchCredentialSource" value="llm_provider"/);
   assert.match(templateHtml, /name="webSearchCredentialSource" value="api_key"/);
   assert.match(templateHtml, /id="webSearchLlmProvider"/);
@@ -147,7 +220,7 @@ test("Web Search 配置采用两个显式模式并列出原生供应商", () => 
   assert.doesNotMatch(templateHtml, /id="webSearchApiKeyHint"|输入 DeepSeek 的 API Key/);
   assert.doesNotMatch(templateHtml, /class="web-search-mode-detail/);
   assert.match(templateHtml, /web-search-mode-dot/);
-  assert.match(templateHtml, /<strong>会话原生搜索<\/strong>/);
+  assert.match(templateHtml, /<strong>会话模型原生搜索<\/strong>/);
   assert.match(templateHtml, /<strong>指定供应商<\/strong>/);
   assert.match(templateHtml, /沿用供应商/);
   assert.match(templateHtml, /单独 API Key/);
@@ -194,12 +267,12 @@ test("Web Search 连接测试在当前弹框内展示简短反馈", () => {
 
 test("Web Search 摘要只回显当前生效的一个供应商选择", () => {
   const ui = loadGlobalSettingsUi();
-  assert.equal(ui.webSearchSummaryLabel({ value: { mode: "native" } }), "会话原生搜索");
+  assert.equal(ui.webSearchSummaryLabel({ value: { mode: "native" } }), "会话模型原生搜索");
   assert.equal(
     ui.webSearchSummaryLabel({ value: { mode: "provider", provider: "tavily" } }),
     "Tavily",
   );
-  assert.match(templateHtml, /id="webSearchSummaryValue">会话原生搜索/);
+  assert.match(templateHtml, /id="webSearchSummaryValue">会话模型原生搜索/);
   const webSearchSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsWebSearch">[\s\S]*?<\/section>/)?.[0] || "";
   assert.match(webSearchSection, /Web Search[\s\S]*?配置 Agent 的搜索供应商。[\s\S]*?id="webSearchSummaryValue"[\s\S]*?openWebSearchSettingsBtn/);
   assert.doesNotMatch(webSearchSection, /global-settings-summary-row|<p|当前支持|Kimi/);
@@ -216,7 +289,7 @@ test("不同搜索供应商只生成必要配置", () => {
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "deepseek", model: "", apiKey: "secret", credentialSource: "api_key" }))),
-    { version: 1, value: { mode: "provider", provider: "deepseek", model: "deepseek-v4-flash", credential_source: "api_key", api_key: "secret" } },
+    { version: 1, value: { mode: "provider", provider: "deepseek", model: "deepseek-v4-pro", credential_source: "api_key", api_key: "secret" } },
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "kimi", model: "kimi-k3", credentialSource: "llm_provider", llmProviderId: "provider-1" }))),

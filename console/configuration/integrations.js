@@ -10,7 +10,7 @@
     render(settings, agents) {
       const selected = settings?.agent_id || '';
       const missing = selected && !agents.some(agent => agent.id === selected);
-      return `<div class="field integration-agent-field"><span class="integration-agent-label"><label for="integrationAgentId">Agent</label><button type="button" id="clearIntegrationAgentBtn" class="btn-link">清空</button></span><select id="integrationAgentId" aria-label="Agent"><option value="" hidden disabled ${!selected ? 'selected' : ''}>未配置</option>${missing ? `<option value="${escapeHtml(selected)}" selected disabled hidden>Agent 已不可用（${escapeHtml(String(selected).slice(0, 8))}）</option>` : ''}${agents.map(agent => `<option value="${escapeHtml(agent.id)}" ${agent.id === selected ? 'selected' : ''}>${escapeHtml(agent.name)}</option>`).join('')}</select></div>${!agents.length ? '<p class="field-hint">暂无 Agent，请先在 Agent 页面创建。</p>' : ''}`;
+      return `<div class="field integration-agent-field"><span class="integration-agent-label"><label for="integrationAgentId">Agent</label><button type="button" id="clearIntegrationAgentBtn" class="btn-link">清空</button></span><select id="integrationAgentId" aria-label="Agent"><option value="" hidden disabled ${!selected ? 'selected' : ''}>请设置</option>${missing ? `<option value="${escapeHtml(selected)}" selected disabled hidden>Agent 已不可用（${escapeHtml(String(selected).slice(0, 8))}）</option>` : ''}${agents.map(agent => `<option value="${escapeHtml(agent.id)}" ${agent.id === selected ? 'selected' : ''}>${escapeHtml(agent.name)}</option>`).join('')}</select></div>${!agents.length ? '<p class="field-hint">暂无 Agent，请先在 Agent 页面创建。</p>' : ''}`;
     },
     read(settings, agents) {
       const id = el('integrationAgentId').value;
@@ -22,6 +22,20 @@
   const descriptions = {
     'deeptable-assistant': '选择电子表格助手关联的 Agent。电子表格组件会读取此配置，并使用所选 Agent 发起对话；助手的模型、工具与指令由该 Agent 的配置决定。',
     'deepcube-assistant': '选择 Python Server 中 DeepCube 助手关联的 Agent。组件会读取此配置，并使用所选 Agent 发起对话；助手的模型、工具与指令由该 Agent 的配置决定。',
+  };
+  const features = {
+    'deeptable-assistant': [
+      ['messages-square', '对话入口', '电子表格组件通过所选 Agent 发起对话'],
+      ['table-2', '表格上下文', '结合组件传入的页面、选区与业务上下文'],
+      ['wrench', '工具与技能', '沿用所选 Agent 已配置的工具和 Skill'],
+      ['sparkles', '模型与指令', '模型、系统指令等由 Agent 统一维护'],
+    ],
+    'deepcube-assistant': [
+      ['messages-square', '对话入口', 'Python Server 中的 DeepCube 助手对话'],
+      ['square-code', '脚本上下文', '结合组件传入的脚本与 DeepCube 上下文'],
+      ['wrench', '工具与技能', '沿用所选 Agent 已配置的工具和 Skill'],
+      ['sparkles', '模型与指令', '具体能力取决于 Agent 配置与用户权限'],
+    ],
   };
   const editors = { 'deeptable-assistant': agentEditor, 'deepcube-assistant': agentEditor };
   const admin = {
@@ -38,7 +52,7 @@
         const [result, agents] = await Promise.all([apiFetch('/api/v1/integrations', options), apiFetch('/api/v1/agents', options)]);
         if (generation !== this.listGeneration) return;
         if (!Array.isArray(result?.groups) || result.groups.some(group => !Array.isArray(group.integrations)) || !Array.isArray(agents)) throw new Error('集成目录加载失败，请重试。');
-        this.items = result.groups.flatMap(group => group.integrations);
+        this.items = result.groups.flatMap(group => group.integrations.map(item => ({ ...item, groupName: group.name })));
         this.agents = agents;
         this.render();
       } catch (error) {
@@ -48,7 +62,7 @@
       }
     },
     render() {
-      el('integrationTableBody').innerHTML = this.items.length ? this.items.map(item => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td><code>${escapeHtml(item.code)}</code></td><td class="${!item.settings?.agent_id ? 'integration-unconfigured' : ''}">${escapeHtml(editors[item.code]?.summary(item.settings, this.agents) || '—')}</td><td><div class="row-actions integration-row-actions"><button type="button" class="btn" data-integration-configure="${escapeHtml(item.code)}"><i data-lucide="settings-2"></i>配置</button></div></td></tr>`).join('') : '<tr><td colspan="4" class="empty-cell">暂无集成</td></tr>';
+      el('integrationTableBody').innerHTML = this.items.length ? this.items.map(item => `<tr><td><div class="integration-identity"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.groupName || '')}</small></div></td><td><code>${escapeHtml(item.code)}</code></td><td class="${!item.settings?.agent_id ? 'integration-unconfigured' : ''}">${escapeHtml(editors[item.code]?.summary(item.settings, this.agents) || '—')}</td><td><div class="row-actions integration-row-actions"><button type="button" class="btn" data-integration-configure="${escapeHtml(item.code)}"><i data-lucide="settings-2"></i>配置</button></div></td></tr>`).join('') : '<tr><td colspan="4" class="empty-cell">暂无集成</td></tr>';
       window.lucide?.createIcons();
     },
     find(code) { return this.items.find(item => item.code === code); },
@@ -58,6 +72,9 @@
       if (!item) return;
       ++this.editGeneration; this.editingCode = code;
       el('integrationConfigTitle').textContent = item.name;
+      el('integrationFeaturesPanel').innerHTML = `<p class="field-hint">以下说明仅描述集成用途，实际能力以关联 Agent 的配置为准。</p>${(features[code] || []).map(([icon, title, description]) => `<div class="integration-feature"><i data-lucide="${icon}" aria-hidden="true"></i><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div></div>`).join('')}`;
+      this.selectTab('api');
+      window.lucide?.createIcons();
       el('integrationConfigCode').textContent = code;
       el('integrationConfigDescription').textContent = descriptions[code] || '';
       AdminFormFeedback.clear(el('integrationConfigForm'));
@@ -65,6 +82,16 @@
       el('saveIntegrationConfigBtn').disabled = !editors[code];
       if (!el('integrationConfigModal').open) el('integrationConfigModal').showModal();
       void this.loadApi(code);
+    },
+    selectTab(name) {
+      if (name !== 'features' && name !== 'api') return;
+      el('integrationFeaturesPanel').hidden = name !== 'features';
+      el('integrationApiPanel').hidden = name !== 'api';
+      el('integrationDetailTabs').querySelectorAll('[data-integration-tab]').forEach(button => {
+        const selected = button.dataset.integrationTab === name;
+        button.setAttribute('aria-selected', String(selected));
+        button.tabIndex = selected ? 0 : -1;
+      });
     },
     setBusy(value) {
       this.busy = value;
@@ -144,6 +171,18 @@ ${escapeHtml(JSON.stringify(spec.response_example, null, 2))}</code></pre>`;
     el('integrationConfigForm')?.addEventListener('submit', event => admin.save(event));
     el('integrationConfigModal')?.querySelectorAll('[data-integration-close]').forEach(button => button.addEventListener('click', () => admin.closeConfig()));
     el('integrationConfigModal')?.addEventListener('cancel', event => { event.preventDefault(); admin.closeConfig(); });
+    el('integrationDetailTabs')?.addEventListener('click', event => {
+      const button = event.target.closest('[data-integration-tab]');
+      if (button && !admin.busy) admin.selectTab(button.dataset.integrationTab);
+    });
+    el('integrationDetailTabs')?.addEventListener('keydown', event => {
+      const button = event.target.closest('[data-integration-tab]');
+      if (!button || admin.busy || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const name = event.key === 'Home' ? 'api' : event.key === 'End' ? 'features' : button.dataset.integrationTab === 'features' ? 'api' : 'features';
+      admin.selectTab(name);
+      el('integrationDetailTabs').querySelector(`[data-integration-tab="${name}"]`).focus();
+    });
     el('retryIntegrationApiBtn')?.addEventListener('click', () => admin.loadApi());
     el('integrationEditor')?.addEventListener('click', event => {
       if (!event.target.closest('#clearIntegrationAgentBtn') || admin.busy) return;

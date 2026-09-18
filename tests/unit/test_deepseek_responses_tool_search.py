@@ -37,7 +37,7 @@ def config(provider_type="deepseek", *, custom=False):
 
 def model_for(provider_type="deepseek", *, custom=False):
     return resolve_provider_model(
-        model_name="deepseek-v4-flash-vision-exp" if provider_type == "deepseek" else "gpt-5.4",
+        model_name="deepseek-v4-pro" if provider_type == "deepseek" else "gpt-5.4",
         provider=config(provider_type, custom=custom), native_web_search=True,
     )
 
@@ -117,7 +117,7 @@ class DeepSeekResponsesToolSearchTests(unittest.IsolatedAsyncioTestCase):
                            "content": [{"type": "output_text", "text": "done", "annotations": []}]}]
             return httpx2.Response(200, json={
                 "id": f"resp-{index}", "object": "response", "created_at": 1,
-                "model": "deepseek-v4-flash-vision-exp", "status": "completed", "output": output,
+                "model": "deepseek-v4-pro", "status": "completed", "output": output,
                 "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
             })
 

@@ -2320,8 +2320,20 @@ async function runChatStream(payload, assistant) {
     });
 
     if (!resp.ok || !resp.body) {
-      const detail = await resp.text().catch(() => "");
-      throw new Error(`HTTP ${resp.status} ${detail}`.trim());
+      // An explicit rejection happens before SSE admission. There may be no
+      // persisted session yet; reloading History would erase this error and
+      // the unsaved question, then leave the composer waiting on a 404.
+      // Timeouts/server errors remain ambiguous and still recover History.
+      if (resp.status >= 400 && resp.status < 500 && resp.status !== 408) {
+        state.refreshHistoryAfterStream = false;
+      }
+      let detail = await resp.text().catch(() => "");
+      try {
+        const body = JSON.parse(detail);
+        detail = typeof body?.detail === "string" ? body.detail
+          : typeof body?.message === "string" ? body.message : detail;
+      } catch { /* Non-JSON upstream errors keep their response text. */ }
+      throw new Error(detail || `HTTP ${resp.status}`);
     }
     if (!current()) return;
     setConn("ok", "已连接");

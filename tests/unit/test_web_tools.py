@@ -16,6 +16,7 @@ from deep_agent.ptc.file_payload import CODE_MODE_METADATA_KEY
 from deep_agent.web.package import build_web_tool_package
 from deep_agent.web.runtime import (
     _search_duckduckgo,
+    _search_deepseek,
     _search_tavily,
     _html_to_markdown,
     _web_fetch_tool,
@@ -104,6 +105,7 @@ class WebSearchCredentialTests(unittest.IsolatedAsyncioTestCase):
                     name="DeepSeek Session",
                     provider_type="deepseek",
                     api_key="session-secret",
+                    use_default_base_url=True,
                 )
 
         config = await load_web_search_config(Store(), LlmConfiguration())
@@ -525,6 +527,38 @@ class WebImageViewTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProviderSearchRoutingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_deepseek_plain_text_is_not_a_successful_search(self) -> None:
+        result = SimpleNamespace(
+            output="See https://example.com/invented-source",
+            all_messages=lambda: [ModelResponse(parts=[])],
+        )
+        with patch("deep_agent.web.runtime.Agent") as agent:
+            agent.return_value.run = AsyncMock(return_value=result)
+            with self.assertRaisesRegex(ToolFailed, "did not execute web_search"):
+                await _search_deepseek(WebSearchRuntimeConfig(
+                    mode="provider", provider="deepseek", api_key="fixture-only",
+                ), "fixture query")
+
+    async def test_deepseek_failed_native_result_is_not_success(self) -> None:
+        result = SimpleNamespace(output="https://example.com", all_messages=lambda: [
+            ModelResponse(parts=[NativeToolReturnPart(tool_name="web_search", content={"status": "failed"})])
+        ])
+        with patch("deep_agent.web.runtime.Agent") as agent:
+            agent.return_value.run = AsyncMock(return_value=result)
+            with self.assertRaises(ToolFailed):
+                await _search_deepseek(WebSearchRuntimeConfig(
+                    mode="provider", provider="deepseek", api_key="fixture-only",
+                ), "fixture query")
+
+    async def test_deepseek_custom_provider_address_is_used_by_search_and_probe(self) -> None:
+        from deep_agent.web.runtime import _deepseek_search_model
+        model = _deepseek_search_model(WebSearchRuntimeConfig(
+            mode="provider", provider="deepseek", api_key="fixture-only",
+            base_url="https://custom.example/v1",
+        ))
+        async with model:
+            self.assertEqual(str(model.client.base_url), "https://custom.example/v1/")
+
     async def test_pydantic_search_rows_are_normalized_from_typed_dicts(self) -> None:
         async def fake_duck(query: str):
             return [{"title": "Duck", "href": "https://duck.example", "body": query}]

@@ -1,8 +1,8 @@
 .integration-row-actions { flex-wrap: nowrap; }
 .integration-row-actions .btn { white-space: nowrap; }
-.integration-table th:last-child { width: 82px; text-align: right; }
+.integration-table th:last-child { width: 104px; text-align: right; }
 .integration-table td:nth-child(2), .integration-table td:nth-child(3) { overflow-wrap: anywhere; }
-dialog#integrationConfigModal { width: min(920px, calc(100vw - 40px)); height: min(680px, calc(100dvh - 48px)); max-width: none; max-height: none; }
+dialog#integrationConfigModal { width: min(920px, calc(100vw - 40px)); height: min(620px, calc(100dvh - 48px)); max-width: none; max-height: none; }
 #integrationConfigForm { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 #integrationConfigModal .modal-header, #integrationConfigModal .modal-footer { flex-shrink: 0; }
 #integrationConfigModal .integration-dialog-columns { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); padding: 0; flex: 1; min-height: 0; max-height: none; overflow: hidden; }
@@ -28,3 +28,21 @@ dialog#integrationConfigModal { width: min(920px, calc(100vw - 40px)); height: m
 .integration-agent-label .btn-link { padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
 .integration-agent-label .btn-link:hover { text-decoration: underline; }
 .integration-agent-label .btn-link:disabled { color: var(--text-faint); cursor: default; }
+
+.integration-table td { padding-top: 12px; padding-bottom: 12px; }
+.integration-table th:first-child { width: 30%; }
+.integration-table th:nth-child(2) { width: 29%; }
+.integration-identity { display: flex; flex-direction: column; gap: 2px; }
+.integration-identity small { color: var(--text-dim); font-size: 12px; }
+.integration-detail-tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--border); margin-bottom: 20px; flex-shrink: 0; }
+.integration-detail-tabs button { padding: 0 0 10px; border: 0; border-radius: 0; background: transparent; color: var(--text-dim); font: inherit; font-size: 12px; cursor: pointer; }
+.integration-detail-tabs button[aria-selected="true"] { color: var(--accent); box-shadow: 0 2px var(--accent); }
+.integration-detail-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.integration-detail-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
+.integration-detail-panel[hidden] { display: none; }
+#integrationFeaturesPanel > .field-hint { margin: 0 0 12px; font-size: 12px; line-height: 1.8; }
+.integration-feature { display: flex; align-items: center; gap: 12px; padding: 15px 0; border-bottom: 1px solid var(--border); }
+.integration-feature:last-child { border-bottom: 0; }
+.integration-feature > svg { width: 17px; height: 17px; flex-shrink: 0; color: var(--accent); }
+.integration-feature strong { font-size: 13px; font-weight: 600; }
+.integration-feature p { margin: 3px 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.7; }

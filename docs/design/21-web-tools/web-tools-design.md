@@ -49,23 +49,31 @@ DuckDuckGo没有Key；其他固定Provider只有Key。切换Provider时不复用
 - `GET /api/v1/global-settings/web-search`
 - `PUT /api/v1/global-settings/web-search`
 - `POST /api/v1/global-settings/web-search/test`
+- `POST /api/v1/global-settings/web-search/test-model`：入参`model_id`，读取当前有效模型与Provider，复用会话搜索适配器，仅暴露待测搜索能力，60秒/最多2次模型请求；必须有成功搜索工具结果，不保存配置或会话。
 
 均沿用Console企业管理员门禁。测试接口直接测试未保存草稿，只返回成功或脱敏短错误，不保存配置，
-也不返回结果正文。
+也不返回结果正文。测试统一使用查找 Python 官网最新版本的简单问题；支持流式工具事件的供应商收到成功搜索结果即关闭流；Gemini/OpenRouter等仅在完整响应暴露搜索凭证的适配器保留短回答验证，分别检查grounding与搜索调用统计，Kimi 指定供应商在 Formula 成功后结束，不再调用模型整理答案。实际聊天仍保留完整搜索与回答流程。
 
 Console路径为“配置中心 → 全局配置”。同一页按上下顺序展示“Web Search”和“运行设置”；后者
 继续展示既有环境变量事实，不显示只读标签。Web Search平时只回显当前方式，点击编辑后选择“当前
 模型”或“指定Provider”。Provider与模型同排，凭据位于下一排；所有选择器使用Console统一的
-自定义下拉。DeepSeek/Kimi额外显示“沿用会话Provider / 单独配置API Key”二选一。
+自定义下拉。会话模型原生搜索支持从当前可用模型中选择并测试，显示供应商图标与模型名。
+指定供应商模型只能从实测名单选择：DeepSeek默认V4 Pro；Kimi默认K3，其次K2.7 Code Highspeed、K2.6。
+DeepSeek/Kimi额外显示“沿用会话Provider / 单独配置API Key”二选一。
 
 ## 运行路由
 
 ### 当前模型
 
 Pydantic AI `WebSearch(native=True, local=False)`进入本次请求的Capabilities；模型装配在请求级
-切换到对应原生适配：DeepSeek/OpenAI使用Responses，Anthropic/Google保持原生模型，OpenRouter
-使用其模型适配。Moonshot/Kimi、Alibaba、Z.AI和普通OpenAI-Compatible没有本仓原生适配时明确
+切换到对应原生适配：OpenAI使用Responses，Anthropic/Google保持原生模型，OpenRouter
+使用其模型适配。DeepSeek Flash、Alibaba、Z.AI和普通OpenAI-Compatible没有本仓原生适配时明确
 失败，不切DuckDuckGo。
+
+2026-09-18按模型核验：DeepSeek Flash及旧Flash别名会忽略原生`web_search`，但`deepseek-v4-pro`仍支持；Pro继续使用Responses与原生工具白名单。
+DeepSeek对话模型仍可配合固定搜索Provider使用普通函数工具。
+Moonshot/Kimi使用官方Formula `moonshot/web-search:latest`，以普通`web_search`函数交给当前模型，
+用当前Provider的地址和凭据执行搜索，密文结果原样回传当前模型，不另起辅助模型。
 
 ### 指定Provider
 
@@ -73,8 +81,10 @@ Pydantic AI `WebSearch(native=True, local=False)`进入本次请求的Capabiliti
 
 - DuckDuckGo、Tavily：Pydantic AI Common Tools，普通结果上限5、30秒。
 - Exa、You.com：Harness工具，普通结果上限5、30秒。
-- DeepSeek：Responses原生WebSearch包成辅助搜索，120秒。
-- Kimi：官方`$web_search`工具循环包成辅助搜索，最多4轮、120秒。
+- DeepSeek：保留历史配置读取，Responses辅助搜索必须收到真实原生搜索结果才算成功；当前Flash不支持，需选择`deepseek-v4-pro`或其他搜索Provider，普通文本回答不能通过测试。
+- Kimi：官方Formula工具循环包成辅助搜索，最多4轮、120秒；支持K3、K2.7 Code Highspeed与K2.6，保留reasoning_content和tool_call_id，搜索密文原样回放。旧`builtin_function.$web_search`在K3上报tokenization failed，已移除。
+- DeepSeek默认搜索模型为`deepseek-v4-pro`；旧显式模型配置仍保留并如实报错，不静默替换。
+- Kimi复用会话Provider时，同时沿用该Provider的API地址与凭据，避免Moonshot国内/国际地址混用。
 
 输出归一化为Provider、Query、内容、结果数、来源URL和“不可信外部内容”标记。鉴权、限流、超时、
 空结果和Provider失败各自关闭，不执行隐式降级。

@@ -18,11 +18,12 @@ from deep_agent.options import OPTION, DeepAgentOptions
 from deep_agent.schemas.llm_provider import mask_api_key
 from deep_agent.schemas.web_search import (
     WebSearchSettingsResponse,
+    WebSearchModelTestRequest,
     WebSearchSettingsWrite,
     WebSearchTestResponse,
     WebSearchValueResponse,
 )
-from deep_agent.web.runtime import probe_web_search_config
+from deep_agent.web.runtime import probe_web_search_config, probe_current_model_search
 from deep_agent.web.settings import (
     WEB_SEARCH_SCHEMA_VERSION,
     WEB_SEARCH_SETTING_KEY,
@@ -597,3 +598,23 @@ async def test_web_search_settings(
         message="连接成功",
         elapsed_ms=elapsed_ms,
     )
+
+
+@router.post("/global-settings/web-search/test-model", response_model=WebSearchTestResponse)
+async def test_web_search_model(body: WebSearchModelTestRequest, ctx: AppContextDep) -> WebSearchTestResponse:
+    from deep_agent.models.provider_registry import model_unavailable_reason
+
+    row = await ctx.stores.llm_model.get_by_id(body.model_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="模型不存在")
+    provider = await ctx.stores.llm_configuration.get_provider(row.provider_id)
+    if provider is None or model_unavailable_reason(row, provider):
+        raise HTTPException(status_code=422, detail="模型未启用或供应商配置不可用")
+    started = time.monotonic()
+    try:
+        await probe_current_model_search(row, provider)
+    except ToolFailed as exc:
+        return WebSearchTestResponse(ok=False, provider=provider.provider_type,
+            message=str(exc), elapsed_ms=int((time.monotonic() - started) * 1000))
+    return WebSearchTestResponse(ok=True, provider=provider.provider_type,
+        message="搜索测试成功", elapsed_ms=int((time.monotonic() - started) * 1000))

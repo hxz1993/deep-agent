@@ -19,7 +19,7 @@ WebSearchCredentialSource = Literal["api_key", "llm_provider"]
 
 _PROVIDERS = frozenset({"deepseek", "kimi", "tavily", "exa", "you", "duckduckgo"})
 _MODEL_DEFAULTS = {
-    "deepseek": "deepseek-v4-flash",
+    "deepseek": "deepseek-v4-pro",
     "kimi": "kimi-k3",
 }
 _KEYLESS_PROVIDERS = frozenset({"duckduckgo"})
@@ -42,6 +42,8 @@ class WebSearchRuntimeConfig:
     credential_source: WebSearchCredentialSource | None = None
     llm_provider_id: str | None = None
     llm_provider_name: str | None = None
+    # Runtime-only: never persist a second copy of the provider endpoint.
+    base_url: str | None = None
 
     def to_stored_value(self) -> dict[str, Any]:
         if self.mode == "native":
@@ -173,10 +175,13 @@ async def resolve_web_search_credentials(
         raise WebSearchConfigurationError(
             f"Selected LLM provider has no API key: {row.name}"
         )
+    from deep_agent.models.provider_registry import ProviderRuntimeConfig, effective_base_url
+
     return replace(
         config,
         api_key=api_key,
         llm_provider_name=str(row.name),
+        base_url=effective_base_url(ProviderRuntimeConfig.from_row(row)),
     )
 
 

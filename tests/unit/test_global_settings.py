@@ -138,6 +138,32 @@ class GlobalSettingsApiTests(unittest.TestCase):
         reset_context()
         asyncio.run(self.engine.dispose())
 
+    def test_native_search_probe_validates_model_without_saving(self):
+        headers = {"user": "enterprise-admin"}
+        provider = self.client.post("/api/v1/llm-providers", headers=headers, json={
+            "name": "Kimi probe", "provider_type": "moonshotai", "use_default_base_url": True,
+            "api_key": "fixture-secret",
+        }).json()
+        response = self.client.post("/api/v1/llm-models", headers=headers, json={
+            "name": "K3", "model": "kimi-k3", "provider_id": provider["id"],
+            "input_modalities": ["text"], "context_window_tokens": 100000, "max_output_tokens": 1000,
+        })
+        self.assertEqual(response.status_code, 201, response.text)
+        model_id = response.json()["id"]
+        url = "/api/v1/global-settings/web-search/test-model"
+        with patch("deep_agent.api.v1.global_settings.probe_current_model_search", new=AsyncMock()) as probe:
+            result = self.client.post(url, headers=headers, json={"model_id": model_id})
+            self.assertTrue(result.json()["ok"], result.text)
+            self.assertEqual(probe.call_args.args[0].model, "kimi-k3")
+            self.assertEqual(probe.call_args.args[1].api_key, "fixture-secret")
+            self.assertIsNone(asyncio.run(self.stores.global_setting.get("web_search")))
+            self.assertNotIn("fixture-secret", result.text)
+            self.client.patch(f"/api/v1/llm-models/{model_id}", headers=headers, json={"enabled": False})
+            result = self.client.post(url, headers=headers, json={"model_id": model_id})
+            self.assertEqual(result.status_code, 422, result.text)
+            self.assertEqual(probe.await_count, 1)
+        self.assertEqual(self.client.post(url, headers=headers, json={"model_id": "missing"}).status_code, 404)
+
     def test_returns_grouped_read_only_settings_for_enterprise_admin(
         self,
     ) -> None:
@@ -202,7 +228,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
         self.assertEqual(created.status_code, 200, created.text)
         self.assertTrue(created.json()["value"]["api_key_set"])
         self.assertNotIn("deepseek-secret", created.text)
-        self.assertEqual(created.json()["value"]["model"], "deepseek-v4-flash")
+        self.assertEqual(created.json()["value"]["model"], "deepseek-v4-pro")
 
         retained = self.client.put(
             "/api/v1/global-settings/web-search",
@@ -372,7 +398,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
     def test_all_keyed_providers_validate_only_their_required_fields(self) -> None:
         headers = {"user": "enterprise-admin"}
         cases = (
-            ("deepseek", "deepseek-v4-flash"),
+            ("deepseek", "deepseek-v4-pro"),
             ("kimi", "kimi-k3"),
             ("tavily", None),
             ("exa", None),

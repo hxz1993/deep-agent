@@ -263,6 +263,7 @@ async def _build_runner_from_spec(
             )
             web_runtime = build_web_runtime(
                 web_config,
+                current_provider=spec.provider_config,
                 image_capable="image" in {
                     str(value).strip().lower()
                     for value in (spec.input_modalities or [])

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
@@ -95,6 +95,12 @@ class ProviderDefinitionTests(unittest.TestCase):
 
 
 class ProviderValidationTests(unittest.TestCase):
+    def test_rejected_native_search_does_not_allocate_http_client(self):
+        with patch("deep_agent.models.provider_registry._openai_style_provider") as create:
+            with self.assertRaises(ProviderConfigurationError):
+                resolve_provider_model(model_name="deepseek-flash", provider=_config("deepseek"), native_web_search=True)
+            create.assert_not_called()
+
     def test_effective_model_availability_is_provider_configuration(self) -> None:
         model = SimpleNamespace()
         self.assertIsNone(model_unavailable_reason(model, _config("deepseek")))
@@ -274,7 +280,7 @@ class ProviderModelAssemblyTests(unittest.TestCase):
 
     def test_native_web_search_selects_supported_model_protocols(self) -> None:
         for provider_type, model_name, expected_class in (
-            ("deepseek", "deepseek-v4-flash", OpenAIResponsesModel),
+            ("deepseek", "deepseek-v4-pro", OpenAIResponsesModel),
             ("openai", "gpt-5", OpenAIResponsesModel),
             ("openrouter", "openai/gpt-5", OpenRouterModel),
             ("anthropic", "claude-sonnet-4-5", AnthropicModel),
@@ -289,7 +295,7 @@ class ProviderModelAssemblyTests(unittest.TestCase):
                 self.assertIsInstance(model, expected_class)
 
     def test_native_web_search_rejects_unsupported_provider_without_fallback(self) -> None:
-        for provider_type in ("moonshotai", "alibaba", "zai", "openai_compatible"):
+        for provider_type in ("deepseek", "moonshotai", "alibaba", "zai", "openai_compatible"):
             with self.subTest(provider_type=provider_type):
                 config = _config(
                     provider_type,

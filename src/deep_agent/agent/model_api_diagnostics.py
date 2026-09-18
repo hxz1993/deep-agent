@@ -62,6 +62,13 @@ def _tool_names(tools: list) -> list[str]:
             continue
         function = tool.get("function")
         name = function.get("name") if isinstance(function, dict) else tool.get("name")
+        # Responses native tools have a type rather than a function name.
+        # Record only known protocol identifiers, never arbitrary tool config.
+        if name is None and tool.get("type") in {
+            "web_search", "web_search_preview", "tool_search", "file_search",
+            "code_interpreter", "image_generation", "computer_use_preview",
+        }:
+            name = tool["type"]
         if type(name) is str:
             names.append(name)
     return names

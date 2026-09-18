@@ -1,12 +1,14 @@
 const WEB_SEARCH_PROVIDERS = {
-  deepseek: { label: "DeepSeek", requiresKey: true, llmProviderType: "deepseek", defaultModel: "deepseek-v4-flash", models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"] },
-  kimi: { label: "Kimi", requiresKey: true, llmProviderType: "moonshotai", defaultModel: "kimi-k3", models: ["kimi-k3", "kimi-k2.6"] },
+  deepseek: { label: "DeepSeek", requiresKey: true, llmProviderType: "deepseek", defaultModel: "deepseek-v4-pro", models: ["deepseek-v4-pro"] },
+  kimi: { label: "Kimi", requiresKey: true, llmProviderType: "moonshotai", defaultModel: "kimi-k3", models: ["kimi-k3", "kimi-k2.7-code-highspeed", "kimi-k2.6"] },
   tavily: { label: "Tavily", requiresKey: true },
   exa: { label: "Exa", requiresKey: true },
   you: { label: "You.com", requiresKey: true },
   duckduckgo: { label: "DuckDuckGo", requiresKey: false },
 };
 let webSearchTestRunId = 0;
+let webSearchModelLoadId = 0;
+let webSearchOperation = null;
 
 function globalSettingSourceLabel(source) {
   return source === "environment" ? "环境配置" : "代码默认值";
@@ -115,9 +117,7 @@ function closeWebSearchMenus(exceptId = "") {
     }
   });
   document.querySelectorAll("#webSearchSettingsDialog [aria-expanded]").forEach((trigger) => {
-    const controls = trigger.id === "webSearchModelToggle"
-      ? "webSearchModelMenu"
-      : trigger.id.replace(/Trigger$/, "Menu");
+    const controls = trigger.id.replace(/Trigger$/, "Menu");
     if (controls !== exceptId) trigger.setAttribute("aria-expanded", "false");
   });
 }
@@ -145,10 +145,16 @@ function renderConsoleSelect(selectId, emptyLabel = "请选择") {
   if (!select || !label || !menu) return;
   const options = Array.from(select.options);
   const selected = options.find((option) => option.value === select.value);
-  label.textContent = selected?.textContent || emptyLabel;
+  const optionLabel = (option) => {
+    if (selectId !== "webSearchTestModel") return escapeHtml(option.textContent);
+    const model = globalSettingsAdmin.testModels.find((item) => item.id === option.value);
+    if (!model) return escapeHtml(option.textContent);
+    return `${providerBrandMarkup(model.provider)}<span>${escapeHtml(option.textContent)}</span>`;
+  };
+  label.innerHTML = selected ? optionLabel(selected) : escapeHtml(emptyLabel);
   menu.innerHTML = options.length ? options.map((option) => `
     <button class="console-select-option${option.value === select.value ? " selected" : ""}" type="button" role="option" aria-selected="${option.value === select.value}" data-console-select-value="${escapeHtml(option.value)}">
-      <span>${escapeHtml(option.textContent)}</span>${option.value === select.value ? '<i data-lucide="check" aria-hidden="true"></i>' : ""}
+      <span class="web-search-option-label">${optionLabel(option)}</span>${option.value === select.value ? '<i data-lucide="check" aria-hidden="true"></i>' : ""}
     </button>`).join("") : `<div class="console-select-empty">${escapeHtml(emptyLabel)}</div>`;
   window.lucide?.createIcons();
 }
@@ -190,19 +196,27 @@ function setWebSearchCredentialSource(source) {
   if (input) input.checked = true;
 }
 
-function renderWebSearchModelMenu(query = "") {
+function renderWebSearchModelMenu() {
   const provider = document.getElementById("webSearchProvider")?.value || "deepseek";
-  const models = providerUiState(provider).models;
-  const normalized = String(query || "").trim().toLowerCase();
-  const visible = models.filter((model) => !normalized || model.toLowerCase().includes(normalized));
-  const current = document.getElementById("webSearchModel")?.value || "";
-  const menu = document.getElementById("webSearchModelMenu");
-  if (!menu) return;
-  menu.innerHTML = visible.length ? visible.map((model) => `
-    <button class="console-select-option${model === current ? " selected" : ""}" type="button" role="option" aria-selected="${model === current}" data-web-search-model="${escapeHtml(model)}">
-      <span>${escapeHtml(model)}</span>${model === current ? '<i data-lucide="check" aria-hidden="true"></i>' : ""}
-    </button>`).join("") : `<div class="console-select-empty">可直接输入模型名称</div>`;
-  window.lucide?.createIcons();
+  const config = providerUiState(provider);
+  const select = document.getElementById("webSearchModel");
+  if (!select) return;
+  const selected = config.models.includes(select.value) ? select.value : config.defaultModel;
+  select.innerHTML = config.models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("");
+  select.value = selected;
+  renderConsoleSelect("webSearchModel");
+}
+
+function renderWebSearchTestModels(models) {
+  globalSettingsAdmin.testModels = models;
+  const select = document.getElementById("webSearchTestModel");
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = models.map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name || model.model)}</option>`).join("");
+  select.value = models.some((model) => model.id === previous) ? previous : (models[0]?.id || "");
+  document.getElementById("webSearchTestModelTrigger").disabled = !models.length;
+  document.getElementById("testWebSearchModelBtn").disabled = Boolean(webSearchOperation) || !models.length;
+  renderConsoleSelect("webSearchTestModel", "无可用模型");
 }
 
 function renderWebSearchLlmProviderOptions(provider, selectedId = "") {
@@ -216,7 +230,7 @@ function renderWebSearchLlmProviderOptions(provider, selectedId = "") {
 
 function webSearchSummaryLabel(settings) {
   const value = settings?.value || { mode: "native" };
-  if (value.mode !== "provider") return "会话原生搜索";
+  if (value.mode !== "provider") return "会话模型原生搜索";
   return WEB_SEARCH_PROVIDERS[value.provider]?.label || value.provider || "未配置";
 }
 
@@ -331,7 +345,9 @@ function renderWebSearchSettings(settings) {
   if (providerInput) providerInput.value = provider;
   renderConsoleSelect("webSearchProvider");
   const modelInput = document.getElementById("webSearchModel");
-  if (modelInput) modelInput.value = value.model || providerUiState(provider).defaultModel;
+  renderWebSearchModelMenu();
+  if (modelInput && providerUiState(provider).models.includes(value.model)) modelInput.value = value.model;
+  renderConsoleSelect("webSearchModel");
   setWebSearchCredentialSource(value.credential_source || (value.llm_provider_id ? "llm_provider" : "api_key"));
   renderWebSearchLlmProviderOptions(provider, value.llm_provider_id || "");
   const apiKey = document.getElementById("webSearchApiKey");
@@ -352,19 +368,47 @@ function currentWebSearchDraft() {
 }
 
 function setWebSearchBusy(busy) {
-  ["saveWebSearchBtn", "cancelWebSearchBtn", "testWebSearchBtn", "testWebSearchLlmProviderBtn", "testWebSearchKeylessBtn"].forEach((id) => {
+  ["saveWebSearchBtn", "cancelWebSearchBtn", "testWebSearchBtn", "testWebSearchLlmProviderBtn", "testWebSearchKeylessBtn", "testWebSearchModelBtn"].forEach((id) => {
     const button = document.getElementById(id);
-    if (button) button.disabled = Boolean(busy);
+    if (button) button.disabled = Boolean(busy) || (id === "testWebSearchModelBtn" && !globalSettingsAdmin.testModels.length);
   });
 }
 
-function openWebSearchSettings() {
+function beginWebSearchOperation(kind) {
+  if (webSearchOperation) return null;
+  const operation = { kind, controller: new AbortController() };
+  webSearchOperation = operation;
+  setWebSearchBusy(true);
+  return operation;
+}
+
+function finishWebSearchOperation(operation) {
+  if (webSearchOperation !== operation) return;
+  webSearchOperation = null;
+  setWebSearchBusy(false);
+}
+
+async function openWebSearchSettings() {
   renderWebSearchSettings(globalSettingsAdmin.webSearch);
   const dialog = document.getElementById("webSearchSettingsDialog");
   if (dialog && !dialog.open) dialog.showModal();
+  const loadId = ++webSearchModelLoadId;
+  renderWebSearchTestModels([]);
+  try {
+    const models = await apiFetch("/api/v1/llm-models");
+    if (loadId === webSearchModelLoadId && dialog?.open) renderWebSearchTestModels(models);
+  } catch (error) {
+    if (loadId === webSearchModelLoadId && dialog?.open) setWebSearchTestFeedback("error", error.message || "模型加载失败");
+  }
 }
 
 function closeWebSearchSettings() {
+  if (webSearchOperation?.kind === "save") return;
+  if (webSearchOperation) {
+    webSearchOperation.controller.abort();
+    finishWebSearchOperation(webSearchOperation);
+  }
+  webSearchModelLoadId += 1;
   closeWebSearchMenus();
   renderWebSearchSettings(globalSettingsAdmin.webSearch);
   const dialog = document.getElementById("webSearchSettingsDialog");
@@ -373,6 +417,7 @@ function closeWebSearchSettings() {
 
 const globalSettingsAdmin = {
   groups: [],
+  testModels: [],
   query: "",
   webSearch: null,
   async refresh() {
@@ -406,7 +451,8 @@ const globalSettingsAdmin = {
     renderGlobalSettings(this.groups, this.query);
   },
   async saveWebSearch() {
-    setWebSearchBusy(true);
+    const operation = beginWebSearchOperation("save");
+    if (!operation) return;
     try {
       const saved = await apiFetch("/api/v1/global-settings/web-search", {
         method: "PUT",
@@ -419,28 +465,36 @@ const globalSettingsAdmin = {
     } catch (error) {
       showToast(error?.message || "Web Search 配置保存失败", true);
     } finally {
-      setWebSearchBusy(false);
+      finishWebSearchOperation(operation);
     }
   },
   async testWebSearch() {
+    if (webSearchOperation) return;
+    const native = selectedWebSearchMode() === "native";
+    const modelId = document.getElementById("webSearchTestModel")?.value;
+    if (native && !modelId) {
+      setWebSearchTestFeedback("error", "请选择测试模型");
+      return;
+    }
     const requestId = ++webSearchTestRunId;
-    setWebSearchBusy(true);
+    const operation = beginWebSearchOperation("test");
     setWebSearchTestFeedback("testing");
     try {
-      const result = await apiFetch("/api/v1/global-settings/web-search/test", {
+      const result = await apiFetch(native ? "/api/v1/global-settings/web-search/test-model" : "/api/v1/global-settings/web-search/test", {
         method: "POST",
-        body: JSON.stringify(currentWebSearchDraft()),
+        signal: operation.controller.signal,
+        body: JSON.stringify(native ? { model_id: modelId } : currentWebSearchDraft()),
       });
-      if (requestId !== webSearchTestRunId) return;
+      if (webSearchOperation !== operation || requestId !== webSearchTestRunId) return;
       setWebSearchTestFeedback(
         result?.ok ? "success" : "error",
         result?.message || (result?.ok ? "连接成功" : "连接失败"),
       );
     } catch (error) {
-      if (requestId !== webSearchTestRunId) return;
+      if (webSearchOperation !== operation || requestId !== webSearchTestRunId) return;
       setWebSearchTestFeedback("error", error?.message || "连接测试失败");
     } finally {
-      setWebSearchBusy(false);
+      finishWebSearchOperation(operation);
     }
   },
 };
@@ -467,6 +521,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("closeWebSearchSettingsBtn")?.addEventListener("click", closeWebSearchSettings);
   bindConsoleSelect("webSearchProvider");
   bindConsoleSelect("webSearchLlmProvider");
+  bindConsoleSelect("webSearchModel");
+  bindConsoleSelect("webSearchTestModel");
   document.querySelectorAll('input[name="webSearchMode"]').forEach((input) => input.addEventListener("change", updateWebSearchMode));
   document.getElementById("webSearchProvider")?.addEventListener("change", () => {
     const modelInput = document.getElementById("webSearchModel");
@@ -475,41 +531,23 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.querySelectorAll('input[name="webSearchCredentialSource"]').forEach((input) => input.addEventListener("change", () => updateWebSearchProvider()));
   document.getElementById("webSearchLlmProvider")?.addEventListener("change", () => setWebSearchTestFeedback());
-  document.getElementById("webSearchModelToggle")?.addEventListener("click", () => {
-    const menu = document.getElementById("webSearchModelMenu");
-    const trigger = document.getElementById("webSearchModelToggle");
-    if (!menu || !trigger) return;
-    const opening = menu.classList.contains("hidden");
-    renderWebSearchModelMenu(document.getElementById("webSearchModel")?.value);
-    closeWebSearchMenus(opening ? menu.id : "");
-    menu.classList.toggle("hidden", !opening);
-    trigger.setAttribute("aria-expanded", String(opening));
-    if (opening) positionWebSearchMenu(trigger, menu);
-  });
-  document.getElementById("webSearchModel")?.addEventListener("input", (event) => {
-    setWebSearchTestFeedback();
-    renderWebSearchModelMenu(event.target.value);
-  });
-  document.getElementById("webSearchModelMenu")?.addEventListener("click", (event) => {
-    const option = event.target.closest("[data-web-search-model]");
-    if (!option) return;
-    const input = document.getElementById("webSearchModel");
-    if (input) input.value = option.dataset.webSearchModel;
-    renderWebSearchModelMenu();
-    closeWebSearchMenus();
-  });
+  ["webSearchModel", "webSearchTestModel"].forEach((id) => document.getElementById(id)?.addEventListener("change", () => setWebSearchTestFeedback()));
+  document.getElementById("testWebSearchModelBtn")?.addEventListener("click", () => globalSettingsAdmin.testWebSearch());
   document.getElementById("webSearchSettingsForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     globalSettingsAdmin.saveWebSearch();
   });
   document.getElementById("cancelWebSearchBtn")?.addEventListener("click", closeWebSearchSettings);
-  document.getElementById("webSearchSettingsDialog")?.addEventListener("cancel", () => renderWebSearchSettings(globalSettingsAdmin.webSearch));
+  document.getElementById("webSearchSettingsDialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeWebSearchSettings();
+  });
   document.getElementById("testWebSearchBtn")?.addEventListener("click", () => globalSettingsAdmin.testWebSearch());
   document.getElementById("testWebSearchLlmProviderBtn")?.addEventListener("click", () => globalSettingsAdmin.testWebSearch());
   document.getElementById("testWebSearchKeylessBtn")?.addEventListener("click", () => globalSettingsAdmin.testWebSearch());
   document.getElementById("webSearchApiKey")?.addEventListener("input", () => setWebSearchTestFeedback());
   document.addEventListener("click", (event) => {
-    if (!event.target.closest("#webSearchSettingsDialog .console-select, #webSearchSettingsDialog .console-combobox")) closeWebSearchMenus();
+    if (!event.target.closest("#webSearchSettingsDialog .console-select")) closeWebSearchMenus();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeWebSearchMenus();

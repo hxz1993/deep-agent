@@ -58,3 +58,9 @@ class WebSearchTestResponse(BaseModel):
     provider: str
     message: str
     elapsed_ms: int
+
+
+class WebSearchModelTestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_id: str = Field(min_length=1, max_length=64)

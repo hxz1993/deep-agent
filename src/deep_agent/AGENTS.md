@@ -249,15 +249,28 @@ Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处
 
 DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前上下文压缩使用这一层；DeepSeek V4 已交由 Pydantic AI 官方 Provider/Profile，不再注册项目自定义重试能力。
 
-DeepSeek 会话原生搜索按供应商协议进入 Responses，并声明 `WebSearchTool`；不按模型名称设置本地允许／拒绝名单，型号及别名原样发给供应商。供应商失败保留脱敏错误；搜索测试与固定搜索工具必须收到真实成功搜索证据，不能把普通文本回答算作搜索成功。历史实测结论不得变成型号门禁。
-2026-09-10的原生Tool Search重名400兼容仍保留：MCP发现通过普通函数回退，不能重新继承SDK的原生ToolSearch。该限制针对工具协议，不限制模型型号。
-`test_deepseek_responses_tool_search.py`覆盖序列化和旧历史回放；`test_deepseek_tool_search.py`覆盖固定搜索Chat路径及任意型号原生请求。
+2026-09-19 独立搜索改版本地已实现，尚未发布。Web 统一披露普通 `web_search(query)`，不再向主会话
+注入原生搜索 Capability，不按主会话模型选择搜索实现，也不切换 DeepSeek 主会话协议。
+DeepSeek 搜索在 `web/deepseek.py` 中异步直调 Anthropic Messages，默认 `deepseek-flash`，
+声明 `web_search_20250305`，只解析结构化结果和引用片段，不创建辅助 Agent。
+Kimi 在 `web/kimi.py` 直接调用 `/v1/tools/search`，无 model、无辅助 Chat、Formula 或 Responses 后备。
+DuckDuckGo/Tavily 复用 Common Tools，Exa/You.com 复用 Harness。运行时不限制模型名称，不自动降级或换供应商。
 
+`web/settings.py` 将空配置、无记录和旧 native 归一为 `unconfigured`，读取不写库；坏引用、缺 Key、
+无效 Provider 地址携带 `configuration_error`。不在装配阶段因这些配置问题拒绝 Run；实际搜索时使用
+`ToolFailed` 生成同 ID 的失败 Tool Result，模型可继续回答，SSE/History/事件协议不变。
+管理保存仅接受 `mode=provider`；三个 Console 入口不增加存储层级。Kimi 旧 model 读取忽略、保存移除；
+复用 Provider 只存引用不复制 Key。GET 回显 `configuration_error`；旧 `/test-model` 返回410。
+新库最终无默认搜索行：已发布001不改，`initialize_current_defaults()` 仅在空库初始化时清掉native种子；
+历史升级不删除记录，旧备份恢复仍按未配置解释。不得引入新的隐式搜索默认供应商。
 
-Moonshot当前模型搜索使用官方Formula普通`web_search`函数，沿用当前Provider地址和密钥；
-固定Kimi搜索用同一Formula执行器加辅助模型最多4轮。K3不能使用旧`$web_search`，
-K2.6思考模式不能强制`tool_choice=required`；均保留加密工具结果原文与调用ID。
-回归见`tests/unit/test_kimi_web_search.py`。搜索测试仅执行简单查询：有流式工具结果时立即结束并释放连接；Gemini grounding与OpenRouter搜索次数需在完整响应中核验，不把普通回答或URL视为成功。固定DeepSeek搜索也校验结果状态并沿用供应商地址。回归见`tests/unit/test_web_search_probe.py`。
+2026-09-10的原生Tool Search重名400兼容仍保留：MCP发现通过普通函数回退，不能重新继承SDK的原生ToolSearch。
+该限制针对工具协议，不限制模型型号；旧原生工具消息仍保持历史回读。协议历史探测结论见
+`../../docs/design/21-web-tools/web-tools-research.md`，不能用旧单句探针声称完整主会话原生搜索已接通。
+回归入口包括 `test_web_search_settings.py`、`test_global_settings.py`、`test_web_search_probe.py`、
+`test_kimi_web_search.py`、`test_web_search_failure_events.py`；测试搜索必须验证真实来源，HTTP200或回答文本不算成功。
+2026-09-19管理草稿沿用已有Provider Key实测：Kimi 1510 ms、DeepSeek Flash 3894 ms、Pro 15388 ms；
+不保存配置，耗时为单次观测；DuckDuckGo真实草稿测试约11.36秒通过。Tavily/Exa/You.com真实Key联调仍待补。
 
 模型每轮直接看到的是：Agent/能力 Instructions、`message_history`、当前用户输入/附件和本轮 Tool Definitions。Toolset 负责列出、准备和调用工具；MCP Prompt 不会自动进入模型工具列表。MCP Resource 由宿主侧动态代理工具按需读取。
 
@@ -273,8 +286,8 @@ ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工�
 v0.6.5起的公开Web实现位于`web/`。`builtin:web`提供`web_search/web_fetch`，v0.6.6另向
 图片输入模型注入外层普通工具`web_image_view`；该工具返回Pydantic AI原生`ImageUrl`且不进入Monty。
 `web_fetch`的HTML薄适配只负责过滤脚本/样式并在原位置保留绝对图片URL，不自动发送图片。全局唯一
-`global_settings.web_search`决定当前模型或固定Provider路由，但不能替代Agent显式授权。v0.6.7起
-Web工具不进入PTC；原生搜索由Provider执行。不得因此开放PTC内部Socket、平台凭据、任意Header或
+`global_settings.web_search`选择独立搜索Provider，但不能替代Agent显式授权。v0.6.7起
+Web工具不进入PTC。不得因此开放PTC内部Socket、平台凭据、任意Header或
 Internal HTTP。显式HTTP CONNECT代理下，`web/proxy_compat.py`只修正fake-IP
 公共解析与TLS SNI传递，并覆盖Pydantic AI组装下一次请求时的`ImageUrl(force_download=true)`延迟
 下载；SSRF地址校验、固定IP、重定向复检和正文解析仍由Pydantic AI负责。完整边界见

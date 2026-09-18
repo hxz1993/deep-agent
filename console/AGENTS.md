@@ -219,7 +219,7 @@ Headers JSON使用透明输入层与语法高亮层重叠，两层及高亮token
 - 增量事实轨迹测试须覆盖同轮part乱序/分批到达、助手行ID和来源ID稳定、usage不重复累计、并行工具
   先后返回、持久事件先于工具SSE无重复、异常SSE无重复异常行、取消无回执，以及旧RUN旁正常历史可读。
   History跟随仍须测试轮询串行、切会话忽略迟到结果、终态History失败不解锁、运行工具禁止提前交互。
-- 全局配置上下排列Web Search、紧凑数据库摘要和运行设置：Web Search默认只回显一个当前Provider选择，点击编辑后在标准Console弹窗中维护当前模型/指定Provider及当前Provider必填字段；Provider与模型同排并使用Console自定义下拉，DeepSeek/Kimi可选择沿用同类型会话Provider或单独配置API Key；条件字段直接落在弹窗正文，不增加装饰性配置卡片；Fetch无配置不展示；运行设置沿用原安全白名单。数据库摘要通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。Provider详情默认撑满剩余页面高度。会话标题使用首轮实际模型并通过`session/title`事件更新，不提供独立模型入口或轮询刷新。
+- 全局配置上下排列Web Search、紧凑数据库摘要和运行设置：Web Search默认只回显一个当前Provider选择，点击编辑后在标准Console弹窗中维护 DeepSeek / Kimi / 网络搜索服务商三段切换及外置“暂不配置”文字选项及当前 Provider 必填字段；空配置与旧 native 展示未配置，弹框选中“暂不配置”，DeepSeek 默认 Flash、直接展示搜索模型，Kimi 无模型字段；搜索入口共用既有 Provider 存储结构及草稿搜索测试，不再加载原生测试模型。DeepSeek/Kimi 可选择沿用同类型会话 Provider 或单独配置 API Key；条件字段直接落在弹窗正文，不增加装饰性配置卡片；Fetch无配置不展示；运行设置沿用原安全白名单。数据库摘要通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。Provider详情默认撑满剩余页面高度。会话标题使用首轮实际模型并通过`session/title`事件更新，不提供独立模型入口或轮询刷新。
 - “工具”统一提供 UI / 内置切换，默认 UI；新建工具包仅在 UI 视图显示。内置视图展示代码随版本发布、由Agent显式配置的工具包，以及运行时自动注入的系统工具；该视图没有注册、编辑、删除、全局启停入口，系统工具不得进入 Agent 能力勾选。
 - Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
   `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。

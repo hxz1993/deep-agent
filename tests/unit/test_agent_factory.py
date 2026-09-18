@@ -218,6 +218,36 @@ class ResolveModelTests(unittest.TestCase):
             any(module.startswith("deep_agent.models") for module in capability_modules)
         )
 
+    def test_web_toolset_preserves_main_chat_protocol_for_all_chat_providers(self) -> None:
+        for provider_type in (
+            "deepseek", "moonshotai", "openai", "openrouter", "alibaba", "zai",
+            "openai_compatible",
+        ):
+            with self.subTest(provider_type=provider_type):
+                web_toolset = FunctionToolset()
+                model_name = "openai/future-model-alias" if provider_type == "openrouter" else "future-model-alias"
+                spec = _spec(
+                    model=model_name,
+                    capabilities=["builtin:web"],
+                    provider_config=ProviderRuntimeConfig(
+                        id="fixture", name="fixture", provider_type=provider_type,
+                        use_default_base_url=provider_type != "openai_compatible",
+                        base_url="https://fixture.invalid/v1", api_key="fixture-only",
+                    ),
+                )
+                with mock.patch(
+                    "deep_agent.agent.factory._resolve_model", wraps=_resolve_model,
+                ) as resolve:
+                    agent = build_agent(spec, build_registry(), web_toolset=web_toolset)
+                resolve.assert_called_once_with(spec)
+                self.assertIsInstance(agent.model, OpenAIChatModel)
+                self.assertEqual(agent.model.model_name, model_name)
+                self.assertIn(web_toolset, agent.toolsets)
+                self.assertFalse(any(
+                    capability.__class__.__name__ == "WebSearch"
+                    for capability in agent.root_capability.capabilities
+                ))
+
     def test_harness_tool_output_limits_can_be_added_as_standard_capability(self) -> None:
         capability = ToolOutputLimits()
         agent = build_agent(

@@ -23,7 +23,7 @@ from deep_agent.schemas.web_search import (
     WebSearchTestResponse,
     WebSearchValueResponse,
 )
-from deep_agent.web.runtime import probe_web_search_config, probe_current_model_search
+from deep_agent.web.runtime import probe_web_search_config
 from deep_agent.web.settings import (
     WEB_SEARCH_SCHEMA_VERSION,
     WEB_SEARCH_SETTING_KEY,
@@ -31,6 +31,7 @@ from deep_agent.web.settings import (
     WebSearchRuntimeConfig,
     resolve_web_search_config,
     resolve_web_search_credentials,
+    read_web_search_config,
 )
 
 
@@ -460,6 +461,7 @@ def _web_search_response(row, config: WebSearchRuntimeConfig) -> WebSearchSettin
             credential_source=config.credential_source,
             llm_provider_id=config.llm_provider_id,
             llm_provider_name=config.llm_provider_name,
+            configuration_error=config.configuration_error,
         ),
         created_at=getattr(row, "created_at", None),
         updated_at=getattr(row, "updated_at", None),
@@ -474,29 +476,15 @@ async def _current_web_search(ctx: AppContextDep, *, for_write: bool = False):
             detail="Global settings store is unavailable",
         )
     row = await store.get(WEB_SEARCH_SETTING_KEY)
-    if row is None:
-        return None, WebSearchRuntimeConfig(mode="native")
+    if not for_write:
+        return row, await read_web_search_config(row, ctx.stores.llm_configuration)
     try:
-        if int(row.version) != WEB_SEARCH_SCHEMA_VERSION:
-            raise WebSearchConfigurationError(
-                f"Unsupported Web Search settings version: {row.version}"
-            )
-        config = resolve_web_search_config(row.value, require_credentials=not for_write)
-        if for_write:
-            # A draft replaces the stored configuration. Retain a same-provider
-            # key when parseable, but do not resolve a broken old provider first.
-            return row, config
-        return row, await resolve_web_search_credentials(
-            config,
-            ctx.stores.llm_configuration,
-        )
-    except WebSearchConfigurationError as exc:
-        if for_write:
-            return row, WebSearchRuntimeConfig(mode="native")
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Stored Web Search configuration is invalid: {exc}",
-        ) from exc
+        if row is not None and row.version == WEB_SEARCH_SCHEMA_VERSION:
+            # Preserve same-provider credentials, without resolving a stale reference.
+            return row, resolve_web_search_config(row.value, require_credentials=False)
+    except WebSearchConfigurationError:
+        pass
+    return row, WebSearchRuntimeConfig(mode="unconfigured")
 
 
 async def _resolve_web_search_write(
@@ -554,7 +542,7 @@ async def put_web_search_settings(
     logger.info(
         "Global Web Search configuration updated mode={} provider={}",
         config.mode,
-        config.provider or "current-model",
+        config.provider or "unconfigured",
     )
     return _web_search_response(row, config)
 
@@ -570,7 +558,7 @@ async def test_web_search_settings(
     _row, existing = await _current_web_search(ctx, for_write=True)
     config = await _resolve_web_search_write(body, existing=existing, ctx=ctx)
     started = time.monotonic()
-    provider = config.provider or "current-model"
+    provider = config.provider or "unconfigured"
     try:
         await probe_web_search_config(config)
     except ToolFailed as exc:
@@ -602,19 +590,7 @@ async def test_web_search_settings(
 
 @router.post("/global-settings/web-search/test-model", response_model=WebSearchTestResponse)
 async def test_web_search_model(body: WebSearchModelTestRequest, ctx: AppContextDep) -> WebSearchTestResponse:
-    from deep_agent.models.provider_registry import model_unavailable_reason
-
-    row = await ctx.stores.llm_model.get_by_id(body.model_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="模型不存在")
-    provider = await ctx.stores.llm_configuration.get_provider(row.provider_id)
-    if provider is None or model_unavailable_reason(row, provider):
-        raise HTTPException(status_code=422, detail="模型未启用或供应商配置不可用")
-    started = time.monotonic()
-    try:
-        await probe_current_model_search(row, provider)
-    except ToolFailed as exc:
-        return WebSearchTestResponse(ok=False, provider=provider.provider_type,
-            message=str(exc), elapsed_ms=int((time.monotonic() - started) * 1000))
-    return WebSearchTestResponse(ok=True, provider=provider.provider_type,
-        message="搜索测试成功", elapsed_ms=int((time.monotonic() - started) * 1000))
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="会话模型原生搜索测试已移除，请配置搜索供应商后测试。",
+    )

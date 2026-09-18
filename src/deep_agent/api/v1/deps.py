@@ -38,6 +38,7 @@ from deep_agent.web.settings import (
     WEB_PACKAGE_CODE,
     WebSearchConfigurationError,
     load_web_search_config,
+    WebSearchRuntimeConfig,
 )
 
 
@@ -263,16 +264,16 @@ async def _build_runner_from_spec(
             )
             web_runtime = build_web_runtime(
                 web_config,
-                current_provider=spec.provider_config,
                 image_capable="image" in {
                     str(value).strip().lower()
                     for value in (spec.input_modalities or [])
                 },
             )
         except WebSearchConfigurationError as exc:
-            from deep_agent.core.exceptions import ToolPackageError
-
-            raise ToolPackageError(f"Invalid Web Search configuration: {exc}") from exc
+            web_runtime = build_web_runtime(
+                WebSearchRuntimeConfig(mode="unconfigured", configuration_error=str(exc)),
+                image_capable="image" in (spec.input_modalities or []),
+            )
     agent = build_agent(
         spec,
         ctx.registry,
@@ -295,7 +296,6 @@ async def _build_runner_from_spec(
         ],
         estimator=estimator,
         web_toolset=(web_runtime.toolset if web_runtime is not None else None),
-        web_capability=(web_runtime.capability if web_runtime is not None else None),
     )
     limits = UsageLimits(
         request_limit=OPTION.agent.max_requests,

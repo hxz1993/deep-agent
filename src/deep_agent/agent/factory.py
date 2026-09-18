@@ -102,11 +102,7 @@ def _resolve_google(spec: AgentSpec, model_name: str) -> GoogleModel:
     return GoogleModel(model_name, provider=provider)
 
 
-def resolve_model(
-    spec: AgentSpec,
-    *,
-    native_web_search: bool = False,
-) -> str | Model:
+def resolve_model(spec: AgentSpec) -> str | Model:
     """Turn the spec's model string into a model for Pydantic AI.
 
     Persisted models always use their explicit provider configuration. The
@@ -126,7 +122,6 @@ def resolve_model(
             provider=spec.provider_config,
             input_modalities=spec.input_modalities,
             tags=spec.tags,
-            native_web_search=native_web_search,
         )
 
     provider_name = _model_provider_prefix(spec.model)
@@ -272,7 +267,6 @@ def build_agent(
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
     web_toolset: Any | None = None,
-    web_capability: AbstractCapability[AgentDeps] | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
@@ -285,7 +279,7 @@ def build_agent(
     # replace ``_resolve_model`` with a deterministic TestModel.  Calling the
     # public alias directly would bypass that replacement and accidentally send
     # test traffic to the configured Provider.
-    model = _resolve_model(spec, native_web_search=web_capability is not None)
+    model = _resolve_model(spec)
     toolsets = _toolsets_for_spec(
         registry,
         spec,
@@ -308,8 +302,6 @@ def build_agent(
         capabilities.append(skill_capability)
     if tool_output_limits is not None:
         capabilities.append(tool_output_limits)
-    if web_capability is not None:
-        capabilities.append(web_capability)
     if mcp_toolsets:
         capabilities.append(
             DeepAgentToolSearch(

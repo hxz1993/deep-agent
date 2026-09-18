@@ -16,9 +16,7 @@ import httpx2
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
-from pydantic_ai.models.openrouter import OpenRouterModel
-from pydantic_ai.native_tools import WebSearchTool
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.alibaba import AlibabaProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
@@ -315,7 +313,6 @@ def resolve_provider_model(
     provider: ProviderRuntimeConfig,
     input_modalities: list[str] | None = None,
     tags: list[str] | None = None,
-    native_web_search: bool = False,
     http_retry_attempts: int | None = None,
 ) -> Model:
     """Build a Pydantic AI model from an explicit model/provider pair."""
@@ -325,24 +322,6 @@ def resolve_provider_model(
         raise ProviderConfigurationError("LLM model name is required")
 
     if definition.model_protocol == "openai_chat":
-        if native_web_search:
-            if provider.provider_type == "deepseek":
-                # Model support is determined by the provider response, not a
-                # local model-name list. Keep only the protocol compatibility
-                # restriction that prevents duplicate MCP tool declarations.
-                return OpenAIResponsesModel(
-                    model_name,
-                    provider=_openai_style_provider(provider),
-                    profile={"supported_native_tools": frozenset({WebSearchTool})},
-                )
-            if provider.provider_type == "openai":
-                return OpenAIResponsesModel(model_name, provider=_openai_style_provider(provider))
-            if provider.provider_type == "openrouter":
-                return OpenRouterModel(model_name, provider=_openai_style_provider(provider))
-            raise ProviderConfigurationError(
-                "Current model Provider does not support native Web Search: "
-                f"{provider.provider_type}"
-            )
         runtime_provider = _openai_style_provider(provider)
         model_class = (
             OpenAICompatibleVideoChatModel

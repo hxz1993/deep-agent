@@ -511,6 +511,8 @@ html, body {
   align-items: center;
   gap: 12px;
 }
+.global-settings-summary-value.invalid { color: var(--danger-text); }
+.global-settings-summary-value.unconfigured { color: var(--text-faint); }
 .global-settings-summary-value { color: var(--accent); font-size: 13px; font-weight: 600; }
 
 .web-search-settings-form {
@@ -529,48 +531,46 @@ html, body {
 }
 dialog .modal-body.web-search-settings-body { max-height: none; overflow: visible; }
 
-.web-search-mode-fieldset { margin: 0; padding: 0; border: 0; }
+.web-search-mode-fieldset { position: relative; min-width: 0; margin: 0; padding: 0; border: 0; }
 .web-search-mode-fieldset legend { margin-bottom: 7px; font-size: 13px; font-weight: 700; }
 .web-search-mode-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-.web-search-mode-card {
-  position: relative;
-  display: flex;
-  min-height: 64px;
-  align-items: center;
-  gap: 9px;
-  padding: 9px 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  background: var(--console-surface, var(--bg));
-  cursor: pointer;
+  border-radius: 8px;
+  background: var(--bg);
 }
-.web-search-mode-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.web-search-mode-card input { position: absolute; opacity: 0; pointer-events: none; }
-.web-search-mode-dot {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
-  border: 1px solid var(--border-strong, var(--border));
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 3px var(--console-surface, var(--bg));
+.web-search-mode-option, .web-search-unconfigured-option { position: relative; min-width: 0; cursor: pointer; }
+.web-search-mode-option input, .web-search-unconfigured-option input { position: absolute; opacity: 0; pointer-events: none; }
+.web-search-mode-option > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
 }
-.web-search-mode-card.active .web-search-mode-dot { border-color: var(--accent); background: var(--accent); }
-.web-search-mode-card strong,
-.web-search-mode-card small { display: block; }
-.web-search-mode-card strong { font-size: 13px; }
-.web-search-mode-card small { margin-top: 3px; color: var(--text-dim); font-size: 12px; line-height: 1.35; }
+.web-search-mode-option img, .web-search-mode-option svg { width: 16px; height: 16px; flex: 0 0 16px; object-fit: contain; }
+.web-search-mode-option:has(input:checked) > span { color: var(--accent); background: var(--accent-soft); }
+.web-search-unconfigured-option { position: absolute; right: 0; top: -25px; color: var(--text-dim); font-size: 12px; }
+.web-search-unconfigured-option:hover, .web-search-unconfigured-option:has(input:checked) { color: var(--accent); }
+.web-search-unconfigured-option:has(input:checked) { text-decoration: underline; text-underline-offset: 3px; }
+.web-search-mode-option:has(input:focus-visible) > span, .web-search-unconfigured-option:has(input:focus-visible) > span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.web-search-mode-fieldset label:has(input:disabled) { cursor: not-allowed; opacity: .55; }
 
-.web-search-native-copy > p { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
+.web-search-unconfigured { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
 .web-search-provider-fields { display: grid; gap: 14px; }
 .web-search-provider-fields .field { min-width: 0; max-width: none; margin: 0; }
 .web-search-provider-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 .web-search-provider-grid > .field {
@@ -580,7 +580,6 @@ dialog .modal-body.web-search-settings-body { max-height: none; overflow: visibl
 }
 .web-search-provider-grid > .field > span { line-height: 18px; }
 .web-search-provider-grid > .field > .console-select { height: 36px; }
-.web-search-provider-grid.single .web-search-provider-field { grid-column: 1 / -1; }
 .web-search-credential-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -714,7 +713,7 @@ dialog .modal-body.web-search-settings-body { max-height: none; overflow: visibl
 .web-search-test-feedback[data-status="success"] { color: var(--success); }
 .web-search-test-feedback[data-status="error"] { color: var(--danger-text); }
 dialog.web-search-settings-dialog.console-detail-dialog.modal {
-  width: min(520px, calc(100vw - 28px));
+  width: min(460px, calc(100vw - 28px));
   height: min(460px, calc(100vh - 28px));
   overflow: visible;
 }
@@ -1413,12 +1412,10 @@ dialog.console-action-dialog::backdrop {
 }
 
 @media (max-width: 640px) {
-  .web-search-mode-grid { grid-template-columns: 1fr; }
   .web-search-provider-grid,
   .web-search-credential-row { grid-template-columns: 1fr; }
   .web-search-credential-source { align-items: stretch; flex-direction: column; gap: 6px; }
   .web-search-credential-options { width: 100%; max-width: none; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .web-search-provider-grid.single .web-search-provider-field { grid-column: auto; }
   dialog .modal-body.web-search-settings-body { max-height: calc(100vh - 120px); overflow-y: auto; }
   dialog.web-search-settings-dialog.console-detail-dialog.modal { overflow: hidden; }
   .global-settings-section-heading { align-items: stretch; flex-direction: column; }
@@ -3576,10 +3573,6 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 .channel-user-query-result small { display: block; color: var(--text-faint); }
 .channel-user-query-result[data-state="missing"], .channel-user-query-result[data-state="error"] { color: var(--danger-text); }
 
-.web-search-native-test { margin-top: 18px; max-width: none; }
-.web-search-native-test-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.web-search-native-test-row .console-select { min-width: 0; }
-#webSearchTestModelLabel, .web-search-option-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
-#webSearchTestModelLabel > span:last-child, .web-search-option-label > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#webSearchSettingsDialog .provider-brand-mark { width: 18px; height: 18px; flex: 0 0 18px; background: transparent; padding: 0; }
-#webSearchSettingsDialog .provider-brand-mark img { width: 16px; height: 16px; object-fit: contain; }
+@media (max-width: 440px) {
+  .web-search-mode-option > span { font-size: 12px; gap: 4px; padding: 0 3px; }
+}

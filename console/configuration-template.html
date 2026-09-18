@@ -24,7 +24,7 @@
               <span class="global-settings-section-copy">配置 Agent 的搜索供应商。</span>
             </div>
             <div class="global-settings-section-actions">
-              <span class="global-settings-summary-value" id="webSearchSummaryValue">会话模型原生搜索</span>
+              <span class="global-settings-summary-value" id="webSearchSummaryValue">未配置</span>
               <button class="btn" id="openWebSearchSettingsBtn" type="button"><i data-lucide="pencil"></i>编辑</button>
             </div>
           </div>
@@ -292,48 +292,38 @@
       </div>
       <div class="modal-body web-search-settings-body">
         <fieldset class="web-search-mode-fieldset">
-          <legend>搜索模式</legend>
+          <legend>搜索服务</legend>
+          <label class="web-search-unconfigured-option">
+            <input type="radio" name="webSearchCategory" value="unconfigured" />
+            <span>暂不配置</span>
+          </label>
           <div class="web-search-mode-grid">
-            <label class="web-search-mode-card">
-              <input type="radio" name="webSearchMode" value="native" checked />
-              <span class="web-search-mode-dot" aria-hidden="true"></span>
-              <span><strong>会话模型原生搜索</strong></span>
+            <label class="web-search-mode-option">
+              <input type="radio" name="webSearchCategory" value="deepseek" />
+              <span><img src="./assets/provider-logos/deepseek.ico" alt="" />DeepSeek</span>
             </label>
-            <label class="web-search-mode-card">
-              <input type="radio" name="webSearchMode" value="provider" />
-              <span class="web-search-mode-dot" aria-hidden="true"></span>
-              <span><strong>指定供应商</strong></span>
+            <label class="web-search-mode-option">
+              <input type="radio" name="webSearchCategory" value="kimi" />
+              <span><img src="./assets/provider-logos/kimi.ico" alt="" />Kimi</span>
+            </label>
+            <label class="web-search-mode-option">
+              <input type="radio" name="webSearchCategory" value="third-party" />
+              <span><i data-lucide="globe" aria-hidden="true"></i>网络搜索服务商</span>
             </label>
           </div>
         </fieldset>
-
-        <div class="web-search-native-copy" data-web-search-detail="native">
-          <p>使用当前会话模型的搜索能力，已接入 DeepSeek、Kimi、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter，具体模型可用性以实际测试结果为准。</p>
-          <div class="field web-search-native-test">
-            <span>测试模型</span>
-            <div class="web-search-native-test-row">
-              <div class="console-select" data-console-select="webSearchTestModel">
-                <button class="console-select-trigger" id="webSearchTestModelTrigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="webSearchTestModelLabel">请选择模型</span><i data-lucide="chevron-down"></i></button>
-                <div class="console-select-menu hidden" id="webSearchTestModelMenu" role="listbox" aria-label="选择测试模型"></div>
-                <select class="hidden" id="webSearchTestModel" tabindex="-1" aria-hidden="true"></select>
-              </div>
-              <button class="btn" id="testWebSearchModelBtn" type="button"><i data-lucide="plug-zap"></i>测试</button>
-            </div>
-          </div>
-        </div>
+        <p class="web-search-unconfigured" id="webSearchUnconfigured">保存后清空已有搜索配置。网络搜索将提示未配置，网页抓取仍可使用。</p>
 
         <div class="web-search-provider-fields hidden" data-web-search-detail="provider">
-          <div class="web-search-provider-grid" id="webSearchProviderGrid">
+          <div class="web-search-provider-grid" data-web-search-field="provider">
             <div class="field web-search-provider-field">
               <span>供应商</span>
               <div class="console-select" data-console-select="webSearchProvider">
                 <button class="console-select-trigger" id="webSearchProviderTrigger" type="button" aria-haspopup="listbox" aria-expanded="false">
-                  <span id="webSearchProviderLabel">DeepSeek</span><i data-lucide="chevron-down" aria-hidden="true"></i>
+                  <span id="webSearchProviderLabel">Tavily</span><i data-lucide="chevron-down" aria-hidden="true"></i>
                 </button>
                 <div class="console-select-menu hidden" id="webSearchProviderMenu" role="listbox" aria-label="选择搜索供应商"></div>
                 <select class="hidden" id="webSearchProvider" name="provider" tabindex="-1" aria-hidden="true">
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="kimi">Kimi</option>
                   <option value="tavily">Tavily</option>
                   <option value="exa">Exa</option>
                   <option value="you">You.com</option>
@@ -341,14 +331,15 @@
                 </select>
               </div>
             </div>
-            <div class="field" data-web-search-field="model">
-              <span>模型</span>
+          </div>
+
+          <div class="field" data-web-search-field="model">
+              <span>搜索模型</span>
               <div class="console-select" data-console-select="webSearchModel">
                 <button class="console-select-trigger" id="webSearchModelTrigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="webSearchModelLabel"></span><i data-lucide="chevron-down"></i></button>
                 <div class="console-select-menu hidden" id="webSearchModelMenu" role="listbox" aria-label="选择搜索模型"></div>
                 <select class="hidden" id="webSearchModel" tabindex="-1" aria-hidden="true"></select>
               </div>
-            </div>
           </div>
 
           <div class="web-search-credential-row" id="webSearchCredentialRow">
@@ -394,7 +385,7 @@
 
       <footer class="modal-footer">
         <button class="btn" id="cancelWebSearchBtn" type="button">取消</button>
-        <button class="btn primary" id="saveWebSearchBtn" type="submit">保存</button>
+        <button class="btn primary" id="saveWebSearchBtn" type="submit" disabled>保存</button>
       </footer>
     </form>
   </dialog>

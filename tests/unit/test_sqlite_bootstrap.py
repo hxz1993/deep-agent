@@ -138,8 +138,8 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._row_count(db_path, "wecom_applications"), 0)
         self.assertEqual(self._row_count(db_path, "wecom_user_profiles"), 0)
         self.assertEqual(
-            self._scalar(db_path, "SELECT value FROM global_settings WHERE key='web_search'"),
-            '{"mode":"native"}',
+            self._scalar(db_path, "SELECT COUNT(*) FROM global_settings WHERE key='web_search'"),
+            0,
         )
         self.assertEqual(
             json.loads(str(self._scalar(db_path, "SELECT capabilities FROM agents WHERE name='default'"))),
@@ -208,10 +208,12 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 with sqlite3.connect(db_path) as connection:
                     before = connection.execute("SELECT * FROM llm_providers").fetchall()
                     models_before = connection.execute("SELECT * FROM llm_models").fetchall()
+                    search_before = connection.execute("SELECT * FROM global_settings").fetchall()
                 await asyncio.to_thread(command.upgrade, config, "head")
                 with sqlite3.connect(db_path) as connection:
                     self.assertEqual(before, connection.execute("SELECT * FROM llm_providers").fetchall())
                     self.assertEqual(models_before, connection.execute("SELECT * FROM llm_models").fetchall())
+                    self.assertEqual(search_before, connection.execute("SELECT * FROM global_settings").fetchall())
 
     async def test_restart_does_not_recreate_deleted_defaults(self) -> None:
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete-bootstrap-") as tmpdir:

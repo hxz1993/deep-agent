@@ -138,31 +138,14 @@ class GlobalSettingsApiTests(unittest.TestCase):
         reset_context()
         asyncio.run(self.engine.dispose())
 
-    def test_native_search_probe_validates_model_without_saving(self):
-        headers = {"user": "enterprise-admin"}
-        provider = self.client.post("/api/v1/llm-providers", headers=headers, json={
-            "name": "Kimi probe", "provider_type": "moonshotai", "use_default_base_url": True,
-            "api_key": "fixture-secret",
-        }).json()
-        response = self.client.post("/api/v1/llm-models", headers=headers, json={
-            "name": "K3", "model": "kimi-k3", "provider_id": provider["id"],
-            "input_modalities": ["text"], "context_window_tokens": 100000, "max_output_tokens": 1000,
-        })
-        self.assertEqual(response.status_code, 201, response.text)
-        model_id = response.json()["id"]
-        url = "/api/v1/global-settings/web-search/test-model"
-        with patch("deep_agent.api.v1.global_settings.probe_current_model_search", new=AsyncMock()) as probe:
-            result = self.client.post(url, headers=headers, json={"model_id": model_id})
-            self.assertTrue(result.json()["ok"], result.text)
-            self.assertEqual(probe.call_args.args[0].model, "kimi-k3")
-            self.assertEqual(probe.call_args.args[1].api_key, "fixture-secret")
-            self.assertIsNone(asyncio.run(self.stores.global_setting.get("web_search")))
-            self.assertNotIn("fixture-secret", result.text)
-            self.client.patch(f"/api/v1/llm-models/{model_id}", headers=headers, json={"enabled": False})
-            result = self.client.post(url, headers=headers, json={"model_id": model_id})
-            self.assertEqual(result.status_code, 422, result.text)
-            self.assertEqual(probe.await_count, 1)
-        self.assertEqual(self.client.post(url, headers=headers, json={"model_id": "missing"}).status_code, 404)
+    def test_native_search_probe_is_removed_without_saving(self):
+        response = self.client.post(
+            "/api/v1/global-settings/web-search/test-model",
+            headers={"user": "enterprise-admin"}, json={"model_id": "any-model"},
+        )
+        self.assertEqual(response.status_code, 410, response.text)
+        self.assertIn("已移除", response.json()["detail"])
+        self.assertIsNone(asyncio.run(self.stores.global_setting.get("web_search")))
 
     def test_returns_grouped_read_only_settings_for_enterprise_admin(
         self,
@@ -191,7 +174,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
         )
         self.assertTrue(first["restart_required"])
 
-    def test_web_search_defaults_to_current_model(self) -> None:
+    def test_web_search_defaults_to_unconfigured(self) -> None:
         response = self.client.get(
             "/api/v1/global-settings/web-search",
             headers={"user": "enterprise-admin"},
@@ -200,7 +183,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
         self.assertEqual(
             response.json()["value"],
             {
-                "mode": "native",
+                "mode": "unconfigured",
                 "provider": None,
                 "model": None,
                 "api_key_set": False,
@@ -208,6 +191,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
                 "credential_source": None,
                 "llm_provider_id": None,
                 "llm_provider_name": None,
+                "configuration_error": None,
             },
         )
 
@@ -228,7 +212,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
         self.assertEqual(created.status_code, 200, created.text)
         self.assertTrue(created.json()["value"]["api_key_set"])
         self.assertNotIn("deepseek-secret", created.text)
-        self.assertEqual(created.json()["value"]["model"], "deepseek-v4-pro")
+        self.assertEqual(created.json()["value"]["model"], "deepseek-flash")
 
         retained = self.client.put(
             "/api/v1/global-settings/web-search",
@@ -285,16 +269,17 @@ class GlobalSettingsApiTests(unittest.TestCase):
             with self.subTest(value=value, version=version):
                 asyncio.run(self.stores.global_setting.upsert("web_search", value=value, version=version))
                 invalid = self.client.get("/api/v1/global-settings/web-search", headers=headers)
-                self.assertEqual(invalid.status_code, 409, invalid.text)
+                self.assertEqual(invalid.status_code, 200, invalid.text)
+                self.assertTrue(invalid.json()["value"]["configuration_error"])
                 draft = {"version": 1, "value": {"mode": "provider", "provider": "tavily", "api_key": "new-test-key"}}
                 with patch("deep_agent.api.v1.global_settings.probe_web_search_config", new=AsyncMock()) as probe:
                     tested = self.client.post("/api/v1/global-settings/web-search/test", headers=headers, json=draft)
                 self.assertEqual(tested.status_code, 200, tested.text)
                 self.assertEqual(probe.call_args.args[0].api_key, "new-test-key")
                 self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, value)
-                saved = self.client.put("/api/v1/global-settings/web-search", headers=headers, json={"version": 1, "value": {"mode": "native"}})
+                saved = self.client.put("/api/v1/global-settings/web-search", headers=headers, json=draft)
                 self.assertEqual(saved.status_code, 200, saved.text)
-                self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, {"mode": "native"})
+                self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value["provider"], "tavily")
 
     def test_invalid_old_credentials_do_not_allow_invalid_replacement(self) -> None:
         asyncio.run(self.stores.global_setting.upsert("web_search", value={"mode": "broken"}, version=1))
@@ -329,6 +314,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
                 "credential_source": None,
                 "llm_provider_id": None,
                 "llm_provider_name": None,
+                "configuration_error": None,
             },
         )
 
@@ -398,8 +384,8 @@ class GlobalSettingsApiTests(unittest.TestCase):
     def test_all_keyed_providers_validate_only_their_required_fields(self) -> None:
         headers = {"user": "enterprise-admin"}
         cases = (
-            ("deepseek", "deepseek-v4-pro"),
-            ("kimi", "kimi-k3"),
+            ("deepseek", "deepseek-flash"),
+            ("kimi", None),
             ("tavily", None),
             ("exa", None),
             ("you", None),
@@ -460,8 +446,86 @@ class GlobalSettingsApiTests(unittest.TestCase):
             "/api/v1/global-settings/web-search",
             headers={"user": "enterprise-admin"},
         )
-        self.assertEqual(persisted.json()["value"]["mode"], "native")
+        self.assertEqual(persisted.json()["value"]["mode"], "unconfigured")
+
+    def test_empty_and_legacy_settings_are_read_only_unconfigured(self):
+        headers = {"user": "enterprise-admin"}
+        for value in ({}, {"mode": "native"}):
+            with self.subTest(value=value):
+                asyncio.run(self.stores.global_setting.upsert("web_search", value=value, version=1))
+                response = self.client.get("/api/v1/global-settings/web-search", headers=headers)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["value"]["mode"], "unconfigured")
+                self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, value)
+
+    def test_empty_native_or_implicit_write_and_test_are_rejected(self):
+        headers = {"user": "enterprise-admin"}
+        for value in ({}, {"mode": "native"}, {"provider": "duckduckgo"}):
+            for method, path in ((self.client.put, ""), (self.client.post, "/test")):
+                response = method("/api/v1/global-settings/web-search" + path,
+                                  headers=headers, json={"value": value})
+                self.assertEqual(response.status_code, 422, response.text)
+        self.assertIsNone(asyncio.run(self.stores.global_setting.get("web_search")))
+
+    def test_deleted_provider_reference_is_visible_and_repairable(self):
+        value = {"mode": "provider", "provider": "kimi", "model": "kimi-k3",
+                 "credential_source": "llm_provider", "llm_provider_id": "missing"}
+        asyncio.run(self.stores.global_setting.upsert("web_search", value=value, version=1))
+        headers = {"user": "enterprise-admin"}
+        response = self.client.get("/api/v1/global-settings/web-search", headers=headers)
+        actual = response.json()["value"]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(actual["llm_provider_id"], "missing")
+        self.assertEqual(actual["provider"], "kimi")
+        self.assertIsNone(actual["model"])
+        self.assertIn("no longer exists", actual["configuration_error"])
+        self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, value)
+        response = self.client.put("/api/v1/global-settings/web-search", headers=headers,
+                                  json={"value": {"mode": "provider", "provider": "kimi",
+                                                  "credential_source": "api_key", "api_key": "new-key"}})
+        self.assertEqual(response.status_code, 200, response.text)
+        stored = asyncio.run(self.stores.global_setting.get("web_search"))
+        self.assertNotIn("model", stored.value)
+        self.assertNotIn("llm_provider_id", stored.value)
+
+    def test_legacy_kimi_model_is_removed_only_when_saved(self):
+        value = {"mode": "provider", "provider": "kimi", "model": "kimi-k3", "api_key": "old-key"}
+        asyncio.run(self.stores.global_setting.upsert("web_search", value=value, version=1))
+        headers = {"user": "enterprise-admin"}
+        response = self.client.get("/api/v1/global-settings/web-search", headers=headers)
+        self.assertIsNone(response.json()["value"]["model"])
+        self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, value)
+        response = self.client.put("/api/v1/global-settings/web-search", headers=headers,
+                                  json={"value": {"mode": "provider", "provider": "kimi", "model": "kimi-k3"}})
+        self.assertEqual(response.status_code, 200, response.text)
+        stored = asyncio.run(self.stores.global_setting.get("web_search"))
+        self.assertNotIn("model", stored.value)
+        self.assertEqual(stored.value["api_key"], "old-key")
 
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_clear_configuration_removes_credentials_and_allows_reconfiguration(self):
+        headers = {"user": "enterprise-admin"}
+        url = "/api/v1/global-settings/web-search"
+        for existing in (
+            {"mode": "provider", "provider": "kimi", "api_key": "fixture-secret", "model": "legacy"},
+            {"mode": "provider", "provider": "deepseek", "credential_source": "llm_provider", "llm_provider_id": "deleted"},
+        ):
+            asyncio.run(self.stores.global_setting.upsert("web_search", value=existing, version=1))
+            cleared = self.client.put(url, headers=headers, json={"value": {"mode": "unconfigured"}})
+            self.assertEqual(cleared.status_code, 200, cleared.text)
+            self.assertEqual(cleared.json()["value"]["mode"], "unconfigured")
+            self.assertFalse(cleared.json()["value"]["api_key_set"])
+            self.assertEqual(asyncio.run(self.stores.global_setting.get("web_search")).value, {})
+            self.assertEqual(self.client.get(url, headers=headers).json()["value"]["mode"], "unconfigured")
+            saved = self.client.put(url, headers=headers, json={"value": {"mode": "provider", "provider": "duckduckgo"}})
+            self.assertEqual(saved.status_code, 200, saved.text)
+            self.assertEqual(saved.json()["value"]["provider"], "duckduckgo")
+
+    def test_clear_rejects_mixed_provider_credentials(self):
+        response = self.client.put("/api/v1/global-settings/web-search", headers={"user": "enterprise-admin"},
+            json={"value": {"mode": "unconfigured", "api_key": "fixture-secret"}})
+        self.assertEqual(response.status_code, 422)
+        self.assertIsNone(asyncio.run(self.stores.global_setting.get("web_search")))

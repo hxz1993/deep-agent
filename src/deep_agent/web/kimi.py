@@ -1,12 +1,13 @@
-"""Moonshot Formula search: shared by current-model and fixed-provider modes."""
+"""Independent Moonshot Search API; no auxiliary model or Chat loop."""
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
+
+import httpx2
 
 from openai import AsyncOpenAI
 from pydantic_ai import ToolFailed
-
-FORMULA_PATH = "/formulas/moonshot/web-search:latest"
 
 
 def search_client(api_key: str | None, base_url: str | None = None) -> AsyncOpenAI:
@@ -15,20 +16,25 @@ def search_client(api_key: str | None, base_url: str | None = None) -> AsyncOpen
         base_url=base_url or "https://api.moonshot.cn/v1",
         timeout=60,
         max_retries=0,
+        http_client=httpx2.AsyncClient(timeout=60, follow_redirects=False),
     )
 
 
-async def execute_search(client: AsyncOpenAI, arguments: str) -> str:
-    fiber: dict[str, Any] = await client.post(
-        f"{FORMULA_PATH}/fibers",
+async def execute_search(client: AsyncOpenAI, query: str) -> dict[str, Any]:
+    if not isinstance(query, str) or not query.strip():
+        raise ToolFailed("Web Search query cannot be empty")
+    result: dict[str, Any] = await client.post(
+        "/tools/search",
         cast_to=dict[str, Any],
-        body={"name": "web_search", "arguments": arguments},
+        body={"text_query": query.strip(), "limit": 5, "timeout_seconds": 30, "include_content": False},
     )
-    if fiber.get("status") != "succeeded":
-        raise ToolFailed("Kimi Formula Web Search execution failed")
-    context = fiber.get("context") or {}
-    output = context.get("output") or context.get("encrypted_output")
-    if not isinstance(output, str) or not output.strip():
-        raise ToolFailed("Kimi Formula Web Search returned no result")
-    # Preserve the encrypted result verbatim. Only Moonshot's model can read it.
-    return output
+    rows = result.get("search_results")
+    if not isinstance(rows, list) or not rows:
+        raise ToolFailed("Kimi Web Search returned no results")
+    if not all(isinstance(row, dict) and isinstance(row.get("url"), str) and row["url"].strip() for row in rows):
+        raise ToolFailed("Kimi Web Search returned invalid results")
+    for row in rows:
+        parsed = urlsplit(row["url"])
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            raise ToolFailed("Kimi Web Search returned invalid source URLs")
+    return {"search_results": rows[:5], "untrusted_external_content": True}

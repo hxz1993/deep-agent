@@ -19,8 +19,7 @@ WebSearchCredentialSource = Literal["api_key", "llm_provider"]
 
 _PROVIDERS = frozenset({"deepseek", "kimi", "tavily", "exa", "you", "duckduckgo"})
 _MODEL_DEFAULTS = {
-    "deepseek": "deepseek-v4-pro",
-    "kimi": "kimi-k3",
+    "deepseek": "deepseek-flash",
 }
 _KEYLESS_PROVIDERS = frozenset({"duckduckgo"})
 _REUSABLE_LLM_PROVIDER_TYPES = {
@@ -35,7 +34,7 @@ class WebSearchConfigurationError(ValueError):
 
 @dataclass(frozen=True)
 class WebSearchRuntimeConfig:
-    mode: Literal["native", "provider"]
+    mode: Literal["unconfigured", "provider"]
     provider: WebSearchProvider | None = None
     api_key: str | None = None
     model: str | None = None
@@ -44,17 +43,18 @@ class WebSearchRuntimeConfig:
     llm_provider_name: str | None = None
     # Runtime-only: never persist a second copy of the provider endpoint.
     base_url: str | None = None
+    configuration_error: str | None = None
 
     def to_stored_value(self) -> dict[str, Any]:
-        if self.mode == "native":
-            return {"mode": "native"}
+        if self.mode == "unconfigured":
+            return {}
         value: dict[str, Any] = {
             "mode": "provider",
             "provider": self.provider,
         }
         if self.api_key and self.credential_source != "llm_provider":
             value["api_key"] = self.api_key
-        if self.model:
+        if self.model and self.provider == "deepseek":
             value["model"] = self.model
         if self.credential_source:
             value["credential_source"] = self.credential_source
@@ -76,12 +76,14 @@ def resolve_web_search_config(
     existing: WebSearchRuntimeConfig | None = None,
     require_credentials: bool = True,
 ) -> WebSearchRuntimeConfig:
-    raw = dict(value or {"mode": "native"})
-    mode = _normalized_optional(raw.get("mode")) or "native"
-    if mode == "native":
-        return WebSearchRuntimeConfig(mode="native")
+    if value is not None and not isinstance(value, Mapping):
+        raise WebSearchConfigurationError("Web Search configuration must be an object")
+    raw = dict(value or {})
+    mode = _normalized_optional(raw.get("mode"))
+    if not raw or mode in {"native", "unconfigured"}:
+        return WebSearchRuntimeConfig(mode="unconfigured")
     if mode != "provider":
-        raise WebSearchConfigurationError("mode must be native or provider")
+        raise WebSearchConfigurationError("mode must be provider")
 
     provider = _normalized_optional(raw.get("provider"))
     if provider not in _PROVIDERS:
@@ -175,14 +177,41 @@ async def resolve_web_search_credentials(
         raise WebSearchConfigurationError(
             f"Selected LLM provider has no API key: {row.name}"
         )
-    from deep_agent.models.provider_registry import ProviderRuntimeConfig, effective_base_url
+    from deep_agent.models.provider_registry import (
+        ProviderRuntimeConfig, ProviderRuntimeError, effective_base_url,
+    )
+
+    try:
+        base_url = effective_base_url(ProviderRuntimeConfig.from_row(row))
+    except (ProviderRuntimeError, ValueError) as exc:
+        raise WebSearchConfigurationError("Selected LLM provider has an invalid endpoint configuration") from exc
 
     return replace(
         config,
         api_key=api_key,
         llm_provider_name=str(row.name),
-        base_url=effective_base_url(ProviderRuntimeConfig.from_row(row)),
+        base_url=base_url,
     )
+
+
+async def read_web_search_config(row: Any, llm_configuration: Any) -> WebSearchRuntimeConfig:
+    """Read stored settings without allowing stale configuration to abort a Run.
+
+    Keep valid fields on broken provider references so administrators can repair
+    the configuration. Database/infrastructure exceptions still propagate.
+    """
+    config = WebSearchRuntimeConfig(mode="unconfigured")
+    if row is None:
+        return config
+    try:
+        if row.version != WEB_SEARCH_SCHEMA_VERSION:
+            raise WebSearchConfigurationError("Unsupported Web Search settings version")
+        config = resolve_web_search_config(row.value, require_credentials=False)
+        # Validate credentials separately so missing keys retain the chosen provider.
+        config = resolve_web_search_config(row.value)
+        return await resolve_web_search_credentials(config, llm_configuration)
+    except WebSearchConfigurationError as exc:
+        return replace(config, configuration_error=str(exc))
 
 
 async def load_web_search_config(
@@ -190,11 +219,4 @@ async def load_web_search_config(
     llm_configuration: Any,
 ) -> WebSearchRuntimeConfig:
     row = await store.get(WEB_SEARCH_SETTING_KEY)
-    if row is None:
-        return WebSearchRuntimeConfig(mode="native")
-    if int(row.version) != WEB_SEARCH_SCHEMA_VERSION:
-        raise WebSearchConfigurationError(
-            f"Unsupported Web Search settings version: {row.version}"
-        )
-    config = resolve_web_search_config(row.value)
-    return await resolve_web_search_credentials(config, llm_configuration)
+    return await read_web_search_config(row, llm_configuration)

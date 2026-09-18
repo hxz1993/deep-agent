@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.10.13`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.10.14`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -167,17 +167,20 @@ PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 MySQL 的连接及业务文本字段应使用 `utf8mb4`，避免 Emoji 等字符损失引发保存失败；
 已有数据库需要检查实际字段。详见[字符集部署要求与排查](docs/guides/mysql-character-set.md)。
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为`005`：生产基线 `001`完整包含原
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为`006`：生产基线 `001`完整包含原
 Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP、Skill、UI工具、模型目录、
-`chat_sessions + chat_session_events` Event Store，以及初始化为会话原生搜索的`global_settings`；
+`chat_sessions + chat_session_events` Event Store 和 `global_settings`。全新初始化不生成 Web Search 配置行；
+旧 `native` 配置读取为未配置，需管理员明确选择搜索供应商，见[Web 工具设计](docs/design/21-web-tools/web-tools-design.md)。
 增量`002`增加企微Channel的Account、Session Binding和Message Run三表；渠道用户由管理员配置
 `session_user_id`，Peer键名使用`userid/chatid`。
 增量 `003` 移除 10 条数据库外键，由后端事务、记录锁和逻辑引用校验维持原有删除规则。
 增量 `004` 新增 `integration_settings`，保存组件 AI 功能的 JSON 配置，不插入初始记录。见[集成配置](docs/guides/integrations.md)。
 增量 `005` 允许 Agent 不配置模型；降级前须先补齐空模型。安装包支持导出、上传安装和自带目录安装，见[Agent 安装包](docs/guides/agent-packages.md)。
 
-已发布的 `001` 至 `004` 不改写。上线顺序：完整备份 → 停止旧 API/Gateway 写入 → 升级并核验
-`005` → 启动新版 → 业务冒烟；不能让旧代码继续向无外键数据库写入。
+增量 `006` 新增企微应用及成员缓存，见[企微应用说明](docs/guides/wecom-applications.md)。
+
+已发布的 `001` 至 `006` 不改写。上线顺序：完整备份 → 停止旧 API/Gateway 写入 → 升级并核验
+`006` → 启动新版 → 业务冒烟；不能让旧代码继续向无外键数据库写入。
 迁移预检发现孤儿数据会停止，MySQL 中断后保持维护状态并重跑。具体见
 [无外键部署与回归](docs/guides/application-references.md)。
 

@@ -10,7 +10,6 @@ import anyio
 import httpx2
 
 from pydantic_ai import Agent
-from pydantic_ai.capabilities import WebSearch
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
     ModelMessage,
@@ -49,35 +48,36 @@ class IsUserOnlyRequestTests(unittest.TestCase):
 
 
 class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_native_search_provider_rejection_uses_existing_error_event(self) -> None:
+    async def test_chat_provider_rejection_uses_existing_error_event(self) -> None:
         sent = []
 
         def transport(request):
             sent.append(json.loads(request.content))
-            return httpx2.Response(400, json={"error": {"message": "fixture search rejected"}})
+            return httpx2.Response(400, json={"error": {"message": "fixture request rejected"}})
 
         async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as http:
             provider = DeepSeekProvider(api_key="fixture-only", http_client=http)
             with patch("deep_agent.models.provider_registry._openai_style_provider", return_value=provider):
                 model = resolve_provider_model(
-                    model_name="future-model-alias", native_web_search=True,
+                    model_name="future-model-alias",
                     provider=ProviderRuntimeConfig(id="fixture", name="fixture", provider_type="deepseek",
                                                    api_key="fixture-only", use_default_base_url=True, base_url=None),
                 )
             runner = AgentRunner(
-                Agent(model, deps_type=AgentDeps, capabilities=[WebSearch(native=True, local=False)]),
+                Agent(model, deps_type=AgentDeps),
                 self.store, UsageLimits(request_limit=2),
             )
             with patch.object(AgentRunner, "_generate_model_title", return_value=None):
                 output = [event async for event in runner.run_stream(
-                    "native-rejected", "Search the web", self._deps("native-rejected"),
+                    "provider-rejected", "fixture question", self._deps("provider-rejected"),
                     persister=self.persister,
                 )]
         self.assertTrue(sent, "Model names must not prevent the provider request")
         self.assertEqual(sent[0]["model"], "future-model-alias")
-        self.assertIn("web_search", [tool["type"] for tool in sent[0]["tools"]])
+        self.assertIn("messages", sent[0])
+        self.assertNotIn("input", sent[0])
         self.assertEqual(output[-1]["type"], "error")
-        self.assertIn("fixture search rejected", output[-1]["message"])
+        self.assertIn("fixture request rejected", output[-1]["message"])
         self.assertNotIn("final", [event["type"] for event in output])
 
     async def asyncSetUp(self) -> None:

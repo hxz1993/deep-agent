@@ -6,8 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
-from pydantic_ai.models.openrouter import OpenRouterModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.alibaba import AlibabaProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
@@ -95,12 +94,6 @@ class ProviderDefinitionTests(unittest.TestCase):
 
 
 class ProviderValidationTests(unittest.TestCase):
-    def test_rejected_native_search_does_not_allocate_http_client(self):
-        with patch("deep_agent.models.provider_registry._openai_style_provider") as create:
-            with self.assertRaises(ProviderConfigurationError):
-                resolve_provider_model(model_name="vendor-model", provider=_config("openai_compatible", use_default_base_url=False), native_web_search=True)
-            create.assert_not_called()
-
     def test_effective_model_availability_is_provider_configuration(self) -> None:
         model = SimpleNamespace()
         self.assertIsNone(model_unavailable_reason(model, _config("deepseek")))
@@ -277,39 +270,6 @@ class ProviderModelAssemblyTests(unittest.TestCase):
             input_modalities=["text", "video"],
         )
         self.assertIsInstance(model, OpenAICompatibleVideoChatModel)
-
-    def test_native_web_search_selects_supported_model_protocols(self) -> None:
-        for provider_type, model_name, expected_class in (
-            ("deepseek", "deepseek-v4-pro", OpenAIResponsesModel),
-            ("openai", "gpt-5", OpenAIResponsesModel),
-            ("openrouter", "openai/gpt-5", OpenRouterModel),
-            ("anthropic", "claude-sonnet-4-5", AnthropicModel),
-            ("google", "gemini-2.5-flash", GoogleModel),
-        ):
-            with self.subTest(provider_type=provider_type):
-                model = resolve_provider_model(
-                    model_name=model_name,
-                    provider=_config(provider_type),
-                    native_web_search=True,
-                )
-                self.assertIsInstance(model, expected_class)
-
-    def test_native_web_search_rejects_unsupported_provider_without_fallback(self) -> None:
-        for provider_type in ("moonshotai", "alibaba", "zai", "openai_compatible"):
-            with self.subTest(provider_type=provider_type):
-                config = _config(
-                    provider_type,
-                    use_default_base_url=provider_type != "openai_compatible",
-                )
-                with self.assertRaisesRegex(
-                    ProviderConfigurationError,
-                    "does not support native Web Search",
-                ):
-                    resolve_provider_model(
-                        model_name="vendor-model",
-                        provider=config,
-                        native_web_search=True,
-                    )
 
     def test_empty_model_name_fails_before_request(self) -> None:
         with self.assertRaisesRegex(ProviderConfigurationError, "model name"):

@@ -14,13 +14,14 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 from pydantic_ai.models import ModelRequestParameters
+from pydantic_ai.native_tools import WebSearchTool
 from pydantic_ai.native_tools._tool_search import ToolSearchTool
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.tools import Tool, ToolDefinition
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_discovery import DeepAgentToolSearch
-from deep_agent.models.provider_registry import ProviderConfigurationError, ProviderRuntimeConfig, resolve_provider_model
+from deep_agent.models.provider_registry import ProviderRuntimeConfig, resolve_provider_model
 
 
 DISCOVERED = ["deepcube_search", "deepfos-doc_docs_search"]
@@ -42,14 +43,23 @@ def model_for(provider_type="deepseek", *, custom=False):
 
 
 class DeepSeekToolSearchTests(unittest.IsolatedAsyncioTestCase):
-    def test_deepseek_rejects_native_search_with_actionable_error(self):
+    async def test_native_search_sends_any_model_to_provider_and_surfaces_api_error(self):
         for custom in (False, True):
-            for model_name in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
+            for model_name in ("deepseek-flash", "deepseek-v4-flash", "future-model-alias"):
                 with self.subTest(custom=custom, model=model_name):
-                    with self.assertRaisesRegex(ProviderConfigurationError, "固定搜索 Provider"):
-                        resolve_provider_model(model_name=model_name,
-                                               provider=config(custom=custom),
-                                               native_web_search=True)
+                    sent = []
+                    def transport(request):
+                        sent.append(json.loads(request.content))
+                        return httpx2.Response(400, json={"error": {"message": "fixture provider rejected search"}})
+                    async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as http:
+                        runtime_provider = DeepSeekProvider(api_key="fixture", http_client=http)
+                        with patch("deep_agent.models.provider_registry._openai_style_provider", return_value=runtime_provider):
+                            model = resolve_provider_model(model_name=model_name, provider=config(custom=custom), native_web_search=True)
+                        with self.assertRaises(ModelHTTPError):
+                            await model.request([ModelRequest(parts=[UserPromptPart("search")])], None,
+                                                ModelRequestParameters(native_tools=[WebSearchTool()]))
+                    self.assertEqual(sent[0]["model"], model_name)
+                    self.assertIn("web_search", [tool["type"] for tool in sent[0]["tools"]])
 
     def test_openai_keeps_native_tool_search(self):
         self.assertIn(ToolSearchTool, model_for("openai").profile["supported_native_tools"])

@@ -534,7 +534,7 @@ class ProviderSearchRoutingTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch("deep_agent.web.runtime.Agent") as agent:
             agent.return_value.run = AsyncMock(return_value=result)
-            with self.assertRaisesRegex(ToolFailed, "did not execute web_search"):
+            with self.assertRaisesRegex(ToolFailed, "未返回搜索执行成功的证据"):
                 await _search_deepseek(WebSearchRuntimeConfig(
                     mode="provider", provider="deepseek", api_key="fixture-only",
                 ), "fixture query")

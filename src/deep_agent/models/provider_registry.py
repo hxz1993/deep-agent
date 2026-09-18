@@ -327,21 +327,13 @@ def resolve_provider_model(
     if definition.model_protocol == "openai_chat":
         if native_web_search:
             if provider.provider_type == "deepseek":
-                # V4 Pro still executes native search. Flash and its retired V4
-                # aliases now route to V4.1 Flash, which silently ignores it.
-                if model_name == "deepseek-v4-pro":
-                    # Keep MCP discovery on ordinary functions; inherited native
-                    # tool-search support redeclares historical tool schemas.
-                    return OpenAIResponsesModel(
-                        model_name,
-                        provider=_openai_style_provider(provider),
-                        profile={"supported_native_tools": frozenset({WebSearchTool})},
-                    )
-                raise ProviderConfigurationError(
-                    f"DeepSeek model {model_name} does not support native Web Search. "
-                    "当前 Flash 及旧 Flash 别名会忽略 web_search。请在全局配置的 "
-                    "Web Search 中选择可用的固定搜索 Provider，或切换为支持原生"
-                    "搜索的模型（已验证 deepseek-v4-pro）。"
+                # Model support is determined by the provider response, not a
+                # local model-name list. Keep only the protocol compatibility
+                # restriction that prevents duplicate MCP tool declarations.
+                return OpenAIResponsesModel(
+                    model_name,
+                    provider=_openai_style_provider(provider),
+                    profile={"supported_native_tools": frozenset({WebSearchTool})},
                 )
             if provider.provider_type == "openai":
                 return OpenAIResponsesModel(model_name, provider=_openai_style_provider(provider))

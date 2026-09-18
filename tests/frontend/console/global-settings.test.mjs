@@ -192,7 +192,8 @@ test("Agent 是配置中心默认页，系统分组包含全局配置和模型�
 test("Web Search 配置采用两个显式模式并列出原生供应商", () => {
   assert.match(templateHtml, /value="native" checked/);
   assert.match(templateHtml, /value="provider"/);
-  assert.match(templateHtml, /已实测：DeepSeek V4 Pro[\s\S]*已接入：OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter/);
+  assert.match(templateHtml, /已接入 DeepSeek、Kimi、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter/);
+  assert.doesNotMatch(templateHtml, /web-search-support-details|已知不支持|已实测/);
   assert.doesNotMatch(templateHtml, /Kimi 请选择|当前模型搜索|无需额外配置/);
   assert.doesNotMatch(templateHtml, /Web Fetch/);
   assert.match(templateHtml, /id="testWebSearchBtn"/);

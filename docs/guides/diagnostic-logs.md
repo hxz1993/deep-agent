@@ -162,10 +162,7 @@ OpenAI 兼容模型（包含 DeepSeek 的 Chat Completions / Responses）额外�
 DeepSeek Responses 的重名错误需要同时看 `duplicate_tool_names` 和 `redeclared_tool_names`：
 顶层工具名没有重复，不代表搜索历史没有再次声明同一工具。2026-09-10 已在模型装配时将
 DeepSeek 原生能力限制为 Web Search，工具搜索使用 SDK 普通函数回退，避免双处声明。
-但这仅证明发送格式，不证明供应商执行了搜索。2026-09-18 真实请求及
-[DeepSeek 官方文档](https://api-docs.deepseek.com/guides/responses_api/)
-确认当前 Flash 及旧 Flash 别名静默忽略原生 `web_search`，因此拒绝这一模型组合并提示配置固定搜索 Provider。
-同日实测 `deepseek-v4-pro` 仍返回真实 `web_search_call`，保留其 Responses 与原生工具白名单。
+这仅证明发送格式，不证明供应商执行了搜索。不同模型、别名和供应商版本的实际能力会变化，因此不使用历史实测名单拦截模型请求。所有 DeepSeek 型号原样发给 Responses API；排查时检查供应商错误及真实 `web_search_call` 成功状态，不能只看 HTTP 200 或正文 URL。搜索测试收到普通回答但缺少搜索执行成功的证据时，仅提示“无法确认搜索成功”，不判定该型号永久不支持搜索。
 普通 `web_search` 函数和 MCP 工具仍可交给 DeepSeek；无需修改工具名或清除历史。
 
 采集使用现有 HTTP 客户端的事件钩子，不更换客户端、重试或超时策略。

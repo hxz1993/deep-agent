@@ -48,7 +48,7 @@ class SearchProbeTests(unittest.IsolatedAsyncioTestCase):
         from pydantic_ai.models.function import FunctionModel
         async def text_only(messages, info):
             yield 'OK'
-        with self.assertRaisesRegex(ToolFailed, '未执行'):
+        with self.assertRaisesRegex(ToolFailed, '未返回搜索执行成功的证据'):
             await _probe_search_agent(Agent(FunctionModel(stream_function=text_only)))
 
     async def test_function_search_stops_without_waiting_for_followup(self):

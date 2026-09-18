@@ -249,15 +249,9 @@ Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处
 
 DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前上下文压缩使用这一层；DeepSeek V4 已交由 Pydantic AI 官方 Provider/Profile，不再注册项目自定义重试能力。
 
-2026-09-18 按模型实测：`deepseek-flash`、`deepseek-v4-flash`原生搜索被忽略，
-官方9月10日公告说明旧Flash/Flash Vision别名已转到V4.1 Flash；但`deepseek-v4-pro`
-仍返回真实`web_search_call`。`provider_registry.py`按模型保留Pro的Responses适配与
-`WebSearchTool`白名单，其他DeepSeek模型选择原生搜索时明确提示，禁止静默切换搜索源。
-固定Provider模式仍把普通`web_search`函数交给DeepSeek，不受此限制。DeepSeek固定搜索
-适配必须收到真实NativeToolReturnPart，不能把普通文本回答算作搜索成功。
-2026-09-10的原生Tool Search重名400修复仍适用于Pro：MCP发现通过普通函数回退，
-不能重新继承SDK的原生ToolSearch。`test_deepseek_responses_tool_search.py`覆盖Pro的
-真实序列化和旧历史回放；`test_deepseek_tool_search.py`覆盖固定搜索模式的Chat路径。
+DeepSeek 会话原生搜索按供应商协议进入 Responses，并声明 `WebSearchTool`；不按模型名称设置本地允许／拒绝名单，型号及别名原样发给供应商。供应商失败保留脱敏错误；搜索测试与固定搜索工具必须收到真实成功搜索证据，不能把普通文本回答算作搜索成功。历史实测结论不得变成型号门禁。
+2026-09-10的原生Tool Search重名400兼容仍保留：MCP发现通过普通函数回退，不能重新继承SDK的原生ToolSearch。该限制针对工具协议，不限制模型型号。
+`test_deepseek_responses_tool_search.py`覆盖序列化和旧历史回放；`test_deepseek_tool_search.py`覆盖固定搜索Chat路径及任意型号原生请求。
 
 
 Moonshot当前模型搜索使用官方Formula普通`web_search`函数，沿用当前Provider地址和密钥；

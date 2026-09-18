@@ -67,10 +67,10 @@ DeepSeek/Kimi额外显示“沿用会话Provider / 单独配置API Key”二选�
 
 Pydantic AI `WebSearch(native=True, local=False)`进入本次请求的Capabilities；模型装配在请求级
 切换到对应原生适配：OpenAI使用Responses，Anthropic/Google保持原生模型，OpenRouter
-使用其模型适配。DeepSeek Flash、Alibaba、Z.AI和普通OpenAI-Compatible没有本仓原生适配时明确
+使用其模型适配。Alibaba、Z.AI和普通OpenAI-Compatible没有本仓原生适配时明确
 失败，不切DuckDuckGo。
 
-2026-09-18按模型核验：DeepSeek Flash及旧Flash别名会忽略原生`web_search`，但`deepseek-v4-pro`仍支持；Pro继续使用Responses与原生工具白名单。
+DeepSeek 使用 Responses 搜索适配，不按型号或别名做本地拦截。原生工具协议白名单仅避免不兼容的 Tool Search 声明。是否支持以供应商实际响应为准；测试必须核验真实搜索证据，接口成功但未搜索不能判为测试通过。
 DeepSeek对话模型仍可配合固定搜索Provider使用普通函数工具。
 Moonshot/Kimi使用官方Formula `moonshot/web-search:latest`，以普通`web_search`函数交给当前模型，
 用当前Provider的地址和凭据执行搜索，密文结果原样回传当前模型，不另起辅助模型。
@@ -81,13 +81,18 @@ Moonshot/Kimi使用官方Formula `moonshot/web-search:latest`，以普通`web_se
 
 - DuckDuckGo、Tavily：Pydantic AI Common Tools，普通结果上限5、30秒。
 - Exa、You.com：Harness工具，普通结果上限5、30秒。
-- DeepSeek：保留历史配置读取，Responses辅助搜索必须收到真实原生搜索结果才算成功；当前Flash不支持，需选择`deepseek-v4-pro`或其他搜索Provider，普通文本回答不能通过测试。
+- DeepSeek：保留历史配置读取，Responses辅助搜索必须收到真实原生搜索结果才算成功；不按型号预先拒绝，普通文本回答不能通过测试。
 - Kimi：官方Formula工具循环包成辅助搜索，最多4轮、120秒；支持K3、K2.7 Code Highspeed与K2.6，保留reasoning_content和tool_call_id，搜索密文原样回放。旧`builtin_function.$web_search`在K3上报tokenization failed，已移除。
-- DeepSeek默认搜索模型为`deepseek-v4-pro`；旧显式模型配置仍保留并如实报错，不静默替换。
+- DeepSeek默认搜索模型为`deepseek-v4-pro`；旧显式模型配置仍保留，按实际接口响应处理，不静默替换。
 - Kimi复用会话Provider时，同时沿用该Provider的API地址与凭据，避免Moonshot国内/国际地址混用。
 
 输出归一化为Provider、Query、内容、结果数、来源URL和“不可信外部内容”标记。鉴权、限流、超时、
 空结果和Provider失败各自关闭，不执行隐式降级。
+
+固定供应商的模型下拉只维护实测名单，不作为会话模型或运行时测试的型号准入限制。
+会话调用的供应商异常沿用既有SSE `error`事件；普通文本响应正常展示，不因没有搜索记录而新增会话错误。
+搜索测试需有供应商搜索执行结果等结构化证据才能通过；缺少证据提示“本次响应未返回搜索执行成功的证据”，
+不推断该型号永久不支持搜索，也不把该结果记成型号黑名单。
 
 ### Web Fetch与图片读取
 

@@ -696,8 +696,7 @@ async def _search_deepseek(config: WebSearchRuntimeConfig, query: str) -> ToolRe
         # A successful text completion (even one containing URLs) is not proof
         # that a search ran. DeepSeek may silently ignore native web_search.
         raise ToolFailed(
-            "DeepSeek did not execute web_search. 当前 Flash 不支持原生搜索，"
-            "请改用已验证支持的 deepseek-v4-pro 或其他可用的搜索 Provider。"
+            "本次响应未返回搜索执行成功的证据，无法确认搜索成功；普通文本回答不能作为依据。"
         )
     content = str(result.output)
     sources = _native_result_sources(result) or _source_urls(content)
@@ -918,7 +917,7 @@ async def _probe_search_agent(agent: Agent, *, provider_type: str | None = None)
                 count = (details.get("server_tool_use") or {}).get("web_search_requests")
                 if type(count) is int and count > 0:
                     return
-        raise ToolFailed("模型未执行网络搜索；普通文本回答不算测试通过")
+        raise ToolFailed("本次响应未返回搜索执行成功的证据，无法确认搜索成功；普通文本回答不能作为依据。")
 
     async with agent.run_stream_events(
         _DEFAULT_QUERY, usage_limits=UsageLimits(request_limit=2),
@@ -934,7 +933,7 @@ async def _probe_search_agent(agent: Agent, *, provider_type: str | None = None)
             # Leaving the context cancels the remaining response/agent run and
             # closes its HTTP stream. A tool call or plain text is never enough.
             return
-    raise ToolFailed("模型未执行网络搜索；普通文本回答不算测试通过")
+    raise ToolFailed("本次响应未返回搜索执行成功的证据，无法确认搜索成功；普通文本回答不能作为依据。")
 
 
 async def probe_current_model_search(row: Any, provider: Any) -> None:

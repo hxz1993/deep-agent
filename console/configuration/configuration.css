@@ -3583,11 +3583,3 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 #webSearchTestModelLabel > span:last-child, .web-search-option-label > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #webSearchSettingsDialog .provider-brand-mark { width: 18px; height: 18px; flex: 0 0 18px; background: transparent; padding: 0; }
 #webSearchSettingsDialog .provider-brand-mark img { width: 16px; height: 16px; object-fit: contain; }
-
-.web-search-support-details { margin-top: 8px; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
-.web-search-support-details > summary { width: fit-content; color: var(--accent); cursor: pointer; }
-.web-search-support-details > div { margin-top: 8px; }
-.web-search-support-details p { margin: 6px 0; }
-dialog.web-search-settings-dialog.console-detail-dialog.modal:has(.web-search-native-copy:not(.hidden) .web-search-support-details[open]) {
-  height: min(600px, calc(100vh - 28px));
-}

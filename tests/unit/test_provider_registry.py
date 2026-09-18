@@ -98,7 +98,7 @@ class ProviderValidationTests(unittest.TestCase):
     def test_rejected_native_search_does_not_allocate_http_client(self):
         with patch("deep_agent.models.provider_registry._openai_style_provider") as create:
             with self.assertRaises(ProviderConfigurationError):
-                resolve_provider_model(model_name="deepseek-flash", provider=_config("deepseek"), native_web_search=True)
+                resolve_provider_model(model_name="vendor-model", provider=_config("openai_compatible", use_default_base_url=False), native_web_search=True)
             create.assert_not_called()
 
     def test_effective_model_availability_is_provider_configuration(self) -> None:
@@ -295,7 +295,7 @@ class ProviderModelAssemblyTests(unittest.TestCase):
                 self.assertIsInstance(model, expected_class)
 
     def test_native_web_search_rejects_unsupported_provider_without_fallback(self) -> None:
-        for provider_type in ("deepseek", "moonshotai", "alibaba", "zai", "openai_compatible"):
+        for provider_type in ("moonshotai", "alibaba", "zai", "openai_compatible"):
             with self.subTest(provider_type=provider_type):
                 config = _config(
                     provider_type,

@@ -150,7 +150,7 @@ OpenAI 兼容模型（包含 DeepSeek 的 Chat Completions / Responses）额外�
 `model_api_request`、`model_api_response`，Console 详情使用中文字段标签展示（值保留原值）：
 
 - API 来源地址与规范路径、HTTP 方法和状态码；地址不包含认证信息、查询参数或自定义前缀。
-- 顶层函数工具名、总数、去重数、重复项、相对上一请求新增项及清单 SHA256。
+- 顶层函数工具名及已知原生工具类型（如 `web_search`）、总数、去重数、重复项、相对上一请求新增项及清单 SHA256。
 - Responses 搜索结果历史里的工具名，以及它们与顶层工具清单的交集，辅助排查重复声明。
 - 每次 HTTP 请求的本地关联 ID；响应耗时只到收到响应头，不等于流式生成完成时间。
 
@@ -161,9 +161,9 @@ OpenAI 兼容模型（包含 DeepSeek 的 Chat Completions / Responses）额外�
 
 DeepSeek Responses 的重名错误需要同时看 `duplicate_tool_names` 和 `redeclared_tool_names`：
 顶层工具名没有重复，不代表搜索历史没有再次声明同一工具。2026-09-10 已在模型装配时将
-DeepSeek 原生能力限制为其支持的 Web Search，工具搜索使用 SDK 普通函数回退，避免双处声明；
-其他 Provider 不受影响。核验的 [Pydantic AI 2.42.0 DeepSeek Profile](https://github.com/pydantic/pydantic-ai/blob/v2.42.0/pydantic_ai_slim/pydantic_ai/providers/deepseek.py)
-尚未包含此限制；不需要修改数据库、工具名或清除历史。
+DeepSeek 原生能力限制为 Web Search，工具搜索使用 SDK 普通函数回退，避免双处声明。
+这仅证明发送格式，不证明供应商执行了搜索。不同模型、别名和供应商版本的实际能力会变化，因此不使用历史实测名单拦截模型请求。所有 DeepSeek 型号原样发给 Responses API；排查时检查供应商错误及真实 `web_search_call` 成功状态，不能只看 HTTP 200 或正文 URL。搜索测试收到普通回答但缺少搜索执行成功的证据时，仅提示“无法确认搜索成功”，不判定该型号永久不支持搜索。
+普通 `web_search` 函数和 MCP 工具仍可交给 DeepSeek；无需修改工具名或清除历史。
 
 采集使用现有 HTTP 客户端的事件钩子，不更换客户端、重试或超时策略。
 SDK 流式请求延迟到消费者任务执行，因此通过透明 `WrapperModel` 在实际

@@ -113,7 +113,7 @@
 Python 全量记录属于本轮视觉修改前的同一后端基线，本轮没有修改后端。
 
 随后按用户补充的 DevBox 参考图片重新生成3张主稿并重做两个查询页的视觉，最终证据见
-[DevBox 视觉交付与图片对照](visual-rebuild-20260910/README.md)：Light真实DOM隔离流程26/26，
+历史 DevBox 视觉交付与图片对照（原截图已清理，可从 Git 恢复）：Light真实DOM隔离流程26/26，
 真实8000只读14/14，其他三种主题与窄屏各13/13。修复图表绘图区偏扁、下半区域被挤出屏幕、
 分页不固定，以及返回列表丢失内层滚动和详情重绘丢失消息高亮的问题。日志34px行 / 436px详情，
 会话40px控件 / 68px列表行；详情仍严格使用对话测试原布局，未新增会话反向查日志操作。
@@ -121,7 +121,7 @@ Python 全量记录属于本轮视觉修改前的同一后端基线，本轮没�
 Console 回归命令：
 
 ```bash
-node --experimental-vm-modules --test tests/frontend/console/*.test.mjs docs/design/23-diagnostics-and-logs/interactive-prototype/*.test.mjs
+node --experimental-vm-modules --test tests/frontend/console/*.test.mjs
 ```
 
 未向真实企微群发送测试消息；本次验收只读取已有会话与日志，不调用模型、工具或 MCP 检测。

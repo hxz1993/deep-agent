@@ -12,6 +12,11 @@ from sqlalchemy.engine import Connection
 
 
 def initialize_current_defaults(connection: Connection) -> None:
+    # Released 001 seeds native search. Only fresh databases pass through here;
+    # leave existing installations untouched and do not seed a search provider.
+    global_settings = sa.table("global_settings", sa.column("key", sa.String()))
+    connection.execute(global_settings.delete().where(global_settings.c.key == "web_search"))
+
     # Preserve the baseline IDs and Agent association; no credentials are seeded.
     providers = sa.table(
         "llm_providers",

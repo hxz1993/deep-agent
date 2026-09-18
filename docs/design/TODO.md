@@ -11,7 +11,7 @@
 | `SANDBOX-001` | [会话级 Sandbox](07-python-sandbox/session-sandbox-design.md) | 活跃会话复用工作目录，支持 Python/Shell；允许到期清理并明确告知；长期目录保留、内存恢复非硬要求；尚未开发 | 验证候选运行时的部署、隔离及生命周期成本，确定有效期与最小验收；不要求用户预先锁定永久存储方案 |
 | `OPS-SSE-001` | 网关SSE Read Timeout至少330秒、建议360秒并关闭缓冲 | 应用已每约10秒发送压缩进度；网关由部署平台维护 | 发布0.6.0 Test镜像时同步调整并验证 |
 | `ATT-CONFIG-001` | 平台附件扩展名白名单补充MD/HTML/XML/WEBP/GIF/WAV | 只改环境配置，不扩展`read_file`或Provider模态 | 各环境完成六种最小文件上传验证 |
-| `WEB-PROVIDER-VERIFY-001` | Kimi、Tavily、Exa、You.com真实Key联调 | v0.6.5已完成协议、Mock全链路和测试入口；不再改架构 | 获得各Provider Key后补真实搜索验收 |
+| `WEB-PROVIDER-VERIFY-001` | Exa、You.com真实Key联调 | 现有适配保留；DeepSeek/Kimi改版后管理接口真实检索通过，Tavily 已通过用户本地会话验证，Exa/You.com尚未真实Key联调 | 获得各Provider Key后补真实搜索验收 |
 
 ## 需要真实需求后再设计
 
@@ -65,7 +65,7 @@
 ## v0.6.5 已完成
 
 - 默认不关联的`builtin:web`，固定包含`web_search`和`web_fetch`；未授权Agent完全没有网络工具。
-- 全局唯一Web Search配置，明确选择当前模型或六种固定Provider；不做隐式降级。
+- 当时交付全局唯一Web Search配置，选择当前模型或六种固定Provider；2026-09-19由`WEB-SEARCH-002`取代此模式设计，改版纳入 v0.10.14。
 - Pydantic AI原生Search、DuckDuckGo/Tavily和SSRF-safe Fetch，Harness Exa/You.com，以及
   DeepSeek/Kimi薄协议适配；Code Mode只可编排显式授权函数，Monty和`execute_python`不获得任意网络。
 

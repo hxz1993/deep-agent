@@ -5,10 +5,10 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260918-release01012";
+} from "./configuration.js?v=20260919-search-editor-2";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
 import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260918-release01012";
-import { initWorkspace } from "./workspace.js?v=20260918-release01012";
+import { initWorkspace } from "./workspace.js?v=20260918-release01013";
 import "./time.js?v=20260913-49";
 
 initUserIdentityControls();

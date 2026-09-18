@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.12`，数据库Head为`006` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.14`，数据库Head为`006` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -141,7 +141,7 @@ v0.8.3 完成目录收敛，本地与线上都从同一份 `src/` 加载 Python 
 所有启动、维护和 Python 测试命令从仓库根执行并设置 `PYTHONPATH=src`；Gunicorn 配置统一为
 `deploy/gunicorn.conf.py`；Compose 在仓库根使用 `--project-directory "$PWD" -f deploy/docker-compose.yml`，
 保留项目名和数据卷范围，不依赖旧路径或符号链接。
-原型归入 `docs/design/17-console-ui/`，原始 Jenkins 脚本只在 `docs/archive/jenkins/` 归档；
+尚未实施的原型归入 `docs/design/`，原始 Jenkins 脚本只在 `docs/archive/jenkins/` 归档；
 `data/`、`.venv` 和 `.venv-sandbox` 保留；临时验证按需创建 `tmp/`，任务结束清理，不长期保留空目录。
 详见 [`项目结构指南`](docs/guides/project-structure.md)。
 
@@ -318,3 +318,9 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - `PRAGMA foreign_key_check` 为空不代表逻辑引用有效，必须执行 `assert_logical_references`。
 - 升级/降级需要实际数据库结构检查，不支持生成003离线SQL；001/002保留历史离线编译。
 - 备份按源Revision输出，导入要求同版；测试必须使用隔离库，不能改共享Alpha/Test或稳定本地SQLite。
+
+### 临时产物与已落地原型清理
+
+功能落地并发布后，删除对应一次性 HTML 原型、图片评审稿、测试截图和临时报告，保留当前指南、设计决策与正式回归；历史材料通过 Git 恢复，不另存一份备份。尚未实施的课题材料（如数据流 AI 集成）继续保留。
+测试夹具应放在 `tests/`，不能依赖随时可清理的原型目录；测试报告默认写到忽略的 `output/TMP_to_delete-*`。
+清理前核对在用文件；不删除本地数据库、用户文件、环境配置、依赖环境及正式内置安装包。

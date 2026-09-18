@@ -138,6 +138,30 @@ test('abnormal idle transport recovery reloads History and unlocks the composer'
   assert.deepEqual(h.calls, ['history', '异常中断', 'sessions']);
 });
 
+test('pre-stream configuration rejection keeps the error and does not reload nonexistent History', async () => {
+  const h = streamHarness();
+  const errors = [];
+  h.daFetch = async () => ({ ok: false, status: 400,
+    text: async () => JSON.stringify({ error: 'ProviderConfigurationError', detail: '请选择固定搜索 Provider' }),
+  });
+  h.addErrorTo = (_assistant, message) => errors.push(message);
+  await h.runChatStream({}, {});
+  assert.deepEqual(errors, ['请求失败：请选择固定搜索 Provider']);
+  assert.deepEqual(h.calls, ['sessions']);
+  assert.equal(h.state.streaming, false);
+  assert.equal(h.state.abortController, null);
+});
+
+test('HTTP timeout and server failure still recover potentially persisted History', async () => {
+  for (const status of [408, 500, 502]) {
+    const h = streamHarness();
+    h.daFetch = async () => ({ ok: false, status, text: async () => 'upstream failure' });
+    await h.runChatStream({}, {});
+    assert.deepEqual(h.calls, ['history', 'sessions']);
+    assert.equal(h.state.streaming, false);
+  }
+});
+
 test('an old stream finally cannot unlock or reload a newer stream', async () => {
   const h = streamHarness();
   const running = h.runChatStream({}, {});

@@ -15,7 +15,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { FIXTURE_START, FIXTURE_END, FIXTURE_NOW, LOG_START, TIMEZONE, fixtureResponse, selectedLog, agents } from "../../../docs/design/23-diagnostics-and-logs/visual-rebuild-20260910/visual-fixtures.mjs";
+import { FIXTURE_START, FIXTURE_END, FIXTURE_NOW, LOG_START, TIMEZONE, fixtureResponse, selectedLog, agents } from "./fixtures/diagnostics-visual-fixtures.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const require = createRequire(import.meta.url);
@@ -615,7 +615,7 @@ try {
   report.completedAt = new Date().toISOString(); report.browserClosed = closed;
   report.passed = report.checks.every(check => check.passed);
   await writeFile(join(output, "review.json"), JSON.stringify(report, null, 2) + "\n");
-  const masterDirectory = "docs/design/23-diagnostics-and-logs/visual-rebuild-20260910";
+  const masterDirectory = "docs/guides/console-ui-guidelines.md（布局参考尺寸保存在本回归脚本）";
   const summary = [`# 诊断中心浏览器视觉验收`, "", `- 模式：${mode}；主题：${theme}；视口：${viewport.width}×${viewport.height}`, `- 结果：${report.checks.filter(check => check.passed).length}/${report.checks.length} 检查通过`, `- 浏览器与上下文已关闭：${closed}`, `- 参考主稿：${masterDirectory}`, "- 截图仅是人工对照证据；通过 DOM/行为检查不代表像素一致。", "- Fixture 模式只返回合成账号与业务文本；live 模式只读且不把接口正文保存到报告。", "", "## 检查结果", "", ...report.checks.map(item => `- ${item.passed ? "通过" : "失败"}：${item.name}${item.passed ? "" : ` — ${item.message.replaceAll("\n", " ")}`}`), "", "## 截图", "", ...report.screenshots.map(name => `- [${name}](${name})`), "", "布局位置、字体、颜色、边框和相对于图片主稿的区域差值见 [review.json](review.json)。", ""];
   await writeFile(join(output, "README.md"), summary.join("\n"));
 }

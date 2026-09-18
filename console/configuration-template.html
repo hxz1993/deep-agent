@@ -24,7 +24,7 @@
               <span class="global-settings-section-copy">配置 Agent 的搜索供应商。</span>
             </div>
             <div class="global-settings-section-actions">
-              <span class="global-settings-summary-value" id="webSearchSummaryValue">会话原生搜索</span>
+              <span class="global-settings-summary-value" id="webSearchSummaryValue">未配置</span>
               <button class="btn" id="openWebSearchSettingsBtn" type="button"><i data-lucide="pencil"></i>编辑</button>
             </div>
           </div>
@@ -292,37 +292,38 @@
       </div>
       <div class="modal-body web-search-settings-body">
         <fieldset class="web-search-mode-fieldset">
-          <legend>搜索模式</legend>
+          <legend>搜索服务</legend>
+          <label class="web-search-unconfigured-option">
+            <input type="radio" name="webSearchCategory" value="unconfigured" />
+            <span>暂不配置</span>
+          </label>
           <div class="web-search-mode-grid">
-            <label class="web-search-mode-card">
-              <input type="radio" name="webSearchMode" value="native" checked />
-              <span class="web-search-mode-dot" aria-hidden="true"></span>
-              <span><strong>会话原生搜索</strong></span>
+            <label class="web-search-mode-option">
+              <input type="radio" name="webSearchCategory" value="deepseek" />
+              <span><img src="./assets/provider-logos/deepseek.ico" alt="" />DeepSeek</span>
             </label>
-            <label class="web-search-mode-card">
-              <input type="radio" name="webSearchMode" value="provider" />
-              <span class="web-search-mode-dot" aria-hidden="true"></span>
-              <span><strong>指定供应商</strong></span>
+            <label class="web-search-mode-option">
+              <input type="radio" name="webSearchCategory" value="kimi" />
+              <span><img src="./assets/provider-logos/kimi.ico" alt="" />Kimi</span>
+            </label>
+            <label class="web-search-mode-option">
+              <input type="radio" name="webSearchCategory" value="third-party" />
+              <span><i data-lucide="globe" aria-hidden="true"></i>网络搜索服务商</span>
             </label>
           </div>
         </fieldset>
-
-        <div class="web-search-native-copy" data-web-search-detail="native">
-          <p>支持 DeepSeek、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter。</p>
-        </div>
+        <p class="web-search-unconfigured" id="webSearchUnconfigured">保存后清空已有搜索配置。网络搜索将提示未配置，网页抓取仍可使用。</p>
 
         <div class="web-search-provider-fields hidden" data-web-search-detail="provider">
-          <div class="web-search-provider-grid" id="webSearchProviderGrid">
+          <div class="web-search-provider-grid" data-web-search-field="provider">
             <div class="field web-search-provider-field">
               <span>供应商</span>
               <div class="console-select" data-console-select="webSearchProvider">
                 <button class="console-select-trigger" id="webSearchProviderTrigger" type="button" aria-haspopup="listbox" aria-expanded="false">
-                  <span id="webSearchProviderLabel">DeepSeek</span><i data-lucide="chevron-down" aria-hidden="true"></i>
+                  <span id="webSearchProviderLabel">Tavily</span><i data-lucide="chevron-down" aria-hidden="true"></i>
                 </button>
                 <div class="console-select-menu hidden" id="webSearchProviderMenu" role="listbox" aria-label="选择搜索供应商"></div>
                 <select class="hidden" id="webSearchProvider" name="provider" tabindex="-1" aria-hidden="true">
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="kimi">Kimi</option>
                   <option value="tavily">Tavily</option>
                   <option value="exa">Exa</option>
                   <option value="you">You.com</option>
@@ -330,14 +331,15 @@
                 </select>
               </div>
             </div>
-            <div class="field" data-web-search-field="model">
-              <span>模型</span>
-              <div class="console-combobox" id="webSearchModelCombobox">
-                <input id="webSearchModel" name="model" type="text" autocomplete="off" />
-                <button class="console-combobox-toggle" id="webSearchModelToggle" type="button" title="选择模型" aria-label="选择模型" aria-expanded="false"><i data-lucide="chevron-down"></i></button>
+          </div>
+
+          <div class="field" data-web-search-field="model">
+              <span>搜索模型</span>
+              <div class="console-select" data-console-select="webSearchModel">
+                <button class="console-select-trigger" id="webSearchModelTrigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="webSearchModelLabel"></span><i data-lucide="chevron-down"></i></button>
                 <div class="console-select-menu hidden" id="webSearchModelMenu" role="listbox" aria-label="选择搜索模型"></div>
+                <select class="hidden" id="webSearchModel" tabindex="-1" aria-hidden="true"></select>
               </div>
-            </div>
           </div>
 
           <div class="web-search-credential-row" id="webSearchCredentialRow">
@@ -374,17 +376,16 @@
               <button class="btn" id="testWebSearchKeylessBtn" type="button"><i data-lucide="plug-zap"></i>测试连接</button>
             </div>
           </div>
-
-          <div class="web-search-test-feedback hidden" id="webSearchTestFeedback" role="status" aria-live="polite">
+        </div>
+        <div class="web-search-test-feedback hidden" id="webSearchTestFeedback" role="status" aria-live="polite">
             <span class="web-search-test-feedback-dot" aria-hidden="true"></span>
             <span id="webSearchTestFeedbackText"></span>
           </div>
-        </div>
       </div>
 
       <footer class="modal-footer">
         <button class="btn" id="cancelWebSearchBtn" type="button">取消</button>
-        <button class="btn primary" id="saveWebSearchBtn" type="submit">保存</button>
+        <button class="btn primary" id="saveWebSearchBtn" type="submit" disabled>保存</button>
       </footer>
     </form>
   </dialog>
@@ -975,7 +976,14 @@
       <div class="modal-header"><h3 id="integrationConfigTitle">集成配置</h3><button type="button" class="icon-btn" data-integration-close aria-label="关闭"><i data-lucide="x"></i></button></div>
       <div class="modal-body integration-dialog-columns">
         <section class="integration-editor-pane" aria-label="配置"><h4 id="integrationConfigCode"></h4><p class="field-hint" id="integrationConfigDescription"></p><div id="integrationEditor"></div><div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div></section>
-        <section class="integration-example-pane" aria-label="接口示例"><h4>接口示例</h4><div id="integrationApiContent"></div><button type="button" class="btn" id="retryIntegrationApiBtn" hidden>重试</button></section>
+        <section class="integration-example-pane" aria-label="集成说明">
+          <div class="integration-detail-tabs" id="integrationDetailTabs" role="tablist" aria-label="集成说明">
+            <button type="button" id="integrationApiTab" role="tab" aria-selected="true" aria-controls="integrationApiPanel" data-integration-tab="api">接口示例</button>
+            <button type="button" id="integrationFeaturesTab" role="tab" aria-selected="false" aria-controls="integrationFeaturesPanel" tabindex="-1" data-integration-tab="features">适用功能</button>
+          </div>
+          <div id="integrationApiPanel" class="integration-detail-panel" role="tabpanel" aria-labelledby="integrationApiTab"><div id="integrationApiContent"></div><button type="button" class="btn" id="retryIntegrationApiBtn" hidden>重试</button></div>
+          <div id="integrationFeaturesPanel" class="integration-detail-panel" role="tabpanel" aria-labelledby="integrationFeaturesTab" hidden></div>
+        </section>
       </div>
       <div class="modal-footer"><button type="button" class="btn" data-integration-close>取消</button><button type="submit" class="btn primary" id="saveIntegrationConfigBtn">保存</button></div>
     </form>

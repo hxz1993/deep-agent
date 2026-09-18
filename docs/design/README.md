@@ -6,7 +6,7 @@
 | 序号   | 课题                                              | 首次研究 | 当前状态 |
 |------|-------------------------------------------------| --- | --- |
 | `01` | [`UI 工具`](01-ui-tools/README.md)                | 2026-06 | builtin/manual 已落地；MCP 自动发现方案已关闭 |
-| `02` | [`运维控制台`](02-operations-console/README.md)      | 2026-07 | 一体化 Console 已落地，保留交互原型 |
+| `02` | [`运维控制台`](02-operations-console/README.md)      | 2026-07 | 一体化 Console 已落地；过期原型已清理 |
 | `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | v0.6.0单Event压缩、八段摘要、Evidence、超大结果裁剪和历史回读已落地 |
 | `04` | [`模型目录`](04-model-catalog/README.md)            | 2026-07 | 数据库目录与手工刷新已落地，结构并入 v0.3.0 基线 001 |
 | `05` | [`工具优化`](05-tool-optimization/README.md)        | 2026-07 | 工具体系映射、错误语义、Return Schema与v0.4.0大工具结果外置已落地；大型 MCP 检索见 13 课题 |
@@ -25,10 +25,10 @@
 | `18` | [`会话事件与轨迹`](18-session-trajectory/README.md) | 2026-08 | v0.6.0统一Event Store、Event API、持久化SSE、Plan与Console轨迹 |
 | `19` | [`Provider与模型分层`](19-model-provider-architecture/README.md) | 2026-08 | v0.5.6已完成两层归一化、007迁移与统一运行门禁 |
 | `20` | [`PTC程序编排`](20-code-mode/README.md) | 2026-08 | v0.6.7规范化`builtin:ptc`，保留MCP原生+`run_code`双通道，并支持URL/File ID不透明中转 |
-| `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | v0.6.6显式`builtin:web`、搜索路由、SSRF-safe Fetch与按需Web图片读取已实现 |
+| `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | 2026-09-19独立搜索服务、空态兼容及非终止失败结果纳入 v0.10.14；DeepSeek/Kimi管理草稿实测通过 |
 | `22` | [`渠道网关与企微 Channel`](22-wecom-channel/README.md) | 2026-09 | v0.7.0公共Gateway/官方SDK Adapter、三表、五个渠道命令与来源标题；002不变 |
-| `23` | [`诊断中心与日志`](23-diagnostics-and-logs/README.md) | 2026-09 | 四种导航布局与日志、会话排查、会话统计的可混搭 HTML 原型；管理态会话能力待确认 |
-| `24` | [`业务助手初始化与升级`](24-assistant-installation/README.md) | 2026-09 | 历史讨论稿；固定 ID 方案已由正式 Agent 安装包方案替代，当前见安装包指南 |
+| `23` | [`诊断中心与日志`](23-diagnostics-and-logs/README.md) | 2026-09 | 日志、管理员会话查询与统计已发布；保留设计与实施说明，原型已清理 |
+| `24` | [`业务助手初始化与升级`](24-assistant-installation/README.md) | 2026-09 | 已由正式 Agent 安装包方案替代；旧稿已清理，保留指南入口 |
 | `26` | [`定时任务`](26-scheduled-tasks/README.md) | 2026-09-14 | 上游调研与初步设计；独立配置、Cron、会话归属及停机补跑，尚未开发 |
 
 ## 文档命名

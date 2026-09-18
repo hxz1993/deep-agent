@@ -7,7 +7,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260918-release01012";
+const CONFIGURATION_ASSET_VERSION = "20260919-search-editor-2";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",

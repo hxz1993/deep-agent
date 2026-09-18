@@ -8,8 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx2
 from pydantic_ai import ModelRetry, Tool, ToolFailed
-from pydantic_ai.messages import ImageUrl, ModelResponse, NativeToolReturnPart, ToolReturn
-from pydantic_ai.capabilities import WebSearch
+from pydantic_ai.messages import ImageUrl, ToolReturn
 from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
 from deep_agent.ptc.file_payload import CODE_MODE_METADATA_KEY
@@ -20,7 +19,6 @@ from deep_agent.web.runtime import (
     _html_to_markdown,
     _web_fetch_tool,
     _web_image_view_tool,
-    _native_result_sources,
     build_web_runtime,
     execute_provider_search,
 )
@@ -42,24 +40,14 @@ class WebPackageTests(unittest.TestCase):
             ["网络搜索", "获取网页内容", "查看网络图片"],
         )
 
-    def test_native_mode_keeps_fetch_local_and_search_native(self) -> None:
-        runtime = build_web_runtime(WebSearchRuntimeConfig(mode="native"))
-
-        self.assertIsInstance(runtime.toolset, FunctionToolset)
-        self.assertEqual(set(runtime.toolset.tools), {"web_fetch"})
-        self.assertIsInstance(runtime.capability, WebSearch)
-        fetch = runtime.toolset.tools["web_fetch"]
-        self.assertNotIn(CODE_MODE_METADATA_KEY, fetch.metadata)
-        self.assertTrue(fetch.metadata["web_content_untrusted"])
+    def test_unconfigured_search_is_still_disclosed(self) -> None:
+        runtime = build_web_runtime(WebSearchRuntimeConfig(mode="unconfigured"))
+        names = {name for part in runtime.toolset.toolsets for name in part.tools}
+        self.assertEqual(names, {"web_search", "web_fetch"})
 
     def test_visual_model_gets_outer_image_tool_without_code_mode_metadata(self) -> None:
-        runtime = build_web_runtime(
-            WebSearchRuntimeConfig(mode="native"),
-            image_capable=True,
-        )
-
-        self.assertEqual(set(runtime.toolset.tools), {"web_fetch", "web_image_view"})
-        image_tool = runtime.toolset.tools["web_image_view"]
+        runtime = build_web_runtime(WebSearchRuntimeConfig(mode="unconfigured"), image_capable=True)
+        image_tool = runtime.toolset.toolsets[1].tools["web_image_view"]
         self.assertNotIn(CODE_MODE_METADATA_KEY, image_tool.metadata)
         self.assertTrue(image_tool.metadata["web_content_untrusted"])
 
@@ -69,7 +57,6 @@ class WebPackageTests(unittest.TestCase):
         )
 
         self.assertIsInstance(runtime.toolset, CombinedToolset)
-        self.assertIsNone(runtime.capability)
         names = {
             name
             for toolset in runtime.toolset.toolsets
@@ -104,6 +91,7 @@ class WebSearchCredentialTests(unittest.IsolatedAsyncioTestCase):
                     name="DeepSeek Session",
                     provider_type="deepseek",
                     api_key="session-secret",
+                    use_default_base_url=True,
                 )
 
         config = await load_web_search_config(Store(), LlmConfiguration())
@@ -557,36 +545,6 @@ class ProviderSearchRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(duck.metadata["sources"][0]["url"], "https://duck.example")
         self.assertEqual(tavily.metadata["sources"][0]["url"], "https://tavily.example")
-
-    def test_native_deepseek_sources_come_from_structured_tool_result(self) -> None:
-        class FakeResult:
-            @staticmethod
-            def all_messages():
-                return [
-                    ModelResponse(
-                        parts=[
-                            NativeToolReturnPart(
-                                "web_search",
-                                {
-                                    "status": "completed",
-                                    "sources": [
-                                        {
-                                            "url": "https://example.com/source",
-                                            "title": "Example",
-                                        }
-                                    ],
-                                },
-                                "native-search-1",
-                                provider_name="deepseek",
-                            )
-                        ]
-                    )
-                ]
-
-        self.assertEqual(
-            _native_result_sources(FakeResult()),
-            [{"url": "https://example.com/source", "title": "Example"}],
-        )
 
     async def test_provider_failure_never_falls_back(self) -> None:
         config = WebSearchRuntimeConfig(

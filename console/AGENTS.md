@@ -48,7 +48,7 @@ console/
 “集成”由 `configuration/integrations.js` 管理，一级导航使用 `puzzle` 图标，复用渠道页的普通表格布局，不展示分组、分割线或二级标题。
 条目取自 `GET /api/v1/integrations`，前端将目录条目平铺显示；不补固定条目、不创建初始化记录。按集成编码维护编辑器与摘要渲染，
 当前两个集成均通过现有 Agent 下拉选择，表格“配置”列显示 Agent 名称；JSON 是底层存储，不向用户提供通用 Key/Value 编辑器。
-配置和接口示例放在同一个固定尺寸左右分栏弹框，左侧 40% 配置并解释关联 Agent 的用途，右侧 60% 在填满剩余高度的同一个代码框展示请求与返回；接口条目使用 `code`、`settings`。API 示例仍与 OpenAPI 共源。
+列表名称下展示所属组件副标题，不加行首图标。配置使用固定尺寸左右分栏弹框，左侧 40% 选择 Agent（空值显示非斜体的“请设置”占位），右侧 60% 提供“接口示例 / 适用功能”页签，默认展示接口示例；接口条目使用 `code`、`settings`，API 示例仍与 OpenAPI 共源。数据流模型配置目前仅在原型中，不加入正式目录。
 切页和关闭弹框中止读请求并忽略迟到结果，保存期间阻止重复提交和离开编辑器；30秒无响应时中止客户端请求、解锁并提示结果待确认，需重新打开集成页核对。契约见
 [`../docs/guides/integrations.md`](../docs/guides/integrations.md)。
 
@@ -57,6 +57,8 @@ console/
 连接先建立、随后读取 History；按服务端 Run 起点 Sequence 和目标 Run ID 排除待重放内容及后续 Run，
 保留已保存用户输入，串行重放后继续接收增量。终态后忽略迟到正文，`observation_end`校准历史后关闭。
 此连接只观察打开时已在运行的那次执行；空闲会话不订阅、不自动跟随企微后续新消息。
+
+聊天请求在SSE开始前被明确拒绝（4xx，408超时除外）时，保留当前输入消息与后端detail错误，不执行历史恢复；新会话此时尚未落库，查询History会用404覆盖真正原因。网络中断、超时和5xx仍恢复可能已保存的历史。
 断线仅重连同一 Run；无重放缓存时回退 `history-follower.js`串行读取该 Run 的状态与 History，
 不得因状态返回新 Run 而继续跟随。正常终态 History 成功读取后才解锁。
 切会话/Agent/卸载必须中止请求且忽略迟到结果，刷新正文保留滚动和未变化 DOM 的折叠状态。
@@ -217,7 +219,7 @@ Headers JSON使用透明输入层与语法高亮层重叠，两层及高亮token
 - 增量事实轨迹测试须覆盖同轮part乱序/分批到达、助手行ID和来源ID稳定、usage不重复累计、并行工具
   先后返回、持久事件先于工具SSE无重复、异常SSE无重复异常行、取消无回执，以及旧RUN旁正常历史可读。
   History跟随仍须测试轮询串行、切会话忽略迟到结果、终态History失败不解锁、运行工具禁止提前交互。
-- 全局配置上下排列Web Search、紧凑数据库摘要和运行设置：Web Search默认只回显一个当前Provider选择，点击编辑后在标准Console弹窗中维护当前模型/指定Provider及当前Provider必填字段；Provider与模型同排并使用Console自定义下拉，DeepSeek/Kimi可选择沿用同类型会话Provider或单独配置API Key；条件字段直接落在弹窗正文，不增加装饰性配置卡片；Fetch无配置不展示；运行设置沿用原安全白名单。数据库摘要通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。Provider详情默认撑满剩余页面高度。会话标题使用首轮实际模型并通过`session/title`事件更新，不提供独立模型入口或轮询刷新。
+- 全局配置上下排列Web Search、紧凑数据库摘要和运行设置：Web Search默认只回显一个当前Provider选择，点击编辑后在标准Console弹窗中维护 DeepSeek / Kimi / 网络搜索服务商三段切换及外置“暂不配置”文字选项及当前 Provider 必填字段；空配置与旧 native 展示未配置，弹框选中“暂不配置”，DeepSeek 默认 Flash、直接展示搜索模型，Kimi 无模型字段；搜索入口共用既有 Provider 存储结构及草稿搜索测试，不再加载原生测试模型。DeepSeek/Kimi 可选择沿用同类型会话 Provider 或单独配置 API Key；条件字段直接落在弹窗正文，不增加装饰性配置卡片；Fetch无配置不展示；运行设置沿用原安全白名单。数据库摘要通过 `GET /api/v1/database-info` 只展示类型、主机、端口、库名或 SQLite 文件名，不返回凭据、连接参数或本地完整路径。Provider详情默认撑满剩余页面高度。会话标题使用首轮实际模型并通过`session/title`事件更新，不提供独立模型入口或轮询刷新。
 - “工具”统一提供 UI / 内置切换，默认 UI；新建工具包仅在 UI 视图显示。内置视图展示代码随版本发布、由Agent显式配置的工具包，以及运行时自动注入的系统工具；该视图没有注册、编辑、删除、全局启停入口，系统工具不得进入 Agent 能力勾选。
 - Console 顶部只展示一处产品版本，通过同源 `GET /info` 读取
   `deep_agent.__version__`；配置中心的数据库结构 revision 是独立运维信息。
@@ -277,8 +279,8 @@ Headers JSON使用透明输入层与语法高亮层重叠，两层及高亮token
   完整ID用于查询，缩略仅展示；日志Run ID保留原值，不支持页面筛选/跳转，日志跳会话只传Session ID，旧log路由run_id忽略。
   会话内部的真实问题/异常事件定位不受影响。复制不得冒泡触发跳转，返回恢复分页和滚动。
 - 这两个查询页面使用限定作用域的`diagnostics-design.css`（直接映射Console主题变量）以及各自CSS；不全局导入
-  DevBox样式，也不影响会话详情和其他目录。旧视觉依据、生成提示词、合成截图/逐点比较保存在
-  `docs/design/23-diagnostics-and-logs/visual-rebuild-20260910/`；图片中的演示计数不能进入生产。
+  DevBox样式，也不影响会话详情和其他目录。旧视觉依据和截图已清理，历史可从 Git 恢复；回归夹具位于
+  `tests/frontend/console/fixtures/diagnostics-visual-fixtures.mjs`，其中的演示计数不能进入生产。
   可复跑`node tests/frontend/console/diagnostics-visual-review.mjs`：默认隔离路由夹具；`--mode live`
   仅同源GET/HEAD，禁止执行请求和外网。浏览器必须finally关闭，截图通过不等于像素完全相等。
 
@@ -375,7 +377,7 @@ Console会话渲染模块边界：
 - `session-inspector.js`：共用概览/当前/上下文与已有渠道信息，只读取注入的会话数据；不取管理员当前测试身份替代历史。
 - `chat.js`：保留工作台请求编排、SSE、Session/附件/Context状态和执行副作用，使用共享Presenter，不维护第二套事件投影。
 - `diagnostic-detail.js`：独立只读宿主，复用以上呈现与轨迹，不复制整页工作台或挂载可写工具widget。
-- 诊断页面视觉以 `docs/design/23-diagnostics-and-logs/interactive-prototype` 的 L4/S1/S2 为基线；
+- 诊断页面视觉以当前 Console UI 指南与正式实现为准；旧 L4/S1/S2 原型已清理，历史可从 Git 恢复；
   表格保留外框、表头与行分隔，图表保留坐标与参考线，不把减少装饰理解成全面去边框。
   用户信息只显示用户名，资料缺失回退真实 ID，不再显示头像或邮箱。详情严格复用对话测试模板与信息栏，
   不新增用户卡、轮次日志栏或跳日志按钮。日志右上筛选首行时间/来源/等级/Session ID，次行关键词/查询/重置，不提供Run筛选；

@@ -72,4 +72,4 @@ skills/<skill-code>.zip
 
 本次本地按用户要求不新增备份，清理指定验收数据、保留原有 6 个 Agent。全组合使用独立 SQLite/FileStore/运行目录。`DEEP_AGENT_SKILL_RUNTIME_ROOT` 可指定实例 Skill 目录，隔离验收不得共用日常实例缓存。
 
-全组合结果及复现入口见 [矩阵验收](../reports/agent-package-matrix/README.md)。此功能随产品版本 0.10.0 发布。
+此功能随产品版本 0.10.0 发布。全组合回归入口为 `tests/run_agent_package_matrix.py`，默认报告输出到 `output/TMP_to_delete-agent-package-matrix`；历史验收报告可从 Git 恢复。

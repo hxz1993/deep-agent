@@ -18,6 +18,7 @@ from deep_agent.options import OPTION, DeepAgentOptions
 from deep_agent.schemas.llm_provider import mask_api_key
 from deep_agent.schemas.web_search import (
     WebSearchSettingsResponse,
+    WebSearchModelTestRequest,
     WebSearchSettingsWrite,
     WebSearchTestResponse,
     WebSearchValueResponse,
@@ -30,6 +31,7 @@ from deep_agent.web.settings import (
     WebSearchRuntimeConfig,
     resolve_web_search_config,
     resolve_web_search_credentials,
+    read_web_search_config,
 )
 
 
@@ -459,6 +461,7 @@ def _web_search_response(row, config: WebSearchRuntimeConfig) -> WebSearchSettin
             credential_source=config.credential_source,
             llm_provider_id=config.llm_provider_id,
             llm_provider_name=config.llm_provider_name,
+            configuration_error=config.configuration_error,
         ),
         created_at=getattr(row, "created_at", None),
         updated_at=getattr(row, "updated_at", None),
@@ -473,29 +476,15 @@ async def _current_web_search(ctx: AppContextDep, *, for_write: bool = False):
             detail="Global settings store is unavailable",
         )
     row = await store.get(WEB_SEARCH_SETTING_KEY)
-    if row is None:
-        return None, WebSearchRuntimeConfig(mode="native")
+    if not for_write:
+        return row, await read_web_search_config(row, ctx.stores.llm_configuration)
     try:
-        if int(row.version) != WEB_SEARCH_SCHEMA_VERSION:
-            raise WebSearchConfigurationError(
-                f"Unsupported Web Search settings version: {row.version}"
-            )
-        config = resolve_web_search_config(row.value, require_credentials=not for_write)
-        if for_write:
-            # A draft replaces the stored configuration. Retain a same-provider
-            # key when parseable, but do not resolve a broken old provider first.
-            return row, config
-        return row, await resolve_web_search_credentials(
-            config,
-            ctx.stores.llm_configuration,
-        )
-    except WebSearchConfigurationError as exc:
-        if for_write:
-            return row, WebSearchRuntimeConfig(mode="native")
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Stored Web Search configuration is invalid: {exc}",
-        ) from exc
+        if row is not None and row.version == WEB_SEARCH_SCHEMA_VERSION:
+            # Preserve same-provider credentials, without resolving a stale reference.
+            return row, resolve_web_search_config(row.value, require_credentials=False)
+    except WebSearchConfigurationError:
+        pass
+    return row, WebSearchRuntimeConfig(mode="unconfigured")
 
 
 async def _resolve_web_search_write(
@@ -553,7 +542,7 @@ async def put_web_search_settings(
     logger.info(
         "Global Web Search configuration updated mode={} provider={}",
         config.mode,
-        config.provider or "current-model",
+        config.provider or "unconfigured",
     )
     return _web_search_response(row, config)
 
@@ -569,7 +558,7 @@ async def test_web_search_settings(
     _row, existing = await _current_web_search(ctx, for_write=True)
     config = await _resolve_web_search_write(body, existing=existing, ctx=ctx)
     started = time.monotonic()
-    provider = config.provider or "current-model"
+    provider = config.provider or "unconfigured"
     try:
         await probe_web_search_config(config)
     except ToolFailed as exc:
@@ -596,4 +585,12 @@ async def test_web_search_settings(
         provider=provider,
         message="连接成功",
         elapsed_ms=elapsed_ms,
+    )
+
+
+@router.post("/global-settings/web-search/test-model", response_model=WebSearchTestResponse)
+async def test_web_search_model(body: WebSearchModelTestRequest, ctx: AppContextDep) -> WebSearchTestResponse:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="会话模型原生搜索测试已移除，请配置搜索供应商后测试。",
     )

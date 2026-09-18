@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import httpx2
 from pydantic_ai import Agent
+from pydantic_ai.capabilities import WebSearch
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -17,6 +18,27 @@ from deep_agent.agent.model_api_diagnostics import observe_model_api, _scope
 
 
 class ModelApiDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_web_search_is_in_actual_wire_manifest(self):
+        wire, rows = [], []
+
+        def transport(request):
+            wire.append(json.loads(request.content))
+            return httpx2.Response(400, json={"error": {"message": "fixture stop"}})
+
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+            model = OpenAIResponsesModel("gpt-4.1", provider=OpenAIProvider(
+                api_key="fixture-only", http_client=client))
+            with patch("deep_agent.agent.model_api_diagnostics.log_event",
+                       side_effect=lambda event, **kw: rows.append((event, kw))):
+                agent = Agent(model, deps_type=AgentDeps,
+                              capabilities=[RuntimeDiagnostics(), WebSearch(native=True, local=False)])
+                with self.assertRaises(ModelHTTPError):
+                    await agent.run("private fixture prompt", deps=AgentDeps(session_id="fixture"))
+        self.assertEqual(wire[0]["tools"][0]["type"], "web_search")
+        self.assertEqual(rows[0][1]["tool_names"], ["web_search"])
+        self.assertEqual(rows[0][1]["tool_count"], 1)
+        self.assertNotIn("private fixture prompt", repr(rows))
+
     async def test_actual_wire_duplicates_delta_endpoint_and_status_without_body(self):
         sent, rows = [], []
 

@@ -16,9 +16,7 @@ import httpx2
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
-from pydantic_ai.models.openrouter import OpenRouterModel
-from pydantic_ai.native_tools import WebSearchTool
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.alibaba import AlibabaProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
@@ -315,7 +313,6 @@ def resolve_provider_model(
     provider: ProviderRuntimeConfig,
     input_modalities: list[str] | None = None,
     tags: list[str] | None = None,
-    native_web_search: bool = False,
     http_retry_attempts: int | None = None,
 ) -> Model:
     """Build a Pydantic AI model from an explicit model/provider pair."""
@@ -326,27 +323,6 @@ def resolve_provider_model(
 
     if definition.model_protocol == "openai_chat":
         runtime_provider = _openai_style_provider(provider)
-        if native_web_search:
-            if provider.provider_type == "deepseek":
-                # DeepSeek Responses only implements native web search. Pydantic AI
-                # through 2.42.0 inherits OpenAI's native tool-search support here,
-                # replaying discovered schemas in both input and tools (HTTP 400:
-                # "Tool names must be unique"). The public profile override keeps
-                # search_tools on the SDK's ordinary function-call fallback, including
-                # replay of existing ToolSearch*Part history; local MCP is unchanged.
-                return OpenAIResponsesModel(
-                    model_name,
-                    provider=runtime_provider,
-                    profile={"supported_native_tools": frozenset({WebSearchTool})},
-                )
-            if provider.provider_type == "openai":
-                return OpenAIResponsesModel(model_name, provider=runtime_provider)
-            if provider.provider_type == "openrouter":
-                return OpenRouterModel(model_name, provider=runtime_provider)
-            raise ProviderConfigurationError(
-                "Current model Provider does not support native Web Search: "
-                f"{provider.provider_type}"
-            )
         model_class = (
             OpenAICompatibleVideoChatModel
             if "video" in (input_modalities or []) or "video_url" in (tags or [])

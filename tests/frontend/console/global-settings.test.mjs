@@ -57,6 +57,98 @@ function loadGlobalSettingsUi() {
   return window.__GlobalSettingsUI;
 }
 
+function webSearchOperationHarness() {
+  const nodes = new Map();
+  const requests = [];
+  const node = (id) => {
+    if (!nodes.has(id)) nodes.set(id, {
+      value: "", disabled: false, open: true, dataset: {},
+      classList: { toggle() {} }, close() { this.open = false; },
+    });
+    return nodes.get(id);
+  };
+  const context = vm.createContext({
+    window: {}, AbortController, escapeHtml,
+    document: {
+      addEventListener() {}, getElementById: node,
+      querySelectorAll(selector) {
+        assert.match(selector, /input.*select.*console-select-trigger.*console-select-option/);
+        return ["categoryRadio", "credentialRadio", "webSearchApiKey", "webSearchModel", "webSearchLlmProvider", "webSearchProviderTrigger", "webSearchModelTrigger", "webSearchLlmProviderTrigger", "openMenuOption"].map(node);
+      },
+    },
+    apiFetch: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })),
+    showToast() {},
+  });
+  vm.runInContext(source, context);
+  vm.runInContext(`
+    selectedWebSearchCategory = () => "deepseek";
+    currentWebSearchDraft = () => ({ version: 1, value: { mode: "provider", provider: "deepseek" } });
+    renderConsoleSelect = () => {};
+    closeWebSearchMenus = () => {};
+    renderWebSearchSettings = () => setWebSearchTestFeedback();
+  `, context);
+  return { context, node, requests, admin: context.window.globalSettingsAdmin };
+}
+
+test("搜索测试和保存均拒绝重复调用", async () => {
+  const h = webSearchOperationHarness();
+  const pending = h.admin.testWebSearch();
+  assert.equal(h.node("testWebSearchBtn").disabled, true);
+  await h.admin.testWebSearch();
+  await h.admin.saveWebSearch();
+  assert.equal(h.requests.length, 1);
+  h.requests[0].resolve({ ok: true, message: "搜索成功" });
+  await pending;
+  assert.equal(h.node("testWebSearchBtn").disabled, false);
+});
+
+test("测试和保存期间锁定草稿控件，成功或失败后恢复编辑", async () => {
+  const h = webSearchOperationHarness();
+  const controls = ["categoryRadio", "credentialRadio", "webSearchApiKey", "webSearchModel", "webSearchLlmProvider", "webSearchProviderTrigger", "webSearchModelTrigger", "webSearchLlmProviderTrigger", "openMenuOption"];
+  const testing = h.admin.testWebSearch();
+  controls.forEach(id => assert.equal(h.node(id).disabled, true, id));
+  h.requests[0].resolve({ ok: true, message: "搜索成功" });
+  await testing;
+  controls.forEach(id => assert.equal(h.node(id).disabled, false, id));
+  const saving = h.admin.saveWebSearch();
+  controls.forEach(id => assert.equal(h.node(id).disabled, true, id));
+  h.requests[1].reject(new Error("保存失败"));
+  await saving;
+  controls.forEach(id => assert.equal(h.node(id).disabled, false, id));
+});
+
+test("关闭重开后的旧测试结果和 finally 不得覆盖或解锁新测试", async () => {
+  const h = webSearchOperationHarness();
+  const old = h.admin.testWebSearch();
+  vm.runInContext("closeWebSearchSettings()", h.context);
+  assert.equal(h.requests[0].options.signal.aborted, true);
+  h.node("webSearchSettingsDialog").open = true;
+  const next = h.admin.testWebSearch();
+  h.requests[0].resolve({ ok: true, message: "旧结果" });
+  await old;
+  assert.equal(h.node("webSearchTestFeedback").dataset.status, "testing");
+  assert.equal(h.node("testWebSearchBtn").disabled, true);
+  assert.equal(h.node("saveWebSearchBtn").disabled, true);
+  h.requests[1].resolve({ ok: true, message: "新结果" });
+  await next;
+  assert.equal(h.node("webSearchTestFeedbackText").textContent, "新结果");
+  assert.equal(h.node("saveWebSearchBtn").disabled, false);
+});
+
+test("保存期间阻止关闭和重复提交，失败后保留编辑器并解锁", async () => {
+  const h = webSearchOperationHarness();
+  const pending = h.admin.saveWebSearch();
+  vm.runInContext("closeWebSearchSettings()", h.context);
+  await h.admin.saveWebSearch();
+  await h.admin.testWebSearch();
+  assert.equal(h.node("webSearchSettingsDialog").open, true);
+  assert.equal(h.requests.length, 1);
+  h.requests[0].reject(new Error("保存失败"));
+  await pending;
+  assert.equal(h.node("webSearchSettingsDialog").open, true);
+  assert.equal(h.node("saveWebSearchBtn").disabled, false);
+});
+
 test("旧搜索配置失效不阻止展示运行设置和打开修复草稿", async () => {
   const summary = {}, window = {};
   const context = vm.createContext({
@@ -116,55 +208,23 @@ test("Agent 是配置中心默认页，系统分组包含全局配置和模型�
   assert.doesNotMatch(indexHtml, /data-tab="database-connection"/);
 });
 
-test("Web Search 配置采用两个显式模式并列出原生供应商", () => {
-  assert.match(templateHtml, /value="native" checked/);
-  assert.match(templateHtml, /value="provider"/);
-  assert.match(templateHtml, /DeepSeek、OpenAI、Anthropic Claude、Google Gemini 和 OpenRouter/);
-  assert.doesNotMatch(templateHtml, /Kimi 请选择|当前模型搜索|无需额外配置/);
-  assert.doesNotMatch(templateHtml, /Web Fetch/);
-  assert.match(templateHtml, /id="testWebSearchBtn"/);
-  assert.match(templateHtml, /id="webSearchTestFeedback"[^>]*role="status"[^>]*aria-live="polite"/);
-  assert.match(templateHtml, /id="saveWebSearchBtn"/);
-  assert.match(templateHtml, /id="openWebSearchSettingsBtn"/);
-  assert.match(
-    templateHtml,
-    /<dialog[^>]*id="webSearchSettingsDialog"[\s\S]*?<form[^>]*id="webSearchSettingsForm"/,
-  );
-  assert.match(
-    templateHtml,
-    /<\/section>\s*<\/div>\s*<dialog[^>]*id="webSearchSettingsDialog"/,
-    "Web Search 弹窗应位于 admin-app 外并由配置加载器挂载到 body",
-  );
-  assert.match(source, /openWebSearchSettingsBtn[\s\S]*openWebSearchSettings/);
-  assert.match(source, /webSearchSettingsDialog[\s\S]*showModal\(\)/);
-  assert.match(source, /this\.webSearch = saved;[\s\S]*webSearchSettingsDialog"\)\?\.close\(\)/);
-  assert.match(templateHtml, /class="console-select-trigger" id="webSearchProviderTrigger"/);
-  assert.match(templateHtml, /id="webSearchModelToggle"/);
+test("Web Search 三段切换及独立暂不配置选项，直接展示 DeepSeek 模型", () => {
+  const radios = templateHtml.match(/<input[^>]*name="webSearchCategory"[^>]*>/g);
+  assert.equal(radios.length, 4);
+  assert.ok(radios.every(radio => !radio.includes("checked")));
+  for (const category of ["deepseek", "kimi", "third-party", "unconfigured"]) assert.ok(radios.some(radio => radio.includes(`value="${category}"`)));
+  assert.match(templateHtml, /id="webSearchUnconfigured"/);
+  assert.match(templateHtml, /id="saveWebSearchBtn"[^>]*disabled/);
+  assert.match(templateHtml, /<div class="field" data-web-search-field="model">/);
+  assert.doesNotMatch(templateHtml, /高级设置|第三方搜索/);
   assert.match(templateHtml, /name="webSearchCredentialSource" value="llm_provider"/);
   assert.match(templateHtml, /name="webSearchCredentialSource" value="api_key"/);
-  assert.match(templateHtml, /id="webSearchLlmProvider"/);
-  assert.match(templateHtml, /<legend>搜索模式<\/legend>/);
-  assert.doesNotMatch(templateHtml, /id="webSearchApiKeyHint"|输入 DeepSeek 的 API Key/);
-  assert.doesNotMatch(templateHtml, /class="web-search-mode-detail/);
-  assert.match(templateHtml, /web-search-mode-dot/);
-  assert.match(templateHtml, /<strong>会话原生搜索<\/strong>/);
-  assert.match(templateHtml, /<strong>指定供应商<\/strong>/);
-  assert.match(templateHtml, /沿用供应商/);
-  assert.match(templateHtml, /单独 API Key/);
-  assert.match(templateHtml, /class="web-search-credential-source"[\s\S]*?<strong>凭据<\/strong>/);
-  assert.doesNotMatch(templateHtml, /<span>会话供应商<\/span>/);
-  assert.match(configurationCss, /\.web-search-mode-card\s*\{[\s\S]*?min-height: 64px/);
-  assert.match(configurationCss, /\.web-search-provider-grid\s*\{[\s\S]*?grid-template-columns: repeat\(2,/);
-  assert.match(configurationCss, /\.web-search-credential-row\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
-  assert.match(configurationCss, /\.web-search-credential-source\s*\{[\s\S]*?display: flex;[\s\S]*?justify-content: space-between/);
-  assert.match(configurationCss, /\.web-search-credential-options\s*\{[\s\S]*?width: max-content;[\s\S]*?grid-template-columns: repeat\(2, max-content\)/);
-  assert.match(configurationCss, /dialog\.web-search-settings-dialog\.console-detail-dialog\.modal\s*\{[\s\S]*?width: min\(520px, calc\(100vw - 28px\)\);[\s\S]*?height: min\(460px, calc\(100vh - 28px\)\)/);
-  assert.match(configurationCss, /\.web-search-provider-grid > \.field\s*\{[\s\S]*?display: grid;[\s\S]*?grid-template-rows: 18px 36px/);
-  assert.match(configurationCss, /\.console-select-trigger\s*\{[\s\S]*?border-radius: 8px/);
-  assert.match(configurationCss, /\.console-select-menu\s*\{[\s\S]*?box-shadow:/);
-  assert.doesNotMatch(configurationCss, /\.web-search-provider-fields\s*\{[^}]*\b(?:border|background|padding)\s*:/);
-  assert.match(configurationCss, /\.web-search-test-feedback\s*\{[^}]*display: flex/);
-  assert.doesNotMatch(configurationCss, /\.web-search-test-feedback\s*\{[^}]*(?:border|background)\s*:/);
+  assert.doesNotMatch(templateHtml, /webSearchTestModel|会话模型原生搜索|name="webSearchMode"/);
+  assert.doesNotMatch(source, /test-model|webSearchTestModel|renderWebSearchTestModels/);
+  assert.equal((templateHtml.match(/class="web-search-mode-option"/g) || []).length, 3);
+  assert.match(templateHtml, /class="web-search-unconfigured-option"[\s\S]*?暂不配置/);
+  assert.match(templateHtml, /id="webSearchTestFeedback"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(source, /webSearchSettingsDialog[\s\S]*showModal\(\)/);
 });
 
 test("Web Search 连接测试在当前弹框内展示简短反馈", () => {
@@ -194,12 +254,13 @@ test("Web Search 连接测试在当前弹框内展示简短反馈", () => {
 
 test("Web Search 摘要只回显当前生效的一个供应商选择", () => {
   const ui = loadGlobalSettingsUi();
-  assert.equal(ui.webSearchSummaryLabel({ value: { mode: "native" } }), "会话原生搜索");
+  for (const settings of [null, {}, { value: {} }, { value: { mode: "native" } }, { value: { mode: "unconfigured" } }]) assert.equal(ui.webSearchSummaryLabel(settings), "未配置");
   assert.equal(
     ui.webSearchSummaryLabel({ value: { mode: "provider", provider: "tavily" } }),
     "Tavily",
   );
-  assert.match(templateHtml, /id="webSearchSummaryValue">会话原生搜索/);
+  assert.equal(ui.webSearchSummaryLabel({ value: { mode: "provider", provider: "kimi", configuration_error: "供应商已删除" } }), "配置不可用");
+  assert.match(templateHtml, /id="webSearchSummaryValue">未配置/);
   const webSearchSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsWebSearch">[\s\S]*?<\/section>/)?.[0] || "";
   assert.match(webSearchSection, /Web Search[\s\S]*?配置 Agent 的搜索供应商。[\s\S]*?id="webSearchSummaryValue"[\s\S]*?openWebSearchSettingsBtn/);
   assert.doesNotMatch(webSearchSection, /global-settings-summary-row|<p|当前支持|Kimi/);
@@ -210,17 +271,15 @@ test("Web Search 摘要只回显当前生效的一个供应商选择", () => {
 
 test("不同搜索供应商只生成必要配置", () => {
   const ui = loadGlobalSettingsUi();
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(ui.buildPayload({ mode: "native" }))),
-    { version: 1, value: { mode: "native" } },
-  );
+  assert.throws(() => ui.buildPayload({ mode: "native" }), /请选择搜索供应商/);
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.buildPayload({ mode: "unconfigured", provider: "kimi", apiKey: "discard", llmProviderId: "discard" }))), { version: 1, value: { mode: "unconfigured" } });
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "deepseek", model: "", apiKey: "secret", credentialSource: "api_key" }))),
-    { version: 1, value: { mode: "provider", provider: "deepseek", model: "deepseek-v4-flash", credential_source: "api_key", api_key: "secret" } },
+    { version: 1, value: { mode: "provider", provider: "deepseek", model: "deepseek-flash", credential_source: "api_key", api_key: "secret" } },
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "kimi", model: "kimi-k3", credentialSource: "llm_provider", llmProviderId: "provider-1" }))),
-    { version: 1, value: { mode: "provider", provider: "kimi", model: "kimi-k3", credential_source: "llm_provider", llm_provider_id: "provider-1" } },
+    { version: 1, value: { mode: "provider", provider: "kimi", credential_source: "llm_provider", llm_provider_id: "provider-1" } },
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "tavily", model: "ignored", apiKey: "key" }))),
@@ -230,9 +289,29 @@ test("不同搜索供应商只生成必要配置", () => {
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "duckduckgo", model: "ignored", apiKey: "ignored" }))),
     { version: 1, value: { mode: "provider", provider: "duckduckgo" } },
   );
-  assert.equal(ui.providerState("kimi").requiresModel, true);
+  assert.equal(ui.providerState("kimi").requiresModel, false);
   assert.equal(ui.providerState("exa").requiresModel, false);
   assert.equal(ui.providerState("duckduckgo").requiresKey, false);
+});
+
+test("历史 DeepSeek 模型不被推荐列表覆盖，失效 Provider 不静默换绑", () => {
+  const nodes = new Map();
+  const node = id => { if (!nodes.has(id)) nodes.set(id, { value: "", innerHTML: "" }); return nodes.get(id); };
+  const context = vm.createContext({
+    window: {}, escapeHtml,
+    state: { llmProviders: [{ id: "new-provider", name: "新的 DeepSeek", provider_type: "deepseek", api_key_set: true }] },
+    document: { addEventListener() {}, getElementById: node },
+  });
+  vm.runInContext(source, context);
+  vm.runInContext('renderConsoleSelect = () => {}; renderWebSearchModelMenu("deepseek-v4-flash");', context);
+  assert.equal(node("webSearchModel").value, "deepseek-v4-flash");
+  assert.match(node("webSearchModel").innerHTML, /deepseek-v4-flash/);
+  vm.runInContext('renderWebSearchModelMenu("proxy-custom-model");', context);
+  assert.equal(node("webSearchModel").value, "proxy-custom-model");
+  vm.runInContext('renderWebSearchModelMenu(""); renderWebSearchLlmProviderOptions("deepseek", "deleted-provider");', context);
+  assert.equal(node("webSearchModel").value, "deepseek-flash");
+  assert.equal(node("webSearchLlmProvider").value, "deleted-provider");
+  assert.match(node("webSearchLlmProvider").innerHTML, /供应商已不可用/);
 });
 
 test("全局配置列表展示值、单位、环境变量和来源", () => {
@@ -303,4 +382,34 @@ test("全局配置使用单表分组行并支持大小写不敏感搜索", () =>
   assert.equal(ui.matches(groups[0], groups[0].items[0], "初始化"), true);
   assert.match(templateHtml, /id="globalSettingsSearch"/);
   assert.doesNotMatch(templateHtml, /id="refreshGlobalSettingsBtn"/);
+});
+
+
+test("脱敏密钥与留空不提交替换，新密钥才提交", () => {
+  const ui = loadGlobalSettingsUi();
+  for (const provider of ["deepseek", "kimi", "tavily", "exa", "you"]) {
+    const base = { mode: "provider", provider, credentialSource: "api_key", maskedApiKey: "sk-abc********xyz" };
+    for (const apiKey of [base.maskedApiKey, "", "   "]) {
+      assert.equal(Object.hasOwn(ui.buildPayload({ ...base, apiKey }).value, "api_key"), false);
+    }
+    assert.equal(ui.buildPayload({ ...base, apiKey: "test-new-key" }).value.api_key, "test-new-key");
+    assert.equal(Object.hasOwn(ui.buildPayload({ ...base, mode: "unconfigured", apiKey: "test-new-key" }).value, "api_key"), false);
+  }
+});
+
+test("重新打开回显同供应商脱敏值，切换供应商不串用密钥", () => {
+  const input = { dataset: {}, value: "", type: "password" };
+  const context = vm.createContext({ window: {}, document: { addEventListener() {}, getElementById: () => input } });
+  vm.runInContext(source, context);
+  vm.runInContext('globalSettingsAdmin.webSearch = {value: {mode: "provider", provider: "tavily", api_key_masked: "tvly-abc********xyz"}}; resetWebSearchApiKey("tavily")', context);
+  assert.equal(input.value, "tvly-abc********xyz");
+  assert.equal(input.type, "text");
+  vm.runInContext('resetWebSearchApiKey("exa")', context);
+  assert.equal(input.value, "");
+  assert.equal(input.dataset.maskedValue, "");
+  assert.equal(input.type, "password");
+  vm.runInContext('resetWebSearchApiKey("tavily")', context);
+  assert.equal(input.value, "tvly-abc********xyz");
+  vm.runInContext('globalSettingsAdmin.webSearch.value.credential_source = "llm_provider"; resetWebSearchApiKey("tavily")', context);
+  assert.equal(input.value, "");
 });

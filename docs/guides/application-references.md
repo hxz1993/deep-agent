@@ -42,7 +42,7 @@ v0.9.7 使用 Alembic `003`。移除原有 10 条外键，保留关联 ID、主�
 
 当前库的 `foreign_key_check` 为空没有证明作用。维护检查使用 `deep_agent.db.reference_schema.assert_logical_references`，传入 SQLAlchemy 同步 Connection；异步连接通过 `run_sync` 执行。历史维护命令仍受各自 Revision 限制。
 
-验收范围和实际结果见 [v0.9.7 回归记录](../reports/v0.9.7-application-references.md)。
+v0.9.7 的历史回归记录可从 Git 恢复；当前约束以本文、数据库迁移与自动化回归为准。
 
 ## v0.10.9 管理删除确认
 

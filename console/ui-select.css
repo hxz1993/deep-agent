@@ -8,7 +8,7 @@ select.da-select-native { position: absolute !important; width: 1px !important; 
 .da-select-trigger:focus-visible, .da-select-trigger[aria-expanded=true] { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .da-select-trigger:disabled { background: var(--console-readonly-surface, var(--bg-soft)); color: var(--text-faint); cursor: not-allowed; }
 .da-select-trigger[aria-invalid=true] { border-color: var(--danger, #dc2626); }
-.da-select-trigger .da-select-placeholder { color: var(--text-faint); font-style: italic; }
+.da-select-trigger .da-select-placeholder { color: var(--text-faint); font-style: normal; }
 .da-select-menu { position: fixed; inset: auto; box-sizing: border-box; z-index: 10000; margin: 0; padding: 5px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--console-card-border, var(--border)); border-radius: 9px; background: var(--console-surface, var(--bg)); color: var(--text); box-shadow: 0 8px 24px color-mix(in srgb, #182333 14%, transparent); font-family: inherit; font-size: 12px; }
 .da-select-menu[hidden] { display: none; }
 .da-select-menu::backdrop { background: transparent; }

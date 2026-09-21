@@ -183,6 +183,23 @@ function bindConsoleNavigationResizer() {
 }
 
 function bindNavigation() {
+  const tutorialsDialog = document.getElementById("tutorialsDialog");
+  document.getElementById("openTutorialsBtn")?.addEventListener("click", () => {
+    if (consoleAllowed && !tutorialsDialog.open) tutorialsDialog.showModal();
+  });
+  tutorialsDialog.querySelectorAll("[data-close-tutorials]").forEach((button) => {
+    button.addEventListener("click", () => tutorialsDialog.close());
+  });
+  document.getElementById("downloadTutorialBtn")?.addEventListener("click", () => {
+    const selected = tutorialsDialog.querySelector('input[name="tutorialDocument"]:checked');
+    if (!selected) return;
+    const link = document.createElement("a");
+    link.href = new URL(selected.value, document.baseURI).href;
+    link.download = selected.dataset.filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+  });
   bindConsoleNavigationResizer();
   const resourceNav = document.getElementById("consoleResourceNav");
   const template = document.getElementById("configurationNavigation");

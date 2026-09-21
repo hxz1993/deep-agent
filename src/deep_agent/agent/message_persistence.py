@@ -8,7 +8,7 @@ from copy import deepcopy
 from typing import Any
 
 from pydantic_ai import AgentStreamEvent, ModelRequestNode, RunContext, ToolDenied
-from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering
+from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering, ToolSearch
 from pydantic_ai.exceptions import ToolFailedError
 from pydantic_ai.messages import (
     FunctionToolCallEvent, FunctionToolResultEvent, ModelMessage, ModelRequest,
@@ -58,7 +58,10 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         # The public SDK orders after_* hooks in reverse. Outermost means our
         # after_tool_execute observes the existing limits/redaction's final
         # result, never the raw oversized result before those policies run.
-        return CapabilityOrdering(position="outermost")
+        # ToolSearch is itself outermost and adds feedback to its tool return.
+        # Resolve the tie explicitly so its final result is saved once, in both
+        # ordinary and streaming runs, before immutable event comparison.
+        return CapabilityOrdering(position="outermost", wraps=[ToolSearch])
 
     @staticmethod
     def _same_message(left: ModelMessage, right: ModelMessage) -> bool:

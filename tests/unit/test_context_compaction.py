@@ -17,7 +17,9 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.usage import RunUsage
+from pydantic_ai import RunContext
+from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from deep_agent.agent.context.compaction import (
     DeepAgentContextCompaction,
@@ -293,6 +295,32 @@ class DshCompactionRulesTests(unittest.TestCase):
 
 
 class CompactionPreparationProgressTests(unittest.IsolatedAsyncioTestCase):
+    async def test_summary_cannot_spend_reserved_final_request_after_resume(self) -> None:
+        from deep_agent.agent.deps import AgentDeps
+        from deep_agent.agent.request_budget import TurnRequestBudget
+
+        calls = []
+        def respond(messages, info):
+            calls.append(True)
+            return ModelResponse(parts=[TextPart(valid_summary())])
+
+        # 38 requests happened in earlier Runs; the current Run has two left.
+        budget = TurnRequestBudget(UsageLimits(request_limit=40), previous_requests=38)
+        deps = AgentDeps(session_id="summary-reserve")
+        usage = RunUsage()
+        model = FunctionModel(respond)
+        state = ContextRunState(raw_history=[], estimator=TokenEstimator.conservative(),
+                                usage_limits=budget.run_limits)
+        ctx = RunContext(deps=deps, model=model, usage=usage, usage_limits=budget.run_limits)
+        compaction = DeepAgentContextCompaction(context_window_tokens=100_000, max_output_tokens=1024)
+        history = [ModelRequest(parts=[UserPromptPart(content="fixture context")])]
+        await compaction._single_summary(history, None, ctx, 1024, state, reserve_answer_request=True)
+        self.assertEqual(usage.requests, 1)
+        with self.assertRaisesRegex(SummaryUnavailable, "request_limit_reserved"):
+            await compaction._single_summary(history, None, ctx, 1024, state, reserve_answer_request=True)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(usage.requests, 1)
+
     async def test_incremental_summary_reserves_evidence_before_model_call(self) -> None:
         raw = [ModelRequest(parts=[UserPromptPart(content="较早任务")])]
         for i in range(45):

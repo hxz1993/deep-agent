@@ -56,6 +56,6 @@ def deep_agent_file_key(call: ToolCallPart) -> str | None:
             f"tool-result:{handle}:{args.get('offset') or 0}:"
             f"{args.get('limit') or ''}:{bool(args.get('from_end', False))}:"
             f"{args.get('pattern') or ''}:{args.get('char_offset') or 0}:"
-            f"{args.get('end_offset')}"
+            f"{args.get('end_offset')}:{args.get('context_lines') or 0}"
         )
     return None

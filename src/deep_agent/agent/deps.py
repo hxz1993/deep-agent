@@ -9,6 +9,7 @@ from pydantic_ai import CancellationToken
 from deep_agent.schemas.attachment import AttachmentRef
 
 if TYPE_CHECKING:
+    from deep_agent.agent.request_budget import TurnRequestBudget
     from deep_agent.agent.context.runtime import ContextRunState
     from deep_agent.agent.tool_discovery import ToolDiscoveryTelemetry
     from deep_agent.agent.tool_output_limits import ToolOutputTelemetry
@@ -41,6 +42,7 @@ class AgentDeps:
     request_headers: Mapping[str, str] = field(default_factory=dict)
     file_store: "FileStore | None" = field(default=None, repr=False)
     context_state: "ContextRunState | None" = None
+    request_budget: "TurnRequestBudget | None" = None
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
     tool_output_limits: "ToolOutputTelemetry | None" = None
     # Names only, per Run, for model-wire diagnostics; never a tool authority.

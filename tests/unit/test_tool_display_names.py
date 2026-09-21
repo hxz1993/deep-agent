@@ -72,7 +72,7 @@ class ToolDisplayNameMapTests(unittest.TestCase):
         self.assertEqual(mapping["web_search"], "网络搜索")
         self.assertEqual(mapping["web_fetch"], "获取网页内容")
         self.assertEqual(mapping["web_image_view"], "查看网络图片")
-        self.assertEqual(mapping["search_tools"], "搜索MCP工具")
+        self.assertEqual(mapping["search_tools"], "搜索工具")
         self.assertEqual(mapping["demo__form"], "填写信息")
         self.assertEqual(mapping["docs_lookup"], "查询文档")
 

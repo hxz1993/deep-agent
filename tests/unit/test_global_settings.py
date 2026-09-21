@@ -39,8 +39,8 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
             AgentOptions.max_requests.set_by = previous_source
 
         item = _find_item(settings, "max_requests")
-        self.assertEqual(item.value, 30)
-        self.assertEqual(item.display_value, "30")
+        self.assertEqual(item.value, 40)
+        self.assertEqual(item.display_value, "40")
         self.assertEqual(item.source, "default")
         self.assertEqual(item.env_name, "DEEP_AGENT_MAX_REQUESTS")
 

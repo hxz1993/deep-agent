@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.15`，数据库Head为`006` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.16`，数据库Head为`006` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -69,6 +69,16 @@ PYTHONPATH=src python3.12 -m deep_agent.local_dev \
   `platform`。文件正文保存为私有Blob，独立`metadata.sqlite3`只存索引；业务API与线上保持一致。
 
 ### 稳定 SQLite 本地开发基线
+
+v0.10.16 本地升级验证使用仓库 `.venv/bin/python`，依赖按 `requirements.txt` 安装；
+不要用仍装旧依赖的全局解释器启动。该环境可复用已安装的内部 DeepCube wheel。
+
+当前 SQLite 启动命令：
+
+```bash
+PYTHONPATH=src .venv/bin/python -m deep_agent.local_dev \
+  --config ~/.config/deep-agent/sqlite.env --port 8000
+```
 
 后续日常本地开发、Console 联调和人工验收，不再随任务创建全新的空 SQLite。默认固定复用：
 
@@ -267,8 +277,9 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - v0.3.21 起 `/api/v1/system-tools` 只读说明 Skill、文件、MCP Tool Search 和 MCP Resource 的运行时工具来源与注入条件；这些 `runtime:*` 展示编码不得进入 Capability Registry、Agent 配置或数据库。Python Sandbox 完整说明由当前 Profile 的包清单动态生成，Function Tool Definition 保持一行。
 - v0.3.23 起附件与 Skill 文件统一由自动注入的系统工具 `read_file`读取：只处理文本、DOCX和XLSX，并在同一Run复用字节与解析结果。图片不属于文件工具：当前轮图片始终作为原生多模态内容交给Provider，由Provider决定所选模型是否接受；历史图片和Skill图片不读取。PDF和PPT/PPTX若有产品需求，单独设计文档解析工具，不塞进 `read_file`或伪装成模型原生模态。`execute_skill_script`在Agent同时选择含脚本Skill和 `builtin:sandbox`时注入，与 `execute_python`共用当前子进程沙箱。
 - v0.3.14 起每个 Pod 固定一个异步 Gunicorn Worker，保证进程内 `ActiveRunRegistry` 与取消请求一致命中；横向扩容多个 Pod 前必须提供会话粘性或共享取消协调器。工具检索以用户问题为主，Context Reference 标签仅在问题无检索结果时回退，并在单次 Run 内排除已披露工具和重复搜索；不得清空 Pydantic AI 的跨 Run 发现历史。
+- v0.10.16 固定 Core 2.46.0 / Harness 0.32.0 / Monty 0.0.23。SDK 的 Toolset.id 不能含冒号，动态部分用可逆百分号编码；业务 capability code 和 MCP 协议工具名不改。WebFetch 覆写须同步上游安全转换、字符集和异常边界，不能只升级 requirements。
 - Harness 是可选能力库，不是产品平台。会话、身份、配置、HITL、SSE 和 Console 继续由 DeepAgent 负责；引入 Harness 0.x 时必须与 `pydantic-ai-slim` 一起固定准确版本。
-- `pydantic-ai-slim 2.35.1`要求OpenAI 3.x；当前联合固定`openai==3.5.0`、`aiohttp>=3.14.3,<4`和`deepfos>=1.1.97,<2`。OpenAI 3.x在模块导入时就会加载aiohttp传输，不能再与aiohttp 3.9混装。Google Provider的自定义代理客户端使用`httpx2`，禁止退回已弃用的旧`httpx.AsyncClient`路径。
+- `pydantic-ai-slim 2.46.0`要求OpenAI >=3.8；当前联合固定`openai==3.8.0`、`aiohttp>=3.14.3,<4`和`deepfos>=1.1.97,<2`。OpenAI 3.x在模块导入时就会加载aiohttp传输，不能再与aiohttp 3.9混装。Google Provider的自定义代理客户端使用`httpx2`，禁止退回已弃用的旧`httpx.AsyncClient`路径。
 - Provider Usage 是 best effort；OpenAI-compatible 或私有端点返回 0 时可能代表缺失。上下文预算必须结合模型窗口元数据和保守估算，不能只依赖 `result.usage`。
 - 新上传只保存附件引用；运行时 `read_file`通过 1-based `offset/limit`、
   `has_more/next_offset`渐进读取 TXT、LOG、DOCX、XLSX。合法 `file_id`

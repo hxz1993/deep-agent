@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.toolsets import FunctionToolset
@@ -42,7 +43,7 @@ def build_mcp_toolset(
     if transport == "url":
         parsed = McpInspection.from_value(inspection, transport=transport)
         if parsed.tools.snapshot_status != "ready" or parsed.tools.snapshot is None:
-            return FunctionToolset(id=f"mcp-unavailable:{name}")
+            return FunctionToolset(id=f"mcp-unavailable-{quote(name, safe='')}")
         return SnapshotMcpToolset(
             server_name=name,
             config=config,
@@ -69,7 +70,7 @@ def build_resource_client(
     init_timeout = resolve_mcp_init_timeout(config)
     return MCPToolset(
         url,
-        id=f"resources:{name}",
+        id=f"resources-{quote(name, safe='')}",
         headers=headers,
         init_timeout=init_timeout,
         max_retries=resolve_mcp_max_retries(),
@@ -87,7 +88,7 @@ def build_raw_url_mcp_toolset(
     headers = dict(static_headers or {})
     return MCPToolset(
         url,
-        id=name,
+        id=quote(name, safe=""),
         headers=headers or None,
         include_instructions=True,
         process_tool_call=inject_request_meta,

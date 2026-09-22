@@ -63,7 +63,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             web_search = await client.put(
                 "/api/v1/global-settings/web-search",
-                json={"value": {"mode": "native"}},
+                json={"value": {"mode": "provider", "provider": "duckduckgo"}},
             )
             responses = [
                 await client.get("/api/v1/agents"),

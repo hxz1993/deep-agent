@@ -18,6 +18,7 @@ from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.registry import (
     build_external_toolset,
+    build_ui_tool_package,
     build_tool_hints,
     enrich_deferred,
     enrich_tool_event,
@@ -652,6 +653,20 @@ class ToolHintsTests(unittest.TestCase):
         self.assertEqual(enriched["calls"][0]["widget"], "text")
 
 class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_package_runtime_id_preserves_business_code_and_protocol_names(self) -> None:
+        package = build_ui_tool_package(
+            builtin_ui_records(), code="ui:builtin", label="通用交互", source="builtin",
+        )
+        self.assertEqual(package.code, "ui:builtin")
+        self.assertNotIn(":", package.toolset.id)
+        model = FunctionModel(lambda messages, info: ModelResponse(parts=[
+            ToolCallPart("builtin__confirm", {"message": "继续？"}, tool_call_id="confirm-1"),
+        ]))
+        result = await Agent(
+            model, toolsets=[package.toolset], output_type=[str, DeferredToolRequests],
+        ).run("请确认")
+        self.assertEqual(result.output.calls[0].tool_name, "builtin__confirm")
+
     def test_build_external_toolset_preserves_names(self) -> None:
         toolset = build_external_toolset(builtin_ui_records())
         self.assertEqual(toolset.id, "ui-dynamic")

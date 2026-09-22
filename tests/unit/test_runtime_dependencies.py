@@ -16,7 +16,7 @@ class RuntimeDependencyTests(unittest.TestCase):
             if line.strip() and not line.lstrip().startswith("#")
         }
 
-        self.assertIn("openai==3.5.0", requirements)
+        self.assertIn("openai==3.8.0", requirements)
         self.assertIn("aiohttp>=3.14.3,<4", requirements)
         self.assertIn("deepfos>=1.1.97,<2", requirements)
         self.assertIn("httpx2>=2.7,<3", requirements)
@@ -29,18 +29,18 @@ class RuntimeDependencyTests(unittest.TestCase):
         }
 
         self.assertIn(
-            "pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.35.1",
+            "pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.46.0",
             requirements,
         )
         self.assertIn(
-            "pydantic-ai-harness[skills,exa,youdotcom]==0.26.0",
+            "pydantic-ai-harness[skills,exa,youdotcom]==0.32.0",
             requirements,
         )
-        self.assertIn("pydantic-monty==0.0.21", requirements)
-        self.assertEqual(version("pydantic-ai-slim"), "2.35.1")
-        self.assertEqual(version("pydantic-ai-harness"), "0.26.0")
-        self.assertEqual(version("pydantic-monty"), "0.0.21")
-        self.assertEqual(version("openai"), "3.5.0")
+        self.assertIn("pydantic-monty==0.0.23", requirements)
+        self.assertEqual(version("pydantic-ai-slim"), "2.46.0")
+        self.assertEqual(version("pydantic-ai-harness"), "0.32.0")
+        self.assertEqual(version("pydantic-monty"), "0.0.23")
+        self.assertEqual(version("openai"), "3.8.0")
         self.assertGreaterEqual(tuple(map(int, version("aiohttp").split(".")[:2])), (3, 14))
 
     def test_pydantic_ai_openai_model_imports(self) -> None:

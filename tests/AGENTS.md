@@ -99,7 +99,7 @@ tests/
 | `test_jenkins_deploy.py`、`test_jenkins_api_only.py` | 网关/仅API流水线Shell、按名覆盖启动命令、失败中断、API探针及原始归档完整性 |
 | `test_rebaseline_database.py` | 旧012物理结构校验、显式改标、全表行数与内容哈希不变及异常拒绝 |
 | `test_configuration_import.py` | 同Revision配置初始化、主键保留、空会话门禁、事务回滚和Skill File ID重写 |
-| `test_runtime_dependencies.py` | Pydantic AI/Harness、OpenAI/aiohttp/deepfos联合版本锁定与模型导入 |
+| `test_runtime_dependencies.py`、`test_upstream_code_mode.py` | 联合版本锁定、模型导入；真实 Hybrid/Monty 金额/UUID/日期规范化及跨代码片段累计交互上限 |
 | `test_project_layout.py` | 旧入口已移除、唯一源码目录、规范命令与资源路径、Gateway导入和Sandbox子进程路径 |
 | `test_session_model_override.py` | Agent 对话 `model_id` 请求级覆盖（`build_runner_for_agent`） |
 | `test_ui_tools_rfc.py` | builtin/manual UI 工具包、工具归属、Agent 整包选择、Schema 校验与 Deferred |
@@ -107,6 +107,11 @@ tests/
 ---
 
 ## 集成测试（`integration/`）
+
+`test_web_fetch_upstream.py` 用真实回环 HTTP 字节响应验证字符集、HTML 转换、图片及完整正文；
+病态未闭合标签放入有超时和 finally 清理的隔离子进程，避免解析回归卡住整个套件。
+升级 Pydantic AI 时同时跑 MCP 服务说明/SDK Toolset.id、前端回传、40 次预算和 PTC 回归。
+
 
 | 文件 | 覆盖 |
 | --- | --- |

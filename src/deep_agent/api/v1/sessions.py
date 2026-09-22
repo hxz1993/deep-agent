@@ -505,6 +505,11 @@ class SessionContextStatus(BaseModel):
     estimated_sample_count: int = 0
     estimator_source: str | None = None
     estimate_scope: str = "history_only"
+    estimated_request_tokens: int | None = None
+    context_occupancy_tokens: int | None = None
+    occupancy_source: str = "estimated"
+    usage_anchor_id: str | None = None
+    estimation_fallback_reason: str | None = None
     safety_margin_tokens: int | None = None
     usable_request_tokens: int | None = None
     trigger_tokens: int | None = None
@@ -512,6 +517,9 @@ class SessionContextStatus(BaseModel):
     compaction_event_id: str | None = None
     compaction_source_through_sequence: int | None = None
     compaction_estimated_tokens: int | None = None
+    compaction_estimated_tokens_before: int | None = None
+    compaction_estimated_tokens_after: int | None = None
+    compaction_estimate_scope: str | None = None
     compaction_updated_at: UtcDatetime | None = None
     summary_model_id: str | None = None
     manual_compaction_available: bool = False
@@ -645,6 +653,14 @@ def context_status_from_data(resolved_session_id: str, context_data: dict[str, A
     compaction_source = compaction.payload.get("source", {}) if compaction else {}
     compaction_budget = compaction.payload.get("budget", {}) if compaction else {}
     summary_call = compaction.payload.get("summary_call", {}) if compaction else {}
+    request_comparison = all(
+        compaction_budget.get(key) is not None
+        for key in ("estimated_tokens_before", "estimated_tokens_after")
+    )
+    before_key, after_key = (
+        ("estimated_tokens_before", "estimated_tokens_after")
+        if request_comparison else ("estimated_before", "estimated_after")
+    )
     return SessionContextStatus(
         session_id=resolved_session_id,
         raw_message_count=len(context_data["raw_history"]),
@@ -660,6 +676,11 @@ def context_status_from_data(resolved_session_id: str, context_data: dict[str, A
         estimated_sample_count=budget.estimated_sample_count,
         estimator_source=budget.estimator_source,
         estimate_scope=budget.estimate_scope,
+        estimated_request_tokens=budget.estimated_request_tokens,
+        context_occupancy_tokens=budget.context_occupancy_tokens,
+        occupancy_source=budget.occupancy_source,
+        usage_anchor_id=budget.usage_anchor_id,
+        estimation_fallback_reason=budget.estimation_fallback_reason,
         safety_margin_tokens=budget.safety_margin_tokens,
         usable_request_tokens=budget.usable_request_tokens,
         trigger_tokens=budget.trigger_tokens,
@@ -672,6 +693,16 @@ def context_status_from_data(resolved_session_id: str, context_data: dict[str, A
         compaction_estimated_tokens=(
             int(compaction_budget.get("estimated_after"))
             if compaction_budget.get("estimated_after") is not None else None
+        ),
+        compaction_estimated_tokens_before=(
+            int(compaction_budget[before_key]) if compaction_budget.get(before_key) is not None else None
+        ),
+        compaction_estimated_tokens_after=(
+            int(compaction_budget[after_key]) if compaction_budget.get(after_key) is not None else None
+        ),
+        compaction_estimate_scope=(
+            (compaction_budget.get("estimate_scope") or "full_model_request")
+            if request_comparison else "history_only" if compaction else None
         ),
         compaction_updated_at=compaction.updated_at if compaction else None,
         summary_model_id=summary_call.get("model_id"),

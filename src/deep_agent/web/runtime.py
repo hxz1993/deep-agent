@@ -13,15 +13,17 @@ from typing import Any
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 import httpx2
-from markdownify import MarkdownConverter
+from bs4 import BeautifulSoup
 from pydantic_ai import ModelRetry, Tool, ToolFailed
 from pydantic_ai._ssrf import safe_download, validate_and_resolve_url
-from pydantic_ai._utils import is_text_like_media_type
+from pydantic_ai._utils import is_text_like_media_type, run_in_executor
 from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 from pydantic_ai.common_tools.tavily import tavily_search_tool
 from pydantic_ai.common_tools.web_fetch import (
     WebFetchLocalTool,
+    _MarkdownConverter,
     _clean_whitespace,
+    _decode_text,
     _extract_title,
 )
 from pydantic_ai.messages import (
@@ -62,6 +64,7 @@ _WEB_FETCH_MAX_ATTEMPTS = 2
 _WEB_FETCH_RETRY_DELAY_SECONDS = 0.5
 _WEB_FETCH_MAX_RETRY_AFTER_SECONDS = 3.0
 _WEB_FETCH_RETRY_STATUS_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
+_HTML_TAG_START_RE = re.compile(r"<[a-zA-Z]")
 
 
 @dataclass(frozen=True)
@@ -151,7 +154,7 @@ def _fetch_transport_failure(exc: BaseException) -> str | None:
     if any(_is_tls_certificate_failure(cause) for cause in chain):
         return "Web Fetch could not verify the public page TLS certificate"
     for cause in chain:
-        # Pinned pydantic-ai 2.35.1 safe_download uses this precise ValueError
+        # Pinned pydantic-ai safe_download uses this precise ValueError
         # contract for wire/decoded size overflow. Other ValueErrors (including
         # invalid URLs and SSRF checks) remain correctable ModelRetry failures.
         if isinstance(cause, ValueError) and re.fullmatch(
@@ -176,8 +179,11 @@ def _normalized_public_image_url(raw_url: str, *, base_url: str) -> str | None:
     value = raw_url.strip()
     if not value:
         return None
-    absolute = urljoin(base_url, value)
-    parsed = urlsplit(absolute)
+    try:
+        absolute = urljoin(base_url, value)
+        parsed = urlsplit(absolute)
+    except ValueError:
+        return None
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.hostname
@@ -188,7 +194,9 @@ def _normalized_public_image_url(raw_url: str, *, base_url: str) -> str | None:
     return absolute
 
 
-class _ImagePreservingMarkdownConverter(MarkdownConverter):
+class _ImagePreservingMarkdownConverter(_MarkdownConverter):
+    """Keep Pydantic AI's linear-time conversion safeguards and retain images."""
+
     def __init__(self, *, base_url: str) -> None:
         super().__init__()
         self._base_url = base_url
@@ -213,7 +221,20 @@ class _ImagePreservingMarkdownConverter(MarkdownConverter):
 
 def _html_to_markdown(html: str, *, base_url: str) -> str:
     """Convert HTML while preserving safe image references in their source position."""
-    return _ImagePreservingMarkdownConverter(base_url=base_url).convert(html)
+    # Older CPython HTMLParser implementations repeatedly scan this malformed
+    # suffix at EOF, taking quadratic time even with the upstream safe converter.
+    # Reject only repeated unclosed starts; do not guess where page text ends or
+    # silently drop it. Complete tags and ordinary comparison text are unchanged.
+    tail_start = html.rfind(">") + 1
+    first = _HTML_TAG_START_RE.search(html, tail_start)
+    if first is not None and _HTML_TAG_START_RE.search(html, first.end()) is not None:
+        raise ModelRetry("Failed to convert public page: repeated incomplete HTML tags")
+    soup = BeautifulSoup(html, "html.parser")
+    return _ImagePreservingMarkdownConverter(base_url=base_url).convert_soup(soup)
+
+
+def _convert_html(html: str, base_url: str) -> tuple[str, str]:
+    return _extract_title(html), _html_to_markdown(html, base_url=base_url)
 
 
 def _response_public_url(response: httpx2.Response, fallback: str) -> str:
@@ -227,7 +248,7 @@ def _response_public_url(response: httpx2.Response, fallback: str) -> str:
 
 
 class _DeepAgentWebFetchLocalTool(WebFetchLocalTool):
-    """Pydantic Web Fetch with only the HTML image conversion behavior adapted."""
+    """Pinned Pydantic Web Fetch safety behavior with image-preserving conversion."""
 
     async def __call__(self, url: str):  # type: ignore[override]
         request_headers = {"Accept": "text/markdown, text/html;q=0.9, */*;q=0.8"}
@@ -243,26 +264,30 @@ class _DeepAgentWebFetchLocalTool(WebFetchLocalTool):
                 blocked_domains=self.blocked_domains,
                 max_bytes=self.max_download_bytes,
             )
-        except (ValueError, httpx2.HTTPStatusError, httpx2.RequestError) as exc:
+        except (ValueError, httpx2.InvalidURL, httpx2.HTTPStatusError, httpx2.RequestError) as exc:
             raise ModelRetry(tool_error_message("Failed to fetch public URL", exc)) from exc
 
         media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         title = ""
         if not media_type or is_text_like_media_type(media_type):
-            text = response.text
+            try:
+                text = await run_in_executor(_decode_text, response)
+            except (UnicodeError, LookupError) as exc:
+                raise ModelRetry(tool_error_message("Failed to decode public page", exc)) from exc
             if media_type in {"text/markdown", "text/x-markdown"}:
                 content = text
             elif not media_type or media_type in {"text/html", "application/xhtml+xml"}:
-                title = _extract_title(text)
-                content = _html_to_markdown(
-                    text,
-                    base_url=_response_public_url(response, url),
-                )
+                try:
+                    title, content = await run_in_executor(
+                        _convert_html, text, _response_public_url(response, url)
+                    )
+                except RecursionError as exc:
+                    raise ModelRetry("Failed to convert public page: the HTML is nested too deeply") from exc
             elif media_type == "application/json":
                 try:
                     parsed = json.loads(text)
                     content = f"```json\n{json.dumps(parsed, indent=2)}\n```"
-                except (json.JSONDecodeError, ValueError):
+                except (json.JSONDecodeError, ValueError, RecursionError):
                     content = text
             else:
                 content = text
@@ -321,7 +346,10 @@ def _web_fetch_tool() -> Tool[Any]:
         Args:
             url: An HTTP(S) URL without embedded credentials.
         """
-        parsed = urlsplit(url)
+        try:
+            parsed = urlsplit(url)
+        except ValueError as exc:
+            raise ModelRetry("Web Fetch only accepts valid absolute HTTP(S) URLs") from exc
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ModelRetry("Web Fetch only accepts absolute HTTP(S) URLs")
         if parsed.username is not None or parsed.password is not None:
@@ -443,7 +471,10 @@ def _web_image_view_tool() -> Tool[Any]:
             url: A public HTTP(S) image URL without embedded credentials.
             force_download: Download safely before constructing the next model request.
         """
-        parsed = urlsplit(url)
+        try:
+            parsed = urlsplit(url)
+        except ValueError as exc:
+            raise ModelRetry("Web Image View only accepts valid absolute HTTP(S) URLs") from exc
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ModelRetry("Web Image View only accepts absolute HTTP(S) URLs")
         if parsed.username is not None or parsed.password is not None:
@@ -454,7 +485,7 @@ def _web_image_view_tool() -> Tool[Any]:
         install_proxy_compatibility()
         try:
             await validate_and_resolve_url(url, allow_local=False)
-        except (ValueError, httpx2.RequestError) as exc:
+        except (ValueError, httpx2.InvalidURL, httpx2.RequestError) as exc:
             raise ModelRetry(tool_error_message("Web Image View rejected URL", exc)) from exc
 
         media_type = _image_media_type_from_url(url)

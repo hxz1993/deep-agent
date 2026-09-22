@@ -39,14 +39,21 @@ async def download_local_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     headers = extract_forward_headers(request)
     headers["user"] = user_id
+    return await local_attachment_response(ctx.file_store, file_id, headers)
+
+
+async def local_attachment_response(
+    file_store: LocalFileStore, file_id: str, headers: dict[str, str]
+) -> Response:
+    """Return attachment bytes after the caller has selected a trusted owner."""
     try:
-        metadata = await ctx.file_store.describe(file_id, headers)
+        metadata = await file_store.describe(file_id, headers)
         if metadata.file_type != FILE_TYPE_ATTACHMENT:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="File not found",
             )
-        data = await ctx.file_store.download(file_id, headers)
+        data = await file_store.download(file_id, headers)
     except HTTPException:
         raise
     except FileStoreError as exc:

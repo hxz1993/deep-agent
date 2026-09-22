@@ -326,10 +326,24 @@ class SqlConversationCoordinator:
         compaction_event_id: str | None = None,
         pruned_tool_results: list[dict[str, Any]] | None = None,
         summary_call: dict[str, Any] | None = None,
-        validate_projection: Callable[[list[ModelMessage]], int] | None = None,
+        validate_projection: Callable[[list[ModelMessage]], int | tuple[int, int]] | None = None,
+        estimated_tokens_before: int | None = None,
+        estimated_tokens_after: int | None = None,
+        estimate_scope: str | None = None,
     ) -> SessionEventSnapshot | None:
         scope, user = self._required_identity(agent_id, user_id)
+        # The projection must be one summary anchor followed by the entire
+        # preserved suffix. A partial match must never move the cutoff forward.
+        anchor = projected_history[0] if projected_history else None
+        if (not isinstance(anchor, ModelRequest) or len(anchor.parts) != 1
+                or not isinstance(anchor.parts[0], UserPromptPart)
+                or not isinstance(anchor.parts[0].content, str)
+                or not anchor.parts[0].content.startswith(
+                    "Summary of previous conversation:\n\n" + summary_markdown.strip())):
+            raise ValueError("compaction_anchor_mismatch")
         suffix = _common_message_suffix(raw_history, projected_history)
+        if suffix != len(projected_history) - 1:
+            raise ValueError("compaction_tail_mismatch")
         covered_messages = len(raw_history) - suffix
         if covered_messages <= 0 or not summary_markdown.strip():
             return None
@@ -442,9 +456,13 @@ class SqlConversationCoordinator:
                 # the runtime index. Validate the exact anchor readers will use
                 # before changing the successful checkpoint in this transaction.
                 tail = list(raw_history[-suffix:]) if suffix else []
-                estimated_after = validate_projection([
+                validated = validate_projection([
                     _compaction_anchor({"replacement": rendered}), *tail,
                 ])
+                if isinstance(validated, tuple):
+                    estimated_after, estimated_tokens_after = validated
+                else:
+                    estimated_after = validated
             lifecycle_row = None
             if compaction_event_id is not None:
                 lifecycle_row = (
@@ -484,6 +502,10 @@ class SqlConversationCoordinator:
                     "estimated_before": estimated_before,
                     "target_tokens": target_tokens,
                     "estimated_after": estimated_after,
+                    **({"estimated_tokens_before": estimated_tokens_before,
+                        "estimated_tokens_after": estimated_tokens_after,
+                        "estimate_scope": estimate_scope}
+                       if estimated_tokens_before is not None and estimated_tokens_after is not None else {}),
                     "preserved_tail_tokens": preserved_tail_tokens,
                 },
                 "pruned_tool_results": pruned_records,
@@ -823,7 +845,19 @@ def _common_message_suffix(raw: list[ModelMessage], projected: list[ModelMessage
     projected_payloads = [serialize_message(message) for message in projected]
     count = 0
     while count < min(len(raw_payloads), len(projected_payloads)):
-        if raw_payloads[-1 - count] != projected_payloads[-1 - count]:
+        original = raw_payloads[-1 - count]
+        visible = projected_payloads[-1 - count]
+        if original.get("kind") == visible.get("kind") == "request":
+            # The SDK adds request-envelope values after tool results were
+            # persisted. These do not change the original message parts.
+            original, visible = dict(original), dict(visible)
+            for key in ("conversation_id", "run_id", "timestamp"):
+                original.pop(key, None)
+                visible.pop(key, None)
+            if original.get("instructions") is None:
+                original.pop("instructions", None)
+                visible.pop("instructions", None)
+        if original != visible:
             break
         count += 1
     return count

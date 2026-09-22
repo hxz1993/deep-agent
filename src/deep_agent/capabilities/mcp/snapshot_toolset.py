@@ -4,6 +4,7 @@ import asyncio
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 from pydantic_ai import RunContext, ToolDefinition, messages
 from pydantic_ai.exceptions import ModelRetry, RunCancelled, ToolFailed
@@ -53,7 +54,8 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
 
     @property
     def id(self) -> str:
-        return f"mcp-snapshot:{self.server_name}"
+        # SDK instruction IDs reserve colons; the protocol server name is unchanged.
+        return f"mcp-snapshot-{quote(self.server_name, safe='')}"
 
     async def for_run(self, ctx: RunContext[AgentDeps]) -> SnapshotMcpToolset:
         return SnapshotMcpToolset(
@@ -179,7 +181,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                 )
             inner = MCPToolset(
                 self.config["url"],
-                id=self.server_name,
+                id=quote(self.server_name, safe=""),
                 headers=headers,
                 include_instructions=False,
                 init_timeout=self.init_timeout,

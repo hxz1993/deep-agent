@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 # Core agent runtime. Slim package + only the provider/mcp/web extras we use,
 # to avoid pulling in every provider SDK (bedrock, cohere, huggingface, ...).
-pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.35.1
-# Pydantic AI 2.35 requires OpenAI 3.x. Its bundled aiohttp transport imports
-# aiohttp 3.14 APIs at module load time, so the SDK and aiohttp must move together.
-openai==3.5.0
-pydantic-ai-harness[skills,exa,youdotcom]==0.26.0
+pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.46.0
+# Pydantic AI 2.46 requires OpenAI >=3.8. Keep the validated SDK pinned;
+# its aiohttp transport also needs the platform-compatible aiohttp 3.14 line.
+openai==3.8.0
+pydantic-ai-harness[skills,exa,youdotcom]==0.32.0
 # Harness CodeMode uses Monty as its isolated Python-subset runtime. Keep the
 # direct pin instead of enabling the broader code-mode extra.
-pydantic-monty==0.0.21
+pydantic-monty==0.0.23
 # DeepAgent passes a dedicated proxy client to GoogleProvider. Pydantic AI 2.35
 # deprecates legacy httpx clients for this path in favor of httpx2.
 httpx2>=2.7,<3
@@ -45,7 +45,7 @@ filelock>=3.13
 psutil>=5.9
 
 # deepfos platform
-# OpenAI 3.5 imports SocketTimeoutError from aiohttp during normal module import.
+# OpenAI 3.x imports SocketTimeoutError from aiohttp during normal module import.
 # deepfos 1.1.97 is the first current platform SDK line compatible with 3.14+.
 aiohttp>=3.14.3,<4
 deepfos>=1.1.97,<2

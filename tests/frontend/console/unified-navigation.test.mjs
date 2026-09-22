@@ -58,7 +58,8 @@ test("全局目录跨页先加载配置，且未授权点击不进入管理处�
 test("导航宽度连续拖动，文字渐隐且宽度限制为56至200px", () => {
   const classes = new Set();
   const widths = [];
-  const element = { setAttribute() {}, innerHTML: "" };
+  const petStates = [];
+  const element = { setAttribute() {}, toggleAttribute(name, active) { if (name === "collapsed") petStates.push(active); }, innerHTML: "" };
   const context = vm.createContext({
     document: {
       body: { classList: { toggle(name, active) { active ? classes.add(name) : classes.delete(name); } },
@@ -72,6 +73,7 @@ test("导航宽度连续拖动，文字渐隐且宽度限制为56至200px", () =
   assert.equal(classes.has("console-nav-collapsed"), true);
   for (const width of [125, 230]) context.setConsoleNavigationWidth(width);
   assert.deepEqual(widths, ["170px", "110px", "96px", "56px", "125px", "200px"]);
+  assert.deepEqual(petStates, [false, false, true, true, false, false]);
   assert.equal(classes.has("console-nav-collapsed"), false);
 });
 

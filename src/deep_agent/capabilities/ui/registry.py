@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 from loguru import logger
 from pydantic_ai import ExternalToolset
@@ -88,7 +89,7 @@ def build_ui_tool_package(
         category="ui",
         toolset=build_external_toolset(
             definitions,
-            toolset_id=f"ui-package:{code}",
+            toolset_id=f"ui-package-{quote(code, safe='')}",
         ),
         label=label,
         source=source,

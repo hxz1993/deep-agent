@@ -18,6 +18,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+from pydantic_ai.usage import RequestUsage
 
 from deep_agent.agent.planning import PLAN_METADATA_KEY
 from deep_agent.conversation.projector import project_session_events
@@ -64,7 +65,7 @@ class ConversationProjectorTests(unittest.TestCase):
             NativeToolReturnPart(tool_name="web_search", content={}, tool_call_id="native-2"),
             NativeToolReturnPart(tool_name="web_search", content={}, tool_call_id="native-3"),
             ThinkingPart(content="整理结果"), TextPart(content="最终回答"),
-        ]))
+        ], usage=RequestUsage(input_tokens=120, output_tokens=30)))
         before = deepcopy(native)
         history = project_session_events([native])
         self.assertEqual([item.kind for item in history.items], [
@@ -78,6 +79,7 @@ class ConversationProjectorTests(unittest.TestCase):
         self.assertEqual(len({item.item_id for item in history.items}), len(history.items))
         self.assertEqual(assistants[0].item_id, "message:event-1")
         self.assertEqual(sum(item.usage is not None for item in assistants), 1)
+        self.assertEqual(assistants[-1].usage["input_tokens"], 120)
         self.assertTrue(all(item.source_event_ids == ["event-1"] for item in assistants))
         self.assertEqual(native, before)
         self.assertEqual(history, project_session_events([native]))

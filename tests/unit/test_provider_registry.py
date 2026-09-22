@@ -49,6 +49,17 @@ def _config(
 
 
 class ProviderDefinitionTests(unittest.TestCase):
+    def test_deepseek_output_limit_mapping_preserves_native_profile(self) -> None:
+        for use_default in (True, False):
+            with self.subTest(use_default=use_default):
+                model = resolve_provider_model(model_name="deepseek-v4-pro",
+                    provider=_config("deepseek", use_default_base_url=use_default))
+                self.assertFalse(model.profile["openai_chat_supports_max_completion_tokens"])
+                self.assertTrue(model.profile["supports_thinking"])
+                self.assertEqual(model.profile["openai_chat_send_back_thinking_parts"], "field")
+        other = resolve_provider_model(model_name="custom-model", provider=_config("openai"))
+        self.assertNotEqual(other.profile.get("openai_chat_supports_max_completion_tokens"), False)
+
     def test_registry_order_and_defaults_are_stable(self) -> None:
         self.assertEqual(
             [item.code for item in PROVIDER_TYPES],

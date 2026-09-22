@@ -341,11 +341,20 @@ Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Stor
 框架能力不得因为“官方已经提供”就进入开发计划。
 
 当前上下文压缩在模型配置有效`context_window_tokens`时启用，否则停用，并固定使用当前Agent模型。
+上下文请求计数统一从 `TokenEstimator.estimate_request` 进入 Harness 公开估算入口；仅复用模型、
+有效历史、请求参数与指令指纹均匹配的响应 Usage，其他情况完整估算。基准 metadata 必须在响应
+首次增量保存前写入，摘要响应不能成为主会话基准。原始 Usage 不改写，累计消耗与当前占用分开。
+只读 context-status 未准备最终请求参数时保持 history_only 并说明回退，不能冒充完整请求预算。
 自动、主动和Provider Overflow调用同一安全前缀、
 八段摘要、Evidence与目标复检流程；Compaction从Running原位更新到终态，失败不改变Surface。
 摘要总预算300秒，每约10秒发送非持久化进度；客户端取消复用正式Run Cancellation Token。Timeout不重试，
 仅满足时间与剩余预算条件的429/502/503/504快速失败可重试一次。Provider原生CompactionPart作为普通
 Provider Part保存，不能替代DeepAgent跨Provider摘要。
+
+摘要安全边界将带 `tool_call_id` 的 `RetryPromptPart` 视为对应调用的终结，不能把已拒绝的调用永久保留为等待。
+DeepSeek 摘要请求使用 `max_tokens` 并关闭辅助请求的思考，主对话思考配置不受影响；保留 SDK 原有 Profile 能力。
+摘要输出最多分配目标预算的 20%，受模型上限及 4096 tokens 封顶，仍须通过最终目标与持久化前复检。
+截断或格式校验失败也应保留 `summary_call` 的 usage、finish_reason 和输出上限，便于真实归因。
 
 压缩前的预算估算、安全边界选择和Evidence整理必须在线性复杂度内完成，并把CPU准备工作移出SSE事件
 循环；准备耗时超过心跳周期时继续发送`preparing`。实时SSE不重复发送持久化Conversation Item；
@@ -739,7 +748,9 @@ SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protoco
 9. 请求上下文以 App 为主键：标准 App 必须以三位数字结尾；Space 自动取 `app[:-3]`。App 与显式 Space 不一致时返回 422，Language 缺失时默认 `zh-cn`。
 10. 上下文压缩只在八段Summary、Evidence、来源Hash和目标预算全部通过时把同一Compaction Event更新为
     Completed；失败终态保留审计但不改变模型Surface。
-11. Console压缩测试会话是管理员功能；后端按当前模型实时预算构造可往返的普通Event，不得直接伪造
+11. 自动压缩持久化必须验证“单个摘要锚点 + 完整保留尾部”；不能仅凭部分公共后缀推断覆盖边界。仅允许归一化 ModelRequest 顶层运行 ID、时间戳和原本缺失的 instructions；parts、工具调用 ID、内容及已有指令必须严格匹配。失败保留旧 checkpoint 与原始事件。
+12. 附件读取授权从当前上传与原始会话历史恢复，不能从压缩后的模型历史建立；摘要提及的文件 ID 不构成授权。
+13. Console压缩测试会话是管理员功能；后端按当前模型实时预算构造可往返的普通Event，不得直接伪造
     Completed Compaction或新增测试专用表。
 
 | 现象 | 原因 |

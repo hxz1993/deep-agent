@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="34 17 446 446" role="img" aria-labelledby="title desc">
+  <title id="title">DeepAgent</title>
+  <desc id="desc">蓝紫色圆角 D 形机器人，图标放大，眼窗向下延长，双眼为加长的圆头竖线，保留圆头直天线，背景和眼窗透明。</desc>
+  <g fill="#6254FF">
+    <rect x="234" y="74" width="26" height="66"/>
+    <circle cx="247" cy="66" r="27"/>
+    <path fill-rule="evenodd" d="M126 132H250C354 132 410 193 410 287C410 381 354 442 250 442H126Q104 442 104 420V154Q104 132 126 132Z M203 200H297C329 200 349 220 349 252V306C349 338 329 358 297 358H203C171 358 157 338 157 306V252C157 220 171 200 203 200Z"/>
+    <rect x="194" y="232" width="30" height="94" rx="15"/>
+    <rect x="274" y="232" width="30" height="94" rx="15"/>
+  </g>
+</svg>

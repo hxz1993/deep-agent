@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from deep_agent.diagnostics.runtime import DiagnosticConfig, DiagnosticRuntime
 from deep_agent.diagnostics.query import query_logs
-from deep_agent.diagnostics.text import parse_record
+from deep_agent.diagnostics.text import format_record, parse_record
 from deep_agent.diagnostics.schema import (
     IDENTIFIER_FIELDS, MAX_RECORD_BYTES, NUMBER_FIELDS, TOOL_LIST_BUDGET,
     TOOL_LIST_FIELDS, safe_fields, sanitize_record,
@@ -108,7 +108,19 @@ class ModelLogFieldsTests(unittest.TestCase):
         maximal = {**dict.fromkeys(IDENTIFIER_FIELDS, "x" * 180),
                    **dict.fromkeys(NUMBER_FIELDS, 10**15), **facts}
         bounded = safe_fields(maximal)
-        self.assertLessEqual(len(json.dumps(bounded, separators=(",", ":")).encode()) + 1000, MAX_RECORD_BYTES)
+        # The public boundary is the actual pipe-delimited UTF-8 record, not a
+        # JSON estimate plus an arbitrary envelope allowance. Scalar allowlist
+        # growth may consume that estimate while the wire formatter still fits.
+        line = format_record({
+            **bounded, "event": "model_api_request", "source": "api", "level": "INFO",
+            "timestamp": datetime.now(timezone.utc).isoformat(), "process_id": 123,
+            "record_id": "a" * 32, "boot_id": "b" * 32, "instance_id": "c" * 16,
+        })
+        self.assertLessEqual(len(line.encode()) + 1, MAX_RECORD_BYTES)
+        restored = parse_record(line)
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored["tool_count"], 1000)
+        self.assertEqual(restored["tool_names_hash"], "b" * 64)
         self.assertEqual(safe_fields(bounded), bounded)
 
 

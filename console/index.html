@@ -16,20 +16,20 @@
     })();
   </script>
   <title>DeepAgent 一体化控制台</title>
-  <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260914-d-robot-wide-long-eyes" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg?v=20260922-d-rounded" />
   <link rel="stylesheet" href="../vendor/katex/katex.min.css" />
   <link id="markdownTheme" rel="stylesheet" href="../vendor/github-markdown-light.min.css" />
   <link id="hljsTheme" rel="stylesheet" href="../vendor/highlight-github.min.css" />
   <link rel="stylesheet" href="./themes.css?v=20260913-49" />
-  <link rel="stylesheet" href="./workspace.css?v=20260918-release01012" />
+  <link rel="stylesheet" href="./workspace.css?v=20260923-usage-tab-2" />
   <link rel="stylesheet" href="./configuration/configuration.css?v=20260919-search-editor-2" />
-  <link rel="stylesheet" href="./console.css?v=20260917-release01010" />
+  <link rel="stylesheet" href="./console.css?v=20260922-pet-4" />
   <link rel="stylesheet" href="./diagnostics.css?v=20260915-ui-polish" />
   <link rel="stylesheet" href="./diagnostics-design.css?v=20260913-49" />
   <link rel="stylesheet" href="./diagnostics-sessions.css?v=20260917-release01010" />
   <link rel="stylesheet" href="./diagnostics-channels.css?v=20260917-release01010" />
   <link rel="stylesheet" href="./session-loading.css?v=20260918-release01012" />
-  <link rel="stylesheet" href="./diagnostic-detail.css?v=20260918-release01012" />
+  <link rel="stylesheet" href="./diagnostic-detail.css?v=20260922-trajectory-8" />
   <link rel="stylesheet" href="./ui-select.css?v=20260918-release01013" />
   <link rel="stylesheet" href="./ui-channel-hints.css?v=20260913-channel-heading" />
   <link rel="stylesheet" href="./ui-dialogs.css?v=20260913-49" />
@@ -47,10 +47,9 @@
     <aside class="console-rail" aria-label="控制台主导航">
       <header class="console-rail-header">
         <div class="console-brand">
-          <button type="button" class="console-brand-icon" id="expandConsoleNavBtn" aria-label="DeepAgent" title="DeepAgent"><img src="./favicon.svg?v=20260914-d-robot-wide-long-eyes" alt="" /></button>
+          <button type="button" class="console-brand-icon" id="expandConsoleNavBtn" aria-label="收起导航" title="收起导航" aria-expanded="true" aria-controls="consoleResourceNav"><deepagent-sprite-pet id="consoleBrandPet" aria-hidden="true"></deepagent-sprite-pet><img class="console-pet-fallback" src="./favicon.svg?v=20260922-d-rounded" alt="" /></button>
           <div class="console-brand-copy"><strong>DeepAgent</strong><span class="connection-pill" id="connStatus" title="后端服务连接状态"><span class="dot"></span><span class="conn-text">连接中</span></span></div>
         </div>
-        <button type="button" class="console-rail-toggle" id="toggleConsoleNavBtn" aria-label="收起导航" title="收起导航" aria-expanded="true" aria-controls="consoleResourceNav"><i data-lucide="panel-left-close" aria-hidden="true"></i></button>
       </header>
       <nav class="console-nav">
         <button type="button" class="console-nav-btn active" data-page="workspace" title="测试" aria-label="测试">
@@ -233,6 +232,6 @@
     </div>
     <div class="modal-footer"><button type="button" class="btn" data-close-tutorials>取消</button><button type="button" class="btn primary" id="downloadTutorialBtn"><i data-lucide="download"></i><span>下载</span></button></div>
   </dialog>
-  <script type="module" src="./main.js?v=20260922-tutorial-download"></script>
+  <script type="module" src="./main.js?v=20260923-usage-tab-2"></script>
 </body>
 </html>

@@ -60,6 +60,10 @@ class ContextBudget:
     usable_request_tokens: int | None
     trigger_tokens: int | None
     target_tokens: int | None
+    context_occupancy_tokens: int | None = None
+    occupancy_source: str = "estimated"
+    usage_anchor_id: str | None = None
+    estimation_fallback_reason: str | None = None
 
     def as_dict(self) -> dict[str, int | float | str | bool | None]:
         return {
@@ -82,6 +86,10 @@ class ContextBudget:
             "usable_request_tokens": self.usable_request_tokens,
             "trigger_tokens": self.trigger_tokens,
             "target_tokens": self.target_tokens,
+            "context_occupancy_tokens": self.context_occupancy_tokens,
+            "occupancy_source": self.occupancy_source,
+            "usage_anchor_id": self.usage_anchor_id,
+            "estimation_fallback_reason": self.estimation_fallback_reason,
         }
 
 
@@ -186,11 +194,11 @@ def build_context_budget(
     precomputed_message_tokens: int | None = None,
 ) -> ContextBudget:
     estimator = estimator or TokenEstimator.conservative()
+    estimate = None
     if precomputed_message_tokens is None:
-        estimated_request, message_tokens, parameter_tokens = estimator.request(
-            messages,
-            request_parameters,
-        )
+        estimate = estimator.estimate_request(messages, request_parameters)
+        estimated_request, message_tokens, parameter_tokens = (
+            estimate.tokens, estimate.message_tokens, estimate.parameter_tokens)
     else:
         message_tokens = max(0, int(precomputed_message_tokens))
         parameter_tokens = estimator.request_parameters(request_parameters)
@@ -199,6 +207,12 @@ def build_context_budget(
         )
     scope = estimate_scope or (
         "full_model_request" if request_parameters is not None else "history_only"
+    )
+    estimate_fields = dict(
+        context_occupancy_tokens=estimated_request,
+        occupancy_source=estimate.source if estimate else "estimated",
+        usage_anchor_id=estimate.anchor_id if estimate else None,
+        estimation_fallback_reason=estimate.fallback_reason if estimate else "usage_unavailable",
     )
     prediction = predict_output(
         output_history if output_history is not None else messages,
@@ -209,6 +223,7 @@ def build_context_budget(
 
     if context_window_tokens is None or context_window_tokens <= 0:
         return ContextBudget(
+            **estimate_fields,
             enabled=False,
             reason="context_window_unknown",
             context_window_tokens=context_window_tokens,
@@ -247,6 +262,7 @@ def build_context_budget(
         math.floor(usable * OPTION.agent.context_compaction_target_ratio),
     )
     return ContextBudget(
+        **estimate_fields,
         enabled=True,
         reason="enabled",
         context_window_tokens=context_window_tokens,

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="title">
+  <title id="title">DeepAgent</title>
+  <path d="M12 8V4H8"/>
+  <path d="M6 8H12C17 8 20 10 20 14S17 20 12 20H6A2 2 0 0 1 4 18V10A2 2 0 0 1 6 8Z"/>
+  <path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>
+</svg>

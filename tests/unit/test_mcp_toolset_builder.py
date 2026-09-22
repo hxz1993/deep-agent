@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import httpx
+from contextlib import asynccontextmanager
 
 from fastmcp.exceptions import ToolError
 from mcp import McpError
@@ -19,16 +20,54 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
+from pydantic_ai.toolsets import FunctionToolset
 
 from deep_agent.agent.deps import AgentDeps
 from tests.helpers.conversation import project_model_messages
 from deep_agent.capabilities.mcp.toolset_builder import (
     build_mcp_toolset,
+    build_resource_client,
     build_raw_url_mcp_toolset,
     resolve_mcp_init_timeout,
     resolve_mcp_max_retries,
 )
 from deep_agent.options import OPTION
+from deep_agent.capabilities.mcp.run_scoped import RunScopedMcpToolset
+
+
+class McpInstructionIdentityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_builtin_server_instructions_reach_real_agent(self) -> None:
+        inner = FunctionToolset(instructions="Use the builtin catalog.")
+
+        class LeaseManager:
+            @asynccontextmanager
+            async def lease(self, *args, **kwargs):
+                yield inner
+
+        def model_function(messages, info):
+            self.assertIn("Use the builtin catalog.", info.instructions)
+            return ModelResponse(parts=[TextPart("ok")])
+
+        toolset = RunScopedMcpToolset(
+            server_name="builtin-service", config={}, lease_manager=LeaseManager(),
+        ).prefixed("builtin-service")
+        result = await Agent(FunctionModel(model_function), toolsets=[toolset]).run(
+            "hello", deps=AgentDeps(session_id="instruction-test"),
+        )
+        self.assertEqual(result.output, "ok")
+
+    def test_dynamic_client_ids_are_colon_free_and_distinct(self) -> None:
+        identities = []
+        for name in ("biz:name", "biz-name", "biz%3Aname"):
+            clients = [
+                build_mcp_toolset(name, "url", {"url": "https://example.invalid/mcp"}),
+                build_resource_client(name, "url", {"url": "https://example.invalid/mcp"}),
+                build_raw_url_mcp_toolset(name, "https://example.invalid/mcp"),
+            ]
+            for client in clients:
+                self.assertNotIn(":", client.id)
+                identities.append(client.id)
+        self.assertEqual(len(identities), len(set(identities)))
 
 
 class ResolveMcpInitTimeoutTests(unittest.TestCase):
@@ -212,7 +251,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
         mcp_toolset_cls.assert_not_called()
         self.assertEqual(list(tools), ["biz_query"])
         self.assertEqual(tools["biz_query"].tool_def.return_schema, {"type": "object"})
-        self.assertEqual(instructions.content, "Use the business catalog.")
+        self.assertEqual([part.content for part in instructions], ["Use the business catalog."])
 
     async def test_connects_on_first_call_and_reuses_connection(self) -> None:
         ctx = RunContext(

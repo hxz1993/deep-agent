@@ -19,7 +19,7 @@ from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.agent.planning import build_planning_capability
 from deep_agent.agent.diagnostics import RuntimeDiagnostics
-from deep_agent.models.provider_registry import resolve_provider_model
+from deep_agent.models.provider_registry import deepseek_chat_profile, resolve_provider_model
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.tool_discovery import (
@@ -70,7 +70,7 @@ def _resolve_official_deepseek(spec: AgentSpec, model_name: str) -> OpenAIChatMo
     """Use the native profile when a catalog row points at DeepSeek's API."""
     provider = DeepSeekProvider(api_key=spec.api_key)
     if _normalize_url(spec.base_url) == _normalize_url(provider.base_url):
-        return OpenAIChatModel(model_name, provider=provider)
+        return OpenAIChatModel(model_name, provider=provider, profile=deepseek_chat_profile(model_name))
     return None
 
 
@@ -161,6 +161,7 @@ def resolve_model(spec: AgentSpec) -> str | Model:
             return OpenAIChatModel(
                 model_name,
                 provider=DeepSeekProvider(api_key=spec.api_key),
+                profile=deepseek_chat_profile(model_name),
             )
         deepseek_model = _resolve_official_deepseek(spec, model_name)
         if deepseek_model is not None:

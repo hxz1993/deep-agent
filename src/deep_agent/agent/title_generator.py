@@ -14,6 +14,7 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent, UserContent
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
+from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import UsageLimits
 
@@ -45,6 +46,8 @@ _TITLE_SETTINGS: ModelSettings = {
 def _title_model_settings(model: Model | str, provider_type: str | None) -> ModelSettings:
     settings: ModelSettings = dict(_TITLE_SETTINGS)
     provider = provider_type or getattr(model, "system", None)
+    while isinstance(model, WrapperModel):
+        model = model.wrapped
     # New aliases may not yet have an SDK thinking profile. Use the provider's
     # native off switch without mutating the model shared with the main run.
     if provider == "deepseek" and isinstance(model, OpenAIResponsesModel):

@@ -1,6 +1,9 @@
+import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-usage-tab-2";
+import { renderPlanItems } from "./plan-view.js?v=20260922-trajectory-8";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
-import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260918-release01012";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20260912-21";
+import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260923-usage-tab-2";
+import { cacheTrajectorySummary } from "./cache-usage.js?v=20260923-usage-tab-2";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20260922-trajectory-8";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
   contextCompactionPresentation,
@@ -18,8 +21,8 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20260912-21";
-import { createTrajectoryController } from "./trajectory.js?v=20260915-scroll-focus";
-import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260912-21";
+import { createTrajectoryController } from "./trajectory.js?v=20260923-usage-tab-2";
+import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import {
@@ -157,6 +160,8 @@ const state = {
   contextStatus: null,
   lastRunUsage: null,
   lastRunMetrics: null,
+  sessionCache: null,
+  runCache: null,
   automaticCompactionRow: null,
   automaticCompactionTimer: null,
   pendingAutomaticCompaction: null,
@@ -378,18 +383,7 @@ function renderComposerPlan(snapshot) {
   state.planSnapshot = presentation.plan;
   el.composerPlan.classList.remove("hidden");
   el.composerPlanProgress.textContent = presentation.label;
-  el.composerPlanItems.innerHTML = presentation.plan.items.map((item) => {
-    const display = item.status === "in_progress" && item.active_form
-      ? item.active_form
-      : item.content;
-    const icon = item.status === "completed"
-      ? "circle-check"
-      : item.status === "in_progress" ? "loader-circle" : "circle";
-    return `<li class="composer-plan-item status-${escapeHtml(item.status)}">
-      <span class="composer-plan-status">${lucideIcon(icon)}</span>
-      <span>${escapeHtml(display)}</span>
-    </li>`;
-  }).join("");
+  el.composerPlanItems.innerHTML = renderPlanItems(presentation.plan.items);
   if (wasHidden) setComposerPlanExpanded(true);
   refreshLucideIcons();
 }
@@ -910,6 +904,8 @@ function newChat(agentId) {
   }
   loadUiTools(state.agentId);
   state.sessionId = null;
+  state.sessionCache = null;
+  state.runCache = null;
   state.conversationId = null;
   state.awaitingHitl = false;
   state.modelMessageCount = 0;
@@ -1045,6 +1041,8 @@ async function switchSession(s) {
   stopHistoryObservation();
   const session = normalizeSession(s);
   state.sessionId = session.id;
+  state.sessionCache = null;
+  state.runCache = null;
   state.lastRunUsage = null;
   state.lastRunMetrics = null;
   if (session.agentId) {
@@ -1116,7 +1114,10 @@ async function loadSessionHistory(session, { signal, isCurrent = () => true } = 
       const history = normalizeConversationHistory(await response.json());
       if (!current()) return;
       applyObservedHistory(history, { status: "running" });
-      if (events.response.ok) trajectory?.setHistory(events.data);
+      if (events.response.ok) {
+        trajectory?.setHistory(events.data);
+        updateObservedSessionMetrics(normalized, events.data.items);
+      }
       state.historyObservationPending = true;
     } else {
       await observeSessionHistory(normalized, controller, current);
@@ -1376,6 +1377,9 @@ async function observePersistedSessionHistory(session, controller, current, {
 function updateObservedSessionMetrics(session, events) {
   const selected = state.sessions.find((item) => item.id === session.id && item.agentId === session.agentId);
   if (!selected) return;
+  state.sessionCache = cacheTrajectorySummary(trajectory?.events() || []);
+  const cacheRunId = state.streaming ? state.lastRunMetrics?.run_id : savedRunState(events).run_id;
+  state.runCache = cacheRunId ? cacheTrajectorySummary(trajectory?.events() || [], cacheRunId) : null;
   const { messageCount, turnCount } = savedSessionCounts(events);
   // Saved events aggregate a whole Run; a projected assistant is only one message.
   if (!state.abortController) {
@@ -1445,9 +1449,10 @@ function compactTokenLabel(value) {
 
 function updateComposerContextControls() {
   const status = state.contextStatus || {};
-  const estimated = Number(status.estimated_history_tokens);
-  const usable = Number(status.usable_request_tokens);
-  const ratio = Number.isFinite(estimated) && Number.isFinite(usable) && usable > 0
+  const occupancy = contextOccupancyPresentation(status);
+  const estimated = occupancy.tokens;
+  const usable = tokenValue(status.usable_request_tokens);
+  const ratio = estimated != null && usable != null && usable > 0
     ? estimated / usable
     : null;
   if (el.contextBudgetBadge) {
@@ -1457,8 +1462,8 @@ function updateComposerContextControls() {
     el.contextBudgetBadge.style.setProperty("--context-progress", `${(percent || 0) * 3.6}deg`);
     const detail = ratio == null
       ? "上下文用量暂不可用"
-      : `上下文窗口：已用 ${percent}%\n${compactTokenLabel(estimated)} / ${compactTokenLabel(usable)} Token`;
-    el.contextBudgetBadge.setAttribute("aria-label", detail.replace("\n", "，"));
+      : `${occupancy.label}：${Math.round(ratio * 100)}% 可用输入\n${compactTokenLabel(estimated)} / ${compactTokenLabel(usable)} Token\n${occupancy.detail}`;
+    el.contextBudgetBadge.setAttribute("aria-label", detail.replaceAll("\n", "，"));
     el.contextBudgetBadge.removeAttribute("title");
     if (el.contextBudgetTooltip) el.contextBudgetTooltip.textContent = detail;
   }
@@ -2522,9 +2527,16 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
     return;
   }
   trajectory?.ingest({ event: type, data });
+  if (["session_event_appended", "session_event_updated"].includes(type)) {
+    const rows = trajectory?.events() || [];
+    state.sessionCache = cacheTrajectorySummary(rows);
+    const runId = data.event?.run_id || state.lastRunMetrics?.run_id;
+    state.runCache = runId ? cacheTrajectorySummary(rows, runId) : null;
+  }
   switch (type) {
     case "session": {
       const id = data.session_id;
+      state.runCache = null;
       if (id) {
         state.sessionId = id;
         state.conversationId = data.conversation_id || state.conversationId;
@@ -2593,6 +2605,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       }
       break;
     case "final":
+      state.runCache = data.run_metrics?.cache_usage || state.runCache;
       applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       if (data.usage) renderUsage(data.usage);
       else state.lastRunUsage = null;
@@ -2640,6 +2653,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       clearComposerPlan();
       break;
     case "cancelled":
+      state.runCache = data.run_metrics?.cache_usage || state.runCache;
       failAutomaticContextCompaction("上下文压缩已取消，未生成压缩事件");
       // Keep the current streamed conversation in place. The official
       // interrupted history remains the source of truth when the session is

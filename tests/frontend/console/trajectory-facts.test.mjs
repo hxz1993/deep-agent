@@ -66,7 +66,7 @@ test("execution errors show an escaped reason, code and phase once despite termi
     assert.equal(controller.events().filter((row) => row.kind === "error").length, 1);
     assert.equal(controller.events().some((row) => row.kind === "run"), false);
     const markup = elements.get("inspectorContent").innerHTML;
-    assert.match(markup, /异常/);
+    assert.match(markup, /Error/);
     assert.match(markup, /provider_error/);
     assert.match(markup, /model/);
     assert.match(markup, /&lt;script&gt;/);
@@ -174,10 +174,75 @@ test("上下文引用保留在用户输入中，不再派生独立轨迹，入�
     assert.equal(controller.events()[0].id, "user-context");
     assert.deepEqual(controller.events()[0].payload.context_refs, refs.map(ref => ({ kind: "context-ref", ...ref })));
     const markup = elements.get("inspectorContent").innerHTML;
-    assert.match(markup, /用户/);
-    assert.match(markup, /摘要/);
+    assert.match(markup, />用户</);
+    assert.match(markup, />Summary</);
     assert.match(markup, />Completed</);
     assert.match(markup, /选中区域/);
-    assert.doesNotMatch(markup, />USER<|>CONTEXT<|>Summary</);
+    assert.doesNotMatch(markup, />USER<|>CONTEXT<|>摘要</);
+  });
+});
+
+
+test("detail tabs distinguish message content, tool input/result and semantic events", () => {
+  withController((controller, elements) => {
+    controller.setHistory({ items: [
+      fact("reply", 1, 0, 0, { part_kind: "text", content: "assistant-output" }),
+      fact("call", 2, 1, 0, { part_kind: "tool-call", tool_name: "lookup", tool_call_id: "call-1", args: { query: "input-only" } }),
+      fact("result", 3, 2, 0, { part_kind: "tool-return", tool_name: "lookup", tool_call_id: "call-1", content: "result-only" }, "tool/results"),
+      { event_id: "title", sequence: 4, event_type: "session/title", payload: { title: "saved-title", source: "user" } },
+    ] });
+    const detail = () => elements.get("inspectorContent").innerHTML;
+    controller.restore({ selectedId: "reply", detailTab: "message" });
+    assert.match(detail(), />Message</);
+    assert.match(detail(), /assistant-output/);
+    assert.doesNotMatch(detail(), />Input<|>Result<|>Payload</);
+    controller.restore({ selectedId: "tool:call-1", detailTab: "input" });
+    assert.match(detail(), /input-only/);
+    assert.doesNotMatch(detail(), /result-only/);
+    controller.restore({ selectedId: "tool:call-1", detailTab: "result" });
+    assert.match(detail(), /result-only/);
+    assert.doesNotMatch(detail(), /input-only/);
+    controller.restore({ selectedId: "title", detailTab: "event" });
+    assert.match(detail(), />Event</);
+    assert.match(detail(), /saved-title/);
+    assert.doesNotMatch(detail(), />Request<|>Result<|>Payload</);
+  });
+});
+
+test("planning shows the protocol tool name and a shared escaped plan snapshot", () => {
+  withController((controller, elements) => {
+    const items = [
+      { id: "one", content: "<script>bad</script>", status: "completed" },
+      { id: "two", content: "second", active_form: "running-step", status: "in_progress" },
+    ];
+    controller.setHistory({ items: [
+      fact("plan-call", 1, 0, 0, { part_kind: "tool-call", tool_name: "write_plan", tool_call_id: "plan-1", args: { items } }),
+      fact("plan-result", 2, 1, 0, { part_kind: "tool-return", tool_name: "write_plan", tool_call_id: "plan-1", content: "Plan updated", metadata: { deepagent_plan: { items } } }, "tool/results"),
+    ] });
+    controller.restore({ selectedId: "tool:plan-1" });
+    assert.match(elements.get("trajectoryList").innerHTML, /<strong>write_plan<\/strong>/);
+    const html = elements.get("inspectorContent").innerHTML;
+    assert.match(html, /composer-plan-item status-completed/);
+    assert.match(html, /running-step/);
+    assert.match(html, /1\/2/);
+    assert.match(html, /&lt;script&gt;/);
+    assert.doesNotMatch(html, /<script>|trajectory-plan-progress|创建或改写任务计划/);
+  });
+});
+
+
+test("title Event keeps initial and latest title records without HTTP labels", () => {
+  withController((controller, elements) => {
+    controller.setHistory({ items: [
+      { event_id: "initial-title", sequence: 1, event_type: "session/title", payload: { title: "initial-name", source: "fallback", source_event_id: "user-1" } },
+      { event_id: "latest-title", sequence: 2, event_type: "session/title", payload: { title: "final-name", source: "model", source_event_id: "user-1" } },
+    ] });
+    controller.restore({ selectedId: "initial-title", detailTab: "event" });
+    const html = elements.get("inspectorContent").innerHTML;
+    assert.match(html, /initial-name/);
+    assert.match(html, /final-name/);
+    assert.match(html, /initial-title/);
+    assert.match(html, /latest-title/);
+    assert.doesNotMatch(html, />Request<|>Result</);
   });
 });

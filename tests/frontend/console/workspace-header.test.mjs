@@ -64,7 +64,7 @@ test("工作台只读展示上下文预算与压缩事件状态", () => {
   assert.match(chatSource, /\/context-status/);
   assert.match(chatSource, /last_compaction:\s*data\.context\.compaction/);
   assert.match(chatSource, /void loadContextStatus\(state\.sessionId\)/);
-  assert.match(workspaceSource, /历史占用/);
+  assert.match(workspaceSource, /contextOccupancyPresentation/);
   assert.match(workspaceSource, /上下文窗口/);
   assert.match(workspaceSource, /输出预留/);
   assert.match(workspaceSource, /安全余量/);
@@ -120,7 +120,7 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
 test("会话详情保留既有属性并用横向页签、键值列表与复合轨道展示", () => {
   for (const label of [
     "会话 ID", "会话统计", "App / Space", "Language", "User ID",
-    "Conv. ID", "Run ID", "请求", "本次使用", "预计剩余",
+    "Conv. ID", "Run ID", "请求", "累计使用", "输入 / 输出",
     "缓存读取", "缓存写入", "工具调用", "Tool Search", "耗时", "压缩",
     "压缩前", "压缩后", "压缩事件", "来源截止", "摘要模型", "更新时间",
   ]) {
@@ -137,8 +137,8 @@ test("会话详情保留既有属性并用横向页签、键值列表与复合�
   assert.match(consoleCss, /\.inspector-stacked-value/);
   assert.match(consoleCss, /\.context-budget-segments/);
   assert.match(consoleCss, /\.run-usage-track/);
-  assert.match(workspaceSource, /renderRunUsageOverview\(run, usage, contextStatus\)/);
-  assert.match(workspaceSource, /class="remaining"[\s\S]*上下文剩余/);
+  assert.match(workspaceSource, /renderRunUsageOverview\(run, usage\)/);
+  assert.doesNotMatch(workspaceSource, /class="remaining"[\s\S]*上下文剩余/);
   assert.ok(workspaceSource.indexOf("compactionContent") < workspaceSource.indexOf("const runContent"));
   assert.match(workspaceSource, /runModel\?\.name \|\| runModel\?\.model/);
 });
@@ -292,7 +292,7 @@ test("输入框提供附件入口和圆环预算且不再暴露手动压缩", ()
   assert.match(template, /id="input"[\s\S]*rows="2"/);
   assert.doesNotMatch(template, /📎/);
   assert.doesNotMatch(chatSource, /📎/);
-  assert.match(chatSource, /estimated_history_tokens/);
+  assert.match(chatSource, /contextOccupancyPresentation\(status\)/);
   assert.match(chatSource, /usable_request_tokens/);
   assert.doesNotMatch(chatSource, /manual_compaction_available|compactCurrentContext|context_compaction_result/);
   assert.match(chatSource, /context_compaction_progress/);

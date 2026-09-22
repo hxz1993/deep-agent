@@ -14,6 +14,7 @@ from PIL import Image
 from pydantic_ai import RunContext
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
+from pydantic_ai.messages import ModelRequest, ToolReturnPart, UserPromptPart
 
 from deep_agent.agent.attachments import resolve_user_prompt
 from deep_agent.agent.deps import AgentDeps
@@ -135,6 +136,67 @@ class LocalFileApiTests(unittest.IsolatedAsyncioTestCase):
                 "/api/v1/local-files/local_00000000000000000000000000000000/download"
             )
         self.assertEqual(response.status_code, 404)
+
+    async def test_admin_download_is_scoped_to_session_files_and_original_owner(self):
+        from deep_agent.agent.attachments import attachment_ref_dict
+        from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT, FILE_TYPE_SKILL_PACKAGE
+        from tests.helpers.sqlite_stores import seed_default_agent
+
+        agent_id = await seed_default_agent(self.stores)
+        async def upload(name, owner="session-owner", file_type=FILE_TYPE_ATTACHMENT):
+            return await self.file_store.upload(file_type=file_type, file_name=name,
+                data=name.encode(), mime="text/plain", request_headers={"user": owner})
+
+        attachment = await upload("input.txt")
+        generated = await upload("output.txt")
+        overflow = await upload("overflow.txt")
+        unrelated = await upload("unrelated.txt")
+        foreign = await upload("foreign.txt", owner="another-owner")
+        system = await upload("system.zip", file_type=FILE_TYPE_SKILL_PACKAGE)
+        sid = "diagnostic-files"
+        refs = [AttachmentRef(id=item.id, name=item.file_name, mime="text/plain")
+                for item in (attachment, foreign, system)]
+        await get_context().store.append(sid, [ModelRequest(parts=[
+            UserPromptPart(["fixture", *[attachment_ref_dict(ref) for ref in refs]]),
+            ToolReturnPart("execute_python", "done", tool_call_id="output-call", metadata={
+                "generated_files": [{"file_id": generated.id, "file_name": generated.file_name}],
+                "overflow_handle": overflow.id,
+            }),
+            # Arbitrary text is not a trusted file reference.
+            ToolReturnPart("fake", {"file_id": unrelated.id}, tool_call_id="fake-call"),
+        ])], agent_id=agent_id, user_id="session-owner", run_id="fixture-run")
+        await get_context().store.append("other-session", [ModelRequest(parts=[UserPromptPart("hello")])],
+            agent_id=agent_id, user_id="session-owner", run_id="other-run")
+        path = f"/api/v1/diagnostics/sessions/{sid}/files"
+        async with AsyncClient(transport=self.transport, base_url="http://test",
+                               headers={"user": "admin-caller"}) as client:
+            for item in (attachment, generated, overflow):
+                response = await client.get(f"{path}/{item.id}/download")
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.content, item.file_name.encode())
+                self.assertEqual(response.headers["cache-control"], "no-store")
+                self.assertIn("attachment;", response.headers["content-disposition"])
+                ordinary = await client.get(f"/api/v1/local-files/{item.id}/download")
+                self.assertEqual(ordinary.status_code, 404)
+            for item in (unrelated, foreign, system):
+                response = await client.get(f"{path}/{item.id}/download")
+                self.assertEqual(response.status_code, 404, response.text)
+            for target in ("other-session", "missing-session"):
+                response = await client.get(f"/api/v1/diagnostics/sessions/{target}/files/{attachment.id}/download")
+                self.assertEqual(response.status_code, 404)
+            get_context().file_store = PlatformFileStore()
+            response = await client.get(f"{path}/{attachment.id}/download")
+            self.assertEqual(response.status_code, 404)
+
+    async def test_diagnostic_file_download_requires_admin(self):
+        from deep_agent.api.v1.admin import require_console_admin, resolve_console_admin_access
+        from deep_agent.security import ConsoleAdminAccess
+
+        self.app.dependency_overrides.pop(require_console_admin)
+        self.app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=False, roles=())
+        async with AsyncClient(transport=self.transport, base_url="http://test", headers={"user": "ordinary"}) as client:
+            response = await client.get("/api/v1/diagnostics/sessions/any/files/local_any/download")
+            self.assertEqual(response.status_code, 403)
 
     async def test_local_read_file_native_image_spill_skill_and_export(self) -> None:
         headers = {"user": "local-user", "app": "app001", "space": "app"}

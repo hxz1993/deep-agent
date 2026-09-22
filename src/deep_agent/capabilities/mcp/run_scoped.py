@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field, replace
 from typing import Any
+from urllib.parse import quote
 
 from pydantic_ai import RunContext
 from pydantic_ai.messages import InstructionPart
@@ -37,7 +38,7 @@ class RunScopedMcpToolset(AbstractToolset[AgentDeps]):
 
     @property
     def id(self) -> str | None:
-        return f"mcp-run:{self.server_name}"
+        return f"mcp-run-{quote(self.server_name, safe='')}"
 
     def prefixed(self, prefix: str) -> PrefixedToolset[AgentDeps]:
         return PrefixedToolset(self, prefix)

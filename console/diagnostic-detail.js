@@ -1,15 +1,15 @@
 import { sessionLoadingHtml, prepareSessionRender, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
-import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20260918-release01012";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20260912-21";
+import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20260923-usage-tab-2";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20260922-trajectory-8";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20260912-21";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260912-21";
-import { createTrajectoryController } from "./trajectory.js?v=20260915-scroll-focus";
+import { createTrajectoryController } from "./trajectory.js?v=20260923-usage-tab-2";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20260918-release01012";
+import { renderSessionInspector } from "./session-inspector.js?v=20260923-usage-tab-2";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260918-release01012";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
-import { bindAttachmentImagePreviews } from "./attachment-preview.js?v=20260912-21";
+import { bindAttachmentImagePreviews, attachmentDownloadUrl } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { createReadonlySessionShell } from "./session-view-shell.js?v=20260912-21";
 
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -61,6 +61,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   let selectedRunId = null;
   let currentView = "conversation";
   let disposed = false;
+  let copyFeedbackTimer = null;
   let lastFocusKey = null;
   let loadingSnapshot = null;
   let pageLoading = false;
@@ -89,6 +90,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
       activeSession: { appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
       model, runModel,
       run, usage, contextStatus, agentName: session.agent_name || session.agent_id || "未记录",
+      sessionCache: session.cache_usage || {}, runCache: run.cache_usage || {},
       context: { app: session.app_id, space: session.space_id, language: session.language }, identity: { user: userId || "", profile: data.users[userId] || {} },
       channelOrigin: channelOriginPresentation(session.channel), activeTab: inspectorTab,
       contextContent: contextReferenceContent(selectedReference?.reference),
@@ -97,7 +99,8 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     refreshIcons();
   }
 
-  const conversation = createConversationPresenter({ messages, readOnly: true, userLabel: "用户", showConsoleToast: toast,
+  const attachmentUrl = (attachment) => attachmentDownloadUrl(attachment, undefined, { diagnosticSessionId: state.sessionId });
+  const conversation = createConversationPresenter({ messages, readOnly: true, attachmentUrl, userLabel: "用户", showConsoleToast: toast,
     onContextReference(reference, branchPoint) {
       const same = selectedReference?.branchPoint === branchPoint && selectedReference?.reference === reference;
       selectedReference = same ? null : { reference, branchPoint };
@@ -106,7 +109,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     },
     isContextReferenceSelected: (reference, branchPoint) => selectedReference?.reference === reference && selectedReference?.branchPoint === branchPoint,
   });
-  const trajectory = createTrajectoryController({ state, host: root, readOnly: true,
+  const trajectory = createTrajectoryController({ state, host: root, readOnly: true, attachmentUrl,
     onViewChange(view) { currentView = view; if (view === "conversation") renderInspector(); onViewChange(view); },
     onInspector() { currentView = "conversation"; renderInspector(); },
     onOpenInspector() { currentView = "trajectory"; setInspectorVisible(true); },
@@ -154,8 +157,10 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     if (selected) {
       const marker = document.createElement("span");
       marker.className = "diagnostic-message-marker";
-      marker.textContent = "定位消息";
-      row.querySelector(".bubble-wrap").prepend(marker);
+      marker.innerHTML = `${icon("crosshair")}<span>定位消息</span>`;
+      if (row.classList.contains("user")) row.append(marker);
+      else row.querySelector(".bubble-wrap").prepend(marker);
+      refreshIcons();
     }
   }
 
@@ -307,7 +312,27 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     else if (button.dataset.inspectorTab) { inspectorTab = button.dataset.inspectorTab; renderInspector(); }
     else if (button.hasAttribute("data-detail-copy-session") || button.dataset.inspectorCopy || (button.dataset.copyFileId && currentView !== "trajectory")) {
       event.stopPropagation();
-      try { await copyTextToClipboard(button.dataset.inspectorCopy || button.dataset.copyFileId || state.sessionId); if (!disposed) toast("已复制"); }
+      try {
+        await copyTextToClipboard(button.dataset.inspectorCopy || button.dataset.copyFileId || state.sessionId);
+        if (disposed) return;
+        toast("已复制");
+        if (button.hasAttribute("data-detail-copy-session")) {
+          button.classList.add("copied");
+          button.title = "会话 ID 已复制";
+          button.setAttribute("aria-label", "会话 ID 已复制");
+          button.innerHTML = icon("check");
+          refreshIcons();
+          clearTimeout(copyFeedbackTimer);
+          copyFeedbackTimer = setTimeout(() => {
+            if (disposed || !button.isConnected) return;
+            button.classList.remove("copied");
+            button.title = "复制会话 ID";
+            button.setAttribute("aria-label", "复制会话 ID");
+            button.innerHTML = icon("copy");
+            refreshIcons();
+          }, 1500);
+        }
+      }
       catch { if (!disposed) toast("复制失败，请手动选择复制", true); }
     } else if (button.hasAttribute("data-detail-image-close")) closeImage();
   });
@@ -339,6 +364,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
 
   function destroy() {
     if (disposed) return; disposed = true;
+    clearTimeout(copyFeedbackTimer);
     presenters.forEach((presenter) => presenter.dispose()); presenters = []; renderedRows = [];
     trajectory.destroy(); disposeImagePreviews(); listeners.splice(0).forEach((remove) => remove());
     if (imageDialog.open) imageDialog.close();

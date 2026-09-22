@@ -289,7 +289,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(template, /data-trajectory-mode="calls"[\s\S]*data-lucide="wrench"/);
   assert.doesNotMatch(template, /id="trajectoryDetail"/);
   assert.match(chatSource, /createTrajectoryController\(\{ state \}\)/);
-  assert.match(chatSource, /if \(events\.response\.ok\) trajectory\?\.setHistory\(events\.data\)/);
+  assert.match(chatSource, /if \(events\.response\.ok\)\s*\{\s*trajectory\?\.setHistory\(events\.data\)/);
   assert.match(chatSource, /trajectory\?\.ingest\(\{ event: type, data \}\)/);
   assert.match(workspaceCss, /\.chat-view-tabs[\s\S]*border-radius:\s*8px/);
   assert.doesNotMatch(workspaceCss, /\.chat-view-tab\.active::after/);
@@ -304,23 +304,23 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(workspaceCss, /\.trajectory-summary-markdown/);
   assert.match(workspaceCss, /\.trajectory-thinking-content[^}]*max-height:\s*50vh/);
   assert.match(trajectorySource, /const preview = `\$\{renderThinking\(event\.payload\?\.thinking\)\}\$\{renderMarkdown/);
-  assert.match(workspaceCss, /\.trajectory-summary-preview \.trajectory-thinking,[\s\S]*border-left:\s*2px solid var\(--accent-soft\)/);
+  assert.doesNotMatch(workspaceCss, /\.trajectory-summary-preview \.trajectory-thinking,[\s\S]*border-left:\s*2px solid var\(--accent-soft\)/);
   assert.doesNotMatch(workspaceCss, /trajectory-thinking-preview|trajectory-technical-details/);
   assert.doesNotMatch(trajectorySource, /标识与模型信息|renderTechnicalDetails/);
-  assert.match(trajectorySource, /\["summary", "摘要"\]/);
-  assert.match(trajectorySource, /event\.kind === "title"\) return \[\["summary", "摘要"\], \["request", "请求"\], \["result", "结果"\]\]/);
-  assert.match(trajectorySource, /tabs\.push\(\["preview", "预览"\], \["raw", "原文"\]\)/);
-  assert.match(trajectorySource, /\["思考", event\.payload\?\.thinking\][\s\S]*\["正文", event\.payload\?\.content\]/);
+  assert.match(trajectorySource, /\["summary", "Summary"\]/);
+  assert.match(trajectorySource, /tabs\.push\(\["message", "Message"\], \["preview", "Preview"\]\)/);
+  assert.match(trajectorySource, /const tabs = \[\["summary", "Summary"\]\];\s*if \(trajectoryUsage\(event\)\) tabs.push\(\["usage", "Usage"\]\)/);
+  assert.match(trajectorySource, /tabs.push\(\["raw", "Raw"\]\)/);
+  assert.match(trajectorySource, /\["Thinking", event\.payload\?\.thinking\][\s\S]*\["Text", event\.payload\?\.content\]/);
   assert.match(trajectorySource, /completed: "Completed"/);
   assert.doesNotMatch(trajectorySource, /trajectoryRunCount/);
-  assert.match(trajectorySource, /renderSummarySection\("数据"[\s\S]*renderSummarySection\("结果"/);
+  assert.match(trajectorySource, /renderSummarySection\("Input"[\s\S]*renderSummarySection\("Result"/);
   assert.match(trajectorySource, /data-trajectory-detail-tab-target/);
   assert.match(trajectorySource, /data-trajectory-event-target/);
-  assert.match(trajectorySource, /renderDetail\(selected, detailTab, events\)/);
-  assert.match(trajectorySource, /renderSummarySection\("附件"/);
-  assert.match(trajectorySource, /renderSummarySection\("上下文引用"/);
+  assert.match(trajectorySource, /renderDetail\(selected, detailTab, events, attachmentUrl\)/);
+  assert.match(trajectorySource, /renderSummarySection\("Attachments"/);
+  assert.match(trajectorySource, /renderSummarySection\("Context references"/);
   assert.doesNotMatch(trajectorySource, /Object\.entries\(reference\.payload/);
-  assert.match(trajectorySource, /TOOL_KINDS\.has\(event\.kind\) && hasMeaningfulValue\(event\.result\)/);
   assert.doesNotMatch(trajectorySource, /下载本地文件/);
   assert.match(trajectorySource, /trajectory-summary-link local-file-download/);
   assert.doesNotMatch(trajectorySource, /icon\("list-checks"\)|icon\("archive-restore"\)|icon\("message-square-more"\)/);
@@ -349,10 +349,10 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(workspaceCss, /\.trajectory-detail-body \.trajectory-json\.is-flat\s*\{[\s\S]*border:\s*0;[\s\S]*background:\s*transparent/);
   assert.match(workspaceCss, /\.trajectory-kind\.input\s*\{[^}]*background:\s*#eef4ff/);
   assert.match(workspaceCss, /\.trajectory-kind\.assistant,[\s\S]*background:\s*#f3edff/);
-  assert.match(workspaceCss, /\.trajectory-kind\.tool\s*\{[^}]*background:\s*#fff3e7/);
-  assert.match(workspaceCss, /\.trajectory-kind\.code\s*\{[^}]*background:\s*#e8f1ff/);
+  assert.match(workspaceCss, /\.trajectory-kind\.tool,\s*\.trajectory-kind\.code\s*\{[^}]*background:\s*#fff3e7/);
+  assert.match(workspaceCss, /\.trajectory-kind\.code\s*\{[^}]*background:\s*#fff3e7/);
   assert.match(trajectorySource, /return isRunCodeEvent\(event\) \? "PTC"/);
-  assert.match(trajectorySource, /isPythonCodeEvent\(event\)\) tabs\.push\(\["code", "代码"\]\)/);
+  assert.match(trajectorySource, /isPythonCodeEvent\(event\)\) tabs\.push\(\["code", "Code"\]\)/);
   assert.match(trajectorySource, /class="hljs language-python"/);
   assert.match(trajectorySource, /data-copy-run-code/);
   assert.match(trajectorySource, /activeTab === "code"[\s\S]*?"trajectory-detail-body is-code"/);
@@ -420,4 +420,20 @@ test("Console正文不低于12px，只有明确的辅助标签使用紧凑字号
   assert.deepEqual(lowFontDeclarations(configurationCss), []);
   assert.deepEqual(lowFontDeclarations(themesCss), []);
   assert.match(consoleCss, /\.agent-select-label[^}]*font-size:\s*14px/);
+});
+
+
+test("前端工具回传后助手 Pending 解除，部分返回与无关联返回不解除", () => {
+  const call = (id, run, ids, sequence) => ({ event_id: id, event_type: "assistant/message", status: "pending", sequence, run_id: run,
+    payload: { message: { kind: "response", parts: ids.map(tool_call_id => ({ part_kind: "tool-call", tool_name: "builtin__choice", tool_call_id, args: {} })) } } });
+  const result = (id, callId, sequence) => ({ event_id: id, event_type: "tool/results", sequence, run_id: "resumed-run",
+    payload: { message: { kind: "request", parts: [{ part_kind: "tool-return", tool_name: "builtin__choice", tool_call_id: callId, content: "chosen" }] } } });
+  const first = call("pending-first", "run-1", ["call-a", "call-b"], 1);
+  assert.equal(buildTrajectory({ items: [first, result("result-a", "call-a", 2)] })[0].status, "pending");
+  const completed = buildTrajectory({ items: [first, result("result-a", "call-a", 2), result("result-b", "call-b", 3)] });
+  assert.equal(completed[0].status, "completed");
+  assert.equal(first.status, "pending", "原始持久记录不改写");
+  const reused = buildTrajectory({ items: [call("old", "run-old", ["reused"], 1), call("new", "run-new", ["reused"], 2), result("later", "reused", 3)] });
+  assert.equal(reused.find(e => e.id === "old").status, "pending");
+  assert.equal(reused.find(e => e.id === "new").status, "completed");
 });

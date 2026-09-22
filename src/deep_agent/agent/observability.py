@@ -1,10 +1,25 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any, Iterable
 
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.usage import RunUsage
+
+
+def token_usage_available(usage: Any) -> bool:
+    """SDK default zero counters do not establish provider token measurement.
+
+    Preserve raw usage in message events; only presentation/aggregation treats
+    an entirely empty token measurement as unknown. A reported zero output is
+    still valid when the response has measured input (and vice versa).
+    """
+    return any(
+        isinstance(value, int) and not isinstance(value, bool) and value > 0
+        for name in ("input_tokens", "output_tokens")
+        for value in [usage.get(name) if isinstance(usage, Mapping) else getattr(usage, name, None)]
+    )
 
 
 def usage_dict(usage: RunUsage | None) -> dict[str, int | None]:
@@ -18,14 +33,15 @@ def usage_dict(usage: RunUsage | None) -> dict[str, int | None]:
             "cache_read_tokens": None,
             "cache_write_tokens": None,
         }
+    measured = token_usage_available(usage)
     return {
         "requests": usage.requests,
         "tool_calls": usage.tool_calls,
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_tokens": usage.total_tokens,
-        "cache_read_tokens": usage.cache_read_tokens,
-        "cache_write_tokens": usage.cache_write_tokens,
+        "input_tokens": usage.input_tokens if measured else None,
+        "output_tokens": usage.output_tokens if measured else None,
+        "total_tokens": usage.total_tokens if measured else None,
+        "cache_read_tokens": usage.cache_read_tokens if measured else None,
+        "cache_write_tokens": usage.cache_write_tokens if measured else None,
     }
 
 
@@ -57,6 +73,7 @@ def run_metrics(
     tool_search_calls: int = 0,
     compaction: str = "none",
     cache_metrics_available: bool | None = None,
+    messages: Iterable[ModelMessage] | None = None,
 ) -> dict[str, Any]:
     metrics = {
         "model_id": model_id,
@@ -72,6 +89,13 @@ def run_metrics(
     ):
         metrics["cache_read_tokens"] = None
         metrics["cache_write_tokens"] = None
+    if messages is not None:
+        from deep_agent.agent.cache_usage import summarize_cache_usage
+
+        cache = summarize_cache_usage(messages)
+        metrics["cache_usage"] = cache
+        metrics["cache_read_tokens"] = cache["cache_read_tokens"]
+        metrics["cache_write_tokens"] = cache["cache_write_tokens"]
     return metrics
 
 

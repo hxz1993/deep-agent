@@ -67,7 +67,7 @@ test("diagnostic inspector uses injected saved identity, historical model and un
   assert.match(html, /上下文预算/);
   assert.match(html, /上下文压缩/);
   const run = renderSessionInspector({ diagnostic: true, activeTab: "run", run: { run_id: "run-1", duration_ms: null } });
-  assert.match(run, /本次使用/);
+  assert.match(run, /累计使用/);
   assert.doesNotMatch(run, />0 ms</);
   assert.doesNotMatch(run, /data-diagnostic-run-logs|查看此轮日志/);
 });
@@ -187,4 +187,22 @@ test("empty fields retain their original labels and styles while values and zero
   assert.match(filled, /<code>space<\/code>/);
   assert.match(filled, /title="提问数"><i[^]*?<\/i>0<\/span>/);
   assert.doesNotMatch(filled, /hidden-id|conservative_fallback/);
+});
+
+test("missing usage in one grouped response does not turn into zero or a complete total", () => {
+  const response = (ordinal, usage) => ({
+    event_type: "assistant/message", event_id: `response-${ordinal}`, run_id: "run-usage", sequence: ordinal + 1,
+    payload: { source: { message_ordinal: ordinal, part_index: 0, part_key: "0" }, message: { kind: "response", usage, parts: [{ part_kind: "text", content: "answer" }] } },
+  });
+  const measured = response(0, { input_tokens: 80, output_tokens: 20 });
+  const missing = response(1, { input_tokens: 0, output_tokens: 0 });
+  const facts = savedRunFacts([measured, missing], "run-usage");
+  assert.deepEqual(facts.usage, { input_tokens: 80, output_tokens: 20, total_tokens: 100 });
+  assert.equal(facts.usage_partial, true);
+  assert.equal(facts.usage_missing_responses, 1);
+  const unknown = savedRunFacts([missing], "run-usage");
+  assert.deepEqual(unknown.usage, {});
+  assert.equal(unknown.usage_missing_responses, 1);
+  const html = renderSessionInspector({ activeTab: "run", run: facts, usage: facts.usage });
+  assert.match(html, /累计使用（部分）/);
 });

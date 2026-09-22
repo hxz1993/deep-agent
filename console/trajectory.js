@@ -1,8 +1,11 @@
+import { cacheMessageSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
+import { tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
+import { renderPlanSnapshot } from "./plan-view.js?v=20260922-trajectory-8";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
-import { attachmentPreviewAttributes } from "./attachment-preview.js?v=20260912-21";
+import { attachmentPreviewAttributes, attachmentDownloadUrl } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { toolResultPresentation } from "./assistant-presentation.js?v=20260912-21";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
@@ -46,25 +49,14 @@ function valuePreview(value, limit = 180) {
   return normalized.length > limit ? `${normalized.slice(0, limit)}…` : normalized;
 }
 
-function usageTotal(usage) {
-  if (!usage || typeof usage !== "object") return null;
-  const direct = Number(usage.total_tokens);
-  if (Number.isFinite(direct)) return direct;
-  const input = Number(usage.input_tokens);
-  const output = Number(usage.output_tokens);
-  if (Number.isFinite(input) || Number.isFinite(output)) {
-    return (Number.isFinite(input) ? input : 0) + (Number.isFinite(output) ? output : 0);
-  }
-  return null;
-}
 
 function eventLabel(kind, part = {}) {
-  if (kind === "input") return "用户输入";
-  if (kind === "thinking") return "模型思考";
-  if (kind === "assistant") return "助手输出";
-  if (kind === "title") return "会话标题";
+  if (kind === "input") return "User message";
+  if (kind === "thinking") return "Thinking";
+  if (kind === "assistant") return "Assistant message";
+  if (kind === "title") return "Session title";
   if (kind === "error") return "异常";
-  if (kind === "compaction") return "上下文压缩";
+  if (kind === "compaction") return "Compaction";
   if (kind === "planning") return part.tool || "任务计划";
   if (kind === "deferred") return part.tool || "等待用户操作";
   if (kind === "tool") return part.tool || "工具调用";
@@ -74,11 +66,11 @@ function eventLabel(kind, part = {}) {
 function eventSummary(kind, source = {}) {
   if (kind === "input") return valuePreview(source.content) || "仅包含附件或上下文引用";
   if (["thinking", "assistant"].includes(kind)) return valuePreview(source.content);
-  if (kind === "title") return valuePreview(source.title) || "会话标题";
+  if (kind === "title") return valuePreview(source.title) || "Session title";
   if (kind === "error") return valuePreview(source.message) || "执行异常";
   if (kind === "compaction") {
-    const before = source.budget?.estimated_before;
-    const after = source.budget?.estimated_after;
+    const before = source.budget?.estimated_tokens_before ?? source.budget?.estimated_before;
+    const after = source.budget?.estimated_tokens_after ?? source.budget?.estimated_after;
     return before != null && after != null ? `${before} → ${after} Token` : "上下文压缩事件";
   }
   if (source.type === "tool_result") return valuePreview(source.result ?? source.content) || "工具已返回";
@@ -464,6 +456,23 @@ export function buildTrajectory(history = {}) {
       }
     });
   }
+  // Pending records describe the pause at persistence time. Resolve only calls
+  // belonging to this response, not an unrelated later run with the same ID.
+  const toolsByCallEvent = new Map();
+  for (const tool of projected.filter((row) => TOOL_KINDS.has(row.kind))) {
+    const id = tool.native?.call_event_id;
+    if (!id) continue;
+    const group = toolsByCallEvent.get(id) || [];
+    group.push(tool);
+    toolsByCallEvent.set(id, group);
+  }
+  for (const row of projected) {
+    if (row.kind !== "assistant" || row.status !== "pending" || !row.payload?.tool_calls?.length) continue;
+    const matching = (row.native?.event_ids || [row.id]).flatMap((id) => toolsByCallEvent.get(id) || []);
+    if (row.payload.tool_calls.every((call) => matching.some((tool) => tool.tool_call_id === call.tool_call_id && tool.native?.result_event_id))) {
+      row.status = "completed";
+    }
+  }
   return projected.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
 }
 
@@ -510,7 +519,7 @@ function liveEventKind(type, data) {
 }
 
 function liveLabel(type, data) {
-  if (type.startsWith("context_compaction")) return "上下文压缩";
+  if (type.startsWith("context_compaction")) return "Compaction";
   return eventLabel(liveEventKind(type, data), data);
 }
 
@@ -621,23 +630,54 @@ function durationLabel(value) {
   return `${(value / 1000).toFixed(value < 10000 ? 2 : 1)} s`;
 }
 
-function renderMarkdown(content, emptyMessage = "当前事件没有正文。") {
+function renderMarkdown(content, emptyMessage = "No content in this event.") {
   if (!content) return `<p class="trajectory-summary-empty">${escapeHtml(emptyMessage)}</p>`;
   const rendered = globalThis.DeepAgentMarkdown?.renderBody?.(content)
     || `<div class="markdown-body"><p>${escapeHtml(content)}</p></div>`;
   return `<div class="trajectory-summary-markdown">${rendered}</div>`;
 }
 
+function trajectoryUsage(event) {
+  if (!event.native?.usage) return null;
+  const usage = event.native.usage;
+  const input = tokenValue(usage.input_tokens);
+  const output = tokenValue(usage.output_tokens);
+  const reportedTotal = tokenValue(usage.total_tokens);
+  const cache = cacheMessageSummary(event.native);
+  const reported = [input, output, reportedTotal, cache.cache_read_tokens, cache.cache_write_tokens]
+    .some(value => value != null && value > 0) || cache.read_complete || cache.write_complete;
+  if (!reported) return null;
+  return { input, output, total: reportedTotal ?? (input != null && output != null ? input + output : null), cache };
+}
+
+export function renderTrajectoryUsage(event) {
+  const usage = trajectoryUsage(event);
+  if (!usage) return `<p class="trajectory-summary-empty">此请求暂无供应商用量数据。</p>`;
+  const { input, output, total, cache } = usage;
+  const number = value => value == null ? "—" : value.toLocaleString("zh-CN");
+  const fact = (label, text, title = "") => `<span title="${escapeHtml(title || `${label} ${text}`)}"><small>${label}</small><strong>${escapeHtml(text)}</strong></span>`;
+  return `<section class="inspector-section">
+    <header><strong>Token 用量</strong></header>
+    <div class="context-budget-summary">${fact("输入", number(input))}${fact("输出", number(output))}${fact("合计", number(total), `合计 ${number(total)} Token`)}</div>
+    <p class="trajectory-summary-copy">本次模型请求的用量，同一响应拆分的事件共用此统计。</p>
+  </section>
+  <section class="inspector-section">
+    <header><strong>缓存统计</strong></header>
+    <div class="context-budget-summary">${fact("命中率", cache.hit_ratio == null ? "—" : `${(cache.hit_ratio * 100).toFixed(1)}%`, "缓存读取 ÷ 输入 Token；未报告或无法计算时显示 —")}${fact("缓存读取", number(cache.cache_read_tokens), cache.cache_read_tokens == null ? "供应商未报告或旧记录无法确认" : `缓存读取 ${number(cache.cache_read_tokens)} Token`)}${fact("缓存写入", number(cache.cache_write_tokens), cache.cache_write_tokens == null ? "供应商未报告或旧记录无法确认" : `缓存写入 ${number(cache.cache_write_tokens)} Token`)}</div>
+    <p class="trajectory-summary-copy">缓存 Token 已包含在输入中。</p>
+  </section>`;
+}
+
 function renderMeta(event) {
-  const total = usageTotal(event.native?.usage);
   const duration = eventDuration(event);
+  const usage = trajectoryUsage(event);
   const items = [
     ["clock-3", event.timestamp ? formatTime(event.timestamp) : null],
     ["timer", durationLabel(duration)],
-    ["coins", total == null ? null : `${total.toLocaleString("zh-CN")} Token`],
+    ["coins", usage?.total != null ? `${usage.total.toLocaleString("zh-CN")} Token` : null],
   ].filter(([, value]) => value);
   if (!items.length) return "";
-  return `<div class="trajectory-summary-meta">${items.map(([name, value]) => `<span>${icon(name)}${escapeHtml(value)}</span>`).join("")}</div>`;
+  return `<div class="trajectory-summary-meta">${items.map(([name, value]) => `<span${name === "coins" ? ' title="本次模型请求的 Token 合计"' : ""}>${icon(name)}${escapeHtml(value)}</span>`).join("")}</div>`;
 }
 
 function renderSummarySection(title, body, { targetTab = null, className = "" } = {}) {
@@ -653,37 +693,40 @@ function renderJumpLink({ eventId, iconName, text, detail = "" }) {
   return `<button type="button" class="trajectory-summary-link"${attributes}>${icon(iconName)}<span><strong>${escapeHtml(text)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</span>${eventId ? icon("arrow-up-right") : ""}</button>`;
 }
 
-function renderInputSummary(event) {
+function renderInputSummary(event, _events, attachmentUrl = attachmentDownloadUrl) {
   const contextRefs = Array.isArray(event.payload?.context_refs) ? event.payload.context_refs : [];
   const attachments = Array.isArray(event.payload?.attachments) ? event.payload.attachments : [];
   const contextLinks = contextRefs.map((reference) => renderJumpLink({
       eventId: null,
       iconName: "braces",
-      text: reference?.label || reference?.key || reference?.type || "未命名上下文",
+      text: reference?.label || reference?.key || reference?.type || "Unnamed context",
       detail: reference?.type || reference?.key || "",
     })).join("");
   const attachmentLinks = attachments.map((attachment) => {
-    const previewAttributes = attachmentPreviewAttributes(attachment);
-    if (previewAttributes) return `<button type="button" class="trajectory-summary-link attachment-image-trigger" ${previewAttributes}>${icon("image")}<span><strong>${escapeHtml(attachment.name || attachment.id)}</strong><small>${escapeHtml(attachment.mime_type || attachment.mime || "图片")}</small></span></button>`;
-    return renderJumpLink({
-      eventId: null,
-      iconName: "paperclip",
-      text: attachment?.name || attachment?.id || "未命名附件",
-      detail: attachment?.mime_type || attachment?.mime || "附件",
-    });
+    const href = attachmentUrl(attachment);
+    const name = attachment.name || attachment.id || "Unnamed attachment";
+    const detail = attachment.mime_type || attachment.mime || "Attachment";
+    const previewAttributes = attachmentPreviewAttributes(attachment, undefined, href);
+    const copy = `<span><strong>${escapeHtml(name)}</strong><small>${escapeHtml(detail)}</small></span>`;
+    const download = href ? `<a class="trajectory-attachment-download" href="${escapeHtml(href)}" download aria-label="下载 ${escapeHtml(name)}" title="下载">${icon("download")}</a>` : "";
+    const main = previewAttributes
+      ? `<button type="button" class="trajectory-summary-link attachment-image-trigger" ${previewAttributes}>${icon("image")}${copy}</button>`
+      : href ? `<a class="trajectory-summary-link" href="${escapeHtml(href)}" download>${icon("paperclip")}${copy}</a>`
+      : renderJumpLink({ eventId: null, iconName: "paperclip", text: name, detail });
+    return `<div class="trajectory-attachment-row">${main}${download}</div>`;
   }).join("");
   return `${renderSummarySection(
-    "预览",
-    renderMarkdown(event.payload?.content, "本次输入只包含附件或结构化上下文。"),
+    "Preview",
+    renderMarkdown(event.payload?.content, "This message only contains attachments or context references."),
     { targetTab: "preview", className: "trajectory-summary-preview is-scroll" },
-  )}${attachmentLinks ? renderSummarySection("附件", `<div class="trajectory-summary-links">${attachmentLinks}</div>`) : ""}
-    ${contextLinks ? renderSummarySection("上下文引用", `<div class="trajectory-summary-links">${contextLinks}</div>`) : ""}`;
+  )}${attachmentLinks ? renderSummarySection("Attachments", `<div class="trajectory-summary-links">${attachmentLinks}</div>`) : ""}
+    ${contextLinks ? renderSummarySection("Context references", `<div class="trajectory-summary-links">${contextLinks}</div>`) : ""}`;
 }
 
 function renderThinking(thinking) {
   if (!thinking) return "";
-  return `<details class="trajectory-thinking">
-    <summary><span>${icon("brain")}思考</span>${icon("chevron-down")}</summary>
+  return `<details class="trajectory-thinking assistant-thinking">
+    <summary class="assistant-thinking-head"><span class="thinking-icon">${icon("brain")}</span><span class="thinking-heading">思考过程</span><span class="thinking-chevron">${icon("chevron-right")}</span></summary>
     <div class="trajectory-thinking-content">${escapeHtml(thinking)}</div>
   </details>`;
 }
@@ -700,7 +743,7 @@ function renderAssistantTools(event, events) {
     return renderJumpLink({
       eventId: target?.id || null,
       iconName: "wrench",
-      text: call?.tool || "未命名工具",
+      text: call?.tool || "Unnamed tool",
       detail: valuePreview(call?.args, 120),
     });
   }).join("")}</div>`;
@@ -709,14 +752,14 @@ function renderAssistantTools(event, events) {
 function renderAssistantSummary(event, events) {
   const preview = `${renderThinking(event.payload?.thinking)}${renderMarkdown(
     event.payload?.content,
-    event.payload?.thinking ? "模型尚未输出正文。" : "本次模型响应没有正文。",
+    event.payload?.thinking ? "No text output yet." : "No text in this model response.",
   )}`;
   return `${renderSummarySection(
-    "预览",
+    "Preview",
     preview,
     { targetTab: "preview", className: "trajectory-summary-preview trajectory-summary-assistant-preview is-scroll" },
   )}
-    ${event.payload?.tool_calls?.length ? renderSummarySection("工具", renderAssistantTools(event, events)) : ""}`;
+    ${event.payload?.tool_calls?.length ? renderSummarySection("Tool", renderAssistantTools(event, events)) : ""}`;
 }
 
 function toolResultValue(event) {
@@ -752,7 +795,7 @@ function renderLocalFileDownload(value, artifacts = []) {
   const path = `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`;
   const href = globalThis.serviceUrl?.(path) || `/${path}`;
   return renderSummarySection(
-    "文件",
+    "Files",
     `<a class="trajectory-summary-link local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span><strong>${escapeHtml(file.fileName)}</strong></span></a>`,
   );
 }
@@ -771,28 +814,28 @@ function renderGeneratedFiles(artifacts) {
   if (!generated.length) return "";
   const rows = generated.map((artifact) => {
     const fileId = String(artifact.file_id || artifact.artifact_id || "");
-    const fileName = String(artifact.file_name || fileId || "未命名文件");
+    const fileName = String(artifact.file_name || fileId || "Unnamed file");
     const details = [artifact.mime, formatFileBytes(artifact.byte_size)].filter(Boolean).join(" · ");
     const download = fileId.startsWith("local_")
-      ? `<a class="local-file-download" href="${escapeHtml(globalThis.serviceUrl?.(`api/v1/local-files/${encodeURIComponent(fileId)}/download`) || `/api/v1/local-files/${encodeURIComponent(fileId)}/download`)}" download title="下载文件">${icon("download")}</a>`
+      ? `<a class="local-file-download" href="${escapeHtml(globalThis.serviceUrl?.(`api/v1/local-files/${encodeURIComponent(fileId)}/download`) || `/api/v1/local-files/${encodeURIComponent(fileId)}/download`)}" download title="Download file">${icon("download")}</a>`
       : "";
-    return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制文件 ID">${icon("copy")}</button></span></div>`;
+    return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="Copy file ID">${icon("copy")}</button></span></div>`;
   }).join("");
-  return renderSummarySection("生成文件", `<div class="generated-file-list">${rows}</div>`);
+  return renderSummarySection("Generated files", `<div class="generated-file-list">${rows}</div>`);
 }
 
 function renderPayloadResultSections({ payload, result }) {
   const payloadText = hasMeaningfulValue(payload) ? valuePreview(payload, 280) : null;
   const resultText = hasMeaningfulValue(result) ? valuePreview(result, 360) : null;
-  return `${payloadText ? renderSummarySection("数据", `<p class="trajectory-summary-code">${escapeHtml(payloadText)}</p>`, { targetTab: "payload" }) : ""}
-    ${resultText ? renderSummarySection("结果", `<p class="trajectory-summary-code">${escapeHtml(resultText)}</p>`, { targetTab: "result" }) : ""}`;
+  return `${payloadText ? renderSummarySection("Input", `<p class="trajectory-summary-code">${escapeHtml(payloadText)}</p>`, { targetTab: "input" }) : ""}
+    ${resultText ? renderSummarySection("Result", `<p class="trajectory-summary-code">${escapeHtml(resultText)}</p>`, { targetTab: "result" }) : ""}`;
 }
 
 function renderToolSummary(event) {
   const result = toolResultValue(event);
   const artifacts = Array.isArray(event.result?.artifacts) ? event.result.artifacts : [];
   const imagePreview = renderWebImagePreview(result, { className: "trajectory-web-image-preview" });
-  return `${imagePreview ? renderSummarySection("网络图片", imagePreview) : ""}${renderGeneratedFiles(artifacts)}${renderPayloadResultSections({
+  return `${imagePreview ? renderSummarySection("Web image", imagePreview) : ""}${renderGeneratedFiles(artifacts)}${renderPayloadResultSections({
     payload: event.payload?.args ?? event.payload,
     result,
   })}${renderLocalFileDownload(result, artifacts)}`;
@@ -804,12 +847,7 @@ function planSnapshot(event) {
 
 function renderPlanningSummary(event) {
   const plan = planSnapshot(event);
-  const completed = Number(plan?.completed || 0);
-  const total = Number(plan?.total || plan?.items?.length || 0);
-  const label = event.label === "write_plan" ? "创建或改写任务计划" : event.label;
-  const progress = `<p class="trajectory-summary-lead"><strong>${escapeHtml(label)}</strong></p>
-    ${total ? `<div class="trajectory-plan-progress"><span style="width:${Math.min(100, Math.max(0, completed / total * 100))}%"></span></div><p class="trajectory-plan-count">${completed} / ${total} 已完成</p>` : ""}`;
-  return `${renderSummarySection("计划", progress)}
+  return `${renderPlanSnapshot(plan)}
     ${renderPayloadResultSections({ payload: event.payload, result: toolResultValue(event) })}`;
 }
 
@@ -819,47 +857,47 @@ function renderDeferredSummary(event) {
   const reason = args.reason || args.message || event.summary;
   const primary = `<p class="trajectory-summary-lead"><strong>${escapeHtml(title)}</strong></p>
     ${reason && reason !== title ? `<p class="trajectory-summary-copy">${escapeHtml(reason)}</p>` : ""}`;
-  return `${renderSummarySection("交互", primary)}
+  return `${renderSummarySection("Interaction", primary)}
     ${renderPayloadResultSections({ payload: event.payload, result: toolResultValue(event) })}`;
 }
 
 function renderCompactionSummary(event) {
-  const before = event.payload?.budget?.estimated_before;
-  const after = event.payload?.budget?.estimated_after;
+  const before = event.payload?.budget?.estimated_tokens_before ?? event.payload?.budget?.estimated_before;
+  const after = event.payload?.budget?.estimated_tokens_after ?? event.payload?.budget?.estimated_after;
   const primary = before != null && after != null
     ? `${Number(before).toLocaleString("zh-CN")} → ${Number(after).toLocaleString("zh-CN")} Token`
     : event.summary;
   const source = event.payload?.source || {};
   const detail = [
-    source.through_sequence != null ? `截至序号 ${source.through_sequence}` : null,
+    source.through_sequence != null ? `Through sequence ${source.through_sequence}` : null,
     event.payload?.summary_call?.model_id || null,
-    event.payload?.error?.message || event.payload?.error || null,
+    event.payload?.error?.message || event.payload?.error?.code || (typeof event.payload?.error === "string" ? event.payload.error : null),
   ].filter(Boolean).join(" · ");
-  return renderSummarySection("压缩", `<p class="trajectory-summary-lead"><strong>${escapeHtml(primary || event.label)}</strong></p>${detail ? `<p class="trajectory-summary-copy">${escapeHtml(detail)}</p>` : ""}`);
+  return renderSummarySection("Compaction", `<p class="trajectory-summary-lead"><strong>${escapeHtml(primary || event.label)}</strong></p>${detail ? `<p class="trajectory-summary-copy">${escapeHtml(detail)}</p>` : ""}`);
 }
 
 function renderTitleSummary(event) {
   const sourceLabel = {
-    fallback: "确定性兜底",
-    model: "模型生成",
-    user: "用户修改",
+    fallback: "fallback",
+    model: "model",
+    user: "user",
   }[event.payload?.source] || event.payload?.source;
   const model = event.payload?.model_name || event.payload?.model_id;
   const facts = [
-    renderFact("来源", sourceLabel),
-    renderFact("模型", model, { mono: true }),
-    renderFact("源事件", event.payload?.source_event_id, { mono: true }),
+    renderFact("Source", sourceLabel),
+    renderFact("Model", model, { mono: true }),
+    renderFact("Source event", event.payload?.source_event_id, { mono: true }),
   ].join("");
   return renderSummarySection(
-    "标题",
-    `<p class="trajectory-summary-lead"><strong>${escapeHtml(event.payload?.title || event.summary || "会话标题")}</strong></p>${facts ? `<div class="trajectory-context-standard">${facts}</div>` : ""}`,
+    "Title",
+    `<p class="trajectory-summary-lead"><strong>${escapeHtml(event.payload?.title || event.summary || "Session title")}</strong></p>${facts ? `<div class="trajectory-context-standard">${facts}</div>` : ""}`,
   );
 }
 
 function renderExecutionErrorSummary(event) {
-  return renderSummarySection("异常", `<p class="trajectory-summary-copy">${escapeHtml(event.payload?.message || event.summary)}</p>
-    ${renderFact("错误类型", event.payload?.code, { mono: true })}
-    ${renderFact("发生阶段", event.payload?.phase)}`);
+  return renderSummarySection("Error", `<p class="trajectory-summary-copy">${escapeHtml(event.payload?.message || event.summary)}</p>
+    ${renderFact("Error code", event.payload?.code, { mono: true })}
+    ${renderFact("Phase", event.payload?.phase)}`);
 }
 
 const SUMMARY_RENDERERS = Object.freeze({
@@ -873,18 +911,18 @@ const SUMMARY_RENDERERS = Object.freeze({
   error: renderExecutionErrorSummary,
 });
 
-function renderSummary(event, events) {
+function renderSummary(event, events, attachmentUrl) {
   const renderer = SUMMARY_RENDERERS[event.kind];
   const primary = renderer
-    ? renderer(event, events)
-    : renderSummarySection("事件", `<p class="trajectory-summary-lead">${escapeHtml(event.summary || event.label)}</p>`);
+    ? renderer(event, events, attachmentUrl)
+    : renderSummarySection("Event", `<p class="trajectory-summary-lead">${escapeHtml(event.summary || event.label)}</p>`);
   return `<section class="trajectory-summary">${renderMeta(event)}<div class="trajectory-summary-primary">${primary}</div></section>`;
 }
 
 function renderJsonBlock(value) {
   return globalThis.DeepAgentJson?.renderBlock?.(value, {
     className: "trajectory-json is-flat",
-    ariaLabel: "轨迹 JSON",
+    ariaLabel: "Trajectory JSON",
   }) || `<pre class="trajectory-json"><code>${escapeHtml(formatJson(value))}</code></pre>`;
 }
 
@@ -917,32 +955,37 @@ function highlightPython(code) {
 
 function renderRunCode(event) {
   const code = runCodeSource(event);
-  if (!code) return `<p class="trajectory-summary-empty">本次调用没有可展示的源代码。</p>`;
+  if (!code) return `<p class="trajectory-summary-empty">No source code in this call.</p>`;
   return `<section class="trajectory-code-view">
-    <header><span>Python</span><button type="button" data-copy-run-code>${icon("copy")}复制</button></header>
+    <header><span>Python</span><button type="button" data-copy-run-code>${icon("copy")}Copy</button></header>
     <pre><code class="hljs language-python">${highlightPython(code)}</code></pre>
   </section>`;
 }
 
+// Tabs describe semantic projections, not HTTP bodies or database columns.
 function detailTabs(event) {
-  if (event.kind === "title") return [["summary", "摘要"], ["request", "请求"], ["result", "结果"]];
-  const tabs = [["summary", "摘要"]];
-  if (isPythonCodeEvent(event)) tabs.push(["code", "代码"]);
-  if (hasMeaningfulValue(event.payload)) tabs.push(["payload", "数据"]);
-  if (["input", "assistant"].includes(event.kind)) {
-    tabs.push(["preview", "预览"], ["raw", "原文"]);
+  const tabs = [["summary", "Summary"]];
+  if (trajectoryUsage(event)) tabs.push(["usage", "Usage"]);
+  if (isPythonCodeEvent(event)) tabs.push(["code", "Code"]);
+  if (TOOL_KINDS.has(event.kind)) {
+    if (hasMeaningfulValue(event.payload)) tabs.push(["input", "Input"]);
+    if (hasMeaningfulValue(event.result)) tabs.push(["result", "Result"]);
+  } else if (["input", "assistant"].includes(event.kind)) {
+    tabs.push(["message", "Message"], ["preview", "Preview"]);
+    tabs.push(["raw", "Raw"]);
+  } else if (hasMeaningfulValue(event.payload)) {
+    tabs.push(["event", "Event"]);
   }
-  if (TOOL_KINDS.has(event.kind) && hasMeaningfulValue(event.result)) tabs.push(["result", "结果"]);
   return tabs;
 }
 
 function renderRaw(event) {
   if (event.kind === "assistant") {
     const sections = [
-      ["思考", event.payload?.thinking],
-      ["正文", event.payload?.content],
+      ["Thinking", event.payload?.thinking],
+      ["Text", event.payload?.content],
     ].filter(([, content]) => content);
-    if (!sections.length) return `<p class="trajectory-summary-empty">暂无原始文本。</p>`;
+    if (!sections.length) return `<p class="trajectory-summary-empty">No raw text.</p>`;
     return `<div class="trajectory-raw-sections">${sections.map(([title, content]) => `
       <section class="trajectory-raw-section">
         <div class="trajectory-raw-heading">${escapeHtml(title)}</div>
@@ -950,31 +993,38 @@ function renderRaw(event) {
       </section>`).join("")}</div>`;
   }
   const content = event.kind === "input" ? event.payload?.content : formatJson(event.payload);
-  return `<pre class="trajectory-raw">${escapeHtml(content || "暂无")}</pre>`;
+  return `<pre class="trajectory-raw">${escapeHtml(content || "None")}</pre>`;
 }
 
 function renderPreview(event) {
   if (event.kind === "assistant") {
-    return `<section class="trajectory-preview">${renderThinking(event.payload?.thinking)}${renderMarkdown(event.payload?.content, "本次模型响应没有正文。")}</section>`;
+    return `<section class="trajectory-preview">${renderThinking(event.payload?.thinking)}${renderMarkdown(event.payload?.content, "No text in this model response.")}</section>`;
   }
-  return `<section class="trajectory-preview">${renderMarkdown(event.payload?.content, "本次输入没有文本正文。")}</section>`;
+  return `<section class="trajectory-preview">${renderMarkdown(event.payload?.content, "No text in this user message.")}</section>`;
 }
 
-function renderDetail(event, activeTab = "summary", events = []) {
-  if (!event) return `<div class="trajectory-detail-empty">${icon("scan-search")}<p>选择一条轨迹查看原生信息</p></div>`;
+function renderDetail(event, activeTab = "summary", events = [], attachmentUrl) {
+  if (!event) return `<div class="trajectory-detail-empty">${icon("scan-search")}<p>Select an event to inspect</p></div>`;
   const tabs = detailTabs(event);
   const allowedTabs = new Set(tabs.map(([id]) => id));
   if (!allowedTabs.has(activeTab)) activeTab = "summary";
-  let content = renderSummary(event, events);
-  if (activeTab === "request") content = renderJsonBlock(event.native?.title_request || event.payload);
-  if (activeTab === "payload") content = renderJsonBlock(event.payload);
-  if (activeTab === "result") content = renderJsonBlock(event.kind === "title" ? (event.native?.title_result || event.payload) : event.result);
+  let content = renderSummary(event, events, attachmentUrl);
+  if (["input", "message", "event"].includes(activeTab)) content = renderJsonBlock(event.payload);
+  if (activeTab === "event" && event.kind === "title" && event.native?.event_ids?.length > 1) {
+    // These are title lifecycle records, never an HTTP request/response pair.
+    content = renderJsonBlock({
+      initial: { event_id: event.native.event_ids[0], payload: event.native.title_request },
+      latest: { event_id: event.native.event_ids.at(-1), payload: event.native.title_result || event.payload },
+    });
+  }
+  if (activeTab === "result") content = renderJsonBlock(event.result);
   if (activeTab === "preview") content = renderPreview(event);
   if (activeTab === "raw") content = renderRaw(event);
+  if (activeTab === "usage") content = renderTrajectoryUsage(event);
   if (activeTab === "code") content = renderRunCode(event);
   const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title"].includes(event.kind)
     ? event.label
-    : event.run_id ? `回合 ${String(event.run_id).slice(0, 8)}` : "";
+    : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
   const detailBodyClass = activeTab === "code"
     ? "trajectory-detail-body is-code"
     : "trajectory-detail-body";
@@ -986,7 +1036,7 @@ function renderDetail(event, activeTab = "summary", events = []) {
     <div class="${detailBodyClass}">${content}</div>`;
 }
 
-export function createTrajectoryController({ state = {}, host = null, readOnly = false, onViewChange = null, onInspector = null, onOpenInspector = null, onSelectEvent = null } = {}) {
+export function createTrajectoryController({ state = {}, host = null, readOnly = false, attachmentUrl = attachmentDownloadUrl, onViewChange = null, onInspector = null, onOpenInspector = null, onSelectEvent = null } = {}) {
   const scope = host || document;
   const byId = (id) => host ? host.querySelector(`[data-session-role="${id}"]`) : document.getElementById(id);
   const query = (selector) => scope.querySelector(selector);
@@ -1074,11 +1124,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     }
     const html = [];
     events.forEach((event) => {
-      const showToolName = ["tool", "deferred"].includes(event.kind);
-      const planningSummary = {
-        write_plan: "创建或改写任务计划",
-      }[event.label];
-      const summary = event.kind === "planning" ? (planningSummary || "更新任务计划") : (event.summary || "暂无内容");
+      const showToolName = TOOL_KINDS.has(event.kind);
+      const summary = event.summary || "No content";
       html.push(`<button type="button" class="trajectory-row ${escapeHtml(event.kind)} ${selectedId === event.id ? "active" : ""}" data-trajectory-id="${escapeHtml(event.id)}">
         <span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
         <span class="trajectory-row-meta"><time>${escapeHtml(formatTime(event.timestamp))}</time><em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></span>
@@ -1098,7 +1145,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     selectedId = selected?.id || null;
     renderRows(visible);
     if (query("main.chat")?.classList.contains("trajectory-active")) {
-      detail.innerHTML = renderDetail(selected, detailTab, events);
+      detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl);
       globalThis.DeepAgentMarkdown?.renderDiagrams?.(detail);
       if (selectedId === renderedSelectedId) detail.scrollTop = detailScrollTop;
     }
@@ -1235,7 +1282,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         timestamp: existing?.timestamp || new Date().toISOString(),
         timestamp_end: new Date().toISOString(),
         status: "running",
-        label: "上下文压缩",
+        label: "Compaction",
         summary: payload.phase || "正在处理上下文",
         tool_call_id: null,
         source: "sse",
@@ -1391,7 +1438,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (copyFile) {
       copyTextToClipboard(copyFile.dataset.copyFileId || "").then(() => {
         copyFile.classList.add("copied");
-        copyFile.textContent = "已复制";
+        copyFile.textContent = "Copied";
       });
       return;
     }
@@ -1400,7 +1447,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       const selected = allEvents().find((item) => item.id === selectedId);
       copyTextToClipboard(runCodeSource(selected)).then(() => {
         copyCode.classList.add("copied");
-        copyCode.textContent = "已复制";
+        copyCode.textContent = "Copied";
       });
       return;
     }

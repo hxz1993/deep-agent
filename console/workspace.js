@@ -1,11 +1,11 @@
 import { sessionLoadingHtml, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
-import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentation } from "./session-presentation.js?v=20260918-release01012";
-import { renderSessionInspector } from "./session-inspector.js?v=20260918-release01012";
+import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentation } from "./session-presentation.js?v=20260923-usage-tab-2";
+import { renderSessionInspector } from "./session-inspector.js?v=20260923-usage-tab-2";
 import { channelOriginPresentation } from "./session-display.js?v=20260918-release01012";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20260918-release01013";
+const WORKSPACE_ASSET_VERSION = "20260923-usage-tab-2";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -536,6 +536,7 @@ function renderInspector() {
     context: { language: activeSession.language },
     identity: window.DeepAgentConsoleContext?.identity || {},
     contextStatus: state.contextStatus || {}, usage: saved.usage,
+    sessionCache: state.sessionCache || {}, runCache: state.runCache || run.cache_usage || {},
     agentName: currentAgentName(state), activeTab: inspectorActiveTab,
     contextContent: renderContextReferenceInspector(state),
     statusText: state.awaitingHitl ? "待操作" : state.streaming ? "进行中" : sessionStatusLabels[run.status] || (state.sessionId ? "未开始" : "空闲"),
@@ -561,6 +562,8 @@ function startStateMonitor() {
       contextStatus: api.state.contextStatus,
       lastRunUsage: api.state.lastRunUsage,
       lastRunMetrics: api.state.lastRunMetrics,
+      sessionCache: api.state.sessionCache,
+      runCache: api.state.runCache,
       identity: window.DeepAgentConsoleContext?.identity,
       conversationId: api.state.conversationId,
       sessionMetrics: api.state.sessions

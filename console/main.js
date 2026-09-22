@@ -1,3 +1,4 @@
+import "./assets/deepagent-pet/sprite-pet.js?v=20260922-pet-1";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
 import { initConsoleSelects } from "./ui-select.js?v=20260914-wecom-placeholder";
@@ -7,8 +8,8 @@ import {
   rememberConfigurationTab,
 } from "./configuration.js?v=20260919-search-editor-2";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260918-release01012";
-import { initWorkspace } from "./workspace.js?v=20260918-release01013";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260923-usage-tab-2";
+import { initWorkspace } from "./workspace.js?v=20260923-usage-tab-2";
 import "./time.js?v=20260913-49";
 
 initUserIdentityControls();
@@ -120,14 +121,12 @@ function setConsoleNavigationWidth(width) {
   document.body.style.setProperty("--console-rail-width", `${nextWidth}px`);
   document.body.style.setProperty("--console-nav-label-opacity", String(Math.max(0, Math.min(1, (nextWidth - 96) / 44))));
   document.getElementById("consoleNavResizer")?.setAttribute("aria-valuenow", String(nextWidth));
-  const button = document.getElementById("toggleConsoleNavBtn");
   const label = collapsed ? "展开导航" : "收起导航";
-  button.setAttribute("aria-expanded", String(!collapsed));
-  button.setAttribute("aria-label", label);
-  button.title = label;
   const brand = document.getElementById("expandConsoleNavBtn");
   brand.title = label;
   brand.setAttribute("aria-label", brand.title);
+  brand.setAttribute("aria-expanded", String(!collapsed));
+  document.getElementById("consoleBrandPet")?.toggleAttribute("collapsed", collapsed);
   window.dispatchEvent(new Event("resize"));
 }
 
@@ -214,7 +213,6 @@ function bindNavigation() {
     const label = button.querySelector("span")?.textContent.trim();
     if (label) { button.title = label; button.setAttribute("aria-label", label); }
   });
-  document.getElementById("toggleConsoleNavBtn")?.addEventListener("click", toggleConsoleNavigation);
   document.getElementById("expandConsoleNavBtn")?.addEventListener("click", toggleConsoleNavigation);
   // Capture cross-page clicks before the lazy-loaded configuration tab handlers.
   document.querySelector(".console-rail")?.addEventListener("click", async (event) => {

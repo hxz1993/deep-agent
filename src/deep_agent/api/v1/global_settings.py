@@ -108,7 +108,7 @@ _SETTING_GROUPS = (
                 "DEEP_AGENT_MAX_REQUESTS",
                 "agent",
                 "max_requests",
-                "单轮对话允许的模型请求上限，用于阻止失控循环。",
+                "单次回复的模型请求上限，工具回传续跑共用额度，最后一次用于总结；新消息重新计数。",
                 "次/轮",
             ),
             _SettingDefinition(

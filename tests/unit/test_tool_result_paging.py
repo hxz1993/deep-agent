@@ -89,14 +89,73 @@ class ToolResultPagingTests(unittest.IsolatedAsyncioTestCase):
         self.store.read = AsyncMock(return_value=b"abc\n[.*] one\nxyz\n[.*] two")
         page = await self.read(pattern="[.*]", limit=1)
         self.assertEqual(page["content"], "[.*] one")
+        self.assertEqual(page["source_line_numbers"], [2])
+        self.assertEqual(page["source_total_count"], 4)
         tail = await self.resume(page["next_read"])
         self.assertEqual(tail["content"], "[.*] two")
+        self.assertEqual(tail["source_line_numbers"], [4])
         self.assertIsNone(tail["next_read"])
         empty = await self.read(pattern="absent")
         self.assertEqual(empty["content"], "")
+        self.assertEqual(empty["source_line_numbers"], [])
         self.assertFalse(empty["has_more"])
         empty = await self.read(offset=100)
         self.assertEqual(empty["content"], "")
+
+    async def test_context_merges_and_paginates_selected_lines_with_source_positions(self) -> None:
+        lines = ["start", "[hit] one", "middle", "[hit] two", "after", "gap", "gap", "before", "[hit] three", "end"]
+        self.store.read = AsyncMock(return_value="\n".join(lines).encode())
+        page = await self.read(pattern="[hit]", context_lines=1, limit=3)
+        contents, positions = [], []
+        for _ in range(4):
+            self.assertEqual(page["total_count"], 8)
+            self.assertEqual(page["source_total_count"], 10)
+            contents.extend(page["content"].splitlines())
+            positions.extend(page["source_line_numbers"])
+            if page["next_read"] is None:
+                break
+            self.assertEqual(page["next_read"]["context_lines"], 1)
+            page = await self.resume(page["next_read"])
+        self.assertIsNone(page["next_read"])
+        self.assertEqual(positions, [1, 2, 3, 4, 5, 8, 9, 10])
+        self.assertEqual(contents, [lines[index - 1] for index in positions])
+
+    async def test_context_clips_at_boundaries_and_no_pattern_keeps_all_lines(self) -> None:
+        self.store.read = AsyncMock(return_value=b"hit\n\nlast hit")
+        page = await self.read(pattern="hit", context_lines=5)
+        self.assertEqual(page["content"], "hit\n\nlast hit")
+        self.assertEqual(page["source_line_numbers"], [1, 2, 3])
+        plain = await self.read(context_lines=5)
+        self.assertEqual(plain, page)
+        empty = await self.read(pattern="absent", context_lines=3)
+        self.assertEqual(empty["content"], "")
+        self.assertEqual(empty["source_line_numbers"], [])
+        self.assertEqual(empty["total_count"], 0)
+        self.assertEqual(empty["source_total_count"], 3)
+
+    async def test_context_tail_cursor_and_long_line_keep_original_positions(self) -> None:
+        long_line = "😀" * 60_000
+        self.store.read = AsyncMock(return_value=("older hit\nold context\ngap\n" + long_line + "\nnew hit\nlast").encode())
+        page = await self.read(pattern="hit", context_lines=1, from_end=True, limit=3)
+        previous = page["previous_read"]
+        self.assertEqual(page["source_line_numbers"], [4])
+        self.assertEqual(page["content"], long_line[:50_000])
+        self.assertEqual(previous["context_lines"], 1)
+        self.assertEqual(page["next_read"]["context_lines"], 1)
+        tail = await self.resume(page["next_read"])
+        self.assertEqual(tail["source_line_numbers"], [4, 5, 6])
+        self.assertEqual(tail["content"], long_line[50_000:] + "\nnew hit\nlast")
+        self.assertIsNone(tail["next_read"])
+        older = await self.resume(previous)
+        self.assertEqual(older["source_line_numbers"], [1, 2])
+        self.assertEqual(older["content"], "older hit\nold context")
+
+    async def test_invalid_context_is_rejected_before_store_read(self) -> None:
+        self.store.read = AsyncMock(return_value=b"hit")
+        for context in [-1, 6, 1.5, True, "3"]:
+            with self.subTest(context=context), self.assertRaises(ModelRetry):
+                await self.read(context_lines=context)
+        self.store.read.assert_not_awaited()
 
     async def test_invalid_cursors_do_not_silently_skip(self) -> None:
         self.store.read = AsyncMock(return_value=b"abc")
@@ -122,10 +181,15 @@ class ToolResultPagingTests(unittest.IsolatedAsyncioTestCase):
             definition = next(t for t in info.function_tools if t.name == "read_tool_result")
             self.assertEqual(definition.parameters_json_schema["properties"]["limit"]["default"], 400)
             self.assertIn("char_offset", definition.parameters_json_schema["properties"])
+            context_schema = definition.parameters_json_schema["properties"]["context_lines"]
+            self.assertEqual(context_schema["default"], 0)
+            self.assertEqual(context_schema["minimum"], 0)
+            self.assertEqual(context_schema["maximum"], 5)
             if len(messages) == 1:
                 return ModelResponse(parts=[ToolCallPart("read_tool_result", {"handle": "fixture"}, "read-1")])
             returned = [p for m in messages if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, ToolReturnPart)]
             self.assertEqual(returned[-1].content["content"], "first\nlast")
+            self.assertEqual(returned[-1].content["source_line_numbers"], [1, 2])
             return ModelResponse(parts=[TextPart("done")])
 
         agent = Agent(FunctionModel(model), deps_type=AgentDeps, capabilities=[self.capability])
@@ -140,4 +204,8 @@ class ToolResultPagingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(
             deep_agent_file_key(ToolCallPart("read_tool_result", {"handle": "fixture", "end_offset": 3})),
             deep_agent_file_key(ToolCallPart("read_tool_result", {"handle": "fixture", "end_offset": 4})),
+        )
+        self.assertNotEqual(
+            deep_agent_file_key(ToolCallPart("read_tool_result", {"handle": "fixture", "pattern": "hit"})),
+            deep_agent_file_key(ToolCallPart("read_tool_result", {"handle": "fixture", "pattern": "hit", "context_lines": 3})),
         )

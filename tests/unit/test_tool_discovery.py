@@ -590,7 +590,8 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         instructions = await wrapper.get_instructions(ctx)
         instruction_text = "\n".join(instructions or [])
         self.assertIn(deferred[0], instruction_text)
-        self.assertIn("用户原始语言和简洁英文能力描述", instruction_text)
+        self.assertIn("已知完整协议名时，一次批量加载", instruction_text)
+        self.assertIn("不知道名称时，才按能力描述搜索", instruction_text)
         self.assertIn("协议名必须原样复制", instruction_text)
 
     async def test_ten_or_fewer_mcp_tools_are_all_direct(self) -> None:
@@ -832,7 +833,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result[0], "wecom-doc_media_upload")
 
-    async def test_tool_search_definition_requests_complementary_queries(self) -> None:
+    async def test_tool_search_definition_distinguishes_names_from_capabilities(self) -> None:
         seen: dict[str, ToolDefinition] = {}
 
         def model_function(_messages, info: AgentInfo) -> ModelResponse:
@@ -865,11 +866,12 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         )
 
         search_tool = seen["search_tools"]
-        self.assertIn("用户原始语言和简洁英文能力描述", search_tool.description or "")
+        self.assertIn("已知完整协议名时，一次批量加载", search_tool.description or "")
+        self.assertIn("准确名称与能力描述不要混在同一批", search_tool.description or "")
         query_description = search_tool.parameters_json_schema["properties"]["queries"][
             "description"
         ]
-        self.assertIn("2～3 个互补查询", query_description)
+        self.assertIn("1～3 个查询", query_description)
         self.assertIn("目录协议名", query_description)
         self.assertIn("单独占一个数组项", query_description)
 

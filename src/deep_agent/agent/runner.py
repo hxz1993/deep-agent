@@ -67,6 +67,7 @@ from deep_agent.agent.event_persister import EventPersister, PersistEvent
 from deep_agent.agent.message_persistence import MessagePersistenceCapability, StreamMessagePersistenceCapability, MessagePersistenceError
 from deep_agent.db.run_ownership import live_run
 from deep_agent.agent.limits import format_stream_error
+from deep_agent.agent.request_budget import TurnRequestBudget, restored_request_count
 from deep_agent.agent.observability import (
     cache_usage_available,
     log_event,
@@ -970,10 +971,34 @@ class AgentRunner:
         deps.context_state = ContextRunState(
             raw_history=list(prepared.raw),
             estimator=self._estimator,
-            usage_limits=self.usage_limits,
+            usage_limits=self._run_limits(deps),
             event_queue=event_queue,
         )
         self._bind_compaction_lifecycle(session_id=deps.session_id, deps=deps)
+
+    async def _prepare_request_budget(self, session_id: str, deps: AgentDeps) -> None:
+        previous_requests = 0
+        if deps.turn_id and deps.turn_id != deps.run_id:
+            # Turn-scoped raw facts survive compaction and process restarts.
+            rows = []
+            after = 0
+            while True:
+                page = await self.store.list_events(
+                    session_id, turn_id=deps.turn_id, after_sequence=after, limit=500,
+                )
+                rows.extend(page)
+                if len(page) < 500:
+                    break
+                after = page[-1].sequence
+            previous_requests = restored_request_count(rows)
+        deps.request_budget = TurnRequestBudget(self.usage_limits, previous_requests)
+
+    def _run_limits(self, deps: AgentDeps) -> UsageLimits:
+        return deps.request_budget.run_limits if deps.request_budget is not None else self.usage_limits
+
+    @staticmethod
+    def _run_capabilities(deps: AgentDeps, progress):
+        return [capability for capability in (progress, deps.request_budget) if capability is not None]
 
     def _bind_compaction_lifecycle(self, *, session_id: str, deps: AgentDeps) -> None:
         state = deps.context_state
@@ -1576,6 +1601,7 @@ class AgentRunner:
                     branch_from=branch_from,
                     deferred_tool_results=deferred_tool_results,
                 )
+                await self._prepare_request_budget(session_id, deps)
             except BaseException as exc:
                 self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
                                        started_at=started_at, error=exc, phase="history")
@@ -1633,14 +1659,14 @@ class AgentRunner:
                     user_prompt,
                     deps=deps,
                     message_history=llm_history,
-                    usage_limits=self.usage_limits,
+                    usage_limits=self._run_limits(deps),
                     deferred_tool_results=deferred_tool_results,
                     output_type=_STREAM_OUTPUT_TYPE,
                     model_settings=self.model_settings,
                     conversation_id=deps.conversation_id,
                     run_id=deps.run_id,
                     cancellation_token=deps.cancellation_token,
-                    **({"capabilities": [progress]} if progress is not None else {}),
+                    capabilities=self._run_capabilities(deps, progress),
                 )
             except BaseException as exc:
                 self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
@@ -1788,7 +1814,7 @@ class AgentRunner:
             user_prompt=user_prompt,
             deps=deps,
             message_history=message_history,
-            usage_limits=self.usage_limits,
+            usage_limits=self._run_limits(deps),
             deferred_tool_results=deferred_tool_results,
             output_type=_STREAM_OUTPUT_TYPE,
             model_settings=self.model_settings,
@@ -1796,7 +1822,7 @@ class AgentRunner:
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
             usage=usage,
-            **({"capabilities": [progress]} if progress is not None else {}),
+            capabilities=self._run_capabilities(deps, progress),
         ) as stream:
             stream_task: asyncio.Task[Any] | None = asyncio.create_task(
                 stream.__anext__()
@@ -1870,7 +1896,7 @@ class AgentRunner:
             deps=deps,
             model=self.agent.model,
             usage=usage,
-            usage_limits=self.usage_limits,
+            usage_limits=self._run_limits(deps),
             agent=self.agent,
             messages=message_history,
             model_settings=self.model_settings,
@@ -1982,6 +2008,7 @@ class AgentRunner:
                     deferred_tool_results=deferred_tool_results,
                     session_event_queue=session_events,
                 )
+                await self._prepare_request_budget(session_id, deps)
             except BaseException as exc:
                 self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
                                        started_at=started_at, error=exc, phase="history")

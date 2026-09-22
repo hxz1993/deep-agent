@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.10.14`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.10.15`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -233,6 +233,20 @@ v0.4.0 使用 Harness `ToolOutputLimits` 在工具执行后、结果进入下一
 通过系统工具 `read_tool_result` 按行或关键词读取。该机制不增加 Artifact 表，句柄权限只从当前
 会话的原始 Tool Result Event 恢复；结构化摘要中的 Evidence 只提供来源索引，不能扩大访问范围。完整边界见
 [`docs/design/05-tool-optimization/tool-optimization-design.md`](docs/design/05-tool-optimization/tool-optimization-design.md#92-tooloutputlimits-与大工具结果外置)。
+
+读取结果的 `source_line_numbers` 是正文各行对应的原文行号（从 1 开始），
+`source_total_count` 是原文总行数。关键词按字面匹配；可传 `context_lines=3` 查看前后文
+（默认 0，最多 5），重叠范围合并。`offset` 仍从 0 开始，表示筛选并合并后的行集合位置，
+不等于原文行号；续读请直接使用 `next_read`，长行的字符游标和返回大小上限保持不变。
+
+## 单轮请求预算
+
+`DEEP_AGENT_MAX_REQUESTS` 默认 40，已有显式环境配置优先。计数对象是模型请求，
+不是单个工具调用；同一用户轮次的前端工具回传和 Deferred 续跑共用额度。
+达到约 80% 时在模型请求中提醒聚焦关键缺口，最后一次请求关闭工具，只生成阶段性总结，
+说明已完成和未确认事项，并提示可以回复“继续”。用户发新消息重新获得额度。
+正常收束沿用现有文字与 final 事件，不新增客户端协议；真实 Provider、Token 上限等错误仍如实返回。
+自动压缩沿用共享请求预算并保留最后一次回答；标题生成不占聊天预算。
 
 ## 文件发布到下载中心
 

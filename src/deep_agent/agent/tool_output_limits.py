@@ -5,8 +5,9 @@ import base64
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence
+from typing import Annotated, Any, Mapping, Sequence
 
+from pydantic import Field
 from pydantic_ai import FunctionToolset, RunContext, ToolReturn
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.tools import ToolDefinition
@@ -392,25 +393,31 @@ class DeepAgentToolOutputLimits(ToolOutputLimits[AgentDeps]):
             pattern: str | None = None,
             char_offset: int = 0,
             end_offset: int | None = None,
+            context_lines: Annotated[int, Field(ge=0, le=5, strict=True)] = 0,
         ) -> dict[str, Any]:
             """Read an authorized spilled result, up to 400 lines by default (max 2000).
 
             Args:
                 handle: Exact overflow handle from the original tool result.
-                offset: Zero-based count of matching lines to skip.
+                offset: Zero-based count of selected lines to skip, not a source line number.
                 limit: Maximum lines; the body is also limited to 50000 characters.
                 from_end: Select a tail window, retaining document order.
                 pattern: Literal substring filter, not a regular expression.
                 char_offset: Zero-based character position within the first selected line.
                 end_offset: Exclusive forward boundary, copied from next_read only.
+                context_lines: Surrounding lines per match (0-5, default 0); try 3 to see ownership.
 
             Call with the returned next_read arguments to continue without losing a
             partial line. For tail reads, finish next_read first; previous_read selects
-            an older window. Changing the filter starts a new pagination sequence.
+            an older window. Overlapping context is merged before pagination.
+            source_line_numbers gives original one-based positions for each returned
+            content line; source_total_count is the original document's line count.
+            Changing pattern or context_lines starts a new pagination sequence.
             """
             return await read_stored_tool_result(
                 store, handle, offset=offset, limit=limit, from_end=from_end,
                 pattern=pattern, char_offset=char_offset, end_offset=end_offset,
+                context_lines=context_lines,
             )
 
         return FunctionToolset([read_tool_result])

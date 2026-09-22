@@ -1,0 +1,9 @@
+dialog#tutorialsDialog { width: min(480px, calc(100vw - 32px)); }
+.tutorial-hint { margin: 0 0 12px; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.tutorial-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--config-radius, 8px); cursor: pointer; }
+.tutorial-card:has(input:checked) { border-color: var(--accent); }
+.tutorial-card input { width: 14px; height: 14px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
+.tutorial-file-icon { width: 20px; height: 20px; flex-shrink: 0; color: var(--accent); }
+.tutorial-copy { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.tutorial-copy strong { font-size: 13px; line-height: 1.5; font-weight: 600; }
+.tutorial-format { font-size: 11px; color: var(--text-faint); }

@@ -114,7 +114,8 @@ test("UI 工具直接编辑 JSON Schema 并在保存前校验", () => {
 });
 
 test("UI 工具为紧凑单列布局，三类 JSON 按标签切换", () => {
-  const modal = template.slice(template.indexOf('id="uiToolModal"'));
+  const start = template.indexOf('id="uiToolModal"');
+  const modal = template.slice(start, template.indexOf("</dialog>", start));
   assert.ok(modal.indexOf('id="uiToolName"') < modal.indexOf('id="uiToolWidget"'));
   assert.ok(modal.indexOf('id="uiToolWidget"') < modal.indexOf('id="uiToolDescription"'));
   assert.match(modal, /role="tablist" aria-label="工具结构"/);

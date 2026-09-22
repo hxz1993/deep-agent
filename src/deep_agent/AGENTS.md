@@ -181,6 +181,13 @@ JSON列转换和自动标题修正，再使用ORM维护入口。该脚本仅接�
 
 ### 对话请求流（`POST /api/v1/chat/stream`）
 
+请求预算在 `agent/request_budget.py`：默认 40 次模型请求，同一 `turn_id` 的 Deferred 续跑
+从原始事件恢复用量；每次 Run 的 Token/usage 仍独立统计。模型响应首次保存前写入
+`metadata.deepagent_request_budget.run_requests`，按来源消息归组计数，不能按 Part 事件条数计数。
+最后一次请求在压缩与工具发现之后移除全部工具并要求正常总结，保持原有 SSE/History 协议。
+`MessagePersistenceCapability` 显式包住同为 outermost 的 `ToolSearch`，保证搜索反馈补全后再保存，
+不能放宽不可变内容校验来兼容中间结果。回归见 `test_turn_request_budget.py`。
+
 1. 解析 `StreamChatRequest`；`session_id` 缺省则生成 UUID
 2. **无 `agent_id`**：`build_runner(model?, capabilities?)` → `OPTION` 默认 `AgentSpec`
 3. **有 `agent_id`**：`build_runner_for_agent()` → `agents` 表 → `AgentSpec.from_row()` → 存储 `(agent_id, session_id)`
@@ -747,4 +754,4 @@ SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protoco
 
 ### MCP 工具发现范围
 
-MCP 工具合计不超过 10 个时全部直接披露，超过 10 个时预选最多 3 个，其余通过 `search_tools`（显示名“搜索MCP工具”）按需搜索，每次最多返回 5 个。预选、搜索及异常回退不按用户提问、上下文数据或工具名推断读写权限，也不因关键词排除写入/删除工具；候选范围始终受 Agent 显式关联的 MCP 限定。保留相关性排序、已披露工具去重和重复查询去重。
+MCP 工具合计不超过 10 个时全部直接披露，超过 10 个时预选最多 3 个，其余通过 `search_tools`（显示名“搜索工具”）按需搜索，每次最多返回 5 个。已知准确协议名时用最多 3 个查询项批量加载；未知名称才按能力描述搜索，不混填名称与中英文描述，不要求凑满查询项。预选、搜索及异常回退不按用户提问、上下文数据或工具名推断读写权限，也不因关键词排除写入/删除工具；候选范围始终受 Agent 显式关联的 MCP 限定。保留相关性排序、已披露工具去重和重复查询去重。

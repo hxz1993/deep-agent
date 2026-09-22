@@ -29,8 +29,8 @@ from tests.helpers.sqlite_stores import make_sqlite_stores_sync
 
 
 class GlobalRequestLimitOptionTests(unittest.TestCase):
-    def test_default_is_30(self) -> None:
-        self.assertEqual(AgentOptions.max_requests.default, 30)
+    def test_default_is_40(self) -> None:
+        self.assertEqual(AgentOptions.max_requests.default, 40)
 
     def test_environment_can_override_default(self) -> None:
         previous_source = AgentOptions.max_requests.set_by

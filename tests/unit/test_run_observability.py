@@ -19,6 +19,22 @@ from deep_agent.diagnostics.text import parse_record
 
 
 class RunObservabilityTests(unittest.TestCase):
+    def test_missing_provider_tokens_are_unknown_but_request_counts_survive(self) -> None:
+        raw = RunUsage(requests=2, tool_calls=1)
+        projected = usage_dict(raw)
+        self.assertEqual(projected["requests"], 2)
+        self.assertEqual(projected["tool_calls"], 1)
+        for key in ("input_tokens", "output_tokens", "total_tokens", "cache_read_tokens", "cache_write_tokens"):
+            self.assertIsNone(projected[key])
+        self.assertEqual(raw.input_tokens, 0)
+        self.assertEqual(raw.output_tokens, 0)
+
+    def test_measured_input_preserves_zero_output(self) -> None:
+        projected = usage_dict(RunUsage(requests=1, input_tokens=100, output_tokens=0))
+        self.assertEqual(projected["input_tokens"], 100)
+        self.assertEqual(projected["output_tokens"], 0)
+        self.assertEqual(projected["total_tokens"], 100)
+
     def test_usage_includes_provider_cache_tokens(self) -> None:
         usage = RunUsage(
             requests=2,

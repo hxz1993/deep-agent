@@ -1075,14 +1075,12 @@ class AgentRunner:
         ):
             return None
         target = (
-            deps.context_state.last_budget.target_tokens
-            if deps.context_state.last_budget is not None
+            deps.context_state.compaction_target_tokens
+            if deps.context_state.compaction_target_tokens is not None
+            else deps.context_state.last_budget.target_tokens if deps.context_state.last_budget is not None
             else None
         )
-        if (
-            target is None
-            or deps.context_state.estimator.messages(projected_history) > target
-        ):
+        if target is None:
             return None
         try:
             raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
@@ -1144,22 +1142,24 @@ class AgentRunner:
             for message in projected_history
             if not summary_contents([message])
         ]
-        def validate_persisted_projection(candidate: list[ModelMessage]) -> int:
+        state = deps.context_state
+        parameters = state.compaction_request_parameters if state is not None else None
+        before = (state.compaction_estimated_tokens_before
+                  if state is not None and state.compaction_estimated_tokens_before is not None
+                  else state.telemetry.estimated_tokens_before if state is not None
+                  else self._estimator.estimate_request(raw_history, parameters).tokens)
+
+        def validate_persisted_projection(candidate: list[ModelMessage]) -> tuple[int, int]:
             tokens = self._estimator.messages(candidate)
-            state = deps.context_state
-            overhead = max(0, (
-                state.telemetry.estimated_tokens_after
-                - self._estimator.messages(projected_history)
-            )) if state is not None else 0
-            request_tokens = tokens + overhead
+            request_tokens = self._estimator.estimate_request(candidate, parameters).tokens
             if state is not None:
                 state.telemetry.candidate_tokens = request_tokens
             if request_tokens > target_tokens:
                 raise SummaryUnavailable("persisted_target_not_met")
             if state is not None:
                 state.telemetry.estimated_tokens_after = request_tokens
-                state.telemetry.reduction_ratio = max(0.0, 1 - request_tokens / max(1, state.telemetry.estimated_tokens_before))
-            return tokens
+                state.telemetry.reduction_ratio = max(0.0, 1 - request_tokens / max(1, before))
+            return tokens, request_tokens
 
         return await persist(
             session_id,
@@ -1172,6 +1172,9 @@ class AgentRunner:
             model_id=self._model_id,
             estimated_before=self._estimator.messages(raw_history),
             estimated_after=self._estimator.messages(projected_history),
+            estimated_tokens_before=before,
+            estimated_tokens_after=(state.telemetry.estimated_tokens_after if state is not None else None),
+            estimate_scope=state.compaction_estimate_scope if state is not None else "history_only",
             target_tokens=target_tokens,
             validate_projection=validate_persisted_projection,
             context_window_tokens=self._context_window_tokens,

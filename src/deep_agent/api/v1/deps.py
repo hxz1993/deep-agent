@@ -13,6 +13,7 @@ from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_output_limits import build_tool_output_limits
 from deep_agent.agent.history_tools import build_history_toolset
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
+from deep_agent.models.context_window import ContextWindowModel
 from deep_agent.models.provider_registry import (
     ProviderRuntimeError,
     effective_base_url,
@@ -297,6 +298,8 @@ async def _build_runner_from_spec(
         estimator=estimator,
         web_toolset=(web_runtime.toolset if web_runtime is not None else None),
     )
+    if spec.context_window_tokens is not None and agent.model is not None:
+        agent.model = ContextWindowModel(agent.model, spec.context_window_tokens)
     limits = UsageLimits(
         request_limit=OPTION.agent.max_requests,
         total_tokens_limit=OPTION.agent.max_total_tokens,

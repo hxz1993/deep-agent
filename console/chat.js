@@ -1,6 +1,7 @@
+import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderPlanItems } from "./plan-view.js?v=20260922-trajectory-8";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
-import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260922-trajectory-8";
+import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260923-c02";
 import { createConversationPresenter } from "./conversation-presenter.js?v=20260922-trajectory-8";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
@@ -1435,9 +1436,10 @@ function compactTokenLabel(value) {
 
 function updateComposerContextControls() {
   const status = state.contextStatus || {};
-  const estimated = Number(status.estimated_history_tokens);
-  const usable = Number(status.usable_request_tokens);
-  const ratio = Number.isFinite(estimated) && Number.isFinite(usable) && usable > 0
+  const occupancy = contextOccupancyPresentation(status);
+  const estimated = occupancy.tokens;
+  const usable = tokenValue(status.usable_request_tokens);
+  const ratio = estimated != null && usable != null && usable > 0
     ? estimated / usable
     : null;
   if (el.contextBudgetBadge) {
@@ -1447,8 +1449,8 @@ function updateComposerContextControls() {
     el.contextBudgetBadge.style.setProperty("--context-progress", `${(percent || 0) * 3.6}deg`);
     const detail = ratio == null
       ? "上下文用量暂不可用"
-      : `上下文窗口：已用 ${percent}%\n${compactTokenLabel(estimated)} / ${compactTokenLabel(usable)} Token`;
-    el.contextBudgetBadge.setAttribute("aria-label", detail.replace("\n", "，"));
+      : `${occupancy.label}：${Math.round(ratio * 100)}% 可用输入\n${compactTokenLabel(estimated)} / ${compactTokenLabel(usable)} Token\n${occupancy.detail}`;
+    el.contextBudgetBadge.setAttribute("aria-label", detail.replaceAll("\n", "，"));
     el.contextBudgetBadge.removeAttribute("title");
     if (el.contextBudgetTooltip) el.contextBudgetTooltip.textContent = detail;
   }

@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
+from deep_agent.agent.observability import token_usage_available
 from deep_agent.agent.planning import is_planning_tool
 from deep_agent.agent.tool_output_limits import artifacts_from_metadata
 from deep_agent.web.images import safe_web_image_value
@@ -307,7 +308,7 @@ def _assistant_item(
         provider_name=_optional_str(message.get("provider_name")),
         provider_response_id=_optional_str(message.get("provider_response_id")),
         finish_reason=_optional_str(message.get("finish_reason")),
-        usage=dict(message["usage"]) if isinstance(message.get("usage"), Mapping) else None,
+        usage=dict(message["usage"]) if token_usage_available(message.get("usage")) else None,
     )
 
 

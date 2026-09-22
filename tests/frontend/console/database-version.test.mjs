@@ -67,14 +67,14 @@ test("顶部连接状态不可展开且版本位于用户详情", () => {
   assert.match(consoleCss, /\.runtime-schema-version\s*\{/);
 });
 
-test("浏览器图标与标题栏共用 D 形机器人资源", () => {
+test("导航使用宠物组件，静态回退与浏览器共用 D 形机器人资源", () => {
   const favicon = indexHtml.match(/rel="icon" type="image\/svg\+xml" href="([^"]+)"/)[1];
-  const brandIcon = indexHtml.match(/id="expandConsoleNavBtn"[^>]*><img src="([^"]+)"/)[1];
-  assert.equal(brandIcon, favicon);
+  const brand = indexHtml.match(/id="expandConsoleNavBtn"[^>]*>([\s\S]*?)<\/button>/)[1];
+  const fallback = brand.match(/class="console-pet-fallback" src="([^"]+)"/)[1];
+  assert.match(brand, /<deepagent-sprite-pet id="consoleBrandPet" aria-hidden="true">/);
+  assert.equal(fallback, favicon);
   assert.match(favicon, /^\.\/favicon\.svg\?v=.+/);
-  assert.match(faviconSvg, /<title id="title">DeepAgent<\/title>/);
-  assert.match(faviconSvg, /fill-rule="evenodd"/);
-  assert.match(faviconSvg, /<circle[^>]+r="27"/);
-  assert.equal((faviconSvg.match(/width="30" height="94" rx="15"/g) || []).length, 2);
+  assert.match(faviconSvg, /<title id="title">DeepAgent[^<]*<\/title>/);
+  for (const part of ["silhouette", "face", "eyes"]) assert.match(faviconSvg, new RegExp(`<g id="${part}"`));
   assert.doesNotMatch(faviconSvg, /<script|<image|href=/);
 });

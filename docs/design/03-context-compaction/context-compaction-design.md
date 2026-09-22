@@ -1,4 +1,4 @@
-# 上下文压缩设计（v0.6.0）
+# 上下文压缩设计（v0.10.18）
 
 本文是当前实现口径。压缩没有独立数据表；一次压缩就是`chat_session_events`中的一条
 `event_type=compaction`生命周期事件。
@@ -25,8 +25,28 @@ DeepAgent的跨Provider摘要事件。Evidence使用`source_event_id + part_offs
 - 摘要固定使用当前 Agent 的有效模型，不配置第二套模型映射。
 - 摘要模型窗口放不下候选前缀时失败关闭，不递归生成多层摘要。
 - 新锚点加保留尾部必须小于原前缀并达到目标Token，否则不提交成功。
-- Token估算同时覆盖文字、工具Schema和实际模型可见媒体。DeepSeek v4 Vision图片按像素尺寸与
-  Provider公式估算；未知路由或图片解码失败按1024 Token保守回退。实际Usage始终优先于估算。
+- Token计数由统一估算入口提供，优先使用通过指纹验证的Provider Usage基准；无法验证时完整估算，
+  不能把“历史中存在Usage”视为基准仍然有效。文字、工具Schema和实际模型可见媒体均纳入预算。
+- DeepSeek v4 Vision图片按像素尺寸与Provider公式估算；未知路由或图片解码失败按1024 Token
+  保守回退。已包含在有效Usage基准内的图片、工具定义和指令不重复计数。
+
+### Usage基准与累计消耗
+
+复用Harness公开的`estimate_context_tokens`：有效基准为最近模型响应的`input_tokens + output_tokens`，
+其后的新增内容通过现有tokenizer或中英文保守计数补充；当前有效指令只计算一次。
+主会话响应在原有Message元数据中保存模型身份、有效历史、请求参数和指令的指纹，不另建Usage表。
+压缩、历史改写、模型切换、指令或工具定义变化使指纹不匹配时，回退完整估算；下一次正常响应
+建立新基准。旧响应缺少指纹也回退，摘要请求的Usage不作为主会话基准。
+
+Provider原始Usage保持不变。Run累计消耗按唯一模型响应汇总，不能因消息拆成多个展示Part而重复
+累计，也不能用累计消耗扣除窗口容量。上下文预计占用是另一项数据，包含有效基准和未测量增量。
+SDK模型`context_window`优先采用项目明确配置的窗口；`context_window_used`只表示最近响应时点的
+比例，不是下一次请求的精确占用。
+
+自动、手动和Provider超窗恢复共用估算与`_compact_projection`压缩链路。只读`context-status`
+没有下一次请求的最终参数，仍返回`history_only`保守估算；有已验证历史基准但参数缺失时，原因是
+`request_parameters_unavailable`。历史重开不承诺沿用实时完整请求数值；真正的新请求组装好相同
+参数后，可重新验证并复用持久化基准。API及SSE字段见[预算指南](../../guides/context-compaction-budget.md)。
 
 环境配置：
 

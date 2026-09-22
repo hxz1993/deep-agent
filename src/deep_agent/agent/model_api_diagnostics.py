@@ -260,6 +260,8 @@ def observe_model_api(model: Any, fields: dict, previous: dict[str, set[str]]):
     try:
         from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 
+        while isinstance(model, WrapperModel):
+            model = model.wrapped
         if isinstance(model, (OpenAIChatModel, OpenAIResponsesModel)):
             # Pinned OpenAI 3.5 owns this HTTP client. Do not replace it or attach
             # new clients (which would change pooling, proxy or close semantics).
@@ -306,7 +308,10 @@ def observed_model(model, fields, previous):
     """Only adapt supported transports; unknown/custom models remain untouched."""
     try:
         from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
-        if isinstance(model, (OpenAIChatModel, OpenAIResponsesModel)):
+        transport_model = model
+        while isinstance(transport_model, WrapperModel):
+            transport_model = transport_model.wrapped
+        if isinstance(transport_model, (OpenAIChatModel, OpenAIResponsesModel)):
             return _ObservedModel(model, fields, previous)
     except Exception:
         pass

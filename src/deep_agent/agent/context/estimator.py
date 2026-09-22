@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 import unicodedata
 from io import BytesIO
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import Any, Callable
+from uuid import uuid4
+
+from pydantic_ai.usage import RequestUsage
+from pydantic_ai_harness.compaction import estimate_context_tokens, estimate_token_count
 
 from pydantic_ai.messages import (
     BaseToolCallPart,
@@ -38,6 +43,68 @@ MESSAGE_OVERHEAD_TOKENS = 8
 PART_OVERHEAD_TOKENS = 4
 TOOL_DEFINITION_OVERHEAD_TOKENS = 32
 MEDIA_CONTENT_TOKENS = 1_024
+USAGE_ANCHOR_METADATA = "deepagent_context_usage"
+
+
+@dataclass(frozen=True)
+class RequestEstimate:
+    tokens: int
+    message_tokens: int
+    parameter_tokens: int
+    source: str = "estimated"
+    anchor_id: str | None = None
+    fallback_reason: str | None = None
+
+
+def _fingerprint(value: Any) -> str:
+    # Hash binary content itself, not just its length; persist only the digest.
+    def normalize(item):
+        if isinstance(item, bytes):
+            return {"sha256": hashlib.sha256(item).hexdigest()}
+        if is_dataclass(item):
+            return normalize(asdict(item))
+        if isinstance(item, dict):
+            return {str(k): normalize(v) for k, v in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [normalize(v) for v in item]
+        if isinstance(item, (set, frozenset)):
+            return sorted((normalize(v) for v in item), key=canonical_json)
+        return item
+    return hashlib.sha256(canonical_json(normalize(value)).encode()).hexdigest()
+
+
+def _history_fingerprint(messages: list[ModelMessage]) -> str:
+    # Usage, event ordinals and response IDs do not change model-visible text.
+    # Strip bookkeeping only at the SDK Part boundary, never inside tool JSON
+    # or schemas where "metadata" and "timestamp" are legitimate input keys.
+    def part_data(part):
+        value = asdict(part) if is_dataclass(part) else _jsonable(part)
+        return {key: item for key, item in value.items() if key not in {"metadata", "timestamp"}} if isinstance(value, dict) else value
+    return _fingerprint([(message.kind, [part_data(part) for part in message.parts]) for message in messages])
+
+
+def _instructions(messages: list[ModelMessage], parameters: Any | None = None) -> str | None:
+    parts = getattr(parameters, "instruction_parts", None)
+    if parts is not None:
+        return "\n\n".join(part.content for part in parts).strip() or None
+    requests = [message for message in messages if isinstance(message, ModelRequest)]
+    if not requests:
+        return None
+    last = requests[-1]
+    if last.instructions is not None:
+        return last.instructions
+    if len(requests) > 1 and all(part.part_kind in {"tool-return", "retry-prompt"} for part in last.parts):
+        return requests[-2].instructions
+    return None
+
+
+def _normalized_instructions(messages: list[ModelMessage], parameters: Any | None) -> list[ModelMessage]:
+    instruction = _instructions(messages, parameters)
+    last_request = next((i for i in range(len(messages) - 1, -1, -1)
+                         if isinstance(messages[i], ModelRequest)), None)
+    return [replace(message, instructions=instruction if index == last_request else None)
+            if isinstance(message, ModelRequest) else message
+            for index, message in enumerate(messages)]
 
 _DEEPSEEK_PATCH_SIZE = 14
 _DEEPSEEK_DOWNSAMPLE_RATIO = 3
@@ -253,6 +320,7 @@ class TokenEstimator:
     source: str
     _counter: Callable[[str], int] | None = None
     _image_counter: Callable[[int, int], int] | None = None
+    model_identity: str | None = None
 
     @classmethod
     def for_model(
@@ -262,6 +330,7 @@ class TokenEstimator:
         *,
         provider_type: str | None = None,
     ) -> "TokenEstimator":
+        identity = _fingerprint((provider_type, base_url, model))
         image_counter = deepseek_image_tokens if _is_deepseek_v4_vision(model, provider_type) else None
         model_name = _official_openai_model(model, base_url, provider_type)
         if model_name and tiktoken is not None:
@@ -274,8 +343,9 @@ class TokenEstimator:
                     source="model_tokenizer",
                     _counter=lambda text: len(encoding.encode(text)),
                     _image_counter=image_counter,
+                    model_identity=identity,
                 )
-        return cls(source="conservative_fallback", _image_counter=image_counter)
+        return cls(source="conservative_fallback", _image_counter=image_counter, model_identity=identity)
 
     @classmethod
     def conservative(cls) -> "TokenEstimator":
@@ -362,18 +432,16 @@ class TokenEstimator:
 
     def message(self, message: ModelMessage) -> int:
         tokens = MESSAGE_OVERHEAD_TOKENS
-        if isinstance(message, ModelRequest) and message.instructions:
-            tokens += self.text(message.instructions)
         parts = getattr(message, "parts", ())
         return tokens + sum(self.part(part) for part in parts)
 
     def messages(self, messages: list[ModelMessage]) -> int:
-        return sum(self.message(message) for message in messages)
+        return sum(self.message(message) for message in messages) + self.text(_instructions(messages) or "")
 
     def response_output(self, response: ModelResponse) -> int:
         return max(1, sum(self.part(part) for part in response.parts))
 
-    def request_parameters(self, parameters: Any | None) -> int:
+    def request_parameters(self, parameters: Any | None, *, include_instructions: bool = True) -> int:
         if parameters is None:
             return 0
         total = 0
@@ -388,8 +456,8 @@ class TokenEstimator:
         if output_object is not None:
             total += TOOL_DEFINITION_OVERHEAD_TOKENS + self.text(_jsonable(output_object))
         instruction_parts = getattr(parameters, "instruction_parts", None)
-        if instruction_parts:
-            total += sum(self.value(part) for part in instruction_parts)
+        if instruction_parts and include_instructions:
+            total += self.text("\n\n".join(part.content for part in instruction_parts))
         prompted_template = getattr(parameters, "prompted_output_template", None)
         if prompted_template:
             total += self.text(prompted_template)
@@ -400,10 +468,70 @@ class TokenEstimator:
         messages: list[ModelMessage],
         parameters: Any | None = None,
     ) -> tuple[int, int, int]:
-        message_tokens = self.messages(messages)
-        parameter_tokens = self.request_parameters(parameters)
-        return (
-            message_tokens + parameter_tokens + REQUEST_ENVELOPE_TOKENS,
-            message_tokens,
-            parameter_tokens,
-        )
+        result = self.estimate_request(messages, parameters)
+        return result.tokens, result.message_tokens, result.parameter_tokens
+
+    def record_usage_anchor(self, messages: list[ModelMessage], parameters: Any,
+                            response: ModelResponse) -> None:
+        if not self.model_identity or response.usage.input_tokens <= 0:
+            return
+        response.metadata = {**(response.metadata or {}), USAGE_ANCHOR_METADATA: {
+            "version": 1, "id": uuid4().hex, "model": self.model_identity,
+            "history": _history_fingerprint([*messages, response]),
+            "parameters": _fingerprint(parameters),
+            "instructions": _fingerprint(_instructions(messages, parameters)),
+        }}
+
+    def estimate_request(self, messages: list[ModelMessage], parameters: Any | None = None) -> RequestEstimate:
+        normalized = _normalized_instructions(messages, parameters)
+        message_tokens = self.messages(normalized)
+        parameter_tokens = self.request_parameters(
+            parameters, include_instructions=not any(isinstance(m, ModelRequest) for m in messages))
+        reason = "usage_unavailable"
+        anchor_index = None
+        anchor = None
+        # A newer unusable response must not silently revive an older baseline.
+        for index in range(len(messages) - 1, -1, -1):
+            response = messages[index]
+            if not isinstance(response, ModelResponse):
+                continue
+            data = (response.metadata or {}).get(USAGE_ANCHOR_METADATA) or {}
+            if response.usage.input_tokens <= 0:
+                reason = "usage_unavailable"
+            elif data.get("version") != 1:
+                reason = "anchor_unverified"
+            elif data.get("model") != self.model_identity:
+                reason = "model_changed"
+            elif data.get("history") != _history_fingerprint(messages[:index + 1]):
+                reason = "history_changed"
+            elif parameters is None:
+                reason = "request_parameters_unavailable"
+            elif data.get("parameters") != _fingerprint(parameters):
+                reason = "request_parameters_changed"
+            elif data.get("instructions") != _fingerprint(_instructions(messages, parameters)):
+                reason = "instructions_changed"
+            else:
+                anchor_index, anchor = index, data
+            break
+
+        # Only the verified anchor is visible to Harness. Never alter persisted Usage.
+        normalized = [replace(message, usage=RequestUsage())
+                      if isinstance(message, ModelResponse) and index != anchor_index else message
+                      for index, message in enumerate(normalized)]
+        if anchor_index is not None:
+            # Unchanged instructions were paid for by the anchor. Avoid Harness
+            # treating moving the effective instructions to the last request as a change.
+            normalized = [replace(m, instructions=None) if isinstance(m, ModelRequest) else m
+                          for m in normalized]
+        base = estimate_context_tokens(normalized, tokenizer=self.text)
+        tail = normalized if anchor_index is None else normalized[anchor_index + 1:]
+        # Harness counts text; retain our media, context-ref projection, message
+        # envelope and structured-part accounting only for the unmeasured suffix.
+        supplement = self.messages(tail) - estimate_token_count(tail, tokenizer=self.text)
+        tokens = base + supplement
+        if anchor_index is None:
+            tokens += parameter_tokens + REQUEST_ENVELOPE_TOKENS
+        return RequestEstimate(max(0, tokens), message_tokens, parameter_tokens,
+                               "provider_usage_plus_estimate" if anchor else "estimated",
+                               anchor.get("id") if anchor else None,
+                               None if anchor else reason)

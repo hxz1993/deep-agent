@@ -435,6 +435,10 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(compacted), 1)
         self.assertEqual(compacted[0]["event_id"], context_status["compaction_event_id"])
+        persisted_budget = compacted[0]["payload"]["budget"]
+        self.assertEqual(persisted_budget["estimated_tokens_before"], result["before_tokens"])
+        self.assertEqual(persisted_budget["estimated_tokens_after"], result["after_tokens"])
+        self.assertEqual(persisted_budget["estimate_scope"], "history_only")
 
         async with AsyncClient(
             transport=self._transport,

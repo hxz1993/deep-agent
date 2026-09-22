@@ -19,6 +19,39 @@
 直播中的 Thinking、工具进度、自动压缩提示等可以只存在于当前页面，不要求在 History 中重放。
 History 的用户消息、助手回复、工具、Plan、附件和 Context 均由后端从 Event Store 确定性投影。
 
+## 上下文预算与Usage（v0.10.18）
+
+`final.context.budget`保留原有字段，新增`context_occupancy_tokens`、`occupancy_source`、
+`usage_anchor_id`和`estimation_fallback_reason`。`estimated_request_tokens`继续表示当前范围的
+请求估算；该字段也补充到只读`context-status`响应。字段定义见[上下文预算指南](context-compaction-budget.md)。
+
+`occupancy_source=provider_usage_plus_estimate`表示通过模型、历史、参数和指令指纹验证的Provider
+Usage基准加新增内容估算；`estimated`表示保守估算。基准失效或缺失时，`usage_anchor_id=null`，
+并由`estimation_fallback_reason`说明原因。最近响应完成后的预算包含本次响应，不沿用请求前的旧占用。
+
+`final`中的累计Usage与上下文占用分开：累计Usage按唯一模型响应计数，不能用来推算窗口剩余。
+客户端继续使用后端预算，不自行累加指令或复制Token算法，也不将未知数据当零。
+实时完整请求预算为`estimate_scope=full_model_request`；重新打开会话的只读状态缺少最终请求参数，
+返回`history_only`估算，可出现`request_parameters_unavailable`。两者数值及来源可能不同，不能
+把只读回退当成Usage丢失。原始Usage与基准元数据仍在响应事件中，真正的新请求会重新验证基准。
+
+只读`context-status`（普通会话与管理员详情共用）补充最近一次成功压缩的展示字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `compaction_estimated_tokens_before` | 同次压缩前的预计占用；无记录时为`null` |
+| `compaction_estimated_tokens_after` | 同次压缩落库前最终复检的预计占用；无记录时为`null` |
+| `compaction_estimate_scope` | 该组前后数值的范围：`full_model_request`或`history_only`；无压缩记录时为`null` |
+
+前后数值成对读取压缩事件`budget.estimated_tokens_before/estimated_tokens_after`，范围取该事件的
+`budget.estimate_scope`。自动压力压缩包含主请求参数；主动压缩等缺少完整主请求参数的路径标记
+`history_only`，客户端应保留范围提示，不把两者混作相同口径。
+
+旧事件缺少完整的新字段对时，前后值一起回退到`budget.estimated_before/estimated_after`，范围标记
+`history_only`，不将新旧口径各取一项拼成比较。旧响应字段`compaction_estimated_tokens`继续表示
+历史内容压缩后的估算，含义不变；客户端优先使用新的前后字段，旧服务响应缺少新字段时仍可
+使用该旧字段展示压缩后值，未知的压缩前值显示“—”。
+
 ## 观察正在执行的一轮（v0.8.5）
 
 `GET /api/v1/sessions/{session_id}/live?agent_id=…&run_id=…` 是只读 SSE，

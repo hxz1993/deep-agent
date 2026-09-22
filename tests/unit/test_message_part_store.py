@@ -152,7 +152,7 @@ class MessagePartStoreTests(unittest.IsolatedAsyncioTestCase):
         snapshot = await self.store.persist_compaction_projection(
             "session", agent_id=self.agent_id, user_id="user-1",
             raw_history=raw,
-            projected_history=[ModelRequest(parts=[UserPromptPart("summary")]), *raw[1:]],
+            projected_history=[ModelRequest(parts=[UserPromptPart("Summary of previous conversation:\n\nsummary")]), *raw[1:]],
             summary_markdown="summary", trigger="manual", model_id="test",
             estimated_before=100, estimated_after=50, target_tokens=60,
             context_window_tokens=1000, preserved_tail_tokens=25, duration_ms=1,

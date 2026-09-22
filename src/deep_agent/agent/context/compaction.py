@@ -7,6 +7,7 @@ import json
 import math
 import re
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
@@ -1007,6 +1008,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             require_summary=True,
             emit_deterministic=True,
             reserve_answer_request=False,
+            estimate_scope="history_only",
         )
         telemetry.summary_applied = True
         telemetry.target_met = True
@@ -1061,6 +1063,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             require_summary=True,
             emit_deterministic=True,
             reserve_answer_request=True,
+            estimate_scope="history_only",
         )
         telemetry.summary_applied = True
         telemetry.target_met = True
@@ -1079,6 +1082,13 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
     ) -> ModelResponse:
         state: ContextRunState = ctx.deps.context_state
         usage = response.usage
+        # The SDK's final request context includes changes from later hooks.
+        # Stamp before outermost message persistence; summary calls use a
+        # separate Agent and must never establish the conversation baseline.
+        await asyncio.to_thread(
+            state.estimator.record_usage_anchor,
+            list(request_context.messages), request_context.model_request_parameters, response,
+        )
         output_tokens = getattr(usage, "output_tokens", None)
         if isinstance(output_tokens, int) and output_tokens > 0:
             state.output_samples.append(OutputTokenSample(output_tokens, "provider"))
@@ -1105,6 +1115,17 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                 telemetry.max_absolute_estimation_error_ratio or 0.0,
                 absolute,
             )
+        # Final SSE must describe occupancy after the response, not the stale
+        # pre-request estimate. The original request estimate remains telemetry.
+        state.last_budget = await asyncio.to_thread(
+            build_context_budget, [*request_context.messages, response],
+            context_window_tokens=self.context_window_tokens,
+            max_output_tokens=self.max_output_tokens,
+            estimator=state.estimator, output_history=state.raw_history,
+            additional_output_samples=state.output_samples,
+            request_parameters=request_context.model_request_parameters,
+        )
+        self.last_budget = state.last_budget
         return response
 
     async def _compact_projection(
@@ -1118,6 +1139,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
         require_summary: bool,
         emit_deterministic: bool,
         reserve_answer_request: bool,
+        estimate_scope: str = "full_model_request",
     ) -> tuple[list[ModelMessage], int]:
         """Build one target-bounded projection for automatic or manual compaction."""
 
@@ -1127,6 +1149,12 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             compacted,
             request_context,
         )
+        # Automatic compaction may be persisted after later model requests.
+        # Keep this operation's parameters and starting occupancy stable.
+        state.compaction_request_parameters = deepcopy(request_context.model_request_parameters)
+        state.compaction_estimated_tokens_before = estimated_tokens
+        state.compaction_target_tokens = target
+        state.compaction_estimate_scope = estimate_scope
         if emit_deterministic:
             state.emit(
                 "preparing",

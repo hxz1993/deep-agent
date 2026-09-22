@@ -315,6 +315,48 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["runs"][0]["usage"]["input_tokens"], 30)
         self.assertEqual(result["runs"][0]["model_name"], "historical-model")
 
+    async def test_multiple_responses_and_replayed_saves_count_each_response_once(self):
+        responses = [
+            ModelResponse(parts=[ThinkingPart("reason"), TextPart("working"), ToolCallPart("read", {}, "call")],
+                usage=RequestUsage(input_tokens=10000, output_tokens=1000)),
+            ModelRequest(parts=[ToolReturnPart("read", "found", "call")]),
+            ModelResponse(parts=[ThinkingPart("finish"), TextPart("answer")],
+                usage=RequestUsage(input_tokens=12000, output_tokens=500)),
+        ]
+        kwargs = dict(agent_id=self.agent_id, user_id="user-one", turn_id="turn", run_id="run",
+            terminal_status="completed")
+        await self.store.append_message_parts("parts", messages=responses, **kwargs)
+        await self.store.append_message_parts("parts", messages=responses, **kwargs)
+        result = detail_event_metadata(await self.store.list_all_events("parts"))
+        self.assertEqual(result["usage"]["input_tokens"], 22000)
+        self.assertEqual(result["usage"]["output_tokens"], 1500)
+        self.assertEqual(result["usage"]["total_tokens"], 23500)
+        self.assertEqual(result["runs"][0]["recorded_model_responses"], 2)
+        self.assertEqual(result["runs"][0]["usage"], result["usage"])
+        self.assertFalse(result["usage_partial"])
+        self.assertEqual(result["usage_missing_responses"], 0)
+
+    async def test_missing_usage_is_unknown_and_partial_usage_is_explicit(self):
+        kwargs = dict(agent_id=self.agent_id, user_id="user-one", turn_id="turn", run_id="run")
+        await self.store.append_message_parts("missing", messages=[ModelResponse(parts=[TextPart("answer")])],
+            terminal_status="completed", **kwargs)
+        events = await self.store.list_all_events("missing")
+        result = detail_event_metadata(events)
+        self.assertIsNone(result["usage"])
+        self.assertEqual(result["usage_missing_responses"], 1)
+        self.assertNotIn("usage", result["runs"][0])
+        from deep_agent.conversation.projector import project_session_events
+        self.assertIsNone(project_session_events(events).items[0].usage)
+        self.assertEqual(events[0].payload["message"]["usage"]["input_tokens"], 0)
+        await self.store.append_message_parts("missing", messages=[ModelResponse(parts=[TextPart("measured")],
+            usage=RequestUsage(input_tokens=25, output_tokens=0))], first_message_ordinal=2,
+            terminal_status="completed", **kwargs)
+        result = detail_event_metadata(await self.store.list_all_events("missing"))
+        self.assertEqual(result["usage"]["total_tokens"], 25)
+        self.assertTrue(result["usage_partial"])
+        self.assertTrue(result["runs"][0]["usage_partial"])
+        self.assertEqual(result["runs"][0]["usage_missing_responses"], 1)
+
     async def test_duplicate_save_distinct_inputs_and_legacy_run_are_separate(self):
         from deep_agent.db.serialization import deserialize_message
         saved = await self.question("duplicate", content="same", run="original")

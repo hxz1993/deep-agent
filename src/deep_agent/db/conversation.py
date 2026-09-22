@@ -326,7 +326,10 @@ class SqlConversationCoordinator:
         compaction_event_id: str | None = None,
         pruned_tool_results: list[dict[str, Any]] | None = None,
         summary_call: dict[str, Any] | None = None,
-        validate_projection: Callable[[list[ModelMessage]], int] | None = None,
+        validate_projection: Callable[[list[ModelMessage]], int | tuple[int, int]] | None = None,
+        estimated_tokens_before: int | None = None,
+        estimated_tokens_after: int | None = None,
+        estimate_scope: str | None = None,
     ) -> SessionEventSnapshot | None:
         scope, user = self._required_identity(agent_id, user_id)
         # The projection must be one summary anchor followed by the entire
@@ -453,9 +456,13 @@ class SqlConversationCoordinator:
                 # the runtime index. Validate the exact anchor readers will use
                 # before changing the successful checkpoint in this transaction.
                 tail = list(raw_history[-suffix:]) if suffix else []
-                estimated_after = validate_projection([
+                validated = validate_projection([
                     _compaction_anchor({"replacement": rendered}), *tail,
                 ])
+                if isinstance(validated, tuple):
+                    estimated_after, estimated_tokens_after = validated
+                else:
+                    estimated_after = validated
             lifecycle_row = None
             if compaction_event_id is not None:
                 lifecycle_row = (
@@ -495,6 +502,10 @@ class SqlConversationCoordinator:
                     "estimated_before": estimated_before,
                     "target_tokens": target_tokens,
                     "estimated_after": estimated_after,
+                    **({"estimated_tokens_before": estimated_tokens_before,
+                        "estimated_tokens_after": estimated_tokens_after,
+                        "estimate_scope": estimate_scope}
+                       if estimated_tokens_before is not None and estimated_tokens_after is not None else {}),
                     "preserved_tail_tokens": preserved_tail_tokens,
                 },
                 "pruned_tool_results": pruned_records,

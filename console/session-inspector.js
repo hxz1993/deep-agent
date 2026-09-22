@@ -1,3 +1,4 @@
+import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 // Pure shared inspector markup. Hosts supply identity, historical data and tab state.
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -8,34 +9,30 @@ export function formatTokens(value) {
 }
 
 export function contextBudgetPercent(value, total) {
-  const amount = Number(value);
-  const capacity = Number(total);
-  if (!Number.isFinite(amount) || !Number.isFinite(capacity) || capacity <= 0) return null;
+  const amount = tokenValue(value);
+  const capacity = tokenValue(total);
+  if (amount == null || capacity == null || capacity <= 0) return null;
   return Math.max(0, Math.min(100, (amount / capacity) * 100));
 }
 
-export function finiteTokenValue(value) {
-  const number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? number : 0;
-}
-
-export function renderContextBudgetOverview(contextStatus) {
-  const total = finiteTokenValue(contextStatus.context_window_tokens);
-  const history = finiteTokenValue(contextStatus.estimated_history_tokens);
-  const output = finiteTokenValue(contextStatus.predicted_output_tokens);
-  const safety = finiteTokenValue(contextStatus.safety_margin_tokens);
-  const occupied = Math.min(total, history);
-  const outputWidth = Math.min(Math.max(total - occupied, 0), output);
-  const safetyWidth = Math.min(Math.max(total - occupied - outputWidth, 0), safety);
-  const free = Math.max(total - occupied - outputWidth - safetyWidth, 0);
+export function renderContextBudgetOverview(contextStatus = {}) {
+  const total = tokenValue(contextStatus.context_window_tokens);
+  const occupancy = contextOccupancyPresentation(contextStatus);
+  const output = tokenValue(contextStatus.predicted_output_tokens);
+  const safety = tokenValue(contextStatus.safety_margin_tokens);
+  const complete = total != null && occupancy.tokens != null && output != null && safety != null;
+  const free = complete ? Math.max(total - occupancy.tokens - output - safety, 0) : null;
   const segments = [
-    ["history", occupied, "历史"],
-    ["output", outputWidth, "输出预留"],
-    ["safety", safetyWidth, "安全余量"],
+    ["history", occupancy.tokens, occupancy.label],
+    ["output", output, "输出预留"],
+    ["safety", safety, "安全余量"],
     ["free", free, "剩余"],
   ];
+  let availableWidth = 100;
   const segmentHtml = segments.map(([tone, value, label]) => {
-    const width = contextBudgetPercent(value, total) || 0;
+    // Clamp only painted widths, never the original values in labels/tooltips.
+    const width = complete ? Math.min(availableWidth, contextBudgetPercent(value, total) || 0) : 0;
+    availableWidth -= width;
     return `<span class="context-budget-segment tone-${tone}" style="width:${width.toFixed(2)}%" title="${escapeHtml(label)} ${escapeHtml(formatTokens(value))} Token"></span>`;
   }).join("");
   const markers = [
@@ -48,8 +45,8 @@ export function renderContextBudgetOverview(contextStatus) {
   }).join("");
   return `<div class="context-budget-overview">
     <div class="context-budget-summary">
-      <span><small>历史占用</small><strong>${escapeHtml(formatTokens(contextStatus.estimated_history_tokens))}</strong></span>
-      <span><small>可用输入</small><strong>${escapeHtml(formatTokens(contextStatus.usable_request_tokens))}</strong></span>
+      <span title="${escapeHtml(occupancy.detail)}"><small>${occupancy.label}</small><strong>${escapeHtml(formatTokens(occupancy.tokens))}</strong></span>
+      <span title="可用输入 ${escapeHtml(formatTokens(contextStatus.usable_request_tokens))} Token"><small>剩余预算</small><strong>${escapeHtml(formatTokens(free))}</strong></span>
       <span><small>上下文窗口</small><strong>${escapeHtml(formatTokens(contextStatus.context_window_tokens))}</strong></span>
     </div>
     <div class="context-budget-composite" role="img" aria-label="上下文预算分段与压缩阈值">
@@ -57,7 +54,7 @@ export function renderContextBudgetOverview(contextStatus) {
       ${markers}
     </div>
     <div class="context-budget-legend">
-      <span class="tone-history">历史</span><span class="tone-output">输出预留</span><span class="tone-safety">安全余量</span><span class="tone-free">剩余</span>
+      <span class="tone-history" title="${escapeHtml(occupancy.detail)}">${occupancy.label}</span><span class="tone-output">输出预留</span><span class="tone-safety">安全余量</span><span class="tone-free">剩余</span>
     </div>
   </div>`;
 }
@@ -75,25 +72,30 @@ export function inspectorFactHtml(label, valueHtml, options = {}) {
   return `<div class="${classes}"><span>${escapeHtml(label)}</span><strong>${valueHtml}</strong></div>`;
 }
 
-export function renderRunUsageOverview(run, usage, contextStatus) {
-  const input = finiteTokenValue(run.input_tokens ?? usage.input_tokens);
-  const output = finiteTokenValue(run.output_tokens ?? usage.output_tokens);
-  const total = Math.max(finiteTokenValue(run.total_tokens ?? usage.total_tokens), input + output);
-  const contextWindow = finiteTokenValue(contextStatus?.context_window_tokens);
-  const capacity = Math.max(contextWindow, total);
-  const remaining = contextWindow > 0 ? Math.max(capacity - total, 0) : 0;
+export function renderRunUsageOverview(run = {}, usage = {}) {
+  const reported = [run.input_tokens ?? usage.input_tokens, run.output_tokens ?? usage.output_tokens, run.total_tokens ?? usage.total_tokens];
+  const hasUsage = reported.some(value => (tokenValue(value) ?? 0) > 0);
+  const input = hasUsage ? tokenValue(reported[0]) : null;
+  const output = hasUsage ? tokenValue(reported[1]) : null;
+  const total = (hasUsage ? tokenValue(reported[2]) : null)
+    ?? (input != null && output != null ? input + output : null);
+  const partial = run.usage_partial === true || usage.usage_partial === true;
+  const usageTitle = partial
+    ? "仅累计 Provider 已报告的 Usage，部分响应缺失；不代表完整消耗或当前上下文占用"
+    : "本轮各模型响应的 Provider Usage 累计消耗，不代表当前上下文占用";
+  // This bar is the Run's cumulative input/output composition, not a model window.
+  const capacity = input != null && output != null ? input + output : null;
   const inputWidth = contextBudgetPercent(input, capacity) || 0;
   const outputWidth = contextBudgetPercent(output, capacity) || 0;
-  const remainingWidth = contextBudgetPercent(remaining, capacity) || 0;
   return `<div class="run-usage-overview">
     <div class="run-usage-summary">
-      <span><small>本次使用</small><strong>${escapeHtml(formatTokens(run.total_tokens ?? usage.total_tokens))}</strong></span>
-      <span><small>预计剩余</small><strong>${escapeHtml(formatTokens(contextWindow > 0 ? remaining : null))}</strong></span>
+      <span title="${usageTitle}"><small>${partial ? "累计使用（部分）" : "累计使用"}</small><strong>${escapeHtml(formatTokens(total))}</strong></span>
+      <span><small>输入 / 输出</small><strong>${escapeHtml(formatTokens(input))} / ${escapeHtml(formatTokens(output))}</strong></span>
     </div>
-    <div class="run-usage-track" role="img" aria-label="本轮输入、输出与上下文剩余 Token">
-      <span class="input" style="width:${inputWidth.toFixed(2)}%" title="输入 ${escapeHtml(formatTokens(input))} Token"></span><span class="output" style="width:${outputWidth.toFixed(2)}%" title="输出 ${escapeHtml(formatTokens(output))} Token"></span><span class="remaining" style="width:${remainingWidth.toFixed(2)}%" title="上下文剩余 ${escapeHtml(formatTokens(remaining))} Token"></span>
+    <div class="run-usage-track" role="img" aria-label="本轮累计输入与输出 Token 构成">
+      <span class="input" style="width:${inputWidth.toFixed(2)}%" title="输入 ${escapeHtml(formatTokens(input))} Token"></span><span class="output" style="width:${outputWidth.toFixed(2)}%" title="输出 ${escapeHtml(formatTokens(output))} Token"></span>
     </div>
-    <div class="run-usage-legend"><span class="input">输入</span><span class="output">输出</span><span class="remaining">上下文剩余</span></div>
+    <div class="run-usage-legend"><span class="input">输入</span><span class="output">输出</span></div>
   </div>`;
 }
 
@@ -102,7 +104,12 @@ export function renderSessionInspector({
   usage = {}, run = {}, runModel = null, agentName = "—", channelOrigin = null, agentChannels = [],
   activeTab = "session", contextContent = "", statusText = "", statusClass = "idle",
 } = {}) {
-  const compaction = contextStatus.last_compaction || {};
+  // Every Run emits telemetry, including no-op estimates. Only a successful
+  // triggered compaction may replace the last persisted comparison.
+  const currentCompaction = contextStatus.last_compaction;
+  const compaction = currentCompaction?.triggered === true
+    && currentCompaction.target_met === true && !currentCompaction.failure
+    ? currentCompaction : {};
   const strategyLabels = {
     none: "未触发",
     tiered_deterministic: "确定性压缩",
@@ -116,12 +123,18 @@ export function renderSessionInspector({
     : contextStatus.compaction_enabled
       ? "未触发"
       : "未启用";
+  const compactionScope = compaction.estimated_tokens_before != null
+    ? (compaction.estimate_scope || contextStatus.estimate_scope)
+    : contextStatus.compaction_estimate_scope;
+  const compactionHint = compactionScope === "full_model_request"
+    ? "压缩前后均为同次完整请求的预计占用"
+    : "压缩前后为历史内容估算，不含完整请求参数";
   const compactionContent = `<section class="inspector-section">
     <header><strong>上下文压缩</strong><span>${escapeHtml(compactionState)}</span></header>
-    <div class="compaction-comparison">
-      <span><small>压缩前</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_before))}</strong></span>
+    <div class="compaction-comparison" title="${compactionHint}">
+      <span><small>压缩前</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_before ?? contextStatus.compaction_estimated_tokens_before))}</strong></span>
       <i data-lucide="arrow-right"></i>
-      <span><small>压缩后</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_after ?? contextStatus.compaction_estimated_tokens))}</strong></span>
+      <span><small>压缩后</small><strong>${escapeHtml(formatTokens(compaction.estimated_tokens_after ?? contextStatus.compaction_estimated_tokens_after ?? contextStatus.compaction_estimated_tokens))}</strong></span>
     </div>
     <div class="inspector-facts compact">
       ${inspectorFact("压缩事件", contextStatus.compaction_event_id || "暂无", { mono: true, wide: true })}
@@ -163,13 +176,13 @@ export function renderSessionInspector({
     </div>
   </section>
   <section class="inspector-section inspector-budget-section">
-    <header title="${escapeHtml(contextStatus.unavailable_reason || "按当前配置估算，非历史快照")}"><strong>上下文预算</strong></header>
+    <header title="${escapeHtml(contextOccupancyPresentation(contextStatus).detail)}"><strong>上下文预算</strong></header>
     ${renderContextBudgetOverview(contextStatus)}
   </section>
   ${compactionContent}`;
 
   const runContent = `<section class="inspector-section">
-    ${renderRunUsageOverview(run, usage, contextStatus)}
+    ${renderRunUsageOverview(run, usage)}
     <div class="inspector-facts compact run-facts">
       ${inspectorFact("终态", run.status || "—")}
       ${inspectorFact("请求", run.requests ?? usage.requests ?? "—")}

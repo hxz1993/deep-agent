@@ -341,6 +341,10 @@ Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Stor
 框架能力不得因为“官方已经提供”就进入开发计划。
 
 当前上下文压缩在模型配置有效`context_window_tokens`时启用，否则停用，并固定使用当前Agent模型。
+上下文请求计数统一从 `TokenEstimator.estimate_request` 进入 Harness 公开估算入口；仅复用模型、
+有效历史、请求参数与指令指纹均匹配的响应 Usage，其他情况完整估算。基准 metadata 必须在响应
+首次增量保存前写入，摘要响应不能成为主会话基准。原始 Usage 不改写，累计消耗与当前占用分开。
+只读 context-status 未准备最终请求参数时保持 history_only 并说明回退，不能冒充完整请求预算。
 自动、主动和Provider Overflow调用同一安全前缀、
 八段摘要、Evidence与目标复检流程；Compaction从Running原位更新到终态，失败不改变Surface。
 摘要总预算300秒，每约10秒发送非持久化进度；客户端取消复用正式Run Cancellation Token。Timeout不重试，

@@ -85,6 +85,10 @@ class ContextRunState:
     compaction_event_id: str | None = None
     compaction_started_at: float | None = None
     summary_call: dict[str, Any] | None = None
+    compaction_request_parameters: Any | None = field(default=None, repr=False)
+    compaction_estimated_tokens_before: int | None = None
+    compaction_target_tokens: int | None = None
+    compaction_estimate_scope: str = "history_only"
     pruned_tool_results: list[dict[str, Any]] = field(default_factory=list)
     start_compaction_event: Callable[[str], Awaitable[Any]] | None = field(
         default=None, repr=False

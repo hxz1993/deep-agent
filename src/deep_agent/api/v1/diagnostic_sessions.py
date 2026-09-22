@@ -11,6 +11,10 @@ from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.diagnostic_routes import NoStoreRoute
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.api.v1.sessions import SessionEventsResponse, SessionEventResponse, _build_context_data, context_status_from_data
+from deep_agent.api.v1.local_files import local_attachment_response
+from deep_agent.agent.attachments import index_attachment_refs
+from deep_agent.agent.tool_output_limits import session_file_metadata_from_history
+from deep_agent.files.storage import LOCAL_FILE_PREFIX, LocalFileStore
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
 from deep_agent.conversation.display_names import decorate_history_display_names
 from deep_agent.conversation.models import ConversationHistoryResponse
@@ -155,6 +159,28 @@ async def get_diagnostic_history(ctx: AppContextDep, session_id: str):
         names = await resolve_tool_display_name_map(ctx.registry, ctx.stores,
             capabilities=list(row.capabilities or []) if row else None)
         return await run_in_threadpool(decorate_history_display_names, projected, names)
+
+
+@router.get("/{session_id}/files/{file_id}/download", include_in_schema=False)
+async def download_diagnostic_session_file(ctx: AppContextDep, session_id: str, file_id: str):
+    """Admin-only local download, restricted to this session's persisted files.
+
+    Platform downloads keep their existing Platform authorization; this endpoint
+    never forwards an owner's identity or proxies Platform file bytes.
+    """
+    if not isinstance(ctx.file_store, LocalFileStore) or not file_id.startswith(LOCAL_FILE_PREFIX):
+        raise HTTPException(404, "File not found")
+    async with query_budget():
+        detail = await service(ctx).identity(session_id)
+        owner = detail["user_id"]
+        if not owner:
+            raise HTTPException(404, "File not found")
+        raw = await ctx.store.get_raw_history(session_id, agent_id=detail["agent_id"])
+        def referenced():
+            return file_id in index_attachment_refs(messages=raw) or file_id in session_file_metadata_from_history(raw)
+        if not await run_in_threadpool(referenced):
+            raise HTTPException(404, "File not found")
+        return await local_attachment_response(ctx.file_store, file_id, {"user": owner})
 
 
 @router.get("/{session_id}/events", response_model=SessionEventsResponse)

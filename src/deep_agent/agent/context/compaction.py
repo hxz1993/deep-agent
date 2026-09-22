@@ -19,10 +19,13 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     SystemPromptPart,
     UserPromptPart,
 )
 from pydantic_ai.settings import ModelSettings
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.tools import RunContext
 from pydantic_core import to_jsonable_python
 from loguru import logger
@@ -215,7 +218,7 @@ def _safe_boundaries(messages: list[ModelMessage]) -> list[int]:
             if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                 open_calls.add(part.tool_call_id)
         for part in message.parts:
-            if isinstance(part, BaseToolReturnPart) and part.tool_call_id:
+            if isinstance(part, (BaseToolReturnPart, RetryPromptPart)) and part.tool_call_id:
                 open_calls.discard(part.tool_call_id)
         if not open_calls:
             boundaries.append(index)
@@ -301,10 +304,10 @@ def _formatted_history(messages: list[ModelMessage]) -> str:
                         "tool_call_id": part.tool_call_id,
                     }
                 )
-            elif isinstance(part, BaseToolReturnPart):
+            elif isinstance(part, (BaseToolReturnPart, RetryPromptPart)):
                 parts.append(
                     {
-                        "kind": "tool_result",
+                        "kind": "tool_retry" if isinstance(part, RetryPromptPart) else "tool_result",
                         "tool": part.tool_name,
                         "content": part.content,
                         "tool_call_id": part.tool_call_id,
@@ -534,9 +537,20 @@ def _summary_output_limit(
         min(
             max_output_tokens or 4_096,
             4_096,
-            max(256, math.floor(target_tokens * 0.10)),
+            max(256, math.floor(target_tokens * 0.20)),
         ),
     )
+
+
+def _summary_model_settings(model: Any, output_limit: int) -> ModelSettings:
+    settings: ModelSettings = {"max_tokens": output_limit, "thinking": False}
+    while isinstance(model, WrapperModel):
+        model = model.wrapped
+    if isinstance(model, OpenAIChatModel) and model.system == "deepseek":
+        # New aliases may not yet support the SDK's unified thinking switch.
+        # Apply only to this auxiliary request, never the main conversation.
+        settings["extra_body"] = {"thinking": {"type": "disabled"}}
+    return settings
 
 
 def _summary_safety_tokens(estimator: TokenEstimator, prompt_tokens: int) -> int:
@@ -1319,6 +1333,12 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
     ) -> str:
         estimator = state.estimator
         prompt = _summary_prompt(messages, previous_summary)
+        prompt = (
+            f"摘要总输出预算为 {output_limit} tokens（包含八个标题），请尽量控制在预算的 70% 以内。"
+            "每节只保留继续任务必要的事实，避免重复；不要抄录完整代码、历史回复或工具输出。"
+            "精确标识与来源另有确定性证据索引保留，但关键结论、数值与待办仍须在摘要中写清。\n\n"
+            + prompt
+        )
         prompt_tokens = estimator.text(_SUMMARY_INSTRUCTIONS) + estimator.text(prompt)
         safety = _summary_safety_tokens(estimator, prompt_tokens)
         if prompt_tokens + output_limit + safety > (
@@ -1362,7 +1382,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                         prompt,
                         usage=ctx.usage,
                         usage_limits=state.usage_limits,
-                        model_settings=ModelSettings(max_tokens=output_limit),
+                        model_settings=_summary_model_settings(ctx.model, output_limit),
                         cancellation_token=getattr(ctx.deps, "cancellation_token", None),
                     )
                 )
@@ -1440,9 +1460,6 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                 None,
             )
             finish_reason = getattr(response, "finish_reason", None)
-            if finish_reason in {"length", "max_tokens"}:
-                raise SummaryUnavailable("summary_truncated")
-            validate_summary_markdown(summary)
             state.summary_call = {
                 "provider_id": getattr(response, "provider_name", None),
                 "model_id": getattr(response, "model_name", None),
@@ -1451,6 +1468,9 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                 "usage": _jsonable_usage(getattr(result, "usage", None)),
                 "max_output_tokens": output_limit,
             }
+            if finish_reason in {"length", "max_tokens"}:
+                raise SummaryUnavailable("summary_truncated")
+            validate_summary_markdown(summary)
             return summary
         raise SummaryUnavailable("summary_provider_error")
 

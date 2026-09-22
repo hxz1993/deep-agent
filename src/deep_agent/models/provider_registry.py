@@ -307,6 +307,18 @@ def _openai_style_provider(config: ProviderRuntimeConfig):
     raise UnknownProviderTypeError(config.provider_type)
 
 
+def deepseek_chat_profile(model_name: str) -> dict[str, Any]:
+    """Preserve the SDK profile, but use DeepSeek's documented token-limit field.
+
+    Core 2.46 defaults Chat models to max_completion_tokens. DeepSeek accepts
+    max_tokens instead; silently ignoring the former can break summary budgets.
+    """
+    return {
+        **(DeepSeekProvider.model_profile(model_name) or {}),
+        "openai_chat_supports_max_completion_tokens": False,
+    }
+
+
 def resolve_provider_model(
     *,
     model_name: str,
@@ -328,7 +340,11 @@ def resolve_provider_model(
             if "video" in (input_modalities or []) or "video_url" in (tags or [])
             else OpenAIChatModel
         )
-        return model_class(model_name, provider=runtime_provider)
+        return model_class(
+            model_name,
+            provider=runtime_provider,
+            **({"profile": deepseek_chat_profile(model_name)} if provider.provider_type == "deepseek" else {}),
+        )
     if definition.model_protocol == "anthropic":
         runtime_provider = AnthropicProvider(
             api_key=provider.api_key,

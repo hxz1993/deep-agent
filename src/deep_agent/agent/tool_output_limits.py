@@ -36,6 +36,7 @@ TOOL_OUTPUT_DEFAULT_TOKENS = 24_000
 TOOL_OUTPUT_RATIO = 0.20
 TOOL_OUTPUT_PREVIEW_CHARS = 2_000
 TOOL_OUTPUT_FALLBACK_CHARS = 8_000
+TOOL_OUTPUT_FALLBACK_TAIL_LINES = 5
 
 _EXCLUDED_TOOLS = frozenset(
     {
@@ -571,7 +572,10 @@ def build_tool_output_limits(
                 over=threshold,
                 action=Spill(
                     preview_chars=TOOL_OUTPUT_PREVIEW_CHARS,
-                    then=Truncate(max_chars=TOOL_OUTPUT_FALLBACK_CHARS),
+                    then=Truncate(
+                        max_chars=TOOL_OUTPUT_FALLBACK_CHARS,
+                        keep_tail_lines=TOOL_OUTPUT_FALLBACK_TAIL_LINES,
+                    ),
                 ),
             )
         ],

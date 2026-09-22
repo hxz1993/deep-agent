@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   attachmentPreviewAttributes,
   attachmentPreviewUrl,
+  attachmentDownloadUrl,
   isImageAttachment,
   createImageGallery,
   bindAttachmentImagePreviews,
@@ -95,11 +96,14 @@ test("直播和历史共用的用户气泡把附件与上下文放在正文前",
   assert.match(source, /bindAttachmentImagePreviews\(\{ root: document.getElementById\("workspaceGrid"\), openImage: openAttachmentImagePreview \}\)/);
 });
 
-test("轨迹图片用可预览按钮，普通附件保持原展示", async () => {
-  const source = await readFile(new URL("../../../console/trajectory.js", import.meta.url), "utf8");
-  assert.match(source, /attachmentPreviewAttributes\(attachment\)/);
-  assert.match(source, /trajectory-summary-link attachment-image-trigger/);
-  assert.match(source, /return renderJumpLink\(\{\s*eventId: null/);
+test("附件下载区分所有者和管理员会话路由，平台沿用原权限", () => {
+  const attachment = { id: "local_a", name: "sales.xlsx" };
+  const base = "https://example.test/prefix/console/";
+  assert.equal(attachmentDownloadUrl(attachment, base), "https://example.test/prefix/api/v1/local-files/local_a/download");
+  assert.equal(attachmentDownloadUrl(attachment, base, { diagnosticSessionId: "session/b" }), "https://example.test/prefix/api/v1/diagnostics/sessions/session%2Fb/files/local_a/download");
+  const platform = new URL(attachmentDownloadUrl({ id: "platform-a", name: "sales.xlsx" }, base, { diagnosticSessionId: "s" }));
+  assert.equal(platform.pathname, "/deepfos-server/platform-file-server/files/download");
+  assert.equal(attachmentDownloadUrl({}, base), null);
 });
 
 test("长附件名和上下文在窄气泡中省略，不撑出对话区域", async () => {

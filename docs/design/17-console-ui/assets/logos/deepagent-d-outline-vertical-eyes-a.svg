@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">DeepAgent · A</title>
+  <desc id="desc">适度加粗，横向舒展的蓝紫色 D 形边框，白色内部，纵向竖条眼睛，圆头直天线，无耳朵，外部透明。</desc>
+  <g fill="#6254FF">
+    <rect x="234" y="74" width="26" height="70"/>
+    <circle cx="247" cy="66" r="27"/>
+  </g>
+  <path d="M127 149H250C350 149 411 196 411 279C411 362 350 409 250 409H127Q110 409 110 392V166Q110 149 127 149Z" fill="#FFFFFF" stroke="#6254FF" stroke-width="34" stroke-linejoin="round"/>
+  <g fill="#6254FF">
+    <rect x="198" y="240" width="24" height="54" rx="12"/>
+    <rect x="290" y="240" width="24" height="54" rx="12"/>
+  </g>
+</svg>

@@ -528,6 +528,41 @@ class HarnessToolOutputLimitsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["inline_fallback"], original)
         self.assertEqual(store.telemetry.spill_failures, 1)
 
+    async def test_upload_failure_prioritizes_complete_tail_lines_within_cap(self) -> None:
+        for newline, line_width in (("\n", 1_200), ("\r\n", 1_200), ("\n", 2_000)):
+            with self.subTest(newline=repr(newline), line_width=line_width):
+                capability, store = build_tool_output_limits(
+                    request_headers={},
+                    context_window_tokens=10_000,
+                    max_output_tokens=2_000,
+                    estimator=TokenEstimator.conservative(),
+                )
+                tail = newline.join(
+                    f"结论{index}:" + "尾" * line_width for index in range(5)
+                ) + newline
+                original = ("正文" * 15_000) + newline + tail
+                api = SimpleNamespace(file=SimpleNamespace(
+                    upload=AsyncMock(side_effect=OSError("platform down")),
+                ))
+                with patch("deep_agent.files.storage.PlatformAPI", return_value=api):
+                    result = await capability.after_tool_execute(
+                        _ctx(),
+                        call=ToolCallPart("query", {}, "call-tail"),
+                        tool_def=ToolDefinition(name="query"),
+                        args={},
+                        result=original,
+                    )
+                self.assertIsInstance(result, ToolReturn)
+                self.assertLessEqual(len(result.return_value), 8_000)
+                if len(tail) <= 8_000:
+                    self.assertTrue(result.return_value.endswith(tail))
+                else:
+                    self.assertTrue(result.return_value.endswith(newline))
+                    self.assertIn("结论4:", result.return_value)
+                self.assertTrue(result.metadata["spill_failed"])
+                self.assertEqual(result.metadata["inline_fallback"], original)
+                self.assertEqual(store.telemetry.spill_failures, 1)
+
     async def test_successful_spill_persists_full_artifact_hash(self) -> None:
         capability, store = build_tool_output_limits(
             request_headers={},

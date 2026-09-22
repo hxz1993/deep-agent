@@ -1,4 +1,4 @@
-import { buildTrajectory, redactTrajectoryValue } from "./trajectory.js?v=20260915-scroll-focus";
+import { buildTrajectory, redactTrajectoryValue } from "./trajectory.js?v=20260922-trajectory-8";
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Saved terminal facts only; an active transport is the host's separate override. */

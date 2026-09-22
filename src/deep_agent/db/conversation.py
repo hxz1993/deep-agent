@@ -329,7 +329,18 @@ class SqlConversationCoordinator:
         validate_projection: Callable[[list[ModelMessage]], int] | None = None,
     ) -> SessionEventSnapshot | None:
         scope, user = self._required_identity(agent_id, user_id)
+        # The projection must be one summary anchor followed by the entire
+        # preserved suffix. A partial match must never move the cutoff forward.
+        anchor = projected_history[0] if projected_history else None
+        if (not isinstance(anchor, ModelRequest) or len(anchor.parts) != 1
+                or not isinstance(anchor.parts[0], UserPromptPart)
+                or not isinstance(anchor.parts[0].content, str)
+                or not anchor.parts[0].content.startswith(
+                    "Summary of previous conversation:\n\n" + summary_markdown.strip())):
+            raise ValueError("compaction_anchor_mismatch")
         suffix = _common_message_suffix(raw_history, projected_history)
+        if suffix != len(projected_history) - 1:
+            raise ValueError("compaction_tail_mismatch")
         covered_messages = len(raw_history) - suffix
         if covered_messages <= 0 or not summary_markdown.strip():
             return None
@@ -823,7 +834,19 @@ def _common_message_suffix(raw: list[ModelMessage], projected: list[ModelMessage
     projected_payloads = [serialize_message(message) for message in projected]
     count = 0
     while count < min(len(raw_payloads), len(projected_payloads)):
-        if raw_payloads[-1 - count] != projected_payloads[-1 - count]:
+        original = raw_payloads[-1 - count]
+        visible = projected_payloads[-1 - count]
+        if original.get("kind") == visible.get("kind") == "request":
+            # The SDK adds request-envelope values after tool results were
+            # persisted. These do not change the original message parts.
+            original, visible = dict(original), dict(visible)
+            for key in ("conversation_id", "run_id", "timestamp"):
+                original.pop(key, None)
+                visible.pop(key, None)
+            if original.get("instructions") is None:
+                original.pop("instructions", None)
+                visible.pop("instructions", None)
+        if original != visible:
             break
         count += 1
     return count

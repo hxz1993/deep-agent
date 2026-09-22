@@ -12,6 +12,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -33,6 +34,7 @@ from deep_agent.agent.context.compaction import (
     _prune_tool_results,
     _jsonable_usage,
     _summary_anchor,
+    _summary_output_limit,
     _summary_materials,
     _run_preparation_step,
     is_provider_context_overflow,
@@ -56,6 +58,13 @@ def valid_summary() -> str:
 
 
 class DshCompactionRulesTests(unittest.TestCase):
+    def test_summary_allowance_respects_model_and_global_caps(self) -> None:
+        self.assertEqual(_summary_output_limit(9829, None), 1965)
+        self.assertEqual(_summary_output_limit(100_000, None), 4096)
+        self.assertEqual(_summary_output_limit(9829, 1024), 1024)
+        self.assertEqual(_summary_output_limit(100, 1), 1)
+
+
     def test_summary_usage_is_recursively_json_safe(self) -> None:
         usage = RunUsage(
             input_tokens=12,
@@ -144,6 +153,29 @@ class DshCompactionRulesTests(unittest.TestCase):
         boundaries = _safe_boundaries(messages)
         self.assertNotIn(2, boundaries)
         self.assertIn(3, boundaries)
+
+    def test_tool_retry_closes_only_its_call_before_later_turn(self) -> None:
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="读文件")]),
+            ModelResponse(parts=[ToolCallPart("read_file", {}, "retry-a"), ToolCallPart("query", {}, "pending-b")]),
+            ModelRequest(parts=[RetryPromptPart(content="文件不存在", tool_name="read_file", tool_call_id="retry-a")]),
+            ModelRequest(parts=[RetryPromptPart(content="请修正输出格式")]),
+            ModelRequest(parts=[ToolReturnPart("query", "完成", "pending-b")]),
+            ModelRequest(parts=[UserPromptPart(content="下一轮")]),
+            ModelResponse(parts=[TextPart(content="完成")]),
+        ]
+        boundaries = _safe_boundaries(messages)
+        self.assertNotIn(2, boundaries)
+        self.assertNotIn(3, boundaries)
+        self.assertNotIn(4, boundaries)
+        self.assertIn(5, boundaries)
+        self.assertIn(7, boundaries)
+        formatted = json.loads(_formatted_history(messages))
+        retry = formatted[2]["parts"][0]
+        self.assertEqual(retry["kind"], "tool_retry")
+        self.assertEqual(retry["tool_call_id"], "retry-a")
+        self.assertEqual(retry["content"], "文件不存在")
+        self.assertEqual(_protected_messages(messages), messages[5:])
 
     def test_current_turn_is_preserved_as_one_unit(self) -> None:
         messages = [
@@ -295,6 +327,59 @@ class DshCompactionRulesTests(unittest.TestCase):
 
 
 class CompactionPreparationProgressTests(unittest.IsolatedAsyncioTestCase):
+    async def test_truncated_summary_keeps_response_telemetry(self) -> None:
+        def respond(messages, info):
+            return ModelResponse(parts=[TextPart("## 1. Primary Request and Intent")],
+                                 finish_reason="length", model_name="summary-test")
+        model = FunctionModel(respond)
+        state = ContextRunState(raw_history=[], estimator=TokenEstimator.conservative())
+        ctx = RunContext(deps=SimpleNamespace(), model=model, usage=RunUsage())
+        compaction = DeepAgentContextCompaction(context_window_tokens=100_000, max_output_tokens=4096)
+        with self.assertRaisesRegex(SummaryUnavailable, "summary_truncated"):
+            await compaction._single_summary(
+                [ModelRequest(parts=[UserPromptPart(content="fixture")])], None,
+                ctx, 256, state, reserve_answer_request=False,
+            )
+        self.assertEqual(state.summary_call["finish_reason"], "length")
+        self.assertEqual(state.summary_call["max_output_tokens"], 256)
+        self.assertIsNotNone(state.summary_call["usage"])
+
+
+    async def test_deepseek_summary_sends_real_output_limit_without_main_thinking_change(self) -> None:
+        import httpx2
+        from pydantic_ai import Agent
+        from pydantic_ai.providers.deepseek import DeepSeekProvider
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from deep_agent.models.provider_registry import deepseek_chat_profile
+
+        requests = []
+        def transport(request):
+            requests.append(json.loads(request.content))
+            return httpx2.Response(200, json={
+                "id": "summary-response", "object": "chat.completion", "created": 0,
+                "model": "deepseek-flash", "choices": [{"index": 0, "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": valid_summary()}}],
+            })
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(transport)) as client:
+            model = OpenAIChatModel("deepseek-flash",
+                provider=DeepSeekProvider(api_key="test-key", http_client=client),
+                profile=deepseek_chat_profile("deepseek-flash"))
+            state = ContextRunState(raw_history=[], estimator=TokenEstimator.conservative())
+            ctx = RunContext(deps=SimpleNamespace(), model=model, usage=RunUsage())
+            compaction = DeepAgentContextCompaction(context_window_tokens=100_000, max_output_tokens=4096)
+            await compaction._single_summary(
+                [ModelRequest(parts=[UserPromptPart(content="销售收入360成本230")])], None,
+                ctx, 864, state, reserve_answer_request=False,
+            )
+            await Agent(model).run("main chat", model_settings={"max_tokens": 1})
+        self.assertEqual(requests[0]["max_tokens"], 864)
+        self.assertNotIn("max_completion_tokens", requests[0])
+        self.assertEqual(requests[0]["thinking"], {"type": "disabled"})
+        self.assertIn("864 tokens", requests[0]["messages"][-1]["content"])
+        self.assertEqual(requests[1]["max_tokens"], 1)
+        self.assertNotIn("thinking", requests[1])
+        self.assertEqual(state.summary_call["max_output_tokens"], 864)
+
     async def test_summary_cannot_spend_reserved_final_request_after_resume(self) -> None:
         from deep_agent.agent.deps import AgentDeps
         from deep_agent.agent.request_budget import TurnRequestBudget

@@ -1238,25 +1238,22 @@ body.workspace-pane-resizing.console-nav-snapping .console-shell { transition: g
   padding: 0 10px;
   border-bottom: 1px solid var(--console-card-border);
 }
-.console-rail-header .console-brand { flex: 1; min-width: 0; gap: 6px; padding-right: 26px; }
+.console-rail-header .console-brand { flex: 1; min-width: 0; gap: 8px; padding-right: 0; align-items: flex-end; }
 .console-rail .console-rail-header { border-bottom: 0; }
 .console-rail-header button.console-brand-icon { padding: 0; border: 0; cursor: pointer; }
-.console-rail-header .console-brand-icon { width: 30px; height: 30px; }
+.console-rail-header .console-brand-icon { position: relative; width: 40px; height: 44px; }
+.console-rail-header .console-brand-copy { margin-bottom: 0; }
 .console-rail-header .console-brand-copy strong { font-size: 13px; }
-.console-rail-toggle { position: absolute; right: 10px; display: grid; place-items: center; width: 26px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: 6px; color: var(--text-faint); background: transparent; cursor: pointer; }
-.console-rail-toggle:hover { color: var(--accent); background: var(--accent-soft); }
-.console-rail-toggle svg { width: 16px; height: 16px; }
 body.console-nav-collapsed { --console-rail-width: 56px; }
 /* Keep every row (including group labels and footer) in place while resizing. */
 .console-rail .resource-group-label,
 .console-rail .console-brand-copy,
-.console-rail .console-user-name,
-.console-rail-toggle { opacity: var(--console-nav-label-opacity, 1); transition: opacity .18s ease; }
+.console-rail .console-user-name { opacity: var(--console-nav-label-opacity, 1); transition: opacity .18s ease; }
 .console-rail .resource-group-label,
 .console-rail .console-brand-copy { overflow: hidden; }
-body.console-nav-collapsed .console-rail-toggle { pointer-events: none; visibility: hidden; }
-body.console-nav-collapsed .console-rail-header .console-brand { justify-content: center; padding-right: 0; gap: 0; }
-body.console-nav-collapsed .console-rail-header .console-brand-copy { display: none; }
+/* Keep the brand anchored while the rail width animates; centering here causes a jump. */
+.console-rail-header .console-brand { justify-content: flex-start; }
+body.console-nav-collapsed .console-rail-header .console-brand-copy { pointer-events: none; }
 
 .skill-install-note { display: grid; gap: 4px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); }
 .skill-install-note-number { color: var(--accent); margin-right: 7px; }
@@ -1312,7 +1309,10 @@ body.console-nav-collapsed .console-rail-header .console-brand-copy { display: n
   border-radius: 10px;
   background: transparent;
 }
-.console-brand-icon img { width: 30px; height: 30px; display: block; }
+.console-brand-icon deepagent-sprite-pet { width: 40px; height: 44px; display: block; }
+.console-brand-icon deepagent-sprite-pet:not([data-ready="true"]) { visibility: hidden; }
+.console-brand-icon .console-pet-fallback { position: absolute; width: 30px; height: 38px; object-fit: contain; pointer-events: none; }
+.console-brand-icon deepagent-sprite-pet[data-ready="true"] + .console-pet-fallback { display: none; }
 .console-brand-copy { flex-direction: column !important; align-items: flex-start !important; gap: 0; }
 .console-brand-copy > span { color: var(--text-faint); }
 .breadcrumb-chevron { width: 13px; height: 13px; color: var(--text-faint); }
@@ -1896,7 +1896,8 @@ dialog.agent-editor-page::backdrop { display: none; }
   .console-rail { padding-left: 3px; padding-right: 3px; }
   .console-rail-header { margin-left: -3px; margin-right: -3px; padding: 0 6px; gap: 4px; }
   .console-rail-header .console-brand { gap: 4px; }
-  .console-rail-header .console-brand-icon { width: 24px; height: 24px; }
+  .console-rail-header .console-brand-icon { width: 38px; height: 44px; }
+  .console-rail-header .console-brand-icon deepagent-sprite-pet { width: 38px; height: 44px; }
   .console-rail-header .console-brand-icon img { width: 22px; height: 22px; }
   .console-rail-header .console-brand-copy strong { font-size: 12px; }
   .console-topbar { padding: 0 10px; }

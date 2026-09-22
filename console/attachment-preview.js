@@ -5,11 +5,18 @@ export function isImageAttachment(attachment) {
 }
 
 export function attachmentPreviewUrl(attachment, baseURI = globalThis.document?.baseURI) {
-  if (!isImageAttachment(attachment) || !attachment?.id || !baseURI) return null;
+  return isImageAttachment(attachment) ? attachmentDownloadUrl(attachment, baseURI) : null;
+}
+
+export function attachmentDownloadUrl(attachment, baseURI = globalThis.document?.baseURI, { diagnosticSessionId } = {}) {
+  if (!attachment?.id || !baseURI) return null;
   const root = new URL("../", baseURI);
   const id = String(attachment.id);
   if (id.startsWith("local_")) {
-    return new URL(`api/v1/local-files/${encodeURIComponent(id)}/download`, root).href;
+    const path = diagnosticSessionId
+      ? `api/v1/diagnostics/sessions/${encodeURIComponent(diagnosticSessionId)}/files/${encodeURIComponent(id)}/download`
+      : `api/v1/local-files/${encodeURIComponent(id)}/download`;
+    return new URL(path, root).href;
   }
   // Platform deployments mount sibling services below the same gateway prefix.
   // Match the platform client's existing file route, without proxying file bytes.
@@ -26,8 +33,8 @@ function escapeAttribute(value) {
   return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-export function attachmentPreviewAttributes(attachment, baseURI) {
-  const url = attachmentPreviewUrl(attachment, baseURI);
+export function attachmentPreviewAttributes(attachment, baseURI, downloadUrl) {
+  const url = isImageAttachment(attachment) ? downloadUrl || attachmentPreviewUrl(attachment, baseURI) : null;
   if (!url) return "";
   const name = attachment.name || "图片附件";
   return `data-attachment-image-url="${escapeAttribute(url)}" data-attachment-image-name="${escapeAttribute(name)}" aria-label="预览图片 ${escapeAttribute(name)}"`;

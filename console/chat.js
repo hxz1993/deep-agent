@@ -1,6 +1,7 @@
+import { renderPlanItems } from "./plan-view.js?v=20260922-trajectory-8";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
-import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260918-release01012";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20260912-21";
+import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260922-trajectory-8";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20260922-trajectory-8";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
   contextCompactionPresentation,
@@ -18,8 +19,8 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20260912-21";
-import { createTrajectoryController } from "./trajectory.js?v=20260915-scroll-focus";
-import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260912-21";
+import { createTrajectoryController } from "./trajectory.js?v=20260922-trajectory-8";
+import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import {
@@ -378,18 +379,7 @@ function renderComposerPlan(snapshot) {
   state.planSnapshot = presentation.plan;
   el.composerPlan.classList.remove("hidden");
   el.composerPlanProgress.textContent = presentation.label;
-  el.composerPlanItems.innerHTML = presentation.plan.items.map((item) => {
-    const display = item.status === "in_progress" && item.active_form
-      ? item.active_form
-      : item.content;
-    const icon = item.status === "completed"
-      ? "circle-check"
-      : item.status === "in_progress" ? "loader-circle" : "circle";
-    return `<li class="composer-plan-item status-${escapeHtml(item.status)}">
-      <span class="composer-plan-status">${lucideIcon(icon)}</span>
-      <span>${escapeHtml(display)}</span>
-    </li>`;
-  }).join("");
+  el.composerPlanItems.innerHTML = renderPlanItems(presentation.plan.items);
   if (wasHidden) setComposerPlanExpanded(true);
   refreshLucideIcons();
 }

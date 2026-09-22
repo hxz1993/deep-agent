@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="title desc">
+  <title id="title">DeepAgent</title>
+  <desc id="desc">方形机器人头部，左侧小圆角，右上与右下大圆角形成 D 形，竖线眼睛，圆头直天线，无耳朵。</desc>
+  <path d="M12 8V4.5"/>
+  <circle cx="12" cy="3.5" r="1.2" fill="currentColor" stroke="none"/>
+  <path d="M6 8H15A5 5 0 0 1 20 13V15A5 5 0 0 1 15 20H6A2 2 0 0 1 4 18V10A2 2 0 0 1 6 8Z"/>
+  <path d="M15 13v2M9 13v2"/>
+</svg>

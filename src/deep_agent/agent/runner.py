@@ -889,9 +889,11 @@ class AgentRunner:
             history = [*history, user_request]
             raw_history = [*raw_history, user_request]
             pre_persisted_user = True
+        # Compaction changes model-visible history, never attachment ownership.
+        # Only original session references (plus this turn's uploads) authorize files.
         deps.attachment_by_id = index_attachment_refs(
             attachments=attachments,
-            messages=history,
+            messages=raw_history,
         )
         deps.has_context_references = history_has_context_references(history)
         return _PreparedHistory(

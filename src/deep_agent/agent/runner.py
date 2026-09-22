@@ -1761,6 +1761,7 @@ class AgentRunner:
             tool_search_calls=(deps.tool_discovery.search_calls if deps.tool_discovery else 0),
             compaction=self._compaction_name(deps),
             cache_metrics_available=cache_usage_available(result.new_messages()),
+            messages=result.new_messages(),
         )
         response["context"] = self._context_status(prepared.projected, deps)
         response["context"]["compaction"]["compaction_event_saved"] = compaction_event_saved
@@ -2468,6 +2469,7 @@ class AgentRunner:
                     ),
                     compaction=self._compaction_name(deps),
                     cache_metrics_available=cache_usage_available(pending),
+                    messages=pending,
                 ),
             )
             return
@@ -2550,6 +2552,7 @@ class AgentRunner:
             cache_metrics_available=(
                 cache_usage_available(result.new_messages()) if result is not None else False
             ),
+            messages=result.new_messages() if result is not None else [],
         )
         log_event(
             "agent_run_pending" if metrics["status"] == "pending" else "agent_run_completed",

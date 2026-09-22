@@ -1,3 +1,5 @@
+import { cacheMessageSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
+import { tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderPlanSnapshot } from "./plan-view.js?v=20260922-trajectory-8";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
@@ -47,17 +49,6 @@ function valuePreview(value, limit = 180) {
   return normalized.length > limit ? `${normalized.slice(0, limit)}…` : normalized;
 }
 
-function usageTotal(usage) {
-  if (!usage || typeof usage !== "object") return null;
-  const direct = Number(usage.total_tokens);
-  if (Number.isFinite(direct)) return direct;
-  const input = Number(usage.input_tokens);
-  const output = Number(usage.output_tokens);
-  if (Number.isFinite(input) || Number.isFinite(output)) {
-    return (Number.isFinite(input) ? input : 0) + (Number.isFinite(output) ? output : 0);
-  }
-  return null;
-}
 
 function eventLabel(kind, part = {}) {
   if (kind === "input") return "User message";
@@ -646,16 +637,47 @@ function renderMarkdown(content, emptyMessage = "No content in this event.") {
   return `<div class="trajectory-summary-markdown">${rendered}</div>`;
 }
 
+function trajectoryUsage(event) {
+  if (!event.native?.usage) return null;
+  const usage = event.native.usage;
+  const input = tokenValue(usage.input_tokens);
+  const output = tokenValue(usage.output_tokens);
+  const reportedTotal = tokenValue(usage.total_tokens);
+  const cache = cacheMessageSummary(event.native);
+  const reported = [input, output, reportedTotal, cache.cache_read_tokens, cache.cache_write_tokens]
+    .some(value => value != null && value > 0) || cache.read_complete || cache.write_complete;
+  if (!reported) return null;
+  return { input, output, total: reportedTotal ?? (input != null && output != null ? input + output : null), cache };
+}
+
+export function renderTrajectoryUsage(event) {
+  const usage = trajectoryUsage(event);
+  if (!usage) return `<p class="trajectory-summary-empty">此请求暂无供应商用量数据。</p>`;
+  const { input, output, total, cache } = usage;
+  const number = value => value == null ? "—" : value.toLocaleString("zh-CN");
+  const fact = (label, text, title = "") => `<span title="${escapeHtml(title || `${label} ${text}`)}"><small>${label}</small><strong>${escapeHtml(text)}</strong></span>`;
+  return `<section class="inspector-section">
+    <header><strong>Token 用量</strong></header>
+    <div class="context-budget-summary">${fact("输入", number(input))}${fact("输出", number(output))}${fact("合计", number(total), `合计 ${number(total)} Token`)}</div>
+    <p class="trajectory-summary-copy">本次模型请求的用量，同一响应拆分的事件共用此统计。</p>
+  </section>
+  <section class="inspector-section">
+    <header><strong>缓存统计</strong></header>
+    <div class="context-budget-summary">${fact("命中率", cache.hit_ratio == null ? "—" : `${(cache.hit_ratio * 100).toFixed(1)}%`, "缓存读取 ÷ 输入 Token；未报告或无法计算时显示 —")}${fact("缓存读取", number(cache.cache_read_tokens), cache.cache_read_tokens == null ? "供应商未报告或旧记录无法确认" : `缓存读取 ${number(cache.cache_read_tokens)} Token`)}${fact("缓存写入", number(cache.cache_write_tokens), cache.cache_write_tokens == null ? "供应商未报告或旧记录无法确认" : `缓存写入 ${number(cache.cache_write_tokens)} Token`)}</div>
+    <p class="trajectory-summary-copy">缓存 Token 已包含在输入中。</p>
+  </section>`;
+}
+
 function renderMeta(event) {
-  const total = usageTotal(event.native?.usage);
   const duration = eventDuration(event);
+  const usage = trajectoryUsage(event);
   const items = [
     ["clock-3", event.timestamp ? formatTime(event.timestamp) : null],
     ["timer", durationLabel(duration)],
-    ["coins", total == null ? null : `${total.toLocaleString("zh-CN")} Token`],
+    ["coins", usage?.total != null ? `${usage.total.toLocaleString("zh-CN")} Token` : null],
   ].filter(([, value]) => value);
   if (!items.length) return "";
-  return `<div class="trajectory-summary-meta">${items.map(([name, value]) => `<span>${icon(name)}${escapeHtml(value)}</span>`).join("")}</div>`;
+  return `<div class="trajectory-summary-meta">${items.map(([name, value]) => `<span${name === "coins" ? ' title="本次模型请求的 Token 合计"' : ""}>${icon(name)}${escapeHtml(value)}</span>`).join("")}</div>`;
 }
 
 function renderSummarySection(title, body, { targetTab = null, className = "" } = {}) {
@@ -943,12 +965,14 @@ function renderRunCode(event) {
 // Tabs describe semantic projections, not HTTP bodies or database columns.
 function detailTabs(event) {
   const tabs = [["summary", "Summary"]];
+  if (trajectoryUsage(event)) tabs.push(["usage", "Usage"]);
   if (isPythonCodeEvent(event)) tabs.push(["code", "Code"]);
   if (TOOL_KINDS.has(event.kind)) {
     if (hasMeaningfulValue(event.payload)) tabs.push(["input", "Input"]);
     if (hasMeaningfulValue(event.result)) tabs.push(["result", "Result"]);
   } else if (["input", "assistant"].includes(event.kind)) {
-    tabs.push(["message", "Message"], ["preview", "Preview"], ["raw", "Raw"]);
+    tabs.push(["message", "Message"], ["preview", "Preview"]);
+    tabs.push(["raw", "Raw"]);
   } else if (hasMeaningfulValue(event.payload)) {
     tabs.push(["event", "Event"]);
   }
@@ -996,6 +1020,7 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl) 
   if (activeTab === "result") content = renderJsonBlock(event.result);
   if (activeTab === "preview") content = renderPreview(event);
   if (activeTab === "raw") content = renderRaw(event);
+  if (activeTab === "usage") content = renderTrajectoryUsage(event);
   if (activeTab === "code") content = renderRunCode(event);
   const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title"].includes(event.kind)
     ? event.label

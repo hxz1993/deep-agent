@@ -18,6 +18,7 @@ from sqlalchemy import and_, case, exists, func, literal, or_, select
 from sqlalchemy.orm import aliased
 
 from deep_agent.agent.observability import token_usage_available
+from deep_agent.agent.cache_usage import summarize_cache_usage
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
 from deep_agent.db.models import Agent, ChannelAccount, ChatSession, ChatSessionEvent
 from deep_agent.db.session_scope import agent_scope_to_api
@@ -429,6 +430,8 @@ def detail_event_metadata(events, active_run_id=None):
     if active_run_id in runs:
         runs[active_run_id]["status"] = "running"
     totals: dict[str, int] = {}
+    cache_messages: list[dict] = []
+    run_cache_messages: dict[str, list[dict]] = {}
     usage_missing_responses = 0
     last_model = last_provider = conversation_id = None
     message_count = attachment_count = tool_call_count = 0
@@ -437,7 +440,7 @@ def detail_event_metadata(events, active_run_id=None):
     except (KeyError, ValueError, TypeError):
         return {"runs": list(runs.values()), "usage": None, "model_name": None, "provider_name": None,
             "conversation_id": None, "message_count": None, "turn_count": None, "attachment_count": None,
-            "tool_call_count": None, "metadata_error": "部分历史消息无法解析，请切换轨迹查看已保存事件"}
+            "tool_call_count": None, "cache_usage": summarize_cache_usage([]), "metadata_error": "部分历史消息无法解析，请切换轨迹查看已保存事件"}
     for event in grouped:
         kind = event.get("event_type") if isinstance(event, dict) else event.event_type
         if kind not in MESSAGE_EVENT_TYPES:
@@ -457,6 +460,9 @@ def detail_event_metadata(events, active_run_id=None):
             continue
         run_id = event.get("run_id") if isinstance(event, dict) else event.run_id
         run = runs.get(run_id)
+        cache_messages.append(message)
+        if run is not None:
+            run_cache_messages.setdefault(run_id, []).append(message)
         last_model = message.get("model_name") or last_model
         last_provider = message.get("provider_name") or last_provider
         conversation_id = message.get("conversation_id") or conversation_id
@@ -482,12 +488,14 @@ def detail_event_metadata(events, active_run_id=None):
     if "input_tokens" in totals and "output_tokens" in totals:
         totals["total_tokens"] = totals["input_tokens"] + totals["output_tokens"]
     for run in runs.values():
+        run["cache_usage"] = summarize_cache_usage(run_cache_messages.get(run["run_id"], []))
         run["usage_missing_responses"] = run.get("usage_missing_responses", 0)
         run["usage_partial"] = bool(run.get("usage") and run["usage_missing_responses"])
         usage = run.get("usage") or {}
         if "input_tokens" in usage and "output_tokens" in usage:
             usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
     return {"runs": list(runs.values()), "usage": totals or None,
+        "cache_usage": summarize_cache_usage(cache_messages),
         "usage_missing_responses": usage_missing_responses,
         "usage_partial": bool(totals and usage_missing_responses), "model_name": last_model,
         "provider_name": last_provider, "conversation_id": conversation_id, "message_count": message_count,

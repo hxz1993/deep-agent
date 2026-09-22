@@ -73,6 +73,7 @@ def run_metrics(
     tool_search_calls: int = 0,
     compaction: str = "none",
     cache_metrics_available: bool | None = None,
+    messages: Iterable[ModelMessage] | None = None,
 ) -> dict[str, Any]:
     metrics = {
         "model_id": model_id,
@@ -88,6 +89,13 @@ def run_metrics(
     ):
         metrics["cache_read_tokens"] = None
         metrics["cache_write_tokens"] = None
+    if messages is not None:
+        from deep_agent.agent.cache_usage import summarize_cache_usage
+
+        cache = summarize_cache_usage(messages)
+        metrics["cache_usage"] = cache
+        metrics["cache_read_tokens"] = cache["cache_read_tokens"]
+        metrics["cache_write_tokens"] = cache["cache_write_tokens"]
     return metrics
 
 

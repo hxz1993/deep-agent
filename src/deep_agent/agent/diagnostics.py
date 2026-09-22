@@ -11,7 +11,8 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, ToolRetryError
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.observability import cache_usage_available, log_event
+from deep_agent.agent.cache_usage import cache_message_summary, stamp_cache_usage
+from deep_agent.agent.observability import log_event
 from deep_agent.agent.model_api_diagnostics import observed_model
 from deep_agent.agent.tool_errors import native_error_facts
 
@@ -117,12 +118,13 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             response = await handler(request_context)
             extra = {}
             try:
+                stamp_cache_usage(response)
                 usage = response.usage
-                cache_available = cache_usage_available([response])
+                cache = cache_message_summary(response)
                 extra = dict(provider_name=response.provider_name, finish_reason=response.finish_reason,
                              input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
-                             cache_read_tokens=usage.cache_read_tokens if cache_available else None,
-                             cache_write_tokens=usage.cache_write_tokens if cache_available else None)
+                             cache_read_tokens=cache["cache_read_tokens"],
+                             cache_write_tokens=cache["cache_write_tokens"])
             except Exception:
                 pass
             self._emit("model_request_completed", **fields, **extra,

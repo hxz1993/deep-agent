@@ -709,8 +709,8 @@ html, body {
   background: transparent;
 }
 .trajectory-summary { display: flex; min-height: 100%; flex-direction: column; }
-.trajectory-summary-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 0 0 12px; border-bottom: 0; }
-.trajectory-summary-meta span { display: inline-flex; align-items: center; gap: 5px; color: var(--text-faint); font-size: 12px; }
+.trajectory-summary-meta { display: flex; gap: 10px; white-space: nowrap; overflow-x: auto; padding: 0 0 12px; border-bottom: 0; }
+.trajectory-summary-meta span { flex: none; display: inline-flex; align-items: center; gap: 5px; color: var(--text-faint); font-size: 12px; }
 .trajectory-summary-meta svg { width: 14px; height: 14px; }
 .trajectory-summary-primary { padding: 8px 0; }
 .trajectory-summary-section + .trajectory-summary-section,

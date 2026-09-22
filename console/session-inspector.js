@@ -99,9 +99,38 @@ export function renderRunUsageOverview(run = {}, usage = {}) {
   </div>`;
 }
 
+export function formatCacheHitRatio(summary = {}) {
+  const ratio = summary.read_complete === true && typeof summary.hit_ratio === "number"
+    && Number.isFinite(summary.hit_ratio) && summary.hit_ratio >= 0 && summary.hit_ratio <= 1
+    ? summary.hit_ratio : null;
+  return ratio == null ? "—" : `${(ratio * 100).toFixed(1)}%`;
+}
+
+function cacheFact(label, value, complete, scope, stacked = false) {
+  const amount = tokenValue(value);
+  const partial = amount != null && complete !== true;
+  const title = amount == null ? "供应商未报告或旧记录无法确认"
+    : partial ? `${scope}仅累计已报告数据，部分请求缺失` : `${scope}供应商报告的 Token`;
+  const text = `${escapeHtml(formatTokens(amount))}${partial ? "（部分）" : ""}`;
+  if (stacked) return `<span title="${escapeHtml(title)}"><small>${label}</small><strong>${text}</strong></span>`;
+  return inspectorFactHtml(label, `<span title="${escapeHtml(title)}">${text}</span>`);
+}
+
+export function renderCacheFacts(summary = {}, { scope = "会话累计", ratioLabel = "累计命中率", stacked = false } = {}) {
+  const title = summary.response_count > 0 && summary.read_complete !== true
+    ? "缓存读取数据不完整，无法计算完整命中率"
+    : `${scope}缓存读取 Token ÷ 输入 Token；缓存读取已包含在输入中`;
+  if (stacked) return `<span title="${escapeHtml(title)}"><small>${ratioLabel}</small><strong>${formatCacheHitRatio(summary)}</strong></span>
+    ${cacheFact("缓存读取", summary.cache_read_tokens, summary.read_complete, scope, true)}
+    ${cacheFact("缓存写入", summary.cache_write_tokens, summary.write_complete, scope, true)}`;
+  return `${inspectorFactHtml(ratioLabel, `<span title="${escapeHtml(title)}">${formatCacheHitRatio(summary)}</span>`)}
+    ${cacheFact("缓存读取", summary.cache_read_tokens, summary.read_complete, scope)}
+    ${cacheFact("缓存写入", summary.cache_write_tokens, summary.write_complete, scope)}`;
+}
+
 export function renderSessionInspector({
   state = {}, activeSession = {}, model = null, context = {}, identity = {}, contextStatus = {},
-  usage = {}, run = {}, runModel = null, agentName = "—", channelOrigin = null, agentChannels = [],
+  usage = {}, run = {}, sessionCache = {}, runCache = {}, runModel = null, agentName = "—", channelOrigin = null, agentChannels = [],
   activeTab = "session", contextContent = "", statusText = "", statusClass = "idle",
 } = {}) {
   // Every Run emits telemetry, including no-op estimates. Only a successful
@@ -175,6 +204,10 @@ export function renderSessionInspector({
       <div class="wide inspector-user-fact"><span>用户</span>${renderUserIdentity(identity?.profile || {}, {userId: identity?.user || "", copyable: true})}</div>
     </div>
   </section>
+  <section class="inspector-section inspector-cache-section">
+    <header title="当前会话各模型响应的缓存统计"><strong>缓存统计</strong></header>
+    <div class="context-budget-summary">${renderCacheFacts(sessionCache, { stacked: true })}</div>
+  </section>
   <section class="inspector-section inspector-budget-section">
     <header title="${escapeHtml(contextOccupancyPresentation(contextStatus).detail)}"><strong>上下文预算</strong></header>
     ${renderContextBudgetOverview(contextStatus)}
@@ -188,8 +221,7 @@ export function renderSessionInspector({
       ${inspectorFact("请求", run.requests ?? usage.requests ?? "—")}
       ${inspectorFact("工具调用", run.tool_calls ?? usage.tool_calls ?? "—")}
       ${inspectorFact("Tool Search", run.tool_search_calls ?? "—")}
-      ${inspectorFact("缓存读取", formatTokens(run.cache_read_tokens ?? usage.cache_read_tokens))}
-      ${inspectorFact("缓存写入", formatTokens(run.cache_write_tokens ?? usage.cache_write_tokens))}
+      ${renderCacheFacts(runCache.response_count > 0 ? runCache : {}, { scope: "本轮累计", ratioLabel: "本轮命中率" })}
       ${inspectorFact("耗时", run.duration_ms != null && Number.isFinite(Number(run.duration_ms)) ? `${Number(run.duration_ms).toLocaleString("zh-CN")} ms` : "—")}
       ${inspectorFact("压缩", run.compaction || "—")}
       ${inspectorFact("Conv. ID", run.conversation_id || "—", { mono: true, wide: true })}

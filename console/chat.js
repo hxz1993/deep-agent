@@ -1,7 +1,8 @@
-import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
+import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-usage-tab-2";
 import { renderPlanItems } from "./plan-view.js?v=20260922-trajectory-8";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
-import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260923-c02";
+import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260923-usage-tab-2";
+import { cacheTrajectorySummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 import { createConversationPresenter } from "./conversation-presenter.js?v=20260922-trajectory-8";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
@@ -20,7 +21,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20260912-21";
-import { createTrajectoryController } from "./trajectory.js?v=20260922-trajectory-8";
+import { createTrajectoryController } from "./trajectory.js?v=20260923-usage-tab-2";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
@@ -159,6 +160,8 @@ const state = {
   contextStatus: null,
   lastRunUsage: null,
   lastRunMetrics: null,
+  sessionCache: null,
+  runCache: null,
   automaticCompactionRow: null,
   automaticCompactionTimer: null,
   pendingAutomaticCompaction: null,
@@ -901,6 +904,8 @@ function newChat(agentId) {
   }
   loadUiTools(state.agentId);
   state.sessionId = null;
+  state.sessionCache = null;
+  state.runCache = null;
   state.conversationId = null;
   state.awaitingHitl = false;
   state.modelMessageCount = 0;
@@ -1036,6 +1041,8 @@ async function switchSession(s) {
   stopHistoryObservation();
   const session = normalizeSession(s);
   state.sessionId = session.id;
+  state.sessionCache = null;
+  state.runCache = null;
   state.lastRunUsage = null;
   state.lastRunMetrics = null;
   if (session.agentId) {
@@ -1107,7 +1114,10 @@ async function loadSessionHistory(session, { signal, isCurrent = () => true } = 
       const history = normalizeConversationHistory(await response.json());
       if (!current()) return;
       applyObservedHistory(history, { status: "running" });
-      if (events.response.ok) trajectory?.setHistory(events.data);
+      if (events.response.ok) {
+        trajectory?.setHistory(events.data);
+        updateObservedSessionMetrics(normalized, events.data.items);
+      }
       state.historyObservationPending = true;
     } else {
       await observeSessionHistory(normalized, controller, current);
@@ -1367,6 +1377,9 @@ async function observePersistedSessionHistory(session, controller, current, {
 function updateObservedSessionMetrics(session, events) {
   const selected = state.sessions.find((item) => item.id === session.id && item.agentId === session.agentId);
   if (!selected) return;
+  state.sessionCache = cacheTrajectorySummary(trajectory?.events() || []);
+  const cacheRunId = state.streaming ? state.lastRunMetrics?.run_id : savedRunState(events).run_id;
+  state.runCache = cacheRunId ? cacheTrajectorySummary(trajectory?.events() || [], cacheRunId) : null;
   const { messageCount, turnCount } = savedSessionCounts(events);
   // Saved events aggregate a whole Run; a projected assistant is only one message.
   if (!state.abortController) {
@@ -2514,9 +2527,16 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
     return;
   }
   trajectory?.ingest({ event: type, data });
+  if (["session_event_appended", "session_event_updated"].includes(type)) {
+    const rows = trajectory?.events() || [];
+    state.sessionCache = cacheTrajectorySummary(rows);
+    const runId = data.event?.run_id || state.lastRunMetrics?.run_id;
+    state.runCache = runId ? cacheTrajectorySummary(rows, runId) : null;
+  }
   switch (type) {
     case "session": {
       const id = data.session_id;
+      state.runCache = null;
       if (id) {
         state.sessionId = id;
         state.conversationId = data.conversation_id || state.conversationId;
@@ -2585,6 +2605,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       }
       break;
     case "final":
+      state.runCache = data.run_metrics?.cache_usage || state.runCache;
       applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       if (data.usage) renderUsage(data.usage);
       else state.lastRunUsage = null;
@@ -2632,6 +2653,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       clearComposerPlan();
       break;
     case "cancelled":
+      state.runCache = data.run_metrics?.cache_usage || state.runCache;
       failAutomaticContextCompaction("上下文压缩已取消，未生成压缩事件");
       // Keep the current streamed conversation in place. The official
       // interrupted history remains the source of truth when the session is

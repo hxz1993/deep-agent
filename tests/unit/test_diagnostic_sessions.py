@@ -336,6 +336,40 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["usage_partial"])
         self.assertEqual(result["usage_missing_responses"], 0)
 
+    async def test_cache_summary_survives_split_replay_and_reports_partial_history(self):
+        from deep_agent.agent.cache_usage import stamp_cache_usage
+        responses = [
+            ModelResponse(parts=[ThinkingPart("reason"), TextPart("working"), ToolCallPart("read", {}, "call")],
+                usage=RequestUsage(input_tokens=10000, output_tokens=500, cache_read_tokens=8000)),
+            ModelRequest(parts=[ToolReturnPart("read", "found", "call")]),
+            ModelResponse(parts=[ThinkingPart("finish"), TextPart("answer")],
+                usage=RequestUsage(input_tokens=6000, output_tokens=500, cache_read_tokens=3000,
+                    cache_write_tokens=0)),
+        ]
+        for message in responses:
+            if message.kind == "response":
+                stamp_cache_usage(message)
+        kwargs = dict(agent_id=self.agent_id, user_id="user-one", turn_id="turn", run_id="run",
+            terminal_status="completed")
+        await self.store.append_message_parts("cache-parts", messages=responses, **kwargs)
+        await self.store.append_message_parts("cache-parts", messages=responses, **kwargs)
+        result = detail_event_metadata(await self.store.list_all_events("cache-parts"))
+        self.assertEqual(result["cache_usage"]["response_count"], 2)
+        self.assertEqual(result["cache_usage"]["hit_ratio"], .6875)
+        self.assertEqual(result["cache_usage"]["cache_read_tokens"], 11000)
+        self.assertFalse(result["cache_usage"]["write_complete"])
+        self.assertEqual(result["runs"][0]["cache_usage"], result["cache_usage"])
+        await self.store.append_message_parts("cache-parts",
+            messages=[ModelResponse(parts=[TextPart("older unknown cache")],
+                usage=RequestUsage(input_tokens=30, output_tokens=2))],
+            agent_id=self.agent_id, user_id="user-one", turn_id="next-turn", run_id="next-run",
+            terminal_status="completed")
+        reopened = detail_event_metadata(await self.store.list_all_events("cache-parts"))
+        self.assertIsNone(reopened["cache_usage"]["hit_ratio"])
+        self.assertEqual(reopened["cache_usage"]["cache_read_tokens"], 11000)
+        self.assertFalse(reopened["cache_usage"]["read_complete"])
+        self.assertEqual(reopened["runs"][0]["cache_usage"]["hit_ratio"], .6875)
+
     async def test_missing_usage_is_unknown_and_partial_usage_is_explicit(self):
         kwargs = dict(agent_id=self.agent_id, user_id="user-one", turn_id="turn", run_id="run")
         await self.store.append_message_parts("missing", messages=[ModelResponse(parts=[TextPart("answer")])],

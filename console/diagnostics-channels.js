@@ -4,7 +4,7 @@ import { escapeHtml as e, icon, icons, selectHtml, bindDiagnosticSelects, diagno
 import { diagnosticHash, sessionRange, channelEntryFilters } from "./diagnostics-navigation.js?v=20260915-release-audit";
 import { createSessionReader, sessionQueryError } from "./diagnostics-session-query.js?v=20260915-release-audit";
 import { bindChannelResizer } from "./channel-resizer.js?v=20260915-release-audit";
-import { shortQuestionTime } from "./diagnostics-sessions.js?v=20260923-c02";
+import { shortQuestionTime } from "./diagnostics-sessions.js?v=20260923-usage-tab-2";
 
 const PERIODS = [["24", "最近 1 天"], ["168", "最近 7 天"], ["720", "最近 30 天"]];
 const PAGE_SIZE = 25;

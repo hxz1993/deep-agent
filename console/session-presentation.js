@@ -1,4 +1,5 @@
-import { buildTrajectory, redactTrajectoryValue } from "./trajectory.js?v=20260922-trajectory-8";
+import { buildTrajectory, redactTrajectoryValue } from "./trajectory.js?v=20260923-usage-tab-2";
+import { cacheSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Saved terminal facts only; an active transport is the host's separate override. */
@@ -40,7 +41,12 @@ export function savedRunFacts(events = [], runId = null) {
     usage.total_tokens = (usage.input_tokens || 0) + (usage.output_tokens || 0);
   }
   const latest = messages.at(-1)?.native || {};
-  return { usage, usage_partial: missingResponses > 0 && missingResponses < messages.length, usage_missing_responses: missingResponses, conversation_id: latest.conversation_id || null, provider_name: latest.provider_name || null, model_name: latest.model_name || null, model_id: latest.model_id || null, finish_reason: latest.finish_reason || null };
+  const cache_usage = cacheSummary(messages.map(item => item.native));
+  for (const field of ["cache_read_tokens", "cache_write_tokens"]) {
+    if (cache_usage[field] != null) usage[field] = cache_usage[field];
+    else delete usage[field];
+  }
+  return { usage, cache_usage, usage_partial: missingResponses > 0 && missingResponses < messages.length, usage_missing_responses: missingResponses, conversation_id: latest.conversation_id || null, provider_name: latest.provider_name || null, model_name: latest.model_name || null, model_id: latest.model_id || null, finish_reason: latest.finish_reason || null };
 }
 
 /** Count SDK messages, not their separately persisted parts. */

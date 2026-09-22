@@ -4,7 +4,7 @@ import { diagnosticTime } from "./diagnostics.js?v=20260915-ui-polish";
 import { diagnosticHash, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260915-app-filter";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260915-app-filter";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260923-c02";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260923-usage-tab-2";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PERIODS = [["24", "最近 1 天"], ["168", "最近 7 天"], ["720", "最近 30 天"], ["custom", "自定义时间"]];

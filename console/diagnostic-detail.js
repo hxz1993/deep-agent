@@ -1,11 +1,11 @@
 import { sessionLoadingHtml, prepareSessionRender, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
-import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20260923-c02";
+import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20260923-usage-tab-2";
 import { createConversationPresenter } from "./conversation-presenter.js?v=20260922-trajectory-8";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20260912-21";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260912-21";
-import { createTrajectoryController } from "./trajectory.js?v=20260922-trajectory-8";
+import { createTrajectoryController } from "./trajectory.js?v=20260923-usage-tab-2";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20260923-c02";
+import { renderSessionInspector } from "./session-inspector.js?v=20260923-usage-tab-2";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260918-release01012";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
@@ -90,6 +90,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
       activeSession: { appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
       model, runModel,
       run, usage, contextStatus, agentName: session.agent_name || session.agent_id || "未记录",
+      sessionCache: session.cache_usage || {}, runCache: run.cache_usage || {},
       context: { app: session.app_id, space: session.space_id, language: session.language }, identity: { user: userId || "", profile: data.users[userId] || {} },
       channelOrigin: channelOriginPresentation(session.channel), activeTab: inspectorTab,
       contextContent: contextReferenceContent(selectedReference?.reference),

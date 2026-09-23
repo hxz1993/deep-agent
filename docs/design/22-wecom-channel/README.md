@@ -8,6 +8,8 @@
   SSE 转换、媒体、快捷命令、来源标题和单副本边界。
 - [`message-lifecycle-review.md`](message-lifecycle-review.md)：逐条消息与命令如何改变 Binding/Run，
   以及固定版本 OpenClaw、LangBot 的取舍依据。
+- [`weixin-astrbot-research.md`](weixin-astrbot-research.md)：2026-09-23 个人微信 iLink 与 AstrBot
+  渠道、身份、历史落库和控制台入口调研；用户明确暂不开发，不纳入当前版本。
 
 当前认可的核心边界：
 

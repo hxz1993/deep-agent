@@ -1053,8 +1053,17 @@ class AgentRunner:
                 event_id, status=status, payload=terminal_payload
             )
 
+        async def persist_summary_usage(calls):
+            if state.compaction_event_id is not None:
+                for call in calls:
+                    call["model_id"] = self._model_id
+                    call["provider_id"] = self._provider_id
+                return await self.store.attach_usage(state.compaction_event_id,
+                    calls=calls, usage_model_id=self._model_id)
+
         state.start_compaction_event = start
         state.finish_compaction_event = finish
+        state.persist_summary_usage = persist_summary_usage
 
     async def _maybe_save_compaction(
         self,
@@ -1313,6 +1322,8 @@ class AgentRunner:
                     run_id=deps.run_id,
                     first_message_ordinal=1 if pre_persisted_user else 0,
                     terminal_status=terminal_status,
+                    usage_model_id=self._model_id,
+                    usage_provider_id=self._provider_id,
                 )
         except Exception as exc:
             log_event("message_persistence_failed", session_id=session_id,
@@ -1473,6 +1484,19 @@ class AgentRunner:
         session_event_queue: asyncio.Queue[dict[str, Any]] | None,
     ) -> None:
         from deep_agent.agent.title_generator import generate_title
+        from deep_agent.usage import merge_calls, response_call
+
+        responses = []
+        def title_calls():
+            return [response_call(response,
+                request_id=f"{fallback_event.event_id}:title:{index}",
+                model_id=self._model_id, provider_id=self._provider_id, purpose="title")
+                for index, response in enumerate(responses)]
+        async def retain_on_fallback():
+            calls = title_calls()
+            if calls:
+                await self.store.attach_usage(fallback_event.event_id,
+                    calls=calls, usage_model_id=self._model_id)
 
         try:
             result = await generate_title(
@@ -1491,9 +1515,12 @@ class AgentRunner:
                 attachments=attachments,
                 file_store=deps.file_store,
                 request_headers=deps.request_headers,
+                usage_collector=responses,
             )
             if result is None:
+                await retain_on_fallback()
                 return
+            calls = title_calls()
             event = await self.store.apply_session_title(
                 session_id,
                 agent_id=deps.agent_id,
@@ -1504,6 +1531,8 @@ class AgentRunner:
                 turn_id=deps.turn_id,
                 run_id=deps.run_id,
                 expected_event_id=fallback_event.event_id,
+                usage=merge_calls(None, calls),
+                usage_model_id=self._model_id if calls else None,
                 details={
                     "provider_id": self._provider_id,
                     "provider_type": self._provider_type,
@@ -1514,7 +1543,13 @@ class AgentRunner:
                     "image_used": result.image_used,
                 },
             )
+            if event is None:
+                await retain_on_fallback()
         except Exception as exc:  # noqa: BLE001 - fallback remains authoritative
+            try:
+                await retain_on_fallback()
+            except Exception:
+                logger.warning("Title usage persistence failed for session {}", session_id)
             log_event("title_generation_failed", session_id=session_id, run_id=deps.run_id,
                       agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name, model_id=self._model_id,
                       phase="title_update", error_type=type(exc).__name__)
@@ -1656,7 +1691,7 @@ class AgentRunner:
             progress = (
                 MessagePersistenceCapability(self.store, history_length=len(llm_history),
                                       skip_user_prompt=prepared.pre_persisted_user,
-                                      model_name=self._model_id)
+                                      model_name=self._model_id, provider_id=self._provider_id)
                 if callable(getattr(self.store, "append_message_parts", None)) else None
             )
             try:
@@ -2118,6 +2153,7 @@ class AgentRunner:
                     StreamMessagePersistenceCapability(
                         self.store, history_length=len(model_history),
                         skip_user_prompt=prepared.pre_persisted_user, model_name=self._model_id,
+                        provider_id=self._provider_id,
                         event_queue=session_events,
                     )
                     if callable(getattr(self.store, "append_message_parts", None)) else None

@@ -11,7 +11,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, capture_run_messages
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, RunCancelled
 from pydantic_ai.messages import (
@@ -39,6 +39,7 @@ from deep_agent.agent.context.budget import (
 from deep_agent.agent.context.estimator import TokenEstimator, canonical_json
 from deep_agent.agent.context.runtime import CompactionTelemetry, ContextRunState
 from deep_agent.options import OPTION
+from deep_agent.usage import response_call
 
 if TYPE_CHECKING:
     from pydantic_ai.models import ModelRequestContext
@@ -1401,19 +1402,33 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
             state.telemetry.summary_calls += 1
             state.telemetry.summary_chunks = 1
             usage_requests_before_attempt = ctx.usage.requests
+            async def observed_summary():
+                with capture_run_messages() as responses:
+                    try:
+                        return await summary_agent.run(
+                            prompt,
+                            usage=ctx.usage,
+                            usage_limits=state.usage_limits,
+                            model_settings=_summary_model_settings(ctx.model, output_limit),
+                            cancellation_token=getattr(ctx.deps, "cancellation_token", None),
+                        )
+                    finally:
+                        calls = [response_call(message,
+                            request_id=f"{state.compaction_event_id}:summary:{len(state.summary_usage_calls) + index}",
+                            model_id=getattr(ctx.deps, "model_id", None), provider_id=None,
+                            purpose="compaction")
+                            for index, message in enumerate(responses) if isinstance(message, ModelResponse)]
+                        state.summary_usage_calls.extend(calls)
+                        if calls and state.persist_summary_usage is not None:
+                            try:
+                                await asyncio.shield(state.persist_summary_usage(calls))
+                            except Exception as exc:
+                                logger.warning("Summary usage persistence failed: {}", type(exc).__name__)
             try:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError
-                request_task = asyncio.create_task(
-                    summary_agent.run(
-                        prompt,
-                        usage=ctx.usage,
-                        usage_limits=state.usage_limits,
-                        model_settings=_summary_model_settings(ctx.model, output_limit),
-                        cancellation_token=getattr(ctx.deps, "cancellation_token", None),
-                    )
-                )
+                request_task = asyncio.create_task(observed_summary())
                 try:
                     while not request_task.done():
                         remaining = deadline - time.monotonic()
@@ -1493,7 +1508,7 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                 "model_id": getattr(response, "model_name", None),
                 "provider_response_id": getattr(response, "provider_response_id", None),
                 "finish_reason": finish_reason,
-                "usage": _jsonable_usage(getattr(result, "usage", None)),
+                "usage": _jsonable_usage(getattr(response, "usage", None)),
                 "max_output_tokens": output_limit,
             }
             if finish_reason in {"length", "max_tokens"}:

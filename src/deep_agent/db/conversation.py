@@ -53,6 +53,7 @@ class SessionStore(Protocol):
         app_id: str | None = None, space_id: str | None = None,
         turn_id: str | None = None, run_id: str | None = None,
         first_message_ordinal: int = 0, terminal_status: str | None = None,
+        usage_model_id: str | None = None, usage_provider_id: str | None = None,
     ) -> list[SessionEventSnapshot]: ...
 
     async def append_message_parts(
@@ -60,6 +61,7 @@ class SessionStore(Protocol):
         turn_id: str, run_id: str, messages: list[ModelMessage],
         first_message_ordinal: int = 1, app_id: str | None = None,
         space_id: str | None = None, terminal_status: str | None = None,
+        usage_model_id: str | None = None, usage_provider_id: str | None = None,
     ) -> list[SessionEventSnapshot]: ...
 
     async def append_execution_error(
@@ -95,6 +97,8 @@ class SessionStore(Protocol):
         turn_id: str | None, run_id: str | None,
         expected_event_id: str | None = None,
         details: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
+        usage_model_id: str | None = None,
     ) -> SessionEventSnapshot | None: ...
     async def list_session_summaries(
         self, filters: SessionListFilters,
@@ -186,6 +190,7 @@ class SqlConversationCoordinator:
         app_id: str | None = None, space_id: str | None = None,
         turn_id: str | None = None, run_id: str | None = None,
         first_message_ordinal: int = 0, terminal_status: str | None = None,
+        usage_model_id: str | None = None, usage_provider_id: str | None = None,
     ) -> list[SessionEventSnapshot]:
         if not messages and terminal_status is None:
             return []
@@ -231,12 +236,14 @@ class SqlConversationCoordinator:
                 rows = await self._events._append_message_parts(
                     db, session, messages, turn_id=resolved_turn_id, run_id=run_id,
                     first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
+                    usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
                 )
             else:
                 rows = await self._events._append_messages(
                     db, session, messages, turn_id=resolved_turn_id, run_id=run_id, now=now,
                     first_message_ordinal=first_message_ordinal,
                     terminal_status=terminal_status,
+                    usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
                 )
             return [SessionEventSnapshot.from_row(row) for row in rows]
 
@@ -245,6 +252,7 @@ class SqlConversationCoordinator:
         turn_id: str, run_id: str, messages: list[ModelMessage],
         first_message_ordinal: int = 1, app_id: str | None = None,
         space_id: str | None = None, terminal_status: str | None = None,
+        usage_model_id: str | None = None, usage_provider_id: str | None = None,
     ) -> list[SessionEventSnapshot]:
         if not run_id or not turn_id:
             raise ValueError("Message parts require run_id and turn_id")
@@ -263,6 +271,7 @@ class SqlConversationCoordinator:
             rows = await self._events._append_message_parts(
                 db, session, messages, turn_id=turn_id, run_id=run_id,
                 first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
+                usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
             )
             return [SessionEventSnapshot.from_row(row) for row in rows]
 
@@ -315,6 +324,10 @@ class SqlConversationCoordinator:
         self, event_id: str, *, status: LifecycleStatus, payload: dict[str, Any],
     ) -> SessionEventSnapshot | None:
         return await self._events.update_lifecycle(event_id, status=status, payload=payload)
+
+    async def attach_usage(self, event_id: str, *, calls: list[dict[str, Any]],
+                           usage_model_id: str | None = None) -> SessionEventSnapshot | None:
+        return await self._events.attach_usage(event_id, calls=calls, usage_model_id=usage_model_id)
 
     async def persist_compaction_projection(
         self, session_id: str, *, agent_id: str | None, user_id: str | None,
@@ -788,6 +801,8 @@ class SqlConversationCoordinator:
         run_id: str | None,
         expected_event_id: str | None = None,
         details: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
+        usage_model_id: str | None = None,
     ) -> SessionEventSnapshot | None:
         if source not in {"model", "user"}:
             raise ValueError("Session title source must be model or user")
@@ -819,6 +834,7 @@ class SqlConversationCoordinator:
                 turn_id=turn_id,
                 run_id=run_id,
                 details=details,
+                usage=usage, usage_model_id=usage_model_id,
             )
             return SessionEventSnapshot.from_row(row)
 

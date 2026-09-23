@@ -85,6 +85,8 @@ class ContextRunState:
     compaction_event_id: str | None = None
     compaction_started_at: float | None = None
     summary_call: dict[str, Any] | None = None
+    summary_usage_calls: list[dict[str, Any]] = field(default_factory=list)
+    persist_summary_usage: Callable[[list[dict[str, Any]]], Awaitable[Any]] | None = field(default=None, repr=False)
     compaction_request_parameters: Any | None = field(default=None, repr=False)
     compaction_estimated_tokens_before: int | None = None
     compaction_target_tokens: int | None = None
@@ -100,6 +102,7 @@ class ContextRunState:
     async def begin_compaction(self, trigger: str) -> None:
         self.compaction_started_at = time.perf_counter()
         self.summary_call = None
+        self.summary_usage_calls = []
         self.pruned_tool_results = []
         if self.start_compaction_event is None:
             return

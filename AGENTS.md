@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.19`，数据库Head为`006` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.11.0`，数据库Head为`007` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -22,7 +22,7 @@
 新增平台身份适配必须复用 `deepfos_platform.discovery.target.normalize_service_target`，
 保留显式 IP/端口、真实域名及网关路径的直连语义。
 
-诊断中心分「日志 / 会话」两个入口：见[日志指南](docs/guides/diagnostic-logs.md)和[会话指南](docs/guides/diagnostic-sessions.md)。
+诊断中心依次为「会话 / 用量 / 日志」：见[会话指南](docs/guides/diagnostic-sessions.md)、[用量指南](docs/guides/diagnostic-usage.md)和[日志指南](docs/guides/diagnostic-logs.md)。
 会话概览、列表和跨用户只读详情统一使用管理员 `/diagnostics/sessions` 接口；统计只读取现有会话与真实事件，
 平台会话概览/列表的用户维度为平台账号（包含渠道会话的归属账号）；新增渠道详情独立按渠道账户、用户/群聊和发言人统计，读取已有渠道台账与会话事件，不新增统计表或事件。
 `diagnostics/` 是独立、尽力写入的管道分隔文本日志模块（`.log`），不写会话事件、不改变业务执行。

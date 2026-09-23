@@ -10,8 +10,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from pydantic_ai import Agent
-from pydantic_ai.messages import BinaryContent, UserContent
+from pydantic_ai import Agent, capture_run_messages
+from pydantic_ai.messages import BinaryContent, ModelResponse, UserContent
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.models.wrapper import WrapperModel
@@ -182,6 +182,7 @@ async def generate_title(
     request_headers: Mapping[str, str] | None = None,
     provider_type: str | None = None,
     diagnostic_fields: Mapping[str, Any] | None = None,
+    usage_collector: list[ModelResponse] | None = None,
 ) -> TitleGenerationResult | None:
     """Run exactly one title request with the effective first-turn model."""
 
@@ -218,26 +219,35 @@ async def generate_title(
         )
         image_used = True
 
+    captured = []
+    def collect_usage():
+        if usage_collector is not None:
+            usage_collector.extend(message for message in captured if isinstance(message, ModelResponse))
+
     try:
         agent = Agent(model, instructions=_TITLE_PROMPT, output_type=str)
-        result = await asyncio.wait_for(
-            agent.run(
-                prompt,
-                model_settings=_title_model_settings(model, provider_type),
-                usage_limits=UsageLimits(request_limit=1),
-            ),
-            timeout=TITLE_GENERATION_TIMEOUT_SECONDS,
-        )
+        with capture_run_messages() as captured:
+            result = await asyncio.wait_for(
+                agent.run(
+                    prompt,
+                    model_settings=_title_model_settings(model, provider_type),
+                    usage_limits=UsageLimits(request_limit=1),
+                ),
+                timeout=TITLE_GENERATION_TIMEOUT_SECONDS,
+            )
     except TimeoutError:
+        collect_usage()
         record("title_generation_failed", phase="model", reason="timeout", error_type="TimeoutError")
         logger.warning(
             "Title generation timed out after %.1fs", TITLE_GENERATION_TIMEOUT_SECONDS
         )
         return None
     except asyncio.CancelledError:
+        collect_usage()
         record("title_generation_cancelled", phase="model")
         raise
     except Exception as exc:  # noqa: BLE001 - fallback title remains authoritative
+        collect_usage()
         reason = "output_token_limit" if str(exc).startswith("Model token limit (") else "model_error"
         record("title_generation_failed", phase="model", reason=reason,
                error_type=type(exc).__name__, http_status=getattr(exc, "status_code", None))
@@ -245,6 +255,7 @@ async def generate_title(
         logger.debug("Title generation traceback", exc_info=True)
         return None
 
+    collect_usage()
     raw = result.output if isinstance(result.output, str) else str(result.output or "")
     title = _clean_title(raw)
     if title:

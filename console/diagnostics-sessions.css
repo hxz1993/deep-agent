@@ -275,9 +275,9 @@
 .diagnostic-sessions-page .diagnostic-session-id .diagnostic-copy-separator { position:relative; display:inline-grid; place-items:center; width:16px; height:18px; flex:0 0 16px; margin:0 1px; padding:0; border:0; background:transparent; cursor:pointer; }
 .diagnostic-sessions-page .diagnostic-copy-separator::before { content:"·"; font-size:12px; line-height:18px; }
 .diagnostic-sessions-page .diagnostic-copy-separator > svg { position:absolute; width:12px; height:12px; opacity:0; }
-.diagnostic-sessions-page .diagnostic-session-row:is(:hover,:focus-within) .diagnostic-copy-separator::before,
+.diagnostic-sessions-page :is(.diagnostic-session-row,.usage-session-entry):is(:hover,:focus-within) .diagnostic-copy-separator::before,
 .diagnostic-sessions-page .diagnostic-copy-separator.copied::before { opacity:0; }
-.diagnostic-sessions-page .diagnostic-session-row:is(:hover,:focus-within) .diagnostic-copy-separator > svg,
+.diagnostic-sessions-page :is(.diagnostic-session-row,.usage-session-entry):is(:hover,:focus-within) .diagnostic-copy-separator > svg,
 .diagnostic-sessions-page .diagnostic-copy-separator.copied > svg { opacity:1; }
 .diagnostic-sessions-page .diagnostic-copy-separator:hover { color:var(--diag-accent); background:var(--diag-accent-soft); }
 .diagnostic-sessions-page .diagnostic-copy-separator:focus-visible { outline:2px solid var(--diag-accent); outline-offset:1px; }

@@ -12,8 +12,6 @@
 .diagnostic-usage-page .diagnostic-session-filters > .usage-agent { width:240px; flex-basis:240px; }
 .diagnostic-usage-page .diagnostic-control-with-icon > svg { position:absolute; left:12px; top:8px; width:16px; height:16px; color:var(--diag-muted); pointer-events:none; z-index:1; }
 .diagnostic-usage-page .console-select-trigger { width:100%; padding-left:35px; }
-.usage-columns { display:grid; grid-template-columns:minmax(0, 3fr) minmax(390px, 2fr); gap:16px; min-height:0; flex:1; }
-.usage-left { display:grid; grid-template-rows:78px clamp(370px, 43vh, 530px) minmax(170px, auto) auto; align-content:start; gap:12px; min-width:0; min-height:0; }
 .usage-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
 .usage-stat { display:flex; align-items:center; gap:14px; min-width:0; min-height:78px; box-sizing:border-box; padding:12px 16px; border:1px solid var(--diag-border); border-radius:8px; background:var(--diag-surface); box-shadow:var(--diag-shadow); }
 .usage-stat-icon { display:grid; place-items:center; flex:0 0 38px; width:38px; height:38px; border-radius:8px; background:var(--diag-accent-soft); color:var(--diag-accent); }
@@ -31,10 +29,6 @@
 .usage-chart-tools { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
 .usage-trend > .usage-panel-head { flex-wrap:wrap; }
 .usage-series-line { fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }
-.usage-insights { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; padding:14px 4px; border-top:1px solid var(--diag-border); }
-.usage-insights small { display:block; color:var(--diag-muted); font-size:12px; margin-bottom:6px; }
-.usage-insights strong { font-size:16px; font-weight:600; font-variant-numeric:tabular-nums; }
-.usage-insights span { display:block; color:var(--diag-muted); font-size:12px; margin-top:2px; }
 html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-chart-tools .console-select { min-width:112px; }
 .usage-chart-tools .console-select-trigger, .usage-details > .usage-panel-head .console-select-trigger { height:32px; min-height:32px; font-size:13px; }
@@ -46,38 +40,17 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-chart-grid line { stroke:var(--diag-border); stroke-width:1; stroke-dasharray:3 4; }
 .usage-chart-grid:last-of-type line { stroke-dasharray:none; }
 .usage-chart-day > line { stroke:var(--diag-border); stroke-width:1; }
-.usage-chart-requests path { fill:none; stroke:var(--diag-secondary); stroke-width:1; stroke-linejoin:round; stroke-linecap:round; opacity:.56; vector-effect:non-scaling-stroke; }
-.usage-chart-requests circle { fill:var(--diag-surface); stroke:var(--diag-secondary); stroke-width:1; opacity:.8; vector-effect:non-scaling-stroke; }
-.usage-chart svg .usage-chart-peak { fill:var(--diag-secondary); font-weight:650; paint-order:stroke; stroke:var(--diag-surface); stroke-width:4px; }
 .usage-legend { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; min-height:42px; padding:8px 4px 0; }
 .usage-legend button { display:flex; align-items:stretch; min-width:0; gap:8px; border:0; padding:2px 0; background:none; color:var(--diag-secondary); cursor:pointer; text-align:left; font:12px var(--font); }
-.usage-legend button.is-hidden { opacity:.4; }
+.usage-legend button.is-dimmed { opacity:.3; }
 .usage-legend-item i { display:block; width:3px; border-radius:2px; flex-shrink:0; }
 .usage-legend-copy { display:block; min-width:0; flex:1; }
 .usage-legend-name { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .usage-legend-value { display:flex; align-items:baseline; gap:6px; font-variant-numeric:tabular-nums; }
 .usage-legend-value strong { color:var(--diag-text); font-weight:600; }
 .usage-legend-value small { color:var(--diag-muted); font-size:11px; }
-.usage-mini-row i { width:7px; height:7px; border-radius:2px; flex-shrink:0; }
-.usage-minis { display:grid; grid-template-columns:1fr 1fr; gap:12px; min-height:0; }
-.usage-minis > section { padding:12px 14px; min-height:0; }
-.usage-mini-body { display:grid; align-content:start; gap:12px; margin-top:16px; }
-.usage-mini-row { display:grid; grid-template-columns:7px minmax(0,1fr) auto auto; align-items:center; gap:8px; font-size:13px; }
-.usage-mini-row span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.usage-mini-row .usage-mini-user { min-width:0; white-space:normal; }
-.usage-mini-user .da-user-identity { max-width:100%; }
-.usage-mini-user .da-user-name,.usage-mini-user .da-user-contact { display:block; overflow:hidden; max-width:100%; text-overflow:ellipsis; white-space:nowrap; }
-.usage-mini-user .da-user-contact { color:var(--diag-muted); font-size:12px; }
-.usage-mini-row strong { font-weight:600; font-variant-numeric:tabular-nums; }
-.usage-mini-row small { color:var(--diag-muted); font-size:12px; }
-.usage-link { display:inline-flex; align-items:center; gap:4px; border:0; padding:2px 0; background:none; color:var(--accent); cursor:pointer; white-space:nowrap; font:inherit; }
-.usage-link svg { width:13px; height:13px; }
 .usage-details { display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; }
 .usage-details > .usage-panel-head { padding:0 0 12px; }
-.usage-detail-tools { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
-.usage-detail-actions { display:flex; align-items:center; gap:8px; min-width:0; }
-.usage-detail-actions .diagnostics-button { display:flex; align-items:center; gap:5px; height:32px; white-space:nowrap; }
-.usage-detail-actions .diagnostics-button svg { width:14px; height:14px; }
 .usage-dimension-switch { max-width:100%; overflow:auto; }
 .usage-table-frame { flex:1; min-height:0; overflow:auto; border:1px solid var(--diag-border); border-radius:8px; background:var(--diag-surface); }
 .usage-detail-row { display:grid; grid-template-columns:minmax(130px,1fr) 58px repeat(3,100px) 86px 80px; width:100%; align-items:center; gap:8px; box-sizing:border-box; min-height:50px; padding:7px 10px; border:0; border-bottom:1px solid var(--diag-border); background:none; color:var(--diag-text); text-align:right; font:13px var(--font); font-variant-numeric:tabular-nums; cursor:pointer; }
@@ -88,11 +61,6 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-detail-head button { border:0; padding:0; background:none; color:inherit; text-align:right; cursor:pointer; font:inherit; }
 .usage-detail-head button:hover { color:var(--diag-accent); }
 .usage-detail-name { overflow:hidden; min-width:0; white-space:nowrap; text-overflow:ellipsis; }
-.usage-detail-name > small { display:block; overflow:hidden; text-overflow:ellipsis; color:var(--diag-muted); font-size:12px; }
-.usage-detail-name .da-user-identity { display:inline-flex; max-width:100%; }
-.usage-detail-name .da-user-name,.usage-detail-name .da-user-contact,.usage-model-name small { display:block; overflow:hidden; max-width:100%; text-overflow:ellipsis; white-space:nowrap; }
-.usage-detail-name .da-user-contact,.usage-model-name small { margin-top:2px; color:var(--diag-muted); font-size:12px; }
-.usage-model-name .usage-deleted { display:inline-block; margin-right:4px; color:var(--danger); }
 .usage-detail-incomplete { display:block; color:var(--diag-muted); font-size:12px; }
 .usage-export-dialog .modal-body { display:grid; gap:9px; padding:16px; }
 .usage-export-dialog .modal-body p { margin:0; }
@@ -102,8 +70,8 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-error { margin:0; color:var(--danger); }
 .usage-coverage { margin:0; color:var(--text-dim); font-size:11px; }
 .usage-loading { margin:0; color:var(--text-dim); }
-@media (max-width:1250px) { .diagnostic-usage-page { height:auto; } .usage-columns { display:flex; flex:none; flex-direction:column; } .usage-left { display:flex; flex-direction:column; } .usage-trend { height:390px; min-height:390px; } .usage-chart { height:250px; flex:1; } .usage-minis > section { min-height:150px; } .usage-details { min-height:420px; } }
-@media (max-width:800px) { .diagnostic-usage-page { padding:14px; } .usage-header { flex:none; flex-direction:column; align-items:stretch; min-height:0; gap:8px; } .diagnostic-usage-page .diagnostic-session-filters { width:100%; justify-content:flex-start; } .usage-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .usage-minis { grid-template-columns:1fr; } .usage-chart-tools { flex-wrap:wrap; } .usage-detail-tools { align-items:flex-start; } .usage-detail-actions { width:100%; justify-content:space-between; } }
+@media (max-width:1250px) { .diagnostic-usage-page { height:auto; } .usage-trend { height:390px; min-height:390px; } .usage-chart { height:250px; flex:1; } .usage-details { min-height:420px; } }
+@media (max-width:800px) { .diagnostic-usage-page { padding:14px; } .usage-header { flex:none; flex-direction:column; align-items:stretch; min-height:0; gap:8px; } .diagnostic-usage-page .diagnostic-session-filters { width:100%; justify-content:flex-start; } .usage-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .usage-chart-tools { flex-wrap:wrap; } }
 /* Overview above the channel-style detail/contribution workbench. */
 .diagnostic-usage-page { height:auto; min-height:100%; }
 .usage-overview { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(480px,1fr); gap:16px; }
@@ -112,25 +80,11 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-chart-body .usage-chart { min-width:0; height:310px; align-self:center; margin:0; }
 .usage-chart-body .usage-legend { display:flex; flex-direction:column; align-self:start; gap:18px; padding:24px 0 0; }
 .usage-legend-name { white-space:normal; overflow-wrap:anywhere; }
-.usage-overview-cards { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-content:start; }
-.usage-overview-cards .usage-stats { grid-column:1/-1; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
-.usage-overview-cards .usage-stat { padding:12px 10px; gap:8px; }
-.usage-overview-cards .usage-stat-icon { width:28px; height:28px; flex-basis:28px; }
-.usage-overview-cards .usage-stat strong { font-size:18px; }
-.usage-purpose,.usage-users { padding:12px 14px; }
+.usage-purpose { padding:12px 14px; }
 .usage-purpose { grid-column:1; }
-.usage-users { grid-column:2; grid-row:2/4; }
 .usage-purpose-values { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:12px; }
 .usage-purpose-values small,.usage-purpose-values span { display:block; color:var(--diag-muted); font-size:12px; }
 .usage-purpose-values strong { display:block; font-size:16px; font-weight:600; margin:4px 0; }
-.usage-overview-cards .usage-insights { grid-column:1; border:1px solid var(--diag-border); border-radius:8px; background:var(--diag-surface); padding:12px 14px; gap:10px; }
-.usage-user-ranking { display:grid; gap:12px; margin-top:14px; }
-.usage-user-rank { display:grid; grid-template-columns:16px minmax(70px,1fr) minmax(30px,.6fr) auto; gap:8px; align-items:center; }
-.usage-user-rank > svg { width:16px; height:16px; color:var(--diag-muted); }
-.usage-user-rank strong { font-size:13px; font-weight:600; }
-.usage-rank-track { height:5px; border-radius:3px; background:var(--diag-accent-soft); overflow:hidden; }
-.usage-rank-track i { display:block; height:100%; background:var(--diag-accent); border-radius:3px; }
-.usage-mini-user { min-width:0; overflow:hidden; }
 .usage-workbench { display:grid; grid-template-columns:minmax(660px,1.5fr) minmax(0,1fr); gap:16px; min-height:340px; flex:1; }
 .usage-details { flex:1; min-height:380px; overflow:visible; }
 .usage-table-area { display:flex; flex-direction:column; min-width:0; }
@@ -140,20 +94,16 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-contributions .usage-panel-head small { overflow-wrap:anywhere; }
 .usage-detail-row.is-selected { background:var(--diag-accent-soft); box-shadow:inset 3px 0 var(--diag-accent); }
 @media (min-width:1251px) { .usage-details { min-height:calc(100vh - 530px); } }
-@media (max-width:1600px) { .usage-overview-cards .usage-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .usage-chart-body { grid-template-columns:minmax(0,1fr) 125px; gap:8px; } }
-@media (max-width:1250px) { .usage-overview { grid-template-columns:1fr; } .usage-overview .usage-trend { height:370px; } .usage-overview-cards .usage-stats { grid-template-columns:repeat(4,minmax(0,1fr)); } .usage-workbench { grid-template-columns:minmax(380px,2fr) minmax(0,3fr); } }
-@media (max-width:800px) { .usage-overview-cards { grid-template-columns:1fr; } .usage-overview-cards .usage-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .usage-users,.usage-purpose,.usage-overview-cards .usage-insights { grid-column:1; grid-row:auto; } .usage-workbench { grid-template-columns:1fr; } .usage-chart-body { grid-template-columns:minmax(0,1fr) 105px; } .usage-chart-body .usage-chart { height:260px; } .usage-overview .usage-trend { height:auto; min-height:380px; } .usage-table-frame { min-height:220px; } }
+@media (max-width:1600px) { .usage-chart-body { grid-template-columns:minmax(0,1fr) 125px; gap:8px; } }
+@media (max-width:1250px) { .usage-overview { grid-template-columns:1fr; } .usage-overview .usage-trend { height:370px; } .usage-workbench { grid-template-columns:minmax(380px,2fr) minmax(0,3fr); } }
+@media (max-width:800px) { .usage-purpose { grid-column:1; grid-row:auto; } .usage-workbench { grid-template-columns:1fr; } .usage-chart-body { grid-template-columns:minmax(0,1fr) 105px; } .usage-chart-body .usage-chart { height:260px; } .usage-overview .usage-trend { height:auto; min-height:380px; } .usage-table-frame { min-height:220px; } }
 
 /* Compact statistics and shared session identity treatment. */
-.usage-overview-cards { grid-template-rows:78px minmax(0,1fr); align-content:stretch; }
 .usage-purpose { grid-row:2; display:flex; flex-direction:column; }
-.usage-users { grid-row:2; }
 .usage-purpose-values { flex:1; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(2,1fr); align-items:center; gap:16px 10px; }
 .usage-purpose-values strong { font-size:15px; overflow-wrap:anywhere; }
 .usage-chart-body { grid-template-columns:minmax(0,1fr) 115px; gap:12px; }
 .usage-legend-name { white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
-.usage-user-rank { grid-template-columns:20px minmax(60px,1fr) minmax(30px,.7fr) auto; min-height:30px; }
-.usage-mini-user { white-space:nowrap; text-overflow:ellipsis; }
 .diagnostic-usage-page .diagnostic-control-with-icon > svg { left:14px; }
 .diagnostic-usage-page .diagnostic-control-with-icon .console-select-trigger { padding-left:36px; }
 .usage-session-heading { display:flex; align-items:center; gap:8px; }
@@ -161,18 +111,16 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-session-heading > strong { white-space:nowrap; font-size:13px; }
 .usage-contributions .channel-session-time > span { display:inline-flex; align-items:center; gap:4px; }
 .usage-contributions .channel-session-time svg { width:13px; height:13px; }
-@media (max-width:1600px) { .usage-overview-cards { grid-template-rows:auto minmax(180px,1fr); } }
-@media (max-width:800px) { .usage-overview-cards { grid-template-rows:auto; } .usage-purpose,.usage-users { grid-row:auto; } .usage-purpose-values { min-height:170px; } .usage-chart-body { grid-template-columns:minmax(0,1fr) 100px; } }
+@media (max-width:800px) { .usage-purpose { grid-row:auto; } .usage-purpose-values { min-height:170px; } .usage-chart-body { grid-template-columns:minmax(0,1fr) 100px; } }
 
 @media (min-width:1251px) { .usage-overview { grid-template-columns:minmax(0,1.55fr) minmax(480px,1fr); } }
 .usage-contributions .channel-session-meta { justify-content:space-between; margin-left:24px; }
 .usage-contributions .channel-session-time { display:flex; align-items:center; gap:12px; }
 
-.diagnostic-usage-page { --usage-other:#a0a7b4; }
-.usage-stat-detail { display:block; color:var(--diag-muted); font-size:11px; margin-top:3px; white-space:nowrap; }
+.diagnostic-usage-page { --usage-other:#818b9b; }
 
 .usage-chart-types button { width:30px; justify-content:center; padding:5px; }
-@media (min-width:1601px) { .usage-overview { grid-template-columns:minmax(0,1.25fr) minmax(720px,1fr); } .usage-overview-cards .usage-stats { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media (min-width:1601px) { .usage-overview { grid-template-columns:minmax(0,1.25fr) minmax(720px,1fr); } }
 
 .usage-stat strong .usage-peak-secondary { color:var(--diag-muted); font:400 12px var(--font); letter-spacing:normal; margin-left:3px; }
 
@@ -182,7 +130,6 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-session-content,.usage-object-copy { flex:1; min-width:0; }
 .usage-session-content .channel-session-meta { margin-left:0; margin-top:3px; }
 .usage-session-content .channel-session-time { gap:6px; flex-wrap:wrap; }
-.usage-session-time b { font-weight:400; }
 .usage-session-count { display:flex; align-items:center; gap:5px; color:var(--diag-muted); }
 .usage-session-count svg { width:16px; height:16px; }
 .usage-contributions .usage-panel-head { padding-bottom:8px; }
@@ -192,3 +139,78 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-session-counts svg { width:13px; height:13px; flex-shrink:0; }
 .usage-session-counts { margin-left:auto; flex-shrink:0; gap:7px; }
 
+
+/* Shared view: summary cards, trend/distribution, then drilldown. */
+.usage-view-toolbar { display:flex; align-items:center; justify-content:flex-end; gap:8px; }
+.usage-summary .usage-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.usage-overview { grid-template-columns:minmax(0,2.05fr) minmax(380px,1fr); }
+.usage-overview > .usage-purpose { grid-column:auto; grid-row:auto; }
+.usage-overview .usage-trend { min-height:300px; }
+.usage-chart-body .usage-chart { height:260px; }
+
+.usage-detail-row { grid-template-columns:minmax(150px,1fr) 110px 70px 100px 90px; min-width:580px; }
+@media (max-width:1250px) { .usage-overview { grid-template-columns:1fr; } }
+
+
+/* Keep primary and secondary metrics together beside the trend. */
+.usage-header { min-height:48px; }
+.usage-summary { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.usage-summary .usage-stat { min-height:72px; padding:10px 12px; gap:10px; }
+.usage-summary .usage-stat strong { font-size:18px; }
+.usage-summary .usage-purpose { flex:1; grid-row:auto; grid-column:auto; }
+.usage-summary .usage-purpose-values { gap:10px; margin-top:8px; }
+.usage-summary .usage-purpose-values strong { margin:2px 0; }
+.usage-view-toolbar > .diagnostics-button { display:inline-flex; align-items:center; gap:5px; height:32px; }
+.usage-view-toolbar > .diagnostics-button svg { width:14px; height:14px; }
+.usage-detail-identity { display:flex; align-items:center; gap:8px; min-width:0; }
+.usage-detail-identity > svg { width:16px; height:16px; flex-shrink:0; color:var(--diag-accent); }
+.usage-detail-identity > .usage-detail-name { flex:1; }
+
+.usage-detail-row { min-height:36px; padding:6px 10px; border-bottom:0; }
+.usage-identity-logo { width:18px; height:18px; object-fit:contain; flex-shrink:0; }
+.usage-detail-identity > span > svg { width:16px; height:16px; }
+.usage-contributions .usage-panel-head h2 { line-height:19px; }
+.usage-contributions .usage-panel-head small { margin-top:0; line-height:17px; }
+.usage-contributions .usage-panel-head { padding-bottom:6px; gap:8px; }
+.usage-contributions .usage-object-icon { width:30px; height:30px; flex-basis:30px; }
+
+#usageContributionRows .usage-session-content .channel-session-time { gap:0; }
+#usageContributionRows .usage-session-content .diagnostic-session-id .diagnostic-copy-separator { width:12px; flex-basis:12px; margin:0; }
+.usage-object-icon .usage-identity-logo { width:20px; height:20px; }
+
+/* Bound the workbench; large datasets scroll inside each pane. */
+.usage-table-area, .usage-contributions { min-height:0; }
+.usage-contributions { overflow:hidden; }
+#usageContributionRows { min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:auto; }
+#usageContributionRows > .usage-panel-head { position:sticky; top:0; z-index:1; background:var(--diag-surface); }
+.usage-table-frame { overscroll-behavior:contain; scrollbar-gutter:auto; }
+.usage-detail-head { position:sticky; top:0; z-index:1; }
+#usageDetailFooter, #usageContributionFooter { flex-shrink:0; }
+#usageContributionFooter:not(:empty) { padding:2px 0 6px; }
+.usage-load-more { display:inline-block; padding:2px 0; border:0; background:none; color:var(--diag-accent); font:12px var(--font); line-height:18px; cursor:pointer; }
+.usage-load-more:hover { text-decoration:underline; }
+.usage-load-more:focus-visible { outline:2px solid var(--diag-accent); outline-offset:2px; }
+@media (min-width:1251px) and (min-height:740px) {
+  #diagnosticsUsagePage { overflow:hidden; }
+  .diagnostic-usage-page { height:100%; min-height:0; overflow:hidden; }
+  .usage-header, .usage-view-toolbar, .usage-overview { flex-shrink:0; }
+  .usage-details, .usage-workbench { min-height:0; }
+  .usage-workbench { overflow:hidden; }
+}
+@media (max-width:1250px), (max-height:739px) {
+  .usage-workbench { height:480px; flex:none; min-height:0; }
+}
+
+/* One shared frame and the same bounded splitter used by channel details. */
+.usage-workbench { gap:0; grid-template-columns:minmax(0,1fr) 1px var(--channel-inspector-width,40%); border:1px solid var(--diag-border); border-radius:8px; background:var(--diag-surface); overflow:hidden; }
+.usage-workbench .usage-table-frame { border:0; border-radius:0; }
+.usage-workbench .usage-contributions { border:0; border-radius:0; }
+.usage-resizer { position:relative; background:var(--diag-border); cursor:col-resize; touch-action:none; z-index:3; }
+.usage-resizer::after { content:""; position:absolute; inset:0 -4px; }
+.usage-resizer:hover,.usage-resizer:focus-visible { background:var(--diag-accent); outline:none; }
+@media (max-width:800px) { .usage-workbench { grid-template-columns:1fr; grid-template-rows:1fr 1px 1fr; } .usage-resizer { pointer-events:none; } }
+
+/* Keep the scroll track at the pane edge, outside the numeric columns. */
+.usage-workbench .usage-contributions { padding-right:0; }
+#usageContributionRows { padding-right:16px; }
+#usageContributionFooter { padding-right:16px; }

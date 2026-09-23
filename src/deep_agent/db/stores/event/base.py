@@ -283,11 +283,20 @@ class SessionEventStore(SessionBoundMixin):
                 continue
             metadata = message.metadata or {}
             ordinal = int(metadata.get("deepagent_message_ordinal", first_message_ordinal + offset))
+            request_id = f"{run_id}:{ordinal}"
+            # A response with no accepted parts still consumed a request. Keep
+            # its usage on an existing event without inventing History text.
+            # Preserve that carrier when a later flush adds accepted parts.
+            metered_row = next((item for item in existing_rows
+                if any(call.get("request_id") == request_id
+                       for call in (item.usage or {}).get("calls", []))), None)
             carrier_id = carriers.get(ordinal)
-            if carrier_id is None:
+            row = metered_row or (existing.get(carrier_id) if carrier_id else None)
+            if row is None:
+                row = next(iter(existing_rows), None)
+            if row is None:
                 continue
-            row = existing[carrier_id]
-            call = response_call(message, request_id=f"{run_id}:{ordinal}",
+            call = response_call(message, request_id=request_id,
                 model_id=usage_model_id, provider_id=usage_provider_id, purpose="chat")
             updated_usage = merge_calls(row.usage, [call])
             if updated_usage != row.usage or row.usage_model_id != usage_model_id:

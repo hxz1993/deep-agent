@@ -51,7 +51,7 @@ test("控制台合并为图文一级导航且保留三个真实页面", () => {
   assert.match(index, /<aside class="console-rail"[\s\S]*?<nav class="console-nav">/);
   assert.match(index, /data-page="workspace"[\s\S]*?class="resource-nav"[\s\S]*?class="console-nav-footer"[\s\S]*?>系统<\/div>[\s\S]*?title="接口文档"/);
   const navigation = index.match(/<template id="configurationNavigation">([\s\S]*?)<\/template>/)[1];
-  assert.match(navigation, /data-tab="channels"[\s\S]*?>诊断<\/div>[\s\S]*?data-diagnostics-nav="logs"[\s\S]*?data-diagnostics-nav="sessions"/);
+  assert.match(navigation, /data-tab="channels"[\s\S]*?>诊断<\/div>[\s\S]*?data-diagnostics-nav="sessions"[\s\S]*?data-diagnostics-nav="usage"[\s\S]*?data-diagnostics-nav="logs"/);
   assert.doesNotMatch(navigation, /data-tab="global-settings"|data-tab="catalog"|接口文档/);
   assert.doesNotMatch(index, /data-page="configuration"|<aside class="resource-nav"/);
   assert.match(styles, /--console-resource-nav-width: 0px/);

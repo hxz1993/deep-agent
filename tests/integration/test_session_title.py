@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.models.wrapper import WrapperModel
 
 from deep_agent.agent.title_generator import TitleGenerationResult
 from deep_agent.api.v1 import api_router
@@ -145,7 +146,10 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(events.index(title_events[-1]), next(i for i, item in enumerate(events) if item["type"] == "final"))
         title_mock.assert_awaited_once()
         call = title_mock.await_args.kwargs
-        self.assertIsInstance(call["model"], TestModel)
+        title_model = call["model"]
+        while isinstance(title_model, WrapperModel):
+            title_model = title_model.wrapped
+        self.assertIsInstance(title_model, TestModel)
         self.assertEqual(call["user_text"], "请分析本季度预算差异")
         self.assertEqual(call["diagnostic_fields"]["session_id"], session_id)
         self.assertEqual(call["diagnostic_fields"]["agent_id"], self._agent_id)

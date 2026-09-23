@@ -21,7 +21,7 @@ class ChannelMigrationTests(unittest.TestCase):
             with patch("deep_agent.db.migrate.get_database_url", return_value=url):
                 config = migrate._build_alembic_config()
             config.attributes["database_url"] = url
-            self.assertEqual(ScriptDirectory.from_config(config).get_heads(), ["006"])
+            self.assertEqual(ScriptDirectory.from_config(config).get_heads(), ["007"])
             command.upgrade(config, "head")
             with sqlite3.connect(path) as db:
                 db.execute("PRAGMA foreign_keys=ON")
@@ -41,7 +41,7 @@ class ChannelMigrationTests(unittest.TestCase):
                             'completed','sent',CURRENT_TIMESTAMP)""")
             command.upgrade(config, "head")
             with sqlite3.connect(path) as db:
-                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("006",))
+                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("007",))
                 self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
                 self.assertEqual(db.execute("SELECT session_user_id,secret FROM channel_accounts").fetchone(),
                                  ("operator", "test-secret"))
@@ -60,9 +60,33 @@ class ChannelMigrationTests(unittest.TestCase):
                                  ("operator",))
             command.upgrade(config, "head")
             with sqlite3.connect(path) as db:
-                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("006",))
+                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("007",))
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM channel_accounts").fetchone(), (0,))
                 self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_007_keeps_event_data_and_refuses_usage_loss_on_downgrade(self):
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_usage_migration_") as directory:
+            path = Path(directory) / "db.sqlite"
+            url = f"sqlite+aiosqlite:///{path}"
+            with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                config = migrate._build_alembic_config()
+            config.attributes["database_url"] = url
+            command.upgrade(config, "006")
+            with sqlite3.connect(path) as db:
+                db.execute("INSERT INTO chat_sessions (session_id,agent_id,user_id,next_sequence) VALUES ('s','','u',2)")
+                db.execute("INSERT INTO chat_session_events (event_id,session_id,sequence,schema_version,event_type,payload,created_at,updated_at) VALUES ('e','s',1,1,'assistant/message','{}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")
+            command.upgrade(config, "007")
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute("SELECT payload,usage,usage_model_id FROM chat_session_events").fetchone(), ('{}', None, None))
+                db.execute("UPDATE chat_session_events SET usage='{}'")
+            with self.assertRaisesRegex(RuntimeError, "session usage exists"):
+                command.downgrade(config, "006")
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute("SELECT usage FROM chat_session_events").fetchone(), ('{}',))
+                db.execute("UPDATE chat_session_events SET usage=NULL")
+            command.downgrade(config, "006")
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute("SELECT payload FROM chat_session_events").fetchone(), ('{}',))
 
 
 if __name__ == "__main__":

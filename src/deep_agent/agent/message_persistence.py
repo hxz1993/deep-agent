@@ -172,7 +172,9 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                              "deepagent_message_ordinal": ordinal,
                              "deepagent_part_indices": indices}
             ordinal += 1
-            if copy.parts:
+            # Keep response headers for metering even when no accepted part
+            # belongs in History (for example a rejected tool-call attempt).
+            if copy.parts or isinstance(copy, ModelResponse):
                 messages.append(copy)
         if self._results:
             # Supplemental media has no call ID; save it in the official SDK

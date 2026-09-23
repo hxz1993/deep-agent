@@ -2508,7 +2508,22 @@ html, body {
   transition: opacity .12s ease, transform .12s ease;
 }
 .attachment-tooltip { left: 0; width: max-content; max-width: 300px; }
-.context-budget-tooltip { right: 0; width: max-content; max-width: 210px; }
+.context-budget-tooltip {
+  right: 0;
+  min-width: 156px;
+  max-width: 210px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  text-align: center;
+  white-space: normal;
+}
+.context-budget-tooltip-title,
+.context-budget-tooltip-percent,
+.context-budget-tooltip-totals { display: block; white-space: nowrap; }
+.context-budget-tooltip-title { color: var(--text-muted); }
+.context-budget-tooltip-percent { color: var(--text-dim); }
+.context-budget-tooltip-totals { margin-top: 2px; color: var(--text); }
+.context-budget-tooltip-totals[hidden] { display: none; }
 .attachment-control:hover .composer-tooltip,
 .attachment-control:focus-within .composer-tooltip,
 .context-budget-wrap:hover .composer-tooltip,

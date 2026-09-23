@@ -1545,6 +1545,15 @@ class AgentRunner:
             )
             if event is None:
                 await retain_on_fallback()
+        except asyncio.CancelledError:
+            # The title task is cancelled when the owning chat closes. A model
+            # response already received still consumed tokens, even though its
+            # title will never be applied.
+            try:
+                await asyncio.shield(retain_on_fallback())
+            except Exception:
+                logger.warning("Title usage persistence failed for session {}", session_id)
+            raise
         except Exception as exc:  # noqa: BLE001 - fallback remains authoritative
             try:
                 await retain_on_fallback()

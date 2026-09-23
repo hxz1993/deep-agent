@@ -11,13 +11,17 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from deep_agent.db.models import ChatSessionEvent
+from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.usage import merge_calls, response_call
 from maintenance.config_backup import database_url_from_config
 
 
 async def backfill(database_url: str, *, apply: bool = False, batch_size: int = 500):
+    if not 1 <= batch_size <= 2000:
+        raise ValueError("batch_size must be 1..2000")
     engine = create_async_engine(database_url, pool_pre_ping=True)
     factory = async_sessionmaker(engine, expire_on_commit=False)
+    sessions = SessionBoundMixin(factory)
     scanned = recorded = 0
     cursor = None
     last_key = None
@@ -26,11 +30,15 @@ async def backfill(database_url: str, *, apply: bool = False, batch_size: int = 
             revision = (await db.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
             if revision != "007": raise RuntimeError(f"Expected database revision 007, found {revision}")
         while True:
-            async with factory() as db:
+            async with (sessions._write() if apply else sessions._read()) as db:
+                revision = (await db.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
+                if revision != "007": raise RuntimeError(f"Expected database revision 007, found {revision}")
                 query = select(ChatSessionEvent).where(ChatSessionEvent.event_type == "assistant/message")
                 if cursor:
                     query = query.where((ChatSessionEvent.session_id > cursor[0]) |
                         ((ChatSessionEvent.session_id == cursor[0]) & (ChatSessionEvent.sequence > cursor[1])))
+                if apply:
+                    query = query.with_for_update()
                 rows = (await db.execute(query.order_by(ChatSessionEvent.session_id,
                     ChatSessionEvent.sequence).limit(batch_size))).scalars().all()
                 if not rows: break
@@ -54,7 +62,6 @@ async def backfill(database_url: str, *, apply: bool = False, batch_size: int = 
                             .where(ChatSessionEvent.event_id == row.event_id)
                             .values(usage=merge_calls(None, [call]), updated_at=row.updated_at))
                 cursor = (rows[-1].session_id, rows[-1].sequence)
-                if apply: await db.commit()
                 if len(rows) < batch_size: break
         return {"scanned": scanned, "eligible": recorded, "applied": recorded if apply else 0}
     finally:

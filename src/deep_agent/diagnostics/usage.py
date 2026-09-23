@@ -101,11 +101,11 @@ class UsageQueries(SessionBoundMixin):
             models = {}
             if model_ids:
                 rows = (await db.execute(select(LlmModel.id, LlmModel.name, LlmModel.model,
-                    LlmProvider.name.label("provider_name"), LlmProvider.id.label("provider_id"))
+                    LlmProvider.provider_type, LlmProvider.name.label("provider_name"), LlmProvider.id.label("provider_id"))
                     .outerjoin(LlmProvider, LlmProvider.id == LlmModel.provider_id)
                     .where(LlmModel.id.in_(model_ids)))).all()
                 models = {row.id: {"name": row.name, "model_name": row.model,
-                    "provider_name": row.provider_name, "provider_id": row.provider_id} for row in rows}
+                    "provider_type": row.provider_type, "provider_name": row.provider_name, "provider_id": row.provider_id} for row in rows}
             agents = dict((await db.execute(select(Agent.id, Agent.name))).all())
         snapshots = {}
         for _, call in calls:

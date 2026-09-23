@@ -135,3 +135,23 @@ class UsageLedgerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["groups"]["model"][0]["key"], self.model_id)
         self.assertTrue(report["model_snapshots"][self.model_id]["deleted"])
         self.assertEqual(report["model_snapshots"][self.model_id]["name"], "historical-model")
+
+    async def test_filters_and_missing_counters_use_only_selected_events(self):
+        for session_id, user_id, usage in [
+            ("included", "user-1", RequestUsage(input_tokens=10)),
+            ("other-user", "user-2", RequestUsage(input_tokens=100, output_tokens=20)),
+        ]:
+            await self.store.append(session_id, [ModelResponse(parts=[TextPart("reply")], usage=usage)],
+                agent_id=self.agent_id, user_id=user_id, run_id=session_id, turn_id=session_id,
+                usage_model_id=self.model_id, usage_provider_id=self.provider_id)
+        base = self.filters()
+        report = await UsageQueries(self.factory).report(SessionFilters(start=base.start, end=base.end,
+            agent_id=self.agent_id, user_id="user-1", timezone=base.timezone))
+        self.assertEqual(report["summary"]["requests"], 1)
+        self.assertEqual(report["summary"]["total_tokens"], 10)
+        self.assertEqual(report["summary"]["missing_requests"], 1)
+        self.assertEqual(report["summary"]["input_reported_requests"], 1)
+        self.assertEqual(report["summary"]["output_reported_requests"], 0)
+        empty = await UsageQueries(self.factory).report(SessionFilters(start=base.start, end=base.end,
+            agent_id="absent", timezone=base.timezone))
+        self.assertEqual(empty["summary"]["requests"], 0)

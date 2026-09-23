@@ -15,6 +15,7 @@ import { COLUMN_BOUNDS } from "../../../console/diagnostic-columns.js";
 
 const source = await readFile(new URL("../../../console/diagnostics-sessions.js", import.meta.url), "utf8");
 const uiSource = await readFile(new URL("../../../console/diagnostics-ui.js", import.meta.url), "utf8");
+const rangeSource = await readFile(new URL("../../../console/diagnostic-range-control.js", import.meta.url), "utf8");
 const centerSource = await readFile(new URL("../../../console/diagnostics-center.js", import.meta.url), "utf8");
 const turn = () => new Promise(setImmediate);
 const settle = async () => { await turn(); await turn(); };
@@ -75,6 +76,7 @@ function sessionHarness(request = async () => overview()) {
       views.push(view); return view;
     },
   });
+  vm.runInContext(rangeSource.replace(/^import .*;\n/gm, "").replace(/^export /gm, "") + "\nconst PERIODS = DIAGNOSTIC_PERIODS;", context);
   vm.runInContext(source.replace(/^import .*;\n/gm, "").replace(/^export /gm, ""), context);
   const controller = context.initDiagnosticSessions({ root, navigate: hash => navigations.push(hash), replace: hash => replacements.push(hash), onBack() {} });
   return {
@@ -113,6 +115,7 @@ function centerHarness(initialHash = diagnosticHash("logs", { q: "original", lev
     window: { addEventListener(name, callback) { handlers.set(name, callback); }, dispatchEvent() {}, DeepAgentConsole: { showPage(page, options) { navCalls.push({ page, options }); } } },
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute,
+    initDiagnosticUsage() { return { activate() {}, deactivate() {}, clear() {}, snapshot() { return {}; } }; },
     initDiagnosticLogs(options) { logs.options = options; return logs; },
     initDiagnosticChannels(options) { channels.options = options; return channels; },
     initDiagnosticSessions(options) { sessions.options = options; return sessions; },

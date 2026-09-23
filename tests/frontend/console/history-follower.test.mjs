@@ -1,3 +1,4 @@
+import { cacheTrajectorySummary } from "../../../console/cache-usage.js";
 import { savedSessionCounts, savedRunFacts, savedRunState } from "../../../console/session-presentation.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -312,10 +313,10 @@ async function observedMetricsFixture(options = {}) {
   let editingTitle = false;
   const controller = new AbortController();
   const context = {
-    state, boundedStreamRequest, historyThroughRun, savedSessionCounts, savedRunFacts, savedRunState, prepareSessionRender: async () => {},
+    state, cacheTrajectorySummary, boundedStreamRequest, historyThroughRun, savedSessionCounts, savedRunFacts, savedRunState, prepareSessionRender: async () => {},
     createHistoryFollower(options) { callbacks = options; return { start: async () => {}, stop() {} }; },
     loadAllSessionEvents() { const gate = deferred(); requests.push(gate); return gate.promise; },
-    trajectory: { setHistory(history) { trajectoryUpdates += 1; trajectoryItems = history.items; } },
+    trajectory: { events: () => trajectoryItems, setHistory(history) { trajectoryUpdates += 1; trajectoryItems = history.items; } },
     applyObservedHistory() {}, loadContextStatus() {},
     el: { sessionList: { querySelector: () => editingTitle } },
     renderSessions() { renders += 1; },

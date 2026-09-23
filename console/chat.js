@@ -1460,12 +1460,25 @@ function updateComposerContextControls() {
     el.contextBudgetBadge.classList.toggle("reminder", ratio != null && ratio >= 0.7 && ratio < 0.8);
     el.contextBudgetBadge.classList.toggle("warning", ratio != null && ratio >= 0.8);
     el.contextBudgetBadge.style.setProperty("--context-progress", `${(percent || 0) * 3.6}deg`);
+    const historyOnly = occupancy.label === "历史占用";
+    const usedLabel = compactTokenLabel(estimated);
+    const usableLabel = compactTokenLabel(usable);
     const detail = ratio == null
       ? "上下文用量暂不可用"
-      : `${occupancy.label}：${Math.round(ratio * 100)}% 可用输入\n${compactTokenLabel(estimated)} / ${compactTokenLabel(usable)} Token\n${occupancy.detail}`;
-    el.contextBudgetBadge.setAttribute("aria-label", detail.replaceAll("\n", "，"));
+      : `${historyOnly ? "历史估算" : "预计占用"} ${percent}%：已用 ${usedLabel}，共 ${usableLabel} Token`;
+    el.contextBudgetBadge.setAttribute("aria-label", detail);
     el.contextBudgetBadge.removeAttribute("title");
-    if (el.contextBudgetTooltip) el.contextBudgetTooltip.textContent = detail;
+    if (el.contextBudgetTooltip) {
+      const percentLine = el.contextBudgetTooltip.querySelector(".context-budget-tooltip-percent");
+      const totalsLine = el.contextBudgetTooltip.querySelector(".context-budget-tooltip-totals");
+      if (percentLine) percentLine.textContent = ratio == null
+        ? "用量暂不可用"
+        : `${percent}% 已用${historyOnly ? " · 历史估算" : ""}`;
+      if (totalsLine) {
+        totalsLine.textContent = ratio == null ? "" : `已用 ${usedLabel}   共 ${usableLabel}`;
+        totalsLine.hidden = ratio == null;
+      }
+    }
   }
 
   if (el.attachBtn) el.attachBtn.disabled = state.streaming || state.awaitingHitl;

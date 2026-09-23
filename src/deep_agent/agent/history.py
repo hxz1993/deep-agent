@@ -15,6 +15,7 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ToolReturnPart,
     UserPromptPart,
+    INTERRUPTED_TOOL_RETURN_CONTENT,
 )
 
 from deep_agent.agent.context_references import (
@@ -248,6 +249,7 @@ def repair_unprocessed_tool_calls(
     denied_message: str = _USER_CANCELLED_TOOL_MESSAGE,
     failure_message: str | None = None,
     diagnostic_fields: Mapping[str, str | None] | None = None,
+    tool_return_metadata: Mapping[str, dict[str, Any]] | None = None,
 ) -> list[ModelMessage]:
     """Close legacy dangling tool calls without touching official interrupted turns.
 
@@ -295,6 +297,7 @@ def repair_unprocessed_tool_calls(
                     ),
                     tool_call_id=tool_call_id,
                     outcome="failed" if failure_message is not None else "success",
+                    metadata=(tool_return_metadata or {}).get(tool_call_id) if tool_name == "run_code" else None,
                 )
                 for tool_call_id, tool_name in pending.items()
             ], metadata=source_metadata,
@@ -318,6 +321,35 @@ def repair_unprocessed_tool_calls(
             flush_pending()
             repaired.append(message)
             if message.state == "interrupted":
+                # Pydantic AI will synthesize a return on the next run, but that
+                # future-only receipt cannot carry diagnostics from this Run.
+                # Persist one PTC-only interrupted receipt now, preserving the
+                # SDK's outcome/content and all other interrupted tool behavior.
+                ptc_parts = []
+                for part in message.parts:
+                    if not isinstance(part, BaseToolCallPart) or part.tool_name != "run_code" or not part.tool_call_id:
+                        continue
+                    metadata = (tool_return_metadata or {}).get(part.tool_call_id)
+                    if metadata is None:
+                        continue
+                    later_return = False
+                    for later in messages[message_index + 1:]:
+                        if isinstance(later, ModelResponse):
+                            break
+                        if isinstance(later, ModelRequest) and any(
+                            isinstance(item, BaseToolReturnPart) and item.tool_call_id == part.tool_call_id
+                            for item in later.parts
+                        ):
+                            later_return = True
+                            break
+                    if not later_return:
+                        ptc_parts.append(ToolReturnPart(
+                            tool_name="run_code", content=INTERRUPTED_TOOL_RETURN_CONTENT,
+                            tool_call_id=part.tool_call_id, outcome="interrupted", metadata=metadata,
+                        ))
+                if ptc_parts:
+                    repaired.append(ModelRequest(parts=ptc_parts))
+                    changed = True
                 continue
             for part in message.parts:
                 if isinstance(part, BaseToolCallPart) and part.tool_call_id:

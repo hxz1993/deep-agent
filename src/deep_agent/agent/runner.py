@@ -1297,13 +1297,17 @@ class AgentRunner:
         terminal_status: str | None = None,
     ) -> bool:
         to_append = incremental_append_messages(new_messages, skip_user_prompt=pre_persisted_user)
-        if repair_dangling_tool_calls:
+        if repair_dangling_tool_calls or (terminal_status == "interrupted" and deps.ptc_diagnostics):
             repair_kwargs = (
                 {"failure_message" if terminal_status == "failed" else "denied_message": dangling_tool_message}
                 if dangling_tool_message is not None
                 else {}
             )
-            to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs, diagnostic_fields={
+            ptc_return_metadata = {
+                call_id: {"code_mode": True, "ptc_diagnostics": diagnostic}
+                for call_id, diagnostic in deps.ptc_diagnostics.items()
+            }
+            to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs, tool_return_metadata=ptc_return_metadata, diagnostic_fields={
                 "session_id": session_id, "run_id": deps.run_id, "agent_id": deps.agent_id,
                 "phase": "terminal_persistence",
             })

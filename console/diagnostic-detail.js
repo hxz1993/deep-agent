@@ -3,7 +3,7 @@ import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContex
 import { createConversationPresenter } from "./conversation-presenter.js?v=20260922-trajectory-8";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20260912-21";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260912-21";
-import { createTrajectoryController } from "./trajectory.js?v=20260923-usage-tab-2";
+import { createTrajectoryController } from "./trajectory.js?v=20260924-ptc-execution-6";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { renderSessionInspector } from "./session-inspector.js?v=20260923-usage-tab-2";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260918-release01012";

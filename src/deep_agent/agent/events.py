@@ -195,7 +195,7 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
         # tool metadata (which may contain internal credentials) onto SSE.
         payload["metadata"] = _to_jsonable({
             key: part.metadata[key]
-            for key in ("code_mode", "nested_calls") if key in part.metadata
+            for key in ("code_mode", "nested_calls", "ptc_diagnostics") if key in part.metadata
         })
     if part.tool_name in {"web_search", "web_fetch", "web_image_view"} and isinstance(part.metadata, dict):
         audit = part.metadata.get(part.tool_name)

@@ -267,7 +267,8 @@ class RuntimeDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         failed = next(p for m in result.new_messages() for p in m.parts
                       if isinstance(p, ToolReturnPart) and p.tool_call_id == "ptc-2")
         self.assertEqual(failed.outcome, "failed")
-        self.assertTrue(failed.metadata["nested_calls"])
+        self.assertEqual(failed.metadata["ptc_diagnostics"]["steps"][0]["status"], "completed")
+        self.assertNotIn("nested_calls", failed.metadata)
         self.assertTrue(any(n == "agent_tool_completed" and f["tool"] == "demo_lookup" for n, f in rows))
         self.assertTrue(any(n == "agent_tool_failed" and f["tool"] == "run_code" for n, f in rows))
         self.assertNotIn("fixture-nested-body", repr(rows))

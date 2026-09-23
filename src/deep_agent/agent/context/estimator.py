@@ -6,7 +6,7 @@ import math
 import re
 import unicodedata
 from io import BytesIO
-from dataclasses import asdict, dataclass, is_dataclass, replace
+from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -78,7 +78,11 @@ def _history_fingerprint(messages: list[ModelMessage]) -> str:
     # Strip bookkeeping only at the SDK Part boundary, never inside tool JSON
     # or schemas where "metadata" and "timestamp" are legitimate input keys.
     def part_data(part):
-        value = asdict(part) if is_dataclass(part) else _jsonable(part)
+        # asdict(part) deep-copies metadata before we can discard it; PTC may
+        # carry a bounded but sizable diagnostic document there.
+        value = ({field.name: getattr(part, field.name) for field in fields(part)
+                  if field.name not in {"metadata", "timestamp"}}
+                 if is_dataclass(part) else _jsonable(part))
         return {key: item for key, item in value.items() if key not in {"metadata", "timestamp"}} if isinstance(value, dict) else value
     return _fingerprint([(message.kind, [part_data(part) for part in message.parts]) for message in messages])
 

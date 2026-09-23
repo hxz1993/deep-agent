@@ -126,7 +126,7 @@ class PTCOutputGovernanceTests(unittest.IsolatedAsyncioTestCase):
         part, store = await self._run(payload)
         self.assertEqual(part.content, payload)
         store.write.assert_not_awaited()
-        self.assertLess(len(json.dumps(part.metadata["nested_calls"], ensure_ascii=False)), 4000)
+        self.assertLess(len(json.dumps(part.metadata["ptc_diagnostics"], ensure_ascii=False).encode()), 128 * 1024)
 
     async def test_real_monty_spills_full_redacted_result_above_48k(self):
         payload = {"text": "文档内容。" * 2000, "password": "synthetic-private-password"}

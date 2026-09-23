@@ -22,7 +22,6 @@ from deep_agent.capabilities import build_registry
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.ptc.toolset import (
     HybridCodeModeToolset,
-    _bounded_nested_audit,
     _scrub_error_text,
 )
 from deep_agent.ptc.file_payload import (
@@ -159,7 +158,8 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         failed = next(item for item in mapped if item.get("type") == "tool_result")
         self.assertIn("native", str(failed["result"]))
         self.assertEqual(official_results[0].outcome, "failed")
-        self.assertEqual(official_results[0].metadata, {"code_mode": True, "nested_calls": []})
+        self.assertEqual(official_results[0].metadata["code_mode"], True)
+        self.assertEqual(official_results[0].metadata["ptc_diagnostics"]["steps"], [])
         self.assertFalse(any(item.get("type") == "tool_call_removed" for item in mapped))
 
     async def test_ptc_execution_errors_are_failed_results_and_native_remains_available(self) -> None:
@@ -230,10 +230,10 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         failed = next(part for message in result.new_messages() for part in message.parts
                       if isinstance(part, ToolReturnPart) and part.tool_call_id == "ptc-2")
         self.assertEqual(failed.outcome, "failed")
-        audit = failed.metadata["nested_calls"]
+        audit = failed.metadata["ptc_diagnostics"]["steps"]
         self.assertEqual(audit[0]["tool_name"], "demo_lookup")
         self.assertEqual(audit[0]["status"], "completed")
-        self.assertEqual(audit[0]["result"]["value"], "safe-result")
+        self.assertEqual(audit[0]["output"]["value"]["value"], "safe-result")
         self.assertNotIn("synthetic-test-secret", json.dumps(audit))
         restored = ModelMessagesTypeAdapter.validate_json(
             ModelMessagesTypeAdapter.dump_json(result.new_messages())
@@ -316,7 +316,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(returns[0].content, {"sum": 5})
         self.assertEqual(returns[0].metadata["code_mode"], True)
-        self.assertEqual(returns[0].metadata["nested_calls"][0]["tool_name"], "demo_add")
+        self.assertEqual(returns[0].metadata["ptc_diagnostics"]["steps"][0]["tool_name"], "demo_add")
 
     async def test_native_schema_is_unchanged_and_code_repl_state_is_run_scoped(self) -> None:
         schemas: list[tuple[str, dict, str | None]] = []
@@ -487,16 +487,16 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             for part in message.parts
             if isinstance(part, ToolReturnPart)
         ]
-        nested = returns[0].metadata["nested_calls"]
+        nested = returns[0].metadata["ptc_diagnostics"]["steps"]
         self.assertEqual(
             [item["tool_name"] for item in nested],
             ["load_file_data", "wecom_upload_media"],
         )
         self.assertEqual(
-            nested[1]["args"]["base64_content"],
-            "[file-payload-redacted]",
+            nested[1]["input"]["value"]["base64_content"],
+            "[redacted]",
         )
-        self.assertEqual(nested[1]["result"], {"media_id": "media-1"})
+        self.assertEqual(nested[1]["output"]["value"], {"media_id": "media-1"})
 
     async def test_text_file_is_strictly_decoded_without_creating_payload_token(self) -> None:
         raw = "预算：100".encode("gb18030")
@@ -804,20 +804,6 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ModelRetry, "地址不安全"):
                 await _load_public_url("http://127.0.0.1/private")
         self.assertEqual(downloader.await_count, 1)
-
-    def test_nested_audit_has_an_aggregate_limit(self) -> None:
-        entries = [
-            {"tool_name": f"tool-{index}", "result": "x" * 2_000}
-            for index in range(100)
-        ]
-        projected = _bounded_nested_audit(
-            entries,
-            sensitive_values=frozenset(),
-            max_chars=4_096,
-        )
-        self.assertLess(len(str(projected)), 6_000)
-        self.assertEqual(projected[-1]["reason"], "nested_audit_limit")
-        self.assertGreater(projected[-1]["truncated_calls"], 0)
 
     async def test_untrusted_mcp_return_schema_degrades_to_generic_json(self) -> None:
         wrapped = FilePayloadResolvingToolset(

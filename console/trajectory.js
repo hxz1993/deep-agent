@@ -7,6 +7,7 @@ import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { attachmentPreviewAttributes, attachmentDownloadUrl } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { toolResultPresentation } from "./assistant-presentation.js?v=20260912-21";
+import { renderPtcExecution } from "./ptc-execution.js?v=20260924-5";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
 const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
@@ -448,7 +449,7 @@ export function buildTrajectory(history = {}) {
           outcome: part.outcome || null,
           plan: toolName === "write_plan" ? metadata.deepagent_plan || null : null,
           artifacts: toolResultArtifacts(metadata),
-          metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls },
+          metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls, ptc_diagnostics: metadata.ptc_diagnostics },
         }));
         tool.native = { ...(tool.native || {}), result_event_id: event.event_id, result_part_offset: offset };
         tool.timestamp_end = event.updated_at || part.timestamp || tool.timestamp_end;
@@ -953,12 +954,21 @@ function highlightPython(code) {
   return escapeHtml(code);
 }
 
-function renderRunCode(event) {
+function renderRunCode(event, line = null, callName = null, compact = false) {
   const code = runCodeSource(event);
   if (!code) return `<p class="trajectory-summary-empty">No source code in this call.</p>`;
+  const lines = code.split("\n");
+  const exactLine = Number.isInteger(line) && line > 0 && line <= lines.length ? line : null;
+  const escapedName = callName ? String(callName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
+  const callPattern = escapedName ? new RegExp(`(?:^|[^\\w])${escapedName}\\s*\\(`) : null;
+  const matchingLines = callPattern && !exactLine
+    ? lines.map((text, index) => callPattern.test(text) ? index + 1 : null).filter(Boolean) : [];
+  const displayed = exactLine || callName
+    ? lines.map((text, index) => `<span class="trajectory-code-line${index + 1 === exactLine ? " is-error" : matchingLines.includes(index + 1) ? " is-call-match" : ""}">${highlightPython(text) || " "}</span>`).join("\n")
+    : highlightPython(code);
   return `<section class="trajectory-code-view">
-    <header><span>Python</span><button type="button" data-copy-run-code>${icon("copy")}Copy</button></header>
-    <pre><code class="hljs language-python">${highlightPython(code)}</code></pre>
+    ${compact ? "" : `<header><span>Python</span><button type="button" data-copy-run-code>${icon("copy")}Copy</button></header>`}
+    <pre><code class="hljs language-python">${displayed}</code></pre>
   </section>`;
 }
 
@@ -967,6 +977,7 @@ function detailTabs(event) {
   const tabs = [["summary", "Summary"]];
   if (trajectoryUsage(event)) tabs.push(["usage", "Usage"]);
   if (isPythonCodeEvent(event)) tabs.push(["code", "Code"]);
+  if (isRunCodeEvent(event)) tabs.push(["execution", "Calls"]);
   if (TOOL_KINDS.has(event.kind)) {
     if (hasMeaningfulValue(event.payload)) tabs.push(["input", "Input"]);
     if (hasMeaningfulValue(event.result)) tabs.push(["result", "Result"]);
@@ -1003,7 +1014,7 @@ function renderPreview(event) {
   return `<section class="trajectory-preview">${renderMarkdown(event.payload?.content, "No text in this user message.")}</section>`;
 }
 
-function renderDetail(event, activeTab = "summary", events = [], attachmentUrl) {
+function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, ptcState = {}) {
   if (!event) return `<div class="trajectory-detail-empty">${icon("scan-search")}<p>Select an event to inspect</p></div>`;
   const tabs = detailTabs(event);
   const allowedTabs = new Set(tabs.map(([id]) => id));
@@ -1022,12 +1033,13 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl) 
   if (activeTab === "raw") content = renderRaw(event);
   if (activeTab === "usage") content = renderTrajectoryUsage(event);
   if (activeTab === "code") content = renderRunCode(event);
+  if (activeTab === "execution") content = renderPtcExecution(event, { ...ptcState, codeView: (step) => renderRunCode(event, step.source_line, step.tool_name, true) });
   const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title"].includes(event.kind)
     ? event.label
     : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
   const detailBodyClass = activeTab === "code"
     ? "trajectory-detail-body is-code"
-    : "trajectory-detail-body";
+    : activeTab === "execution" ? "trajectory-detail-body is-ptc" : "trajectory-detail-body";
   return `
     <header class="trajectory-detail-head">
       <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}<em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></div>
@@ -1072,6 +1084,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let assistantLoopSequence = 0;
   let selectedId = null;
   let detailTab = "summary";
+  let ptcVisible = 20;
+  let ptcExpanded = null;
+  let ptcDetailTab = "result";
   let mode = "sequence";
   let renderQueued = false;
   let renderedSelectedId = null;
@@ -1137,6 +1152,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   function render() {
     const listScrollTop = list.scrollTop;
     const detailScrollTop = detail.scrollTop;
+    const ptcChartScrollTop = detail.querySelector?.(".trajectory-ptc-chart")?.scrollTop || 0;
+    const ptcJsonScrollTop = detail.querySelector?.(".trajectory-ptc-json-panel")?.scrollTop || 0;
     const events = allEvents();
     const stats = trajectoryStats(events);
     const visible = filterTrajectory(events, { mode, query: search?.value });
@@ -1145,9 +1162,15 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     selectedId = selected?.id || null;
     renderRows(visible);
     if (query("main.chat")?.classList.contains("trajectory-active")) {
-      detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl);
+      detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl, { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab });
       globalThis.DeepAgentMarkdown?.renderDiagrams?.(detail);
-      if (selectedId === renderedSelectedId) detail.scrollTop = detailScrollTop;
+      if (selectedId === renderedSelectedId) {
+        detail.scrollTop = detailScrollTop;
+        const chart = detail.querySelector?.(".trajectory-ptc-chart");
+        const jsonPanel = detail.querySelector?.(".trajectory-ptc-json-panel");
+        if (chart) chart.scrollTop = ptcChartScrollTop;
+        if (jsonPanel) jsonPanel.scrollTop = ptcJsonScrollTop;
+      }
     }
     list.scrollTop = listScrollTop;
     if (selectedId !== renderedSelectedId) onSelectEvent?.(selected);
@@ -1164,6 +1187,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (!preserveView || !historyEvents.some((event) => event.id === selectedId)) {
       selectedId = historyEvents.at(-1)?.id || null;
       detailTab = "summary";
+      ptcVisible = 20; ptcExpanded = null; ptcDetailTab = "result";
     }
     scheduleRender();
   }
@@ -1323,7 +1347,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       ));
       if (call) {
         call.result = redactTrajectoryValue(jsonClone({ result: payload.result, outcome: payload.outcome || null, artifacts: payload.artifacts || null, plan: payload.plan || null,
-          metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls } }));
+          metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics } }));
         call.summary = liveSummary(type, payload);
         call.status = toolResultPresentation(payload).status;
         call.timestamp_end = timestamp;
@@ -1431,9 +1455,29 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (!row) return;
     selectedId = row.dataset.trajectoryId;
     detailTab = "summary";
+    ptcVisible = 20; ptcExpanded = null; ptcDetailTab = "result";
     scheduleRender();
   });
   listen(detail, "click", (event) => {
+    const ptcStep = event.target.closest("[data-ptc-step]");
+    if (ptcStep) {
+      const next = Number(ptcStep.dataset.ptcStep);
+      ptcExpanded = next;
+      ptcDetailTab = "result";
+      scheduleRender();
+      return;
+    }
+    const ptcTab = event.target.closest("[data-ptc-detail-tab]");
+    if (ptcTab) {
+      ptcDetailTab = ptcTab.dataset.ptcDetailTab;
+      scheduleRender();
+      return;
+    }
+    if (event.target.closest("[data-ptc-load-more]")) {
+      ptcVisible += 20;
+      scheduleRender();
+      return;
+    }
     const copyFile = event.target.closest("[data-copy-file-id]");
     if (copyFile) {
       copyTextToClipboard(copyFile.dataset.copyFileId || "").then(() => {
@@ -1455,6 +1499,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (eventTarget) {
       selectedId = eventTarget.dataset.trajectoryEventTarget;
       detailTab = "summary";
+      ptcVisible = 20; ptcExpanded = null; ptcDetailTab = "result";
       scheduleRender();
       return;
     }
@@ -1476,7 +1521,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       ? event.id === eventId || event.native?.event_id === eventId || event.native?.event_ids?.includes(eventId)
       : runId && event.run_id === runId);
     if (!target) return false;
-    selectedId = target.id; detailTab = "summary";
+    selectedId = target.id; detailTab = "summary"; ptcVisible = 20; ptcExpanded = null; ptcDetailTab = "result";
     mode = "sequence"; if (search) search.value = "";
     queryAll("[data-trajectory-mode]").forEach((button) => button.classList.toggle("active", button.dataset.trajectoryMode === mode));
     selectView("trajectory", { notify: false }); render();
@@ -1484,11 +1529,14 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     return true;
   }
   function snapshot() {
-    return { selectedId, detailTab, mode, view: activeView, query: search?.value || "", listScrollTop: list.scrollTop, detailScrollTop: detail.scrollTop };
+    return { selectedId, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, mode, view: activeView, query: search?.value || "", listScrollTop: list.scrollTop, detailScrollTop: detail.scrollTop };
   }
   function restore(value = {}) {
     if (value.selectedId && allEvents().some((event) => event.id === value.selectedId)) selectedId = value.selectedId;
     detailTab = value.detailTab || "summary"; mode = value.mode === "calls" ? "calls" : "sequence";
+    ptcVisible = Math.max(20, Number(value.ptcVisible) || 20);
+    ptcExpanded = Number.isInteger(value.ptcExpanded) ? value.ptcExpanded : null;
+    ptcDetailTab = ["input", "result", "error", "code"].includes(value.ptcDetailTab) ? value.ptcDetailTab : "result";
     if (search) search.value = value.query || "";
     queryAll("[data-trajectory-mode]").forEach((button) => button.classList.toggle("active", button.dataset.trajectoryMode === mode));
     selectView(value.view, { notify: false }); render();

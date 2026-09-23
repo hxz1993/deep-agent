@@ -344,7 +344,8 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([p.tool_name for p in parts(canonical, ToolCallPart)], ["run_code"])
         returned = parts(canonical, ToolReturnPart)
         self.assertEqual(len(returned), 1)
-        self.assertEqual(returned[0].metadata["nested_calls"][0]["status"], "completed")
+        self.assertEqual(returned[0].metadata["ptc_diagnostics"]["steps"][0]["status"], "completed")
+        self.assertNotIn("nested_calls", returned[0].metadata)
         self.assertIsNone(cap._executing_parent.get())
 
     async def test_unknown_top_level_call_cannot_bypass_durable_guard(self):

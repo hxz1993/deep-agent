@@ -31,6 +31,7 @@
 | `24` | [`业务助手初始化与升级`](24-assistant-installation/README.md) | 2026-09 | 已由正式 Agent 安装包方案替代；旧稿已清理，保留指南入口 |
 | `26` | [`定时任务`](26-scheduled-tasks/README.md) | 2026-09-14 | 上游调研与初步设计；独立配置、Cron、会话归属及停机补跑，尚未开发 |
 | `27` | [`个人用量统计`](27-personal-usage/README.md) | 2026-09-23 | C04-USAGE 已在本地实现，版本 0.11.0 / 007；复用事件和 SDK Usage，管理员按人／日期／模型／Agent／用途统计，UI 验收中；价格／配额暂缓 |
+| `28` | [`Codex 订阅 Provider`](28-codex-provider/README.md) | 2026-09-24 | C10-CODEX 设计阶段；复用 Provider／模型链路，独立持久化 OAuth 凭据；暂缓实施 |
 
 ## 文档命名
 

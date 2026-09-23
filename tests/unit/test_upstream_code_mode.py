@@ -55,7 +55,7 @@ class UpstreamCodeModeTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(returns[0].outcome, 'success')
         self.assertEqual(returns[0].content, ['1.50', str(UUID(int=1)), '2026-09-22T00:00:00'])
-        self.assertEqual(returns[0].metadata['nested_calls'][0]['status'], 'completed')
+        self.assertEqual(returns[0].metadata['ptc_diagnostics']['steps'][0]['status'], 'completed')
 
     async def test_suspension_limit_spans_snippets_and_preserves_success_audit(self):
         executed = []
@@ -72,5 +72,5 @@ class UpstreamCodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(returns[0].outcome, 'success')
         self.assertEqual(returns[1].outcome, 'failed')
         self.assertIn('suspension limit 4 exceeded', str(returns[1].content))
-        self.assertEqual(returns[1].metadata['nested_calls'][0]['status'], 'completed')
-        self.assertEqual(returns[1].metadata['nested_calls'][0]['result'], 1)
+        self.assertEqual(returns[1].metadata['ptc_diagnostics']['steps'][0]['status'], 'completed')
+        self.assertEqual(returns[1].metadata['ptc_diagnostics']['steps'][0]['output']['value'], 1)

@@ -110,7 +110,7 @@ class PTCStreamFailureTests(unittest.IsolatedAsyncioTestCase):
         returns = [part for message in raw for part in message.parts if isinstance(part, ToolReturnPart)]
         self.assertEqual([part.tool_call_id for part in returns], ["pair-code", "bad-1", "bad-2", "bad-3", "bad-4", "native-search", "native-snapshot"])
         self.assertEqual([part.outcome for part in returns[1:5]], ["failed"] * 4)
-        self.assertEqual(returns[0].metadata["nested_calls"][0]["status"], "completed")
+        self.assertEqual(returns[0].metadata["ptc_diagnostics"]["steps"][0]["status"], "completed")
         _, history = await self._history("ptc-recovery")
         tools = {item.call_id: item for item in history.items if item.kind == "tool"}
         self.assertEqual(tools["pair-code"].status, "completed")
@@ -159,6 +159,11 @@ class PTCStreamFailureTests(unittest.IsolatedAsyncioTestCase):
         tools = {item.call_id: item for item in history.items if item.kind == "tool"}
         self.assertEqual(tools["pair-code"].status, "completed")
         self.assertEqual(tools["waiting-code"].status, "interrupted")
+        raw = await self.store.get_raw_history("ptc-cancel", agent_id=self.agent_id)
+        waiting_returns = [part for message in raw for part in message.parts
+                           if isinstance(part, ToolReturnPart) and part.tool_call_id == "waiting-code"]
+        self.assertEqual(len(waiting_returns), 1)
+        self.assertEqual(waiting_returns[0].metadata["ptc_diagnostics"]["summary"]["status"], "interrupted")
         self.assertFalse(any(item.status in {"running", "pending", "awaiting_input"} for item in history.items))
 
     async def test_provider_failure_after_completed_ptc_keeps_prior_tool_result(self) -> None:

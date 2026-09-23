@@ -8,8 +8,8 @@ import {
   rememberConfigurationTab,
 } from "./configuration.js?v=20260919-search-editor-2";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260923-c04-25";
-import { initWorkspace } from "./workspace.js?v=20260923-context-card-1";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260924-ptc-execution-6";
+import { initWorkspace } from "./workspace.js?v=20260924-ptc-execution-6";
 import "./time.js?v=20260913-49";
 
 initUserIdentityControls();

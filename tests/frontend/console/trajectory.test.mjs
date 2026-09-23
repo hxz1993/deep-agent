@@ -317,7 +317,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /renderSummarySection\("Input"[\s\S]*renderSummarySection\("Result"/);
   assert.match(trajectorySource, /data-trajectory-detail-tab-target/);
   assert.match(trajectorySource, /data-trajectory-event-target/);
-  assert.match(trajectorySource, /renderDetail\(selected, detailTab, events, attachmentUrl\)/);
+  assert.match(trajectorySource, /renderDetail\(selected, detailTab, events, attachmentUrl,/);
   assert.match(trajectorySource, /renderSummarySection\("Attachments"/);
   assert.match(trajectorySource, /renderSummarySection\("Context references"/);
   assert.doesNotMatch(trajectorySource, /Object\.entries\(reference\.payload/);

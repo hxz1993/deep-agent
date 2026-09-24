@@ -50,9 +50,6 @@ window.databaseConnectionAdmin = databaseConnectionAdmin;
 window.__DatabaseConnectionUI = { databaseInfoHtml, databaseInfoValue, schemaBadgeText };
 
 document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("refreshDatabaseConnectionBtn")?.addEventListener("click", () => {
-    databaseConnectionAdmin.refresh();
-  });
   document.getElementById("databaseConnectionContent")?.addEventListener("click", (event) => {
     if (event.target.closest("[data-retry-database-connection]")) {
       databaseConnectionAdmin.refresh();

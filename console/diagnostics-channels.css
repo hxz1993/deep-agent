@@ -89,7 +89,7 @@
 .diagnostic-channels-page .channel-resizer:hover::after,.diagnostic-channels-page .channel-resizer:focus-visible::after { width:2px; background:var(--diag-accent); }
 
 .diagnostic-channels-page .channel-page-title { height:20px; }
-.diagnostic-channels-page .channel-page-title .diagnostics-button { height:20px; min-height:20px; line-height:20px; padding-top:0; padding-bottom:0; }
+.diagnostic-channels-page .channel-page-title .diagnostics-button { height:var(--ui-control-compact); min-height:var(--ui-control-compact); line-height:20px; margin-block:-4px; padding-top:0; padding-bottom:0; }
 .diagnostic-channels-page .channel-account-select { width:200px; }
 .diagnostic-channels-page .channel-account-select > img { position:absolute; left:12px; top:7px; width:18px; height:18px; z-index:1; pointer-events:none; }
 .diagnostic-channels-page .channel-account-select .console-select-option { display:flex; align-items:center; gap:8px; }

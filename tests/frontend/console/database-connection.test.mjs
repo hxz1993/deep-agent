@@ -44,7 +44,8 @@ test("数据库连接并入全局配置，不再提供独立目录", () => {
   assert.ok(systemGroup < indexHtml.indexOf('data-tab="global-settings"'));
   assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
   assert.doesNotMatch(indexHtml, /data-tab="database-connection"/);
-  assert.ok(systemGroup < indexHtml.indexOf('data-tab="catalog"'));
+  assert.doesNotMatch(indexHtml, /data-tab="catalog"/);
+  assert.match(templateHtml, /data-settings-page="models"/);
   assert.doesNotMatch(indexHtml, />模型资源</);
 });
 

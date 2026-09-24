@@ -1,0 +1,357 @@
+/* Shared Console geometry. Theme colors remain owned by themes.css.
+   Use these primitives for UI chrome; never apply them to Markdown/log/chart content. */
+:root {
+  --ui-font-body: 13px;
+  --ui-font-helper: 12px;
+  --ui-font-meta: 11px;
+  --ui-font-title: 16px;
+  --ui-line-title: 24px;
+  --ui-control-height: 32px;
+  --ui-control-compact: 28px;
+  --ui-radius: 8px;
+  --ui-radius-inner: 6px;
+  --ui-radius-overlay: 12px;
+  --ui-icon: 14px;
+  --ui-icon-action: 16px;
+  --ui-icon-title: 18px;
+  --ui-control-icon-inset: 12px;
+  --ui-control-icon-gap: 8px;
+  --ui-group-gap: 28px;
+  --ui-group-content-gap: 8px;
+  --ui-detail-max-width: 1080px;
+  --ui-detail-padding: 24px;
+}
+
+/* 0822：配置中心统一采用 Open Design「Deepfos轻风格」。 */
+#configurationHost {
+  --config-radius: var(--ui-radius);
+  --config-control-height: var(--ui-control-height);
+  --config-compact-control-height: var(--ui-control-compact);
+  --config-header-height: 56px;
+}
+
+.configuration-content,
+#configurationHost {
+  height: 100%;
+  min-height: 0;
+}
+
+#configurationHost > .panel {
+  box-sizing: border-box;
+  min-height: 100%;
+}
+
+.resource-nav,
+#configurationHost .settings-card,
+#configurationHost .agent-card,
+#configurationHost .agent-list-state,
+#configurationHost .database-connection-card,
+#configurationHost .ui-tool-tree-node,
+#configurationHost .skill-list-item,
+#configurationHost .skill-detail-lane,
+#configurationHost .skill-preview-empty,
+#configurationHost .skill-preview-loading,
+#configurationHost .catalog-lab-item,
+#configurationHost .catalog-provider-options,
+#configurationHost .console-list-a,
+#configurationHost .table-wrap,
+#configurationHost .catalog-results .models-table-wrap {
+  border-radius: var(--config-radius) !important;
+}
+
+.resource-nav {
+  border-radius: var(--console-card-radius) !important;
+}
+
+#configurationHost > .panel {
+  border-radius: 0;
+}
+
+.resource-nav,
+#configurationHost > .panel,
+#configurationHost .settings-card {
+  box-shadow: none;
+}
+
+.resource-btn.tab {
+  min-height: 36px;
+  border-radius: var(--config-radius) !important;
+}
+.resource-btn.tab.active { border-radius: var(--config-radius) !important; }
+
+#configurationHost .panel-toolbar,
+#configurationHost .catalog-panel .models-toolbar {
+  min-height: var(--config-header-height);
+  align-items: flex-start;
+  gap: 16px;
+  margin: 0 0 16px;
+}
+
+#configurationHost .catalog-panel .models-toolbar { margin-bottom: var(--ui-group-content-gap); }
+
+#configurationHost .panel-title-copy,
+#configurationHost .panel-toolbar > div:first-child,
+#configurationHost .catalog-panel .models-toolbar > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#configurationHost .panel-toolbar h1,
+#configurationHost .panel-toolbar h2,
+#configurationHost .catalog-panel .catalog-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--ui-font-title);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -.02em;
+}
+
+/* Keep the inline gateway capsule from lowering the page title. */
+#configurationHost #panel-channels .panel-title-copy { display: block; }
+#configurationHost .channel-title-row .channel-runtime-chip { margin-block: -4px; }
+
+#configurationHost .panel-subtitle,
+#configurationHost .catalog-panel .models-desc {
+  overflow: hidden;
+  max-width: 760px;
+  margin: 5px 0 0;
+  color: var(--text-dim);
+  font-size: var(--ui-font-helper);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#configurationHost .panel-toolbar-actions,
+#configurationHost .models-toolbar-actions {
+  min-height: var(--config-control-height);
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+#configurationHost .agent-search,
+#configurationHost .agent-view-switch,
+#configurationHost .catalog-panel .models-filters input,
+#configurationHost .catalog-panel .models-filters select,
+#configurationHost .catalog-view-tabs {
+  box-sizing: border-box;
+  height: var(--config-control-height);
+  min-height: var(--config-control-height);
+  border-radius: var(--config-radius);
+}
+
+
+#configurationHost .catalog-icon-action {
+  width: var(--config-control-height);
+  padding: 0 !important;
+}
+
+#configurationHost .catalog-view-tabs { padding: 2px; }
+
+#configurationHost .agent-view-switch button,
+#configurationHost .catalog-view-tab {
+  border-radius: var(--ui-radius-inner);
+}
+
+#configurationHost .data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+#configurationHost .data-table thead th,
+#configurationHost .console-list-a .data-table th,
+#configurationHost .catalog-model-table thead th {
+  box-sizing: border-box;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--console-card-border);
+  color: var(--text-faint);
+  background: color-mix(in srgb, var(--console-canvas) 54%, var(--console-surface));
+  font-size: var(--ui-font-helper);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+#configurationHost .data-table tbody td,
+#configurationHost .console-list-a .data-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--console-card-border) 72%, transparent);
+  vertical-align: middle;
+}
+
+#configurationHost .console-list-a .row-actions button,
+#configurationHost .console-list-a .row-actions .btn-link,
+#configurationHost .agent-row-actions .row-action,
+#configurationHost .skill-detail-actions .skill-direct-action,
+#configurationHost .skill-more-trigger,
+#configurationHost .catalog-channel-trigger {
+  box-sizing: border-box;
+  height: var(--config-compact-control-height);
+  min-height: var(--config-compact-control-height);
+  border-radius: var(--config-radius);
+}
+
+#configurationHost .console-list-a .row-actions button,
+#configurationHost .console-list-a .row-actions .btn-link,
+#configurationHost .agent-row-actions .row-action,
+#configurationHost .skill-detail-actions .skill-direct-action {
+  padding: 0 8px;
+  border-width: 1px;
+  font-size: var(--ui-font-helper);
+}
+
+#configurationHost .configuration-subheading h3,
+#configurationHost .skill-section-heading h4,
+#configurationHost .skill-lane-heading h4 {
+  color: var(--text);
+  font-weight: 650;
+}
+
+#configurationHost .global-settings-group-row th,
+#configurationHost .system-tool-group-row th {
+  height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--console-card-border);
+  background: color-mix(in srgb, var(--accent) 4%, var(--console-surface));
+}
+
+/* Shared button chrome. Business styles own placement, never the baseline. */
+.btn, .diagnostics-button {
+  box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; gap:7px;
+  height:var(--ui-control-height); min-height:var(--ui-control-height); padding:0 12px;
+  border:1px solid var(--console-card-border, var(--border)); border-radius:var(--ui-radius);
+  background:var(--console-surface, var(--bg-soft)); color:var(--text);
+  font:500 var(--ui-font-helper)/1 var(--font); white-space:nowrap; text-decoration:none; cursor:pointer;
+}
+:is(.btn, .diagnostics-button) > svg { width:var(--ui-icon-action); height:var(--ui-icon-action); flex-shrink:0; }
+:is(.btn, .diagnostics-button):hover { border-color:var(--accent); background:var(--accent-soft); }
+:is(.btn, .diagnostics-button).primary { border-color:var(--accent); background:var(--accent); color:var(--send-fg); }
+:is(.btn, .diagnostics-button).primary:hover { background:var(--accent-hover); }
+.btn.danger { border-color:color-mix(in srgb,var(--danger) 24%,var(--border)); background:color-mix(in srgb,var(--danger) 5%,var(--console-surface)); color:var(--danger); }
+.btn.ghost { background:transparent; }
+:is(.btn, .diagnostics-button).text { border:0; background:transparent; color:var(--accent); padding:0 4px; }
+:is(.btn, .diagnostics-button):disabled { opacity:.5; cursor:not-allowed; }
+:is(.btn, .diagnostics-button):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.btn-sm, .btn.compact { height:var(--ui-control-compact); min-height:var(--ui-control-compact); }
+
+/* Configuration groups: one flow layout, no absolute-positioned actions. */
+.console-stack, .global-settings-stack { display: grid; gap: var(--ui-group-gap); }
+.console-section { min-width: 0; }
+.console-section-heading,
+.global-settings-group-heading,
+#settings-operations .global-settings-section > .global-settings-section-heading,
+#settings-operations .global-settings-runtime-toolbar {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; min-height: var(--ui-control-height);
+  margin: 0 0 var(--ui-group-content-gap);
+}
+.console-section-title,
+#configurationHost #panel-global-settings .settings-group-title,
+#configurationHost :is(.provider-detail-header, .skill-detail-title, .tool-catalog-detail-header, .wecom-detail-heading) h3,
+.modal-header h3 {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0; min-width: 0; padding: 0;
+  color: var(--text); font-size: var(--ui-font-title);
+  font-weight: 600; line-height: var(--ui-line-title); letter-spacing: normal;
+}
+.console-section-title > svg,
+#configurationHost #panel-global-settings :is(.settings-group-title, .global-settings-section-title) > svg {
+  width: var(--ui-icon-title); height: var(--ui-icon-title);
+  flex: 0 0 var(--ui-icon-title); margin: 0; color: var(--accent);
+}
+.console-section-content { margin: 0; min-width: 0; }
+.console-section-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+#settings-operations :is(.global-settings-section-heading > .btn, .global-settings-runtime-toolbar > .global-settings-search) { flex-shrink: 0; }
+#settings-operations .global-settings-section-title { padding: 0; }
+#settings-operations .global-settings-search { max-width: 50%; min-width: 0; }
+#configurationHost .btn.icon-only { width: var(--ui-control-height); padding: 0; }
+.global-settings-nav-item { border-radius: var(--ui-radius); }
+
+/* Search wrappers share geometry; each page only owns its width. */
+.console-search, .agent-search, .wecom-member-search, .global-settings-search {
+  box-sizing: border-box; display: flex; align-items: center; gap: 8px;
+  height: var(--ui-control-height); min-height: var(--ui-control-height);
+  padding: 0 10px; border: 1px solid var(--console-card-border);
+  border-radius: var(--ui-radius); background: var(--console-surface);
+  font-size: var(--ui-font-helper);
+}
+.console-search input, .agent-search input, .global-settings-search input,
+#configurationHost .wecom-member-search input {
+  min-width: 0; flex: 1; width: 100%; height: auto; padding: 0;
+  border: 0; outline: 0; background: transparent; color: var(--text); font: inherit;
+}
+.console-search svg, .agent-search svg, .wecom-member-search svg, .global-settings-search svg {
+  width: var(--ui-icon); height: var(--ui-icon); flex: 0 0 var(--ui-icon); color: var(--text-faint);
+}
+:is(.console-search, .agent-search, .wecom-member-search, .global-settings-search, .compact-search):focus-within,
+.diagnostics-page #diagnosticsFilters .compact-search:focus-within { border-color: var(--accent); }
+.diagnostic-sessions-page .diagnostic-list-search:focus-within { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* Shared modal close target, independent of page-specific button class names. */
+.modal-header :is(.icon-action, .icon-btn) {
+  display: inline-grid; place-items: center; box-sizing: border-box;
+  width: var(--ui-control-compact); height: var(--ui-control-compact);
+  min-height: var(--ui-control-compact); padding: 0;
+  border: 0; border-radius: var(--ui-radius-inner); background: transparent; color: var(--text-dim);
+}
+.modal-header :is(.icon-action, .icon-btn) svg { width: var(--ui-icon-action); height: var(--ui-icon-action); }
+.modal-header :is(.icon-action, .icon-btn):hover { background: var(--accent-soft); color: var(--accent); }
+.modal-header :is(.icon-action, .icon-btn):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#configurationHost .agent-view-switch button { font-family: var(--font); font-size: var(--ui-font-helper); }
+#configurationHost .wecom-member-table thead th { height: 36px; }
+#configurationHost .catalog-panel .models-desc { margin-top: var(--ui-group-content-gap); }
+.console-pagination, .models-pagination, .diagnostic-pagination { display:flex; align-items:center; justify-content:flex-end; gap:12px; color:var(--text-dim); font-size:var(--ui-font-helper); }
+.console-pagination, .models-pagination { margin-top:10px; }
+
+
+
+/* Content tabs use the same borderless active state; mode segments keep their shell. */
+.console-tabs button, .cap-tab, .mcp-catalog-tabs button {
+  box-sizing: border-box; min-height: var(--ui-control-height);
+  border: 0; border-radius: var(--ui-radius-inner); padding: 0 10px;
+  font-family: var(--font); font-size: var(--ui-font-helper);
+}
+.console-tabs button[aria-selected="true"], .cap-tab.active, .mcp-catalog-tabs button[aria-selected="true"] {
+  background: var(--accent-soft); color: var(--accent);
+}
+dialog.modal:not(.agent-editor-page):not(.mcp-editor-page) { border-radius: var(--ui-radius-overlay); }
+
+/* Mode segments: icon-only and icon+label share the same shell and selected state. */
+.console-segmented, .agent-view-switch, .diagnostic-view-switch {
+  box-sizing:border-box; display:inline-flex; flex-shrink:0; height:var(--ui-control-height);
+  padding:3px; gap:2px; border:1px solid var(--console-card-border); border-radius:var(--ui-radius);
+  background:color-mix(in srgb,var(--console-canvas) 70%,var(--console-surface));
+}
+:is(.console-segmented, .agent-view-switch, .diagnostic-view-switch) button {
+  display:inline-flex; align-items:center; justify-content:center; gap:5px; width:auto; min-width:26px;
+  padding:0 8px; border:0; border-radius:var(--ui-radius-inner); background:transparent;
+  color:var(--text-dim); font:500 var(--ui-font-helper)/1 var(--font); cursor:pointer;
+}
+:is(.console-segmented, .agent-view-switch, .diagnostic-view-switch) button.active,
+.console-segmented button[aria-pressed="true"] { color:var(--accent); background:var(--console-surface); }
+:is(.console-segmented, .agent-view-switch, .diagnostic-view-switch) svg { width:var(--ui-icon); height:var(--ui-icon); }
+:is(.console-segmented, .agent-view-switch, .diagnostic-view-switch) button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.console-input, .diagnostics-field input {
+  box-sizing:border-box; width:100%; min-width:0; height:var(--ui-control-height); padding:0 10px;
+  border:1px solid var(--border); border-radius:var(--ui-radius); background:var(--console-surface);
+  color:var(--text); font:var(--ui-font-helper) var(--font);
+}
+.console-input:focus, .diagnostics-field input:focus { outline:none; border-color:var(--accent); }
+.console-input::placeholder, .diagnostics-field input::placeholder { color:var(--text-faint); }
+
+/* Shared leading icon geometry for selects and filter inputs. */
+:is(.console-control-with-icon, .diagnostic-control-with-icon, .diagnostic-user-combobox) { position:relative; }
+:is(.console-control-with-icon, .diagnostic-control-with-icon, .diagnostic-user-combobox) > svg {
+  position:absolute; left:var(--ui-control-icon-inset); top:calc(var(--ui-control-height) / 2);
+  transform:translateY(-50%); width:var(--ui-icon-action); height:var(--ui-icon-action);
+  color:var(--diag-muted, var(--text-dim)); pointer-events:none; z-index:1;
+}
+:is(.console-control-with-icon, .diagnostic-control-with-icon, .diagnostic-user-combobox) :is(.console-select-trigger, input) {
+  padding-left:calc(var(--ui-control-icon-inset) + var(--ui-icon-action) + var(--ui-control-icon-gap));
+}
+

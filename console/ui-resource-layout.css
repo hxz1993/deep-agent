@@ -70,7 +70,7 @@
   background: var(--border);
   pointer-events: none;
 }
-#configurationHost .ui-tool-selected-header { padding: 0 0 14px; min-height: 0; }
+#configurationHost .ui-tool-selected-header { padding: 0 0 var(--ui-group-content-gap); min-height: 0; }
 .tool-catalog-runtime-table .badge { white-space: normal; }
 @media (max-width: 900px) {
   #configurationHost :is(.provider-admin-workspace, .skill-admin-workspace, .tool-catalog-workspace, .ui-tools-workspace) { grid-template-columns: minmax(0, 1fr); min-height: 0; gap: 16px; }
@@ -93,7 +93,7 @@
 #panel-tools .tools-view-switch { display: inline-grid; grid-template-columns: repeat(2, 1fr); flex-shrink: 0; }
 #panel-tools .tools-view-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; padding: 0 10px; white-space: nowrap; font-size: 12px; }
 #panel-tools [hidden] { display: none !important; }
-#panel-tools #toolsUiTab { gap: 9px; }
+#panel-tools #toolsUiTab { gap: 6px; }
 @media (max-width: 640px) {
   #panel-tools > .panel-toolbar { align-items: flex-start; flex-direction: column; }
   #panel-tools .tools-toolbar-actions { flex-wrap: wrap; }

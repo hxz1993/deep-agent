@@ -22,10 +22,9 @@ const configurationModule = await readFile(
   new URL("../../../console/configuration.js", import.meta.url),
   "utf8",
 );
-const styles = await readFile(
-  new URL("../../../console/console.css", import.meta.url),
-  "utf8",
-);
+const styles = (await Promise.all(["console.css", "ui-primitives.css"].map((file) =>
+  readFile(new URL(`../../../console/${file}`, import.meta.url), "utf8"),
+))).join("\n");
 const configurationStyles = await readFile(
   new URL("../../../console/configuration/configuration.css", import.meta.url),
   "utf8",
@@ -49,7 +48,7 @@ const builtinTools = await readFile(
 
 test("控制台合并为图文一级导航且保留三个真实页面", () => {
   assert.match(index, /<aside class="console-rail"[\s\S]*?<nav class="console-nav">/);
-  assert.match(index, /data-page="workspace"[\s\S]*?class="resource-nav"[\s\S]*?class="console-nav-footer"[\s\S]*?>系统<\/div>[\s\S]*?title="接口文档"/);
+  assert.match(index, /data-page="workspace"[\s\S]*?class="resource-nav"[\s\S]*?class="console-nav-footer"[\s\S]*?>系统<\/div>[\s\S]*?data-tab="global-settings"/);
   const navigation = index.match(/<template id="configurationNavigation">([\s\S]*?)<\/template>/)[1];
   assert.match(navigation, /data-tab="channels"[\s\S]*?>诊断<\/div>[\s\S]*?data-diagnostics-nav="sessions"[\s\S]*?data-diagnostics-nav="usage"[\s\S]*?data-diagnostics-nav="logs"/);
   assert.doesNotMatch(navigation, /data-tab="global-settings"|data-tab="catalog"|接口文档/);
@@ -102,12 +101,12 @@ test("内容外壳四边无间距圆角，用户信息浮层不展示内部分�
   assert.doesNotMatch(styles, /#configurationHost > \.panel\s*\{[^}]*border-radius: var\(--console-card-radius\) !important/);
   assert.match(styles, /--console-nav-surface: color-mix/);
   assert.match(styles, /background: var\(--console-nav-surface\)/);
-  assert.match(styles, /#configurationHost \.panel-toolbar h2,[\s\S]*?font-size: 16px;\s*font-weight: 600;/);
-  assert.match(styles, /#configurationHost \.global-settings-section-title h3,[\s\S]*?font-size: 14px; font-weight: 600;/);
+  assert.match(styles, /#configurationHost \.panel-toolbar h2,[\s\S]*?font-size: var\(--ui-font-title\);\s*font-weight: 600;/);
+  assert.match(styles, /#configurationHost #panel-global-settings \.settings-group-title,[\s\S]*?font-size: var\(--ui-font-title\)/);
 });
 
 test("配置弹窗统一水平居中，Agent 独立编辑页仍保持页面层级", () => {
-  assert.match(styles, /dialog\.console-detail-dialog\.modal\s*\{[^}]*margin: auto;[^}]*border-radius: var\(--console-card-radius\);/);
+  assert.match(styles, /dialog\.console-detail-dialog\.modal\s*\{[^}]*margin: auto;[^}]*border-radius: var\(--ui-radius-overlay\);/);
   assert.match(styles, /dialog\.agent-editor-page\.console-detail-dialog\.modal-agent[\s\S]*?margin: 0;/);
 });
 
@@ -121,7 +120,7 @@ test("Agent 卡片与列表统一使用稳定标识的纯图标行操作", () =>
   assert.match(agents, /title="删除" aria-label="删除"><i data-lucide="trash-2"/);
   assert.doesNotMatch(agents, /<span>发起对话<\/span>/);
   assert.match(configurationModule, /link\.matches\("\[data-agent-chat\]"\)/);
-  assert.match(styles, /--config-compact-control-height: 28px/);
+  assert.match(styles, /--config-compact-control-height: var\(--ui-control-compact\)/);
   assert.match(styles, /#configurationHost \.agent-row-actions \.row-action,[\s\S]*height: var\(--config-compact-control-height\);[\s\S]*border-radius: var\(--config-radius\)/);
 });
 
@@ -185,12 +184,12 @@ test("配置中心的主要业务表格统一使用连续轻列表风格 A", () 
 });
 
 test("配置中心采用 Deepfos 轻风格的统一尺寸和表头", () => {
-  assert.match(styles, /--config-radius: 8px/);
-  assert.match(styles, /--config-control-height: 32px/);
+  assert.match(styles, /--config-radius: var\(--ui-radius\)/);
+  assert.match(styles, /--config-control-height: var\(--ui-control-height\)/);
   assert.match(styles, /--config-header-height: 56px/);
   assert.match(styles, /#configurationHost \.panel-toolbar,[\s\S]*min-height: var\(--config-header-height\)/);
-  assert.match(styles, /#configurationHost \.btn,[\s\S]*height: var\(--config-control-height\)/);
-  assert.match(styles, /#configurationHost \.data-table thead th,[\s\S]*height: 36px;[\s\S]*font-size: 12px/);
+  assert.match(styles, /\.btn, \.diagnostics-button\s*\{[^}]*height:var\(--ui-control-height\)/);
+  assert.match(styles, /#configurationHost \.data-table thead th,[\s\S]*height: 36px;[\s\S]*font-size: var\(--ui-font-helper\)/);
   assert.match(template, /<h2>MCP 服务列表<\/h2>[\s\S]*管理 Agent 可授权使用的 MCP 服务、工具快照与连接状态/);
   assert.match(styles, /\.agent-card-body \{[^}]*border-top:[^}]*\}/);
   assert.doesNotMatch(styles, /\.agent-card-body \{[^}]*border-bottom:/);

@@ -2294,13 +2294,6 @@ html, body {
   text-align: center;
 }
 
-.models-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-top: 14px;
-}
 
 .models-page-info {
   font-size: 12px;
@@ -2360,21 +2353,7 @@ html, body {
 .badge.on { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .badge.off { opacity: 0.65; }
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-soft);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-  text-decoration: none;
-}
 
-.btn:hover { background: var(--bg-hover); }
 
 .table-wrap {
   border: 1px solid var(--border);
@@ -2388,29 +2367,10 @@ html, body {
   margin-top: 14px;
 }
 
-.btn {
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 8px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 14px;
-}
 
-.btn:hover { border-color: var(--text-dim); }
 
-.btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--send-fg);
-}
 
-.btn.primary:hover { background: var(--accent-hover); }
 
-.btn.ghost {
-  background: transparent;
-}
 
 .settings-status {
   margin: 12px 0 0;

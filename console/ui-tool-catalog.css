@@ -12,7 +12,7 @@
 }
 .tool-catalog-list { min-width: 0; }
 .tool-catalog-detail { min-width: 0; }
-.tool-catalog-detail-header { margin-bottom: 14px; }
+.tool-catalog-detail-header { margin-bottom: var(--ui-group-content-gap); }
 .tool-catalog-detail-header > div {
   display: flex;
   flex-wrap: wrap;
@@ -20,14 +20,14 @@
   gap: 8px;
   min-height: 32px;
 }
-.tool-catalog-detail-header h3 { margin: 0; font-size: 14px; }
+
 .tool-catalog-detail-header code,
 .tool-catalog-detail-header span {
   color: var(--text-dim);
   font-size: 12px;
 }
 .tool-catalog-detail-header p {
-  margin: 4px 0 0;
+  margin: var(--ui-group-content-gap) 0 0;
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.6;

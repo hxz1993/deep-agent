@@ -1,3 +1,5 @@
+let toolWebSearchSummary = "加载中…";
+
 function isManagedBuiltinCapability(capability) {
   return capability?.source === "builtin" && capability?.category === "builtin";
 }
@@ -27,7 +29,7 @@ function toolCatalogDetails(item, runtime = false) {
       <table class="data-table tool-catalog-table${runtime ? " tool-catalog-runtime-table" : ""}">
         <thead><tr><th>工具名称</th>${runtime ? "<th>实现来源</th><th>自动注入条件</th>" : ""}<th>说明</th></tr></thead>
         <tbody>${tools.length ? tools.map((tool) => `<tr>
-          <td><code>${escapeHtml(tool.name || "—")}</code></td>
+          <td><code>${escapeHtml(tool.name || "—")}</code>${item.code === "builtin:web" && tool.name === "web_search" ? `<span class="tool-web-search-setting"><button type="button" data-web-search-settings title="前往网络搜索设置"><i data-lucide="pencil" aria-hidden="true"></i><span>${escapeHtml(toolWebSearchSummary)}</span></button></span>` : ""}</td>
           ${runtime ? `<td><span class="badge">${escapeHtml(tool.source || "—")}</span></td><td>${escapeHtml(tool.injection_condition || "—")}</td>` : ""}
           <td>${escapeHtml(tool.description || "—")}</td>
         </tr>`).join("") : `<tr><td colspan="${columns}" class="empty-cell">暂无工具</td></tr>`}</tbody>
@@ -65,6 +67,10 @@ function renderToolCatalog() {
       Array.from(host.querySelectorAll("[data-tool-catalog-code]")).find((next) => next.dataset.toolCatalogCode === selectedToolCode)?.focus({ preventScroll: true });
     });
   });
+  host.querySelector("[data-web-search-settings]")?.addEventListener("click", () => {
+    window.globalSettingsAdmin?.selectPage("general", { refresh: false });
+    document.querySelector('.tab[data-tab="global-settings"]')?.click();
+  });
   window.lucide?.createIcons();
 }
 
@@ -86,9 +92,14 @@ const builtinToolsAdmin = {
     const host = document.getElementById("builtinToolCatalog");
     if (!host) return;
     renderToolCatalog();
+    const summaryRequest = apiFetch("/api/v1/global-settings/web-search")
+      .then(settings => { toolWebSearchSummary = window.__GlobalSettingsUI.webSearchSummaryLabel(settings); })
+      .catch(() => { toolWebSearchSummary = "配置不可用，请重新配置"; })
+      .then(() => renderToolCatalog());
     try {
       if (reload || !(state.capabilities || []).length) await loadCapabilities();
       renderBuiltinCapabilities(state.capabilities);
+      await summaryRequest;
     } catch (error) {
       updateToolCatalogGroup(false, [], error instanceof Error ? error.message : String(error));
     }

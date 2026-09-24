@@ -405,8 +405,10 @@ const agentsAdmin = {
         const label = GROUP_LABELS[group] || group;
         return `<div class="cap-panel ${hidden}" data-kind-panel="${escapeHtml(group)}">
           <div class="cap-panel-toolbar">
-            <button type="button" class="btn-link cap-select-all" data-kind="${escapeHtml(group)}">全选 ${escapeHtml(label)}</button>
-            <button type="button" class="btn-link cap-select-none" data-kind="${escapeHtml(group)}">全不选</button>
+            <label class="cap-group-toggle">
+              <input type="checkbox" data-cap-group-toggle="${escapeHtml(group)}" aria-label="全选${escapeHtml(label)}" />
+              <span>全选</span><span class="cap-group-selection-state"></span>
+            </label>
           </div>
           <div class="cap-grid" data-kind-grid="${escapeHtml(group)}">${cards}</div>
         </div>`;
@@ -443,6 +445,19 @@ const agentsAdmin = {
       '#agentCapGroups input[name="cap"]:checked:not(:disabled)'
     );
     const selectedSet = new Set(Array.from(configurableChecked).map((b) => b.value));
+
+    document.querySelectorAll("[data-cap-group-toggle]").forEach((toggle) => {
+      const panel = toggle.closest(".cap-panel");
+      const inputs = Array.from(panel.querySelectorAll('input[name="cap"]:not(:disabled)'));
+      const count = inputs.filter(input => input.checked).length;
+      toggle.checked = inputs.length > 0 && count === inputs.length;
+      toggle.indeterminate = count > 0 && count < inputs.length;
+      toggle.disabled = inputs.length === 0;
+      toggle.title = toggle.checked ? "点击全部关闭" : "点击全部启用";
+      panel.querySelector(".cap-group-selection-state").textContent = inputs.length
+        ? (toggle.checked ? "已全部启用" : count ? `已启用 ${count} / ${inputs.length}` : "未启用")
+        : "暂无可选项";
+    });
 
     document.querySelectorAll("[data-kind-badge]").forEach((badge) => {
       const group = badge.dataset.kindBadge;
@@ -702,18 +717,14 @@ const agentsAdmin = {
         this.switchCapTab(tab.dataset.kind);
         return;
       }
-      const selectAll = e.target.closest(".cap-select-all");
-      if (selectAll) {
-        this.setCapsInKind(selectAll.dataset.kind, true);
-        return;
-      }
-      const selectNone = e.target.closest(".cap-select-none");
-      if (selectNone) {
-        this.setCapsInKind(selectNone.dataset.kind, false);
-      }
+
     });
 
     resources.addEventListener("change", (e) => {
+      if (e.target.matches("[data-cap-group-toggle]")) {
+        this.setCapsInKind(e.target.dataset.capGroupToggle, e.target.checked);
+        return;
+      }
       if (e.target.matches('input[name="cap"]')) {
         this.updateCapCounter();
       }

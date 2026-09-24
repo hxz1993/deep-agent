@@ -35,3 +35,33 @@ test('复制旧 Agent 仅复制启用的包，不发送旧工具名单', async (
   assert.deepEqual(requests[0].capabilities,['ui:forms']);
   assert.equal(Object.hasOwn(requests[0],'ui_tool_selection'),false);
 });
+
+
+test('分类总控跟随全选、部分选中和空列表', () => {
+  const inputs = [{checked:false,value:'a'},{checked:false,value:'b'}];
+  const status = {};
+  const panel = {querySelectorAll:()=>inputs, querySelector:()=>status};
+  const toggle = {closest:()=>panel};
+  const document = {addEventListener(){}, querySelector:()=>panel, querySelectorAll:(selector)=>
+    selector === '[data-cap-group-toggle]' ? [toggle] : selector.includes(':checked') ? inputs.filter(x=>x.checked) : []};
+  const ctx = vm.createContext({window:{},document,state:{capabilities:[]}});
+  vm.runInContext(source,ctx);
+  const admin=ctx.window.agentsAdmin;
+  admin.updateCapCounter();
+  assert.equal(toggle.checked,false);
+  assert.equal(toggle.indeterminate,false);
+  inputs[0].checked=true;
+  admin.updateCapCounter();
+  assert.equal(toggle.indeterminate,true);
+  assert.equal(status.textContent,'已启用 1 / 2');
+  admin.setCapsInKind('builtin',true);
+  assert.equal(toggle.checked,true);
+  assert.equal(toggle.indeterminate,false);
+  assert.equal(status.textContent,'已全部启用');
+  admin.setCapsInKind('builtin',false);
+  assert.equal(status.textContent,'未启用');
+  inputs.length=0;
+  admin.updateCapCounter();
+  assert.equal(toggle.disabled,true);
+  assert.equal(status.textContent,'暂无可选项');
+});

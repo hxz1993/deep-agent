@@ -9,47 +9,68 @@
 
     <!-- Global settings panel -->
     <section class="panel global-settings-panel" id="panel-global-settings">
-      <div class="panel-toolbar">
-        <div>
-          <h2>全局配置</h2>
-          <p class="panel-subtitle">管理 DeepAgent 的系统级业务配置和运行设置。</p>
-        </div>
+      <div class="panel-toolbar global-settings-header">
+        <div><h2>全局配置</h2><p class="panel-subtitle">管理 DeepAgent 的系统级业务配置和运行设置。</p></div>
       </div>
-      <div class="global-settings-stack">
-        <section class="global-settings-section" id="globalSettingsWebSearch">
-          <div class="global-settings-section-heading">
-            <div class="global-settings-section-title">
-              <i data-lucide="globe-2"></i>
-              <h3>Web Search</h3>
-              <span class="global-settings-section-copy">配置 Agent 的搜索供应商。</span>
+      <div class="global-settings-layout">
+        <aside class="global-settings-nav" aria-label="全局配置分类">
+          <nav>
+            <button type="button" class="global-settings-nav-item active" data-settings-page="general" aria-controls="settings-general" aria-current="page"><i data-lucide="sliders-horizontal"></i><span>常规</span></button>
+            <button type="button" class="global-settings-nav-item" data-settings-page="models" aria-controls="settings-models"><i data-lucide="library"></i><span>模型</span></button>
+            <button type="button" class="global-settings-nav-item" data-settings-page="operations" aria-controls="settings-operations"><i data-lucide="wrench"></i><span>运维</span></button>
+          </nav>
+        </aside>
+        <div class="global-settings-detail">
+          <section class="global-settings-page" id="settings-general" aria-label="常规">
+            <div class="global-settings-group-heading"><h2 class="global-settings-detail-title settings-group-title"><i data-lucide="hammer"></i>工具设置</h2></div>
+            <div class="global-settings-stack">
+              <section class="global-settings-section" id="globalSettingsWebSearch">
+                <div class="global-settings-section-heading">
+                  <div class="global-settings-section-title">
+                    <h3>网络搜索</h3>
+                    <span class="global-settings-section-copy">配置 Web Search 工具使用的搜索供应商。</span>
+                  </div>
+                  <div class="global-settings-section-actions">
+                    <span class="global-settings-summary-value" id="webSearchSummaryValue">未配置</span>
+                    <button class="btn" id="openWebSearchSettingsBtn" type="button"><i data-lucide="pencil"></i>编辑</button>
+                  </div>
+                </div>
+              </section>
             </div>
-            <div class="global-settings-section-actions">
-              <span class="global-settings-summary-value" id="webSearchSummaryValue">未配置</span>
-              <button class="btn" id="openWebSearchSettingsBtn" type="button"><i data-lucide="pencil"></i>编辑</button>
-            </div>
-          </div>
-        </section>
+          </section>
+          <section class="global-settings-page catalog-panel" id="settings-models" aria-label="模型" hidden></section>
+          <section class="global-settings-page" id="settings-operations" aria-label="运维" hidden>
+            <div class="global-settings-stack">
+              <section class="global-settings-section" id="globalSettingsDocs">
+                <div class="global-settings-section-heading">
+                  <div class="global-settings-section-title"><i data-lucide="book-open"></i><h3 class="settings-group-title">接口文档</h3></div>
+                  <a class="btn" href="../docs" target="_blank" rel="noopener noreferrer"><i data-lucide="external-link"></i>打开接口文档</a>
+                </div>
+                <p class="global-settings-content-copy">查看 API 接口、请求参数与返回结构，并在线调试接口。</p>
+              </section>
+              <section class="global-settings-section" id="globalSettingsDatabase">
+                <div class="global-settings-section-heading">
+                  <div class="global-settings-section-title"><i data-lucide="database"></i><h3 class="settings-group-title">数据库连接</h3><span class="database-schema-badge" id="databaseSchemaBadge">V—</span></div>
+                  <button class="btn icon-only" type="button" id="refreshDatabaseConnectionBtn" title="重新加载数据库信息" aria-label="重新加载数据库信息"><i data-lucide="refresh-cw"></i></button>
+                </div>
+                <div id="databaseConnectionContent" aria-live="polite"><div class="global-settings-state">正在加载数据库连接…</div></div>
+              </section>
 
-        <section class="global-settings-section" id="globalSettingsDatabase">
-          <div class="global-settings-section-heading">
-            <div class="global-settings-section-title"><i data-lucide="database"></i><h3>数据库连接</h3><span class="database-schema-badge" id="databaseSchemaBadge">V—</span></div>
-            <button class="btn icon-only" type="button" id="refreshDatabaseConnectionBtn" title="重新加载数据库信息" aria-label="重新加载数据库信息"><i data-lucide="refresh-cw"></i></button>
-          </div>
-          <div id="databaseConnectionContent" aria-live="polite"><div class="global-settings-state">正在加载数据库连接…</div></div>
-        </section>
-
-        <section class="global-settings-section" id="globalSettingsRuntime">
-          <div class="global-settings-runtime-toolbar">
-            <div class="global-settings-section-title">
-              <i data-lucide="settings-2"></i>
-              <h3>运行设置</h3>
+              <section class="global-settings-section" id="globalSettingsRuntime">
+                <div class="global-settings-runtime-toolbar">
+                  <div class="global-settings-section-title">
+                    <i data-lucide="settings-2"></i>
+                    <h3 class="settings-group-title">运行设置</h3>
+                  </div>
+                  <label class="agent-search global-settings-search"><i data-lucide="search"></i><input type="search" id="globalSettingsSearch" placeholder="搜索配置项或环境变量" autocomplete="off" /></label>
+                </div>
+                <div class="global-settings-groups" id="globalSettingsGroups" aria-live="polite">
+                  <div class="global-settings-state">正在加载运行设置…</div>
+                </div>
+              </section>
             </div>
-            <label class="agent-search global-settings-search"><i data-lucide="search"></i><input type="search" id="globalSettingsSearch" placeholder="搜索配置项或环境变量" autocomplete="off" /></label>
-          </div>
-          <div class="global-settings-groups" id="globalSettingsGroups" aria-live="polite">
-            <div class="global-settings-state">正在加载运行设置…</div>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
     </section>
 

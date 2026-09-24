@@ -171,7 +171,7 @@ test("旧搜索配置失效不阻止展示运行设置和打开修复草稿", as
   assert.equal(summary.textContent, '配置不可用，请重新配置');
 });
 
-test("Agent 是配置中心默认页，系统分组包含全局配置和模型目录", () => {
+test("Agent 是配置中心默认页，全局配置整合三个二级目录", () => {
   assert.match(
     indexHtml,
     /class="tab resource-btn active" data-tab="agents"/,
@@ -185,26 +185,27 @@ test("Agent 是配置中心默认页，系统分组包含全局配置和模型�
     templateHtml,
     /class="panel active global-settings-panel" id="panel-global-settings"/,
   );
-  assert.doesNotMatch(templateHtml, /data-global-settings-view|global-settings-nav/);
+  assert.match(templateHtml, /class="global-settings-nav"/);
+  for (const page of ["general", "models", "operations"]) {
+    assert.ok(templateHtml.includes(`data-settings-page="${page}"`));
+    assert.ok(templateHtml.includes(`id="settings-${page}"`));
+  }
   assert.match(templateHtml, /class="global-settings-stack"/);
   assert.match(
     templateHtml,
-    /id="globalSettingsWebSearch"[\s\S]*?data-lucide="globe-2"/,
+    /id="globalSettingsWebSearch"[\s\S]*?<h3>网络搜索<\/h3>/,
   );
   assert.match(templateHtml, /id="globalSettingsRuntime"/);
   assert.ok(
     templateHtml.indexOf('id="globalSettingsWebSearch"') <
       templateHtml.indexOf('id="globalSettingsRuntime"'),
   );
-  assert.match(templateHtml, /管理 DeepAgent 的系统级业务配置和运行设置/);
   assert.doesNotMatch(templateHtml, /当前页面只读|只读标签/);
   assert.doesNotMatch(templateHtml, /agentMaxRequests|max_requests|最大请求次数（可选）/);
   assert.doesNotMatch(indexHtml, /data-tab="auxiliary-models"|辅助模型|辅助工具/);
   assert.match(indexHtml, /class="console-nav-footer">\s*<div class="resource-group-label">系统<\/div>[\s\S]*data-tab="global-settings"/);
-  assert.ok(
-    indexHtml.indexOf('data-tab="global-settings"') <
-      indexHtml.indexOf('data-tab="catalog"'),
-  );
+  assert.doesNotMatch(indexHtml, /data-tab="catalog"|href="\.\.\/docs"/);
+  assert.match(templateHtml, /href="\.\.\/docs"[^>]*target="_blank"/);
   assert.doesNotMatch(indexHtml, /data-tab="database-connection"/);
 });
 
@@ -262,7 +263,7 @@ test("Web Search 摘要只回显当前生效的一个供应商选择", () => {
   assert.equal(ui.webSearchSummaryLabel({ value: { mode: "provider", provider: "kimi", configuration_error: "供应商已删除" } }), "配置不可用");
   assert.match(templateHtml, /id="webSearchSummaryValue">未配置/);
   const webSearchSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsWebSearch">[\s\S]*?<\/section>/)?.[0] || "";
-  assert.match(webSearchSection, /Web Search[\s\S]*?配置 Agent 的搜索供应商。[\s\S]*?id="webSearchSummaryValue"[\s\S]*?openWebSearchSettingsBtn/);
+  assert.match(webSearchSection, /网络搜索[\s\S]*?配置 Web Search 工具使用的搜索供应商。[\s\S]*?id="webSearchSummaryValue"[\s\S]*?openWebSearchSettingsBtn/);
   assert.doesNotMatch(webSearchSection, /global-settings-summary-row|<p|当前支持|Kimi/);
   const runtimeSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsRuntime">[\s\S]*?<\/section>/)?.[0] || "";
   assert.doesNotMatch(runtimeSection, /数据库连接、密钥|查看当前 DeepAgent 进程/);

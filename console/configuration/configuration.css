@@ -792,10 +792,10 @@ dialog.web-search-settings-dialog.console-detail-dialog.modal {
   table-layout: fixed;
 }
 
-.global-settings-table th:nth-child(1) { width: 16%; }
-.global-settings-table th:nth-child(2) { width: 14%; }
-.global-settings-table th:nth-child(3) { width: 24%; }
-.global-settings-table th:nth-child(4) { width: 12%; }
+.global-settings-table thead th:nth-child(1) { width: 32%; }
+.global-settings-table thead th:nth-child(2) { width: 17%; }
+.global-settings-table thead th:nth-child(3) { width: 14%; }
+.global-settings-table thead th:nth-child(4) { width: 37%; }
 
 .global-settings-table code {
   color: var(--text-dim);
@@ -1414,7 +1414,7 @@ dialog.console-action-dialog::backdrop {
   .global-settings-runtime-toolbar { display: grid; }
   .global-settings-search { width: 100%; }
   .global-settings-table {
-    min-width: 840px;
+    min-width: 640px;
   }
 
 }
@@ -2648,18 +2648,10 @@ dialog.console-action-dialog::backdrop {
   margin-bottom: 10px;
 }
 
-.cap-panel-toolbar .btn-link {
-  background: none;
-  border: none;
-  color: var(--accent);
-  cursor: pointer;
-  padding: 0;
-  font-size: 12px;
-}
-
-.cap-panel-toolbar .btn-link:hover {
-  color: var(--accent-hover);
-}
+.cap-group-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; font-size: 12px; color: var(--text); cursor: pointer; }
+.cap-group-toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.cap-group-selection-state { color: var(--text-faint); }
+.cap-group-toggle:has(input:disabled) { opacity: .6; cursor: default; }
 
 /* Enterprise IM channels */
 .channel-admin-panel {
@@ -3579,3 +3571,6 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
   .mcp-catalog-toolbar { flex-wrap: wrap; padding: 10px 14px; }
   .mcp-catalog-toolbar .mcp-catalog-search { width: 100%; }
 }
+
+.global-setting-name strong { display: block; font-size: 13px; line-height: 1.5; }
+.global-settings-table .global-setting-name code { display: block; margin-top: 4px; color: var(--text-faint); font-size: 11px; line-height: 1.5; }

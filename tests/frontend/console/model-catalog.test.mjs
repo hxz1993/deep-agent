@@ -61,7 +61,7 @@ test("模型目录标题栏复用配置页标题层级", () => {
 });
 
 test("模型目录筛选左对齐并复用 Console 下拉控件", () => {
-  const filterMarkup = catalogTemplate.match(/<div class="models-filters">[\s\S]*?<\/div>\s*<\/div>/)?.[0] || "";
+  const filterMarkup = catalogTemplate.split('<div class="models-filters">')[1]?.split('<div class="catalog-feedback')[0] || "";
   assert.match(filterMarkup, /placeholder="搜索当前供应商的模型"/);
   assert.match(filterMarkup, />全部输入模态</);
   assert.doesNotMatch(filterMarkup, /<span>搜索<\/span>|<span>接入渠道<\/span>|<span>输入模态<\/span>|<span>查看方式<\/span>/);
@@ -71,7 +71,7 @@ test("模型目录筛选左对齐并复用 Console 下拉控件", () => {
 test("目录说明收进副标题信息提示且不再保留底部展开区域", () => {
   assert.match(
     catalogTemplate,
-    /<h1 class="catalog-title">[\s\S]*模型目录[\s\S]*class="catalog-info"/,
+    /<h1 class="catalog-title settings-group-title">[\s\S]*模型目录[\s\S]*class="catalog-info"/,
   );
   assert.match(catalogTemplate, /data-lucide="info"/);
   assert.match(catalogTemplate, /class="catalog-info-tooltip" role="tooltip"/);
@@ -91,10 +91,10 @@ test("模型目录使用供应商卡片和紧凑能力标签", () => {
 });
 
 test("模型目录填满内容区且只滚动内部列表", () => {
-  assert.match(coreSource, /classList\.toggle\("catalog-active", name === "catalog"\)/);
-  assert.match(consoleStyles, /\.configuration-content\.catalog-active\s*\{[^}]*overflow: hidden;/);
-  assert.match(consoleStyles, /\.configuration-content\.catalog-active #configurationHost,[\s\S]*?#panel-catalog\.active\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/);
-  assert.match(consoleStyles, /\.catalog-panel\.active\s*\{[^}]*display: flex;[^}]*height: 100%;[^}]*overflow: hidden;/);
+  assert.match(coreSource, /classList\.toggle\("global-settings-active", name === "global-settings"\)/);
+  assert.match(consoleStyles, /\.configuration-content\.global-settings-active\s*\{[^}]*overflow: hidden;/);
+  assert.match(consoleStyles, /\.configuration-content\.global-settings-active #configurationHost,[\s\S]*?#panel-global-settings\.active\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/);
+  assert.match(consoleStyles, /\.global-settings-page\.catalog-panel:not\(\[hidden\]\)\s*\{[^}]*display: flex;[^}]*height: 100%;[^}]*overflow: hidden;/);
   assert.match(consoleStyles, /\.catalog-panel \.catalog-browser\s*\{[^}]*flex: 1 1 auto;[^}]*min-height: 0;[^}]*overflow: hidden;/);
   assert.match(consoleStyles, /\.catalog-panel \.catalog-results\s*\{[^}]*display: flex;[^}]*min-height: 0;[^}]*overflow: hidden;/);
   assert.match(consoleStyles, /#configurationHost \.catalog-panel \.models-table-wrap\s*\{[^}]*flex: 1 1 auto;[^}]*overflow: auto;/);

@@ -2102,23 +2102,36 @@ html[data-theme="paper"] .context-budget-row.tone-target .context-budget-track >
 .catalog-detail-row > td { padding: 0 8px 10px !important; background: var(--console-surface); }
 .catalog-provider-options { border-color: var(--console-card-border); border-radius: 10px; background: color-mix(in srgb, var(--bg-soft) 68%, var(--console-surface)); }
 
-.catalog-panel.active {
+.global-settings-page.catalog-panel:not([hidden]) {
   display: flex;
   height: 100%;
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
 }
-.configuration-content.catalog-active {
-  overflow: hidden;
-}
-.configuration-content.catalog-active #configurationHost,
-.configuration-content.catalog-active #panel-catalog.active {
+/* Global settings owns the viewport; each detail page scrolls independently. */
+.configuration-content.global-settings-active { overflow: hidden; }
+.configuration-content.global-settings-active #configurationHost,
+.configuration-content.global-settings-active #panel-global-settings.active {
   box-sizing: border-box;
   height: 100%;
   min-height: 0;
   overflow: hidden;
 }
+#configurationHost > #panel-global-settings.active { display: flex; flex-direction: column; }
+.global-settings-header { flex: 0 0 auto; }
+.global-settings-layout { display: flex; flex: 1 1 auto; width: 100%; margin-inline: 0; min-height: 0; }
+.global-settings-nav { position: relative; box-sizing: border-box; flex: 0 0 164px; min-width: 0; overflow-y: auto; padding: 8px 16px 8px 0; }
+.global-settings-nav::after { content: ""; position: absolute; top: 8px; bottom: 8px; right: 0; width: 1px; background: var(--console-card-border); }
+.global-settings-nav nav { display: grid; gap: 4px; }
+.global-settings-nav-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 36px; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--text-dim); text-align: left; font: inherit; cursor: pointer; }
+.global-settings-nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+.global-settings-nav-item:hover { color: var(--accent); }
+.global-settings-nav-item.active { color: var(--accent); background: var(--accent-soft); }
+.global-settings-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.global-settings-detail { flex: 1; max-width: 1128px; min-width: 0; min-height: 0; overflow: hidden; }
+.global-settings-page { box-sizing: border-box; height: 100%; padding: 8px 24px; overflow: auto; }
+.global-settings-page[hidden] { display: none !important; }
 .catalog-panel .models-toolbar,
 .catalog-panel .models-status,
 .catalog-panel .models-pagination { flex: 0 0 auto; }
@@ -3008,7 +3021,7 @@ dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface
 .agent-select-option > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 #globalSettingsDatabase { padding-top: 14px; padding-bottom: 14px; }
-#globalSettingsDatabase .global-settings-section-heading { min-height: 28px; margin-bottom: 8px; }
+
 .database-inline-facts { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; font-size: 12px; }
 .database-inline-facts > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .database-inline-facts dt { color: var(--text-faint); }
@@ -3022,7 +3035,6 @@ dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface
 #panel-llm-providers .provider-detail-pane { min-height: 0; overflow: auto; }
 
 /* 配置页标题保持紧凑层级，不影响工作台消息与 Markdown 正文。 */
-#configurationHost .global-settings-section-title h3,
 #configurationHost .provider-detail-header h3,
 #configurationHost .modal-header h3 { font-size: 14px; font-weight: 600; }
 #configurationHost .global-settings-section-title > svg { width: 16px; height: 16px; }
@@ -3047,3 +3059,63 @@ dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface
 .catalog-model-table .model-tag-cell .badge { padding: 2px 5px; font-size: 11px; line-height: 16px; }
 #catalogSupplierSidebar .catalog-lab-item { transform: none; }
 #catalogSupplierSidebar .catalog-lab-item span { min-width: 0; line-height: 18px; }
+
+/* Shared settings detail headings and a single catalog filter/status row. */
+#configurationHost .global-settings-section-title h3 { font-size: 16px; font-weight: 600; line-height: 1.25; }
+.global-settings-detail-title { display: flex; align-items: center; gap: 10px; }
+.global-settings-detail-title > svg,
+.catalog-title > svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--accent); }
+
+.catalog-panel .models-filters { flex: 0 0 auto; margin-bottom: 12px; }
+.catalog-panel .models-filters .models-status { margin: 0 0 0 auto; text-align: right; }
+@media (max-width: 900px) {
+  .catalog-panel .models-filters .models-status { grid-column: 1 / -1; }
+}
+
+/* All settings detail pages share the same maximum content width. */
+.global-settings-detail .global-settings-stack { max-width: none; }
+#globalSettingsWebSearch { box-sizing: border-box; padding: 16px 18px; border: 1px solid var(--console-card-border); border-radius: 8px; }
+#globalSettingsWebSearch .global-settings-section-heading { align-items: center; }
+#globalSettingsWebSearch .global-settings-section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
+#configurationHost #globalSettingsWebSearch h3 { font-size: 13px; font-weight: 500; line-height: 1.5; }
+#globalSettingsWebSearch .global-settings-section-copy { font-size: 12px; white-space: normal; line-height: 1.5; }
+#globalSettingsWebSearch .global-settings-section-actions { flex-shrink: 0; }
+
+
+#settings-operations .global-settings-section { padding: 0; border: 0; }
+.global-settings-content-copy { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.6; }
+.global-settings-group-heading { margin-bottom: var(--settings-group-content-gap); }
+#configurationHost .global-settings-group-heading h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 24px; }
+.tool-web-search-setting { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: 10px; font-family: var(--font-sans, inherit); font-weight: 400; font-size: 12px; }
+.tool-web-search-setting button { display: inline-flex; align-items: center; gap: 5px; padding: 2px 0; border: 0; background: transparent; color: var(--text-dim); font: inherit; cursor: pointer; }
+.tool-web-search-setting button:hover { color: var(--accent); }
+.tool-web-search-setting button svg { width: 13px; height: 13px; flex: 0 0 auto; }
+
+/* Settings groups share one title baseline across all three detail pages. */
+#configurationHost #panel-global-settings .settings-group-title {
+  display: flex; align-items: center; gap: 10px; min-height: 24px;
+  margin: 0; padding: 0; font-size: 16px; line-height: 24px;
+  font-weight: 600; letter-spacing: normal; color: var(--text);
+}
+#panel-global-settings .global-settings-section-title { min-height: 24px; gap: 10px; }
+#configurationHost #panel-global-settings .settings-group-title > svg,
+#configurationHost #panel-global-settings .global-settings-section-title > svg {
+  width: 18px; height: 18px; margin: 0; flex: 0 0 18px; color: var(--accent);
+}
+#panel-global-settings #globalSettingsDocs { padding-top: 0; }
+
+
+
+/* Group rhythm: a 24px title row, 8px to content, 28px between groups. */
+#panel-global-settings { --settings-group-content-gap: 8px; --settings-group-gap: 28px; }
+.global-settings-stack { display: grid; gap: var(--settings-group-gap); }
+#settings-operations .global-settings-section > .global-settings-section-heading,
+#settings-operations .global-settings-runtime-toolbar {
+  position: relative; min-height: 24px; margin: 0 0 var(--settings-group-content-gap);
+}
+#settings-operations .global-settings-section-heading > .btn,
+#settings-operations .global-settings-runtime-toolbar > .global-settings-search {
+  position: absolute; right: 0; top: -4px;
+}
+#settings-operations .global-settings-section-title { padding-right: 180px; }
+.catalog-panel .catalog-results > .models-pagination { justify-content: flex-end; width: 100%; margin-top: 10px; }

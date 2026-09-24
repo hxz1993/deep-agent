@@ -123,7 +123,7 @@ test("附件读取不再作为可配置内置工具包", () => {
 
 
 test("两组目录共用详情，异步加载第二组不会丢失第一组选择", () => {
-  const host = { innerHTML: "", querySelectorAll: () => [] };
+  const host = { innerHTML: "", querySelectorAll: () => [], querySelector: () => null };
   const ui = loadBuiltinToolsUi({ getElementById: () => host });
   ui.updateToolCatalogGroup(false, [{ code: "builtin:sandbox", label: "Python 沙箱", tools: [{ name: "execute_python" }] }]);
   ui.updateToolCatalogGroup(true, [{ code: "runtime:planning", label: "任务规划", tools: [{ name: "write_plan" }] }]);
@@ -145,4 +145,13 @@ test("目录项与工具说明转义外部字符串", () => {
   assert.doesNotMatch(html, /<img|<script|<tool>/);
   assert.match(html, /&quot;/);
   assert.match(html, /&lt;script&gt;/);
+});
+
+
+test("web_search 仅显示配置摘要和前往常规设置入口", () => {
+  const ui = loadBuiltinToolsUi();
+  const html = ui.toolCatalogDetails({ code: "builtin:web", tools: [{ name: "web_search" }, { name: "web_fetch" }] });
+  assert.equal((html.match(/data-web-search-settings/g) || []).length, 1);
+  assert.match(html, /web_search[\s\S]*data-web-search-settings[\s\S]*data-lucide="pencil"/);
+  assert.doesNotMatch(html, /<input|<select/);
 });

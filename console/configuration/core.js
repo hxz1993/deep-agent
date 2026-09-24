@@ -315,9 +315,10 @@ function populateAgentModelSelect(selectedId = null) {
   if (!select) return;
   const models = state.llmModels || [];
   select.disabled = false;
-  select.innerHTML = `<option value="">未配置模型</option>` + (models.length
-    ? window.DeepAgentModelOptions.renderGroupedModelOptions(models, { selectedId })
-    : "");
+  select.innerHTML = `<option value="" hidden></option>`
+    + window.DeepAgentModelOptions.renderGroupedModelOptions(models, {
+      selectedId, emptyLabel: null, groupIcon: (provider) => providerBrand(provider).src,
+    });
   select.value = selectedId || "";
 }
 

@@ -104,10 +104,7 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                                     'tools': {tool.name: tool.model_dump() for tool in ui.tools}}
                                     for ui in packages}
                             self.assertEqual(ui_by_code(parsed_export.ui), ui_by_code(package.ui))
-                            expected_selection = {ui.code: package.agent.ui_tool_selection.get(ui.code,
-                                [tool.name for tool in ui.tools]) for ui in package.ui}
-                            self.assertEqual({code: set(names) for code, names in parsed_export.agent.ui_tool_selection.items()},
-                                {code: set(names) for code, names in expected_selection.items()})
+                            self.assertNotIn('ui_tool_selection', parsed_export.agent.model_dump())
                             self.assertEqual(parsed_export.skills, package.skills)
                     self.assertEqual(len(await stores.agent.list_all()), 2)
             finally:

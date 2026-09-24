@@ -23,11 +23,22 @@ from deep_agent.schemas.mcp import (
     McpInspectionResult,
     McpInspectionServer,
     McpResourcesInspection,
+    McpResourceDefinition,
     McpToolSnapshot,
     McpToolSnapshotDefinition,
     McpToolsInspection,
     McpValueChange,
 )
+
+
+def _resource_definitions(items):
+    return [McpResourceDefinition(
+        name=getattr(item, "name", ""),
+        title=getattr(item, "title", None),
+        uri=str(getattr(item, "uri", "")),
+        description=getattr(item, "description", None),
+        mime_type=getattr(item, "mimeType", None),
+    ) for item in items]
 
 
 def _utcnow() -> datetime:
@@ -207,6 +218,7 @@ async def _inspect_builtin_mcp_server(
                 except Exception as exc:
                     template_error = _safe_error("resources/templates/list", exc)
                 resources = McpResourcesInspection(
+                    definitions=_resource_definitions(resource_items) if resource_items is not None else previous.resources.definitions,
                     status="error" if resource_error or template_error else (
                         "supported" if resource_items or template_items else "unsupported"
                     ),
@@ -389,6 +401,7 @@ async def inspect_mcp_server(
                     if resource_error or template_error:
                         degraded = True
                         resources = McpResourcesInspection(
+                            definitions=_resource_definitions(resource_items) if resource_items is not None else previous.resources.definitions,
                             status="error",
                             count=(
                                 len(resource_items)
@@ -406,6 +419,7 @@ async def inspect_mcp_server(
                         resource_count = len(resource_items or [])
                         template_count = len(template_items or [])
                         resources = McpResourcesInspection(
+                            definitions=_resource_definitions(resource_items) if resource_items is not None else previous.resources.definitions,
                             status=(
                                 "supported"
                                 if resource_count or template_count

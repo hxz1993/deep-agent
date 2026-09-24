@@ -37,7 +37,7 @@ import {
   modelOptionLabel,
   preserveCurrentModel,
   renderGroupedModelOptions,
-} from "./model-options.js?v=20260912-21";
+} from "./model-options.js?v=20260924-config-catalog-5";
 import { shouldFollowMessages } from "./message-scroll.js?v=20260912-21";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260912-21";
 import { createHistoryFollower } from "./history-follower.js?v=20260912-21";

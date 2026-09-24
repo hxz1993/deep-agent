@@ -28,12 +28,8 @@ def is_tool_visible(
     record: UIToolRecord,
     *,
     capabilities: list[str] | None,
-    ui_tool_selection: dict[str, list[str]] | None = None,
 ) -> bool:
-    if record.package_code not in (capabilities or []):
-        return False
-    selection = ui_tool_selection or {}
-    return record.package_code not in selection or record.name in selection[record.package_code]
+    return record.package_code in (capabilities or [])
 
 
 def merge_definitions(
@@ -181,7 +177,6 @@ async def load_effective_ui_tools(
         if is_tool_visible(
             record,
             capabilities=spec.capabilities,
-            ui_tool_selection=spec.ui_tool_selection,
         )
     ]
     visible_builtins = [
@@ -190,7 +185,6 @@ async def load_effective_ui_tools(
         if is_tool_visible(
             record,
             capabilities=spec.capabilities,
-            ui_tool_selection=spec.ui_tool_selection,
         )
     ]
 

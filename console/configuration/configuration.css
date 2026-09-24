@@ -1037,51 +1037,38 @@ dialog.web-search-settings-dialog.console-detail-dialog.modal {
 .badge.off { color: var(--text-dim); }
 .badge.warn { color: #b7791f; border-color: color-mix(in srgb, #b7791f 55%, var(--border)); }
 
-.mcp-inspection {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  width: 100%;
-  margin-top: 7px;
-}
-
-.mcp-inspection-counts {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-dim);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.mcp-inspection-counts > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.mcp-inspection-counts svg {
-  width: 13px;
-  height: 13px;
-  color: var(--text-faint);
-}
-
-.mcp-inspection-counts strong {
-  color: var(--text-dim);
-  font-weight: 600;
-}
-
-.mcp-description-column,
-.mcp-description-cell {
-  min-width: 340px;
-  width: 38%;
-}
-
-.mcp-description-text {
-  color: var(--text);
-  line-height: 1.45;
-}
+.mcp-list-table { table-layout: fixed; min-width: 1000px; }
+.mcp-list-table th:nth-child(1) { width: 12%; }
+.mcp-list-table th:nth-child(2) { width: 160px; }
+.mcp-list-table th:nth-child(3) { width: 104px; }
+.mcp-list-table th:nth-child(5) { width: 190px; }
+.mcp-list-table th:nth-child(6) { width: 170px; }
+.mcp-list-table th:nth-child(7) { width: 112px; }
+.mcp-list-table td { white-space: nowrap; }
+.mcp-list-table td:first-child { overflow: hidden; text-overflow: ellipsis; }
+.mcp-inspection { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.mcp-inspection-counts { display: inline-flex; align-items: center; gap: 10px; color: var(--text-dim); font-size: 12px; white-space: nowrap; }
+.mcp-inspection-counts > span,
+.mcp-inspection-counts > button { display: inline-flex; align-items: center; gap: 4px; }
+.mcp-inspection-counts > button { border: 0; background: transparent; color: inherit; padding: 3px; cursor: pointer; border-radius: 4px; }
+.mcp-inspection-counts > button:hover { background: var(--accent-soft); color: var(--accent); }
+.mcp-inspection-counts svg { width: 13px; height: 13px; }
+.mcp-inspection-counts strong { font-weight: 600; }
+.mcp-description-text { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#configurationHost .mcp-list-table .badge.mcp-transport-http,
+#configurationHost .mcp-list-table .badge.mcp-context-inherit { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+#configurationHost .mcp-list-table .badge.mcp-transport-stdio { color: var(--text-dim); background: var(--console-readonly-surface); border-color: var(--border); }
+#configurationHost .mcp-list-table .badge.mcp-context-isolated { color: var(--warning-text, #9a6700); background: color-mix(in srgb, var(--warning-text, #9a6700) 10%, transparent); border-color: transparent; }
+dialog.console-detail-dialog.modal.mcp-catalog-modal { width: min(1120px, calc(100vw - 32px)); height: min(660px, calc(100vh - 48px)); max-height: none; }
+.mcp-catalog-modal[open] { display: flex; flex-direction: column; }
+.mcp-catalog-modal .modal-header,
+.mcp-catalog-modal .mcp-catalog-toolbar { flex-shrink: 0; }
+.mcp-catalog-modal .modal-body { flex: 1; overflow: auto; min-height: 0; max-height: none; padding-top: 0; }
+.mcp-catalog-notice { color: var(--warning-text, #9a6700); }
+.mcp-catalog-table { table-layout: fixed; width: 100%; }
+.mcp-catalog-table th:first-child { width: 32%; }
+.mcp-catalog-table td { vertical-align: top; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mcp-catalog-table thead { background: var(--console-surface); }
 
 .mcp-actions-column,
 .mcp-actions-cell {
@@ -1361,6 +1348,9 @@ dialog.console-action-dialog::backdrop {
   gap: 12px;
   min-width: 0;
 }
+
+.agent-model-clear { padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.agent-model-clear:hover { text-decoration: underline; }
 
 .field .prompt-estimate {
   color: var(--text-faint);
@@ -2911,6 +2901,35 @@ dialog.console-detail-dialog.modal.channel-commands-modal {
   background: color-mix(in srgb, var(--accent) 6%, var(--bg));
 }
 
+/* Agent capability rows rely on a quiet fill; the switch remains the active cue. */
+.agent-editor-pane .cap-card,
+.agent-editor-pane .agent-skill-card {
+  border-color: transparent;
+  background: transparent;
+}
+.agent-editor-pane .cap-card:has(input:checked),
+.agent-editor-pane .agent-skill-card:has(input:checked) {
+  border-color: transparent;
+  background: var(--accent-soft);
+}
+.agent-editor-pane .cap-card:hover,
+.agent-editor-pane .cap-card:focus-within,
+.agent-editor-pane .agent-skill-card:hover,
+.agent-editor-pane .agent-skill-card:focus-within {
+  border-color: transparent;
+}
+.cap-card-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 16px;
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cap-card-counts > span { display: inline-flex; align-items: center; gap: 4px; }
+.cap-card-counts svg { width: 13px; height: 13px; }
+
 .cap-card:hover,
 .cap-card:focus-within {
   border-color: var(--accent);
@@ -3053,37 +3072,6 @@ dialog.console-detail-dialog.modal.channel-commands-modal {
 
 .cap-card.is-locked {
   border-style: dashed;
-}
-
-.cap-card-tools {
-  margin-top: 8px;
-  font-size: 12px;
-}
-
-.cap-card-tools summary {
-  cursor: pointer;
-  color: var(--text-dim);
-  user-select: none;
-}
-
-.cap-card-tools summary:hover {
-  color: var(--text);
-}
-
-.cap-card-tools ul {
-  margin: 6px 0 0;
-  padding-left: 16px;
-  color: var(--text-dim);
-}
-
-.cap-card-tools li {
-  margin-bottom: 4px;
-  line-height: 1.4;
-}
-
-.cap-card-tools li strong {
-  color: var(--text);
-  font-weight: 500;
 }
 
 .cap-empty {
@@ -3575,4 +3563,19 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 
 @media (max-width: 440px) {
   .web-search-mode-option > span { font-size: 12px; gap: 4px; padding: 0 3px; }
+}
+
+.mcp-catalog-table details > summary { cursor: pointer; color: var(--text-dim); white-space: normal; }
+.mcp-catalog-description { margin-top: 10px; line-height: 1.5; }
+
+.mcp-catalog-toolbar { display:flex; align-items:center; justify-content:space-between; gap:16px; background:var(--console-surface); padding:10px 20px; }
+.mcp-catalog-tabs { display:flex; gap:4px; flex-shrink:0; }
+.mcp-catalog-tabs button { border:0; background:transparent; padding:6px 10px; border-radius:6px; color:var(--text-dim); font:inherit; cursor:pointer; }
+.mcp-catalog-tabs button[aria-selected="true"] { color:var(--accent); background:var(--accent-soft); }
+.mcp-catalog-tabs span { margin-left:4px; font-size:12px; }
+.mcp-catalog-toolbar .mcp-catalog-search { width: min(280px, 48%); }
+.mcp-catalog-toolbar .mcp-catalog-search input { width: 100%; height: auto; padding: 0; border: 0; box-shadow: none; background: transparent; }
+@media (max-width: 560px) {
+  .mcp-catalog-toolbar { flex-wrap: wrap; padding: 10px 14px; }
+  .mcp-catalog-toolbar .mcp-catalog-search { width: 100%; }
 }

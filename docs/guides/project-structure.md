@@ -85,7 +85,7 @@ Adapter的原生SDK回复。Gateway不是MCP工具，也不包含模型执行引
 | `ui:<package>` | `ui_tool_packages` + `ui_tool_definitions` | Agent 显式选择的手工 HITL 工具包 |
 
 分类只是 ToolPackage 的 `category` 字段；ToolPackage 是 Agent 配置单位，Toolset 是运行时
-交给 Pydantic AI 的对象。一个包严格包装一个 Toolset，Agent.ui_tool_selection 可限制包内工具；缺少包 key 沿用整包，显式名单仅允许名单内工具，空名单不提供工具。
+交给 Pydantic AI 的对象。一个包严格包装一个 Toolset，Agent 以 `capabilities` 关联整个包；旧 `ui_tool_selection` 字段只为历史数据库兼容保留，不再限制运行时工具。
 
 所有工具包只在 `agents.capabilities` 中显式关联后进入Run；新Agent默认空列表。Skill 不属于
 工具包，也不进入 `agents.capabilities`。Agent 使用独立 `agents.skills` 选择

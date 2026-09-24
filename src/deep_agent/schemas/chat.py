@@ -119,6 +119,7 @@ class ToolPackageDescription(BaseModel):
     tools: list[ToolDescription] = Field(default_factory=list)
     source: str | None = None
     tool_count: int = 0
+    resource_count: int = 0
     tool_catalog_status: str = "complete"
     disclosure_mode: Literal["direct", "conditional", "search"] = "direct"
     disclosure_condition: str | None = None

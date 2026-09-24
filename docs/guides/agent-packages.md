@@ -11,18 +11,13 @@
 
 新建生成新的 Agent ID；名称重复须更名。覆盖保留目标 ID、历史会话、渠道和集成引用，替换提示词及关联配置；包中没有的旧关联取消，资源实体保留。内置能力与 MCP 按准确代码自动关联，不提供映射。模型/MCP 凭据不随包传递。
 
-## 资源更新与 UI 工具范围
+## 资源更新与 UI 工具包
 
 Skill 编码不存在时创建，同编码同内容保持不变，不同内容覆盖。UI 工具包按编码、工具按全局名称创建或更新，跨包同名或代码内置资源冲突明确阻断。影响其他 Agent 的共享资源更新在预检中列出。
 
-旧 UI 包有 A/B/C，安装包只有 A/B：保留 C 及原归属，其他 Agent 仍可使用 C；本次 Agent 仅使用 A/B。`Agent.ui_tool_selection` 保存包编码到工具名单的映射：
+Agent 只按 `capabilities` 关联或取消关联整个 UI 工具包，包内全部有效工具均可用，包括后续新增工具。旧数据库和旧 ZIP 的 `ui_tool_selection` 名单在读取时忽略；Agent 再保存会清空旧列，新导出不再包含名单。无需数据库迁移。
 
-- 未包含某包 key：整包关联，兼容旧 Agent。
-- 包 key 对应具体名单：仅这些工具可进入模型声明与运行，`[]` 表示不启用该包任何工具。
-- 普通配置可调整范围；PATCH 省略字段保留，取消包关联时同时清理对应范围。
-- 复制、配置备份导入、Agent 导出安装、工具提示和 HITL 续跑均保留并校验范围。
-
-安装旧包时从 ZIP 内实际 UI 定义建立明确名单，不把目标环境额外工具带入。导出包含整个关联 UI 工具包的定义，同时保存 Agent 的实际选择范围；再安装不扩大工具范围。
+若目标环境已有同编码工具包，ZIP 中未列出的旧工具仍保留在该共享包中，整包启用的 Agent 也能使用它们；预检逐项提示这些额外工具。导出包含整个关联 UI 工具包的定义。
 
 ## ZIP 格式
 
@@ -35,7 +30,7 @@ skills/<skill-code>.zip
 
 `manifest.json`：`format=deepagent-agent-package`、`schema_version=1`、`exported_from`。软件版本不同不阻断；不支持的格式、版本及影响运行的未知字段明确拒绝。
 
-`agent.json` 包含名称、提示词、能力与 Skill 编码、可选模型参考及 `ui_tool_selection`。模型参考只含名称和 Provider 类型；安装匹配不要求 Provider 类型相同。`ui-tools.json` 包含整个关联自定义工具包及工具定义、参数/结果 Schema、widget 标识和元数据，不包含组件渲染代码。上传 Skill 保留完整原始 ZIP；内置 Skill、工具和 MCP 仅携带引用。缺失或不可读取的关联 Skill 原包导致导出失败。
+`agent.json` 包含名称、提示词、能力与 Skill 编码及可选模型参考；旧 ZIP 中的 `ui_tool_selection` 会被忽略。模型参考只含名称和 Provider 类型；安装匹配不要求 Provider 类型相同。`ui-tools.json` 包含整个关联自定义工具包及工具定义、参数/结果 Schema、widget 标识和元数据，不包含组件渲染代码。上传 Skill 保留完整原始 ZIP；内置 Skill、工具和 MCP 仅携带引用。缺失或不可读取的关联 Skill 原包导致导出失败。
 
 不包含温度、来源 Agent ID、平台文件 ID、会话、日志、Provider 凭据或 MCP 认证配置。
 
@@ -56,7 +51,7 @@ skills/<skill-code>.zip
 | `POST /api/v1/agent-packages/preview` | multipart 的 `file` / `builtin_code` 二选一，加 `mode=create/overwrite` 和覆盖时的 `target_agent_id` |
 | `POST /api/v1/agent-packages/install` | 相同来源，加 JSON 文本 `options`；返回 `{agent, mode, results, missing}` |
 
-预检返回 `digest`、`mode`、`target_agent`、`resources`、`references`、`models`、`ui_tool_selection`、`removed_associations`、`blocked`。资源状态为 `new/update/reuse/missing/blocked`，UI 行另含逐工具 `tools`、`retained_tools`、`selected_tools`，共享更新含 `affected_agents`。
+预检返回 `digest`、`mode`、`target_agent`、`resources`、`references`、`models`、`removed_associations`、`blocked`。资源状态为 `new/update/reuse/missing/blocked`，UI 行另含逐工具 `tools`、`retained_tools`，共享更新含 `affected_agents`。
 
 安装 options：`digest`、`mode`、`target_agent_id`、`name`、`model_id`。新建不得带目标；覆盖必须带目标。省略模型采用预检默认，显式 `null` 清空。旧 `resources`、`mcp_mapping` 参数不再接受。
 

@@ -52,6 +52,7 @@ async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]
                 "source": "builtin" if row.transport == "builtin" else "database",
                 "description": row.description or f"MCP 服务 {row.name}",
                 "tool_count": inspection.tools.count,
+                "resource_count": inspection.resources.count,
                 "tool_catalog_status": catalog_status,
                 "tools": [],
                 "disclosure_mode": (

@@ -16,5 +16,7 @@ select.da-select-native { position: absolute !important; width: 1px !important; 
 .da-select-option:hover, .da-select-option.active { color: var(--text); background: var(--bg-elev); }
 .da-select-option[aria-selected=true] { color: var(--accent); background: var(--accent-soft); }
 .da-select-option[aria-disabled=true] { color: var(--text-faint); cursor: not-allowed; opacity: .6; }
-.da-select-group { padding: 8px 9px 4px; color: var(--text-faint); font-size: 11px; }
+.da-select-group { display: flex; align-items: center; gap: 7px; padding: 8px 9px 4px; color: var(--text-faint); font-size: 11px; }
+.da-select-group img { width: 16px; height: 16px; object-fit: contain; }
+.da-select-option.is-grouped { padding-left: 32px; }
 .da-select-empty { padding: 10px; color: var(--text-faint); font-style: italic; text-align: center; }

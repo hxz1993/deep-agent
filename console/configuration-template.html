@@ -199,19 +199,20 @@
         <button class="btn primary" id="newMcpBtn"><i data-lucide="plus"></i>新建 MCP</button>
       </div>
       <div class="table-wrap console-list-a">
-        <table class="data-table">
+        <table class="data-table mcp-list-table">
           <thead>
             <tr>
               <th>名称</th>
               <th>传输</th>
               <th>上下文</th>
               <th class="mcp-description-column">描述</th>
+              <th class="mcp-capabilities-column">连接与能力</th>
               <th>更新时间</th>
               <th class="mcp-actions-column">操作</th>
             </tr>
           </thead>
           <tbody id="mcpTableBody">
-            <tr><td colspan="6" class="empty-cell">加载中…</td></tr>
+            <tr><td colspan="7" class="empty-cell">加载中…</td></tr>
           </tbody>
         </table>
       </div>
@@ -432,10 +433,13 @@
               <span>名称</span>
               <input type="text" id="agentName" required />
             </label>
-            <label class="field">
-              <span>默认模型</span>
-              <select id="agentModelId"></select>
-            </label>
+            <div class="field">
+              <span class="field-title-row">
+                <label for="agentModelId">默认模型</label>
+                <button type="button" class="agent-model-clear" id="clearAgentModelBtn">清空</button>
+              </span>
+              <select id="agentModelId" data-placeholder="请选择"></select>
+            </div>
             <label class="field field-grow">
               <span class="field-title-row">
                 <span>System Prompt</span>
@@ -988,6 +992,15 @@
       <div class="modal-footer"><button type="button" class="btn" data-integration-close>取消</button><button type="submit" class="btn primary" id="saveIntegrationConfigBtn">保存</button></div>
     </form>
   </dialog>
+
+<dialog class="modal mcp-catalog-modal" id="mcpCatalogModal" aria-labelledby="mcpCatalogTitle">
+  <div class="modal-header"><h3 id="mcpCatalogTitle">工具</h3><button type="button" class="icon-btn" id="closeMcpCatalogModal" aria-label="关闭"><i data-lucide="x"></i></button></div>
+  <div class="mcp-catalog-toolbar">
+    <div class="mcp-catalog-tabs" id="mcpCatalogTabs" role="tablist" aria-label="服务能力"></div>
+    <label class="agent-search mcp-catalog-search"><i data-lucide="search"></i><input type="search" id="mcpCatalogSearch" aria-label="搜索工具或资源" placeholder="搜索名称、描述或 URI" autocomplete="off" /></label>
+  </div>
+  <div class="modal-body" id="mcpCatalogContent" aria-live="polite"></div>
+</dialog>
 
 </body>
 </html>

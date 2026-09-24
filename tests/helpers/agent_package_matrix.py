@@ -146,11 +146,10 @@ def construct_fixture(case):
     expected_skills = [c for c in skills if c not in expected_missing]
     default_model = None if case['model'] == 'none' else IDS['match'] if reference == 'M-match' else IDS['first']
     expected_model = None if case['model'] in ('none', 'clear') else IDS['other'] if case['model'] == 'other' else default_model
-    expected_ui = {code: [t['name'] for t in p['tools']] for code, p in incoming_ui.items()}
     return SimpleNamespace(raw=zip_bytes(files), agent=agent, incoming_skills=incoming_skills, existing_skills=existing_skills,
         incoming_ui=incoming_ui, existing_ui=existing_ui, existing_mcps=existing_mcps, statuses=statuses,
         tool_statuses=tool_statuses, expected_missing=expected_missing, expected_caps=expected_caps,
-        expected_skills=expected_skills, default_model=default_model, expected_model=expected_model, expected_ui=expected_ui)
+        expected_skills=expected_skills, default_model=default_model, expected_model=expected_model)
 
 
 async def create_schema_template(path):
@@ -259,9 +258,6 @@ async def matrix_case(case, worker_root, template, app=None):
                 expected_actions.append(('agent',agent['id'],'new' if case['mode']=='create' else 'update'))
                 expected_actions.extend(('mcp',code,'missing' if code in fixture.expected_missing else 'reuse') for code in fixture.agent['capabilities'] if code.startswith('mcp:'))
                 if case['mode']=='overwrite':expected_actions.append(('capability','builtin:obsolete','unlinked'))
-                for code,old in fixture.existing_ui.items():
-                    packaged_names={t['name'] for t in fixture.incoming_ui[code]['tools']}
-                    expected_actions.extend(('ui_tool',t['name'],'unlinked') for t in old['tools'] if t['name'] not in packaged_names)
                 actual_actions=[(r['kind'],r['code'],r['status']) for r in result['results']]
                 require(Counter(actual_actions)==Counter(expected_actions),f'actual installation actions mismatch {actual_actions} != {expected_actions}')
                 actual_tool_actions={t['name']:t['status'] for r in result['results'] if r['kind']=='ui' for t in r['tools']}
@@ -270,18 +266,21 @@ async def matrix_case(case, worker_root, template, app=None):
                 require(agent['prompt']==fixture.agent['prompt'],'prompt changed')
                 require(set(agent['capabilities'])==set(fixture.expected_caps),'capability references')
                 require(set(agent['skills'])==set(fixture.expected_skills),'skill references')
-                require(agent.get('ui_tool_selection')==fixture.expected_ui,'installed UI tool selection')
+                require('ui_tool_selection' not in agent,'installed Agent has no per-tool selection')
                 require({r['code'] for r in result['missing']}==fixture.expected_missing,'missing references report')
                 require(agent['id']==IDS['target'] if case['mode']=='overwrite' else agent['id']!=IDS['target'],'Agent identity semantics')
                 reread=await client.get(f'/api/v1/agents/{agent["id"]}')
                 require(reread.status_code==200,'Agent reread')
-                require(reread.json()['ui_tool_selection']==fixture.expected_ui,'selection persisted')
-                spec=AgentSpec(name=agent['name'],model='test',instructions=agent['prompt'],capabilities=agent['capabilities'],skills=agent['skills'],ui_tool_selection=agent['ui_tool_selection'])
+                require('ui_tool_selection' not in reread.json(),'Agent API omits old selection')
+                spec=AgentSpec(name=agent['name'],model='test',instructions=agent['prompt'],capabilities=agent['capabilities'],skills=agent['skills'])
                 loaded=await load_effective_ui_tools(stores,spec)
-                expected_names={name for names in fixture.expected_ui.values() for name in names}
+                expected_names={t['name'] for code in fixture.incoming_ui for package in
+                    (fixture.incoming_ui[code], fixture.existing_ui.get(code, {'tools': []})) for t in package['tools']}
                 require({t.name for t in loaded.definitions}==expected_names,'installed runtime loaded extra/missing UI tools')
                 for t in loaded.definitions:
-                    expected=next(x for u in fixture.incoming_ui.values() for x in u['tools'] if x['name']==t.name)
+                    expected=next(x for u in fixture.incoming_ui.values() for x in u['tools'] if x['name']==t.name) if any(
+                        x['name']==t.name for u in fixture.incoming_ui.values() for x in u['tools']) else next(
+                        x for u in fixture.existing_ui.values() for x in u['tools'] if x['name']==t.name)
                     require(t.description==expected['description'],f'UI runtime description {t.name}')
                 for code,raw in fixture.incoming_skills.items():
                     row=await stores.skill_package.get_by_code(code)
@@ -294,14 +293,12 @@ async def matrix_case(case, worker_root, template, app=None):
                         row=await stores.agent.get_by_id(IDS[key])
                         after={k:getattr(row,k) for k in before}
                         require(after==before,'shared Agent association changed')
-                        shared_spec=AgentSpec(name=row.name,model='test',instructions=row.prompt,capabilities=row.capabilities,skills=row.skills,ui_tool_selection=row.ui_tool_selection)
+                        shared_spec=AgentSpec(name=row.name,model='test',instructions=row.prompt,capabilities=row.capabilities,skills=row.skills)
                         effective=await load_effective_ui_tools(stores,shared_spec)
                         expected_shared=set()
                         for code in fixture.existing_ui:
-                            if key=='partial':expected_shared.update(before['ui_tool_selection'][code])
-                            else:
-                                expected_shared.update(t['name'] for t in fixture.existing_ui[code]['tools'])
-                                expected_shared.update(t['name'] for t in fixture.incoming_ui.get(code,{}).get('tools',[]))
+                            expected_shared.update(t['name'] for t in fixture.existing_ui[code]['tools'])
+                            expected_shared.update(t['name'] for t in fixture.incoming_ui.get(code,{}).get('tools',[]))
                         require({t.name for t in effective.definitions}==expected_shared,'shared whole/partial runtime scope changed')
                 async with stores.agent._read() as db:
                     stored_ui=list((await db.execute(select(UiToolDefinition))).scalars())
@@ -325,13 +322,13 @@ async def matrix_case(case, worker_root, template, app=None):
                 require(exported.status_code==200,f'export HTTP {exported.status_code}')
                 parsed=archive.parse_package(exported.content)
                 require(parsed.agent.prompt==fixture.agent['prompt'],'export prompt')
-                require(parsed.agent.ui_tool_selection==fixture.expected_ui,'export UI selection')
+                require('ui_tool_selection' not in parsed.agent.model_dump(),'export omits old UI selection')
                 require(set(parsed.skills)==set(fixture.incoming_skills),'export Skill inclusion')
                 for code,(raw,_) in parsed.skills.items():require(raw==fixture.incoming_skills[code],'export Skill bytes')
                 return {'case_id':case['case_id'],**{k:case[k] for k in DIMENSIONS},'status':'passed','checks':checks,
                     'duration_ms':round((time.perf_counter()-began)*1000,2),'missing_count':len(result['missing']),
-                    'expected':{'resource_statuses':{f'{k[0]}:{k[1]}':v for k,v in fixture.statuses.items()},'model_id':fixture.expected_model,'ui_tools':fixture.expected_ui,'install_actions':expected_actions,'tool_actions':fixture.tool_statuses},
-                    'actual':{'resource_statuses':{f'{k[0]}:{k[1]}':v for k,v in actual_status.items()},'model_id':agent['model_id'],'ui_tools':agent['ui_tool_selection'],'install_actions':actual_actions,'tool_actions':actual_tool_actions}}
+                    'expected':{'resource_statuses':{f'{k[0]}:{k[1]}':v for k,v in fixture.statuses.items()},'model_id':fixture.expected_model,'ui_tools':sorted(expected_names),'install_actions':expected_actions,'tool_actions':fixture.tool_statuses},
+                    'actual':{'resource_statuses':{f'{k[0]}:{k[1]}':v for k,v in actual_status.items()},'model_id':agent['model_id'],'ui_tools':sorted(t.name for t in loaded.definitions),'install_actions':actual_actions,'tool_actions':actual_tool_actions}}
         finally:
             archive.BUILTIN_PACKAGES_ROOT=original_builtin
             reset_context()

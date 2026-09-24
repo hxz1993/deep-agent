@@ -27,7 +27,6 @@ test("卡片与列表按已配置的包和服务去重计数，零配置整体�
   const configured = { ...agent,
     capabilities: ["builtin:general", "builtin:sandbox", "builtin:general", "ui:forms", "mcp:finance", "mcp:finance"],
     skills: ["analysis", "analysis"],
-    ui_tool_selection: { "ui:forms": ["form-a", "form-b"] },
   };
   const { admin, elements } = harness(path => path.endsWith("/agents") ? [configured, { ...agent, id: "empty" }] : []);
   await admin.refresh();

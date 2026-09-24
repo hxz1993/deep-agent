@@ -272,15 +272,6 @@ async def _validate_logical_references(
     *,
     prefix: str,
 ) -> None:
-    from deep_agent.capabilities.ui.selection import validate_ui_tool_selection
-    from deep_agent.db.models import Agent, UiToolDefinition
-
-    tool_rows = (await connection.execute(select(UiToolDefinition.name, UiToolDefinition.package_code))).all()
-    for row in (await connection.execute(select(Agent.capabilities, Agent.ui_tool_selection))).all():
-        try:
-            validate_ui_tool_selection(row.ui_tool_selection, row.capabilities, dict(tool_rows))
-        except (ValueError, TypeError, AttributeError) as exc:
-            raise ConfigurationImportError(f"{prefix} contains invalid UI tool selections: {exc}") from exc
     from deep_agent.db.reference_schema import logical_reference_violations
     violations = await connection.run_sync(logical_reference_violations)
     if violations:

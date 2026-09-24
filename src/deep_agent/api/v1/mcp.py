@@ -15,6 +15,10 @@ from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.mcp import McpServerStoreBase
 from deep_agent.schemas.mcp import (
     McpBuiltinConfig,
+    McpCatalogResponse,
+    McpCatalogResources,
+    McpCatalogTools,
+    McpInspection,
     McpInspectionResult,
     McpServerCreate,
     McpServerRenameRequest,
@@ -110,6 +114,39 @@ async def get_mcp_server(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
     return McpServerResponse.from_row(row)
+
+
+@router.get("/mcp/{name}/catalog", response_model=McpCatalogResponse)
+async def get_mcp_catalog(
+    name: str,
+    store: McpServerStoreBase = Depends(get_mcp_store),
+) -> McpCatalogResponse:
+    row = await store.get_by_name(name)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"MCP server not found: {name}")
+    inspection = McpInspection.from_value(row.inspection, transport=row.transport)
+    tools = inspection.tools
+    return McpCatalogResponse(
+        name=row.name,
+        inspection_status=inspection.status,
+        checked_at=inspection.checked_at,
+        resources=McpCatalogResources(
+            count=inspection.resources.count,
+            snapshot_status=("missing" if inspection.resources.definitions is None else
+                             "stale" if inspection.status in {"stale", "unreachable"} or inspection.resources.status == "error" else "ready"),
+            definitions=inspection.resources.definitions or [],
+        ),
+        tools=McpCatalogTools(
+            status=tools.status,
+            count=tools.count,
+            snapshot_status=(
+                "missing" if tools.snapshot is None and tools.snapshot_status == "ready"
+                else tools.snapshot_status
+            ),
+            snapshot_at=tools.snapshot_at,
+            definitions=tools.snapshot.definitions if tools.snapshot is not None else [],
+        ),
+    )
 
 
 @router.post("/mcp", response_model=McpServerResponse, status_code=status.HTTP_201_CREATED)

@@ -18,8 +18,7 @@
     const uploaded = skills.filter(row => row.source !== 'builtin' && !row.missing);
     const custom = packages.filter(row => row.source !== 'builtin' && !row.missing);
     const tools = list(toolRows).filter(tool => packages.some(pkg => pkg.code === tool.package_code));
-    const selectedTools = tools.filter(tool => !Object.hasOwn(agent.ui_tool_selection || {}, tool.package_code) || agent.ui_tool_selection[tool.package_code].includes(tool.name));
-    return { agent, skills, packages, uploaded, custom, tools, selectedTools, toolCount: tools.length,
+    return { agent, skills, packages, uploaded, custom, tools, toolCount: tools.length,
       missing: [...skills, ...packages].some(row => row.missing) };
   }
   function resourceRow(kind, names, badge, reference = false) {
@@ -70,7 +69,6 @@
       if (agent.model) rows.push(resourceRow('模型', [agent.model.name || '已配置模型'], '仅参考', true));
       if (mcp.length) rows.push(resourceRow('MCP', mcp, '仅参考', true));
       if (builtin.length) rows.push(resourceRow('内置工具', builtin, '内置引用', true));
-      if (Object.keys(agent.ui_tool_selection || {}).length) rows.push(resourceRow('Agent 工具范围', data.selectedTools.length ? data.selectedTools.map(tool => tool.metadata?.display_name || tool.name) : ['未选择 UI 工具'], `${data.selectedTools.length} / ${data.toolCount} 已选`));
       el('agentExportContent').innerHTML = `<div class="agent-export-heading"><div class="agent-export-summary"><span class="agent-export-avatar">${icon('package')}</span><strong>${escapeHtml(agent.name)}</strong></div><div class="agent-export-facts"><span><b>1</b> Agent</span><span><b>${data.skills.length}</b> Skill</span><span><b>${data.toolCount}</b> UI 工具</span></div></div><div class="table-wrap"><table class="data-table agent-export-resources"><thead><tr><th>类型</th><th>内容</th><th>说明</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
       if (data.missing) this.message('有关联资源已缺失，请先修复 Agent 配置后再导出。', true);
       window.lucide?.createIcons();

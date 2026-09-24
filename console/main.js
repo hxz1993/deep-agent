@@ -1,14 +1,14 @@
 import "./assets/deepagent-pet/sprite-pet.js?v=20260922-pet-1";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
-import { initConsoleSelects } from "./ui-select.js?v=20260914-wecom-placeholder";
+import { initConsoleSelects } from "./ui-select.js?v=20260924-config-catalog-5";
 import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260919-search-editor-2";
+} from "./configuration.js?v=20260924-config-catalog-5";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260924-ptc-execution-6";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260924-config-catalog-5";
 import { initWorkspace } from "./workspace.js?v=20260924-ptc-execution-6";
 import "./time.js?v=20260913-49";
 

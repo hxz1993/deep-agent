@@ -236,8 +236,8 @@
           if (['unlinked', 'removed'].includes(item.status)) notes.push('资源保留');
           if (item.status === 'update' && item.affected_agents?.length) notes.push(`影响：${item.affected_agents.map(agent => agent.name).join('、')}`);
           entries.push({ ...item, note: notes.join('；') });
-          for (const tool of item.tools || []) entries.push({ ...tool, kind: 'ui_tool', note: Array.isArray(item.selected_tools) && !item.selected_tools.includes(tool.name) ? '本次不使用' : '' });
-          for (const name of item.retained_tools || []) entries.push({ kind: 'ui_tool', name, status: 'retained', note: '本次不使用' });
+          for (const tool of item.tools || []) entries.push({ ...tool, kind: 'ui_tool', note: '' });
+          for (const name of item.retained_tools || []) entries.push({ kind: 'ui_tool', name, status: 'retained', note: '目标已有；整包启用后可用' });
         }
       }
       return `<div class="agent-package-table-wrap"><table class="agent-package-table"><colgroup><col class="package-col-kind"><col class="package-col-content"><col class="package-col-action"><col class="package-col-note"></colgroup><thead><tr><th>类型</th><th>内容</th><th>处理</th><th>说明</th></tr></thead><tbody>${entries.map(item => `<tr class="package-row-${escapeHtml(item.status)}"><td>${escapeHtml(kindLabels[item.kind] || item.kind)}</td><td class="package-resource-name">${escapeHtml(this.resourceName(item))}</td><td><span class="agent-package-action action-${escapeHtml(item.status)}">${escapeHtml(item.status === 'retained' ? '保留' : this.actionLabel(item, finished))}</span></td><td class="package-resource-note">${escapeHtml(item.note)}</td></tr>`).join('')}</tbody></table></div>`;
@@ -248,7 +248,7 @@
         ...(data.references?.mcps || []).map(item => ({ kind: 'mcp', label: item.code, code: item.code, status: item.matched_code ? 'reuse' : 'missing' }))];
     },
     renderPreview() {
-      const removed = (this.preview.removed_associations || []).filter(item => !(item.kind === 'ui_tool' && this.preview.resources.some(resource => resource.retained_tools?.includes(item.code))));
+      const removed = this.preview.removed_associations || [];
       el('agentPackageContent').innerHTML = `${this.renderSummary()}${this.renderResources([...this.previewResources(), ...removed])}`;
       if (this.isBlocked()) this.message((this.preview.blocked || []).map(item => typeof item === 'string' ? item : item.message || item.label || item.code).join('；') || '存在无法安装的资源，请先修复。', true);
       else this.message('');
@@ -292,8 +292,7 @@
     },
     renderSuccess() {
       const result = this.installResult, agent = this.installed;
-      const retained = new Set((this.preview.resources || []).flatMap(item => item.retained_tools || []));
-      const resources = (result?.results || []).filter(item => !(item.kind === 'ui_tool' && item.status === 'unlinked' && retained.has(item.code)));
+      const resources = result?.results || [];
       el('agentPackageContent').innerHTML = `<div class="agent-package-completed"><i data-lucide="circle-check"></i><strong>${result?.mode === 'overwrite' ? '已覆盖' : '已新建'} ${escapeHtml(agent.name)}</strong><span>默认模型：${escapeHtml(this.modelLabel(agent.model_id, agent))}</span></div>${this.renderResources(resources, true)}`;
       this.message('');
     },

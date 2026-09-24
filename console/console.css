@@ -2948,18 +2948,6 @@ html[data-theme="paper"] .run-usage-legend .remaining { color: #5e9e7f; }
   -webkit-line-clamp: 1;
 }
 
-.agent-editor-pane .cap-card-tools {
-  align-self: center;
-  margin: 0 0 0 16px;
-  white-space: nowrap;
-}
-
-.agent-editor-pane .cap-card-tools[open] {
-  grid-column: 1 / -1;
-  margin: 10px 0 0 46px;
-  white-space: normal;
-}
-
 @media (max-width: 1200px) {
   #configurationHost #panel-skills .skill-detail-layout {
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
@@ -3059,9 +3047,3 @@ dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface
 .catalog-model-table .model-tag-cell .badge { padding: 2px 5px; font-size: 11px; line-height: 16px; }
 #catalogSupplierSidebar .catalog-lab-item { transform: none; }
 #catalogSupplierSidebar .catalog-lab-item span { min-width: 0; line-height: 18px; }
-
-/* Per-Agent UI tool range retains the existing capability package controls. */
-.cap-ui-tool-range .cap-ui-all { display: flex; align-items: center; gap: 7px; padding: 10px 0 4px; font-size: 12px; color: var(--text-dim); }
-.cap-ui-tool-range li label { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; cursor: pointer; }
-.cap-ui-tool-range input { flex-shrink: 0; accent-color: var(--accent); }
-.cap-ui-tool-range li span { overflow-wrap: anywhere; }

@@ -2,7 +2,7 @@ import { initDiagnosticLogs } from "./diagnostics.js?v=20260915-ui-polish";
 import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260924-ptc-execution-6";
 import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260923-c04-1";
 
-import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260923-usage-tab-2";
+import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260924-config-catalog-5";
 import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20260923-c04-25";
 
 let center = null;

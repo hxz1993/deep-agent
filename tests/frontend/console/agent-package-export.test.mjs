@@ -43,9 +43,9 @@ test('导出失败保留确认内容供重试；重复确认不会重复下载',
  assert.equal(h.downloads.length,0);assert.equal(h.node('agentExportModal').open,true);assert.match(h.node('agentExportStatus').textContent,/原 Skill 文件不可用/);assert.equal(h.node('confirmAgentExportBtn').disabled,false);
 });
 
-test('工具范围与整包定义分别展示，空名单不伪造成全部工具', async()=>{
+test('旧工具名单不影响整包导出概览', async()=>{
  const scoped={...agent,ui_tool_selection:{'ui:custom':['clarify']}};
  const h=harness(async path=>response(path.endsWith('/agent')?scoped:dataFor(path)));await h.admin.open('agent');
- assert.equal(h.admin.data.tools.length,2);assert.equal(h.admin.data.selectedTools.length,1);assert.match(h.node('agentExportContent').innerHTML,/Agent 工具范围[\s\S]*clarify[\s\S]*1 \/ 2 已选/);
- scoped.ui_tool_selection['ui:custom']=[];await h.admin.open('agent');assert.equal(h.admin.data.selectedTools.length,0);assert.match(h.node('agentExportContent').innerHTML,/未选择 UI 工具/);
+ assert.equal(h.admin.data.tools.length,2);
+ assert.doesNotMatch(h.node('agentExportContent').innerHTML,/Agent 工具范围|已选|未选择 UI 工具/);
 });

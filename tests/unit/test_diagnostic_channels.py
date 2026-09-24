@@ -240,6 +240,16 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sessions["total"], 1)
         self.assertEqual(sessions["items"], [])
 
+    async def test_accounts_project_deepfos_application_without_secret(self):
+        async with self.factory() as db:
+            account = await db.get(ChannelAccount, "a")
+            account.settings = {"deepfos": {"enabled": True, "app_id": "demo001", "api_key": "SECRET-NOT-FOR-DIAGNOSTICS"}}
+            await db.commit()
+        result = await self.queries.accounts()
+        account = next(item for item in result["items"] if item["id"] == "a")
+        self.assertEqual(account["deepfos_application"], {"enabled": True, "app_id": "demo001", "api_key_set": True})
+        self.assertNotIn("SECRET-NOT-FOR-DIAGNOSTICS", str(result))
+
     async def test_accounts_accept_null_wecom_settings(self):
         # Null is accepted by the channel settings validator as disabled.
         from deep_agent.db.stores.wecom import validate_channel_wecom_settings

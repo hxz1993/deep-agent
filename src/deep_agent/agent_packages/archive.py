@@ -54,7 +54,13 @@ class PackageAgent(StrictModel):
     model_reference: ModelReference | None = None
     capabilities: list[str] = Field(default_factory=list, max_length=256)
     skills: list[str] = Field(default_factory=list, max_length=256)
-    ui_tool_selection: dict[str, list[str]] = Field(default_factory=dict)
+
+    @model_validator(mode='before')
+    @classmethod
+    def discard_legacy_ui_tool_selection(cls, value):
+        if isinstance(value, dict) and 'ui_tool_selection' in value:
+            return {key: item for key, item in value.items() if key != 'ui_tool_selection'}
+        return value
 
     @field_validator('name', 'prompt')
     @classmethod
@@ -200,12 +206,6 @@ def parse_package(raw: bytes) -> Package:
         raise PackageError('UI 工具包或工具名称重复')
     if any(p.code not in agent.capabilities for p in ui):
         raise PackageError('安装包包含未关联的 UI 工具包')
-    definitions = {p.code: {t.name for t in p.tools} for p in ui}
-    for code, names in agent.ui_tool_selection.items():
-        if (code not in agent.capabilities or not code.startswith('ui:')
-                or len(names) != len(set(names)) or any(not name.strip() for name in names)
-                or (code in definitions and not set(names) <= definitions[code])):
-            raise PackageError('UI 工具选择范围与安装包内容不一致')
     if any(not c.startswith(('builtin:', 'ui:', 'mcp:')) for c in agent.capabilities):
         raise PackageError('无法识别的能力引用')
     skills = {}

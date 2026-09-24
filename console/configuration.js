@@ -1,5 +1,5 @@
 let initialized = false;
-import "./model-options.js?v=20260913-49";
+import "./model-options.js?v=20260924-config-catalog-5";
 import * as ProviderCatalog from "./provider-catalog.js?v=20260913-49";
 import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260913-49";
 import * as SchemaText from "./schema-editor.js?v=20260913-49";
@@ -7,7 +7,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260919-search-editor-2";
+const CONFIGURATION_ASSET_VERSION = "20260924-config-catalog-5";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",

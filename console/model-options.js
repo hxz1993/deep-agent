@@ -57,12 +57,12 @@ export function firstSelectableModelId(models) {
   return (models || []).find(isModelSelectable)?.id || "";
 }
 
-export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel = "无可用模型" } = {}) {
+export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel = "无可用模型", groupIcon = null } = {}) {
   const visibleModels = Array.isArray(models)
     ? models.filter((model) => isModelSelectable(model) || model.id === selectedId)
     : [];
   if (!visibleModels.length) {
-    return `<option value="">${escapeOptionText(emptyLabel)}</option>`;
+    return emptyLabel === null ? "" : `<option value="">${escapeOptionText(emptyLabel)}</option>`;
   }
   const groups = new Map();
   for (const model of visibleModels) {
@@ -71,6 +71,7 @@ export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel 
     if (!groups.has(key)) {
       groups.set(key, {
         label: provider?.name || "未关联供应商",
+        icon: groupIcon?.(provider),
         models: [],
       });
     }
@@ -82,7 +83,8 @@ export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel 
       const suffix = unavailableSuffix(model);
       return `<option value="${escapeOptionText(model.id)}"${selected}>${escapeOptionText(modelOptionLabel(model))}${suffix}</option>`;
     }).join("");
-    return `<optgroup label="${escapeOptionText(group.label)}">${options}</optgroup>`;
+    const icon = group.icon ? ` data-icon-src="${escapeOptionText(group.icon)}"` : "";
+    return `<optgroup label="${escapeOptionText(group.label)}"${icon}>${options}</optgroup>`;
   }).join("");
 }
 

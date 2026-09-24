@@ -53,6 +53,4 @@ confirm=false                          正式执行时必须为true
 
 `005` 允许 `agents.model_id` 为空，配置备份与导入保留空值。Agent 安装包与全量配置备份是不同格式，不互相替代。
 
-`005` 的 `agents.ui_tool_selection` 保存每个 UI 工具包的工具名范围，备份与导入原样保留。
-缺少包的 key 表示关联整包，显式名单表示仅关联列出的工具，空名单表示不关联该包内任何工具。
-导入会校验这些包已在 Agent 的 `capabilities` 中，并且名单里的工具确实属于对应包；不匹配时拒绝导入。
+`005` 的 `agents.ui_tool_selection` 列仍可存在于旧备份中；导入原样保留底表数据，但运行时忽略其工具名名单，只按 `agents.capabilities` 启用整个 UI 工具包。Agent 再保存时清空旧名单，新 Agent 导出安装包不携带此字段。

@@ -19,7 +19,7 @@ from tests.helpers.sqlite_stores import make_sqlite_stores
 
 class CodexProviderTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
-        self._env = patch.dict(os.environ, {"DEEP_AGENT_ENABLE_CODEX_PROVIDER": "true"})
+        self._env = patch.dict(os.environ, {"DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "true"})
         self._env.start()
         FLOWS._flows.clear()
         self.stores, self.engine, self.factory = await make_sqlite_stores()
@@ -93,7 +93,7 @@ class CodexProviderTests(unittest.IsolatedAsyncioTestCase):
             await source.save(OpenAICodexCredentials(access_token="old", refresh_token="old", account_id="account-1234"))
         unavailable = await self.client.get(f"/api/v1/llm-models/{model.json()['id']}")
         self.assertEqual(unavailable.json()["unavailable_reason"], "provider_unconfigured")
-        with patch.dict(os.environ, {"DEEP_AGENT_ENABLE_CODEX_PROVIDER": "false"}):
+        with patch.dict(os.environ, {"DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "false"}):
             self.assertEqual((await self.client.get(f"/api/v1/llm-models/{model.json()['id']}")).json()["unavailable_reason"], "provider_disabled")
             self.assertEqual((await self.client.post("/api/v1/llm-providers/codex/authorization", json={})).status_code, 409)
             self.assertEqual((await self.client.get(f"/api/v1/llm-providers/{provider_id}")).status_code, 200)

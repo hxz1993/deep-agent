@@ -63,52 +63,49 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
         self.assertEqual(item.value, 44)
         self.assertEqual(item.source, "environment")
 
-    def test_database_type_uses_effective_database_backend(self) -> None:
-        with patch(
-            "deep_agent.api.v1.global_settings.get_database_url",
-            return_value="sqlite:////tmp/deep-agent.db",
-        ):
+    def test_only_exposes_operator_settings_and_subscription_switch(self) -> None:
+        with patch.dict(os.environ, {
+            "DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "true",
+            "DEEP_AGENT_DBMS_PASSWORD": "not-for-console",
+            "DEEP_AGENT_LOCAL_TOKEN": "not-for-console",
+        }):
             settings = build_global_settings()
-
-        item = _find_item(settings, "database_type")
-        self.assertEqual(item.value, "sqlite")
-        self.assertEqual(item.display_value, "sqlite")
-
-    def test_whitelist_does_not_expose_secrets_or_paths(self) -> None:
-        settings = build_global_settings()
-        payload = settings.model_dump_json().lower()
-        for forbidden in (
-            "deep_agent_dbms_password",
-            "deep_agent_dbms_hostname",
-            "deep_agent_dbms_user",
-            "deep_agent_dbms_database",
-            "deep_agent_gemini_proxy",
-            "deep_agent_sqlite_path",
-            "deep_agent_mcp_runtime_dir",
+        self.assertEqual(_find_item(settings, "subscription_provider_enabled").display_value, "开启")
+        self.assertEqual(_find_item(settings, "subscription_provider_enabled").source, "environment")
+        self.assertEqual([group.key for group in settings.groups], [
+            "runtime", "context_compaction", "mcp", "sandbox", "uploads", "images",
+        ])
+        names = {item.env_name for group in settings.groups for item in group.items}
+        self.assertEqual(names, {
+            "DEEP_AGENT_MAX_REQUESTS", "DEEP_AGENT_MAX_TOTAL_TOKENS", "DEEP_AGENT_REQUEST_RETRIES",
+            "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO", "DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO",
+            "DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT", "DEEP_AGENT_CONTEXT_TOOL_PRUNE_THRESHOLD",
+            "DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER", "DEEP_AGENT_MCP_INIT_TIMEOUT", "DEEP_AGENT_MCP_ACQUIRE_RETRIES",
+            "DEEP_AGENT_MCP_FORWARD_REQUEST_HEADERS",
+            "DEEP_AGENT_SANDBOX_ENABLED", "DEEP_AGENT_SANDBOX_TIMEOUT",
+            "DEEP_AGENT_SANDBOX_MAX_CONCURRENCY", "DEEP_AGENT_SANDBOX_MEMORY_MB", "DEEP_AGENT_SANDBOX_CPU_SECONDS",
+            "DEEP_AGENT_UPLOAD_MAX_SIZE_MB", "DEEP_AGENT_UPLOAD_MAX_COUNT",
+            "DEEP_AGENT_UPLOAD_ALLOWED_MIMES", "DEEP_AGENT_IMAGE_MAX_DIMENSION", "DEEP_AGENT_IMAGE_MAX_BYTES",
+        })
+        for hidden in (
+            "DEEP_AGENT_DBMS_HOSTNAME", "DEEP_AGENT_DBMS_PORT", "DEEP_AGENT_DBMS_PASSWORD",
+            "DEEP_AGENT_LOCAL_TOKEN", "DEEP_AGENT_SQLITE_PATH", "DEEP_AGENT_CHANNEL_PORT",
+            "DEEP_AGENT_SANDBOX_PYTHON", "DEEP_AGENT_MCP_RUNTIME_DIR", "DEEP_AGENT_IMAGE_JPEG_QUALITY",
         ):
-            self.assertNotIn(forbidden, payload)
+            self.assertNotIn(hidden, names)
+        self.assertNotIn("not-for-console", settings.model_dump_json())
 
-        self.assertEqual(
-            [group.key for group in settings.groups],
-            [
-                "runtime",
-                "context_compaction",
-                "mcp",
-                "sandbox",
-                "uploads",
-                "images",
-            ],
-        )
-
-    def test_sandbox_python_does_not_expose_interpreter_path(self) -> None:
-        settings = build_global_settings()
-        item = _find_item(settings, "sandbox_python")
-        payload = settings.model_dump_json().lower()
-        self.assertIn("deep_agent_sandbox_python", payload)
-        self.assertEqual(item.display_value, "已配置")
-        self.assertEqual(item.value, True)
-        self.assertNotIn("/bin/", payload)
-        self.assertNotIn("scripts/python", payload)
+    def test_subscription_switch_uses_legacy_value_unless_new_name_is_set(self) -> None:
+        with patch.dict(os.environ, {
+            "DEEP_AGENT_ENABLE_CODEX_PROVIDER": "true",
+        }, clear=True):
+            legacy = _find_item(build_global_settings(), "subscription_provider_enabled")
+            self.assertEqual(legacy.display_value, "开启")
+            self.assertEqual(legacy.source, "environment")
+            self.assertEqual(legacy.env_name, "DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER")
+            os.environ["DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER"] = "false"
+            disabled = _find_item(build_global_settings(), "subscription_provider_enabled")
+            self.assertEqual(disabled.display_value, "关闭")
 
     def test_sandbox_memory_budget_displays_megabytes(self) -> None:
         settings = build_global_settings()

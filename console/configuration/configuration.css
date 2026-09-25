@@ -607,6 +607,11 @@ dialog.web-search-settings-dialog.console-detail-dialog.modal {
   display: block;
 }
 
+#globalSettingsRuntime { min-width: 0; }
+.cap-tabs.global-settings-group-switch { gap: 4px; padding: 0 0 6px; margin-bottom: 4px; border: 0; }
+.global-settings-group-switch:empty { display: none; }
+.global-settings-group-switch .cap-tab { border: 0; }
+
 .global-settings-search {
   width: min(320px, 34vw);
 }
@@ -674,10 +679,10 @@ dialog.web-search-settings-dialog.console-detail-dialog.modal {
   table-layout: fixed;
 }
 
-.global-settings-table thead th:nth-child(1) { width: 32%; }
+.global-settings-table thead th:nth-child(1) { width: 36%; }
 .global-settings-table thead th:nth-child(2) { width: 17%; }
 .global-settings-table thead th:nth-child(3) { width: 14%; }
-.global-settings-table thead th:nth-child(4) { width: 37%; }
+.global-settings-table thead th:nth-child(4) { width: 33%; }
 
 .global-settings-table code {
   color: var(--text-dim);

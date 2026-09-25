@@ -3,6 +3,12 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.11.5（测试分支）
+
+- 运维运行设置收敛为 6 组、21 项可调优或排障的 Agent 参数，横向切换分组并支持跨组搜索；数据库连接、服务启动和内部进程参数不再混列，保留原有环境变量覆盖能力。
+- 订阅 Provider 总开关改为 `DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER`，默认关闭、目前仅支持 ChatGPT；兼容读取旧 `DEEP_AGENT_ENABLE_CODEX_PROVIDER`，新变量优先。
+- 调整运行设置的表格与切换按钮样式，去掉分组下边线；数据库仍为 V7 / Alembic `007`，无新增迁移。
+
 ## v0.11.4（测试分支）
 
 - 增加本机开关控制的 ChatGPT 订阅 Provider，复用 Pydantic AI 的 Codex 授权、凭据刷新与模型调用；API Key 供应商、旧模型和客户端请求继续沿用原行为。

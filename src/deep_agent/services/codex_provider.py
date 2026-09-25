@@ -29,13 +29,21 @@ from deep_agent.db.models import LlmProvider
 from deep_agent.db.stores._session import serialized_sqlite_session
 
 
+SUBSCRIPTION_PROVIDER_ENV = "DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER"
+LEGACY_CODEX_PROVIDER_ENV = "DEEP_AGENT_ENABLE_CODEX_PROVIDER"
+
+
 def codex_enabled() -> bool:
-    return os.getenv("DEEP_AGENT_ENABLE_CODEX_PROVIDER", "").strip().lower() in {"1", "true", "yes", "on"}
+    # The generic switch takes precedence, including when explicitly set to false.
+    raw = os.getenv(SUBSCRIPTION_PROVIDER_ENV)
+    if raw is None:
+        raw = os.getenv(LEGACY_CODEX_PROVIDER_ENV, "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def require_codex_enabled() -> None:
     if not codex_enabled():
-        raise CodexUnavailable("Codex 订阅实验功能未开启")
+        raise CodexUnavailable("订阅 Provider 功能未开启")
 
 
 class CodexUnavailable(ValueError):

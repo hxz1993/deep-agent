@@ -190,7 +190,7 @@ def validate_provider_config(config: ProviderRuntimeConfig) -> ProviderTypeDefin
     if config.provider_type == "openai_codex":
         from deep_agent.services.codex_provider import codex_enabled
         if not codex_enabled():
-            raise ProviderConfigurationError("Codex 订阅实验功能未开启")
+            raise ProviderConfigurationError("订阅 Provider 功能未开启")
         if config.auth_method != "oauth" or config.auth_status != "connected" or not config.id:
             raise ProviderConfigurationError("Codex 订阅尚未授权或授权已失效")
     elif config.auth_method != "api_key" or not config.api_key:

@@ -3,19 +3,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+import os
 import time
 
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 from pydantic_ai import ToolFailed
 from pydantic import BaseModel
-from sqlalchemy.engine import make_url
 
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.core.context import AppContextDep
-from deep_agent.db.url import get_database_url
 from deep_agent.options import OPTION, DeepAgentOptions
 from deep_agent.schemas.llm_provider import mask_api_key
+from deep_agent.services.codex_provider import (
+    LEGACY_CODEX_PROVIDER_ENV,
+    SUBSCRIPTION_PROVIDER_ENV,
+    codex_enabled,
+)
 from deep_agent.schemas.web_search import (
     WebSearchSettingsResponse,
     WebSearchModelTestRequest,
@@ -81,295 +85,43 @@ class _SettingGroupDefinition:
     items: tuple[_SettingDefinition, ...]
 
 
+# Only settings that an operator might reasonably tune for a running Agent belong here.
+# Database, deployment wiring, subprocess hand-off and local_dev settings live in their
+# respective deployment configuration; listing every environment variable is not useful.
 _SETTING_GROUPS = (
-    _SettingGroupDefinition(
-        key="runtime",
-        label="基础运行",
-        items=(
-            _SettingDefinition(
-                "app_name",
-                "应用名称",
-                "DEEP_AGENT_APP_NAME",
-                "agent",
-                "app_name",
-                "DeepAgent 服务标识。",
-            ),
-            _SettingDefinition(
-                "database_type",
-                "数据库类型",
-                "DEEP_AGENT_DBMS_NAME",
-                "dbms",
-                "name",
-                "当前配置使用的数据库方言，不包含连接信息。",
-            ),
-            _SettingDefinition(
-                "max_requests",
-                "最大模型请求次数",
-                "DEEP_AGENT_MAX_REQUESTS",
-                "agent",
-                "max_requests",
-                "单次回复的模型请求上限，工具回传续跑共用额度，最后一次用于总结；新消息重新计数。",
-                "次/轮",
-            ),
-            _SettingDefinition(
-                "max_total_tokens",
-                "最大 Token 数",
-                "DEEP_AGENT_MAX_TOTAL_TOKENS",
-                "agent",
-                "max_total_tokens",
-                "单轮对话累计 Token 上限。",
-                "Token/轮",
-                "未限制",
-            ),
-            _SettingDefinition(
-                "request_retries",
-                "模型请求重试次数",
-                "DEEP_AGENT_REQUEST_RETRIES",
-                "agent",
-                "request_retries",
-                "模型请求失败时允许的重试次数。",
-                "次",
-            ),
-        ),
-    ),
-    _SettingGroupDefinition(
-        key="context_compaction",
-        label="上下文压缩",
-        items=(
-            _SettingDefinition(
-                "context_compaction_trigger_ratio",
-                "压缩触发比例",
-                "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO",
-                "agent",
-                "context_compaction_trigger_ratio",
-                "历史估算 Token 达到可用请求预算的该比例后触发分层压缩。",
-            ),
-            _SettingDefinition(
-                "context_compaction_target_ratio",
-                "压缩目标比例",
-                "DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO",
-                "agent",
-                "context_compaction_target_ratio",
-                "触发后将模型输入历史压缩到可用请求预算的该比例附近。",
-            ),
-            _SettingDefinition(
-                "context_summary_timeout",
-                "摘要超时",
-                "DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT",
-                "agent",
-                "context_summary_timeout",
-                "摘要调用的总等待时间；期间持续发送 SSE 心跳，超时不重试。",
-                "秒",
-            ),
-            _SettingDefinition(
-                "context_tool_prune_threshold",
-                "工具结果裁剪阈值",
-                "DEEP_AGENT_CONTEXT_TOOL_PRUNE_THRESHOLD",
-                "agent",
-                "context_tool_prune_threshold",
-                "仅对摘要输入副本中超过阈值的单条旧工具结果执行头尾裁剪。",
-                "Unicode 码点",
-            ),
-        ),
-    ),
-    _SettingGroupDefinition(
-        key="mcp",
-        label="MCP 运行",
-        items=(
-            _SettingDefinition(
-                "mcp_init_timeout",
-                "初始化超时",
-                "DEEP_AGENT_MCP_INIT_TIMEOUT",
-                "agent",
-                "mcp_init_timeout",
-                "MCP 服务初始化和能力握手的超时时间。",
-                "秒",
-            ),
-            _SettingDefinition(
-                "mcp_acquire_retries",
-                "获取重试次数",
-                "DEEP_AGENT_MCP_ACQUIRE_RETRIES",
-                "agent",
-                "mcp_acquire_retries",
-                "获取共享 MCP 运行实例失败后的重试次数。",
-                "次",
-            ),
-            _SettingDefinition(
-                "mcp_shared_server_ttl",
-                "共享服务 TTL",
-                "DEEP_AGENT_MCP_SHARED_SERVER_TTL",
-                "agent",
-                "mcp_shared_server_ttl",
-                "共享 MCP 服务记录的存活时间。",
-                "秒",
-            ),
-            _SettingDefinition(
-                "mcp_shared_lock_timeout",
-                "共享锁超时",
-                "DEEP_AGENT_MCP_SHARED_LOCK_TIMEOUT",
-                "agent",
-                "mcp_shared_lock_timeout",
-                "等待共享 MCP 启动锁的最大时间。",
-                "秒",
-            ),
-            _SettingDefinition(
-                "mcp_forward_request_headers",
-                "转发请求头名称",
-                "DEEP_AGENT_MCP_FORWARD_REQUEST_HEADERS",
-                "agent",
-                "mcp_forward_request_headers",
-                "允许向 MCP 转发的请求头名称白名单；不展示请求头值。",
-            ),
-        ),
-    ),
-    _SettingGroupDefinition(
-        key="sandbox",
-        label="Python 沙箱",
-        items=(
-            _SettingDefinition(
-                "sandbox_enabled",
-                "启用沙箱",
-                "DEEP_AGENT_SANDBOX_ENABLED",
-                "agent",
-                "sandbox_enabled",
-                "是否启动 Python 沙箱后端；关闭后 `execute_python` 能力不可用。",
-            ),
-            _SettingDefinition(
-                "sandbox_backend",
-                "沙箱后端",
-                "DEEP_AGENT_SANDBOX_BACKEND",
-                "agent",
-                "sandbox_backend",
-                "沙箱执行后端标识。",
-            ),
-            _SettingDefinition(
-                "sandbox_timeout",
-                "执行超时",
-                "DEEP_AGENT_SANDBOX_TIMEOUT",
-                "agent",
-                "sandbox_timeout",
-                "单次 execute_python 调用的最大等待时间。",
-                "秒",
-            ),
-            _SettingDefinition(
-                "sandbox_max_concurrency",
-                "最大并发",
-                "DEEP_AGENT_SANDBOX_MAX_CONCURRENCY",
-                "agent",
-                "sandbox_max_concurrency",
-                "同时执行的沙箱请求上限。",
-            ),
-            _SettingDefinition(
-                "sandbox_python",
-                "解释器路径",
-                "DEEP_AGENT_SANDBOX_PYTHON",
-                "agent",
-                "sandbox_python",
-                "沙箱专用 Python 解释器；不展示具体路径。",
-                empty_display="未配置",
-            ),
-            _SettingDefinition(
-                "sandbox_ensure_venv",
-                "启动时创建 venv",
-                "DEEP_AGENT_SANDBOX_ENSURE_VENV",
-                "agent",
-                "sandbox_ensure_venv",
-                "gunicorn 主进程在 fork worker 前自动执行 sandbox venv setup；"
-                "适用于固定镜像、临时 venv 目录的 test 部署。",
-            ),
-            _SettingDefinition(
-                "sandbox_memory_mb",
-                "内存预算",
-                "DEEP_AGENT_SANDBOX_MEMORY_MB",
-                "agent",
-                "sandbox_memory_mb",
-                "RSS 产品预算；subprocess-dev 会按比例映射为 RLIMIT_AS。",
-                "MB",
-            ),
-            _SettingDefinition(
-                "sandbox_cpu_seconds",
-                "CPU 时间上限",
-                "DEEP_AGENT_SANDBOX_CPU_SECONDS",
-                "agent",
-                "sandbox_cpu_seconds",
-                "单次执行允许的 CPU 时间上限。",
-                "秒",
-            ),
-            _SettingDefinition(
-                "sandbox_max_pids",
-                "进程数上限",
-                "DEEP_AGENT_SANDBOX_MAX_PIDS",
-                "agent",
-                "sandbox_max_pids",
-                "RLIMIT_NPROC 上限；0 表示不施加（subprocess-dev 推荐）。",
-            ),
-        ),
-    ),
-    _SettingGroupDefinition(
-        key="uploads",
-        label="文件上传",
-        items=(
-            _SettingDefinition(
-                "upload_max_size_mb",
-                "单文件大小上限",
-                "DEEP_AGENT_UPLOAD_MAX_SIZE_MB",
-                "agent",
-                "upload_max_size_mb",
-                "单个上传文件允许的最大体积。",
-                "MB",
-            ),
-            _SettingDefinition(
-                "upload_max_count",
-                "单次文件数量",
-                "DEEP_AGENT_UPLOAD_MAX_COUNT",
-                "agent",
-                "upload_max_count",
-                "一次请求允许上传的最大文件数量。",
-                "个",
-            ),
-            _SettingDefinition(
-                "upload_allowed_mimes",
-                "允许的 MIME",
-                "DEEP_AGENT_UPLOAD_ALLOWED_MIMES",
-                "agent",
-                "upload_allowed_mimes",
-                "允许上传的 MIME 类型列表；留空时使用程序内置白名单。",
-                empty_display="使用内置白名单",
-            ),
-        ),
-    ),
-    _SettingGroupDefinition(
-        key="images",
-        label="图片处理",
-        items=(
-            _SettingDefinition(
-                "image_max_dimension",
-                "图片最大边长",
-                "DEEP_AGENT_IMAGE_MAX_DIMENSION",
-                "agent",
-                "image_max_dimension",
-                "进入模型前图片缩放后的最大边长。",
-                "px",
-            ),
-            _SettingDefinition(
-                "image_max_bytes",
-                "图片最大字节数",
-                "DEEP_AGENT_IMAGE_MAX_BYTES",
-                "agent",
-                "image_max_bytes",
-                "进入模型前单张图片允许的最大体积。",
-                "字节",
-            ),
-            _SettingDefinition(
-                "image_jpeg_quality",
-                "JPEG 质量",
-                "DEEP_AGENT_IMAGE_JPEG_QUALITY",
-                "agent",
-                "image_jpeg_quality",
-                "图片转码为 JPEG 时使用的质量参数。",
-            ),
-        ),
-    ),
+    _SettingGroupDefinition("runtime", "对话与模型", (
+        _SettingDefinition("max_requests", "最大模型请求次数", "DEEP_AGENT_MAX_REQUESTS", "agent", "max_requests", "单轮回复的模型请求上限，工具回传续跑共用额度。", "次/轮"),
+        _SettingDefinition("max_total_tokens", "最大 Token 数", "DEEP_AGENT_MAX_TOTAL_TOKENS", "agent", "max_total_tokens", "单轮对话累计 Token 上限。", "Token/轮", "未限制"),
+        _SettingDefinition("request_retries", "模型请求重试次数", "DEEP_AGENT_REQUEST_RETRIES", "agent", "request_retries", "模型请求失败后允许的重试次数。", "次"),
+        _SettingDefinition("subscription_provider_enabled", "订阅 Provider 接入", SUBSCRIPTION_PROVIDER_ENV, "", "", "允许创建、授权和调用订阅供应商；目前仅支持 ChatGPT，默认关闭。"),
+    )),
+    _SettingGroupDefinition("context_compaction", "上下文压缩", (
+        _SettingDefinition("context_compaction_trigger_ratio", "压缩触发比例", "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO", "agent", "context_compaction_trigger_ratio", "历史 Token 达到可用预算的该比例后触发压缩。"),
+        _SettingDefinition("context_compaction_target_ratio", "压缩目标比例", "DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO", "agent", "context_compaction_target_ratio", "触发后将历史压缩到可用预算的该比例附近。"),
+        _SettingDefinition("context_summary_timeout", "摘要超时", "DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT", "agent", "context_summary_timeout", "生成压缩摘要的等待上限。", "秒"),
+        _SettingDefinition("context_tool_prune_threshold", "工具结果裁剪阈值", "DEEP_AGENT_CONTEXT_TOOL_PRUNE_THRESHOLD", "agent", "context_tool_prune_threshold", "摘要前裁剪过长旧工具结果的触发长度。", "Unicode 码点"),
+    )),
+    _SettingGroupDefinition("mcp", "MCP 连接", (
+        _SettingDefinition("mcp_init_timeout", "初始化超时", "DEEP_AGENT_MCP_INIT_TIMEOUT", "agent", "mcp_init_timeout", "MCP 服务连接及能力握手的等待上限。", "秒"),
+        _SettingDefinition("mcp_acquire_retries", "连接重试次数", "DEEP_AGENT_MCP_ACQUIRE_RETRIES", "agent", "mcp_acquire_retries", "获取共享 MCP 运行实例失败后的重试次数。", "次"),
+        _SettingDefinition("mcp_forward_request_headers", "转发请求头白名单", "DEEP_AGENT_MCP_FORWARD_REQUEST_HEADERS", "agent", "mcp_forward_request_headers", "仅将白名单内的请求头转发给 MCP 服务；影响 App、Space 等上下文传递。"),
+    )),
+    _SettingGroupDefinition("sandbox", "Python 沙箱", (
+        _SettingDefinition("sandbox_enabled", "启用沙箱", "DEEP_AGENT_SANDBOX_ENABLED", "agent", "sandbox_enabled", "关闭后 execute_python 不可用。"),
+        _SettingDefinition("sandbox_timeout", "执行超时", "DEEP_AGENT_SANDBOX_TIMEOUT", "agent", "sandbox_timeout", "单次 Python 执行的等待上限。", "秒"),
+        _SettingDefinition("sandbox_max_concurrency", "最大并发", "DEEP_AGENT_SANDBOX_MAX_CONCURRENCY", "agent", "sandbox_max_concurrency", "同时执行的沙箱请求上限。"),
+        _SettingDefinition("sandbox_memory_mb", "内存预算", "DEEP_AGENT_SANDBOX_MEMORY_MB", "agent", "sandbox_memory_mb", "单次沙箱执行的内存预算。", "MB"),
+        _SettingDefinition("sandbox_cpu_seconds", "CPU 时间上限", "DEEP_AGENT_SANDBOX_CPU_SECONDS", "agent", "sandbox_cpu_seconds", "单次执行消耗 CPU 时间的上限，与等待超时分别生效。", "秒"),
+    )),
+    _SettingGroupDefinition("uploads", "文件上传", (
+        _SettingDefinition("upload_max_size_mb", "单文件大小上限", "DEEP_AGENT_UPLOAD_MAX_SIZE_MB", "agent", "upload_max_size_mb", "单个上传文件允许的最大体积。", "MB"),
+        _SettingDefinition("upload_max_count", "单次文件数量", "DEEP_AGENT_UPLOAD_MAX_COUNT", "agent", "upload_max_count", "一次请求允许上传的最大文件数量。", "个"),
+        _SettingDefinition("upload_allowed_mimes", "允许的 MIME", "DEEP_AGENT_UPLOAD_ALLOWED_MIMES", "agent", "upload_allowed_mimes", "允许上传的 MIME 类型；留空使用内置白名单。", empty_display="使用内置白名单"),
+    )),
+    _SettingGroupDefinition("images", "图片输入", (
+        _SettingDefinition("image_max_dimension", "图片最大边长", "DEEP_AGENT_IMAGE_MAX_DIMENSION", "agent", "image_max_dimension", "发给模型前图片缩放后的最大边长。", "px"),
+        _SettingDefinition("image_max_bytes", "单图大小上限", "DEEP_AGENT_IMAGE_MAX_BYTES", "agent", "image_max_bytes", "发给模型前单张图片允许的最大体积。", "字节"),
+    )),
 )
 
 
@@ -396,27 +148,24 @@ def build_global_settings(
     for group_definition in _SETTING_GROUPS:
         items: list[GlobalSettingItem] = []
         for definition in group_definition.items:
-            category = getattr(options, definition.category)
-            if definition.key == "database_type":
-                raw_value = make_url(get_database_url()).get_backend_name()
-                value = _json_value(raw_value)
-                display_value = _display_value(
-                    value,
-                    empty_display=definition.empty_display,
+            if definition.key == "subscription_provider_enabled":
+                value = codex_enabled()
+                display_value = "开启" if value else "关闭"
+                source: Literal["environment", "default"] = (
+                    "environment"
+                    if SUBSCRIPTION_PROVIDER_ENV in os.environ or LEGACY_CODEX_PROVIDER_ENV in os.environ
+                    else "default"
                 )
-            elif definition.key == "sandbox_python":
-                raw_value = getattr(category, definition.option)
-                configured = bool(str(raw_value).strip())
-                value = configured
-                display_value = "已配置" if configured else definition.empty_display
             else:
+                category = getattr(options, definition.category)
                 raw_value = getattr(category, definition.option)
                 value = _json_value(raw_value)
                 display_value = _display_value(
                     value,
                     empty_display=definition.empty_display,
                 )
-            descriptor = category._options[definition.option]
+                descriptor = category._options[definition.option]
+                source = "environment" if descriptor.set_by else "default"
             items.append(
                 GlobalSettingItem(
                     key=definition.key,
@@ -424,7 +173,7 @@ def build_global_settings(
                     env_name=definition.env_name,
                     value=value,
                     display_value=display_value,
-                    source="environment" if descriptor.set_by else "default",
+                    source=source,
                     unit=definition.unit,
                     description=definition.description,
                 )

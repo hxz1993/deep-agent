@@ -317,7 +317,7 @@ test("历史 DeepSeek 模型不被推荐列表覆盖，失效 Provider 不静默
 
 test("全局配置列表展示值、单位、环境变量和来源", () => {
   const ui = loadGlobalSettingsUi();
-  const html = ui.tableHtml([{
+  const html = ui.tableHtml({
     label: "基础运行",
     items: [
       {
@@ -329,7 +329,7 @@ test("全局配置列表展示值、单位、环境变量和来源", () => {
         description: "用于阻止失控循环。",
       },
     ],
-  }]);
+  });
 
   assert.match(html, /最大模型请求次数/);
   assert.match(html, /30 次\/轮/);
@@ -340,7 +340,7 @@ test("全局配置列表展示值、单位、环境变量和来源", () => {
 
 test("全局配置渲染会转义服务端文本并格式化空值", () => {
   const ui = loadGlobalSettingsUi();
-  const html = ui.tableHtml([{
+  const html = ui.tableHtml({
     label: "<script>",
     items: [
       {
@@ -352,10 +352,10 @@ test("全局配置渲染会转义服务端文本并格式化空值", () => {
         description: "<img src=x>",
       },
     ],
-  }]);
+  });
 
   assert.doesNotMatch(html, /<script>|<b>|<img/);
-  assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
   assert.match(html, /代码默认值/);
   assert.equal(ui.settingValue({ display_value: null }), "—");
   assert.equal(
@@ -368,20 +368,23 @@ test("全局配置渲染会转义服务端文本并格式化空值", () => {
   );
 });
 
-test("全局配置使用单表分组行并支持大小写不敏感搜索", () => {
+test("全局配置按精简分组横向切换并支持跨组搜索", () => {
   const ui = loadGlobalSettingsUi();
   const groups = [
-    { label: "MCP 运行", items: [{ label: "初始化超时", env_name: "DEEP_AGENT_MCP_INIT_TIMEOUT", description: "连接等待", display_value: "30", source: "default" }] },
-    { label: "基础运行", items: [{ label: "应用名称", env_name: "DEEP_AGENT_APP_NAME", description: "服务标识", display_value: "deep-agent", source: "environment" }] },
+    { key: "mcp", label: "MCP 连接", items: [{ label: "初始化超时", env_name: "DEEP_AGENT_MCP_INIT_TIMEOUT", description: "连接等待", display_value: "30", source: "default" }] },
+    { key: "runtime", label: "对话运行", items: [{ label: "最大模型请求次数", env_name: "DEEP_AGENT_MAX_REQUESTS", description: "单轮上限", display_value: "40", source: "environment" }] },
   ];
-  const allHtml = ui.tableHtml(groups);
+  const allHtml = ui.tableHtml(groups[0]);
   assert.equal((allHtml.match(/<thead>/g) || []).length, 1);
-  assert.equal((allHtml.match(/global-settings-group-row/g) || []).length, 2);
-  const filtered = ui.tableHtml(groups, "mcp_init");
-  assert.match(filtered, /DEEP_AGENT_MCP_INIT_TIMEOUT/);
-  assert.doesNotMatch(filtered, /DEEP_AGENT_APP_NAME/);
+  assert.doesNotMatch(allHtml, /DEEP_AGENT_MAX_REQUESTS/);
+  const visible = ui.visibleGroups(groups, "mcp_init");
+  assert.equal(visible.length, 1);
+  assert.match(ui.tableHtml(visible[0]), /DEEP_AGENT_MCP_INIT_TIMEOUT/);
+  const switches = ui.switchHtml(groups, "mcp");
+  assert.match(switches, /data-global-settings-group="mcp" aria-pressed="true"/);
   assert.equal(ui.matches(groups[0], groups[0].items[0], "初始化"), true);
   assert.match(templateHtml, /id="globalSettingsSearch"/);
+  assert.match(templateHtml, /id="globalSettingsGroupSwitch"/);
   assert.doesNotMatch(templateHtml, /id="refreshGlobalSettingsBtn"/);
 });
 

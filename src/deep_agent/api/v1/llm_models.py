@@ -298,7 +298,7 @@ async def test_llm_model(
         messages = {
             "model_disabled": "模型已停用，不参与测试",
             "model_wrong_purpose": "该模型不是对话用途",
-            "provider_disabled": "Codex 订阅实验功能未开启",
+            "provider_disabled": "订阅 Provider 功能未开启",
             "provider_unconfigured": "Provider 尚未配置凭据，请先完成授权或填写 API Key",
             "provider_invalid": "Provider 配置无效，请检查类型和地址",
         }

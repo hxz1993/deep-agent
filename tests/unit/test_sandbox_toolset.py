@@ -227,6 +227,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
         fake_bundle.dialect.value = "sqlite"
         fake_bundle.stores = MagicMock()
         fake_bundle.stores.coordinator.interrupt_running = AsyncMock(return_value=0)
+        fake_bundle.stores.mcp.list_all = AsyncMock(return_value=[])
         fake_bundle.engine = MagicMock()
         fake_bundle.session_factory = MagicMock()
         persister = MagicMock()
@@ -251,6 +252,7 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
                     "deep_agent.core.context.EventPersister",
                     return_value=persister,
                 ),
+                patch("deep_agent.core.context.SkillRuntimeLibrary.reconcile", new=AsyncMock()),
             ):
                 ctx = await AppContext.bootstrap()
             verify.assert_not_awaited()

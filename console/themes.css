@@ -159,3 +159,7 @@
   font-size: 16px;
   line-height: 1.55;
 }
+
+/* The official OpenAI Blossom asset is white; show its full silhouette on every theme. */
+img[src*="/provider-logos/openai.svg"] { filter: brightness(0); }
+[data-theme="dark"] img[src*="/provider-logos/openai.svg"] { filter: brightness(0) invert(1); }

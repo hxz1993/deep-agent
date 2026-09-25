@@ -3,6 +3,10 @@ const providerAdminState = {
   afterSave: null,
   modelTests: new Map(),
   testBatch: null,
+  accessMode: "api",
+  flowId: null,
+  verified: false,
+  existingAuth: false,
 };
 
 const providerCatalogPickerState = {
@@ -15,7 +19,7 @@ function providerTypeByCode(code) {
 }
 
 function providerTypeLabel(provider) {
-  return providerTypeByCode(provider.provider_type)?.label || provider.provider_type || "—";
+  return providerTypeByCode(provider.provider_type)?.label || (provider.provider_type === "openai_codex" ? "ChatGPT" : provider.provider_type) || "—";
 }
 
 function providerModels(providerId) {
@@ -28,7 +32,8 @@ const PROVIDER_BRANDS = {
   alibaba: { src: "./assets/provider-logos/qwen.png", tone: "alibaba" },
   zai: { src: "./assets/provider-logos/zai.svg", tone: "zai" },
   openrouter: { src: "./assets/provider-logos/openrouter.png", tone: "openrouter" },
-  openai: { src: "./assets/provider-logos/openai.svg", tone: "openai" },
+  openai: { src: "./assets/provider-logos/openai.svg?v=20260925-official-1", tone: "openai" },
+  openai_codex: { src: "./assets/provider-logos/openai.svg?v=20260925-official-1", tone: "openai" },
   anthropic: { src: "./assets/provider-logos/anthropic.png", tone: "anthropic" },
   google: { src: "./assets/provider-logos/google-gemini.png", tone: "google" },
   openai_compatible: { src: "./assets/provider-logos/openai-compatible.svg", tone: "compatible" },
@@ -57,9 +62,76 @@ function providerCatalogId(provider) {
 function renderProviderTypeOptions(selectedCode = "") {
   const select = document.getElementById("llmProviderType");
   if (!select) return;
-  select.innerHTML = (state.llmProviderTypes || []).map((item) =>
+  select.innerHTML = (state.llmProviderTypes || []).filter((item) => item.code !== "openai_codex" || selectedCode === "openai_codex").map((item) =>
     `<option value="${escapeHtml(item.code)}" ${item.code === selectedCode ? "selected" : ""}>${escapeHtml(item.label)}</option>`,
   ).join("");
+}
+
+function suggestedProviderName(mode = providerAdminState.accessMode) {
+  return mode === "subscription"
+    ? (document.getElementById("llmProviderSubscriptionType")?.selectedOptions[0]?.textContent.trim() || "GPT")
+    : (providerTypeByCode(document.getElementById("llmProviderType")?.value)?.label || "");
+}
+
+function syncSuggestedProviderName() {
+  if (document.getElementById("llmProviderForm")?.dataset.providerId) return;
+  const input = document.getElementById("llmProviderName");
+  const previous = input.dataset.autoName || "";
+  if (input.value.trim() && input.value !== previous) return;
+  const suggested = suggestedProviderName();
+  input.value = suggested;
+  input.dataset.autoName = suggested;
+}
+
+function setProviderAuthState(message, status = "idle") {
+  const text = document.getElementById("llmProviderSubscriptionState");
+  text.textContent = message;
+  text.closest(".provider-auth-status").dataset.state = status;
+}
+
+function syncProviderAccessMode(mode, { editing = false } = {}) {
+  providerAdminState.accessMode = mode;
+  const subscription = mode === "subscription";
+  const enabled = (state.llmProviderTypes || []).some((item) => item.code === "openai_codex");
+  const modal = document.getElementById("llmProviderModal");
+  modal.classList.toggle("provider-create-modal", !editing && enabled);
+  modal.classList.toggle("provider-api-only-modal", !enabled && !subscription);
+  document.getElementById("llmProviderAccessMode").classList.toggle("hidden", editing || !enabled);
+  document.querySelectorAll("#llmProviderAccessMode [data-provider-access]").forEach((button) => {
+    const active = button.dataset.providerAccess === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  for (const id of ["llmProviderApiTypeField", "llmProviderApiBaseField", "llmProviderApiKeyField"]) {
+    document.getElementById(id).classList.toggle("hidden", subscription);
+  }
+  document.getElementById("llmProviderSubscriptionTypeField").classList.toggle("hidden", !subscription);
+  document.getElementById("llmProviderSubscriptionFields").classList.toggle("hidden", !subscription);
+  document.getElementById("llmProviderSubscriptionType").disabled = !subscription || editing;
+  document.getElementById("llmProviderType").disabled = subscription || editing;
+  document.getElementById("llmProviderBaseUrl").disabled = subscription;
+  document.getElementById("llmProviderBaseUrl").required = !subscription;
+  document.getElementById("llmProviderApiKey").disabled = subscription;
+  const nameInput = document.getElementById("llmProviderName");
+  nameInput.placeholder = subscription ? "例如 GPT 本机" : "例如 Kimi";
+  nameInput.required = editing;
+  if (!editing) syncSuggestedProviderName();
+  document.getElementById("llmProviderDisconnectAuthorization").classList.toggle("hidden", !subscription || !editing || !providerAdminState.existingAuth);
+  document.getElementById("llmProviderStartAuthorization").disabled = !enabled;
+  document.getElementById("llmProviderVerifyAuthorization").disabled = !enabled;
+}
+
+async function cancelProviderAuthorization() {
+  const flowId = providerAdminState.flowId;
+  providerAdminState.flowId = null;
+  providerAdminState.verified = false;
+  if (!flowId) return;
+  const providerId = document.getElementById("llmProviderForm")?.dataset.providerId || null;
+  try {
+    await apiFetch(`/api/v1/llm-providers/codex/authorization/${encodeURIComponent(flowId)}/cancel`, {
+      method: "POST", body: JSON.stringify({ provider_id: providerId }),
+    });
+  } catch (_) { /* Expired flows are already gone server-side. */ }
 }
 
 function syncProviderBaseUrl() {
@@ -208,7 +280,7 @@ const llmProvidersAdmin = {
         ${providerBrandMarkup(provider)}
         <span class="provider-list-copy"><strong>${escapeHtml(provider.name)}</strong><small>${escapeHtml(providerTypeLabel(provider))}</small></span>
         <span class="provider-list-signals">
-          <span class="provider-key-state ${provider.api_key_set ? "on" : "off"}" title="${provider.api_key_set ? "API Key 已配置" : "API Key 未配置"}"><i data-lucide="key-round"></i></span>
+          <span class="provider-key-state ${provider.authenticated ? "on" : "off"}" title="${provider.auth_method === "oauth" ? (provider.authenticated ? "订阅已授权" : "订阅未授权") : (provider.api_key_set ? "API Key 已配置" : "API Key 未配置")}"><i data-lucide="${provider.auth_method === "oauth" ? "user-round-check" : "key-round"}"></i></span>
           <span class="provider-model-count"><i data-lucide="cpu"></i>${Number(provider.model_count ?? providerModels(provider.id).length)}</span>
         </span>
       </button>
@@ -241,11 +313,10 @@ const llmProvidersAdmin = {
             <div class="provider-detail-title-line">
               <h3>${escapeHtml(provider.name)}</h3>
               <div class="provider-facts" aria-label="供应商接入信息">
-                <span class="provider-fact" title="地址模式"><i data-lucide="route"></i><span>${provider.use_default_base_url ? "默认地址" : "自定义地址"}</span></span>
-                <span class="provider-fact ${provider.api_key_set ? "on" : "off"}" title="API Key"><i data-lucide="key-round"></i><span>${provider.api_key_set ? "Key 已配" : "Key 未配"}</span></span>
+                <span class="provider-fact ${provider.authenticated ? "on" : "off"}" title="认证状态"><i data-lucide="${provider.auth_method === "oauth" ? "user-round-check" : "key-round"}"></i><span>${provider.auth_method === "oauth" ? (provider.authenticated ? `订阅已授权 ${escapeHtml(provider.account_hint || "")}` : "订阅未授权") : (provider.api_key_set ? "Key 已配" : "Key 未配")}</span></span>
               </div>
             </div>
-            <span class="provider-fact provider-fact-url" title="Base URL"><i data-lucide="link-2"></i><code>${escapeHtml(provider.effective_base_url || provider.base_url || "—")}</code></span>
+            <span class="provider-fact provider-fact-url" title="Base URL"><i data-lucide="link-2"></i><code>${escapeHtml(provider.effective_base_url || provider.base_url || "—")}</code><span class="provider-address-mode">${provider.use_default_base_url ? "默认" : "自定义"}</span></span>
           </div>
         </div>
         <div class="row-actions provider-action-group">
@@ -395,14 +466,21 @@ const llmProvidersAdmin = {
   async openCreate({ providerType = "", afterSave = null } = {}) {
     await loadLlmProviderTypes();
     providerAdminState.afterSave = afterSave;
+    providerAdminState.flowId = null;
+    providerAdminState.verified = false;
+    providerAdminState.existingAuth = false;
     document.getElementById("llmProviderForm").dataset.providerId = "";
     renderProviderTypeOptions(providerType || state.llmProviderTypes[0]?.code || "");
     document.getElementById("llmProviderModalTitle").textContent = "新建供应商";
     document.getElementById("llmProviderName").value = "";
+    document.getElementById("llmProviderName").dataset.autoName = "";
     setProviderApiKeyEditor();
     document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(providerTypeByCode(document.getElementById("llmProviderType").value)?.supports_default_base_url);
     document.getElementById("llmProviderBaseUrl").value = "";
     syncProviderBaseUrl();
+    document.getElementById("llmProviderCallbackUrl").value = "";
+    setProviderAuthState("尚未授权");
+    syncProviderAccessMode("api");
     document.getElementById("llmProviderModal").showModal();
   },
 
@@ -410,14 +488,24 @@ const llmProvidersAdmin = {
     const provider = await apiFetch(`/api/v1/llm-providers/${encodeURIComponent(providerId)}`);
     await loadLlmProviderTypes();
     providerAdminState.afterSave = null;
+    providerAdminState.flowId = null;
+    providerAdminState.verified = false;
+    providerAdminState.existingAuth = Boolean(provider.authenticated);
     document.getElementById("llmProviderForm").dataset.providerId = providerId;
     renderProviderTypeOptions(provider.provider_type);
     document.getElementById("llmProviderModalTitle").textContent = `编辑供应商 · ${provider.name}`;
     document.getElementById("llmProviderName").value = provider.name;
+    document.getElementById("llmProviderName").dataset.autoName = "";
     document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(provider.use_default_base_url);
     document.getElementById("llmProviderBaseUrl").value = provider.base_url || provider.effective_base_url || "";
     setProviderApiKeyEditor({ maskedValue: provider.api_key_masked || "" });
     syncProviderBaseUrl();
+    document.getElementById("llmProviderCallbackUrl").value = "";
+    setProviderAuthState(provider.authenticated ? `已授权 ${provider.account_hint || ""}` : "尚未授权", provider.authenticated ? "connected" : "idle");
+    syncProviderAccessMode(provider.auth_method === "oauth" ? "subscription" : "api", { editing: true });
+    if (provider.auth_method === "oauth" && !state.llmProviderTypes.some((item) => item.code === "openai_codex")) {
+      setProviderAuthState(`${document.getElementById("llmProviderSubscriptionState").textContent} · 当前环境未开启订阅实验功能`);
+    }
     document.getElementById("llmProviderModal").showModal();
   },
 
@@ -431,23 +519,33 @@ const llmProvidersAdmin = {
     AdminFormFeedback.setSubmitting(form, true);
     try {
       const useDefault = document.getElementById("llmProviderUseDefaultBaseUrl").checked;
-      const payload = {
-        name: document.getElementById("llmProviderName").value.trim(),
+      const subscription = providerAdminState.accessMode === "subscription";
+      const nameInput = document.getElementById("llmProviderName");
+      const name = nameInput.value.trim() || (!editingId ? suggestedProviderName() : "");
+      nameInput.value = name;
+      const payload = subscription ? {
+        name,
+        ...(!editingId ? { provider_type: document.getElementById("llmProviderSubscriptionType").value, use_default_base_url: true } : {}),
+        ...(providerAdminState.flowId && providerAdminState.verified ? { authorization_flow_id: providerAdminState.flowId } : {}),
+      } : {
+        name,
         provider_type: document.getElementById("llmProviderType").value,
         use_default_base_url: useDefault,
         base_url: document.getElementById("llmProviderBaseUrl").value.trim(),
       };
-      const apiKeyInput = document.getElementById("llmProviderApiKey");
-      const apiKey = apiKeyInput.value.trim();
-      const maskedValue = String(apiKeyInput.dataset.maskedValue || "");
-      if (apiKey && apiKey !== maskedValue) payload.api_key = apiKey;
-      if (apiKeyInput.dataset.clearRequested === "true") {
-        payload.clear_api_key = true;
+      if (subscription && !editingId && !providerAdminState.verified) throw new Error("请先完成订阅授权验证");
+      if (!subscription) {
+        const apiKeyInput = document.getElementById("llmProviderApiKey");
+        const apiKey = apiKeyInput.value.trim();
+        const maskedValue = String(apiKeyInput.dataset.maskedValue || "");
+        if (apiKey && apiKey !== maskedValue) payload.api_key = apiKey;
+        if (apiKeyInput.dataset.clearRequested === "true") payload.clear_api_key = true;
       }
       const saved = await apiFetch(editingId ? `/api/v1/llm-providers/${encodeURIComponent(editingId)}` : "/api/v1/llm-providers", {
         method: editingId ? "PATCH" : "POST",
         body: JSON.stringify(payload),
       });
+      providerAdminState.flowId = null;
       document.getElementById("llmProviderModal").close();
       providerAdminState.selectedId = saved.id;
       await this.refresh();
@@ -479,12 +577,66 @@ window.llmProvidersAdmin = llmProvidersAdmin;
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("newLlmProviderBtn")?.addEventListener("click", () => llmProvidersAdmin.openCreate());
   document.getElementById("llmProviderForm")?.addEventListener("submit", (event) => llmProvidersAdmin.save(event));
+  document.querySelectorAll("#llmProviderAccessMode [data-provider-access]").forEach((button) => button.addEventListener("click", async () => {
+    if (button.dataset.providerAccess === providerAdminState.accessMode) return;
+    await cancelProviderAuthorization();
+    setProviderAuthState("尚未授权");
+    syncProviderAccessMode(button.dataset.providerAccess);
+  }));
+  document.getElementById("llmProviderStartAuthorization")?.addEventListener("click", async () => {
+    const form = document.getElementById("llmProviderForm");
+    const providerId = form.dataset.providerId || null;
+    AdminFormFeedback.clear(form);
+    const tab = window.open("about:blank", "_blank");
+    try {
+      await cancelProviderAuthorization();
+      const result = await apiFetch("/api/v1/llm-providers/codex/authorization", {
+        method: "POST", body: JSON.stringify({ provider_id: providerId }),
+      });
+      providerAdminState.flowId = result.flow_id;
+      providerAdminState.verified = false;
+      setProviderAuthState("授权页面已打开，请回填完整回调地址", "pending");
+      if (tab) tab.location.replace(result.authorization_url);
+      else showToast("浏览器拦截了新标签，请允许弹窗后重试", true);
+    } catch (error) {
+      tab?.close();
+      AdminFormFeedback.show(form, error);
+    }
+  });
+  document.getElementById("llmProviderVerifyAuthorization")?.addEventListener("click", async () => {
+    const form = document.getElementById("llmProviderForm");
+    AdminFormFeedback.clear(form);
+    try {
+      if (!providerAdminState.flowId) throw new Error("请先前往授权");
+      const result = await apiFetch(`/api/v1/llm-providers/codex/authorization/${encodeURIComponent(providerAdminState.flowId)}/verify`, {
+        method: "POST",
+        body: JSON.stringify({ provider_id: form.dataset.providerId || null, callback_url: document.getElementById("llmProviderCallbackUrl").value.trim() }),
+      });
+      providerAdminState.verified = true;
+      document.getElementById("llmProviderCallbackUrl").value = "";
+      setProviderAuthState(`验证成功 ${result.account_hint}，点击保存后生效`, "connected");
+    } catch (error) { AdminFormFeedback.show(form, error); }
+  });
+  document.getElementById("llmProviderDisconnectAuthorization")?.addEventListener("click", async () => {
+    const providerId = document.getElementById("llmProviderForm").dataset.providerId;
+    if (!providerId) return;
+    if (!(await confirmAction({ title: "断开订阅授权？", message: "关联模型将暂时不可用，之后可以重新授权。", confirmLabel: "断开" }))) return;
+    try {
+      await apiFetch(`/api/v1/llm-providers/${encodeURIComponent(providerId)}/disconnect`, { method: "POST" });
+      await cancelProviderAuthorization();
+      document.getElementById("llmProviderModal").close();
+      await llmProvidersAdmin.refresh();
+      showToast("订阅授权已断开");
+    } catch (error) { AdminFormFeedback.show(document.getElementById("llmProviderForm"), error); }
+  });
   document.getElementById("llmProviderType")?.addEventListener("change", () => {
     const type = providerTypeByCode(document.getElementById("llmProviderType").value);
     document.getElementById("llmProviderUseDefaultBaseUrl").checked = Boolean(type?.supports_default_base_url && type?.default_base_url);
     document.getElementById("llmProviderBaseUrl").value = "";
     syncProviderBaseUrl();
+    syncSuggestedProviderName();
   });
+  document.getElementById("llmProviderSubscriptionType")?.addEventListener("change", syncSuggestedProviderName);
   document.getElementById("llmProviderUseDefaultBaseUrl")?.addEventListener("change", syncProviderBaseUrl);
   document.getElementById("llmProviderApiKey")?.addEventListener("focus", (event) => {
     if (event.currentTarget.value === event.currentTarget.dataset.maskedValue) event.currentTarget.select();
@@ -506,6 +658,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("closeLlmProviderModal")?.addEventListener("click", () => document.getElementById("llmProviderModal").close());
   document.getElementById("cancelLlmProviderBtn")?.addEventListener("click", () => document.getElementById("llmProviderModal").close());
+  document.getElementById("llmProviderModal")?.addEventListener("close", () => { void cancelProviderAuthorization(); });
   document.getElementById("providerCatalogPickerForm")?.addEventListener("submit", (event) => llmProvidersAdmin.submitCatalogPicker(event));
   document.getElementById("toggleProviderCatalogSelection")?.addEventListener("click", () => llmProvidersAdmin.toggleCatalogPickerSelection());
   document.getElementById("closeProviderCatalogPickerModal")?.addEventListener("click", () => llmProvidersAdmin.closeCatalogPicker());

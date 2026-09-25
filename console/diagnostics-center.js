@@ -3,7 +3,7 @@ import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260924-ptc
 import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260923-c04-1";
 
 import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260924-config-catalog-5";
-import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20260923-c04-25";
+import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20260925-provider-list-1";
 
 let center = null;
 export function initDiagnostics() {

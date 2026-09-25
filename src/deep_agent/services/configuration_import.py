@@ -356,6 +356,11 @@ async def inspect_configuration_backup(
                 table = Base.metadata.tables[table_name]
                 result = await connection.execute(select(table))
                 rows[table_name] = [dict(row) for row in result.mappings().all()]
+            for row in rows.get("llm_providers", []):
+                if row.get("auth_method") == "oauth":
+                    row["credential_json"] = None
+                    row["auth_status"] = "unconfigured"
+                    row["auth_revision"] = 0
             _validate_integration_rows(rows.get("integration_settings", []))
             for row in rows.get("agents", []):
                 row["capabilities"] = canonical_tool_package_codes(
@@ -761,6 +766,8 @@ async def apply_configuration_import(
                     rows=rows,
                 )
                 committed = True
+                from deep_agent.services.codex_provider import evict_all_providers
+                evict_all_providers()
                 updated_plan = replace(plan, rows=rows)
                 return ConfigurationImportResult(
                     plan=updated_plan,

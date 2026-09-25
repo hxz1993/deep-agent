@@ -177,6 +177,7 @@ class LlmModelMigrationShapeTests(unittest.TestCase):
                 "name",
                 "description",
                 "model",
+                "purpose",
                 "provider_id",
                 "input_modalities",
                 "context_window_tokens",

@@ -503,17 +503,35 @@
         <button type="button" class="icon-btn" id="closeLlmProviderModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body">
+        <div class="provider-access-selector hidden" id="llmProviderAccessMode">
+          <div class="provider-access-options" role="group" aria-label="供应商接入方式">
+            <button type="button" class="provider-access-option active" data-provider-access="api" aria-pressed="true">
+              <span class="provider-access-icon"><i data-lucide="key-round"></i></span>
+              <span class="provider-access-copy"><strong>API</strong><small>使用 API Key 连接模型供应商</small></span>
+              <span class="provider-access-check" aria-hidden="true"><i data-lucide="check"></i></span>
+            </button>
+            <button type="button" class="provider-access-option" data-provider-access="subscription" aria-pressed="false">
+              <span class="provider-access-icon"><i data-lucide="user-round-check"></i></span>
+              <span class="provider-access-copy"><strong>订阅</strong><small>使用订阅授权连接模型供应商</small></span>
+              <span class="provider-access-check" aria-hidden="true"><i data-lucide="check"></i></span>
+            </button>
+          </div>
+        </div>
         <div class="dialog-field-grid">
         <label class="field">
           <span>名称</span>
-          <input type="text" id="llmProviderName" required placeholder="例如 Kimi" />
+          <input type="text" id="llmProviderName" placeholder="例如 Kimi" />
         </label>
-        <label class="field">
+        <label class="field" id="llmProviderApiTypeField">
           <span>供应商类型</span>
           <select id="llmProviderType" required></select>
         </label>
+        <label class="field hidden" id="llmProviderSubscriptionTypeField">
+          <span>订阅供应商</span>
+          <select id="llmProviderSubscriptionType" aria-label="订阅供应商"><option value="openai_codex" selected>ChatGPT</option></select>
+        </label>
         </div>
-        <div class="field">
+        <div class="field" id="llmProviderApiBaseField">
           <div class="field-label-actions">
             <label for="llmProviderBaseUrl">Base URL</label>
             <label class="provider-default-switch" for="llmProviderUseDefaultBaseUrl">
@@ -524,9 +542,33 @@
           </div>
           <input type="url" id="llmProviderBaseUrl" required />
         </div>
-        <div class="field">
+        <div class="field" id="llmProviderApiKeyField">
           <div class="field-label-actions"><label for="llmProviderApiKey">API Key</label><button type="button" class="field-text-action hidden" id="llmProviderClearApiKey">清除</button></div>
           <input type="password" id="llmProviderApiKey" autocomplete="new-password" />
+        </div>
+        <div class="field hidden" id="llmProviderSubscriptionFields">
+          <div class="provider-auth-guide">
+            <div class="provider-auth-guide-heading"><strong>授权步骤</strong><span>模型目录仅供参考，实际可用型号以订阅账号权限为准。</span></div>
+            <ol>
+              <li>点击<strong>前往授权</strong>，在新标签页登录 GPT 账号。</li>
+              <li>登录后<strong>复制地址栏的完整回调地址</strong>；即使页面无法打开，地址仍可复制。</li>
+              <li>粘贴地址并<strong>验证授权</strong>，成功后再保存供应商。</li>
+            </ol>
+          </div>
+          <div class="provider-auth-section">
+            <div class="provider-auth-action-row">
+              <span class="provider-auth-section-title">账号授权</span>
+              <div class="provider-auth-actions">
+                <button type="button" class="btn danger hidden" id="llmProviderDisconnectAuthorization">断开授权</button>
+                <button type="button" class="btn" id="llmProviderStartAuthorization">前往授权</button>
+              </div>
+            </div>
+            <div class="provider-auth-status" data-state="idle" role="status"><i data-lucide="info" aria-hidden="true"></i><span id="llmProviderSubscriptionState">尚未授权</span></div>
+          </div>
+          <div class="field provider-callback-field">
+            <div class="field-label-actions"><label for="llmProviderCallbackUrl">完整回调地址</label><button type="button" class="btn compact" id="llmProviderVerifyAuthorization">验证授权</button></div>
+            <textarea id="llmProviderCallbackUrl" rows="2" placeholder="http://localhost:1455/auth/callback?code=…&amp;state=…" autocomplete="off" spellcheck="false"></textarea>
+          </div>
         </div>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>

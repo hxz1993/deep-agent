@@ -106,7 +106,7 @@ function catalogProviderType(provider) {
 function providerChoicesForCatalog(provider) {
   const providerType = catalogProviderType(provider);
   return (state.llmProviders || []).filter(
-    (item) => item.provider_type === providerType,
+    (item) => item.provider_type === providerType || (providerType === "openai" && item.provider_type === "openai_codex"),
   );
 }
 
@@ -122,7 +122,9 @@ function populateModelProviderSelect(selectedId = "") {
   select.disabled = false;
   select.innerHTML = providers.map((provider) => {
     const selected = provider.id === selectedId ? " selected" : "";
-    const suffix = provider.api_key_set ? "" : "（未配置密钥）";
+    const suffix = provider.auth_method === "oauth"
+      ? (provider.authenticated ? "（订阅已授权）" : "（订阅未授权）")
+      : (provider.api_key_set ? "" : "（未配置密钥）");
     return `<option value="${escapeHtml(provider.id)}"${selected}>${escapeHtml(provider.name)} · ${escapeHtml(providerTypeLabel(provider))}${suffix}</option>`;
   }).join("");
 }
@@ -159,7 +161,7 @@ const llmModelsAdmin = {
           (model) => `
         <tr>
           <td><strong>${escapeHtml(model.name)}</strong></td>
-          <td><span class="model-provider-cell"><span class="provider-key-dot ${model.provider?.api_key_set ? "on" : "off"}"></span>${escapeHtml(model.provider?.name || "—")}</span></td>
+          <td><span class="model-provider-cell"><span class="provider-key-dot ${model.provider?.authenticated ? "on" : "off"}"></span>${escapeHtml(model.provider?.name || "—")}</span></td>
           <td><code>${escapeHtml(model.model)}</code></td>
           <td>${escapeHtml(formatTokenCount(model.context_window_tokens))}</td>
           <td>${escapeHtml(formatTokenCount(model.max_output_tokens))}</td>
@@ -229,7 +231,7 @@ const llmModelsAdmin = {
       ? state.llmProviders.find((item) => item.id === this.catalogTargetProviderId)
       : null;
     this.catalogTargetProviderId = "";
-    if (targetProviderId && (!targeted || targeted.provider_type !== providerType)) {
+    if (targetProviderId && (!targeted || (targeted.provider_type !== providerType && !(providerType === "openai" && targeted.provider_type === "openai_codex")))) {
       showToast(targeted
         ? `该目录渠道不能添加到 ${targeted.name}，请选择同类型模型`
         : "当前供应商不存在", true);

@@ -14,7 +14,7 @@ export function isModelSelectable(model) {
   if (model?.enabled === false) return false;
   if (typeof model?.selectable === "boolean") return model.selectable;
   const provider = modelProvider(model);
-  return provider?.api_key_set !== false;
+  return provider?.authenticated !== false && (provider?.auth_method === "oauth" || provider?.api_key_set !== false);
 }
 
 export function preserveCurrentModel(models, currentModel) {
@@ -40,7 +40,11 @@ function unavailableSuffix(model) {
   const provider = modelProvider(model);
   const reason = model?.unavailable_reason;
   if (reason === "model_disabled" || model?.enabled === false) return "（模型已停用）";
-  if (reason === "provider_unconfigured" || provider?.api_key_set === false) return "（供应商未配置密钥）";
+  if (reason === "provider_disabled") return "（订阅实验功能未开启）";
+  if (reason === "model_wrong_purpose") return "（非对话模型）";
+  if (reason === "provider_unconfigured") return provider?.auth_method === "oauth" ? "（订阅未授权）" : "（供应商未配置密钥）";
+  if (provider?.auth_method === "oauth" && provider?.authenticated === false) return "（订阅未授权）";
+  if (provider?.api_key_set === false) return "（供应商未配置密钥）";
   if (reason === "provider_invalid") return "（供应商配置无效）";
   return "";
 }

@@ -87,6 +87,7 @@ class LlmModelCreate(BaseModel):
         description="Normalized model capability tags, separate from input modalities.",
     )
     enabled: bool = True
+    purpose: Literal["chat"] = "chat"
 
     @field_validator("provider_id")
     @classmethod
@@ -139,6 +140,7 @@ class LlmModelUpdate(BaseModel):
     max_output_tokens: int | None = Field(default=None, gt=0)
     tags: list[str] | None = None
     enabled: bool | None = None
+    purpose: Literal["chat"] | None = None
 
     @field_validator("provider_id")
     @classmethod
@@ -156,6 +158,7 @@ class LlmModelUpdate(BaseModel):
                 "context_window_tokens",
                 "max_output_tokens",
                 "enabled",
+                "purpose",
             ):
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
@@ -206,6 +209,7 @@ class LlmModelResponse(BaseModel):
     name: str
     description: str | None = None
     model: str
+    purpose: str = "chat"
     provider_id: str
     provider: LlmProviderSummary
     base_url: str | None = None
@@ -222,6 +226,8 @@ class LlmModelResponse(BaseModel):
         "model_disabled",
         "provider_unconfigured",
         "provider_invalid",
+        "provider_disabled",
+        "model_wrong_purpose",
     ] | None = None
     agent_count: int = Field(default=0, description="Number of agents referencing this preset.")
     created_at: UtcDatetime
@@ -241,6 +247,7 @@ class LlmModelResponse(BaseModel):
             name=row.name,
             description=row.description,
             model=row.model,
+            purpose=getattr(row, "purpose", "chat"),
             provider_id=row.provider_id,
             provider=LlmProviderSummary.from_row(provider),
             base_url=provider.base_url,
@@ -262,6 +269,7 @@ class LlmModelSummary(BaseModel):
     id: str
     name: str
     model: str
+    purpose: str = "chat"
     input_modalities: list[str] = Field(default_factory=list)
     context_window_tokens: int | None = None
     max_output_tokens: int | None = None
@@ -274,6 +282,7 @@ class LlmModelSummary(BaseModel):
             id=row.id,
             name=row.name,
             model=row.model,
+            purpose=getattr(row, "purpose", "chat"),
             input_modalities=_supported_modalities(row.input_modalities),
             context_window_tokens=row.context_window_tokens,
             max_output_tokens=row.max_output_tokens,

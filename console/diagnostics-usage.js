@@ -142,8 +142,9 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
 
     const rowIcon = row => {
       if (state.dimension === "model") {
-        const brands = {deepseek:"deepseek.ico",moonshotai:"kimi.ico",alibaba:"qwen.png",zai:"zai.svg",openrouter:"openrouter.png",openai:"openai.svg",anthropic:"anthropic.png",google:"google-gemini.png"};
-        return `<img class="usage-identity-logo" src="./assets/provider-logos/${brands[row.model?.provider_type] || "openai-compatible.svg"}" alt="" />`;
+        const brands = {deepseek:"deepseek.ico",moonshotai:"kimi.ico",alibaba:"qwen.png",zai:"zai.svg",openrouter:"openrouter.png",openai:"openai.svg?v=20260925-official-1",openai_codex:"openai.svg?v=20260925-official-1",anthropic:"anthropic.png",google:"google-gemini.png"};
+        const providerType = row.model?.provider_type || "openai_compatible";
+        return `<img class="usage-identity-logo" data-provider-type="${e(providerType)}" src="./assets/provider-logos/${brands[providerType] || "openai-compatible.svg"}" alt="" />`;
       }
       if (state.dimension === "user") return icon("user-round");
       return (row.channel_types || []).length ? row.channel_types.map(kind => kind === "wecom" ? '<img class="usage-identity-logo" src="./assets/channel-logos/wecom.png" alt="企业微信渠道" title="企业微信渠道" />' : `<span title="${title(kind)} 渠道">${icon("rss")}</span>`).join("") : icon("bot");

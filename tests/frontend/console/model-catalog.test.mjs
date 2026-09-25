@@ -23,6 +23,7 @@ const consoleStyles = await readFile(
   new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
+const sharedPrimitives = await readFile(new URL("../../../console/ui-primitives.css", import.meta.url), "utf8");
 const coreSource = await readFile(
   new URL("../../../console/configuration/core.js", import.meta.url),
   "utf8",
@@ -98,7 +99,7 @@ test("模型目录填满内容区且只滚动内部列表", () => {
   assert.match(consoleStyles, /\.catalog-panel \.catalog-browser\s*\{[^}]*flex: 1 1 auto;[^}]*min-height: 0;[^}]*overflow: hidden;/);
   assert.match(consoleStyles, /\.catalog-panel \.catalog-results\s*\{[^}]*display: flex;[^}]*min-height: 0;[^}]*overflow: hidden;/);
   assert.match(consoleStyles, /#configurationHost \.catalog-panel \.models-table-wrap\s*\{[^}]*flex: 1 1 auto;[^}]*overflow: auto;/);
-  assert.match(consoleStyles, /\.catalog-panel \.models-pagination \{ margin: 10px 0 0; \}/);
+  assert.match(sharedPrimitives, /\.console-pagination, \.models-pagination \{ margin-top:10px; \}/);
 });
 
 test("模型表单必填上下文和最大输出且模态与能力标签分开", () => {

@@ -51,6 +51,7 @@ class LlmModel(Base):
     name: Mapped[str] = mapped_column(KeyText, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(Text, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False, server_default="chat")
     input_modalities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
     context_window_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -79,6 +80,10 @@ class LlmProvider(Base):
     use_default_base_url: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auth_method: Mapped[str] = mapped_column(String(32), nullable=False, server_default="api_key")
+    credential_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    auth_revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    auth_status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="unconfigured")
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UtcTimestamp(),

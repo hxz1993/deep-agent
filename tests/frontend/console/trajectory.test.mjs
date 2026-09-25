@@ -417,7 +417,7 @@ test("Console正文不低于12px，只有明确的辅助标签使用紧凑字号
     [".inspector-facts .inspector-channel-badge", "font-size: 11px"],
     [".catalog-model-table .model-tag-cell .badge", "font-size: 11px"],
   ]);
-  assert.deepEqual(lowFontDeclarations(configurationCss), []);
+  assert.deepEqual(lowFontDeclarations(configurationCss), [[".provider-address-mode", "font-size: 11px"]]);
   assert.deepEqual(lowFontDeclarations(themesCss), []);
   assert.match(consoleCss, /\.agent-select-label[^}]*font-size:\s*14px/);
 });

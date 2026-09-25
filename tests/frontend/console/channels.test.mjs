@@ -20,6 +20,7 @@ const styles = await readFile(
   "utf8",
 );
 const consoleStyles = await readFile(new URL("../../../console/console.css", import.meta.url), "utf8");
+const sharedPrimitives = await readFile(new URL("../../../console/ui-primitives.css", import.meta.url), "utf8");
 
 test("配置中心提供企微渠道页和完整运行状态", () => {
   assert.match(indexHtml, /data-tab="channels"[\s\S]*?<span>渠道<\/span>/);
@@ -66,8 +67,8 @@ test("快捷命令与新建并排，网关胶囊包含刷新入口并跟随标�
 });
 
 test("渠道标题沿用目录标题基线，状态胶囊不撑高标题行", () => {
-  assert.match(consoleStyles, /#configurationHost #panel-channels \.panel-title-copy\s*\{\s*display: block;/);
-  assert.match(consoleStyles, /#configurationHost \.channel-title-row \.channel-runtime-chip\s*\{\s*margin-block: -4px;/);
+  assert.match(sharedPrimitives, /#configurationHost #panel-channels \.panel-title-copy\s*\{\s*display: block;/);
+  assert.match(sharedPrimitives, /#configurationHost \.channel-title-row \.channel-runtime-chip\s*\{\s*margin-block: -4px;/);
 });
 
 test("快捷命令弹框独立于网关读取统一只读目录并转义内容", async () => {

@@ -306,6 +306,12 @@ async def _copy_table(
     async with source_engine.connect() as source_connection:
         result = await source_connection.execute(select(source_table))
         rows = [dict(row) for row in result.mappings().all()]
+    if table_name == "llm_providers":
+        for row in rows:
+            if row.get("auth_method") == "oauth":
+                row["credential_json"] = None
+                row["auth_status"] = "unconfigured"
+                row["auth_revision"] = 0
     if table_name == "agents":
         for row in rows:
             raw_capabilities = row.get("capabilities") or []

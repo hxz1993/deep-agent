@@ -21,6 +21,8 @@ from pydantic_ai import (
     RunContext,
 )
 from pydantic_ai.exceptions import RunCancelled, UnexpectedModelBehavior, ModelHTTPError, UsageLimitExceeded
+from pydantic_ai.providers.openai_codex import CredentialsRefreshError, CredentialsPersistenceError
+from deep_agent.services.codex_provider import CodexUnavailable
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
@@ -126,6 +128,15 @@ def _safe_run_failure(exc: Exception) -> dict[str, Any]:
     elif isinstance(exc, ModelHTTPError):
         diagnostic.update(code="provider_http_error", phase="provider",
                           message=f"模型服务返回 HTTP {exc.status_code}，本轮已停止。")
+    elif isinstance(exc, CredentialsRefreshError):
+        diagnostic.update(code="provider_authorization_expired", phase="provider",
+                          message="订阅授权失效，请在供应商配置中重新授权。")
+    elif isinstance(exc, CredentialsPersistenceError):
+        diagnostic.update(code="provider_credential_save_failed", phase="provider",
+                          message="订阅凭据刷新后保存失败，本轮已停止。")
+    elif isinstance(exc, CodexUnavailable):
+        diagnostic.update(code="provider_authorization_unavailable", phase="provider",
+                          message="订阅当前不可用，请检查开关或重新授权。")
     elif isinstance(exc, UsageLimitExceeded):
         diagnostic.update(code="usage_limit_exceeded", phase="model",
                           message="模型请求或用量达到执行上限，本轮已停止。")

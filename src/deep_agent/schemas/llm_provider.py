@@ -32,6 +32,7 @@ class LlmProviderCreate(BaseModel):
     use_default_base_url: bool = False
     base_url: str | None = None
     api_key: str | None = None
+    authorization_flow_id: str | None = Field(default=None, exclude=True)
 
     @field_validator("name", "provider_type")
     @classmethod
@@ -63,6 +64,7 @@ class LlmProviderUpdate(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     clear_api_key: bool = False
+    authorization_flow_id: str | None = Field(default=None, exclude=True)
 
     @model_validator(mode="before")
     @classmethod
@@ -111,6 +113,9 @@ class LlmProviderSummary(BaseModel):
     name: str
     provider_type: str
     api_key_set: bool
+    auth_method: str = "api_key"
+    auth_status: str = "unconfigured"
+    authenticated: bool = False
 
     @classmethod
     def from_row(cls, row) -> "LlmProviderSummary":
@@ -119,6 +124,9 @@ class LlmProviderSummary(BaseModel):
             name=row.name,
             provider_type=row.provider_type,
             api_key_set=bool(row.api_key),
+            auth_method=getattr(row, "auth_method", "api_key"),
+            auth_status=getattr(row, "auth_status", "unconfigured"),
+            authenticated=(bool(row.credential_json) and row.auth_status == "connected") if getattr(row, "auth_method", "api_key") == "oauth" else bool(row.api_key),
         )
 
 
@@ -128,6 +136,7 @@ class LlmProviderResponse(LlmProviderSummary):
     base_url: str
     api_key_set: bool
     api_key_masked: str | None = None
+    account_hint: str | None = None
     model_count: int = 0
     created_at: UtcDatetime
     updated_at: UtcDatetime

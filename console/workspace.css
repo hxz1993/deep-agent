@@ -2460,6 +2460,8 @@ html, body {
 .composer-model-trigger:disabled { opacity: .48; cursor: not-allowed; }
 .composer-provider-icon { width: 16px; height: 16px; display: inline-grid; place-items: center; flex: 0 0 auto; color: var(--accent); }
 .composer-provider-icon img { width: 14px; height: 14px; display: block; object-fit: contain; border-radius: 3px; }
+.composer-provider-icon img[data-provider-type="openai"],
+.composer-provider-icon img[data-provider-type="openai_codex"] { width: 22px; height: 22px; }
 .composer-model-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-model-chevron { width: 13px; height: 13px; flex: 0 0 auto; transition: transform .15s ease; }
 .composer-model-picker.open .composer-model-chevron { transform: rotate(180deg); }

@@ -73,10 +73,11 @@ class ProviderDefinitionTests(unittest.TestCase):
                 "anthropic",
                 "google",
                 "openai_compatible",
+                "openai_codex",
             ],
         )
         self.assertEqual(
-            [item.order for item in PROVIDER_TYPES], list(range(1, 10))
+            [item.order for item in PROVIDER_TYPES], list(range(1, 11))
         )
         self.assertEqual(
             {item.code: item.default_base_url for item in PROVIDER_TYPES},
@@ -90,14 +91,16 @@ class ProviderDefinitionTests(unittest.TestCase):
                 "anthropic": "https://api.anthropic.com",
                 "google": "https://generativelanguage.googleapis.com/",
                 "openai_compatible": None,
+                "openai_codex": "https://chatgpt.com/backend-api/codex",
             },
         )
         self.assertFalse(
             provider_type_definition("openai_compatible").supports_default_base_url
         )
         self.assertTrue(
-            all(item.supports_custom_base_url for item in PROVIDER_TYPES)
+            all(item.supports_custom_base_url for item in PROVIDER_TYPES if item.code != "openai_codex")
         )
+        self.assertFalse(provider_type_definition("openai_codex").supports_custom_base_url)
 
     def test_unknown_provider_type_is_not_aliased_or_inferred(self) -> None:
         with self.assertRaises(UnknownProviderTypeError):

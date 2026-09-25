@@ -159,6 +159,8 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 
 .usage-detail-row { min-height:36px; padding:6px 10px; border-bottom:0; }
 .usage-identity-logo { width:18px; height:18px; object-fit:contain; flex-shrink:0; }
+.usage-identity-logo[data-provider-type="openai"],
+.usage-identity-logo[data-provider-type="openai_codex"] { width:25px; height:25px; margin:-3.5px; }
 .usage-detail-identity > span > svg { width:16px; height:16px; }
 .usage-contributions .usage-panel-head h2 { line-height:19px; }
 .usage-contributions .usage-panel-head small { margin-top:0; line-height:17px; }
@@ -168,6 +170,8 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 #usageContributionRows .usage-session-content .channel-session-time { gap:0; }
 #usageContributionRows .usage-session-content .diagnostic-session-id .diagnostic-copy-separator { width:12px; flex-basis:12px; margin:0; }
 .usage-object-icon .usage-identity-logo { width:20px; height:20px; }
+.usage-object-icon .usage-identity-logo[data-provider-type="openai"],
+.usage-object-icon .usage-identity-logo[data-provider-type="openai_codex"] { width:28px; height:28px; margin:0; }
 
 /* Bound the workbench; large datasets scroll inside each pane. */
 .usage-table-area, .usage-contributions { min-height:0; }

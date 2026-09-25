@@ -5,7 +5,7 @@ import { channelOriginPresentation } from "./session-display.js?v=20260918-relea
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20260924-ptc-execution-6";
+const WORKSPACE_ASSET_VERSION = "20260925-provider-list-1";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },

@@ -48,7 +48,7 @@ PROVIDER_TYPES: tuple[ProviderTypeDefinition, ...] = (
     ),
     ProviderTypeDefinition(
         "moonshotai",
-        "MoonshotAI (Kimi)",
+        "MoonshotAI",
         2,
         "https://api.moonshot.ai/v1/",
         True,
@@ -106,6 +106,10 @@ PROVIDER_TYPES: tuple[ProviderTypeDefinition, ...] = (
         True,
         "openai_chat",
     ),
+    ProviderTypeDefinition(
+        "openai_codex", "ChatGPT", 10,
+        "https://chatgpt.com/backend-api/codex", True, False, "openai_codex",
+    ),
 )
 _PROVIDER_TYPES_BY_CODE = {item.code: item for item in PROVIDER_TYPES}
 
@@ -140,6 +144,9 @@ class ProviderRuntimeConfig:
     use_default_base_url: bool
     base_url: str
     api_key: str
+    auth_method: str = "api_key"
+    auth_status: str = "unconfigured"
+    auth_revision: int = 0
 
     @classmethod
     def from_row(cls, row: Any) -> "ProviderRuntimeConfig":
@@ -150,6 +157,9 @@ class ProviderRuntimeConfig:
             use_default_base_url=bool(getattr(row, "use_default_base_url", False)),
             base_url=str(getattr(row, "base_url", "") or "").strip(),
             api_key=str(getattr(row, "api_key", "") or "").strip(),
+            auth_method=str(getattr(row, "auth_method", "api_key") or "api_key"),
+            auth_status=str(getattr(row, "auth_status", "unconfigured") or "unconfigured"),
+            auth_revision=int(getattr(row, "auth_revision", 0) or 0),
         )
 
 
@@ -177,7 +187,13 @@ def _validate_http_url(value: str, *, field: str) -> str:
 
 def validate_provider_config(config: ProviderRuntimeConfig) -> ProviderTypeDefinition:
     definition = provider_type_definition(config.provider_type)
-    if not config.api_key:
+    if config.provider_type == "openai_codex":
+        from deep_agent.services.codex_provider import codex_enabled
+        if not codex_enabled():
+            raise ProviderConfigurationError("Codex 订阅实验功能未开启")
+        if config.auth_method != "oauth" or config.auth_status != "connected" or not config.id:
+            raise ProviderConfigurationError("Codex 订阅尚未授权或授权已失效")
+    elif config.auth_method != "api_key" or not config.api_key:
         raise ProviderConfigurationError(
             f"API key is required for LLM provider: {config.name or config.provider_type}"
         )
@@ -204,7 +220,16 @@ def model_unavailable_reason(llm_model: Any, provider: Any) -> str | None:
     """Return a secret-free reason when a persisted model cannot be selected."""
     if getattr(llm_model, "enabled", True) is False:
         return "model_disabled"
-    if not str(getattr(provider, "api_key", "") or "").strip():
+    purpose = getattr(llm_model, "purpose", None)
+    if isinstance(purpose, str) and purpose != "chat":
+        return "model_wrong_purpose"
+    if getattr(provider, "provider_type", "") == "openai_codex":
+        from deep_agent.services.codex_provider import codex_enabled
+        if not codex_enabled():
+            return "provider_disabled"
+        if getattr(provider, "auth_status", "") != "connected" or not getattr(provider, "credential_json", None):
+            return "provider_unconfigured"
+    elif not str(getattr(provider, "api_key", "") or "").strip():
         return "provider_unconfigured"
     try:
         validate_provider_config(ProviderRuntimeConfig.from_row(provider))
@@ -228,6 +253,9 @@ async def load_provider_for_model(
     model_id = getattr(llm_model, "id", None) or "unknown"
     if getattr(llm_model, "enabled", True) is False:
         raise ProviderConfigurationError(f"LLM model is disabled: {model_id}")
+    purpose = getattr(llm_model, "purpose", None)
+    if isinstance(purpose, str) and purpose != "chat":
+        raise ProviderConfigurationError(f"LLM model is not a chat model: {model_id}")
     provider_id = getattr(llm_model, "provider_id", None)
     if not provider_id:
         raise ProviderConfigurationError(
@@ -345,6 +373,10 @@ def resolve_provider_model(
             provider=runtime_provider,
             **({"profile": deepseek_chat_profile(model_name)} if provider.provider_type == "deepseek" else {}),
         )
+    if definition.model_protocol == "openai_codex":
+        from deep_agent.services.codex_provider import codex_model
+        assert provider.id is not None
+        return codex_model(model_name, provider.id, provider.auth_revision)
     if definition.model_protocol == "anthropic":
         runtime_provider = AnthropicProvider(
             api_key=provider.api_key,

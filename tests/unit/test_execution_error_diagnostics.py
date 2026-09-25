@@ -8,6 +8,7 @@ from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior, Usag
 
 from deep_agent.agent.message_persistence import MessagePersistenceError
 from deep_agent.agent.runner import _safe_run_failure
+from deep_agent.services.codex_provider import CodexUnavailable
 
 
 class ExecutionErrorDiagnosticTests(unittest.TestCase):
@@ -28,6 +29,7 @@ class ExecutionErrorDiagnosticTests(unittest.TestCase):
             (UnexpectedModelBehavior("PRIVATE_PROTOCOL_ARGUMENT"), "unexpected_model_behavior", "model"),
             (MessagePersistenceError("PRIVATE_DATABASE_ARGUMENT"), "message_persistence_failed", "persistence"),
             (ValueError("PRIVATE_UNEXPECTED_ARGUMENT"), "agent_run_failed", "agent"),
+            (CodexUnavailable("PRIVATE_AUTH_ARGUMENT"), "provider_authorization_unavailable", "provider"),
         ]
         for error, code, phase in cases:
             with self.subTest(code=code):

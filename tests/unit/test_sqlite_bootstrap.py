@@ -211,8 +211,8 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     search_before = connection.execute("SELECT * FROM global_settings").fetchall()
                 await asyncio.to_thread(command.upgrade, config, "head")
                 with sqlite3.connect(db_path) as connection:
-                    self.assertEqual(before, connection.execute("SELECT * FROM llm_providers").fetchall())
-                    self.assertEqual(models_before, connection.execute("SELECT * FROM llm_models").fetchall())
+                    self.assertEqual(before, [row[:len(before[0])] for row in connection.execute("SELECT * FROM llm_providers").fetchall()])
+                    self.assertEqual(models_before, [row[:len(models_before[0])] for row in connection.execute("SELECT * FROM llm_models").fetchall()])
                     self.assertEqual(search_before, connection.execute("SELECT * FROM global_settings").fetchall())
 
     async def test_restart_does_not_recreate_deleted_defaults(self) -> None:

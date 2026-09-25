@@ -44,6 +44,21 @@ from maintenance.config_backup import (
 
 
 class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_codex_credentials_are_excluded_from_configuration_backup(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source.db"
+            await self._create_source(source, revision="007")
+            with sqlite3.connect(source) as connection:
+                connection.execute(
+                    "UPDATE llm_providers SET provider_type='openai_codex', auth_method='oauth', auth_status='connected', auth_revision=4, api_key=NULL, credential_json=?",
+                    (json.dumps({"schema_version": 1, "access_token": "backup-secret", "refresh_token": "refresh-secret", "account_id": "account"}),),
+                )
+            result = await export_backup(self._url(source), environment="test", output_root=root / "backups", git_commit="test")
+            with sqlite3.connect(result.path) as connection:
+                row = connection.execute("SELECT auth_method, auth_status, auth_revision, credential_json FROM llm_providers").fetchone()
+            self.assertEqual(row, ("oauth", "unconfigured", 0, None))
+
     async def test_exports_one_sqlite_database_with_config_only(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             root = Path(tmpdir)

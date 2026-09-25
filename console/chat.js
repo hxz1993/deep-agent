@@ -37,7 +37,7 @@ import {
   modelOptionLabel,
   preserveCurrentModel,
   renderGroupedModelOptions,
-} from "./model-options.js?v=20260924-config-catalog-5";
+} from "./model-options.js?v=20260925-codex-1";
 import { shouldFollowMessages } from "./message-scroll.js?v=20260912-21";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260912-21";
 import { createHistoryFollower } from "./history-follower.js?v=20260912-21";
@@ -202,7 +202,8 @@ const COMPOSER_PROVIDER_BRANDS = {
   alibaba: "./assets/provider-logos/qwen.png",
   zai: "./assets/provider-logos/zai.svg",
   openrouter: "./assets/provider-logos/openrouter.png",
-  openai: "./assets/provider-logos/openai.svg",
+  openai: "./assets/provider-logos/openai.svg?v=20260925-official-1",
+  openai_codex: "./assets/provider-logos/openai.svg?v=20260925-official-1",
   anthropic: "./assets/provider-logos/anthropic.png",
   google: "./assets/provider-logos/google-gemini.png",
   openai_compatible: "./assets/provider-logos/openai-compatible.svg",

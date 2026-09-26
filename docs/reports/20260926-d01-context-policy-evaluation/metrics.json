@@ -1,0 +1,441 @@
+{
+  "scope": "Synthetic closed-loop stress evaluation plus separate authentic builtin prompt/UI schema smoke. No remote business writes.",
+  "matrix": [
+    {
+      "arm": "baseline",
+      "trigger": 0.8,
+      "business_pass": 15,
+      "protocol_pass": 12,
+      "strict_pass": 12,
+      "input_tokens": 617699,
+      "output_tokens": 43184,
+      "total_tokens": 660883,
+      "cache_read_tokens": 416256,
+      "sum_case_elapsed_seconds": 262.511,
+      "p50": 12.04,
+      "p95": 16.742,
+      "model_requests": 142,
+      "history_search_calls": 10,
+      "history_read_calls": 3,
+      "evidence_read_calls": 33,
+      "schema_discovery_calls": 0,
+      "schema_chars_total": 228635,
+      "compaction_statuses": {
+        "completed": 30,
+        "failed": 14,
+        "running": 3
+      },
+      "raw_business_pass": 15,
+      "raw_strict_pass": 12,
+      "field_accuracy": 0.625,
+      "observed_runs": 24,
+      "source_sha256": "55dbce02ea1b26a7af2ec7ae98ef0e8639839037fe4578353963d573eadc26d2",
+      "driver_sha256": "7e80f2ffc15475cda3aacd8245318b9397c37541d1bf26d025b3bf5e2a86d5d9",
+      "dataset_sha256": "4bc7db611820ce448a1d513dd7630b8fc2cbb004817a14c1b19d03abf10522a0"
+    },
+    {
+      "arm": "candidate",
+      "trigger": 0.8,
+      "business_pass": 24,
+      "protocol_pass": 24,
+      "strict_pass": 24,
+      "input_tokens": 1214648,
+      "output_tokens": 65020,
+      "total_tokens": 1279668,
+      "cache_read_tokens": 683264,
+      "sum_case_elapsed_seconds": 399.202,
+      "p50": 15.119,
+      "p95": 25.731,
+      "model_requests": 198,
+      "history_search_calls": 10,
+      "history_read_calls": 1,
+      "evidence_read_calls": 38,
+      "schema_discovery_calls": 4,
+      "schema_chars_total": 431716,
+      "compaction_statuses": {
+        "completed": 53
+      },
+      "raw_business_pass": 24,
+      "raw_strict_pass": 24,
+      "field_accuracy": 1.0,
+      "observed_runs": 24,
+      "source_sha256": "de569bfc3185e4112102103d0216aa544066a3bfc7079c57b8e03fd6ea14ef61",
+      "driver_sha256": "7e80f2ffc15475cda3aacd8245318b9397c37541d1bf26d025b3bf5e2a86d5d9",
+      "dataset_sha256": "4bc7db611820ce448a1d513dd7630b8fc2cbb004817a14c1b19d03abf10522a0"
+    },
+    {
+      "arm": "baseline",
+      "trigger": 0.85,
+      "business_pass": 14,
+      "protocol_pass": 11,
+      "strict_pass": 11,
+      "input_tokens": 682345,
+      "output_tokens": 45139,
+      "total_tokens": 727484,
+      "cache_read_tokens": 463104,
+      "sum_case_elapsed_seconds": 267.362,
+      "p50": 12.803,
+      "p95": 16.292,
+      "model_requests": 146,
+      "history_search_calls": 11,
+      "history_read_calls": 1,
+      "evidence_read_calls": 26,
+      "schema_discovery_calls": 0,
+      "schema_chars_total": 237511,
+      "compaction_statuses": {
+        "completed": 29,
+        "failed": 13,
+        "running": 4
+      },
+      "raw_business_pass": 13,
+      "raw_strict_pass": 10,
+      "field_accuracy": 0.5833,
+      "observed_runs": 24,
+      "source_sha256": "55dbce02ea1b26a7af2ec7ae98ef0e8639839037fe4578353963d573eadc26d2",
+      "driver_sha256": "7e80f2ffc15475cda3aacd8245318b9397c37541d1bf26d025b3bf5e2a86d5d9",
+      "dataset_sha256": "4bc7db611820ce448a1d513dd7630b8fc2cbb004817a14c1b19d03abf10522a0"
+    },
+    {
+      "arm": "candidate",
+      "trigger": 0.85,
+      "business_pass": 22,
+      "protocol_pass": 23,
+      "strict_pass": 21,
+      "input_tokens": 1272034,
+      "output_tokens": 100173,
+      "total_tokens": 1372207,
+      "cache_read_tokens": 644864,
+      "sum_case_elapsed_seconds": 539.854,
+      "p50": 17.794,
+      "p95": 50.831,
+      "model_requests": 230,
+      "history_search_calls": 38,
+      "history_read_calls": 3,
+      "evidence_read_calls": 73,
+      "schema_discovery_calls": 3,
+      "schema_chars_total": 473102,
+      "compaction_statuses": {
+        "completed": 67,
+        "failed": 1
+      },
+      "raw_business_pass": 19,
+      "raw_strict_pass": 18,
+      "field_accuracy": 0.9167,
+      "observed_runs": 24,
+      "source_sha256": "de569bfc3185e4112102103d0216aa544066a3bfc7079c57b8e03fd6ea14ef61",
+      "driver_sha256": "7e80f2ffc15475cda3aacd8245318b9397c37541d1bf26d025b3bf5e2a86d5d9",
+      "dataset_sha256": "4bc7db611820ce448a1d513dd7630b8fc2cbb004817a14c1b19d03abf10522a0"
+    },
+    {
+      "arm": "baseline",
+      "trigger": 0.9,
+      "business_pass": 15,
+      "protocol_pass": 5,
+      "strict_pass": 5,
+      "input_tokens": 778993,
+      "output_tokens": 43963,
+      "total_tokens": 822956,
+      "cache_read_tokens": 539008,
+      "sum_case_elapsed_seconds": 264.538,
+      "p50": 12.39,
+      "p95": 16.679,
+      "model_requests": 142,
+      "history_search_calls": 15,
+      "history_read_calls": 0,
+      "evidence_read_calls": 41,
+      "schema_discovery_calls": 0,
+      "schema_chars_total": 228635,
+      "compaction_statuses": {
+        "completed": 23,
+        "failed": 19,
+        "running": 6
+      },
+      "raw_business_pass": 14,
+      "raw_strict_pass": 5,
+      "field_accuracy": 0.625,
+      "observed_runs": 24,
+      "source_sha256": "55dbce02ea1b26a7af2ec7ae98ef0e8639839037fe4578353963d573eadc26d2",
+      "driver_sha256": "7e80f2ffc15475cda3aacd8245318b9397c37541d1bf26d025b3bf5e2a86d5d9",
+      "dataset_sha256": "4bc7db611820ce448a1d513dd7630b8fc2cbb004817a14c1b19d03abf10522a0"
+    },
+    {
+      "arm": "candidate",
+      "trigger": 0.9,
+      "business_pass": 21,
+      "protocol_pass": 24,
+      "strict_pass": 21,
+      "input_tokens": 1518366,
+      "output_tokens": 123426,
+      "total_tokens": 1641792,
+      "cache_read_tokens": 882304,
+      "sum_case_elapsed_seconds": 665.717,
+      "p50": 17.444,
+      "p95": 107.453,
+      "model_requests": 261,
+      "history_search_calls": 41,
+      "history_read_calls": 18,
+      "evidence_read_calls": 73,
+      "schema_discovery_calls": 3,
+      "schema_chars_total": 550496,
+      "compaction_statuses": {
+        "completed": 70
+      },
+      "raw_business_pass": 20,
+      "raw_strict_pass": 20,
+      "field_accuracy": 0.875,
+      "observed_runs": 24,
+      "source_sha256": "de569bfc3185e4112102103d0216aa544066a3bfc7079c57b8e03fd6ea14ef61",
+      "driver_sha256": "7e80f2ffc15475cda3aacd8245318b9397c37541d1bf26d025b3bf5e2a86d5d9",
+      "dataset_sha256": "4bc7db611820ce448a1d513dd7630b8fc2cbb004817a14c1b19d03abf10522a0"
+    }
+  ],
+  "duplicate_reads": {
+    "definition": "Count exact repeated successful fixture reads from durable original events.\n\nSame run_id, tool name, normalized explicit/default parameters, and full return\ncontent hash. Excludes seeded history, history tools, failed retries, and workbook\nreads (a read before authorized update or revision refresh may be necessary).\nNo claim about model intent or semantic waste. No private content is exported.\n",
+    "business_success_selection": "Output-audited metrics; independent blind review confirmed all six changed records. Raw metrics preserved.",
+    "comparisons": [
+      {
+        "trigger": 0.8,
+        "common_business_success_pairs": 15,
+        "all_runs": {
+          "baseline": {
+            "runs": 24,
+            "successful_read_requests": {
+              "evidence_read": 30,
+              "archive_page": 27
+            },
+            "exact_repeated_read_requests": {},
+            "unmatched_returns": 0
+          },
+          "candidate": {
+            "runs": 24,
+            "successful_read_requests": {
+              "evidence_read": 37,
+              "archive_page": 36
+            },
+            "exact_repeated_read_requests": {
+              "evidence_read": 3
+            },
+            "unmatched_returns": 0
+          }
+        },
+        "common_success_subset": {
+          "baseline": {
+            "runs": 15,
+            "successful_read_requests": {
+              "evidence_read": 22
+            },
+            "exact_repeated_read_requests": {},
+            "unmatched_returns": 0
+          },
+          "candidate": {
+            "runs": 15,
+            "successful_read_requests": {
+              "evidence_read": 15
+            },
+            "exact_repeated_read_requests": {},
+            "unmatched_returns": 0
+          }
+        }
+      },
+      {
+        "trigger": 0.85,
+        "common_business_success_pairs": 14,
+        "all_runs": {
+          "baseline": {
+            "runs": 24,
+            "successful_read_requests": {
+              "evidence_read": 23,
+              "archive_page": 43
+            },
+            "exact_repeated_read_requests": {},
+            "unmatched_returns": 0
+          },
+          "candidate": {
+            "runs": 24,
+            "successful_read_requests": {
+              "evidence_read": 70,
+              "archive_page": 36
+            },
+            "exact_repeated_read_requests": {
+              "evidence_read": 8
+            },
+            "unmatched_returns": 0
+          }
+        },
+        "common_success_subset": {
+          "baseline": {
+            "runs": 14,
+            "successful_read_requests": {
+              "evidence_read": 14
+            },
+            "exact_repeated_read_requests": {},
+            "unmatched_returns": 0
+          },
+          "candidate": {
+            "runs": 14,
+            "successful_read_requests": {
+              "evidence_read": 32
+            },
+            "exact_repeated_read_requests": {
+              "evidence_read": 8
+            },
+            "unmatched_returns": 0
+          }
+        }
+      },
+      {
+        "trigger": 0.9,
+        "common_business_success_pairs": 15,
+        "all_runs": {
+          "baseline": {
+            "runs": 24,
+            "successful_read_requests": {
+              "evidence_read": 38,
+              "archive_page": 27
+            },
+            "exact_repeated_read_requests": {},
+            "unmatched_returns": 0
+          },
+          "candidate": {
+            "runs": 24,
+            "successful_read_requests": {
+              "evidence_read": 64,
+              "archive_page": 70
+            },
+            "exact_repeated_read_requests": {
+              "evidence_read": 2
+            },
+            "unmatched_returns": 0
+          }
+        },
+        "common_success_subset": {
+          "baseline": {
+            "runs": 15,
+            "successful_read_requests": {
+              "evidence_read": 27,
+              "archive_page": 1
+            },
+            "exact_repeated_read_requests": {},
+            "unmatched_returns": 0
+          },
+          "candidate": {
+            "runs": 15,
+            "successful_read_requests": {
+              "evidence_read": 28,
+              "archive_page": 17
+            },
+            "exact_repeated_read_requests": {
+              "evidence_read": 1
+            },
+            "unmatched_returns": 0
+          }
+        }
+      }
+    ]
+  },
+  "authentic_assistant_smoke": [
+    {
+      "arm": "baseline",
+      "assistant": "deeptable",
+      "status": "error",
+      "compaction_statuses": {
+        "completed": 1,
+        "failed": 1
+      },
+      "elapsed_seconds": 10.62,
+      "model_requests": 5,
+      "requested_tools": {
+        "deeptable_clarify": 1,
+        "read_conversation_event": 1
+      },
+      "usage": {
+        "input_tokens": 56998,
+        "output_tokens": 1578,
+        "cache_read_tokens": 26752
+      },
+      "semantic_business_pass": false
+    },
+    {
+      "arm": "baseline",
+      "assistant": "deepcube",
+      "status": "completed",
+      "compaction_statuses": {
+        "completed": 2
+      },
+      "elapsed_seconds": 18.705,
+      "model_requests": 8,
+      "requested_tools": {
+        "deepcube_clarify": 1,
+        "read_conversation_event": 2
+      },
+      "usage": {
+        "input_tokens": 87380,
+        "output_tokens": 3321,
+        "cache_read_tokens": 41600
+      },
+      "semantic_business_pass": true
+    },
+    {
+      "arm": "candidate-final",
+      "assistant": "deeptable",
+      "status": "completed",
+      "compaction_statuses": {
+        "completed": 2
+      },
+      "elapsed_seconds": 20.218,
+      "model_requests": 8,
+      "requested_tools": {
+        "deeptable_clarify": 1,
+        "read_conversation_event": 2
+      },
+      "usage": {
+        "input_tokens": 101762,
+        "output_tokens": 3344,
+        "cache_read_tokens": 50944
+      },
+      "semantic_business_pass": true
+    },
+    {
+      "arm": "candidate-final",
+      "assistant": "deepcube",
+      "status": "completed",
+      "compaction_statuses": {
+        "completed": 2
+      },
+      "elapsed_seconds": 16.854,
+      "model_requests": 8,
+      "requested_tools": {
+        "deepcube_clarify": 1,
+        "read_conversation_event": 2
+      },
+      "usage": {
+        "input_tokens": 81314,
+        "output_tokens": 2977,
+        "cache_read_tokens": 35712
+      },
+      "semantic_business_pass": true
+    }
+  ],
+  "judging": {
+    "all_runs_output_audited": 144,
+    "json_extraction_corrections": 6,
+    "blind_confirmed_corrections": 6,
+    "raw_metrics_preserved": true,
+    "authentic_blind_pass": 3,
+    "authentic_blind_total": 4
+  },
+  "cross_provider": {
+    "kimi": {
+      "candidate_pass": 1,
+      "baseline_pass": 0,
+      "runs_per_arm": 1,
+      "summary_native_thinking": "disabled verified in both candidate summary calls"
+    },
+    "gpt": {
+      "status": "skipped",
+      "reason": "configured OpenAI Codex OAuth disconnected; no GPT call made"
+    }
+  },
+  "total_matrix_tokens": 6504990,
+  "sum_matrix_case_elapsed_seconds": 2399.184
+}

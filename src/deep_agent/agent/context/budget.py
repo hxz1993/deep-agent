@@ -257,10 +257,6 @@ def build_context_budget(
         1,
         math.floor(usable * OPTION.agent.context_compaction_trigger_ratio),
     )
-    target = max(
-        1,
-        math.floor(usable * OPTION.agent.context_compaction_target_ratio),
-    )
     return ContextBudget(
         **estimate_fields,
         enabled=True,
@@ -283,5 +279,5 @@ def build_context_budget(
         safety_margin_tokens=safety_margin,
         usable_request_tokens=usable,
         trigger_tokens=trigger,
-        target_tokens=target,
+        target_tokens=None,
     )

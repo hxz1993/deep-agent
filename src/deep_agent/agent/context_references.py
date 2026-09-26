@@ -64,7 +64,11 @@ def history_has_context_references(messages: Sequence[ModelMessage]) -> bool:
         for part in message.parts:
             if isinstance(part, UserPromptPart) and context_references_from_content(part.content):
                 return True
-    return False
+    # The source-validated protected projection is inside the v2 handoff anchor.
+    # Lazy import avoids the renderer/reference projection import cycle.
+    from deep_agent.agent.context.handoff import extract_anchor_protected_context
+    protected = extract_anchor_protected_context(list(messages))
+    return bool(protected.get("has_context_references"))
 
 
 def project_context_references_in_history(

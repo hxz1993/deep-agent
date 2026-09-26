@@ -7,7 +7,7 @@
 |------|-------------------------------------------------| --- | --- |
 | `01` | [`UI 工具`](01-ui-tools/README.md)                | 2026-06 | builtin/manual 已落地；MCP 自动发现方案已关闭 |
 | `02` | [`运维控制台`](02-operations-console/README.md)      | 2026-07 | 一体化 Console 已落地；过期原型已清理 |
-| `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | v0.6.0单Event压缩、八段摘要、Evidence、超大结果裁剪和历史回读已落地 |
+| `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | v0.11.6 D01：同轮闭合步骤、交接摘要与来源回读，移除55%目标；默认触发仍80% |
 | `04` | [`模型目录`](04-model-catalog/README.md)            | 2026-07 | 数据库目录与手工刷新已落地，结构并入 v0.3.0 基线 001 |
 | `05` | [`工具优化`](05-tool-optimization/README.md)        | 2026-07 | 工具体系映射、错误语义、Return Schema与v0.4.0大工具结果外置已落地；大型 MCP 检索见 13 课题 |
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |

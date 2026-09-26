@@ -17,10 +17,21 @@ for import_root in (REPOSITORY_ROOT, REPOSITORY_ROOT / "src"):
         sys.path.insert(0, str(import_root))
 
 
-TARGET = "src/deep_agent/agent/context/compaction.py"
+TARGETS = (
+    "src/deep_agent/agent/context/compaction.py",
+    "src/deep_agent/agent/context/handoff.py",
+)
 REPORT_PATH = Path("/tmp/deep-agent-context-compaction-coverage-TMP_to_delete.json")
 TEST_MODULES = (
     "tests.unit.test_context_compaction",
+    "tests.unit.test_provider_registry",
+    "tests.unit.test_context_usage_anchor",
+    "tests.unit.test_compaction_recovery_ownership",
+    "tests.unit.test_manual_compaction_disconnect",
+    "tests.unit.test_runner_history",
+    "tests.integration.test_context_usage_persistence",
+    "tests.integration.test_d01_protocol_regression",
+    "tests.integration.test_d01_compacted_files",
     "tests.unit.test_context_references",
     "tests.unit.test_context_test_scenarios",
     "tests.integration.test_session_model_override",
@@ -48,27 +59,25 @@ def main() -> int:
         result = unittest.TextTestRunner(verbosity=1).run(suite)
         coverage.stop()
         coverage.save()
+        coverage.json_report(outfile=str(REPORT_PATH), include=TARGETS)
+        report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
+        totals = {key: 0 for key in ("covered_lines", "num_statements", "covered_branches", "num_branches")}
+        for target in TARGETS:
+            summary = report["files"][target]["summary"]
+            for key in totals:
+                totals[key] += summary[key]
+            print(
+                f"{target}: line={_percentage(summary['covered_lines'], summary['num_statements']):.2f}% "
+                f"branch={_percentage(summary['covered_branches'], summary['num_branches']):.2f}% "
+                f"({summary['covered_lines']}/{summary['num_statements']} lines, "
+                f"{summary['covered_branches']}/{summary['num_branches']} branches)"
+            )
+        line_percent = _percentage(totals["covered_lines"], totals["num_statements"])
+        branch_percent = _percentage(totals["covered_branches"], totals["num_branches"])
+        print(f"core total: line={line_percent:.2f}% branch={branch_percent:.2f}%")
+        print(f"coverage report: {REPORT_PATH}")
         if not result.wasSuccessful():
             return 1
-
-        coverage.json_report(outfile=str(REPORT_PATH), include=TARGET)
-        report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
-        summary = report["files"][TARGET]["summary"]
-        line_percent = _percentage(
-            summary["covered_lines"],
-            summary["num_statements"],
-        )
-        branch_percent = _percentage(
-            summary["covered_branches"],
-            summary["num_branches"],
-        )
-        print(
-            f"{TARGET}: line={line_percent:.2f}% "
-            f"branch={branch_percent:.2f}% "
-            f"({summary['covered_lines']}/{summary['num_statements']} lines, "
-            f"{summary['covered_branches']}/{summary['num_branches']} branches)"
-        )
-        print(f"coverage report: {REPORT_PATH}")
         if line_percent < MIN_LINE_PERCENT or branch_percent < MIN_BRANCH_PERCENT:
             print(
                 "coverage gate failed: "

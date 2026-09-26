@@ -111,7 +111,7 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.match(chatSource, /run_metrics/);
   assert.match(workspaceSource, /renderContextBudgetOverview\(contextStatus\)/);
   assert.match(workspaceSource, /context-budget-composite/);
-  assert.match(workspaceSource, /\["target", contextStatus\.target_tokens, "目标线"\]/);
+  assert.doesNotMatch(workspaceSource, /目标线|target_tokens|target_met/);
   assert.match(workspaceSource, /\["trigger", contextStatus\.trigger_tokens, "触发线"\]/);
   assert.doesNotMatch(workspaceSource, /eventRows|eventToolRows/);
   assert.doesNotMatch(chatSource, /deep-agent-console-event/);

@@ -39,7 +39,6 @@ class ContextTestScenarioList(BaseModel):
     context_window_tokens: int
     max_output_tokens: int | None = None
     trigger_tokens: int
-    target_tokens: int
     scenarios: list[ContextTestScenarioInfo]
 
 
@@ -52,7 +51,6 @@ class ContextTestSessionResult(BaseModel):
     scenario_key: str
     estimated_history_tokens: int
     trigger_tokens: int
-    target_tokens: int
     recommended_prompt: str
     expected_behavior: str
 
@@ -97,14 +95,12 @@ async def list_context_test_scenarios(
         estimate_scope="history_only",
     )
     assert budget.trigger_tokens is not None
-    assert budget.target_tokens is not None
     return ContextTestScenarioList(
         agent_id=agent_id,
         model_name=model.name,
         context_window_tokens=model.context_window_tokens,
         max_output_tokens=model.max_output_tokens,
         trigger_tokens=budget.trigger_tokens,
-        target_tokens=budget.target_tokens,
         scenarios=[
             ContextTestScenarioInfo(
                 key=scenario.key,
@@ -156,7 +152,6 @@ async def create_context_test_session(
     await ctx.store.update_session_title(session_id, agent.id, title)
 
     assert built.budget.trigger_tokens is not None
-    assert built.budget.target_tokens is not None
     return ContextTestSessionResult(
         session=SessionInfo(
             session_id=session_id,
@@ -169,7 +164,6 @@ async def create_context_test_session(
         scenario_key=scenario.key,
         estimated_history_tokens=built.budget.estimated_history_tokens,
         trigger_tokens=built.budget.trigger_tokens,
-        target_tokens=built.budget.target_tokens,
         recommended_prompt=scenario.recommended_prompt,
         expected_behavior=scenario.expected_behavior,
     )

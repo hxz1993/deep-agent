@@ -99,7 +99,7 @@ from deep_agent.capabilities.display_names import (
 )
 from loguru import logger
 
-from deep_agent.db.conversation import SessionStore
+from deep_agent.db.conversation import SessionStore, _common_message_suffix
 from deep_agent.time import utc_rfc3339
 from deep_agent.db.serialization import serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
@@ -537,7 +537,7 @@ class AgentRunner:
             *,
             usage: RunUsage | None = None,
             telemetry: dict[str, Any] | None = None,
-            target_tokens: int | None = None,
+            budget_limit_tokens: int | None = None,
             compaction_event: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             metrics = run_metrics(
@@ -552,7 +552,7 @@ class AgentRunner:
                 reason,
                 usage=usage,
                 telemetry=telemetry,
-                target_tokens=target_tokens,
+                budget_limit_tokens=budget_limit_tokens,
                 compaction_event=compaction_event,
                 conversation_id=deps.conversation_id,
                 run_id=deps.run_id,
@@ -612,17 +612,8 @@ class AgentRunner:
                 )
                 yield manual_result(outcome, availability.reason)
                 return
-            configured_target = budget.target_tokens or budget.estimated_history_tokens
-            target_tokens = max(
-                1,
-                min(
-                    configured_target,
-                    int(
-                        budget.estimated_history_tokens
-                        * OPTION.agent.context_compaction_target_ratio
-                    ),
-                ),
-            )
+            budget_limit_tokens = budget.usable_request_tokens
+            assert budget_limit_tokens is not None
             original_hash = _history_hash(raw)
             usage = RunUsage()
             event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -633,7 +624,8 @@ class AgentRunner:
                 event_queue=event_queue,
             )
             deps.context_state = state
-            self._bind_compaction_lifecycle(session_id=session_id, deps=deps)
+            self._bind_compaction_lifecycle(session_id=session_id, deps=deps,
+                                            source_history=visible, model_history=projected)
             deps.attachment_by_id = index_attachment_refs(messages=raw)
             request_context = ModelRequestContext(
                 model=self.agent.model,
@@ -655,7 +647,7 @@ class AgentRunner:
                     run_context,
                     request_context,
                     state=state,
-                    target_tokens=target_tokens,
+                    budget_limit_tokens=budget_limit_tokens,
                 )
             )
             queue_task: asyncio.Task[Any] | None = asyncio.create_task(event_queue.get())
@@ -710,7 +702,7 @@ class AgentRunner:
                     result_reason,
                     usage=usage,
                     telemetry=state.telemetry.as_dict(),
-                    target_tokens=target_tokens,
+                    budget_limit_tokens=budget_limit_tokens,
                 )
                 return
             except (asyncio.CancelledError, GeneratorExit, RunCancelled) as exc:
@@ -732,7 +724,7 @@ class AgentRunner:
                     type(exc).__name__,
                     usage=usage,
                     telemetry=state.telemetry.as_dict(),
-                    target_tokens=target_tokens,
+                    budget_limit_tokens=budget_limit_tokens,
                 )
                 return
             finally:
@@ -761,7 +753,7 @@ class AgentRunner:
                     "session_changed",
                     usage=usage,
                     telemetry=state.telemetry.as_dict(),
-                    target_tokens=target_tokens,
+                    budget_limit_tokens=budget_limit_tokens,
                 )
                 return
             try:
@@ -777,7 +769,7 @@ class AgentRunner:
                     session_id, deps, raw_history=raw, projected_history=compacted,
                     trigger="manual",
                     started_at=state.compaction_started_at or started_at,
-                    target_tokens=target_tokens,
+                    budget_limit_tokens=budget_limit_tokens,
                 )
             except (asyncio.CancelledError, GeneratorExit):
                 with anyio.CancelScope(shield=True):
@@ -787,7 +779,7 @@ class AgentRunner:
                 error_code = exc.reason if isinstance(exc, SummaryUnavailable) else type(exc).__name__
                 state.telemetry.estimated_tokens_after = state.telemetry.estimated_tokens_before
                 state.telemetry.summary_applied = False
-                state.telemetry.target_met = False
+                state.telemetry.candidate_valid = False
                 state.telemetry.reduction_ratio = 0.0
                 logger.warning(
                     "Manual context compaction Event save failed for {}/{}: {}",
@@ -811,7 +803,7 @@ class AgentRunner:
                     error_code,
                     usage=usage,
                     telemetry=state.telemetry.as_dict(),
-                    target_tokens=target_tokens,
+                    budget_limit_tokens=budget_limit_tokens,
                 )
                 return
             if event is None:
@@ -823,7 +815,7 @@ class AgentRunner:
                     "session_changed",
                     usage=usage,
                     telemetry=state.telemetry.as_dict(),
-                    target_tokens=target_tokens,
+                    budget_limit_tokens=budget_limit_tokens,
                 )
                 return
             yield {
@@ -836,7 +828,7 @@ class AgentRunner:
                 None,
                 usage=usage,
                 telemetry=state.telemetry.as_dict(),
-                target_tokens=target_tokens,
+                budget_limit_tokens=budget_limit_tokens,
                 compaction_event={
                     "event_id": event.event_id,
                     "through_sequence": event.payload["source"]["through_sequence"],
@@ -976,6 +968,7 @@ class AgentRunner:
         deps: AgentDeps,
         prepared: _PreparedHistory,
         *,
+        model_history: list[ModelMessage] | None = None,
         event_queue: asyncio.Queue[dict[str, Any]] | None = None,
     ) -> None:
         if self._context_compaction is None:
@@ -987,7 +980,8 @@ class AgentRunner:
             usage_limits=self._run_limits(deps),
             event_queue=event_queue,
         )
-        self._bind_compaction_lifecycle(session_id=deps.session_id, deps=deps)
+        self._bind_compaction_lifecycle(session_id=deps.session_id, deps=deps,
+                                       source_history=prepared.projected, model_history=model_history)
 
     async def _prepare_request_budget(self, session_id: str, deps: AgentDeps) -> None:
         previous_requests = 0
@@ -1013,10 +1007,70 @@ class AgentRunner:
     def _run_capabilities(deps: AgentDeps, progress):
         return [capability for capability in (progress, deps.request_budget) if capability is not None]
 
-    def _bind_compaction_lifecycle(self, *, session_id: str, deps: AgentDeps) -> None:
+    def _bind_compaction_lifecycle(
+        self, *, session_id: str, deps: AgentDeps,
+        source_history: list[ModelMessage] | None = None,
+        model_history: list[ModelMessage] | None = None,
+    ) -> None:
         state = deps.context_state
         if state is None:
             return
+        # Preserve the already resolved input mapping (attachments/context refs)
+        # without downloading media again or trusting new source messages.
+        input_projection = (deepcopy([
+            (source, resolved)
+            for source, resolved in zip(source_history or [], model_history, strict=True)
+            if _common_message_suffix([source], [resolved]) != 1
+        ]) if model_history is not None else [])
+
+        async def refresh_raw_history(request_messages=None):
+            reader = getattr(self.store, "get_raw_history", self.store.get_history)
+            raw = await reader(session_id, agent_id=deps.agent_id)
+            if request_messages is not None:
+                visible = await self.store.get_history(session_id, agent_id=deps.agent_id)
+                normalized = [next((resolved for source, resolved in input_projection
+                                    if _common_message_suffix([source], [message]) == 1), message)
+                              for message in visible]
+                # A checkpoint anchor is re-rendered on every read, so its
+                # synthetic UserPrompt timestamp is not an original Event fact.
+                # All content, evidence and protected context still compare.
+                if (normalized and request_messages
+                        and summary_contents([normalized[0]])
+                        and summary_contents([request_messages[0]])):
+                    normalized[0] = replace(normalized[0], parts=[
+                        replace(normalized[0].parts[0], timestamp=request_messages[0].parts[0].timestamp)
+                    ])
+                if (len(normalized) != len(request_messages)
+                        or _common_message_suffix(normalized, request_messages) != len(normalized)):
+                    raise SummaryUnavailable("source_history_changed")
+            # Read raw before visible: writes between these reads either fail
+            # this full comparison or the atomic raw comparison at commit.
+            return raw
+
+        state.refresh_raw_history = refresh_raw_history
+
+        async def commit_projection(projected):
+            # Manual and overflow callers persist immediately themselves.
+            if state.compaction_trigger != "pressure":
+                return projected
+            # This is the snapshot used to plan and summarize the prefix. A
+            # fresh read here would silently include late, unsummarized Events;
+            # the store compares this snapshot with its current rows atomically.
+            raw = list(state.raw_history)
+            event = await self._persist_compaction(
+                session_id, deps, raw_history=raw, projected_history=projected,
+                trigger="pressure", started_at=state.compaction_started_at or time.perf_counter(),
+                budget_limit_tokens=state.compaction_budget_limit_tokens,
+            )
+            if event is None:
+                raise SummaryUnavailable("source_history_changed")
+            state.committed_event = event
+            if state.event_queue is not None:
+                state.event_queue.put_nowait({"type": "session_event_updated", "persisted": True,
+                                             "event": event.public_dict()})
+            return await self.store.get_history(session_id, agent_id=deps.agent_id)
+
+        state.commit_projection = commit_projection
         started: dict[str, tuple[float, dict[str, Any]]] = {}
 
         async def start(trigger: str):
@@ -1057,7 +1111,10 @@ class AgentRunner:
                     0, round((time.perf_counter() - started_at) * 1_000)
                 ),
                 "error": {"code": error} if error else None,
-                "budget": state.telemetry.as_dict(),
+                "budget": {
+                    **state.telemetry.as_dict(),
+                    "budget_limit_tokens": state.compaction_budget_limit_tokens,
+                },
                 "summary_call": state.summary_call,
             }
             return await self.store.update_lifecycle(
@@ -1085,19 +1142,21 @@ class AgentRunner:
         expected_row_version: int = 0,
     ) -> Any | bool | None:
         del expected_row_version
+        if deps.context_state is not None and deps.context_state.committed_event is not None:
+            return deps.context_state.committed_event
         if (
             self._context_compaction is None
             or deps.context_state is None
             or not deps.context_state.telemetry.summary_applied
             or deps.context_state.telemetry.summary_failed
-            or not deps.context_state.telemetry.target_met
+            or not deps.context_state.telemetry.candidate_valid
             or deps.context_state.telemetry.strategy == "original_history_fallback"
         ):
             return None
         target = (
-            deps.context_state.compaction_target_tokens
-            if deps.context_state.compaction_target_tokens is not None
-            else deps.context_state.last_budget.target_tokens if deps.context_state.last_budget is not None
+            deps.context_state.compaction_budget_limit_tokens
+            if deps.context_state.compaction_budget_limit_tokens is not None
+            else deps.context_state.last_budget.usable_request_tokens if deps.context_state.last_budget is not None
             else None
         )
         if target is None:
@@ -1115,7 +1174,7 @@ class AgentRunner:
                     deps.context_state.compaction_started_at
                     or time.perf_counter()
                 ),
-                target_tokens=target,
+                budget_limit_tokens=target,
             )
             if event is None:
                 logger.warning(
@@ -1149,7 +1208,7 @@ class AgentRunner:
         projected_history: list[ModelMessage],
         trigger: str,
         started_at: float,
-        target_tokens: int,
+        budget_limit_tokens: int,
     ):
         persist = getattr(self.store, "persist_compaction_projection", None)
         if not callable(persist):
@@ -1174,8 +1233,10 @@ class AgentRunner:
             request_tokens = self._estimator.estimate_request(candidate, parameters).tokens
             if state is not None:
                 state.telemetry.candidate_tokens = request_tokens
-            if request_tokens > target_tokens:
-                raise SummaryUnavailable("persisted_target_not_met")
+            if request_tokens > budget_limit_tokens:
+                raise SummaryUnavailable("persisted_request_budget_exceeded")
+            if request_tokens >= before:
+                raise SummaryUnavailable("persisted_no_reduction")
             if state is not None:
                 state.telemetry.estimated_tokens_after = request_tokens
                 state.telemetry.reduction_ratio = max(0.0, 1 - request_tokens / max(1, before))
@@ -1195,7 +1256,7 @@ class AgentRunner:
             estimated_tokens_before=before,
             estimated_tokens_after=(state.telemetry.estimated_tokens_after if state is not None else None),
             estimate_scope=state.compaction_estimate_scope if state is not None else "history_only",
-            target_tokens=target_tokens,
+            budget_limit_tokens=budget_limit_tokens,
             validate_projection=validate_persisted_projection,
             context_window_tokens=self._context_window_tokens,
             preserved_tail_tokens=self._estimator.messages(preserved_tail),
@@ -1711,7 +1772,7 @@ class AgentRunner:
                 )
                 await self._cancel_title_task(title_task)
                 raise
-            self._prepare_context_state(deps, prepared)
+            self._prepare_context_state(deps, prepared, model_history=llm_history)
             progress = (
                 MessagePersistenceCapability(self.store, history_length=len(llm_history),
                                       skip_user_prompt=prepared.pre_persisted_user,
@@ -1788,7 +1849,7 @@ class AgentRunner:
                     )
                     await self._cancel_title_task(title_task)
                 raise
-            compaction_event_saved: bool | None = None
+            compaction_event_saved: bool | None = (True if deps.context_state is not None and deps.context_state.committed_event is not None else None)
             if not isinstance(result.output, DeferredToolRequests):
                 compaction_event = await self._maybe_save_compaction(
                     session_id,
@@ -1954,7 +2015,7 @@ class AgentRunner:
             output_history=raw_history,
             estimate_scope="full_model_request",
         )
-        target = budget.target_tokens
+        target = budget.usable_request_tokens
         if target is None:
             return None
         run_context = RunContext(
@@ -1972,10 +2033,31 @@ class AgentRunner:
                 run_context,
                 request_context,
                 state=state,
-                target_tokens=target,
+                budget_limit_tokens=target,
             )
-        except RunCancelled:
-            await state.finish_compaction("cancelled", "cancelled")
+            event = await self._persist_compaction(
+                session_id,
+                deps,
+                raw_history=raw_history,
+                projected_history=projected,
+                trigger="provider_overflow",
+                started_at=started_at,
+                budget_limit_tokens=target,
+            )
+            if event is None:
+                await state.finish_compaction("stale", "source_history_changed")
+                logger.warning(
+                    "Provider-overflow compaction became stale for session {}",
+                    session_id,
+                )
+                return None
+            # Continue from the exact anchor validated and stored, as automatic compaction does.
+            state.committed_event = event
+            projected = await self.store.get_history(session_id, agent_id=deps.agent_id)
+            return projected, event
+
+        except (RunCancelled, asyncio.CancelledError):
+            await asyncio.shield(state.finish_compaction("cancelled", "cancelled"))
             raise
         except SummaryUnavailable as exc:
             await state.finish_compaction(
@@ -1996,23 +2078,6 @@ class AgentRunner:
                 type(exc).__name__,
             )
             return None
-        event = await self._persist_compaction(
-            session_id,
-            deps,
-            raw_history=raw_history,
-            projected_history=projected,
-            trigger="provider_overflow",
-            started_at=started_at,
-            target_tokens=target,
-        )
-        if event is None:
-            await state.finish_compaction("stale", "source_history_changed")
-            logger.warning(
-                "Provider-overflow compaction became stale for session {}",
-                session_id,
-            )
-            return None
-        return projected, event
 
     async def run_stream(
         self,
@@ -2146,6 +2211,7 @@ class AgentRunner:
             self._prepare_context_state(
                 deps,
                 prepared,
+                model_history=llm_history,
                 event_queue=session_events,
             )
             result = None
@@ -2569,10 +2635,11 @@ class AgentRunner:
             await title_task
             while not session_events.empty():
                 yield session_events.get_nowait()
+        committed_compaction = deps.context_state.committed_event if deps.context_state is not None else None
         compaction_event_saved: bool | None = (
-            True if pre_saved_compaction_event is not None else None
+            True if pre_saved_compaction_event is not None or committed_compaction is not None else None
         )
-        if compaction_projection is not None:
+        if compaction_projection is not None and committed_compaction is None:
             compaction_event = await self._compaction_after_persist(
                 persister,
                 session_id,
@@ -2734,7 +2801,7 @@ def _manual_compaction_result(
     *,
     usage: RunUsage | None = None,
     telemetry: dict[str, Any] | None = None,
-    target_tokens: int | None = None,
+    budget_limit_tokens: int | None = None,
     compaction_event: dict[str, Any] | None = None,
     conversation_id: str | None = None,
     run_id: str | None = None,
@@ -2747,7 +2814,7 @@ def _manual_compaction_result(
         "reason": reason,
         "before_tokens": telemetry.get("estimated_tokens_before", 0),
         "after_tokens": telemetry.get("estimated_tokens_after", 0),
-        "target_tokens": target_tokens,
+
         "reduction_ratio": telemetry.get("reduction_ratio", 0.0),
         "summary_calls": telemetry.get("summary_calls", 0),
         "summary_chunks": telemetry.get("summary_chunks", 0),

@@ -368,11 +368,16 @@ def resolve_provider_model(
             if "video" in (input_modalities or []) or "video_url" in (tags or [])
             else OpenAIChatModel
         )
-        return model_class(
+        model = model_class(
             model_name,
             provider=runtime_provider,
             **({"profile": deepseek_chat_profile(model_name)} if provider.provider_type == "deepseek" else {}),
         )
+        # Custom endpoints use OpenAIProvider and report system="openai".
+        # Preserve the configured identity for auxiliary request adapters without
+        # guessing from a URL/model name or changing the main request settings.
+        model.deepagent_provider_type = provider.provider_type
+        return model
     if definition.model_protocol == "openai_codex":
         from deep_agent.services.codex_provider import codex_model
         assert provider.id is not None

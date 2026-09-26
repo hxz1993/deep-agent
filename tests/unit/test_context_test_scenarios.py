@@ -107,6 +107,7 @@ class ContextTestScenarioApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["scenarios"]), 3)
+        self.assertNotIn("target_tokens", response.json())
 
     def test_create_scenario_writes_owned_schema_valid_history(self) -> None:
         listing = self.client.get(
@@ -122,6 +123,7 @@ class ContextTestScenarioApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201)
         payload = response.json()
+        self.assertNotIn("target_tokens", payload)
         session_id = payload["session"]["session_id"]
         self.assertTrue(session_id.startswith("context-test-long_chinese_summary-"))
         self.assertGreater(

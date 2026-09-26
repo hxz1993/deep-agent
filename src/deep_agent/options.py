@@ -162,28 +162,10 @@ class Agent(Category):
         bind_env="CONTEXT_COMPACTION_TRIGGER_RATIO",
         extra_check=_ensure_ratio,
     )
-    context_compaction_target_ratio = Option(
-        0.55,
-        val_type=float,
-        bind_env="CONTEXT_COMPACTION_TARGET_RATIO",
-        extra_check=_ensure_ratio,
-    )
     context_summary_timeout = Option(
         300.0,
         val_type=float,
         bind_env="CONTEXT_SUMMARY_TIMEOUT",
-    )
-    context_tool_prune_threshold = Option(
-        8192, val_type=int, bind_env="CONTEXT_TOOL_PRUNE_THRESHOLD",
-        extra_check=_ensure_positive_int,
-    )
-    context_tool_prune_head = Option(
-        4096, val_type=int, bind_env="CONTEXT_TOOL_PRUNE_HEAD",
-        extra_check=_ensure_positive_int,
-    )
-    context_tool_prune_tail = Option(
-        1024, val_type=int, bind_env="CONTEXT_TOOL_PRUNE_TAIL",
-        extra_check=_ensure_positive_int,
     )
     mcp_forward_request_headers = Option(
         DEFAULT_MCP_FORWARD_HEADERS,
@@ -358,13 +340,7 @@ def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
                 "DEEP_AGENT_FILE_BACKEND=local is only allowed through "
                 "deep_agent.local_dev"
             )
-    trigger_ratio = options.agent.context_compaction_trigger_ratio
-    target_ratio = options.agent.context_compaction_target_ratio
-    if target_ratio >= trigger_ratio:
-        raise ValueError(
-            "DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO must be less than "
-            "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO"
-        )
+    _ = options.agent.context_compaction_trigger_ratio
     if options.agent.context_summary_timeout <= 0:
         raise ValueError("DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT must be positive")
     if options.agent.sandbox_enabled:

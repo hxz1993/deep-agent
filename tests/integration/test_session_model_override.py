@@ -454,7 +454,7 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
             context_status["compaction_event_id"],
         )
 
-    async def test_manual_target_failure_is_failed_with_candidate_diagnostics(self) -> None:
+    async def test_manual_no_reduction_is_failed_with_candidate_diagnostics(self) -> None:
         history = [item for _ in range(3) for item in (
             ModelRequest(parts=[UserPromptPart(content="背景" * 5000)]),
             ModelResponse(parts=[TextPart(content="已完成" * 1000)]),
@@ -481,12 +481,13 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     )
         result = parse_sse_events(response.text)[-1]
         self.assertEqual(result["status"], "failed", result)
-        self.assertEqual(result["reason"], "target_not_met")
-        self.assertGreater(result["candidate_tokens"], result["target_tokens"])
+        self.assertEqual(result["reason"], "no_context_reclaimed")
+        self.assertGreater(result["candidate_tokens"], result["before_tokens"])
+        self.assertNotIn("target_tokens", result)
         self.assertEqual(result["before_tokens"], result["after_tokens"])
         event = next(e for e in trajectory.json()["items"] if e["event_type"] == "compaction")
         self.assertEqual(event["status"], "failed")
-        self.assertEqual(event["payload"]["error"]["code"], "target_not_met")
+        self.assertEqual(event["payload"]["error"]["code"], "no_context_reclaimed")
         self.assertEqual(event["payload"]["budget"]["candidate_tokens"], result["candidate_tokens"])
         self.assertIsNotNone(event["payload"]["summary_call"])
         self.assertIsNone(event["payload"]["replacement"])
@@ -512,7 +513,7 @@ class SessionModelOverrideIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 trajectory = await client.get(f"/api/v1/sessions/{self._session_id}/events",
                                               params={"agent_id": self._agent_id})
         result = parse_sse_events(response.text)[-1]
-        self.assertEqual(result["reason"], "persisted_target_not_met", result)
+        self.assertEqual(result["reason"], "persisted_request_budget_exceeded", result)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["after_tokens"], result["before_tokens"])
         event = next(e for e in trajectory.json()["items"] if e["event_type"] == "compaction")

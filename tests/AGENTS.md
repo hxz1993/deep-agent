@@ -84,7 +84,7 @@ tests/
 | `test_models_dev.py` | models.dev 严格获取、官方JSON解析与 Lab 可选补充 |
 | `test_llm_models.py` | Provider逻辑引用、Provider内唯一性、模型启停、上下文、最大输出、输入模态与 tags Service/Store/Schema |
 | `test_provider_registry.py` | 九种Provider顺序、默认地址、Pydantic AI Provider/Model工厂及配置失败边界 |
-| `test_context_compaction.py` | 统一Token估算、八段单次摘要、Tool/Context Evidence、DSH式裁剪、超时/重试/取消、Provider Overflow识别、SSE状态和失败闭合 |
+| `test_context_compaction.py` | 统一Token估算、同轮闭合前缀、交接摘要和确定性用户保护、Tool/Context Evidence、有界超大材料、超时/重试/取消、Provider Overflow识别、SSE状态和失败闭合 |
 | `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |

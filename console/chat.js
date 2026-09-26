@@ -166,6 +166,7 @@ const state = {
   automaticCompactionTimer: null,
   pendingAutomaticCompaction: null,
   automaticCompactionAnchor: null,
+  completedAutomaticCompactionEvents: new Set(),
   assistantPresenter: null,
   messageAutoFollow: true,
   messageScrollFrame: null,
@@ -342,6 +343,7 @@ function clearMessages() {
   for (const record of state.historyRendered) record.presenter?.dispose?.();
   state.historyRendered = [];
   clearAutomaticCompactionState();
+  state.completedAutomaticCompactionEvents = new Set();
   state.assistantPresenter = null;
   state.messageAutoFollow = true;
   clearComposerPlan();
@@ -1519,6 +1521,7 @@ function clearAutomaticCompactionState({ remove = false } = {}) {
 }
 
 function showAutomaticContextCompaction(data, beforeNode) {
+  if (data.event_id && state.completedAutomaticCompactionEvents.has(data.event_id)) return;
   state.pendingAutomaticCompaction = data;
   state.automaticCompactionAnchor = beforeNode || state.automaticCompactionAnchor;
   if (state.automaticCompactionRow) {
@@ -1542,7 +1545,27 @@ function showAutomaticContextCompaction(data, beforeNode) {
   }, 150);
 }
 
+function updateAutomaticContextCompactionEvent(data) {
+  const event = data.event;
+  if (data.persisted !== true || event?.event_type !== "compaction" || !event.event_id) return;
+  if (event.status !== "completed" || state.completedAutomaticCompactionEvents.has(event.event_id)) return;
+  const activeId = state.pendingAutomaticCompaction?.event_id;
+  if (activeId && activeId !== event.event_id) return;
+  const budget = event.payload?.budget || {};
+  const before = budget.estimated_tokens_before ?? budget.estimated_before;
+  const after = budget.estimated_tokens_after ?? budget.estimated_after;
+  const row = state.automaticCompactionRow || createContextCompactionRow(state.automaticCompactionAnchor);
+  setContextCompactionRow(row,
+    before != null && after != null
+      ? `上下文已压缩：${compactTokenLabel(before)} → ${compactTokenLabel(after)} Token`
+      : "上下文已压缩",
+    { active: false });
+  state.completedAutomaticCompactionEvents.add(event.event_id);
+  clearAutomaticCompactionState();
+}
+
 function finalizeAutomaticContextCompaction(context, runStatus) {
+  if (!state.pendingAutomaticCompaction && state.completedAutomaticCompactionEvents.size) return;
   const compaction = context?.compaction;
   if (!compaction?.triggered && !state.pendingAutomaticCompaction) {
     clearAutomaticCompactionState({ remove: true });
@@ -1554,22 +1577,10 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
     );
   }
   const row = state.automaticCompactionRow;
-  if (runStatus === "pending") {
-    setContextCompactionRow(
-      row,
-      "本轮上下文已整理，完成工具交互后再生成压缩事件",
-      { active: false },
-    );
-    state.automaticCompactionRow = null;
-    state.pendingAutomaticCompaction = null;
-    state.automaticCompactionAnchor = null;
-    window.setTimeout(() => row.remove(), 2500);
-    return;
-  }
   if (
     compaction?.summary_applied
     && !compaction?.summary_failed
-    && compaction?.target_met
+    && !compaction?.failure
     && compaction?.strategy !== "sliding_window_fallback"
     && compaction?.compaction_event_saved === true
   ) {
@@ -1583,7 +1594,8 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
   }
   if (
     compaction?.summary_applied
-    && compaction?.target_met
+    && !compaction?.summary_failed
+    && !compaction?.failure
     && compaction?.compaction_event_saved === false
   ) {
     setContextCompactionRow(
@@ -2314,6 +2326,7 @@ async function resumeDeferred(deferredResults) {
 }
 
 async function runChatStream(payload, assistant) {
+  state.completedAutomaticCompactionEvents = new Set();
   state.historyFollower?.stop();
   state.historyController?.abort();
   state.historyFollower = null;
@@ -2589,6 +2602,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       break;
     case "session_event_appended":
     case "session_event_updated":
+      updateAutomaticContextCompactionEvent(data);
       break;
     case "thinking":
       applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
@@ -2659,7 +2673,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       break;
     case "error":
       state.lastRunMetrics = { ...state.lastRunMetrics, status: "error" };
-      failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
+      failAutomaticContextCompaction("本次上下文压缩未完成，后续请求失败");
       applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       // Error is transient SSE only — refreshing history would wipe the bubble.
       state.refreshHistoryAfterStream = false;
@@ -2668,7 +2682,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       break;
     case "cancelled":
       state.runCache = data.run_metrics?.cache_usage || state.runCache;
-      failAutomaticContextCompaction("上下文压缩已取消，未生成压缩事件");
+      failAutomaticContextCompaction("本次上下文压缩已取消");
       // Keep the current streamed conversation in place. The official
       // interrupted history remains the source of truth when the session is
       // reopened, but re-rendering it here causes a disruptive visual reload.

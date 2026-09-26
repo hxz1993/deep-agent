@@ -96,10 +96,8 @@ _SETTING_GROUPS = (
         _SettingDefinition("subscription_provider_enabled", "订阅 Provider 接入", SUBSCRIPTION_PROVIDER_ENV, "", "", "允许创建、授权和调用订阅供应商；目前仅支持 ChatGPT，默认关闭。"),
     )),
     _SettingGroupDefinition("context_compaction", "上下文压缩", (
-        _SettingDefinition("context_compaction_trigger_ratio", "压缩触发比例", "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO", "agent", "context_compaction_trigger_ratio", "历史 Token 达到可用预算的该比例后触发压缩。"),
-        _SettingDefinition("context_compaction_target_ratio", "压缩目标比例", "DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO", "agent", "context_compaction_target_ratio", "触发后将历史压缩到可用预算的该比例附近。"),
+        _SettingDefinition("context_compaction_trigger_ratio", "压缩触发比例", "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO", "agent", "context_compaction_trigger_ratio", "完整请求的预计输入达到可用输入预算的该比例后触发压缩。"),
         _SettingDefinition("context_summary_timeout", "摘要超时", "DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT", "agent", "context_summary_timeout", "生成压缩摘要的等待上限。", "秒"),
-        _SettingDefinition("context_tool_prune_threshold", "工具结果裁剪阈值", "DEEP_AGENT_CONTEXT_TOOL_PRUNE_THRESHOLD", "agent", "context_tool_prune_threshold", "摘要前裁剪过长旧工具结果的触发长度。", "Unicode 码点"),
     )),
     _SettingGroupDefinition("mcp", "MCP 连接", (
         _SettingDefinition("mcp_init_timeout", "初始化超时", "DEEP_AGENT_MCP_INIT_TIMEOUT", "agent", "mcp_init_timeout", "MCP 服务连接及能力握手的等待上限。", "秒"),

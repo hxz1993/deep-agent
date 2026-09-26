@@ -18,7 +18,7 @@ class CompactionTelemetry:
     triggered: bool = False
     trigger_count: int = 0
     strategy: str = "none"
-    target_met: bool = False
+    candidate_valid: bool = False
     estimated_tokens_before: int = 0
     estimated_tokens_after: int = 0
     max_estimated_tokens_before: int = 0
@@ -31,7 +31,7 @@ class CompactionTelemetry:
     summary_chunks: int = 0
     fallback_reason: str | None = None
     failure: str | None = None
-    target_tokens: int | None = None
+    budget_limit_tokens: int | None = None
     candidate_tokens: int | None = None
     retained_tail_tokens: int | None = None
     evidence_tokens: int | None = None
@@ -46,7 +46,7 @@ class CompactionTelemetry:
             "triggered": self.triggered,
             "trigger_count": self.trigger_count,
             "strategy": self.strategy,
-            "target_met": self.target_met,
+            "target_met": self.candidate_valid,
             "estimated_tokens_before": self.estimated_tokens_before,
             "estimated_tokens_after": self.estimated_tokens_after,
             "max_estimated_tokens_before": self.max_estimated_tokens_before,
@@ -59,7 +59,7 @@ class CompactionTelemetry:
             "summary_chunks": self.summary_chunks,
             "fallback_reason": self.fallback_reason,
             "failure": self.failure,
-            "target_tokens": self.target_tokens,
+            "target_tokens": None,
             "candidate_tokens": self.candidate_tokens,
             "retained_tail_tokens": self.retained_tail_tokens,
             "evidence_tokens": self.evidence_tokens,
@@ -77,11 +77,16 @@ class ContextRunState:
     estimator: TokenEstimator
     usage_limits: UsageLimits | None = None
     event_queue: asyncio.Queue[dict[str, Any]] | None = None
+    refresh_raw_history: Callable[[list[ModelMessage] | None], Awaitable[list[ModelMessage]]] | None = None
     output_samples: list[OutputTokenSample] = field(default_factory=list)
     telemetry: CompactionTelemetry = field(default_factory=CompactionTelemetry)
     last_budget: Any | None = None
     request_index: int = 0
     pending_request_estimate: int | None = None
+    commit_projection: Callable[[list[ModelMessage]], Awaitable[list[ModelMessage]]] | None = None
+    committed_event: Any | None = None
+    terminal_event_id: str | None = None
+    compaction_trigger: str = "pressure"
     compaction_event_id: str | None = None
     compaction_started_at: float | None = None
     summary_call: dict[str, Any] | None = None
@@ -89,7 +94,7 @@ class ContextRunState:
     persist_summary_usage: Callable[[list[dict[str, Any]]], Awaitable[Any]] | None = field(default=None, repr=False)
     compaction_request_parameters: Any | None = field(default=None, repr=False)
     compaction_estimated_tokens_before: int | None = None
-    compaction_target_tokens: int | None = None
+    compaction_budget_limit_tokens: int | None = None
     compaction_estimate_scope: str = "history_only"
     pruned_tool_results: list[dict[str, Any]] = field(default_factory=list)
     start_compaction_event: Callable[[str], Awaitable[Any]] | None = field(
@@ -100,6 +105,23 @@ class ContextRunState:
     )
 
     async def begin_compaction(self, trigger: str) -> None:
+        # These describe one attempt; counters and usage calibration remain run-wide.
+        telemetry = self.telemetry
+        telemetry.strategy = "none"
+        telemetry.candidate_valid = False
+        telemetry.summary_applied = False
+        telemetry.summary_failed = False
+        telemetry.fallback_reason = None
+        telemetry.failure = None
+        telemetry.budget_limit_tokens = None
+        telemetry.candidate_tokens = None
+        telemetry.retained_tail_tokens = None
+        telemetry.evidence_tokens = None
+        telemetry.summary_tokens = None
+        telemetry.reduction_ratio = 0.0
+        self.committed_event = None
+        self.terminal_event_id = None
+        self.compaction_trigger = trigger
         self.compaction_started_at = time.perf_counter()
         self.summary_call = None
         self.summary_usage_calls = []
@@ -118,9 +140,13 @@ class ContextRunState:
             )
 
     async def finish_compaction(self, status: str, error: str | None = None) -> None:
+        if self.committed_event is not None or self.terminal_event_id == self.compaction_event_id:
+            return
         if self.finish_compaction_event is None or self.compaction_event_id is None:
             return
         event = await self.finish_compaction_event(status, error)
+        if event is not None:
+            self.terminal_event_id = self.compaction_event_id
         if self.event_queue is not None and event is not None:
             self.event_queue.put_nowait(
                 {

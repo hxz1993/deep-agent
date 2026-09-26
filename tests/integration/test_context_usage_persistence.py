@@ -137,12 +137,12 @@ class ContextUsagePersistenceTests(unittest.IsolatedAsyncioTestCase):
                     model_settings=None, model_request_parameters=ModelRequestParameters())
                 if trigger == "manual":
                     projected = await capability.compact_manually(ctx, request,
-                        state=state, target_tokens=14000)
+                        state=state, budget_limit_tokens=14000)
                 else:
                     projected = list((await capability.before_model_request(ctx, request)).messages)
                 self.assertEqual(len(shared_calls), 1)
                 self.assertEqual(len(summary_responses), 1)
-                self.assertTrue(state.telemetry.target_met)
+                self.assertTrue(state.telemetry.candidate_valid)
                 self.assertTrue(state.telemetry.summary_applied)
                 self.assertEqual(projected[-1], raw[-1])
                 self.assertLess(estimator.estimate_request(projected, request.model_request_parameters).tokens,
@@ -162,15 +162,15 @@ class ContextUsagePersistenceTests(unittest.IsolatedAsyncioTestCase):
                 runner = AgentRunner(Agent(model), self.store, UsageLimits(request_limit=10),
                     estimator=estimator, context_window_tokens=30000, max_output_tokens=1000,
                     context_compaction=capability)
-                target = 14000 if trigger == "manual" else state.last_budget.target_tokens
+                target = 14000 if trigger == "manual" else state.last_budget.usable_request_tokens
                 if trigger == "pressure":
-                    state.last_budget = replace(state.last_budget, target_tokens=1)
+                    state.last_budget = replace(state.last_budget, usable_request_tokens=1)
                     saved = await runner._maybe_save_compaction(session_id, deps,
                         projected_history=projected)
                 else:
                     saved = await runner._persist_compaction(session_id, deps, raw_history=raw,
                         projected_history=projected, trigger=trigger, started_at=time.perf_counter(),
-                        target_tokens=target)
+                        budget_limit_tokens=target)
                 self.assertEqual(saved.status, "completed")
                 persisted = await self.store.get_history(session_id, agent_id=self.agent_id)
                 budget = saved.payload["budget"]
@@ -182,7 +182,7 @@ class ContextUsagePersistenceTests(unittest.IsolatedAsyncioTestCase):
                     estimator.estimate_request(persisted, compaction_parameters).tokens)
                 self.assertEqual(budget["estimated_tokens_after"], state.telemetry.estimated_tokens_after)
                 self.assertLessEqual(budget["estimated_tokens_after"], target)
-                self.assertEqual(budget["target_tokens"], target)
+                self.assertEqual(budget["budget_limit_tokens"], target)
                 self.assertEqual(budget["estimate_scope"],
                     "full_model_request" if trigger == "pressure" else "history_only")
                 outcomes.append(projected)

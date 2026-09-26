@@ -37,23 +37,17 @@ class ContextCompactionOptionTests(unittest.TestCase):
     def setUp(self) -> None:
         self._original = (
             OPTION.agent.context_compaction_trigger_ratio,
-            OPTION.agent.context_compaction_target_ratio,
             OPTION.agent.context_summary_timeout,
         )
 
     def tearDown(self) -> None:
         (
             OPTION.agent.context_compaction_trigger_ratio,
-            OPTION.agent.context_compaction_target_ratio,
             OPTION.agent.context_summary_timeout,
         ) = self._original
 
-    def test_target_must_be_lower_than_trigger(self) -> None:
-        OPTION.agent.context_compaction_trigger_ratio = 0.60
-        OPTION.agent.context_compaction_target_ratio = 0.60
-
-        with self.assertRaisesRegex(ValueError, "TARGET_RATIO"):
-            validate_runtime_options()
+    def test_fixed_compaction_target_option_removed(self) -> None:
+        self.assertFalse(hasattr(OPTION.agent, "context_compaction_target_ratio"))
 
     def test_summary_timeout_must_be_positive(self) -> None:
         OPTION.agent.context_summary_timeout = 0.0

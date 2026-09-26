@@ -333,7 +333,7 @@ class SqlConversationCoordinator:
         self, session_id: str, *, agent_id: str | None, user_id: str | None,
         raw_history: list[ModelMessage], projected_history: list[ModelMessage],
         summary_markdown: str, trigger: str, model_id: str | None,
-        estimated_before: int, estimated_after: int, target_tokens: int,
+        estimated_before: int, estimated_after: int, budget_limit_tokens: int,
         context_window_tokens: int | None, preserved_tail_tokens: int,
         duration_ms: int,
         compaction_event_id: str | None = None,
@@ -357,6 +357,11 @@ class SqlConversationCoordinator:
         suffix = _common_message_suffix(raw_history, projected_history)
         if suffix != len(projected_history) - 1:
             raise ValueError("compaction_tail_mismatch")
+        from deep_agent.agent.context.handoff import extract_anchor_protected_context, extract_protected_context
+        protected_context = extract_protected_context(raw_history, cutoff=len(raw_history) - suffix, raw_history=raw_history)
+        supplied_context = extract_anchor_protected_context(projected_history)
+        if supplied_context != protected_context:
+            raise ValueError("compaction_protected_context_mismatch")
         covered_messages = len(raw_history) - suffix
         if covered_messages <= 0 or not summary_markdown.strip():
             return None
@@ -460,6 +465,7 @@ class SqlConversationCoordinator:
             summary_call_payload.setdefault("max_output_tokens", 4096)
             rendered = {
                 "summary_markdown": summary_markdown.strip(),
+                "protected_context": protected_context,
                 "tool_evidence": tool_evidence,
                 "context_evidence": context_evidence,
                 "attachment_evidence": attachment_evidence,
@@ -506,14 +512,14 @@ class SqlConversationCoordinator:
                     "history_hash": _event_rows_hash(covered_rows),
                 },
                 "replacement": {
-                    "format": "dsh-structured-checkpoint-v1",
+                    "format": "handoff-checkpoint-v2",
                     **rendered,
                     "rendered_hash": _value_hash(rendered),
                 },
                 "budget": {
                     "context_window_tokens": context_window_tokens,
                     "estimated_before": estimated_before,
-                    "target_tokens": target_tokens,
+                    "budget_limit_tokens": budget_limit_tokens,
                     "estimated_after": estimated_after,
                     **({"estimated_tokens_before": estimated_tokens_before,
                         "estimated_tokens_after": estimated_tokens_after,
@@ -561,9 +567,13 @@ class SqlConversationCoordinator:
         self, *, agent_id: str, user_id: str, session_id: str | None,
         event_types: list[str] | None = None, tool_name: str | None = None,
         call_id: str | None = None, created_after: datetime | None = None,
-        created_before: datetime | None = None, limit: int = 2_000,
-    ) -> list[dict[str, Any]]:
+        created_before: datetime | None = None, limit: int = 200,
+        offset: int = 0, from_sequence: int | None = None,
+        through_sequence: int | None = None,
+    ) -> dict[str, Any]:
         scope, user = self._required_identity(agent_id, user_id)
+        if (from_sequence is not None or through_sequence is not None) and session_id is None:
+            raise ValueError("Sequence ranges require one session")
         stmt = (
             select(
                 ChatSessionEvent.event_id,
@@ -592,11 +602,30 @@ class SqlConversationCoordinator:
             stmt = stmt.where(ChatSessionEvent.created_at >= created_after)
         if created_before:
             stmt = stmt.where(ChatSessionEvent.created_at <= created_before)
-        stmt = stmt.order_by(ChatSessionEvent.created_at.desc()).limit(
-            min(max(limit, 1), 2_000)
-        )
+        if from_sequence is not None:
+            stmt = stmt.where(ChatSessionEvent.sequence >= from_sequence)
+        if through_sequence is not None:
+            stmt = stmt.where(ChatSessionEvent.sequence <= through_sequence)
+        page_size = min(max(limit, 1), 2_000)
+        stmt = stmt.order_by(
+            ChatSessionEvent.created_at.desc(), ChatSessionEvent.session_id,
+            ChatSessionEvent.sequence.desc(),
+        ).offset(max(0, offset)).limit(page_size + 1)
         async with self._session_factory() as db:
+            source_head = None
+            if session_id is not None:
+                next_sequence = (await db.execute(select(ChatSession.next_sequence).where(
+                    ChatSession.session_id == session_id,
+                    ChatSession.agent_id == scope,
+                    ChatSession.user_id == user,
+                ))).scalar_one_or_none()
+                source_head = max(0, int(next_sequence or 1) - 1)
+                if through_sequence is not None:
+                    source_head = min(source_head, through_sequence)
+                stmt = stmt.where(ChatSessionEvent.sequence <= source_head)
             rows = (await db.execute(stmt)).all()
+        has_more = len(rows) > page_size
+        rows = rows[:page_size]
         candidates: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row._mapping)
@@ -619,6 +648,8 @@ class SqlConversationCoordinator:
                 if (tool_name is None or ref["tool_name"] == tool_name)
                 and (call_id is None or ref["call_id"] == call_id)
             ]
+            if (tool_name or call_id) and not matches:
+                continue
             item["tool_matches"] = matches
             item["attachment_matches"] = [
                 {
@@ -637,13 +668,19 @@ class SqlConversationCoordinator:
             item["tool_name"] = matches[0]["tool_name"] if len(matches) == 1 else None
             item.pop("payload", None)
             candidates.append(item)
-        return candidates
+        return {
+            "items": candidates, "scanned_count": len(rows),
+            "next_offset": offset + len(rows) if has_more else None,
+            "source_head": source_head,
+        }
 
     async def read_authorized_events(
         self, *, agent_id: str, user_id: str, event_id: str | None = None,
         session_id: str | None = None, call_id: str | None = None,
         before: int = 0, after: int = 0,
-    ) -> list[SessionEventSnapshot]:
+        from_sequence: int | None = None, through_sequence: int | None = None,
+        page_size: int | None = None,
+    ) -> list[SessionEventSnapshot] | dict[str, Any]:
         scope, user = self._required_identity(agent_id, user_id)
         async with self._session_factory() as db:
             authorized = and_(
@@ -660,7 +697,7 @@ class SqlConversationCoordinator:
                     )
                 ).scalar_one_or_none()
                 if target is None:
-                    return []
+                    return {"items": [], "next_sequence": None} if page_size is not None else []
                 low = max(1, int(target.sequence) - min(max(before, 0), 20))
                 high = int(target.sequence) + min(max(after, 0), 20)
                 stmt = select(ChatSessionEvent).join(ChatSession, authorized).where(
@@ -674,12 +711,23 @@ class SqlConversationCoordinator:
                 )
             else:
                 raise ValueError("event_id or session_id + call_id is required")
-            rows = list(
-                (await db.execute(stmt.order_by(ChatSessionEvent.sequence))).scalars()
-            )
+            if from_sequence is not None:
+                stmt = stmt.where(ChatSessionEvent.sequence >= from_sequence)
+            if through_sequence is not None:
+                stmt = stmt.where(ChatSessionEvent.sequence <= through_sequence)
+            stmt = stmt.order_by(ChatSessionEvent.sequence)
+            bounded_size = min(max(page_size, 1), 100) if page_size is not None else None
+            if bounded_size is not None:
+                stmt = stmt.limit(bounded_size + 1)
+            rows = list((await db.execute(stmt)).scalars())
+            next_sequence = None
+            if bounded_size is not None and len(rows) > bounded_size:
+                rows = rows[:bounded_size]
+                next_sequence = int(rows[-1].sequence) + 1
             if call_id is not None:
                 rows = [row for row in rows if event_contains_call(row, call_id)]
-        return [SessionEventSnapshot.from_row(row) for row in rows]
+        items = [SessionEventSnapshot.from_row(row) for row in rows]
+        return {"items": items, "next_sequence": next_sequence} if page_size is not None else items
 
     async def list_sessions(self) -> list[tuple[str, str]]:
         return await self._chat_sessions.list_sessions()
@@ -870,6 +918,15 @@ def _common_message_suffix(raw: list[ModelMessage], projected: list[ModelMessage
             for key in ("conversation_id", "run_id", "timestamp"):
                 original.pop(key, None)
                 visible.pop(key, None)
+            # after_tool_execute and the SDK stamp the same result separately.
+            # Ignore only the envelope timestamp of typed tool-return parts;
+            # timestamps inside business content/metadata remain significant.
+            for payload in (original, visible):
+                payload["parts"] = [
+                    {key: value for key, value in part.items() if key != "timestamp"}
+                    if part.get("part_kind") == "tool-return" else part
+                    for part in payload.get("parts", [])
+                ]
             if original.get("instructions") is None:
                 original.pop("instructions", None)
                 visible.pop("instructions", None)
@@ -898,6 +955,7 @@ def _value_hash(value: Any) -> str:
 
 
 def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
+    from deep_agent.agent.context.handoff import safe_tool_args_preview, project_tool_evidence
     calls: dict[str, tuple[ChatSessionEvent, dict[str, Any]]] = {}
     results: dict[str, tuple[ChatSessionEvent, dict[str, Any]]] = {}
     for row in rows:
@@ -922,18 +980,15 @@ def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
         metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         factual_content = metadata.get("inline_fallback", content)
         artifact_id = _find_artifact_id(metadata) or _find_artifact_id(result_part)
-        result_hash = (
-            metadata.get("inline_fallback_hash")
-            or metadata.get("overflow_hash")
-            or (_value_hash(factual_content) if result else None)
-        )
-        evidence.append(
+        outcome = ("failed" if result_part.get("part_kind") == "retry-prompt" or metadata.get("error")
+                   else (result_part.get("outcome") or "success") if result else "pending")
+        item = project_tool_evidence(
             {
                 "_sequence": int((result or call).sequence),
                 "_priority": _tool_evidence_priority(
                     tool_name=(call_ref or result_ref or {}).get("tool_name"),
                     result_present=result is not None,
-                    outcome=result_part.get("outcome") if result else "pending",
+                    outcome=outcome,
                     metadata=metadata,
                 ),
                 "call_id": call_id,
@@ -942,8 +997,7 @@ def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
                 "call_part_offset": call_ref.get("part_offset") if call_ref else None,
                 "result_event_id": result.event_id if result else None,
                 "result_part_offset": result_ref.get("part_offset") if result_ref else None,
-                "args_hash": _value_hash(call_part.get("args")) if call else None,
-                "result_hash": result_hash,
+                "args_preview": safe_tool_args_preview(call_part.get("args"), 384) if call else None,
                 "result_complete": bool(result)
                 and bool(
                     metadata.get("inline_fallback") is not None
@@ -951,10 +1005,12 @@ def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
                     or not metadata.get("truncated")
                 ),
                 "artifact_id": artifact_id,
-                "outcome": result_part.get("outcome") if result else "pending",
-                "stable_facts": _stable_facts(factual_content),
+                "outcome": outcome,
+                "diagnostic": safe_tool_args_preview(factual_content, 256) if outcome in {"failed", "error", "denied", "rejected"} else None,
             }
         )
+        if item is not None:
+            evidence.append(item)
     return evidence
 
 
@@ -1069,16 +1125,20 @@ def _bounded_evidence(
         if "call_id" in full:
             candidates.append(
                 {
-                    key: full.get(key)
+                    key: (full[key][:128] if key in {"args_preview", "diagnostic"} and isinstance(full[key], str) else full[key])
                     for key in (
                         "call_id",
                         "tool_name",
                         "call_event_id",
+                        "call_part_offset",
                         "result_event_id",
+                        "result_part_offset",
+                        "args_preview",
+                        "diagnostic",
                         "result_complete",
                         "artifact_id",
                         "outcome",
-                    )
+                    ) if full.get(key) is not None
                 }
             )
         elif "file_id" in full:

@@ -1,124 +1,111 @@
-# 上下文压缩设计（v0.10.18）
+# 上下文压缩设计（D01）
 
-本文是当前实现口径。压缩没有独立数据表；一次压缩就是`chat_session_events`中的一条
-`event_type=compaction`生命周期事件。
+保留自动压缩、Event Store 和外部聊天协议，以普通文本交接摘要衔接长任务。
+不引入 Notes 子系统、模型自主窗口、长期记忆或同 Run UI 等待。数据库仍为 007，不新增表。
 
-## 事实源与模型可见历史
+## 事实源与压缩边界
 
-原始完整Message（含Tool Call/Result、Context Reference和Plan结果）永久保留为Event。最新有效模型历史为：
-
-```text
-最新 completed Compaction 渲染出的结构化摘要锚点
-+ source.through_sequence 之后的完整消息事件
-```
-
-失败、超时、取消、Stale或Interrupted事件只用于审计，不改变模型历史；每次成功压缩的Cutoff只能
-向前移动。Provider原生`CompactionPart`按普通消息Part持久化，只能回传同一Provider，不能替代
-DeepAgent的跨Provider摘要事件。Evidence使用`source_event_id + part_offset + call_id`精确回查
-完整Message内的原始Part。
-
-## 触发、边界与预算
-
-- 自动压力阈值：有效输入预算的80%；目标压回55%。
-- 手动压缩与明确Provider Context Overflow复用同一算法。
-- 只选择最旧的安全完整前缀；不切断Message、Tool Call/Result或Deferred Pending；当前活跃Turn保留。
-- 摘要固定使用当前 Agent 的有效模型，不配置第二套模型映射。
-- 摘要模型窗口放不下候选前缀时失败关闭，不递归生成多层摘要。
-- 新锚点加保留尾部必须小于原前缀并达到目标Token，否则不提交成功。
-- Token计数由统一估算入口提供，优先使用通过指纹验证的Provider Usage基准；无法验证时完整估算，
-  不能把“历史中存在Usage”视为基准仍然有效。文字、工具Schema和实际模型可见媒体均纳入预算。
-- DeepSeek v4 Vision图片按像素尺寸与Provider公式估算；未知路由或图片解码失败按1024 Token
-  保守回退。已包含在有效Usage基准内的图片、工具定义和指令不重复计数。
-
-### Usage基准与累计消耗
-
-复用Harness公开的`estimate_context_tokens`：有效基准为最近模型响应的`input_tokens + output_tokens`，
-其后的新增内容通过现有tokenizer或中英文保守计数补充；当前有效指令只计算一次。
-主会话响应在原有Message元数据中保存模型身份、有效历史、请求参数和指令的指纹，不另建Usage表。
-压缩、历史改写、模型切换、指令或工具定义变化使指纹不匹配时，回退完整估算；下一次正常响应
-建立新基准。旧响应缺少指纹也回退，摘要请求的Usage不作为主会话基准。
-
-Provider原始Usage保持不变。Run累计消耗按唯一模型响应汇总，不能因消息拆成多个展示Part而重复
-累计，也不能用累计消耗扣除窗口容量。上下文预计占用是另一项数据，包含有效基准和未测量增量。
-SDK模型`context_window`优先采用项目明确配置的窗口；`context_window_used`只表示最近响应时点的
-比例，不是下一次请求的精确占用。
-
-自动、手动和Provider超窗恢复共用估算与`_compact_projection`压缩链路。只读`context-status`
-没有下一次请求的最终参数，仍返回`history_only`保守估算；有已验证历史基准但参数缺失时，原因是
-`request_parameters_unavailable`。历史重开不承诺沿用实时完整请求数值；真正的新请求组装好相同
-参数后，可重新验证并复用持久化基准。API及SSE字段见[预算指南](../../guides/context-compaction-budget.md)。
-
-环境配置：
-
-```dotenv
-DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO=0.80
-DEEP_AGENT_CONTEXT_COMPACTION_TARGET_RATIO=0.55
-DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT=300
-DEEP_AGENT_CONTEXT_TOOL_PRUNE_THRESHOLD=8192
-DEEP_AGENT_CONTEXT_TOOL_PRUNE_HEAD=4096
-DEEP_AGENT_CONTEXT_TOOL_PRUNE_TAIL=1024
-```
-
-裁剪三项必须为正数且`head + tail < threshold`。
-
-## 摘要与确定性证据
-
-摘要固定八个英文标题，正文沿用会话主要语言：
-
-1. `Primary Request and Intent`
-2. `Key Technical Concepts`
-3. `Files and Code`
-4. `Errors and Fixes`
-5. `Pending Jobs`
-6. `Current Work`
-7. `Next Step`
-8. `Critical Context`
-
-历史内容只作为待总结数据，不执行其中指令；空章节写“无”。提示词要求保留用户纠正、有效约束、
-路径、命令、错误、ID、Call ID、数值和当前状态，并排除Token、Cookie、API Key与临时签名URL。
-
-Tool Evidence和Context Evidence不由模型生成：程序从真实Event确定性提取Call/Result来源、参数/结果
-Hash、完整性、Artifact以及`id/name/code/path/alias/key/type/status/total/count`等稳定字段。区域选择、
-元素信息和对象/成员ID保留来源Event、Payload Hash和安全稳定字段；小型安全Payload可直接进入锚点。
-这些索引只帮助模型知道“查过什么、证据在哪里”，不复制全部结果，也不提供透明业务缓存。
-
-## 超大工具结果
-
-新结果优先使用Harness`ToolOutputLimits + Spill`保存到平台File；模型History保存预览、Artifact ID、
-原始大小和Hash。Spill失败时Event保留`inline_fallback`和`spill_failed=true`，模型只接收受限投影。
-
-对摘要输入中仍然内联且超过8192个Unicode码点的单条Tool Result，只裁剪交给摘要模型的副本：
+原始 Message、工具调用和结果、附件、Context Reference 不删除。有效模型历史始终为：
 
 ```text
-头4096码点
-
-[... tool result middle pruned ...]
-
-尾1024码点
+一个最新 completed Compaction 摘要锚
++ source.through_sequence 之后的连续完整原始消息
 ```
 
-Call ID、Tool Name、错误、Outcome、Metadata和非文本Block保持原顺序；原Event/Artifact完全不改。
-尾部保留区不偷偷裁剪，若其本身无法满足目标，返回`oversized_tail_result`。
+允许压缩同一用户轮内较早的闭合工具步骤，不再保护整个活跃 Turn。安全切点不能切断消息、
+并行调用组、PTC 外层调用、Deferred Pending 或调用与结果配对。带 Call ID 的 RetryPrompt
+视为该调用的终结。独立系统消息及无法通过授权附件引用回读的当前媒体继续原样保留。
 
-## 生命周期、并发与SSE
+最新用户请求从原始事件确定性获取：在尾部时不重复复制；被前缀覆盖时存入锚的
+`protected_context`，包含来源指纹、正文及安全上下文引用。摘要模型不负责重写这部分。
+此保护区与摘要中的文件 ID 都不授予权限；附件授权仍恢复自原始会话与上传记录。
 
-开始时在真实触发位置插入一条`status=running`的Compaction Event；摘要请求期间不持有数据库事务。
-成功提交前重新校验来源Event Hash与边界，再条件更新同一Event ID为终态。进程启动时遗留的Running
-事件转为Interrupted。
+## 触发与成功判定
 
-摘要总预算默认300秒；外层SSE每约10秒发送非持久化`context_compaction_progress`，Phase只取
-`preparing/summarizing/validating/committing/retry_wait`，不伪造百分比。客户端断开或用户取消会取消
-内部摘要。Timeout不重试；只有30秒内快速返回的429/502/503/504，在剩余预算至少60秒时最多重试一次。
-网关仍需关闭SSE缓冲并把Read Timeout设为至少330秒，建议360秒；该部署项不由本仓应用代码修改。
+自动压缩按可用输入预算的触发比例启动；主动压缩不要求达到触发线；Provider 明确超窗时
+只在尚无可见输出或潜在副作用的安全情况下压缩并重试一次。三者共用候选构造及保存规则。
+当前默认触发比例保留 0.80。独立真实模型压力对照中 85% / 90% 未满足质量及开销门槛，
+不因产品体验猜测提高，具体证据见 [D01 验收报告](../../reports/20260926-d01-context-compaction/README.md)。
 
-明确Provider Context Overflow只在首个尝试尚未输出正文、工具调用或其他模型事件时，压缩后安全重试
-一次；已发生可见输出或潜在副作用时返回原Overflow，避免重复执行工具。
+删除 55% 目标及摘要长度与目标比例的耦合。候选成功必须满足：
 
-## 校验与回查
+- 来源与压缩开始时冻结的原始历史一致，覆盖范围只前进。
+- 摘要非空且未截断，来源引用有效，消息和工具配对完整。
+- 最新用户请求、必要引用及不能压缩的内容仍在。
+- 完整请求确实变小，且不超过扣除输出预留和安全余量后的输入预算。
+- 最终落库渲染结果再次通过同一校验，保存失败不宣告完成。
 
-提交成功必须同时满足：八段标题完整有序、内容非空、Finish Reason未截断、Evidence引用合法、工具
-边界闭合、没有未知Part、结果确实变小并达到目标、来源Hash未变化。
+摘要输出上限为 4096 Token，并受当前模型输出上限约束。可选尾部保留最近两个完整工作单元、
+合计不超过 8192 Token；超限按完整单元减少，不截工具对。必需保护内容另行完整计入预算。
+这些是内部绝对预算，不是新的压后比例，也不新增环境变量。
 
-模型可用`search_conversation_history`检索当前或本人同Agent会话，再用`read_conversation_event`按
-Event ID或当前会话Call ID精读；Artifact中间内容继续用`read_tool_result(pattern=...)`读取。所有读取
-先校验`agent_id + user_id`，App/Space只作来源过滤，不参与当前授权。
+保留 `DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO` 和 `DEEP_AGENT_CONTEXT_SUMMARY_TIMEOUT`。
+旧 `CONTEXT_COMPACTION_TARGET_RATIO` 与已无效的 `CONTEXT_TOOL_PRUNE_THRESHOLD/HEAD/TAIL`
+配置移除；现有工具结果外置能力继续工作。
+
+## 交接摘要与来源索引
+
+使用当前会话的有效模型生成摘要，不增加第二套模型。摘要采用可跨 Provider 的文本材料，
+保留角色、工具名称、参数、结果和来源，不重放 Provider 专属思考签名，不挂业务执行工具。
+材料放得下时保留完整结果；超大材料才使用有界预览，并给出授权原文读取位置。
+不递归生成无限多层摘要。
+
+交接内容按任务组织，不要求固定八个标题或空章节。重点是目标与约束、最新纠正、已完成工作、
+精确口径和关键事实、失败尝试与原因、读取进度、待处理事项与下一步。后续回读得到的是当时的
+历史资料，不能覆盖更新的用户纠正。工具已执行的副作用须标明，避免重放。
+
+索引由程序从真实来源生成，保留工具名、可读参数、状态、完整性以及 Call/Event/Part/Artifact
+定位。成功的内置历史搜索与回读不再把同一业务资料索引一遍；原始读取事件、当前尾部及摘要
+材料仍保留。失败读取保留必要诊断。模型可见索引不堆砌无消费的参数/结果哈希和无作用域字段；
+真正持久化一致性依赖 Event 来源指纹，而非模型阅读哈希。
+
+已有结果缺少细节时先回读。用户要求刷新、口径变化或业务数据可能变化时可以重新查询。
+不建立透明业务缓存，也不禁止必要的新查询。
+
+## 历史回读
+
+沿用现有工具和权限，不增加独立 Notes 系统：
+
+| 工具 | 能力与边界 |
+| --- | --- |
+| `search_conversation_history` | 模糊关键词、工具名、Call ID、来源范围；已知条件无需猜关键词。空关键词需提供过滤条件。范围只用于当前会话。扫描有界，结果分页，`next_cursor` 可继续扫描；排序是当前扫描页内排序。 |
+| `read_conversation_event` | 按 Event/Call ID 精读，可选原始 Part，字符偏移分页。默认 12000、最大 32000 字符；大结果明确为 JSON 片段并提供 `next_read`，不冒称完整对象。 |
+| `read_tool_result` | 继续负责外置结果的搜索与分页，复用文件设施。 |
+
+所有读取先校验 Agent 和会话所有者；App/Space 仅作来源过滤，摘要索引不扩大访问范围。
+搜索游标约束同一查询与当前会话来源头，追加内容不使分页偏移混乱。
+
+## Token 与 Usage
+
+沿用 TokenEstimator 和 Harness 公开估算器。只有模型、有效历史、请求参数、当前指令指纹匹配时，
+才能复用主响应 Usage；否则完整估算。文字、工具 Schema 与真实发送的媒体均计入。
+摘要 Usage 单独累计，不作为主会话窗口锚，原始 Usage 不修改、不重复统计。
+
+只读 `context-status` 未准备最终工具/指令参数时返回 `history_only`，不能冒充完整请求。
+运行请求使用 `full_model_request`。两者占用不同不代表历史丢失。
+
+## 生命周期、并发与协议
+
+一次压缩对应一条 `compaction` 生命周期事件，开始为 running，在下一次模型推理前保存并更新
+为 completed；同一 Run 多次压缩逐次提交。失败、取消、超时、stale 不替换上一个有效摘要。
+开始新尝试清理本次错误状态，累计调用次数与 Usage 继续保留。
+
+摘要期间不持有数据库事务。提交使用摘要开始前冻结的 raw history，与数据库当前来源做
+原子检查；摘要后不能重新采样来源来掩盖晚到消息。来源变化则拒绝候选，保留原始事件。
+持久化格式为 `handoff-checkpoint-v2`，运行时与重开使用同一渲染器；旧 completed 事件继续读取，
+不批量改写旧会话。进程启动时清理遗留 running 为 interrupted。
+
+摘要总超时默认 300 秒，每约 10 秒发送现有非持久化进度。取消清理关闭摘要任务并收口事件。
+Timeout 不重试；符合剩余预算条件的快速 429/502/503/504 最多重试一次。
+不可写数据库或强杀进程不承诺立即写入终态。
+
+外部聊天 SSE 类型、正文、终态、工具调用/回执、History 和附件引用保持兼容；电子表格等客户端
+无需升级。公开自动压缩遥测的 `target_tokens` 保留为 null，`target_met` 仅映射候选有效性，
+保存是否成功仍看事件状态。主动压缩、管理员测试接口与 Console 删除旧目标值及目标线。
+进度提示收起不删除持久化事件。
+
+## 验收
+
+协议回归与真实模型任务效果分别验收。核心行覆盖率 95%、分支 85% 门槛覆盖
+`compaction.py` 和 `handoff.py`。完整结果、阈值决定及未覆盖项见本次 D01 评测报告；
+测试未通过前不以摘要看起来完整或压缩事件保存成功替代任务完成率。

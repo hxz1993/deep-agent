@@ -1,6 +1,6 @@
 # 22 · 渠道网关与企微 Channel
 
-> 状态：DeepAgent 0.7.0 已实现公共 Gateway、WeCom Adapter 与五个渠道命令；数据库仍为 Alembic `002`。
+> 状态：DeepAgent 0.7.0 已实现公共 Gateway、WeCom Adapter 与五个渠道命令；当时数据库为 Alembic `002`；当前版本 v0.11.6 / 数据库 `007`。
 
 - [`wecom-channel-research.md`](wecom-channel-research.md)：企微机器人、OpenClaw Channel Plugin、
   官方 AIBot SDK 的调用链、能力边界和已知缺口。
@@ -8,8 +8,7 @@
   SSE 转换、媒体、快捷命令、来源标题和单副本边界。
 - [`message-lifecycle-review.md`](message-lifecycle-review.md)：逐条消息与命令如何改变 Binding/Run，
   以及固定版本 OpenClaw、LangBot 的取舍依据。
-- [`weixin-astrbot-research.md`](weixin-astrbot-research.md)：2026-09-23 个人微信 iLink 与 AstrBot
-  渠道、身份、历史落库和控制台入口调研；用户明确暂不开发，不纳入当前版本。
+- 个人微信与 AstrBot 的原研究及渠道扩展复盘已移至 [32 新渠道接入](../32-new-channels/README.md)，本课题只保留企微与公共 Gateway 基线。
 
 当前认可的核心边界：
 

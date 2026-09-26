@@ -1,7 +1,7 @@
 # 微信 Channel 与 AstrBot 初步调研
 
 > 日期：2026-09-23。状态：仅调研归档，用户明确暂不开发；不纳入当前版本实施、数据库迁移或发布。
-> 沿用课题 22「渠道网关与企微 Channel」。本文区分上游能力、本地观察和候选方案，不能当作已批准的开发计划。
+> 原属课题 22，2026-09-26 独立归入课题 32「新渠道接入」。本文区分上游能力、本地观察和候选方案，不能当作已批准的开发计划。
 
 ## 结论
 
@@ -126,6 +126,6 @@ WebChat 左侧聊天列表不会自动混入微信会话。该渠道查看页展
 - [AstrBot 固定版本微信 Adapter](https://github.com/AstrBotDevs/AstrBot/tree/95e98b8aed75d56713666eff39e31bafffd95426/astrbot/core/platform/sources/weixin_oc)
 - [AstrBot 本地学习索引](../../../../agent-labs/astrbot_代码索引.md)
 - AstrBot 本地源码根：`deepfos-AI/agent-labs/astrbot/`。重点：`astrbot/core/platform/{platform.py,register.py,manager.py,message_session.py}`、`sources/weixin_oc/{weixin_oc_client.py,weixin_oc_adapter.py,weixin_oc_event.py}`（后三者相对 platform 目录）、`astrbot/core/db/po.py`、`astrbot/dashboard/services/conversation_service.py`、`dashboard/src/views/conversation/ConversationWorkspacePage.vue`。
-- DeepAgent 当前依据：[渠道设计](wecom-channel-design.md)、[企微成员资料指南](../../guides/wecom-applications.md)；源码 `src/deep_agent/db/models.py` 的三种 Channel 模型、`schemas/channel.py`、`channels/registry.py`、`channels/gateway/deepagent_client.py`。旧设计中的发布版本和迁移号是历史信息，当前行为以源码及现行指南为准。
+- DeepAgent 当前依据：[渠道设计](../22-wecom-channel/wecom-channel-design.md)、[企微成员资料指南](../../guides/wecom-applications.md)；源码 `src/deep_agent/db/models.py` 的三种 Channel 模型、`schemas/channel.py`、`channels/registry.py`、`channels/gateway/deepagent_client.py`。旧设计中的发布版本和迁移号是历史信息，当前行为以源码及现行指南为准。
 
 本地研究环境：AstrBot 4.28.1 已通过 DevBox 的 AstrBot 服务启动，监听 `127.0.0.1:6185`；用于学习和用户自测，不是 DeepAgent 运行依赖。不在文档保存启动密码或微信凭据。

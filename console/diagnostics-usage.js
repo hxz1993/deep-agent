@@ -11,7 +11,9 @@ const PURPOSES = { chat: "聊天", title: "标题", compaction: "压缩" };
 const COLORS = ["var(--diag-accent)", "var(--usage-orange)", "var(--usage-green)", "var(--usage-rose)", "var(--usage-other)"];
 const seriesKeys = (report, group) => report?.series_order?.[group] || [...new Set((report?.trend?.[group] || []).map(row => row.key))];
 const seriesColor = (report, group, key) => COLORS[Math.max(0, seriesKeys(report, group).indexOf(key)) % COLORS.length];
-const seriesName = (report, group, key) => key === "__other__" ? "其他" : group === "purpose" ? PURPOSES[key] || key : group === "agent" ? report?.agents?.[key] || key : group === "model" ? report?.models?.[key]?.name || report?.model_snapshots?.[key]?.name || key : group === "user" ? report?.users?.[key]?.username || key : key;
+const modelName = model => model?.name?.startsWith("function:") ? "测试模型" : model?.name || model?.model_name || "未记录模型";
+const modelBadge = (model, key) => model?.deleted ? "已删除" : key?.startsWith("legacy:") && !model?.name?.startsWith("function:") ? "历史" : "";
+const seriesName = (report, group, key) => key === "__other__" ? "其他" : group === "purpose" ? PURPOSES[key] || key : group === "agent" ? report?.agents?.[key] || key : group === "model" ? modelName(report?.models?.[key] || report?.model_snapshots?.[key]) : group === "user" ? report?.users?.[key]?.username || key : key;
 const fmt = value => Number(value || 0).toLocaleString("zh-CN");
 const short = value => value >= 1e6 ? `${(value / 1e6).toFixed(2)}M` : value >= 1e3 ? `${(value / 1e3).toFixed(1)}K` : fmt(value);
 
@@ -81,7 +83,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
   }
   const queryString = values => new URLSearchParams(Object.entries(values).filter(([, value]) => value !== undefined && value !== null && value !== "")).toString();
   const params = () => Object.fromEntries(["start", "end", "timezone", "agent_id"].map(key => [key, state.filters?.[key]]));
-  const label = (key, dimension = state.dimension) => key === "__other__" ? "其他" : dimension === "purpose" ? PURPOSES[key] || key : dimension === "model" ? state.report?.models?.[key]?.name || state.report?.model_snapshots?.[key]?.name || key : dimension === "agent" ? state.report?.agents?.[key] || key : dimension === "user" ? state.report?.users?.[key]?.username || key : key;
+  const label = (key, dimension = state.dimension) => key === "__other__" ? "其他" : dimension === "purpose" ? PURPOSES[key] || key : dimension === "model" ? modelName(state.report?.models?.[key] || state.report?.model_snapshots?.[key]) : dimension === "agent" ? state.report?.agents?.[key] || key : dimension === "user" ? state.report?.users?.[key]?.username || key : key;
   const title = value => e(String(value || ""));
   const measured = (row, field) => {
     const source = field === "total_tokens" ? (row.input_reported_requests || row.output_reported_requests) : row[field.replace("_tokens", "_reported_requests")];
@@ -131,7 +133,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
         <div class="usage-summary"><div class="usage-stats">${stat("累计 Token", measured(summary, "total_tokens"), "layers-3", "purple")}${stat("日均 Token", (summary.input_reported_requests || summary.output_reported_requests) && data?.dates?.length ? short(summary.total_tokens/data.dates.length) : "—", "calendar-days", "blue")}${stat("单次平均 Token", summary.requests && !summary.missing_requests ? short(summary.total_tokens/summary.requests) : "—", "chart-no-axes-combined", "green")}${stat("峰值日期", peakUsage(data)?.[1] ? `${title(peakUsage(data)[0].slice(5))} <span class="usage-peak-secondary">${short(peakUsage(data)[1])}</span>` : "—", "calendar-check", "orange")}</div>${insightsHtml(data)}</div>
       </div>
       <section class="usage-details"><div class="usage-workbench"><div class="usage-table-area"><div class="usage-table-frame"><div id="usageDetailRows"></div></div><div id="usageDetailFooter"></div></div><div class="channel-resizer usage-resizer" role="separator" aria-label="调整贡献会话宽度" aria-orientation="vertical" tabindex="0"></div><aside class="usage-contributions diagnostic-channels-page" aria-label="贡献会话"><div id="usageContributionRows"></div><div id="usageContributionFooter"></div></aside></div></section>
-      ${summary.missing_requests ? `<p class="usage-coverage" role="status">${fmt(summary.missing_requests)} 次请求的用量不完整，Token 仅统计已报告值。</p>` : ""}${state.busy ? '<p class="usage-loading" role="status">正在查询用量…</p>' : ""}${exportDialog()}</div>`;
+      ${state.busy ? '<p class="usage-loading" role="status">正在查询用量…</p>' : ""}${exportDialog()}</div>`;
     const workbench = root.querySelector(".usage-workbench");
     releaseResizer = bindChannelResizer(workbench, state.inspectorWidth || workbench.clientWidth * .4, width => { state.inspectorWidth = width; });
     renderDetailRows(); icons(); chartResize.disconnect();
@@ -142,8 +144,8 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
 
     const rowIcon = row => {
       if (state.dimension === "model") {
-        const brands = {deepseek:"deepseek.ico",moonshotai:"kimi.ico",alibaba:"qwen.png",zai:"zai.svg",openrouter:"openrouter.png",openai:"openai.svg?v=20260925-official-1",openai_codex:"openai.svg?v=20260925-official-1",anthropic:"anthropic.png",google:"google-gemini.png"};
-        const providerType = row.model?.provider_type || "openai_compatible";
+        const brands = {deepseek:"deepseek.ico",moonshotai:"kimi.ico",alibaba:"qwen.png",zai:"zai.svg",openrouter:"openrouter.png",openai:"openai.svg?v=20260926-centered-2",openai_codex:"openai.svg?v=20260926-centered-2",anthropic:"anthropic.png",google:"google-gemini.png"};
+        const providerType = row.model?.provider_type || row.model?.provider_name?.toLowerCase() || "openai_compatible";
         return `<img class="usage-identity-logo" data-provider-type="${e(providerType)}" src="./assets/provider-logos/${brands[providerType] || "openai-compatible.svg"}" alt="" />`;
       }
       if (state.dimension === "user") return icon("user-round");
@@ -159,7 +161,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
       const rows = state.contributions?.items || [], total = state.contributions?.total || 0;
       const selected = state.details?.items?.find(row => row.key === state.contributing.key), dimension = state.contributing.dimension;
       const description = dimension === "model" ? selected?.model?.provider_name || "模型用量" : dimension === "user" ? state.details?.users?.[state.contributing.key]?.email || "用户用量" : `Agent · ${state.contributing.key}`;
-      const name = dimension === "user" ? state.details?.users?.[state.contributing.key]?.username || state.contributing.name : selected?.model?.name || selected?.name || state.contributing.name;
+      const name = dimension === "user" ? state.details?.users?.[state.contributing.key]?.username || state.contributing.name : dimension === "model" ? modelName(selected?.model) : selected?.name || state.contributing.name;
       contributionHost.innerHTML = `<div class="usage-panel-head"><span class="usage-object-icon">${rowIcon(selected || {})}</span><div class="usage-object-copy"><h2>${title(name)}</h2><small>${title(description)}</small></div><span class="usage-session-count" title="${total} 个会话">${icon("messages-square")}${fmt(total)}</span></div>${rows.map(row => `<article class="usage-session-entry"><div class="usage-session-content"><div class="usage-session-heading"><button type="button" class="channel-last-question" data-usage-session="${title(row.session_id)}">${title(row.title || "未命名会话")}</button><strong class="usage-token-count" title="Token">${measured(row,"total_tokens")}</strong></div><div class="diagnostic-session-id channel-session-meta"><span class="channel-session-time"><code title="${title(row.session_id)}">${title(row.session_id.slice(0,8))}</code><button type="button" class="diagnostic-copy-separator" data-usage-copy="${title(row.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${title(row.session_id)}">${icon("copy")}</button><time>${title(diagnosticTime(row.last_activity))}</time></span><span class="usage-session-counts"><span title="模型请求次数">${icon("activity")}${fmt(row.requests)}</span></span></div></div></article>`).join("") || `<p class="diagnostics-empty">${state.contributions ? "暂无贡献会话" : "正在加载贡献会话…"}</p>`}`;
       contributionFooter.innerHTML = rows.length < total ? `<button type="button" class="usage-load-more" data-usage-action="contribution-more" ${state.contributionBusy ? "disabled" : ""} title="已加载 ${rows.length} / ${total} 个会话">加载更多</button>` : "";
     } else {
@@ -170,7 +172,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
     const headers = `<div class="usage-detail-row usage-detail-head"><span>明细</span><button data-usage-sort="total_tokens">Token</button><button data-usage-sort="requests">请求</button><span title="合计 Token / 模型请求次数">单次平均</span><span title="占当前筛选范围总 Token 的比例">用量占比</span></div>`;
     const names = row => {
       if (state.dimension === "user") { const user = state.details?.users?.[row.key] || {}; return `<span title="${title(user.email || row.key)}">${title(user.username || user.display_name || row.key)}</span>`; }
-      if (state.dimension === "model") { const model = row.model || {}; return `<span title="${title(model.provider_name || "")}">${title(model.name || model.model_name || row.key)}${model.deleted ? "（已删除）" : ""}</span>`; }
+      if (state.dimension === "model") { const model = row.model || {}; const badge = modelBadge(model, row.key); return `<span title="${title(model.provider_name || "")}">${title(modelName(model))}</span>${badge ? `<small class="usage-model-badge">${badge}</small>` : ""}`; }
       return title(row.name || row.key);
     };
     host.innerHTML = `${headers}${rows.map(row => `<button type="button" class="usage-detail-row ${state.contributing?.key === row.key && state.contributing?.dimension === state.dimension ? "is-selected" : ""}" data-usage-key="${title(row.key)}"><span class="usage-detail-identity">${rowIcon(row)}<span class="usage-detail-name">${names(row)}</span></span><strong>${measured(row, "total_tokens")}</strong><span>${fmt(row.requests)}</span><span>${row.requests && !row.missing_requests ? short(row.total_tokens/row.requests) : "—"}</span><span>${state.details?.summary?.total_tokens ? (row.total_tokens/state.details.summary.total_tokens*100).toFixed(1)+"%" : "—"}</span></button>`).join("") || `<p class="diagnostics-empty">${state.busy ? "正在加载…" : "当前条件暂无用量"}</p>`}`;

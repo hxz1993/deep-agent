@@ -47,12 +47,12 @@ for (const terminal of ["error", "cancelled", "final"]) {
     h.send("context_compaction_progress", progress("compact-1"));
     h.send("session_event_updated", completed("compact-1"));
     assert.equal(h.rows.length, 1);
-    assert.equal(h.rows[0].message, "上下文已压缩：18000 → 4000 Token");
+    assert.equal(h.rows[0].message, "上下文已压缩");
     assert.equal(h.rows[0].active, false);
     assert.equal(h.timers.size, 0, "The delayed spinner must be cancelled");
     h.send(terminal, terminal === "final" ? { status: "pending" } : { message: "business failure" });
     assert.equal(h.rows.length, 1);
-    assert.equal(h.rows[0].message, "上下文已压缩：18000 → 4000 Token");
+    assert.equal(h.rows[0].message, "上下文已压缩");
     assert.notEqual(h.rows[0].failed, true);
     assert.equal(h.rows[0].removed, false);
   });
@@ -89,7 +89,7 @@ test("pending final still reports a saved compaction when the completed update w
   h.send("context_compaction_progress", progress("pending"));
   h.finalize({ triggered: true, summary_applied: true, compaction_event_saved: true,
     estimated_tokens_before: 18000, estimated_tokens_after: 4000 }, "pending");
-  assert.equal(h.rows[0].message, "上下文已压缩：18000 → 4000 Token");
+  assert.equal(h.rows[0].message, "上下文已压缩");
   assert.equal(h.timers.size, 0);
 });
 
@@ -100,7 +100,7 @@ test("an unfinished later compaction can fail without rewriting the earlier succ
   h.send("context_compaction_progress", progress("second"));
   h.send("error", { message: "summary unavailable" });
   assert.equal(h.rows.length, 2);
-  assert.equal(h.rows[0].message, "上下文已压缩：18000 → 4000 Token");
+  assert.equal(h.rows[0].message, "上下文已压缩");
   assert.equal(h.rows[1].message, "本次上下文压缩未完成，后续请求失败");
   assert.equal(h.rows[1].failed, true);
 });

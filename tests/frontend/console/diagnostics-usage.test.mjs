@@ -72,3 +72,22 @@ test('usage chart rerenders retain both pane scroll positions; changing dimensio
   assert.equal(h.nodes.get('.usage-table-frame').scrollTop,0);
   assert.equal(h.nodes.get('#usageContributionRows').scrollTop,0);
 });
+
+
+test('model usage distinguishes legacy and deleted records without leaking internal model keys', async () => {
+  const items = [
+    {key:'legacy:deepseek|deepseek-flash',model:{name:'deepseek-flash',provider_name:'deepseek'},requests:1,total_tokens:100},
+    {key:'deleted-id',model:{name:'old-model',deleted:true},requests:1,total_tokens:20},
+    {key:'legacy:|function:respond:',model:{name:'function:respond:'},requests:1,total_tokens:10},
+    {key:'legacy:|',model:{name:null},requests:1,missing_requests:1,total_tokens:0},
+  ];
+  const h = harness(() => Promise.resolve({items,total:items.length,summary:{missing_requests:1}}), {dimension:'model'});
+  await settle(); await settle();
+  const html = h.nodes.get('#usageDetailRows').innerHTML;
+  assert.match(html, /deepseek-flash<\/span><small class="usage-model-badge">历史/);
+  assert.match(html, /old-model<\/span><small class="usage-model-badge">已删除/);
+  assert.match(html, />测试模型<\/span>/);
+  assert.match(html, />未记录模型<\/span>/);
+  assert.match(html, /provider-logos\/deepseek.ico/);
+  assert.match(h.nodes.get('#usageDetailFooter').innerHTML, /1 次用量不完整/);
+});

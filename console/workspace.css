@@ -1924,16 +1924,11 @@ html, body {
   color: var(--text-faint);
   font-size: 12px;
   text-align: center;
-}
-.context-compaction-row {
   display: flex;
   justify-content: center;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 4px;
-  background: var(--bg-soft);
+  padding: 4px 0;
 }
 .context-compaction-row .spinner {
   width: 14px;
@@ -1943,7 +1938,7 @@ html, body {
   border-radius: 50%;
   animation: context-compact-spin .8s linear infinite;
 }
-.context-compaction-row.failed { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); }
+.context-compaction-row.failed { color: var(--danger); }
 .context-compaction-row button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
 .attachment-preview {
   display: flex;
@@ -2460,8 +2455,6 @@ html, body {
 .composer-model-trigger:disabled { opacity: .48; cursor: not-allowed; }
 .composer-provider-icon { width: 16px; height: 16px; display: inline-grid; place-items: center; flex: 0 0 auto; color: var(--accent); }
 .composer-provider-icon img { width: 14px; height: 14px; display: block; object-fit: contain; border-radius: 3px; }
-.composer-provider-icon img[data-provider-type="openai"],
-.composer-provider-icon img[data-provider-type="openai_codex"] { width: 22px; height: 22px; }
 .composer-model-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-model-chevron { width: 13px; height: 13px; flex: 0 0 auto; transition: transform .15s ease; }
 .composer-model-picker.open .composer-model-chevron { transform: rotate(180deg); }

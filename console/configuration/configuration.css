@@ -1513,7 +1513,6 @@ dialog.console-action-dialog::backdrop {
 .provider-brand-mark.zai { background: #edf7f7; }
 .provider-brand-mark.openrouter { background: #f4efff; }
 .provider-brand-mark.openai { background: transparent; }
-.provider-brand-mark.openai img { width: 28px; height: 28px; }
 .provider-brand-mark.anthropic { background: #f8f1e9; }
 .provider-brand-mark.google { background: #edf3ff; }
 .provider-brand-mark.compatible { background: var(--console-subtle, var(--bg-soft)); color: var(--text-dim); }

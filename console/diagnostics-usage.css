@@ -63,7 +63,6 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-export-dialog input { accent-color:var(--accent); }
 .usage-export-status { color:var(--danger); min-height:16px; }
 .usage-error { margin:0; color:var(--danger); }
-.usage-coverage { margin:0; color:var(--text-dim); font-size:11px; }
 .usage-loading { margin:0; color:var(--text-dim); }
 @media (max-width:1250px) { .diagnostic-usage-page { height:auto; } .usage-trend { height:390px; min-height:390px; } .usage-chart { height:250px; flex:1; } .usage-details { min-height:420px; } }
 @media (max-width:800px) { .diagnostic-usage-page { padding:14px; } .usage-header { flex:none; flex-direction:column; align-items:stretch; min-height:0; gap:8px; } .diagnostic-usage-page .diagnostic-session-filters { width:100%; justify-content:flex-start; } .usage-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .usage-chart-tools { flex-wrap:wrap; } }
@@ -158,9 +157,7 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-detail-identity > .usage-detail-name { flex:1; }
 
 .usage-detail-row { min-height:36px; padding:6px 10px; border-bottom:0; }
-.usage-identity-logo { width:18px; height:18px; object-fit:contain; flex-shrink:0; }
-.usage-identity-logo[data-provider-type="openai"],
-.usage-identity-logo[data-provider-type="openai_codex"] { width:25px; height:25px; margin:-3.5px; }
+.usage-identity-logo { display:block; width:16px; height:16px; object-fit:contain; flex-shrink:0; }
 .usage-detail-identity > span > svg { width:16px; height:16px; }
 .usage-contributions .usage-panel-head h2 { line-height:19px; }
 .usage-contributions .usage-panel-head small { margin-top:0; line-height:17px; }
@@ -170,8 +167,6 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 #usageContributionRows .usage-session-content .channel-session-time { gap:0; }
 #usageContributionRows .usage-session-content .diagnostic-session-id .diagnostic-copy-separator { width:12px; flex-basis:12px; margin:0; }
 .usage-object-icon .usage-identity-logo { width:20px; height:20px; }
-.usage-object-icon .usage-identity-logo[data-provider-type="openai"],
-.usage-object-icon .usage-identity-logo[data-provider-type="openai_codex"] { width:28px; height:28px; margin:0; }
 
 /* Bound the workbench; large datasets scroll inside each pane. */
 .usage-table-area, .usage-contributions { min-height:0; }
@@ -209,3 +204,7 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-workbench .usage-contributions { padding-right:0; }
 #usageContributionRows { padding-right:16px; }
 #usageContributionFooter { padding-right:16px; }
+
+.usage-detail-name { display:flex; align-items:center; gap:6px; }
+.usage-detail-name > span { overflow:hidden; text-overflow:ellipsis; }
+.usage-model-badge { flex-shrink:0; padding:1px 5px; border-radius:4px; background:var(--diag-inset); color:var(--text-dim); font-size:10px; line-height:16px; }

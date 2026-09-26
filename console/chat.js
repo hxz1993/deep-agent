@@ -203,8 +203,8 @@ const COMPOSER_PROVIDER_BRANDS = {
   alibaba: "./assets/provider-logos/qwen.png",
   zai: "./assets/provider-logos/zai.svg",
   openrouter: "./assets/provider-logos/openrouter.png",
-  openai: "./assets/provider-logos/openai.svg?v=20260925-official-1",
-  openai_codex: "./assets/provider-logos/openai.svg?v=20260925-official-1",
+  openai: "./assets/provider-logos/openai.svg?v=20260926-centered-2",
+  openai_codex: "./assets/provider-logos/openai.svg?v=20260926-centered-2",
   anthropic: "./assets/provider-logos/anthropic.png",
   google: "./assets/provider-logos/google-gemini.png",
   openai_compatible: "./assets/provider-logos/openai-compatible.svg",
@@ -1491,7 +1491,7 @@ function createContextCompactionRow(beforeNode = null) {
   hideEmptyState();
   const row = document.createElement("div");
   row.className = "context-compaction-row";
-  row.innerHTML = '<span class="spinner" aria-hidden="true"></span><span class="status-text">正在分析上下文…</span>';
+  row.innerHTML = '<span class="spinner" aria-hidden="true"></span><span class="status-text">正在压缩中…</span>';
   if (beforeNode?.parentNode === el.messages) {
     el.messages.insertBefore(row, beforeNode);
   } else {
@@ -1551,14 +1551,9 @@ function updateAutomaticContextCompactionEvent(data) {
   if (event.status !== "completed" || state.completedAutomaticCompactionEvents.has(event.event_id)) return;
   const activeId = state.pendingAutomaticCompaction?.event_id;
   if (activeId && activeId !== event.event_id) return;
-  const budget = event.payload?.budget || {};
-  const before = budget.estimated_tokens_before ?? budget.estimated_before;
-  const after = budget.estimated_tokens_after ?? budget.estimated_after;
   const row = state.automaticCompactionRow || createContextCompactionRow(state.automaticCompactionAnchor);
   setContextCompactionRow(row,
-    before != null && after != null
-      ? `上下文已压缩：${compactTokenLabel(before)} → ${compactTokenLabel(after)} Token`
-      : "上下文已压缩",
+    "上下文已压缩",
     { active: false });
   state.completedAutomaticCompactionEvents.add(event.event_id);
   clearAutomaticCompactionState();
@@ -1586,7 +1581,7 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
   ) {
     setContextCompactionRow(
       row,
-      `上下文已压缩：${compactTokenLabel(compaction.estimated_tokens_before)} → ${compactTokenLabel(compaction.estimated_tokens_after)} Token`,
+      "上下文已压缩",
       { active: false },
     );
     clearAutomaticCompactionState();

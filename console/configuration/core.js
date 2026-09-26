@@ -317,7 +317,7 @@ function populateAgentModelSelect(selectedId = null) {
   select.disabled = false;
   select.innerHTML = `<option value="" hidden></option>`
     + window.DeepAgentModelOptions.renderGroupedModelOptions(models, {
-      selectedId, emptyLabel: null, groupIcon: (provider) => providerBrand(provider).src,
+      selectedId, emptyLabel: null, enabledOnly: true, groupIcon: (provider) => providerBrand(provider).src,
     });
   select.value = selectedId || "";
 }

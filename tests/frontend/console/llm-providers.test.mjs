@@ -275,9 +275,12 @@ test("业务模型选项隐藏不可用模型并仅保留既有 Agent 当前引�
   assert.doesNotMatch(html, /value="d"/);
   assert.doesNotMatch(html, /value="e"/);
   assert.equal(firstSelectableModelId(models), "a");
+  const enabledOptions = renderGroupedModelOptions(models, { enabledOnly: true });
+  assert.match(enabledOptions, /value="c"/);
+  assert.doesNotMatch(enabledOptions, /value="e"|未配置密钥|未授权|已停用/);
 
   const preserved = renderGroupedModelOptions(models, { selectedId: "c" });
-  assert.match(preserved, /value="c" selected[^>]*>C — model-c（供应商未配置密钥）<\/option>/);
+  assert.match(preserved, /value="c" selected[^>]*>C — model-c<\/option>/);
   assert.doesNotMatch(preserved, /value="d"|value="e"/);
 
   assert.equal(isModelSelectable({ enabled: false, provider: { api_key_set: true } }), false);

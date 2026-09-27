@@ -2,7 +2,8 @@ import asyncio
 import time
 import unittest
 
-from deep_agent.services.feishu_registration import FeishuRegistrationService, RegistrationError
+from deep_agent.services.channel_registration import RegistrationError
+from deep_agent.services.feishu_registration import FeishuRegistrationService
 
 
 class FeishuRegistrationTests(unittest.IsolatedAsyncioTestCase):

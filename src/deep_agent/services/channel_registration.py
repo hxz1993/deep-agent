@@ -111,4 +111,3 @@ class RegistrationService:
         for entry in self.entries.values():
             entry.secret = None
         self.entries.clear()
-

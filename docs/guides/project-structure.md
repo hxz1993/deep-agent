@@ -64,9 +64,10 @@ FastAPI API
 - `channels/`：公共消息/Adapter契约、注册表、Peer队列、五个渠道命令与帮助目录。
 - `channels/gateway/`：可选渠道网关进程、运行配置、Account轮询和内部API/DeepAgent Client。
 - `channels/adapters/wecom/`：企微SDK的唯一引用边界，负责SDK事件转换、连接状态、原生媒体和回复调用。
+- `channels/adapters/feishu/`：飞书官方 SDK 的独立适配边界，通过受控子进程隔离账号连接与流式卡片。
 
-渠道入站链路为“官方SDK → WeCom Adapter → 公共ChannelService → 现有Chat API”，出站反向调用
-Adapter的原生SDK回复。Gateway不是MCP工具，也不包含模型执行引擎；新增飞书需实现其Adapter与配置，
+渠道入站链路为“官方SDK → 对应渠道 Adapter → 公共ChannelService → 现有Chat API”，出站反向调用
+Adapter的原生SDK回复。Gateway不是MCP工具，也不包含模型执行引擎；飞书已通过 `channels/adapters/feishu/` 独立适配；后续新增渠道需实现对应 Adapter 与配置，
 而不是另建一套Gateway或重写共享Chat接口。当前单API worker/单Gateway和部署说明见
 [`wecom-channel.md`](wecom-channel.md)。
 

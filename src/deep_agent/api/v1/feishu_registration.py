@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException, Response
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.schemas.channel import FeishuRegistrationCreate
-from deep_agent.services.feishu_registration import RegistrationError, registration_service
+from deep_agent.services.channel_registration import RegistrationError
+from deep_agent.services.feishu_registration import registration_service
 
 router = APIRouter(prefix="/channel-accounts/feishu/registrations", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 

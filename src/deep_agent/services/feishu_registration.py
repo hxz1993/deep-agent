@@ -5,7 +5,7 @@ import asyncio
 import time
 from urllib.parse import urlsplit
 
-from deep_agent.services.channel_registration import Registration, RegistrationError, RegistrationService
+from deep_agent.services.channel_registration import Registration, RegistrationService
 
 
 async def register_with_sdk(**kwargs):

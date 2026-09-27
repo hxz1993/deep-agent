@@ -15,7 +15,7 @@
 - [通用渠道工具对照与设计草案](channel-tools-abstraction.md)：飞书专用媒体工具已撤回；重新按统一消息操作、目标上下文、能力声明和渠道适配设计，暂未实现新工具。
 
 - [个人微信与 AstrBot 调研](weixin-astrbot-research.md)：保留 2026-09-23 微信扫码、长轮询、连续对话落库、渠道会话查看、身份和回复边界的原研究。
-- [渠道扩展复盘](channel-expansion-review.md)：2026-09-26 回顾 AstrBot 配置、会话隔离、能力声明等可参考做法；飞书部分为候选分析，先后顺序尚未确认。
+- [渠道扩展复盘](channel-expansion-review.md)：2026-09-26 回顾 AstrBot 配置、会话隔离、能力声明等可参考做法；其中飞书候选分析属于历史研究，现已实现，当前状态以[飞书使用指南](../../guides/feishu-channel.md)为准。
 
 企微已有能力和公共 Gateway 基线继续放在 [22 课题](../22-wecom-channel/README.md)。新渠道沿用公共调度、会话绑定、Event Store 和平台权限，不引入另一套 AstrBot 运行时。
 

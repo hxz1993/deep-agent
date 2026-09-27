@@ -51,12 +51,12 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await db.execute(text(f"CREATE DATABASE {name}{suffix}"))
                 created = True
             target_url = url.set(database=name).render_as_string(hide_password=False)
-            await asyncio.to_thread(_upgrade_target_schema, target_url, "008")
+            await asyncio.to_thread(_upgrade_target_schema, target_url, "009")
             target = create_async_engine(target_url)
             with tempfile.TemporaryDirectory(prefix="TMP_to_delete-import-") as directory:
                 root = Path(directory)
                 source = root / "source.db"
-                await config_backup_tests.ConfigBackupTests()._create_source(source, revision="008")
+                await config_backup_tests.ConfigBackupTests()._create_source(source, revision="009")
                 with sqlite3.connect(source) as db:
                     db.execute("UPDATE agents SET skills='[]', prompt='中文 👋📊🙂'")
                     db.execute("DELETE FROM skill_packages")

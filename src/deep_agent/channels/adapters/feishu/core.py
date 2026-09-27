@@ -95,6 +95,18 @@ class FeishuSDKAdapter:
         self.client.on("reconnected", lambda *_: self._set_state("connected", "已连接飞书"))
         self.client.on("error", lambda *_: logger.warning("Feishu SDK operation failed"))
 
+    @staticmethod
+    def message_capabilities():
+        from .outbound import message_capabilities
+        return message_capabilities()
+
+    async def send_component(self, target, component, *, reply_to_current=False):
+        from .outbound import send_component
+        from deep_agent.channels.outbound import DeliveryError
+        if target.account_id != self.account.id:
+            raise DeliveryError("invalid_target", "渠道账号与当前会话不一致")
+        return await send_component(self.client, target, component, reply_to_current=reply_to_current)
+
     def _set_state(self, state: str, message: str) -> None:
         if not self._started and state in {"connected", "reconnecting"}:
             return

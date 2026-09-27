@@ -9,9 +9,11 @@ from aibot import WSClient, WSClientOptions, WsFrame, generate_req_id
 from loguru import logger
 
 from deep_agent.channels.contracts import InboundMedia, InboundMessage, MessageCallback
+from deep_agent.channels.outbound import ComponentReceipt, DeliveryError, MessageCapabilities, MessageTarget, PreparedComponent
 
 from .messages import MediaHandle, ReplyHandle, parse_message, reply_handle
 from .sdk_logger import SafeSdkLogger
+from . import outbound
 
 
 class WecomAdapter:
@@ -119,6 +121,21 @@ class WecomAdapter:
             return await self.client.download_file(media.handle.url, media.handle.aes_key)
         except Exception:
             raise RuntimeError("WeCom media download failed") from None
+
+    @staticmethod
+    def message_capabilities() -> MessageCapabilities:
+        return outbound.message_capabilities()
+
+    async def send_component(
+        self, target: MessageTarget, component: PreparedComponent, *, reply_to_current: bool = False,
+    ) -> ComponentReceipt:
+        if target.account_id != self.account.id or target.peer_type not in {"single", "group"} or not target.peer_id:
+            raise DeliveryError("invalid_target", "企微发送目标与当前渠道不匹配")
+        if reply_to_current:
+            raise DeliveryError("unsupported_reply", "企微当前不支持原生引用发送")
+        if not self._authenticated.is_set():
+            raise DeliveryError("channel_disconnected", "企微尚未连接，未发送消息")
+        return await outbound.send_component(self.client, target.peer_id, component)
 
     def new_reply_id(self) -> str:
         return generate_req_id("deepagent")

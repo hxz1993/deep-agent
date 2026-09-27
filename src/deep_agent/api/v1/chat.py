@@ -213,6 +213,20 @@ async def _current_channel_context(ctx, body, account):
             payload.update(userid=profile.userid if profile else None, name=profile.name if profile else None)
 
 
+async def _resolve_message_source(request, ctx, account, session_id, agent_id, user):
+    identifier = request.headers.get("X-Deep-Agent-Channel-Run")
+    if identifier is None:
+        return None
+    if account is None:
+        raise HTTPException(status_code=403, detail="Channel message source requires trusted gateway")
+    from deep_agent.channels.outbound import resolve_run_context, DeliveryError
+    try:
+        return await resolve_run_context(ctx.stores.channel, account_id=account.id,
+            channel_run_id=identifier, session_id=session_id, agent_id=agent_id, user_id=user)
+    except DeliveryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     request: Request,
@@ -229,6 +243,7 @@ async def chat(
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user
     )
+    message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
     try:
         runner = await build_runner_for_agent(
             ctx,
@@ -237,6 +252,7 @@ async def chat(
             capabilities=body.capabilities,
             request_headers=request_headers,
             channel_type=channel_account.channel_type if channel_account is not None else None,
+            **({"channel_context": message_source} if message_source is not None else {}),
         )
     except AgentModelNotConfiguredError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -260,6 +276,8 @@ async def chat(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     deps.cancellation_token = active_run.cancellation_token
     try:
+        if message_source is not None:
+            await ctx.stores.channel.update_run(message_source.channel_run_id, agent_run_id=deps.run_id)
         await _adopt_channel_session_scope(ctx, channel_account, deps)
         await _current_channel_context(ctx, body, channel_account)
         result = await runner.run(
@@ -312,6 +330,7 @@ async def chat_stream(
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user
     )
+    message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
     try:
         runner = await build_runner_for_agent(
             ctx,
@@ -320,6 +339,7 @@ async def chat_stream(
             capabilities=body.capabilities,
             request_headers=request_headers,
             channel_type=channel_account.channel_type if channel_account is not None else None,
+            **({"channel_context": message_source} if message_source is not None else {}),
         )
     except AgentModelNotConfiguredError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -362,6 +382,10 @@ async def chat_stream(
         stream_run = active_run
         live_key = (deps.agent_id, session_id, deps.user)
         try:
+            # A rejected duplicate request must never replace the active source
+            # run's identity. Bind only after exclusive run admission succeeds.
+            if message_source is not None:
+                await ctx.stores.channel.update_run(message_source.channel_run_id, agent_run_id=deps.run_id)
             # Capture the durable prefix before this Run writes its first fact.
             # Observer history/replay can then exclude any later concurrent Run.
             # Failure of this optional observation read must not rerun or abort

@@ -32,6 +32,7 @@ from deep_agent.skills.tools import build_skill_resource_toolset
 from deep_agent.files import build_file_export_toolset, build_file_toolset
 from deep_agent.core.context import AppContext
 from deep_agent.channels.instructions import channel_instructions
+from deep_agent.channels.outbound import ChannelRunContext
 from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
 from deep_agent.web.runtime import build_web_runtime
@@ -132,6 +133,7 @@ async def build_runner_for_agent(
     capabilities: list[str] | None = None,
     request_headers: dict[str, str] | None = None,
     channel_type: str | None = None,
+    channel_context: ChannelRunContext | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     row = await ctx.stores.agent.get_by_id(agent_id)
@@ -152,7 +154,7 @@ async def build_runner_for_agent(
         spec = replace(spec, instructions=f"{spec.instructions}\n\n{entry_instructions}")
     if capabilities is not None:
         spec.capabilities = canonical_tool_package_codes(capabilities)
-    return await _build_runner_from_spec(spec, ctx, request_headers=request_headers)
+    return await _build_runner_from_spec(spec, ctx, request_headers=request_headers, channel_context=channel_context)
 
 
 async def _build_runner_from_spec(
@@ -160,6 +162,7 @@ async def _build_runner_from_spec(
     ctx: AppContext,
     *,
     request_headers: dict[str, str] | None = None,
+    channel_context: ChannelRunContext | None = None,
 ) -> AgentRunner:
     spec = replace(
         spec,
@@ -251,6 +254,16 @@ async def _build_runner_from_spec(
         file_store=getattr(ctx, "file_store", None),
     )
     history_toolset = build_history_toolset(ctx.store)
+    channel_toolset = None
+    if channel_context is not None:
+        from deep_agent.channels.message_tool import build_channel_message_toolset
+        from deep_agent.channels.registry import default_registry
+        from deep_agent.services.channel_gateway_client import ChannelGatewayClient
+        account = await ctx.stores.channel.get_account(channel_context.account_id)
+        caps = default_registry().message_capabilities(account.channel_type)
+        channel_toolset = build_channel_message_toolset(ctx.stores.channel, ChannelGatewayClient(), channel_context, caps)
+        spec = replace(spec, instructions=spec.instructions + "\n本轮已提供channel_message：向当前聊天发图片、文件和已有音视频使用此内置工具，无需MCP；媒体使用会话file_id。普通回答仍自动流式发送。工具已确认发送的内容不要重复贴出；发送结果未知时不得盲目补发。")
+
     web_runtime = None
     if WEB_PACKAGE_CODE in spec.capabilities:
         try:
@@ -287,6 +300,7 @@ async def _build_runner_from_spec(
         skill_resource_toolset=skill_resource_toolset,
         skill_script_toolset=skill_script_toolset,
         history_toolset=history_toolset,
+        channel_toolset=channel_toolset,
         skill_capability=resolved_skills.capability,
         context_compaction=context_compaction,
         tool_output_limits=tool_output_limits,

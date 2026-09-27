@@ -12,6 +12,8 @@ from typing import Any
 
 from deep_agent.channels.contracts import InboundMedia, InboundMessage, MessageCallback
 from .worker import worker_entry
+from deep_agent.channels.outbound import DeliveryError
+from .outbound import message_capabilities
 
 
 class FeishuAdapter:
@@ -45,6 +47,8 @@ class FeishuAdapter:
         data = [account.channel_type, account.transport, account.bot_id, account.secret,
                 json.dumps((account.settings or {}).get("feishu") or {}, sort_keys=True)]
         return hashlib.sha256("\0".join(data).encode()).hexdigest()
+
+    message_capabilities = staticmethod(message_capabilities)
 
     def status(self) -> dict[str, Any]:
         return dict(self._status)
@@ -92,7 +96,10 @@ class FeishuAdapter:
         if kind == "result":
             future = self._pending.get(packet.get("id"))
             if future and not future.done():
-                if packet.get("error"):
+                if packet.get("delivery_error"):
+                    error = packet["delivery_error"]
+                    future.set_exception(DeliveryError(error["code"], error["message"], error["unknown"]))
+                elif packet.get("error"):
                     future.set_exception(RuntimeError("Feishu SDK operation failed"))
                 else:
                     future.set_result(packet.get("result"))
@@ -137,6 +144,13 @@ class FeishuAdapter:
             raise RuntimeError("Feishu worker unavailable") from None
         finally:
             self._pending.pop(identifier, None)
+            if method == "send_component" and not future.done():
+                future.cancel()
+            if method == "send_component" and future.cancelled():
+                try:
+                    await asyncio.to_thread(self._send, {"kind": "cancel", "id": identifier})
+                except (RuntimeError, OSError):
+                    pass
 
     async def _receive(self, packet):
         try:
@@ -243,6 +257,18 @@ class FeishuAdapter:
 
     def new_reply_id(self) -> str:
         return str(uuid.uuid4())
+
+    async def send_component(self, target, component, *, reply_to_current=False):
+        if target.account_id != self.account.id:
+            raise DeliveryError("invalid_target", "渠道账号与当前会话不一致")
+        if self._closing or not self._started:
+            raise DeliveryError("not_connected", "飞书渠道未连接")
+        try:
+            return await self._rpc("send_component", target, component, reply_to_current, timeout=120)
+        except DeliveryError:
+            raise
+        except Exception:
+            raise DeliveryError("send_unknown", "飞书发送结果未知，请确认是否已收到，勿重复发送", unknown=True) from None
 
     async def download_media(self, media: InboundMedia) -> tuple[bytes, str | None]:
         return await self._rpc("download_media", media)

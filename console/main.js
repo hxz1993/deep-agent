@@ -6,7 +6,7 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260928-release-0119-audit";
+} from "./configuration.js?v=20260928-channel-message";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
 import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260927-platform-app-label";
 import { initWorkspace } from "./workspace.js?v=20260927-feishu-release-0117";

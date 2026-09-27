@@ -224,7 +224,7 @@ async def _database_table_names(engine: AsyncEngine) -> set[str]:
 
 async def _discover_copied_tables(engine: AsyncEngine) -> tuple[str, ...]:
     table_names = await _database_table_names(engine)
-    missing_session_tables = set(SESSION_TABLES) - table_names
+    missing_session_tables = await _required_session_tables(engine) - table_names
     if missing_session_tables:
         raise ValueError(
             "Backup schema is missing session tables: "
@@ -240,13 +240,21 @@ async def _validate_source_tables(
     copied_tables: Sequence[str],
 ) -> None:
     source_tables = await _database_table_names(engine)
-    required_tables = set(copied_tables) | set(SESSION_TABLES) | {"alembic_version"}
+    required_tables = set(copied_tables) | await _required_session_tables(engine) | {"alembic_version"}
     missing = required_tables - source_tables
     if missing:
         raise ValueError(
             "Source database is missing tables required by its Alembic revision: "
             + ", ".join(sorted(missing))
         )
+
+
+async def _required_session_tables(engine: AsyncEngine) -> set[str]:
+    required = set(SESSION_TABLES)
+    revision = await _source_revision(engine)
+    if revision in {f"{number:03}" for number in range(1, 9)}:
+        required.discard("channel_message_operations")
+    return required
 
 
 async def _create_backup_info_table(engine: AsyncEngine) -> None:

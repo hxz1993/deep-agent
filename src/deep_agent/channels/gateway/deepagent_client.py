@@ -126,6 +126,7 @@ class DeepAgentChannelClient:
         message: str,
         attachments: list[dict[str, Any]],
         context_refs: list[dict[str, Any]] | None = None,
+        channel_run_id: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         await self.start()
         assert self._session is not None
@@ -141,7 +142,8 @@ class DeepAgentChannelClient:
         async with self._session.post(
             f"{self.config.api_url}/api/v1/chat/stream",
             json=body,
-            headers={**self._headers(account), "Accept": "text/event-stream"},
+            headers={**self._headers(account), "Accept": "text/event-stream",
+                     **({"X-Deep-Agent-Channel-Run": channel_run_id} if channel_run_id else {})},
         ) as response:
             if response.status >= 400:
                 raw_error = await response.read()

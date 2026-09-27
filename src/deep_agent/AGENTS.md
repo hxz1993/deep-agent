@@ -505,6 +505,23 @@ Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_
 作为普通Event持久化；Deferred新Run沿用Turn并恢复最近成功快照，新用户Turn使用空Store。不得新增
 Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 
+### 渠道消息系统工具
+
+`channel_message` 归入系统工具目录 `runtime:channel`，不是 Agent 需要勾选的能力或 MCP。
+仅由可信渠道 Run 自动加载，同时支持飞书和企微；来源来自渠道 Run/Binding，不能靠正文或
+context_refs 授权。每次执行重新检查账号、Agent、会话、Run 与文件权限，只发本轮群或私聊。
+普通 Console 和历史浏览不加载；首轮不必有附件，沙箱新生成的授权 file_id 也可发送。
+
+公共消息服务负责预校验和文件授权，网关持有操作生命周期；各操作适配器负责格式、上传、
+平台发送及安全错误。保持已有入站／流式接口，新增渠道通过注册可选操作适配器接入。
+首版仅 send，有序文字／图片／文件／已有音频视频；飞书支持当前消息引用，企微不伪造引用。
+不预建 targets/history、跨用户发送、通用 SDK 透传或任意 URL/宿主路径读取。
+
+009 新增 channel_message_operations，唯一键为 agent_run_id + tool_call_id，只存安全回执与摘要；
+网关重启将未完成项标记 unknown，不盲目重发。Session 删除保留幂等事实但失去继续发送权限；
+确认删除渠道连带清理回执。配置备份仅建空结构，旧 Revision 不要求含新表；非空表拒绝降级。
+真实验收与实施状态见 [Message 设计](../../docs/design/32-new-channels/channel-tools-abstraction.md)。
+
 ### Skill
 
 - Skill 不属于 ToolPackage，Agent 通过 `agents.skills` 独立选择。

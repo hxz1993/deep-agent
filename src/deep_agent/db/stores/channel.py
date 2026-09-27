@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy import case, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +13,7 @@ from deep_agent.db.models import (
     Agent,
     ChannelAccount,
     ChannelMessageRun,
+    ChannelMessageOperation,
     ChannelSessionBinding,
     ChatSession,
     ChatSessionEvent,
@@ -146,6 +147,7 @@ class ChannelStore(SessionBoundMixin):
             if (impact.counts["binding_count"] or impact.counts["run_count"] or confirmation_token) and confirmation_token != impact.token:
                 raise DeletionConfirmationRequired(impact)
             # Keep Agent and ChatSession history; only remove the channel ledger.
+            await db.execute(delete(ChannelMessageOperation).where(ChannelMessageOperation.account_id == account_id))
             await db.execute(delete(ChannelMessageRun).where(ChannelMessageRun.account_id == account_id))
             await db.execute(delete(ChannelSessionBinding).where(ChannelSessionBinding.account_id == account_id))
             await db.execute(delete(ChannelAccount).where(ChannelAccount.id == account_id))
@@ -166,6 +168,116 @@ class ChannelStore(SessionBoundMixin):
     ) -> ChannelSessionBinding | None:
         async with self._read() as db:
             return await self._get_binding(db, account_id, peer_type, peer_id)
+
+    async def get_binding_by_id(self, binding_id: str) -> ChannelSessionBinding | None:
+        async with self._read() as db:
+            return await db.get(ChannelSessionBinding, binding_id)
+
+    async def get_run(self, run_id: str) -> ChannelMessageRun | None:
+        async with self._read() as db:
+            return await db.get(ChannelMessageRun, run_id)
+
+    @staticmethod
+    def _receipt_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # Metadata only. Refuse accidental body/blob/prompt persistence rather
+        # than silently copying a transport response into the receipt ledger.
+        allowed = {"index", "kind", "requested_kind", "state", "message_id",
+                   "request_id", "text_hash", "error_code", "error_message", "note"}
+        if not isinstance(results, list):
+            raise ValueError("Operation results must be a list")
+        copied = []
+        for item in results:
+            if not isinstance(item, dict) or item.keys() - allowed:
+                raise ValueError("Operation results contain unsupported receipt fields")
+            if any(not isinstance(value, (str, int, bool, type(None))) for value in item.values()):
+                raise ValueError("Operation receipt values must be scalar metadata")
+            copied.append(dict(item))
+        return copied
+
+    async def claim_operation(
+        self, *, account_id: str, channel_run_id: str, agent_run_id: str,
+        tool_call_id: str, session_id: str, request_hash: str,
+        results: list[dict[str, Any]],
+    ) -> tuple[ChannelMessageOperation, bool]:
+        values = self._receipt_results(results)
+        operation_id = uuid5(NAMESPACE_URL, "deep-agent-channel:" + agent_run_id + ":" + tool_call_id).hex
+        async def attempt(db):
+            account = await self._lock_account_for_write(db, account_id)
+            if account is None:
+                raise ReferenceConflict("Channel account not found")
+            session = await lock_reference(db, ChatSession, ChatSession.session_id, session_id, "Session")
+            run = await lock_reference(db, ChannelMessageRun, ChannelMessageRun.id, channel_run_id, "Channel run")
+            if (run.account_id != account_id or run.session_id != session_id
+                    or run.agent_run_id != agent_run_id
+                    or session.agent_id != account.agent_id
+                    or session.user_id != account.session_user_id):
+                raise ReferenceConflict("Outbound operation source does not match its channel run")
+            existing = (await db.execute(select(ChannelMessageOperation).where(
+                ChannelMessageOperation.agent_run_id == agent_run_id,
+                ChannelMessageOperation.tool_call_id == tool_call_id,
+            ).with_for_update())).scalar_one_or_none()
+            if existing is not None:
+                if (existing.request_hash != request_hash or existing.account_id != account_id
+                        or existing.channel_run_id != channel_run_id or existing.session_id != session_id):
+                    raise ValueError("Outbound operation idempotency conflict")
+                return existing, False
+            row = ChannelMessageOperation(
+                id=operation_id, account_id=account_id, channel_run_id=channel_run_id,
+                agent_run_id=agent_run_id, tool_call_id=tool_call_id,
+                session_id=session_id, request_hash=request_hash, state="pending", results=values,
+            )
+            db.add(row)
+            await db.flush()
+            await db.refresh(row)
+            return row, True
+        try:
+            async with self._write() as db:
+                return await attempt(db)
+        except IntegrityError as exc:
+            if not is_unique_conflict(exc):
+                raise
+            # Another worker won the unique (run, tool call) claim. Re-read in
+            # a fresh transaction after rollback; do not repeat external I/O.
+            async with self._write() as db:
+                return await attempt(db)
+
+    async def get_operation(self, operation_id: str) -> ChannelMessageOperation | None:
+        async with self._read() as db:
+            return await db.get(ChannelMessageOperation, operation_id)
+
+    async def update_operation(
+        self, operation_id: str, *, state: str, results: list[dict[str, Any]],
+    ) -> ChannelMessageOperation | None:
+        if state not in {"pending", "running", "completed", "failed", "cancelled", "unknown"}:
+            raise ValueError("Invalid outbound operation state")
+        values = self._receipt_results(results)
+        async with self._write() as db:
+            row = await lock_optional(db, ChannelMessageOperation, ChannelMessageOperation.id, operation_id)
+            if row is None:
+                return None
+            if row.state not in {"pending", "running"}:
+                # A restarted/cancelled operation can never become sendable.
+                return row
+            row.state = state
+            row.results = values
+            row.updated_at = datetime.now(timezone.utc)
+            await db.flush()
+            return row
+
+    async def recover_operations(self) -> int:
+        """Startup recovery preserves receipts and never schedules a resend."""
+        async with self._write() as db:
+            rows = (await db.execute(select(ChannelMessageOperation).where(
+                ChannelMessageOperation.state.in_({"pending", "running"}),
+            ).order_by(ChannelMessageOperation.id).with_for_update())).scalars().all()
+            for row in rows:
+                row.state = "unknown"
+                row.results = [
+                    {**item, "state": "unknown"} if item.get("state") in {"pending", "running"} else dict(item)
+                    for item in row.results
+                ]
+                row.updated_at = datetime.now(timezone.utc)
+            return len(rows)
 
     async def account_summary(self, account_id: str) -> dict[str, str]:
         async with self._read() as db:

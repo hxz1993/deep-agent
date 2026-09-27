@@ -99,7 +99,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def _target_engine(
         self,
         *,
-        revision: str = "008",
+        revision: str = "009",
         baseline: bool = False,
     ) -> AsyncEngine:
         target = self.root / f"target-{revision}-{baseline}.db"
@@ -131,10 +131,10 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         include_skill: bool = False,
-        revision: str = "008",
+        revision: str = "009",
     ) -> tuple[Path, Path | None, bytes | None]:
         source = self.root / f"source-{include_skill}-{revision}.db"
-        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="008")
+        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="009")
         raw_skill: bytes | None = None
         if include_skill:
             raw_skill = skill_zip(name="uploaded-skill")
@@ -174,7 +174,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             exported_at=datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc),
             git_commit="test-commit",
         )
-        if revision != "008":
+        if revision != "009":
             with sqlite3.connect(result.path) as connection:
                 connection.execute(
                     "UPDATE alembic_version SET version_num = ?",
@@ -244,8 +244,8 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             await engine.dispose()
 
     async def test_same_dynamic_revision_import_preserves_ids_and_revision(self) -> None:
-        backup_path, _, _ = await self._backup(revision="008")
-        engine = await self._target_engine(revision="008", baseline=True)
+        backup_path, _, _ = await self._backup(revision="009")
+        engine = await self._target_engine(revision="009", baseline=True)
         try:
             plan = await build_configuration_import_plan(
                 backup_path,
@@ -279,7 +279,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 tuple(provider),
                 ("0123456789abcdef0123456789abcdef", "plain-api-key"),
             )
-            self.assertEqual(revision, "008")
+            self.assertEqual(revision, "009")
             self.assertEqual(sessions, 0)
             self.assertEqual(integrations[0]["code"], "deeptable-assistant")
             self.assertEqual(integrations[0]["settings"], {"enabled": True, "options": [1, None, "中文"]})
@@ -316,7 +316,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             await engine.dispose()
 
     async def test_different_revision_is_rejected(self) -> None:
-        backup_path, _, _ = await self._backup(revision="008")
+        backup_path, _, _ = await self._backup(revision="009")
         engine = await self._target_engine(revision="001")
         try:
             with self.assertRaisesRegex(

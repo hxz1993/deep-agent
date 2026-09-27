@@ -14,6 +14,7 @@ from deep_agent.channels.contracts import ChannelAdapter
 from deep_agent.channels.registry import AdapterRegistry, default_registry
 from deep_agent.channels.service import ChannelService
 from deep_agent.db.stores.channel import ChannelStore
+from deep_agent.channels.operations import ChannelOperationService
 
 
 @dataclass
@@ -33,6 +34,7 @@ class ChannelRuntime:
         self.registry = registry if registry is not None else default_registry()
         self.deep_agent = deep_agent if deep_agent is not None else DeepAgentChannelClient(config)
         self.service = ChannelService(store, self.deep_agent, stream_interval=config.stream_interval)
+        self.operations = ChannelOperationService(self)
         self._accounts: dict[str, AccountRuntime] = {}
         self._disabled: dict[str, datetime] = {}
         self._failed: dict[str, dict] = {}
@@ -42,6 +44,7 @@ class ChannelRuntime:
         self._stopping = False
 
     async def start(self) -> None:
+        await self.store.recover_operations()
         interrupted = await self.store.interrupt_incomplete()
         if interrupted:
             logger.warning("Channel Gateway recovered {} interrupted records", interrupted)
@@ -108,6 +111,7 @@ class ChannelRuntime:
         if managed is not None:
             managed.stopping = True
             try:
+                await self.operations.close_account(account_id)
                 await self.service.close_account(account_id)
             finally:
                 await managed.adapter.stop()

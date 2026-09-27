@@ -14,6 +14,8 @@ import uuid
 from types import SimpleNamespace
 from typing import Any
 
+from deep_agent.channels.outbound import DeliveryError
+
 
 def worker_entry(connection, account: dict, infinite_retry: bool) -> None:
     run_worker(connection, account, infinite_retry)
@@ -53,6 +55,7 @@ async def _serve(connection, adapter: Any, *, on_disconnect=None) -> None:
     loop = asyncio.get_running_loop()
     closed = asyncio.Event()
     requests: set[asyncio.Task] = set()
+    calls: dict[str, asyncio.Task] = {}
     admissions: dict[str, asyncio.Future] = {}
     send_lock = threading.Lock()
 
@@ -71,8 +74,6 @@ async def _serve(connection, adapter: Any, *, on_disconnect=None) -> None:
             admissions.pop(identifier, None)
 
     async def execute(packet):
-        task = asyncio.current_task()
-        requests.add(task)
         method = packet.get("method")
         try:
             args = packet.get("args", ())
@@ -84,6 +85,9 @@ async def _serve(connection, adapter: Any, *, on_disconnect=None) -> None:
                 result = adapter.status()
             elif method == "test_connection":
                 result = await adapter.test_connection(*args)
+            elif method == "send_component":
+                target, component, reply_to_current = args
+                result = await adapter.send_component(target, component, reply_to_current=reply_to_current)
             elif method in {"download_media", "reply_loading", "reply"}:
                 result = await getattr(adapter, method)(*args)
             else:
@@ -91,21 +95,40 @@ async def _serve(connection, adapter: Any, *, on_disconnect=None) -> None:
             await asyncio.to_thread(send, {"kind": "result", "id": packet["id"], "result": result})
         except asyncio.CancelledError:
             raise
+        except DeliveryError as exc:
+            await asyncio.to_thread(send, {"kind": "result", "id": packet["id"], "delivery_error": {
+                "code": exc.code, "message": str(exc), "unknown": exc.unknown,
+            }})
         except Exception:
             await asyncio.to_thread(send, {"kind": "result", "id": packet["id"], "error": "Feishu SDK operation failed"})
         finally:
-            requests.discard(task)
             if method == "stop":
                 closed.set()
 
+    def finished(identifier, task):
+        # A task can be cancelled before execute() starts; its finally block
+        # would never run. Track admission, capacity and cleanup at scheduling.
+        requests.discard(task)
+        calls.pop(identifier, None)
+        if not task.cancelled():
+            task.exception()  # Retrieve pipe-close errors during shutdown.
+
     def dispatch(packet):
-        if packet.get("kind") == "admitted":
+        if packet.get("kind") == "cancel":
+            task = calls.get(packet.get("id"))
+            if task is not None:
+                task.cancel()
+        elif packet.get("kind") == "admitted":
             future = admissions.get(packet.get("id"))
             if future and not future.done():
                 future.set_result(None)
         elif not closed.is_set():
             if len(requests) < 128:
-                asyncio.create_task(execute(packet))
+                identifier = packet["id"]
+                task = asyncio.create_task(execute(packet))
+                calls[identifier] = task
+                requests.add(task)
+                task.add_done_callback(lambda done, key=identifier: finished(key, done))
             else:
                 send({"kind": "result", "id": packet["id"], "error": "Feishu worker capacity reached"})
 

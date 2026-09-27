@@ -43,7 +43,7 @@ class FakeAgent:
         self.allow_cancel = True
         self.hold = False
 
-    async def stream_chat(self, account, *, session_id, message, attachments, context_refs=None):
+    async def stream_chat(self, account, *, session_id, message, attachments, context_refs=None, channel_run_id=None):
         self.calls.append((session_id, message))
         done = asyncio.Event()
         self.running[session_id] = done

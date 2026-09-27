@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import json
+import uuid
+from dataclasses import asdict
 from typing import Any
 
 import aiohttp
@@ -27,6 +30,37 @@ class ChannelGatewayClient:
 
     async def test_account(self, account_id: str) -> dict[str, Any]:
         return await self._request("POST", f"/accounts/{account_id}/test")
+
+    async def send_message(self, source, agent_run_id, tool_call_id, components, *, reply=False):
+        operation_id = uuid.uuid5(uuid.NAMESPACE_URL, f"deep-agent-channel:{agent_run_id}:{tool_call_id}").hex
+        metadata = {key: getattr(source, key) for key in
+                    ("account_id", "channel_run_id", "session_id", "agent_id", "user_id")}
+        metadata.update(agent_run_id=agent_run_id, tool_call_id=tool_call_id, reply=reply,
+                        components=[{k: v for k, v in asdict(c).items() if k != "data"} for c in components])
+        form = aiohttp.FormData()
+        form.add_field("metadata", json.dumps(metadata), content_type="application/json")
+        for index, component in enumerate(components):
+            if component.data is not None:
+                form.add_field(f"media_{index}", component.data, filename=component.filename,
+                               content_type=component.mime)
+        try:
+            # The gateway gives each ordered component up to 120 seconds.
+            # Keep the HTTP request alive for the whole batch, including its
+            # terminal receipt; a fixed 180s budget truncates valid multi-file sends.
+            timeout = aiohttp.ClientTimeout(total=120 * len(components) + 30, connect=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(f"{self.base_url}/messages/send", headers=self._headers(), data=form) as response:
+                    payload = await response.json(content_type=None)
+                    if response.status >= 500 or not isinstance(payload, dict):
+                        return {"operation_id": operation_id, "status": "unknown",
+                                "error": "渠道发送结果无法确认，请勿盲目重复发送"}
+                    if response.status >= 400:
+                        return {"operation_id": operation_id, "status": "failed",
+                                "error": payload.get("detail", "渠道发送被拒绝")}
+                    return payload
+        except (aiohttp.ClientError, TimeoutError, ValueError):
+            return {"operation_id": operation_id, "status": "unknown",
+                    "error": "渠道发送结果无法确认，请勿盲目重复发送"}
 
     async def _request(self, method: str, path: str) -> dict[str, Any]:
         if not self.configured:

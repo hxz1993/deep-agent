@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -31,6 +32,9 @@ class MessageJob:
     terminal: bool = False
     task: asyncio.Task | None = None
     agent_run_id: str | None = None
+    message_tool_sent: bool = False
+    sent_text_hashes: set[str] = field(default_factory=set)
+    outbound_tasks: set[asyncio.Task] = field(default_factory=set)
 
 
 def _log_job(event: str, job: MessageJob, **fields: Any) -> None:
@@ -150,6 +154,16 @@ class ChannelService:
         finally:
             peer.worker = None
             self._kick(peer)
+
+    @staticmethod
+    async def _cancel_outbound(job: MessageJob) -> None:
+        # Stop uploads before waiting for API cancellation or final bubble I/O.
+        # A normal HTTP client disconnect does not cancel the gateway handler.
+        tasks = [task for task in job.outbound_tasks if task is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _process(self, job: MessageJob) -> None:
         # Public text phases accumulate only in the temporary preview. Keep the
@@ -271,7 +285,7 @@ class ChannelService:
             final_status = "completed"
             stream = self.deep_agent.stream_chat(
                 account, session_id=job.session_id, message=job.message.prompt, attachments=attachments,
-                **input_options,
+                channel_run_id=job.run_id, **input_options,
             )
             async for event in stream:
                 if event.event == "session":
@@ -317,6 +331,7 @@ class ChannelService:
                     job.terminal = True
                     final_status = "failed"
                 if job.terminal:
+                    await self._cancel_outbound(job)
                     # Deliver immediately, without waiting for HTTP EOF. Late
                     # deltas or a transport failure cannot overwrite a final.
                     break
@@ -338,8 +353,12 @@ class ChannelService:
             _log_job("channel_processing_failed" if processing == "failed" else
                      "channel_cancelled" if processing == "interrupted" else "channel_completed",
                      job, status=final_status)
+            if processing == "completed" and job.message_tool_sent:
+                if not output.strip() or hashlib.sha256(output.strip().encode()).hexdigest() in job.sent_text_hashes:
+                    output = "已发送。"
             await self._deliver(job, output if output.strip() else "已处理完成，但没有可展示的文本结果。")
         except asyncio.CancelledError:
+            await self._cancel_outbound(job)
             _log_job("channel_cancelled", job)
             await self.store.update_run(
                 job.run_id, processing_status="interrupted", delivery_status="failed",
@@ -358,6 +377,7 @@ class ChannelService:
                     logger.warning("Channel loading completion timed out during cancellation")
             raise
         except Exception as exc:
+            await self._cancel_outbound(job)
             _log_job("channel_processing_failed", job, error_type=type(exc).__name__)
             missing_model = isinstance(exc, AgentModelNotConfiguredError)
             await self.store.update_run(
@@ -367,6 +387,7 @@ class ChannelService:
             )
             await self._deliver(job, "Agent 尚未配置模型，请在 DeepAgent 控制台配置模型。" if missing_model else "消息处理失败，请稍后重试或在 DeepAgent 控制台查看状态。")
         finally:
+            await self._cancel_outbound(job)
             if stream is not None:
                 try:
                     async with asyncio.timeout(2):
@@ -446,6 +467,7 @@ class ChannelService:
             session_id = active.session_id if active else (binding.session_id if binding else None)
             if active:
                 active.stopped = True
+                await self._cancel_outbound(active)
                 if not active.dispatched and active.task:
                     active.task.cancel()
                     # A Task cancelled before its first execution never enters

@@ -99,6 +99,8 @@ class ChannelService:
                     account_id=account.id, binding_id=binding.id,
                     external_message_id=message.message_id,
                     external_request_id=message.request_id, sender_id=message.sender_id,
+                    sender_name=message.sender_name, tenant_id=message.tenant_id,
+                    thread_id=message.thread_id, source_metadata=message.source_metadata,
                     session_id=None, payload_hash=message.payload_hash, stream_id=reply_id,
                 )
                 if not claimed.claimed:
@@ -242,6 +244,12 @@ class ChannelService:
                     "peer_id": job.message.peer_id,
                     "sender_id": job.message.sender_id,
                 }
+                if account.channel_type == "feishu":
+                    source.update({key: value for key, value in {
+                        "message_id": job.message.message_id,
+                        "name": job.message.sender_name, "tenant_id": job.message.tenant_id,
+                        "thread_id": job.message.thread_id,
+                    }.items() if value})
                 if identity_application:
                     trusted_identity = identity if (
                         isinstance(identity, dict) and identity.get("application_id") == identity_application

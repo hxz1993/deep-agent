@@ -3,6 +3,8 @@ const channelAdminState = {
   agents: [],
   runtime: null,
   editingId: null,
+  channelType: "wecom",
+  feishuMode: "scan",
   view: "accounts",
   applications: [],
   applicationLoadGeneration: 0,
@@ -10,6 +12,70 @@ const channelAdminState = {
   apiKeyDraft: "",
   clearApiKey: false,
 };
+
+let channelFeishuRegistration = null;
+function renderFeishuRegistration(data) {
+  const status = document.getElementById("channelFeishuScanStatus");
+  const qr = document.getElementById("channelFeishuQr");
+  const link = document.getElementById("channelFeishuAuthLink");
+  const button = document.getElementById("channelFeishuStartScan");
+  const retry = document.getElementById("channelFeishuRetryScan");
+  const retryable = ["failed", "expired", "denied", "cancelled"].includes(data.status);
+  retry.hidden = !retryable;
+  const labels = { starting: "正在准备二维码…", waiting: "使用飞书扫码，完成应用创建和授权。", authorized: "应用已授权，填写渠道信息后保存。", expired: "二维码已过期，请重新生成。", denied: "授权已拒绝，可重新扫码或关联已有应用。", failed: "授权失败，请重试。", cancelled: "授权已取消。" };
+  status.textContent = data.error || labels[data.status] || "可先填写渠道名称，生成二维码后用手机飞书扫码。应用名称会自动预填，确认创建和授权后保存渠道。";
+  button.disabled = ["starting", "waiting"].includes(data.status);
+  button.hidden = retryable || ["waiting", "authorized"].includes(data.status);
+  button.textContent = data.status === "starting" ? "正在生成…" : "生成二维码";
+  qr.hidden = true; qr.innerHTML = ""; link.hidden = true; link.removeAttribute("href");
+  if (data.status === "waiting" && data.verification_url) {
+    try {
+      const url = new URL(data.verification_url);
+      if (url.protocol !== "https:" || !["feishu.cn", "larksuite.com"].some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))) throw new Error("授权地址不是飞书官方地址");
+      const code = qrcode(0, "M"); code.addData(url.href); code.make();
+      qr.innerHTML = code.createSvgTag({ scalable: true, margin: 4 }); qr.hidden = false;
+      link.href = url.href; link.hidden = false;
+    } catch (error) { status.textContent = error.message; button.hidden = true; retry.hidden = false; }
+  }
+}
+function setChannelFeishuMode(mode) {
+  if (channelAdminState.saving) return;
+  channelAdminState.feishuMode = mode === "scan" ? "scan" : "manual";
+  const scan = channelAdminState.channelType === "feishu" && channelAdminState.feishuMode === "scan";
+  document.querySelectorAll("[data-feishu-mode]").forEach(button => {
+    const selected = button.dataset.feishuMode === channelAdminState.feishuMode;
+    button.classList.toggle("active", selected); button.setAttribute("aria-pressed", String(selected));
+  });
+  document.getElementById("channelFeishuScan").hidden = !scan;
+  document.getElementById("channelFeishuManualHint").hidden = scan;
+  ["channelBotId", "channelSecret"].forEach(id => {
+    const input = document.getElementById(id); input.closest(".field").hidden = scan; input.disabled = scan;
+  });
+  document.getElementById("channelBotId").required = !scan;
+  document.getElementById("channelSecret").required = !scan && !channelAdminState.editingId;
+}
+function prepareChannelPlatform(type) {
+  channelFeishuRegistration?.reset();
+  renderFeishuRegistration({});
+  channelAdminState.channelType = type === "feishu" ? "feishu" : "wecom";
+  const feishu = channelAdminState.channelType === "feishu";
+  document.getElementById("channelPlatformSubtitle").textContent = feishu ? "飞书应用机器人" : "企微智能机器人";
+  document.getElementById("channelBotIdLabel").textContent = feishu ? "App ID" : "Bot ID";
+  document.getElementById("channelBotId").placeholder = feishu ? "请输入 App ID" : "请输入 Bot ID";
+  document.getElementById("channelConnectionHelp").innerHTML = feishu
+    ? "<strong>使用飞书企业自建应用</strong><p>在飞书开放平台获取 App ID 和 App Secret，开启机器人能力。</p><p>事件订阅选择长连接，添加接收消息事件并发布应用。</p>"
+    : "<strong>使用企微智能机器人</strong><p>在企业微信创建智能机器人，选择 API 模式，获取 Bot ID 和 Secret。</p><p>通过长连接接收消息，无需配置公网回调地址。</p>";
+  document.getElementById("channelSecretLabel").textContent = feishu ? "App Secret" : "Secret";
+  document.getElementById("channelName").placeholder = feishu ? "例如：飞书助手" : "例如：企微助手";
+  document.getElementById("channelConnectionTitle").textContent = feishu ? "飞书连接" : "企微连接";
+  document.getElementById("channelFeishuMode").hidden = !feishu || Boolean(channelAdminState.editingId);
+  document.getElementById("channelFeishuSetup").hidden = !feishu || Boolean(channelAdminState.editingId);
+  document.getElementById(feishu && !channelAdminState.editingId ? "channelFeishuCredentials" : "channelCredentialHome").append(document.getElementById("channelCredentialLayout"));
+  document.getElementById("channelMemberTab").hidden = feishu;
+  document.getElementById("channelAccountModal").classList.toggle("feishu-channel-modal", feishu);
+  document.getElementById("channelWecomMemberToggle").hidden = feishu;
+  setChannelFeishuMode(feishu && !channelAdminState.editingId ? "scan" : "manual");
+}
 
 const channelUserQuery = { generation: 0, controller: null };
 
@@ -87,7 +153,7 @@ function renderChannelAgentOptions(selectedId = "") {
   const select = document.getElementById("channelAgentId");
   if (!select) return;
   select.innerHTML = channelAdminState.agents.length
-    ? channelAdminState.agents.map((agent) => `<option value="${escapeHtml(agent.id)}" ${agent.id === selectedId ? "selected" : ""}>${escapeHtml(agent.name)}</option>`).join("")
+    ? `<option value="" disabled hidden ${selectedId ? "" : "selected"}>请选择</option>` + channelAdminState.agents.map((agent) => `<option value="${escapeHtml(agent.id)}" ${agent.id === selectedId ? "selected" : ""}>${escapeHtml(agent.name)}</option>`).join("")
     : '<option value="">（请先创建 Agent）</option>';
   select.disabled = !channelAdminState.agents.length;
 }
@@ -138,6 +204,7 @@ function setChannelUserDetailsEnabled(enabled) {
   button.classList.toggle("on", enabled);
   button.classList.toggle("off", !enabled);
   document.querySelector('#channelMemberTab .channel-extension-dot')?.classList.toggle("on", enabled);
+  enabled = enabled && channelAdminState.channelType !== "feishu";
   document.getElementById("channelWecomApplicationField").hidden = !enabled;
   document.getElementById("channelWecomApplicationId").required = enabled;
 }
@@ -163,6 +230,12 @@ async function prepareChannelApplicationEditor(settings = {}) {
   const select = document.getElementById("channelWecomApplicationId");
   if (!select) return;
   const generation = ++channelAdminState.applicationLoadGeneration;
+  if (channelAdminState.channelType === "feishu") {
+    channelAdminState.applications = [];
+    setChannelUserDetailsEnabled(false);
+    select.disabled = true;
+    return;
+  }
   const selectedId = settings?.wecom?.application_id || "";
   select.dataset.selectedId = selectedId;
   select.innerHTML = '<option value="" hidden disabled selected>正在加载企微应用…</option>';
@@ -279,7 +352,7 @@ const channelsAdmin = {
       return `<tr class="channel-list-row" data-open-channel="${escapeHtml(account.id)}" tabindex="0">
         <td class="channel-enabled-cell"><button type="button" class="model-enabled-switch ${account.enabled ? "on" : "off"}" data-toggle-channel="${escapeHtml(account.id)}" role="switch" aria-checked="${account.enabled}" title="${account.enabled ? "停用渠道" : "启用渠道"}" aria-label="${account.enabled ? "停用渠道" : "启用渠道"}"><span></span></button></td>
         <td><strong>${escapeHtml(account.name)}</strong></td>
-        <td class="channel-type-cell"><span class="channel-type-label"><img src="./assets/channel-logos/wecom.png" width="18" height="18" alt="" />企微（WS）</span></td>
+        <td class="channel-type-cell"><span class="channel-type-label"><img src="./assets/channel-logos/${account.channel_type === "feishu" ? "feishu.ico" : "wecom.png"}" width="18" height="18" alt="" />${account.channel_type === "feishu" ? "飞书" : "企微"}（WS）</span></td>
         <td>${escapeHtml(account.agent_name || account.agent_id)}</td>
         <td><span class="channel-status" data-state="${escapeHtml(runtime.state)}" title="${escapeHtml(runtime.message || "")}"><span></span>${escapeHtml(CHANNEL_STATE_LABELS[runtime.state] || runtime.state)}</span></td>
         <td>${escapeHtml(formatDate(account.updated_at))}</td>
@@ -322,12 +395,13 @@ const channelsAdmin = {
     window.lucide?.createIcons();
   },
 
-  openCreate() {
+  openCreate(channelType = "wecom") {
     clearChannelUserQuery();
     channelAdminState.editingId = null;
-    document.getElementById("channelAccountModalTitle").textContent = "新建企微渠道";
+    prepareChannelPlatform(channelType);
+    document.getElementById("channelAccountModalTitle").textContent = channelType === "feishu" ? "新建飞书渠道" : "新建企微渠道";
     document.getElementById("channelName").value = "";
-    renderChannelAgentOptions(channelAdminState.agents[0]?.id || "");
+    renderChannelAgentOptions();
     document.getElementById("channelBotId").value = "";
     document.getElementById("channelSessionUserId").value = "";
     setChannelSecretEditor({ required: true });
@@ -341,6 +415,7 @@ const channelsAdmin = {
     if (!account) return;
     clearChannelUserQuery();
     channelAdminState.editingId = accountId;
+    prepareChannelPlatform(account.channel_type);
     document.getElementById("channelAccountModalTitle").textContent = account.name;
     document.getElementById("channelName").value = account.name;
     renderChannelAgentOptions(account.agent_id);
@@ -361,13 +436,18 @@ const channelsAdmin = {
     const enabled = document.getElementById("channelUserDetailsEnabled").getAttribute("aria-checked") === "true";
     const applicationSelect = document.getElementById("channelWecomApplicationId");
     const applicationId = applicationSelect.disabled ? applicationSelect.dataset.selectedId : applicationSelect.value;
-    if (enabled && !channelAdminState.applications.some(item => item.id === applicationId)) {
+    const feishu = channelAdminState.channelType === "feishu";
+    const scan = feishu && !editingId && channelAdminState.feishuMode === "scan";
+    if (scan && !channelFeishuRegistration?.authorizedId) {
+      AdminFormFeedback.show(form, "请先完成飞书扫码授权，或选择关联已有应用。"); return;
+    }
+    if (!feishu && enabled && !channelAdminState.applications.some(item => item.id === applicationId)) {
       AdminFormFeedback.show(form, "请选择有效的企微应用；没有应用时，请先创建。");
       return;
     }
     const payload = {
       settings: {
-        ...channelUserDetailsSettings(account?.settings || {}, enabled, applicationId),
+        ...(feishu ? { ...account?.settings, feishu: { domain: "feishu", require_mention: true, ...account?.settings?.feishu } } : channelUserDetailsSettings(account?.settings || {}, enabled, applicationId)),
         deepfos: {
           ...channelApiKeySettings(account?.settings?.deepfos),
           enabled: document.getElementById("channelDeepfosEnabled").getAttribute("aria-checked") === "true",
@@ -382,7 +462,8 @@ const channelsAdmin = {
     const secretInput = document.getElementById("channelSecret");
     const secret = secretInput.value.trim();
     if (secret && secret !== secretInput.dataset.maskedValue) payload.secret = secret;
-    if (!editingId) payload.enabled = false;
+    if (!editingId) { payload.enabled = false; payload.channel_type = channelAdminState.channelType; }
+    if (scan) { payload.registration_id = channelFeishuRegistration.authorizedId; delete payload.bot_id; delete payload.secret; }
     channelAdminState.saving = true;
     form.querySelectorAll("button").forEach(button => { button.disabled = true; });
     try {
@@ -390,9 +471,10 @@ const channelsAdmin = {
         method: editingId ? "PUT" : "POST",
         body: JSON.stringify(payload),
       });
+      channelFeishuRegistration?.reset({ consumed: scan });
       document.getElementById("channelAccountModal").close();
       showToast(editingId ? "渠道已更新" : "渠道已创建");
-      await this.refresh();
+      await refreshAfterSuccessfulMutation(editingId ? "渠道已更新" : "渠道已创建", () => this.refresh());
     } catch (error) {
       AdminFormFeedback.show(form, error.message);
     } finally {
@@ -480,14 +562,17 @@ function bindChannelCreateMenu() {
     event.preventDefault();
     open(true);
   });
-  option.addEventListener("click", () => {
+  const options = Array.from(menu.querySelectorAll("[role=menuitem]"));
+  options.forEach(item => item.addEventListener("click", () => {
     close();
-    channelsAdmin.openCreate();
-  });
+    channelsAdmin.openCreate(item.id === "createFeishuChannelBtn" ? "feishu" : "wecom");
+  }));
   menu.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
       event.preventDefault();
-      option.focus();
+      const index = options.indexOf(document.activeElement);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : (index + (event.key === "ArrowDown" ? 1 : options.length - 1)) % options.length;
+      options[next]?.focus();
     }
   });
   document.addEventListener("keydown", (event) => {
@@ -506,6 +591,9 @@ function bindChannelCreateMenu() {
 window.channelsAdmin = channelsAdmin;
 
 document.addEventListener("DOMContentLoaded", () => {
+  channelFeishuRegistration = window.createFeishuRegistration({ onChange: renderFeishuRegistration });
+  document.querySelectorAll("[data-feishu-mode]").forEach(button => button.addEventListener("click", () => setChannelFeishuMode(button.dataset.feishuMode)));
+  ["channelFeishuStartScan", "channelFeishuRetryScan"].forEach(id => document.getElementById(id)?.addEventListener("click", () => channelFeishuRegistration.start({ appName: document.getElementById("channelName").value.trim() })));
   document.getElementById("queryChannelSessionUserBtn")?.addEventListener("click", queryChannelSessionUser);
   document.getElementById("channelSessionUserId")?.addEventListener("input", clearChannelUserQuery);
   document.addEventListener("click", event => {
@@ -516,16 +604,23 @@ document.addEventListener("DOMContentLoaded", () => {
       event.preventDefault(); event.stopPropagation(); clearChannelUserQuery();
     }
   });
+  document.getElementById("channelAgentId")?.addEventListener("change", event => {
+    if (channelAdminState.editingId) return;
+    const agent = channelAdminState.agents.find(item => item.id === event.target.value);
+    if (agent) document.getElementById("channelName").value = agent.name;
+  });
   bindChannelCreateMenu();
   const extensionTabs = Array.from(document.querySelectorAll("[data-channel-extension]"));
-  extensionTabs.forEach((button, index) => {
+  extensionTabs.forEach(button => {
     button.addEventListener("click", () => selectChannelExtension(button.dataset.channelExtension));
     button.addEventListener("keydown", event => {
-      const next = event.key === "Home" ? 0 : event.key === "End" ? extensionTabs.length - 1 : event.key === "ArrowDown" ? (index + 1) % extensionTabs.length : event.key === "ArrowUp" ? (index + extensionTabs.length - 1) % extensionTabs.length : -1;
+      const visibleTabs = extensionTabs.filter(tab => !tab.hidden);
+      const index = visibleTabs.indexOf(button);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? visibleTabs.length - 1 : event.key === "ArrowDown" ? (index + 1) % visibleTabs.length : event.key === "ArrowUp" ? (index + visibleTabs.length - 1) % visibleTabs.length : -1;
       if (next < 0) return;
       event.preventDefault();
-      selectChannelExtension(extensionTabs[next].dataset.channelExtension);
-      extensionTabs[next].focus();
+      selectChannelExtension(visibleTabs[next].dataset.channelExtension);
+      visibleTabs[next].focus();
     });
   });
   document.getElementById("channelAccountForm")?.addEventListener("invalid", event => {
@@ -591,6 +686,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("channelAccountModal")?.addEventListener("cancel", event => { event.preventDefault(); closeAccount(); });
   document.getElementById("channelAccountModal")?.addEventListener("close", () => {
     clearChannelUserQuery();
+    channelFeishuRegistration?.reset();
     channelAdminState.applicationLoadGeneration++;
     document.getElementById("channelSecret").value = "";
     channelAdminState.apiKeyDraft = "";

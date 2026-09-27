@@ -27,7 +27,7 @@ from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.stores.wecom import validate_channel_wecom_settings
 from deep_agent.db.stores.event.base import SessionEventStore
 from deep_agent.channels.metadata import channel_session_title, normalize_channel_origin, normalize_peer_metadata, wecom_application_id
-from deep_agent.channels.app_context import channel_deepfos_app, merge_channel_settings
+from deep_agent.channels.app_context import channel_deepfos_app, merge_channel_settings, validate_channel_settings
 from deep_agent.agent.request_context import derive_space_from_app
 from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
 
@@ -72,10 +72,14 @@ class ChannelStore(SessionBoundMixin):
     async def create_account(
         self, data: ChannelAccountCreate
     ) -> ChannelAccount:
+        if data.registration_id or not data.bot_id or not data.secret:
+            raise ValueError("请先完成渠道凭据配置")
         try:
             async with self._write(exclusive=True) as db:
                 await lock_reference(db, Agent, Agent.id, data.agent_id, "Agent")
-                await validate_channel_wecom_settings(db, data.settings)
+                validate_channel_settings(data.channel_type, data.settings)
+                if data.channel_type == "wecom":
+                    await validate_channel_wecom_settings(db, data.settings)
                 row = ChannelAccount(
                     id=uuid4().hex,
                     **{**data.model_dump(), "settings": merge_channel_settings(data.settings)},
@@ -87,7 +91,7 @@ class ChannelStore(SessionBoundMixin):
         except IntegrityError as exc:
             if not is_unique_conflict(exc):
                 raise
-            raise ValueError("同一企微 Bot 只能配置一次") from exc
+            raise ValueError("同一渠道机器人只能配置一次") from exc
 
     async def update_account(
         self,
@@ -101,7 +105,9 @@ class ChannelStore(SessionBoundMixin):
                 )
                 if row is None:
                     return None
-                await validate_channel_wecom_settings(db, data.settings if "settings" in data.model_fields_set else row.settings)
+                validate_channel_settings(row.channel_type, data.settings if "settings" in data.model_fields_set else row.settings)
+                if row.channel_type == "wecom":
+                    await validate_channel_wecom_settings(db, data.settings if "settings" in data.model_fields_set else row.settings)
                 for field, value in data.model_dump(exclude_unset=True).items():
                     if field == "settings":
                         value = merge_channel_settings(value, row.settings)
@@ -113,7 +119,7 @@ class ChannelStore(SessionBoundMixin):
         except IntegrityError as exc:
             if not is_unique_conflict(exc):
                 raise
-            raise ValueError("同一企微 Bot 只能配置一次") from exc
+            raise ValueError("同一渠道机器人只能配置一次") from exc
 
     async def _deletion_impact(self, db, account_id: str, user_id: str) -> DeletionImpact | None:
         if await self._lock_account_for_write(db, account_id) is None:
@@ -527,6 +533,10 @@ class ChannelStore(SessionBoundMixin):
         session_id: str | None,
         payload_hash: str,
         stream_id: str | None = None,
+        sender_name: str | None = None,
+        tenant_id: str | None = None,
+        thread_id: str | None = None,
+        source_metadata: dict | None = None,
     ) -> ClaimedChannelMessage:
         now = datetime.now(timezone.utc)
         try:
@@ -539,6 +549,10 @@ class ChannelStore(SessionBoundMixin):
                     external_message_id=external_message_id,
                     external_request_id=external_request_id,
                     sender_id=sender_id,
+                    sender_name=sender_name,
+                    tenant_id=tenant_id,
+                    thread_id=thread_id,
+                    source_metadata=source_metadata or None,
                     session_id=session_id,
                     payload_hash=payload_hash,
                     stream_id=stream_id,

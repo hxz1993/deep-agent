@@ -141,6 +141,9 @@ class ChannelRuntime:
                     return None
 
                 try:
+                    if account.channel_type == "feishu":
+                        result = await adapter.test_connection(self.config.test_timeout)
+                        return {"account_id": account_id, **result}
                     await adapter.start(ignore_message)
                     result = await adapter.test_connection(self.config.test_timeout)
                     return {"account_id": account_id, **result, "warning": "临时测试结束后会断开连接；同一机器人在其他地方的长连接可能被中断。"}

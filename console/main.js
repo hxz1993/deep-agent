@@ -6,10 +6,10 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260925-provider-list-1";
+} from "./configuration.js?v=20260927-feishu-release-0117";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260925-provider-list-1";
-import { initWorkspace } from "./workspace.js?v=20260925-provider-list-1";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260927-feishu-release-0117";
+import { initWorkspace } from "./workspace.js?v=20260927-feishu-release-0117";
 import "./time.js?v=20260913-49";
 
 initUserIdentityControls();

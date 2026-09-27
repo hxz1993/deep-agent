@@ -2,11 +2,11 @@
 
 DeepAgent 支持企微智能机器人 WebSocket 长连接。API 与 Gateway 使用同一代码和镜像，但
 Gateway 是可选独立进程：不使用渠道的环境无需启动，也不会建立外部连接。公共网关通过 Adapter
-管理渠道，当前只实现企微 Adapter；飞书需要后续增加适配，不能直接填配置启用。
+管理渠道，企微与[飞书 Adapter](feishu-channel.md)共用同一网关，分别处理各自平台协议。
 
 ## 前置条件
 
-- 数据库已由 API 升级到当前 Head；v0.10.1 对应 Alembic `006`，`005 → 006` 保留现有渠道配置。
+- 数据库已由 API 升级到当前 Head `008`；本次仅新增消息来源列，保留现有企微渠道配置。
 - 已安装 `requirements.txt` 中固定的 `wecom-aibot-python-sdk==1.0.2`。
 - API 与 Gateway 可以访问同一数据库，Gateway 可以访问 DeepAgent API 和企微公网地址。
 - 生产环境生成高熵内部 Token，并只通过 Secret/私有环境变量注入。

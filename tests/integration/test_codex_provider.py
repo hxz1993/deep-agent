@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -19,6 +21,23 @@ from tests.helpers.sqlite_stores import make_sqlite_stores
 
 class CodexProviderTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        # Keep the actual OS ownership lock, but isolate it from the running
+        # developer service and from other tests in this process.
+        from deep_agent.services import codex_provider
+        temporary = tempfile.TemporaryDirectory(prefix="TMP_to_delete_codex_owner_")
+        self.addCleanup(temporary.cleanup)
+        path_patch = patch("deep_agent.services.codex_provider.Path", wraps=Path)
+        path_proxy = path_patch.start()
+        path_proxy.home.return_value = Path(temporary.name)
+        self.addCleanup(path_patch.stop)
+        owner_patch = patch("deep_agent.services.codex_provider._owner_file", None)
+        owner_patch.start()
+        self.addCleanup(owner_patch.stop)
+        def release_test_owner():
+            if codex_provider._owner_file is not None:
+                codex_provider._owner_file.close()
+                codex_provider._owner_file = None
+        self.addCleanup(release_test_owner)
         self._env = patch.dict(os.environ, {"DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "true"})
         self._env.start()
         FLOWS._flows.clear()

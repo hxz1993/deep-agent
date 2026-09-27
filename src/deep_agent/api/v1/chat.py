@@ -191,6 +191,19 @@ async def _current_channel_context(ctx, body, account):
         if reference.type != "channel.message_source":
             continue
         payload = reference.payload
+        if current.channel_type == "feishu":
+            # Enrichment is display-only and comes from the persisted inbound
+            # event, never from client-provided names or tenant claims.
+            for key in ("userid", "name", "tenant_id", "thread_id"):
+                payload.pop(key, None)
+            message_id = payload.get("message_id")
+            record = await ctx.stores.channel.get_message(current.id, message_id) if isinstance(message_id, str) else None
+            if record and record.sender_id == payload.get("sender_id"):
+                payload.update({key: value for key, value in {
+                    "name": record.sender_name, "tenant_id": record.tenant_id,
+                    "thread_id": record.thread_id,
+                }.items() if value})
+            continue
         if "userid" not in payload and "name" not in payload:
             continue
         payload.pop("userid", None)

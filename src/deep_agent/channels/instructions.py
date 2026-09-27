@@ -4,7 +4,7 @@
 def channel_instructions(channel_type: str | None) -> str:
     if not channel_type:
         return ""
-    platform = "企业微信" if channel_type == "wecom" else "外部聊天平台"
+    platform = {"wecom": "企业微信", "feishu": "飞书"}.get(channel_type, "外部聊天平台")
     return f"""## 渠道会话设定
 本轮消息来自{platform}，你的回复将发送到当前来源会话。
 - channel.message_source 上下文记录 channel_type、account_id、peer_type、peer_id 和 sender_id。群聊每条消息携带；私聊仅在 Session 首轮携带，后续沿用该身份，没有重复携带不表示换人。sender_id 是外部发送者标识，不是平台账号或权限凭证；不要猜测其姓名或把昵称当作身份。

@@ -33,7 +33,9 @@ class AdapterRegistry:
 
 def default_registry() -> AdapterRegistry:
     from .adapters.wecom import WecomAdapter
+    from .adapters.feishu import FeishuAdapter
 
     registry = AdapterRegistry()
     registry.register("wecom", WecomAdapter, WecomAdapter.connection_fingerprint)
+    registry.register("feishu", FeishuAdapter, FeishuAdapter.connection_fingerprint)
     return registry

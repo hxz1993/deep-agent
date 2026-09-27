@@ -13,7 +13,7 @@
 | 1 / `CREDENTIAL-ENCRYPTION-001` | [敏感凭据数据库加密存储](31-credential-encryption/README.md) | 尚未实施。统一覆盖 API Key、OAuth Token、机器人及应用 Secret；先确认密钥部署、旧数据迁移、轮换和备份恢复。只需服务端与部署配合，无业务客户端升级要求 |
 | 2 / `UI-INLINE-WAIT-001` | [UI 工具同 Run 等待与执行连续性](30-ui-tool-inline-wait/README.md) | 已有设计及 SDK/PTC 隔离验证，尚未实施。保留 UI 工具和 Agent 安装定义，改等待/答案回传/取消链路；Console 与业务客户端需同步适配。兼容与协调升级方案仍由用户决策，不默认双模式 |
 
-随后候选：飞书/个人微信渠道见下方渠道回顾；会话级沙盒与平台自动化任务保留原课题，尚未自动纳入近期实施。D01 已交付，不再列为待开发。
+飞书代码与本地受控验收已完成，真实租户验收待办，个人微信暂不开发，见下方渠道回顾；会话级沙盒与平台自动化任务保留原课题，尚未自动纳入近期实施。D01 已交付，不再列为待开发。
 
 ## v0.11.6 D01 已完成（2026-09-26）
 
@@ -74,13 +74,13 @@ C02 已在 v0.10.18 完成，缓存统计展示已在 v0.10.19 完成。C04 与 
 - 原始Usage和基准指纹随响应保留，不新增表或迁移历史。只读历史重开缺少最终请求参数，仍为`history_only`估算；有效历史基准在此处以`request_parameters_unavailable`回退，真正新请求可重新验证复用。字段与边界见[预算指南](../guides/context-compaction-budget.md)。
 - 真实主动压缩验收：预计占用`19,714 → 7,604`，目标`10,701`，实际摘要调用1次（输入`10,268`／输出`1,936`）；压缩后续聊正确保留验收口令、收入／成本／毛利及附件名，真实Usage为输入`13,587`／输出`51`并建立新基准。另验证受保护内容过大时拒绝且不调用摘要模型；日常压缩阈值未修改。
 
-## 渠道下一步（[32 独立课题](32-new-channels/README.md)，未启动实施）
+## 渠道下一步（[32 独立课题](32-new-channels/README.md)）
 
-- `FEISHU-CHANNEL-001`：[飞书渠道完整调研](32-new-channels/feishu-channel-research.md)。2026-09-27 已核对官方 SDK/PyPI 包与 OpenClaw、AstrBot：建议企业自建应用＋WebSocket，不依赖公网回调放行；提供手填与官方扫码注册两入口，先验证官方高层 Channel SDK 的持久接纳和生命周期适配。尚未扫码、联调或批准实施。
+- `FEISHU-CHANNEL-001`：[飞书渠道完整调研](32-new-channels/feishu-channel-research.md)。2026-09-27 已核对官方 SDK/PyPI 包与 OpenClaw、AstrBot：建议企业自建应用＋WebSocket，不依赖公网回调放行；提供手填与官方扫码注册两入口，先验证官方高层 Channel SDK 的持久接纳和生命周期适配。用户已批准实施，已完成官方 SDK 独立适配器、扫码／手填配置和企微回归，见[验收记录](../reports/20260927-feishu-channel/README.md)；真实租户扫码授权与收发待账号验收。
 
 - `PUBLIC-CALLBACK-001`：[公网平台回调与 Gateway 放行](32-new-channels/public-callback-gateway-design.md)。2026-09-27 已核验 Gateway 源码：现有硬编码免登录机制可扩展为受控路由配置；需统一过滤链、固定目标、隔离身份头并脱敏日志。企微自建应用另需接收端验签和企业主体域名。先交平台开发评审，未实施；不做服务自行注册免登录接口。个人微信暂不开发，公众号暂停讨论。
 
-[飞书、微信与 AstrBot 复盘](32-new-channels/channel-expansion-review.md)：企微已有，飞书与个人微信尚未实现。微信已有专项讨论；飞书 09-27 补充专项报告和建议方案，尚未批准实施；沿用公共 Gateway，不接入 AstrBot 作为第二套运行时。优先明确会话隔离、使用者身份、凭据生命周期、回复能力和去重恢复。
+[飞书、微信与 AstrBot 复盘](32-new-channels/channel-expansion-review.md)：企微已有，飞书待真实租户验收，个人微信暂不开发。微信已有专项讨论；飞书 09-27 已批准长连接方案；沿用公共 Gateway，不接入 AstrBot 作为第二套运行时。优先明确会话隔离、使用者身份、凭据生命周期、回复能力和去重恢复。
 
 ## 后续潜力方向／需要真实需求后再设计
 
@@ -112,7 +112,7 @@ D01 已在 v0.11.6 完成；D04 已拆分：Choices 当前不接，列入上述�
 
 - 企微 AIBot WebSocket Channel，使用官方 Python SDK 承接认证、心跳、重连、媒体解密和流式回复。
 - 可选独立 Gateway 进程、Account/Session Binding/Message Run 三表、管理员配置的会话用户与同Peer串行。
-- 公共 Gateway/ChannelService 与 WeCom Adapter 分离；仅 Adapter 引用官方 SDK，飞书适配仍需另行实现。
+- 公共 Gateway/ChannelService 与 WeCom Adapter 分离；仅 Adapter 引用官方 SDK，飞书适配已独立实现，真实租户验收待办。
 - 五个渠道命令 `/help`、`/new`、`/stop`、`/status`、`/whoami`；停止独立控制路径与15秒确认，
   `/new` 停止后原子换绑，旧历史保留；不实现 `/reset`，普通客户端不增加全局拦截。
 - text、mixed、图片、文件、AMR语音和视频进入现有Chat/FileStore链路，回复只投影Markdown文本。

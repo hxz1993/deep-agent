@@ -24,9 +24,15 @@ from deep_agent.diagnostics.runtime import observe_lifespan
 async def lifespan(app: FastAPI):
     configure_logging()
     ctx = await AppContext.bootstrap()
-    yield
-    await ctx.aclose()
-    reset_context()
+    try:
+        yield
+    finally:
+        from deep_agent.services.feishu_registration import registration_service
+        try:
+            await registration_service.aclose()
+        finally:
+            await ctx.aclose()
+            reset_context()
 
 
 app = FastAPI(

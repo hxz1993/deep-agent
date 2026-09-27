@@ -120,16 +120,16 @@ test("网关状态与机器人认证状态分开表达", () => {
 
 test("渠道表单绑定Agent且Secret只展示脱敏值并支持留空保留", () => {
   assert.match(templateHtml, /id="channelAgentId"/);
-  assert.match(templateHtml, /<span>会话用户<\/span>/);
+  assert.match(templateHtml, /<span>会话关联用户<\/span>/);
   assert.match(templateHtml, /type="text" id="channelSessionUserId" maxlength="128" required/);
   assert.match(templateHtml, /id="channelSessionUserId"[^>]*aria-describedby="channelSessionUserHint"/);
-  assert.match(templateHtml, /field-label-row[^\n]*<span>会话用户<\/span><small class="field-subtitle" id="channelSessionUserHint">使用此平台账号记录渠道会话。<\/small>/);
+  assert.match(templateHtml, /field-label-row[^\n]*<span>会话关联用户<\/span><small class="field-subtitle" id="channelSessionUserHint">使用此平台账号记录渠道会话。<\/small>/);
   assert.match(source, /session_user_id: document.getElementById\("channelSessionUserId"\).value.trim\(\)/);
   assert.match(source, /channelSessionUserId"\).value = account.session_user_id/);
   assert.match(templateHtml, /id="channelBotId"/);
   assert.match(templateHtml, /渠道名称/);
   assert.doesNotMatch(templateHtml, /渠道类型/);
-  assert.match(templateHtml, /id="channelBotId"[\s\S]*<span>Secret<\/span>[\s\S]*id="channelSecret"/);
+  assert.match(templateHtml, /id="channelBotId"[\s\S]*<span[^>]*>Secret<\/span>[\s\S]*id="channelSecret"/);
   assert.doesNotMatch(templateHtml, /channel-form-wide/);
   assert.match(templateHtml, /<input type="password" id="channelSecret"/);
   assert.doesNotMatch(templateHtml, /0\.7\.0 按普通字符串保存/);
@@ -157,6 +157,8 @@ function secretEditorHarness() {
       value: "", dataset: {}, listeners: {}, attributes: {}, open: false, selected: false,
       classList: { toggle() {} }, querySelectorAll() { return []; },
       setAttribute(key, value) { this.attributes[key] = value; },
+      removeAttribute(key) { delete this.attributes[key]; },
+      closest() { return this; }, append(child) { this.child = child; },
       getAttribute(key) { return this.attributes[key]; },
       addEventListener(type, listener) { this.listeners[type] = listener; },
       showModal() { this.open = true; }, close() { this.open = false; },
@@ -165,7 +167,7 @@ function secretEditorHarness() {
     return elements.get(id);
   };
   const context = vm.createContext({
-    window: {},
+    window: { createFeishuRegistration: () => ({ reset() {}, start() {} }) },
     document: {
       addEventListener(type, listener) { if (type === "DOMContentLoaded") ready.push(listener); },
       getElementById: getElement,
@@ -176,6 +178,7 @@ function secretEditorHarness() {
     AdminFormFeedback: { clear() {}, show() { assert.fail("unexpected save failure"); } },
     escapeHtml: (value) => String(value ?? ""),
     showToast() {},
+    refreshAfterSuccessfulMutation: async (_message, refresh) => { try { await refresh(); } catch {} },
   });
   vm.runInContext(source, context);
   vm.runInContext(`channelAdminState.accounts = [
@@ -185,7 +188,7 @@ function secretEditorHarness() {
   ready.forEach((listener) => listener());
   const admin = context.window.channelsAdmin;
   admin.refresh = async () => {};
-  return { admin, getElement, requests };
+  return { admin, getElement, requests, context };
 }
 
 test("渠道Secret回显安全掩码，聚焦全选且编辑后隐藏新值", () => {
@@ -239,7 +242,7 @@ test("渠道启停只在列表使用Switch切换", () => {
 });
 
 test("渠道列表使用单行类型、行点击编辑与统一纯图标操作", () => {
-  assert.match(source, /企微（WS）/);
+  assert.match(source, /account.channel_type === "feishu" \? "飞书" : "企微"/);
   assert.doesNotMatch(source, /channel-account-code|channel-transport/);
   assert.match(source, /<td><strong>\$\{escapeHtml\(account\.name\)\}<\/strong><\/td>\s*<td class="channel-type-cell">/);
   assert.match(source, /class="channel-list-row" data-open-channel=/);
@@ -278,6 +281,7 @@ test("新建渠道先选择企微，支持键盘和外部关闭且不提前创�
   const trigger = elements.newChannelBtn = element();
   const menu = elements.newChannelMenu = element();
   const option = elements.createWecomChannelBtn = element();
+  menu.querySelectorAll = () => [option];
   context.document.addEventListener = (type, listener) => { documentEvents[type] = listener; };
   admin.openCreate = () => { opened += 1; };
   vm.runInContext("bindChannelCreateMenu()", context);
@@ -371,7 +375,7 @@ function userQueryHarness(fetchProfile) {
     clear: () => vm.runInContext("clearChannelUserQuery()", context) };
 }
 
-test("会话用户仅手动查询且通过浮层展示资料，不影响保存规则", async () => {
+test("会话关联用户仅手动查询且通过浮层展示资料，不影响保存规则", async () => {
   const h = userQueryHarness(async () => ({user: {user_id: "4", resolution: "resolved", username: "<admin>", email: "a@example.com"}}));
   assert.equal(h.requests.length, 0);
   await h.query();
@@ -411,4 +415,111 @@ test("改值或关闭时清除并中止查询，迟到结果不覆盖下一个�
   assert.equal(h.elements.channelSessionUserResult.innerHTML, "");
   assert.match(source, /channelSessionUserId"\)\?\.addEventListener\("input", clearChannelUserQuery\)/);
   assert.match(source, /addEventListener\("close", \(\) => \{\s*clearChannelUserQuery\(\)/);
+});
+
+
+test("飞书手填复用表单且不请求企微应用，提交独立渠道类型", async () => {
+  const { admin, getElement, requests, context } = secretEditorHarness();
+  admin.openCreate("feishu");
+  assert.equal(getElement("channelBotId").disabled, true);
+  vm.runInContext('setChannelFeishuMode("manual")', context);
+  assert.equal(getElement("channelAccountModalTitle").textContent, "新建飞书渠道");
+  assert.equal(getElement("channelBotIdLabel").textContent, "App ID");
+  assert.equal(getElement("channelWecomMemberToggle").hidden, true);
+  assert.equal(getElement("channelMemberTab").hidden, true);
+  assert.equal(getElement("channelWecomApplicationId").required, false);
+  getElement("channelBotId").value = "cli_demo";
+  getElement("channelSecret").value = "fixture-app-secret";
+  getElement("channelName").value = "飞书助手";
+  getElement("channelSessionUserId").value = "user-1";
+  await admin.save({ preventDefault() {}, currentTarget: getElement("channelAccountForm") });
+  const payload = requests.at(-1).payload;
+  assert.equal(payload.channel_type, "feishu"); assert.equal(payload.bot_id, "cli_demo");
+  assert.equal(payload.secret, "fixture-app-secret"); assert.equal(payload.enabled, false);
+  assert.equal(payload.settings.feishu.require_mention, true);
+  assert.equal(Object.hasOwn(payload.settings, "wecom"), false);
+});
+
+test("飞书扫码保存只提交授权句柄，不混入手填凭据", async () => {
+  const { admin, getElement, requests, context } = secretEditorHarness();
+  admin.openCreate("feishu");
+  vm.runInContext('setChannelFeishuMode("scan"); channelFeishuRegistration.authorizedId = "registration-ready";', context);
+  getElement("channelBotId").value = "stale-cli";
+  getElement("channelSecret").value = "stale-secret";
+  assert.equal(getElement("channelBotId").disabled, true);
+  assert.equal(getElement("channelSecret").required, false);
+  await admin.save({ preventDefault() {}, currentTarget: getElement("channelAccountForm") });
+  const payload = requests.at(-1).payload;
+  assert.equal(payload.registration_id, "registration-ready");
+  assert.equal(Object.hasOwn(payload, "bot_id"), false);
+  assert.equal(Object.hasOwn(payload, "secret"), false);
+});
+
+test("从飞书切回企微恢复原凭据和应用字段语义", () => {
+  const { admin, getElement } = secretEditorHarness();
+  admin.openCreate("feishu"); admin.openCreate();
+  assert.equal(getElement("channelBotIdLabel").textContent, "Bot ID");
+  assert.equal(getElement("channelFeishuSetup").hidden, true);
+  assert.equal(getElement("channelWecomMemberToggle").hidden, false);
+  assert.equal(getElement("channelBotId").disabled, false);
+  assert.equal(getElement("channelSecret").required, true);
+});
+
+test("飞书切换接入方式保留已生成的授权，重新打开表单才清理", () => {
+  const { admin, context } = secretEditorHarness();
+  admin.openCreate("feishu");
+  vm.runInContext('channelFeishuRegistration.reset = () => { throw new Error("must retain registration"); }; channelFeishuRegistration.authorizedId = "retained-authorization";', context);
+  vm.runInContext('setChannelFeishuMode("manual"); setChannelFeishuMode("scan");', context);
+  assert.equal(vm.runInContext('channelFeishuRegistration.authorizedId', context), "retained-authorization");
+  assert.throws(() => admin.openCreate("feishu"), /must retain registration/);
+});
+
+test("扫码过期及失败在右侧提供重试，初始生成按钮只用于空态", () => {
+  const { context, getElement } = secretEditorHarness();
+  for (const status of ["expired", "failed", "denied", "cancelled"]) {
+    vm.runInContext(`renderFeishuRegistration({status: "${status}"})`, context);
+    assert.equal(getElement("channelFeishuRetryScan").hidden, false);
+    assert.equal(getElement("channelFeishuStartScan").hidden, true);
+    assert.equal(getElement("channelFeishuQr").hidden, true);
+  }
+  vm.runInContext('renderFeishuRegistration({status: "starting"})', context);
+  assert.equal(getElement("channelFeishuRetryScan").hidden, true);
+  assert.equal(getElement("channelFeishuStartScan").disabled, true);
+  vm.runInContext('renderFeishuRegistration({})', context);
+  assert.equal(getElement("channelFeishuStartScan").hidden, false);
+  assert.equal(getElement("channelFeishuStartScan").disabled, false);
+});
+
+
+test("飞书编辑保留已有域名及群聊策略", async () => {
+  const { admin, getElement, requests, context } = secretEditorHarness();
+  vm.runInContext('channelAdminState.accounts[0].channel_type = "feishu"; channelAdminState.accounts[0].settings = {feishu: {domain: "feishu", require_mention: true, group_allowlist: ["oc_allowed"]}};', context);
+  admin.openEdit("channel-1");
+  await admin.save({preventDefault() {}, currentTarget: getElement("channelAccountForm")});
+  assert.equal(requests.at(-1).payload.settings.feishu.domain, "feishu");
+  assert.equal(requests.at(-1).payload.settings.feishu.require_mention, true);
+  assert.deepEqual(requests.at(-1).payload.settings.feishu.group_allowlist, ["oc_allowed"]);
+});
+
+test("新建选择 Agent 覆盖名称，编辑渠道不自动重命名", () => {
+  const { admin, getElement } = secretEditorHarness();
+  for (const type of ["feishu", "wecom"]) {
+    admin.openCreate(type);
+    assert.match(getElement("channelAgentId").innerHTML, /value="" disabled hidden selected>请选择/);
+    getElement("channelName").value = "旧名称";
+    getElement("channelAgentId").listeners.change({target: {value: "agent-1"}});
+    assert.equal(getElement("channelName").value, "示例 Agent");
+  }
+  admin.openEdit("channel-1");
+  getElement("channelAgentId").listeners.change({target: {value: "agent-1"}});
+  assert.equal(getElement("channelName").value, "示例渠道");
+});
+
+
+test("扫码后改为手填保存会取消未消费的注册任务", async () => {
+  const { admin, getElement, context } = secretEditorHarness();
+  admin.openCreate("feishu");
+  vm.runInContext('setChannelFeishuMode("manual"); channelFeishuRegistration.reset = options => { window.resetOptions = options; };', context);
+  await admin.save({preventDefault() {}, currentTarget: getElement("channelAccountForm")});
+  assert.equal(context.window.resetOptions.consumed, false);
 });

@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.11.6`，数据库Head为`007` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.11.7`，数据库Head为`008`（飞书来源列） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -43,7 +43,7 @@ Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包�
 
 ### 本地 Test 联调固定启动命令
 
-用户要求“启动/重启本地 8000”时，在仓库根直接执行：
+日常“启动/重启本地 8000”默认使用下节稳定 SQLite＋渠道网关。以下命令仅用于用户明确要求连接共享 Test 的联调：
 
 ```bash
 # 首次或缺 .venv-sandbox 时：local_dev 默认会自动 setup；也可手动：
@@ -76,8 +76,8 @@ v0.10.16 本地升级验证使用仓库 `.venv/bin/python`，依赖按 `requirem
 当前 SQLite 启动命令：
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m deep_agent.local_dev \
-  --config ~/.config/deep-agent/sqlite.env --port 8000
+PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
+  --local-config ~/.config/deep-agent/sqlite.env --api-port 8000
 ```
 
 后续日常本地开发、Console 联调和人工验收，不再随任务创建全新的空 SQLite。默认固定复用：
@@ -89,10 +89,10 @@ Profile:         ~/.config/deep-agent/sqlite.env
 启动端口:        8000
 ```
 
-需要同时运行本地渠道网关时，使用与部署相同的统一监督顺序，同时保留`local_dev`身份与文件能力：
+用户要求日常本地启动／重启必须同时带渠道网关（2026-09-27）。默认使用以下统一监督入口，同时保留 `local_dev` 身份与文件能力；不要只起 API：
 
 ```bash
-PYTHONPATH=src python3.12 -m deep_agent.combined_runtime \
+PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
   --local-config ~/.config/deep-agent/sqlite.env \
   --api-port 8000
 ```
@@ -335,3 +335,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 功能落地并发布后，删除对应一次性 HTML 原型、图片评审稿、测试截图和临时报告，保留当前指南、设计决策与正式回归；历史材料通过 Git 恢复，不另存一份备份。尚未实施的课题材料（如数据流 AI 集成）继续保留。
 测试夹具应放在 `tests/`，不能依赖随时可清理的原型目录；测试报告默认写到忽略的 `output/TMP_to_delete-*`。
 清理前核对在用文件；不删除本地数据库、用户文件、环境配置、依赖环境及正式内置安装包。
+
+## 飞书渠道开发约定（2026-09-27）
+
+飞书与企微共用 Gateway，适配器在 `channels/adapters/feishu/`；官方 SDK 有模块级 WS loop，飞书 SDK 按账号在受控子进程隔离，父网关负责数据库与业务调度，匿名管道通信，不新增公网端口。不得绕过公开接口改写 SDK 私有 loop。扫码凭据只在服务端短期保存，查询接口不返 Secret。群聊每条消息独立保存 sender_id/name，tenant/thread 单列，个性化字段放 source_metadata；均不授予平台权限。008 仅加可空列，无新表。无真实租户时受控 SDK 测试与真实授权验收必须分开报告。详见 `docs/guides/feishu-channel.md`。

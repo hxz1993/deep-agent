@@ -70,6 +70,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                             ChannelAccount.id,
                             ChannelAccount.name,
                             ChannelAccount.channel_type,
+                            ChannelAccount.bot_id,
                             ChannelAccount.transport,
                             ChannelAccount.enabled,
                             ChannelAccount.agent_id,
@@ -120,6 +121,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                         "id": r["id"],
                         "name": r["name"],
                         "channel_type": r["channel_type"],
+                        "bot_id": r["bot_id"],
                         "transport": r["transport"],
                         "enabled": r["enabled"],
                         "agent": {"id": r["agent_id"], "name": r["agent_name"]},
@@ -194,7 +196,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
             user_id = func.coalesce(opaque.userid, plain.userid, r.sender_id)
             name = func.coalesce(opaque.name, plain.name)
         else:
-            user_id, name = r.sender_id, literal(None)
+            user_id, name = r.sender_id, r.sender_name
         return stmt.add_columns(
             _OpaqueIdentity(user_id).label("user_id"), name.label("name")
         ).subquery("channel_questions")

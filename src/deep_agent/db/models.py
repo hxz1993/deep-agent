@@ -506,6 +506,12 @@ class ChannelMessageRun(Base):
     external_message_id: Mapped[str] = mapped_column(KeyText, nullable=False)
     external_request_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     sender_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    # Shared source facts, scoped by account/channel; not DeepFOS identity.
+    sender_name: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    thread_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    # Channel-specific facts are namespaced (wecom_* / lark_*).
+    source_metadata: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     session_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     agent_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     stream_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)

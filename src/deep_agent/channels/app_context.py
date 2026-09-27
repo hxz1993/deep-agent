@@ -81,3 +81,32 @@ def public_channel_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
         config["api_key_set"] = bool(key)
         config["api_key_masked"] = mask_api_key(key)
     return result
+
+
+def validate_channel_settings(channel_type: str, settings: dict[str, Any]) -> None:
+    """Keep provider configuration isolated; Feishu never accepts arbitrary SDK URLs."""
+    channel_deepfos_app(settings)
+    if channel_type != "feishu":
+        if "feishu" in settings:
+            raise ValueError("飞书配置只能用于飞书渠道")
+        return
+    if "wecom" in settings:
+        raise ValueError("飞书渠道不能配置企业微信应用")
+    config = settings.get("feishu", {})
+    if not isinstance(config, dict):
+        raise ValueError("settings.feishu 必须是对象")
+    allowed = {"domain", "require_mention", "group_allowlist"}
+    if set(config) - allowed:
+        raise ValueError("包含不支持的飞书配置项")
+    if config.get("domain", "feishu") != "feishu":
+        raise ValueError("当前仅支持国内飞书长连接")
+    if config.get("require_mention", True) is not True:
+        raise ValueError("飞书群聊仅响应提及机器人的消息")
+    for name in ("group_allowlist",):
+        values = config.get(name, [])
+        if not isinstance(values, list) or len(values) > 1000 or any(
+            not isinstance(value, str) or not value or len(value) > 191 or
+            any(char.isspace() or unicodedata.category(char).startswith("C") for char in value)
+            for value in values
+        ):
+            raise ValueError(f"{name} 必须是有效 ID 列表")

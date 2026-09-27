@@ -244,6 +244,21 @@ async def _actual_primary_keys(
     return {tuple(row) for row in result.all()}
 
 
+def _validate_channel_rows(rows: Sequence[Mapping[str, Any]]) -> None:
+    from deep_agent.channels.app_context import validate_channel_settings
+    for row in rows:
+        channel_type = row.get("channel_type")
+        if channel_type not in {"wecom", "feishu"} or row.get("transport") != "websocket":
+            raise ConfigurationImportError("channel_accounts contains an unsupported channel type or transport")
+        try:
+            settings = row.get("settings") or {}
+            if not isinstance(settings, dict):
+                raise ValueError("settings must be an object")
+            validate_channel_settings(channel_type, settings)
+        except (ValueError, TypeError) as exc:
+            raise ConfigurationImportError("channel_accounts contains an invalid channel configuration") from exc
+
+
 def _validate_integration_rows(rows: Sequence[Mapping[str, Any]]) -> None:
     for row in rows:
         if get_integration_definition(row.get("code")) is None:
@@ -362,6 +377,7 @@ async def inspect_configuration_backup(
                     row["auth_status"] = "unconfigured"
                     row["auth_revision"] = 0
             _validate_integration_rows(rows.get("integration_settings", []))
+            _validate_channel_rows(rows.get("channel_accounts", []))
             for row in rows.get("agents", []):
                 row["capabilities"] = canonical_tool_package_codes(
                     row.get("capabilities") or []
@@ -733,6 +749,7 @@ async def apply_configuration_import(
     active_run_count: int = 0,
 ) -> ConfigurationImportResult:
     _validate_integration_rows(plan.rows.get("integration_settings", []))
+    _validate_channel_rows(plan.rows.get("channel_accounts", []))
     if active_run_count:
         raise ConfigurationImportConflictError("Target DeepAgent has active runs")
     if _IMPORT_LOCK.locked():

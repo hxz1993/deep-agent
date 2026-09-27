@@ -37,6 +37,12 @@ class InboundMessage:
     reply_handle: object = field(default=None, repr=False)
     command_eligible: bool = True
     quote: InboundQuote | None = None
+    # Platform-neutral facts; absent channel capabilities remain None.
+    sender_name: str | None = None
+    tenant_id: str | None = None
+    thread_id: str | None = None
+    # Platform-specific keys use wecom_ / lark_ prefixes. Never authorization.
+    source_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def prompt(self) -> str:

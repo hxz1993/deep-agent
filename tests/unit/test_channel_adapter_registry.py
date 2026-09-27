@@ -3,10 +3,22 @@ import unittest
 from unittest.mock import AsyncMock
 
 from deep_agent.channels.gateway.runtime import ChannelRuntime
-from deep_agent.channels.registry import AdapterRegistry
+from deep_agent.channels.registry import AdapterRegistry, default_registry
 
 
 class RegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_default_registry_installs_feishu_and_tracks_connection_settings(self):
+        from deep_agent.channels.adapters.feishu import FeishuAdapter
+        registry = default_registry()
+        account = SimpleNamespace(id="feishu", channel_type="feishu", transport="websocket",
+                                  bot_id="cli_fixture", secret="fixture", settings={})
+        self.assertIsInstance(registry.create(account), FeishuAdapter)
+        original = registry.fingerprint(account)
+        account.name = "renamed"
+        self.assertEqual(original, registry.fingerprint(account))
+        account.settings = {"feishu": {"group_allowlist": ["oc_fixture"]}}
+        self.assertNotEqual(original, registry.fingerprint(account))
+
     async def test_common_host_routes_test_adapter_and_keeps_business_edits_connected(self):
         adapters = []
         account = SimpleNamespace(id="test-account", channel_type="test-transport", enabled=True,
@@ -70,7 +82,17 @@ class RegistryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await runtime._stop_account(account.id)
         self.assertEqual(runtime._accounts, {})
 
-    def test_registry_does_not_pretend_feishu_is_installed(self):
-        from deep_agent.channels.registry import default_registry
-        with self.assertRaises(ValueError):
-            default_registry().create(SimpleNamespace(channel_type="feishu"))
+    async def test_feishu_credential_test_does_not_open_message_connection(self):
+        adapter = SimpleNamespace(start=AsyncMock(), stop=AsyncMock(),
+                                  test_connection=AsyncMock(return_value={"ok": True}))
+        registry = AdapterRegistry()
+        registry.register("feishu", lambda *_a, **_k: adapter, lambda _: "fixture")
+        account = SimpleNamespace(id="account", channel_type="feishu", enabled=False)
+        store = SimpleNamespace(list_accounts=AsyncMock(return_value=[]),
+                                get_account=AsyncMock(return_value=account))
+        runtime = ChannelRuntime(store, SimpleNamespace(stream_interval=0.1, test_timeout=5),
+                                 registry=registry, deep_agent=SimpleNamespace())
+        self.assertTrue((await runtime.test_account("account"))["ok"])
+        adapter.start.assert_not_awaited()
+        adapter.test_connection.assert_awaited_once_with(5)
+        adapter.stop.assert_awaited_once()

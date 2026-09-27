@@ -7,7 +7,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260925-runtime-curated-2";
+const CONFIGURATION_ASSET_VERSION = "20260927-feishu-release-0117";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -102,6 +102,8 @@ async function loadAdminScripts() {
     "./configuration/ui-tools.js",
     "./configuration/tools.js",
     "./configuration/wecom-applications.js",
+    "./vendor/qrcode.js",
+    "./configuration/feishu-registration.js",
     "./configuration/channels.js",
     "./configuration/integrations.js",
   ];

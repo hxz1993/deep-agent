@@ -99,7 +99,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def _target_engine(
         self,
         *,
-        revision: str = "007",
+        revision: str = "008",
         baseline: bool = False,
     ) -> AsyncEngine:
         target = self.root / f"target-{revision}-{baseline}.db"
@@ -131,10 +131,10 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         include_skill: bool = False,
-        revision: str = "007",
+        revision: str = "008",
     ) -> tuple[Path, Path | None, bytes | None]:
         source = self.root / f"source-{include_skill}-{revision}.db"
-        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="007")
+        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="008")
         raw_skill: bytes | None = None
         if include_skill:
             raw_skill = skill_zip(name="uploaded-skill")
@@ -174,7 +174,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             exported_at=datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc),
             git_commit="test-commit",
         )
-        if revision != "007":
+        if revision != "008":
             with sqlite3.connect(result.path) as connection:
                 connection.execute(
                     "UPDATE alembic_version SET version_num = ?",
@@ -244,8 +244,8 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             await engine.dispose()
 
     async def test_same_dynamic_revision_import_preserves_ids_and_revision(self) -> None:
-        backup_path, _, _ = await self._backup(revision="007")
-        engine = await self._target_engine(revision="007", baseline=True)
+        backup_path, _, _ = await self._backup(revision="008")
+        engine = await self._target_engine(revision="008", baseline=True)
         try:
             plan = await build_configuration_import_plan(
                 backup_path,
@@ -279,7 +279,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 tuple(provider),
                 ("0123456789abcdef0123456789abcdef", "plain-api-key"),
             )
-            self.assertEqual(revision, "007")
+            self.assertEqual(revision, "008")
             self.assertEqual(sessions, 0)
             self.assertEqual(integrations[0]["code"], "deeptable-assistant")
             self.assertEqual(integrations[0]["settings"], {"enabled": True, "options": [1, None, "中文"]})
@@ -316,7 +316,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             await engine.dispose()
 
     async def test_different_revision_is_rejected(self) -> None:
-        backup_path, _, _ = await self._backup(revision="007")
+        backup_path, _, _ = await self._backup(revision="008")
         engine = await self._target_engine(revision="001")
         try:
             with self.assertRaisesRegex(
@@ -593,6 +593,39 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(settings, ["target-only"])
         finally:
             await engine.dispose()
+
+
+    async def test_feishu_configuration_roundtrip_and_invalid_import_rejected(self):
+        backup_path, _, _ = await self._backup()
+        with sqlite3.connect(backup_path) as db:
+            db.execute("UPDATE channel_accounts SET channel_type='feishu', bot_id='cli_fixture', secret='feishu-secret', settings=?",
+                       (json.dumps({"feishu": {"require_mention": True, "group_allowlist": ["oc_group"]}}),))
+            columns = {r[1] for r in db.execute("PRAGMA table_info(channel_message_runs)")}
+            self.assertTrue({"sender_name", "tenant_id", "thread_id", "source_metadata"} <= columns)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM channel_message_runs").fetchone()[0], 0)
+        target = await self._target_engine()
+        try:
+            plan = await build_configuration_import_plan(backup_path, target_engine=target)
+            bad_rows = copy.deepcopy(plan.rows)
+            bad_rows["channel_accounts"][0]["settings"] = {"feishu": {"app_secret": "must-not-echo"}}
+            with self.assertRaises(ConfigurationImportError) as error:
+                await apply_configuration_import(replace(plan, rows=bad_rows), target_engine=target,
+                                                 file_store=_MemoryFileStore(), request_headers={})
+            self.assertNotIn("must-not-echo", str(error.exception))
+            await apply_configuration_import(plan, target_engine=target,
+                                             file_store=_MemoryFileStore(), request_headers={})
+            async with target.connect() as db:
+                row = (await db.execute(text("SELECT channel_type,bot_id,secret,settings FROM channel_accounts"))).mappings().one()
+                self.assertEqual((row["channel_type"], row["bot_id"], row["secret"]),
+                                 ("feishu", "cli_fixture", "feishu-secret"))
+                self.assertEqual(json.loads(row["settings"])["feishu"]["group_allowlist"], ["oc_group"])
+                self.assertEqual(await db.scalar(text("SELECT COUNT(*) FROM channel_message_runs")), 0)
+            with sqlite3.connect(backup_path) as db:
+                db.execute("UPDATE channel_accounts SET settings=?", (json.dumps({"wecom": {}}),))
+            with self.assertRaisesRegex(ConfigurationImportError, "invalid channel configuration"):
+                await build_configuration_import_plan(backup_path, target_engine=target)
+        finally:
+            await target.dispose()
 
 
 if __name__ == "__main__":

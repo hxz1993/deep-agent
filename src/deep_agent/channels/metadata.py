@@ -22,7 +22,7 @@ def normalize_peer_metadata(
 ) -> dict[str, str]:
     result = {
         key: value.strip() for key, value in (metadata or {}).items()
-        if key in {"user_id", "chat_id", "display_name", "wecom_application_id", "wecom_userid", "wecom_name"}
+        if key in {"user_id", "chat_id", "display_name", "wecom_application_id", "wecom_userid", "wecom_name", "tenant_id", "chat_name"}
         and isinstance(value, str) and value.strip()
     }
     if isinstance(legacy_display_name, str) and legacy_display_name.strip() and not result.get("display_name"):

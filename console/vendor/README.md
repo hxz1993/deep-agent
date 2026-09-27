@@ -32,3 +32,5 @@ Console 通过 `markdownTheme` 加载 GitHub Markdown CSS，`theme.js` 随界面
 - 以上均为预构建静态资源；运行时不访问 CDN，不增加 npm 构建链。公式支持 `$...$`、`$$...$$`、`\(...\)`、`\[...\]`；无效语法保留可读文本。
 
 DOMPurify 3.4.15 使用官方同名 tag 的 `dist/purify.min.js`，许可证见 `DOMPurify-LICENSE`。随着公式引入 MathML/SVG，同时更新 sanitizer 的 rawtext、命名空间与 DOM clobbering 防护；保持默认 `SAFE_FOR_XML`，不启用 HTML/SVG 事件或 KaTeX trust。脚注仍复用 marked-footnote 的 tokenizer，展示 ID 使用消息级数字命名空间，防止重复引用与原始标签碰撞。
+
+- `qrcode.js`：qrcode-generator 1.4.4（MIT），官方 npm 发布包，经 jsDelivr 获取；许可证 `qrcode-LICENSE`。仅在本地生成飞书授权二维码，不向第三方二维码服务发送授权链接。

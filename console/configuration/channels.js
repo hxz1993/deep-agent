@@ -4,7 +4,7 @@ const channelAdminState = {
   runtime: null,
   editingId: null,
   channelType: "wecom",
-  feishuMode: "scan",
+  registrationMode: "scan",
   view: "accounts",
   applications: [],
   applicationLoadGeneration: 0,
@@ -13,20 +13,21 @@ const channelAdminState = {
   clearApiKey: false,
 };
 
-let channelFeishuRegistration = null;
-function renderFeishuRegistration(data) {
-  const status = document.getElementById("channelFeishuScanStatus");
-  const qr = document.getElementById("channelFeishuQr");
-  const link = document.getElementById("channelFeishuAuthLink");
-  const button = document.getElementById("channelFeishuStartScan");
-  const retry = document.getElementById("channelFeishuRetryScan");
+let channelRegistration = null;
+function renderChannelRegistration(data) {
+  const status = document.getElementById("channelRegistrationScanStatus");
+  const qr = document.getElementById("channelRegistrationQr");
+  const link = document.getElementById("channelRegistrationAuthLink");
+  const button = document.getElementById("channelRegistrationStartScan");
+  const retry = document.getElementById("channelRegistrationRetryScan");
   const authorized = data.status === "authorized";
-  document.getElementById("channelFeishuAuthorized").hidden = !authorized;
-  document.getElementById("channelFeishuSaveReminder").hidden = !authorized;
+  document.getElementById("channelRegistrationAuthorized").hidden = !authorized;
+  document.getElementById("channelRegistrationSaveReminder").hidden = !authorized;
   const retryable = ["failed", "expired", "denied", "cancelled"].includes(data.status);
-  retry.hidden = !retryable;
-  const labels = { starting: "正在准备二维码…", waiting: "使用飞书扫码，完成应用创建和授权。", authorized: "请补齐渠道名称、关联 Agent 和会话关联用户，点击右下角「保存」。保存后启用渠道，机器人才能接收消息。", expired: "二维码已过期，请重新生成。", denied: "授权已拒绝，可重新扫码或关联已有应用。", failed: "授权失败，请重试。", cancelled: "授权已取消。" };
-  status.textContent = data.error || labels[data.status] || "可先填写渠道名称，生成二维码后用手机飞书扫码。应用名称会自动预填，确认创建和授权后保存渠道。";
+  retry.hidden = !(retryable || data.status === "waiting");
+  const feishu = channelAdminState.channelType === "feishu";
+  const labels = { starting: "正在准备二维码…", waiting: feishu ? "使用飞书扫码，完成应用创建和授权。修改渠道名称后可重新生成。" : "使用手机企业微信扫码，创建或关联智能机器人。请在企业微信确认机器人名称。", authorized: "请补齐渠道名称、关联 Agent 和会话关联用户，点击右下角「保存」。保存后启用渠道，机器人才能接收消息。", expired: "二维码已过期，请重新生成。", denied: "授权已拒绝，可重新扫码或使用已有凭据。", failed: "授权失败，请重试。", cancelled: "授权已取消。" };
+  status.textContent = data.error || labels[data.status] || (feishu ? "可先填写渠道名称，生成二维码后用手机飞书扫码。应用名称会自动预填，确认创建和授权后保存渠道。" : "使用手机企业微信扫码，创建或关联智能机器人。机器人名称需在企业微信确认，完成后请保存渠道。");
   button.disabled = ["starting", "waiting"].includes(data.status);
   button.hidden = retryable || ["waiting", "authorized"].includes(data.status);
   button.textContent = data.status === "starting" ? "正在生成…" : "生成二维码";
@@ -34,23 +35,38 @@ function renderFeishuRegistration(data) {
   if (data.status === "waiting" && data.verification_url) {
     try {
       const url = new URL(data.verification_url);
-      if (url.protocol !== "https:" || !["feishu.cn", "larksuite.com"].some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))) throw new Error("授权地址不是飞书官方地址");
-      const code = qrcode(0, "M"); code.addData(url.href); code.make();
-      qr.innerHTML = code.createSvgTag({ scalable: true, margin: 4 }); qr.hidden = false;
-      link.href = url.href; link.hidden = false;
+      const officialHost = feishu
+        ? ["feishu.cn", "larksuite.com"].some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))
+        : url.hostname === "work.weixin.qq.com";
+      if (url.protocol !== "https:" || url.username || url.password || url.port || !officialHost) throw new Error("授权地址不是平台官方地址");
+      const code = qrcode(0, "H"); code.addData(url.href); code.make();
+      // Reserve whole modules for the brand, rather than overlaying a rounded tile.
+      const count = code.getModuleCount(), quiet = 4, size = count + quiet * 2;
+      const gap = Math.max(5, Math.floor(count * .14) | 1);
+      const first = (count - gap) / 2, last = first + gap;
+      const paths = [];
+      for (let row = 0; row < count; row++) for (let col = 0; col < count; col++) {
+        if (row >= first && row < last && col >= first && col < last) continue;
+        if (code.isDark(row, col)) paths.push(`M${col + quiet},${row + quiet}h1v1h-1z`);
+      }
+      const inset = .6, brandSize = gap - inset * 2, brandStart = first + quiet + inset;
+      qr.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="${feishu ? "飞书" : "企业微信"}授权二维码"><rect width="${size}" height="${size}" fill="white"/><path d="${paths.join("")}" fill="black" shape-rendering="crispEdges"/><image href="./assets/channel-logos/${feishu ? "feishu.ico" : "wecom.png"}" x="${brandStart}" y="${brandStart}" width="${brandSize}" height="${brandSize}"/></svg>`;
+      qr.hidden = false;
+      // WeCom's QR target is a mobile-client flow, not a desktop authorization page.
+      if (feishu) { link.href = url.href; link.hidden = false; }
     } catch (error) { status.textContent = error.message; button.hidden = true; retry.hidden = false; }
   }
 }
-function setChannelFeishuMode(mode) {
+function setChannelRegistrationMode(mode) {
   if (channelAdminState.saving) return;
-  channelAdminState.feishuMode = mode === "scan" ? "scan" : "manual";
-  const scan = channelAdminState.channelType === "feishu" && channelAdminState.feishuMode === "scan";
-  document.querySelectorAll("[data-feishu-mode]").forEach(button => {
-    const selected = button.dataset.feishuMode === channelAdminState.feishuMode;
+  channelAdminState.registrationMode = mode === "scan" ? "scan" : "manual";
+  const scan = !channelAdminState.editingId && channelAdminState.registrationMode === "scan";
+  document.querySelectorAll("[data-registration-mode]").forEach(button => {
+    const selected = button.dataset.registrationMode === channelAdminState.registrationMode;
     button.classList.toggle("active", selected); button.setAttribute("aria-pressed", String(selected));
   });
-  document.getElementById("channelFeishuScan").hidden = !scan;
-  document.getElementById("channelFeishuManualHint").hidden = scan;
+  document.getElementById("channelRegistrationScan").hidden = !scan;
+  document.getElementById("channelRegistrationManualHint").hidden = scan;
   ["channelBotId", "channelSecret"].forEach(id => {
     const input = document.getElementById(id); input.closest(".field").hidden = scan; input.disabled = scan;
   });
@@ -58,26 +74,31 @@ function setChannelFeishuMode(mode) {
   document.getElementById("channelSecret").required = !scan && !channelAdminState.editingId;
 }
 function prepareChannelPlatform(type) {
-  channelFeishuRegistration?.reset();
-  renderFeishuRegistration({});
+  channelRegistration?.reset();
   channelAdminState.channelType = type === "feishu" ? "feishu" : "wecom";
   const feishu = channelAdminState.channelType === "feishu";
+  channelRegistration = window.createChannelRegistration({ channelType: channelAdminState.channelType, onChange: renderChannelRegistration });
+  renderChannelRegistration({});
+  const consoleLink = document.getElementById("channelRegistrationConsoleLink");
+  consoleLink.href = feishu ? "https://open.feishu.cn/app" : "https://work.weixin.qq.com/";
+  consoleLink.textContent = feishu ? "前往飞书开发者后台 ↗" : "前往企业微信管理后台 ↗";
+  document.getElementById("channelRegistrationMode").setAttribute("aria-label", feishu ? "飞书接入方式" : "企微接入方式");
+  document.getElementById("channelRegistrationManualLabel").textContent = "手动关联";
   document.getElementById("channelPlatformSubtitle").textContent = feishu ? "飞书应用机器人" : "企微智能机器人";
   document.getElementById("channelBotIdLabel").textContent = feishu ? "App ID" : "Bot ID";
   document.getElementById("channelBotId").placeholder = feishu ? "请输入 App ID" : "请输入 Bot ID";
   document.getElementById("channelConnectionHelp").innerHTML = feishu
     ? '<strong>使用飞书企业自建应用</strong><p>在<a class="channel-platform-link" href="https://open.feishu.cn/app" target="_blank" rel="noopener noreferrer" title="打开飞书开发者后台（新标签页）">飞书开放平台</a>获取 App ID 和 App Secret，开启机器人能力。</p><p>事件订阅选择长连接，添加接收消息事件并发布应用。</p>'
-    : "<strong>使用企微智能机器人</strong><p>在企业微信创建智能机器人，选择 API 模式，获取 Bot ID 和 Secret。</p><p>通过长连接接收消息，无需配置公网回调地址。</p>";
+    : '<strong>使用企微智能机器人</strong><p>在企业微信创建智能机器人，选择 API 模式，获取 Bot ID 和 Secret。</p><p>通过长连接接收消息，无需配置公网回调地址。</p><a class="channel-platform-link" href="https://work.weixin.qq.com/" target="_blank" rel="noopener noreferrer">前往企业微信管理后台 ↗</a>';
   document.getElementById("channelSecretLabel").textContent = feishu ? "App Secret" : "Secret";
   document.getElementById("channelName").placeholder = feishu ? "例如：飞书助手" : "例如：企微助手";
   document.getElementById("channelConnectionTitle").textContent = feishu ? "飞书连接" : "企微连接";
-  document.getElementById("channelFeishuMode").hidden = !feishu || Boolean(channelAdminState.editingId);
-  document.getElementById("channelFeishuSetup").hidden = !feishu || Boolean(channelAdminState.editingId);
-  document.getElementById(feishu && !channelAdminState.editingId ? "channelFeishuCredentials" : "channelCredentialHome").append(document.getElementById("channelCredentialLayout"));
+  document.getElementById("channelRegistrationMode").hidden = Boolean(channelAdminState.editingId);
+  document.getElementById("channelRegistrationSetup").hidden = Boolean(channelAdminState.editingId);
+  document.getElementById(!channelAdminState.editingId ? "channelRegistrationCredentials" : "channelCredentialHome").append(document.getElementById("channelCredentialLayout"));
   document.getElementById("channelMemberTab").hidden = feishu;
-  document.getElementById("channelAccountModal").classList.toggle("feishu-channel-modal", feishu);
   document.getElementById("channelWecomMemberToggle").hidden = feishu;
-  setChannelFeishuMode(feishu && !channelAdminState.editingId ? "scan" : "manual");
+  setChannelRegistrationMode(!channelAdminState.editingId ? "scan" : "manual");
 }
 
 const channelUserQuery = { generation: 0, controller: null };
@@ -277,6 +298,10 @@ const channelsAdmin = {
       button.setAttribute("aria-selected", String(active));
       button.tabIndex = active ? 0 : -1;
     });
+    const description = document.getElementById("channelViewDescription");
+    if (description) description.textContent = applications
+      ? "配置企业微信应用，按需查询渠道用户姓名与资料。"
+      : "连接外部聊天平台，将消息交给绑定的 Agent 处理。";
     const visibility = { channelAccountsView: applications, channelAccountActions: applications, channelRuntimeBanner: applications, wecomApplicationsView: !applications, newWecomApplicationBtn: !applications };
     Object.entries(visibility).forEach(([id, hidden]) => { const node = document.getElementById(id); if (node) node.hidden = hidden; });
   },
@@ -317,12 +342,27 @@ const channelsAdmin = {
     banner.title = runtime.message || "";
   },
 
-  async openCommands() {
-    const dialog = document.getElementById("channelCommandsModal");
+  openHelp() {
+    this.selectHelpTab("messages");
+    const dialog = document.getElementById("channelHelpModal");
+    if (!dialog.open) dialog.showModal();
+  },
+  selectHelpTab(tab) {
+    if (!["messages", "commands"].includes(tab)) return;
+    document.querySelectorAll("[data-channel-help]").forEach(button => {
+      const active = button.dataset.channelHelp === tab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+    document.getElementById("channelHelpMessagesPanel").hidden = tab !== "messages";
+    document.getElementById("channelHelpCommandsPanel").hidden = tab !== "commands";
+    if (tab === "commands") return this.loadCommands();
+  },
+  async loadCommands() {
     const content = document.getElementById("channelCommandsContent");
     const retry = document.getElementById("retryChannelCommandsBtn");
-    if (!dialog || !content || !retry) return;
-    if (!dialog.open) dialog.showModal();
+    if (!content || !retry) return;
     const requestId = (this.commandsRequestId || 0) + 1;
     this.commandsRequestId = requestId;
     content.innerHTML = '<p class="field-hint" role="status">正在加载快捷命令…</p>';
@@ -440,9 +480,9 @@ const channelsAdmin = {
     const applicationSelect = document.getElementById("channelWecomApplicationId");
     const applicationId = applicationSelect.disabled ? applicationSelect.dataset.selectedId : applicationSelect.value;
     const feishu = channelAdminState.channelType === "feishu";
-    const scan = feishu && !editingId && channelAdminState.feishuMode === "scan";
-    if (scan && !channelFeishuRegistration?.authorizedId) {
-      AdminFormFeedback.show(form, "请先完成飞书扫码授权，或选择关联已有应用。"); return;
+    const scan = !editingId && channelAdminState.registrationMode === "scan";
+    if (scan && !channelRegistration?.authorizedId) {
+      AdminFormFeedback.show(form, "请先完成扫码授权，或切换到手动关联。"); return;
     }
     if (!feishu && enabled && !channelAdminState.applications.some(item => item.id === applicationId)) {
       AdminFormFeedback.show(form, "请选择有效的企微应用；没有应用时，请先创建。");
@@ -466,7 +506,7 @@ const channelsAdmin = {
     const secret = secretInput.value.trim();
     if (secret && secret !== secretInput.dataset.maskedValue) payload.secret = secret;
     if (!editingId) { payload.enabled = false; payload.channel_type = channelAdminState.channelType; }
-    if (scan) { payload.registration_id = channelFeishuRegistration.authorizedId; delete payload.bot_id; delete payload.secret; }
+    if (scan) { payload.registration_id = channelRegistration.authorizedId; delete payload.bot_id; delete payload.secret; }
     channelAdminState.saving = true;
     form.querySelectorAll("button").forEach(button => { button.disabled = true; });
     try {
@@ -474,7 +514,7 @@ const channelsAdmin = {
         method: editingId ? "PUT" : "POST",
         body: JSON.stringify(payload),
       });
-      channelFeishuRegistration?.reset({ consumed: scan });
+      channelRegistration?.reset({ consumed: scan });
       document.getElementById("channelAccountModal").close();
       showToast(editingId ? "渠道已更新" : "渠道已创建");
       await refreshAfterSuccessfulMutation(editingId ? "渠道已更新" : "渠道已创建", () => this.refresh());
@@ -594,9 +634,8 @@ function bindChannelCreateMenu() {
 window.channelsAdmin = channelsAdmin;
 
 document.addEventListener("DOMContentLoaded", () => {
-  channelFeishuRegistration = window.createFeishuRegistration({ onChange: renderFeishuRegistration });
-  document.querySelectorAll("[data-feishu-mode]").forEach(button => button.addEventListener("click", () => setChannelFeishuMode(button.dataset.feishuMode)));
-  ["channelFeishuStartScan", "channelFeishuRetryScan"].forEach(id => document.getElementById(id)?.addEventListener("click", () => channelFeishuRegistration.start({ appName: document.getElementById("channelName").value.trim() })));
+  document.querySelectorAll("[data-registration-mode]").forEach(button => button.addEventListener("click", () => setChannelRegistrationMode(button.dataset.registrationMode)));
+  ["channelRegistrationStartScan", "channelRegistrationRetryScan"].forEach(id => document.getElementById(id)?.addEventListener("click", () => channelRegistration.start({ appName: document.getElementById("channelName").value.trim() })));
   document.getElementById("queryChannelSessionUserBtn")?.addEventListener("click", queryChannelSessionUser);
   document.getElementById("channelSessionUserId")?.addEventListener("input", clearChannelUserQuery);
   document.addEventListener("click", event => {
@@ -670,10 +709,21 @@ document.addEventListener("DOMContentLoaded", () => {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
   document.getElementById("refreshChannelsBtn")?.addEventListener("click", () => channelsAdmin.refresh());
-  document.getElementById("channelCommandsBtn")?.addEventListener("click", () => channelsAdmin.openCommands());
-  document.getElementById("retryChannelCommandsBtn")?.addEventListener("click", () => channelsAdmin.openCommands());
-  document.getElementById("closeChannelCommandsModal")?.addEventListener("click", () => document.getElementById("channelCommandsModal").close());
-  document.getElementById("dismissChannelCommandsBtn")?.addEventListener("click", () => document.getElementById("channelCommandsModal").close());
+  document.getElementById("channelHelpBtn")?.addEventListener("click", () => channelsAdmin.openHelp());
+  const helpTabs = Array.from(document.querySelectorAll("[data-channel-help]"));
+  helpTabs.forEach((button, index) => {
+    button.addEventListener("click", () => channelsAdmin.selectHelpTab(button.dataset.channelHelp));
+    button.addEventListener("keydown", event => {
+      const next = event.key === "Home" ? 0 : event.key === "End" ? helpTabs.length - 1 : event.key === "ArrowRight" ? (index + 1) % helpTabs.length : event.key === "ArrowLeft" ? (index + helpTabs.length - 1) % helpTabs.length : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      channelsAdmin.selectHelpTab(helpTabs[next].dataset.channelHelp);
+      helpTabs[next].focus();
+    });
+  });
+  document.getElementById("retryChannelCommandsBtn")?.addEventListener("click", () => channelsAdmin.loadCommands());
+  ["closeChannelHelpModal", "dismissChannelHelpBtn"].forEach(id => document.getElementById(id)?.addEventListener("click", () => document.getElementById("channelHelpModal").close()));
+  document.getElementById("channelHelpModal")?.addEventListener("close", () => { channelsAdmin.commandsRequestId = (channelsAdmin.commandsRequestId || 0) + 1; });
   document.getElementById("channelAccountForm")?.addEventListener("submit", (event) => channelsAdmin.save(event));
   document.getElementById("channelSecret")?.addEventListener("focus", (event) => {
     const input = event.currentTarget;
@@ -689,7 +739,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("channelAccountModal")?.addEventListener("cancel", event => { event.preventDefault(); closeAccount(); });
   document.getElementById("channelAccountModal")?.addEventListener("close", () => {
     clearChannelUserQuery();
-    channelFeishuRegistration?.reset();
+    channelRegistration?.reset();
     channelAdminState.applicationLoadGeneration++;
     document.getElementById("channelSecret").value = "";
     channelAdminState.apiKeyDraft = "";

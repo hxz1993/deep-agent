@@ -29,6 +29,10 @@ class FeishuRegistrationCreate(BaseModel):
         return value.strip() if isinstance(value, str) else value
 
 
+class WecomRegistrationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class ChannelAccountCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -47,8 +51,8 @@ class ChannelAccountCreate(BaseModel):
     def validate_credentials(self):
         validate_channel_settings(self.channel_type, self.settings)
         if self.registration_id:
-            if self.channel_type != "feishu" or self.bot_id or self.secret:
-                raise ValueError("扫码授权仅适用于飞书新建，不能同时提交应用凭据")
+            if self.bot_id or self.secret:
+                raise ValueError("扫码授权不能同时提交机器人凭据")
         elif not self.bot_id or not self.secret:
             raise ValueError("bot_id and secret are required")
         return self

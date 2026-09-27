@@ -167,11 +167,17 @@
               <button class="channel-runtime-refresh" type="button" id="refreshChannelsBtn" title="刷新渠道网关状态" aria-label="刷新渠道网关状态"><i data-lucide="refresh-cw" aria-hidden="true"></i></button>
             </span>
           </div>
-          <p class="panel-subtitle">连接外部聊天平台，将消息交给绑定的 Agent 处理。</p>
+          <p class="panel-subtitle" id="channelViewDescription">连接外部聊天平台，将消息交给绑定的 Agent 处理。</p>
         </div>
         <div class="panel-toolbar-actions">
-          <div id="channelAccountActions" class="channel-view-actions">
-            <button class="btn channel-commands-btn" type="button" id="channelCommandsBtn"><i data-lucide="terminal"></i><span>快捷命令</span></button>
+          <div class="agent-view-switch channel-view-switch" role="tablist" aria-label="渠道内容">
+            <button type="button" id="channelAccountsTab" class="active" role="tab" aria-selected="true" aria-controls="channelAccountsView" data-channel-view="accounts"><i data-lucide="rss" aria-hidden="true"></i><span>渠道账户</span></button>
+            <button type="button" id="wecomApplicationsTab" role="tab" aria-selected="false" aria-controls="wecomApplicationsView" data-channel-view="applications" tabindex="-1"><img src="./assets/channel-logos/wecom.png" width="14" height="14" alt="" /><span>企微应用</span></button>
+          </div>
+        </div>
+      </div>
+      <div class="channel-content-toolbar">
+        <div id="channelAccountActions" class="channel-view-actions">
           <div class="channel-create-control">
             <button class="btn primary" type="button" id="newChannelBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="newChannelMenu"><i data-lucide="plus"></i><span>新建渠道</span><i data-lucide="chevron-down"></i></button>
             <div class="channel-create-menu" id="newChannelMenu" role="menu" aria-label="选择渠道" hidden>
@@ -179,13 +185,9 @@
               <button class="console-select-option" type="button" id="createFeishuChannelBtn" role="menuitem"><img src="./assets/channel-logos/feishu.ico" width="16" height="16" alt="" /><span>飞书（WS）</span></button>
             </div>
           </div>
-          </div>
-          <button class="btn primary" type="button" id="newWecomApplicationBtn" hidden><i data-lucide="plus"></i>新建应用</button>
-          <div class="agent-view-switch channel-view-switch" role="tablist" aria-label="渠道内容">
-            <button type="button" id="channelAccountsTab" class="active" role="tab" aria-selected="true" aria-controls="channelAccountsView" data-channel-view="accounts"><i data-lucide="rss" aria-hidden="true"></i><span>渠道账户</span></button>
-            <button type="button" id="wecomApplicationsTab" role="tab" aria-selected="false" aria-controls="wecomApplicationsView" data-channel-view="applications" tabindex="-1"><img src="./assets/channel-logos/wecom.png" width="14" height="14" alt="" /><span>企微应用</span></button>
-          </div>
+          <button class="btn channel-help-btn" type="button" id="channelHelpBtn"><i data-lucide="info"></i><span>帮助</span></button>
         </div>
+        <button class="btn primary" type="button" id="newWecomApplicationBtn" hidden><i data-lucide="plus"></i>新建应用</button>
       </div>
       <div class="table-wrap console-list-a" id="channelAccountsView" role="tabpanel" aria-labelledby="channelAccountsTab">
         <table class="data-table channel-table">
@@ -713,20 +715,46 @@
     </div>
   </dialog>
 
-  <dialog class="modal channel-commands-modal" id="channelCommandsModal" aria-labelledby="channelCommandsModalTitle">
+  <dialog class="modal channel-help-modal" id="channelHelpModal" aria-labelledby="channelHelpModalTitle">
     <div class="modal-header">
-      <h3 id="channelCommandsModalTitle">快捷命令</h3>
-      <button type="button" class="icon-btn" id="closeChannelCommandsModal" aria-label="关闭"><i data-lucide="x"></i></button>
+      <h3 id="channelHelpModalTitle">帮助</h3>
+      <button type="button" class="icon-btn" id="closeChannelHelpModal" aria-label="关闭"><i data-lucide="x"></i></button>
     </div>
-    <div class="modal-body" id="channelCommandsContent" aria-live="polite"></div>
-    <div class="modal-footer">
-      <button type="button" class="btn" id="retryChannelCommandsBtn" hidden>重新加载</button>
-      <button type="button" class="btn" id="dismissChannelCommandsBtn">关闭</button>
+    <div class="modal-body">
+      <nav class="cap-tabs channel-help-tabs" role="tablist" aria-label="渠道帮助">
+        <button type="button" class="cap-tab active" id="channelHelpMessagesTab" role="tab" data-channel-help="messages" aria-selected="true" aria-controls="channelHelpMessagesPanel"><i data-lucide="message-circle-more" aria-hidden="true"></i>支持消息</button>
+        <button type="button" class="cap-tab" id="channelHelpCommandsTab" role="tab" data-channel-help="commands" aria-selected="false" aria-controls="channelHelpCommandsPanel" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>快捷命令</button>
+      </nav>
+      <section class="channel-help-panel" id="channelHelpMessagesPanel" role="tabpanel" aria-labelledby="channelHelpMessagesTab">
+        <div class="table-wrap">
+          <table class="data-table channel-support-table" aria-label="当前渠道支持能力">
+            <thead><tr><th scope="col">内容</th><th scope="col">企微</th><th scope="col">飞书</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">私聊 / 群聊</th><td>支持，群聊请 @</td><td>支持，群聊需 @</td></tr>
+              <tr><th scope="row">流式文字回复</th><td>支持</td><td>支持</td></tr>
+              <tr><th scope="row">接收图片</th><td>支持</td><td>支持</td></tr>
+              <tr><th scope="row">发送图片</th><td>需关联发送工具</td><td>暂未接入</td></tr>
+              <tr><th scope="row">接收文件</th><td>支持</td><td>支持</td></tr>
+              <tr><th scope="row">发送文件</th><td>需关联发送工具</td><td>暂未接入</td></tr>
+              <tr><th scope="row">语音转文字</th><td>接收企微转写结果</td><td>请先转成文字发送</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="channel-command-notes">
+          <li>以上为当前接入范围；图片识别和文件读取取决于所选模型与文件格式。</li>
+          <li>企微发送图片、文件需关联发送工具；飞书暂未接入图片、文件发送。</li>
+        </ul>
+      </section>
+      <section class="channel-help-panel" id="channelHelpCommandsPanel" role="tabpanel" aria-labelledby="channelHelpCommandsTab" hidden>
+        <div id="channelCommandsContent" aria-live="polite"></div>
+        <button type="button" class="btn" id="retryChannelCommandsBtn" hidden>重新加载</button>
+      </section>
     </div>
+    <div class="modal-footer"><button type="button" class="btn" id="dismissChannelHelpBtn">关闭</button></div>
   </dialog>
 
   <!-- Channel account modal -->
-  <dialog class="modal channel-account-modal" id="channelAccountModal">
+  <dialog class="modal channel-account-modal registration-channel-modal" id="channelAccountModal">
     <form id="channelAccountForm" method="dialog" novalidate>
       <div class="modal-header">
         <div class="modal-title-copy">
@@ -757,9 +785,9 @@
         <section class="channel-connection-settings" aria-labelledby="channelConnectionTitle">
           <div class="channel-connection-heading">
             <h4 id="channelConnectionTitle">企微连接</h4>
-            <div id="channelFeishuMode" class="console-segmented channel-feishu-mode" role="group" aria-label="飞书接入方式" hidden>
-              <button type="button" data-feishu-mode="scan" class="active" aria-pressed="true"><i data-lucide="scan-line" aria-hidden="true"></i>扫码创建</button>
-              <button type="button" data-feishu-mode="manual" aria-pressed="false"><i data-lucide="key-round" aria-hidden="true"></i>已有应用</button>
+            <div id="channelRegistrationMode" class="console-segmented channel-registration-mode" role="group" aria-label="渠道接入方式" hidden>
+              <button type="button" data-registration-mode="scan" class="active" aria-pressed="true"><i data-lucide="scan-line" aria-hidden="true"></i>扫码创建</button>
+              <button type="button" data-registration-mode="manual" aria-pressed="false"><i data-lucide="link-2" aria-hidden="true"></i><span id="channelRegistrationManualLabel">手动关联</span></button>
             </div>
           </div>
           <div id="channelCredentialHome" class="channel-credential-home">
@@ -777,25 +805,25 @@
           <aside id="channelConnectionHelp" class="channel-connection-help"></aside>
           </div>
           </div>
-          <div id="channelFeishuSetup" hidden>
-            <div id="channelFeishuManualHint" class="channel-feishu-content">
-              <div id="channelFeishuCredentials"></div>
+          <div id="channelRegistrationSetup" hidden>
+            <div id="channelRegistrationManualHint" class="channel-registration-content">
+              <div id="channelRegistrationCredentials"></div>
             </div>
-            <div id="channelFeishuScan" class="channel-feishu-scan" hidden>
-              <div class="channel-feishu-qr-slot">
-                <img class="channel-feishu-qr-placeholder" src="./assets/channel-logos/qr-placeholder.svg" alt="" aria-hidden="true" />
-                <div id="channelFeishuQr" class="channel-feishu-qr" hidden></div>
-                <div id="channelFeishuAuthorized" class="channel-feishu-authorized" hidden><i data-lucide="circle-check" aria-hidden="true"></i><strong>授权成功</strong><span>待保存渠道</span></div>
-                <button type="button" class="btn" id="channelFeishuStartScan">生成二维码</button>
+            <div id="channelRegistrationScan" class="channel-registration-scan" hidden>
+              <div class="channel-registration-qr-slot">
+                <img class="channel-registration-qr-placeholder" src="./assets/channel-logos/qr-placeholder.svg" alt="" aria-hidden="true" />
+                <div id="channelRegistrationQr" class="channel-registration-qr" hidden></div>
+                <div id="channelRegistrationAuthorized" class="channel-registration-authorized" hidden><i data-lucide="circle-check" aria-hidden="true"></i><strong>授权成功</strong><span>待保存渠道</span></div>
+                <button type="button" class="btn" id="channelRegistrationStartScan">生成二维码</button>
               </div>
-              <div class="channel-feishu-scan-copy channel-connection-help">
-                <strong id="channelFeishuSaveReminder" class="channel-feishu-save-reminder" hidden>授权成功，渠道尚未保存</strong>
-                <p id="channelFeishuScanStatus" role="status" aria-live="polite"></p>
-                <div class="channel-feishu-scan-actions">
-                  <button type="button" class="btn" id="channelFeishuRetryScan" hidden>重新生成</button>
-                  <a id="channelFeishuAuthLink" class="btn" target="_blank" rel="noopener noreferrer" hidden>打开授权页面</a>
+              <div class="channel-registration-scan-copy channel-connection-help">
+                <strong id="channelRegistrationSaveReminder" class="channel-registration-save-reminder" hidden>授权成功，渠道尚未保存</strong>
+                <p id="channelRegistrationScanStatus" role="status" aria-live="polite"></p>
+                <div class="channel-registration-scan-actions">
+                  <button type="button" class="btn" id="channelRegistrationRetryScan" hidden>重新生成</button>
+                  <a id="channelRegistrationAuthLink" class="btn" target="_blank" rel="noopener noreferrer" hidden>打开授权页面</a>
                 </div>
-                <a class="channel-platform-link channel-feishu-console-link" href="https://open.feishu.cn/app" target="_blank" rel="noopener noreferrer" title="在新标签页打开">前往飞书开发者后台 ↗</a>
+                <a id="channelRegistrationConsoleLink" class="channel-platform-link channel-registration-console-link" href="https://open.feishu.cn/app" target="_blank" rel="noopener noreferrer" title="在新标签页打开">前往飞书开发者后台 ↗</a>
               </div>
             </div>
           </div>

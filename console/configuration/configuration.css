@@ -2607,12 +2607,12 @@ dialog.console-action-dialog::backdrop {
 }
 
 .channel-title-row { display: flex; align-items: center; gap: 12px; }
-#configurationHost .channel-commands-btn {
+#configurationHost .channel-help-btn {
   border: 0;
-  background: var(--bg-muted);
+  background: transparent;
   color: var(--text-dim);
 }
-#configurationHost .channel-commands-btn:hover { color: var(--text); background: var(--bg-hover); }
+#configurationHost .channel-help-btn:hover { color: var(--text); background: var(--bg-hover); }
 .channel-runtime-refresh { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
 .channel-runtime-refresh svg { width: 13px; height: 13px; }
 .channel-runtime-refresh:hover { background: var(--bg-hover); color: var(--text); }
@@ -2766,12 +2766,15 @@ dialog.console-action-dialog::backdrop {
   width: min(800px, calc(100vw - 32px));
 }
 
-.channel-admin-panel .panel-toolbar { flex-wrap: wrap; }
+#configurationHost .channel-admin-panel .panel-toolbar { flex-wrap: wrap; min-height: var(--ui-control-height); margin-bottom: var(--ui-group-content-gap); }
+.channel-content-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--ui-group-content-gap); margin-bottom: var(--ui-group-content-gap); }
+.channel-content-toolbar > .btn { margin-left: auto; }
+.channel-content-toolbar > .channel-view-actions { width: 100%; justify-content: flex-end; }
 #configurationHost .channel-admin-panel .panel-toolbar-actions { flex-wrap: wrap; max-width: 100%; }
 
-dialog.console-detail-dialog.modal.channel-commands-modal {
+dialog.console-detail-dialog.modal.channel-help-modal {
   width: min(560px, calc(100vw - 32px));
-  height: fit-content;
+  height: min(600px, calc(100vh - 32px));
   min-height: 0;
   max-height: calc(100vh - 32px);
   overflow: hidden;
@@ -2779,13 +2782,16 @@ dialog.console-detail-dialog.modal.channel-commands-modal {
   border-radius: var(--console-card-radius);
 }
 
-#channelCommandsModal > .modal-body {
-  min-height: 0;
-  max-height: calc(100vh - 160px);
-  overflow-y: auto;
-}
+.channel-help-modal > .modal-body { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: hidden; }
+.channel-help-tabs { flex-shrink: 0; padding: 0 0 var(--ui-group-content-gap); border: 0; }
+.channel-help-panel { flex: 1; min-height: 0; overflow-y: auto; }
+.channel-help-panel[hidden] { display: none; }
 
 #retryChannelCommandsBtn[hidden] { display: none; }
+
+.channel-support-table { width: 100%; table-layout: fixed; }
+.channel-support-table :is(th, td) { white-space: normal; overflow-wrap: anywhere; }
+.channel-support-table tbody th { color: var(--text-dim); font-weight: 400; text-align: left; }
 
 .channel-command-list { margin: 0; }
 .channel-command-list > div {
@@ -2810,21 +2816,21 @@ dialog.console-detail-dialog.modal.channel-commands-modal {
 
 .channel-account-form-body .field { margin-bottom: 0; }
 
-.channel-account-modal.feishu-channel-modal { height: min(764px, calc(100dvh - 48px)); }
-.feishu-channel-modal > form { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.feishu-channel-modal .channel-account-form-body { flex: 1; min-height: 0; overflow-y: auto; grid-template-rows: auto auto minmax(min-content, 1fr); }
-.feishu-channel-modal .channel-extension-settings { display: flex; flex-direction: column; min-height: 0; }
-.feishu-channel-modal .channel-extension-layout { flex: 1; height: auto; min-height: 0; }
-.feishu-channel-modal :is(.modal-header, .modal-footer) { flex-shrink: 0; }
+.channel-account-modal.registration-channel-modal { height: min(764px, calc(100dvh - 48px)); }
+.registration-channel-modal > form { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.registration-channel-modal .channel-account-form-body { flex: 1; min-height: 0; overflow-y: auto; grid-template-rows: auto auto minmax(min-content, 1fr); }
+.registration-channel-modal .channel-extension-settings { display: flex; flex-direction: column; min-height: 0; }
+.registration-channel-modal .channel-extension-layout { flex: 1; height: auto; min-height: 0; }
+.registration-channel-modal :is(.modal-header, .modal-footer) { flex-shrink: 0; }
 .channel-connection-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 32px; margin-bottom: 12px; }
 .channel-connection-heading h4::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .channel-connection-heading h4 { display: flex; align-items: center; gap: 12px; flex: 1; margin: 0; font-size: 13px; font-weight: 500; color: var(--text-dim); }
-.channel-feishu-mode { margin-left: auto; display: grid; grid-template-columns: repeat(2, 1fr); }
-.channel-feishu-mode button { justify-content: center; min-width: 100px; }
-.channel-feishu-mode button svg { width: 14px; height: 14px; }
-.channel-feishu-mode[hidden] { display: none; }
-.channel-feishu-content,
-.feishu-channel-modal .channel-credential-home:has(> .channel-credential-layout) { min-width: 0; height: 180px; overflow-y: auto; }
+.channel-registration-mode { margin-left: auto; display: grid; grid-template-columns: repeat(2, 1fr); }
+.channel-registration-mode button { justify-content: center; min-width: 100px; }
+.channel-registration-mode button svg { width: 14px; height: 14px; }
+.channel-registration-mode[hidden] { display: none; }
+.channel-registration-content,
+.registration-channel-modal .channel-credential-home:has(> .channel-credential-layout) { min-width: 0; height: 180px; overflow-y: auto; }
 .channel-credential-home:empty { display: none; }
 .channel-credential-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
 .channel-credentials { display: grid; align-content: start; gap: 14px; }
@@ -2833,28 +2839,28 @@ dialog.console-detail-dialog.modal.channel-commands-modal {
 .channel-connection-help p { margin: 8px 0 0; }
 .channel-platform-link { color: var(--accent); text-decoration: none; }
 .channel-platform-link:hover, .channel-platform-link:focus-visible { color: var(--accent-hover); text-decoration: underline; }
-#channelFeishuSetup { height: 180px; }
-.channel-feishu-scan { display: flex; align-items: flex-start; gap: 24px; padding-left: clamp(24px, 4vw, 40px); height: 180px; }
-.channel-feishu-qr-slot { position: relative; display: flex; align-items: center; justify-content: center; width: 176px; height: 176px; flex: 0 0 176px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--ui-radius); background: var(--console-readonly-surface); }
-.channel-feishu-qr-slot:has(.channel-feishu-qr:not([hidden])) { border-color: transparent; background: white; }
-.channel-feishu-qr-placeholder { position: absolute; inset: 0; width: 100%; height: 100%; filter: blur(3px); opacity: .28; pointer-events: none; }
-.channel-feishu-qr-slot:has(.channel-feishu-qr:not([hidden])) .channel-feishu-qr-placeholder { display: none; }
-.channel-feishu-authorized { position: relative; z-index: 1; padding: 12px 16px; border-radius: var(--ui-radius); background: var(--console-surface); display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text-dim); font-size: 12px; }
-.channel-feishu-authorized[hidden] { display: none; }
-.channel-feishu-authorized svg { width: 36px; height: 36px; color: var(--success); }
-.channel-feishu-authorized strong { color: var(--text); font-size: 14px; }
-.channel-feishu-save-reminder { display: block; margin-bottom: 8px; color: var(--text); }
-.channel-feishu-save-reminder[hidden] { display: none; }
-.channel-feishu-qr-slot > button { position: absolute; z-index: 1; }
-.channel-feishu-scan[hidden], #channelFeishuSetup[hidden] { display: none; }
-.channel-feishu-qr { flex: 0 0 176px; background: white; padding: 0; border-radius: var(--ui-radius); }
-.channel-feishu-qr svg { display: block; width: 176px; height: 176px; }
-.channel-feishu-scan-copy { display: flex; flex-direction: column; min-width: 0; width: 320px; max-width: 100%; height: 176px; box-sizing: border-box; }
-.channel-feishu-scan-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.channel-feishu-scan-actions:not(:has(> :not([hidden]))) { display: none; }
-.channel-feishu-console-link { display: block; width: fit-content; margin: auto 0 0 auto; padding-top: 12px; }
-.channel-feishu-scan-copy p:empty { display: none; }
-.channel-feishu-scan-copy p { margin: 0 0 var(--ui-group-content-gap); }
+#channelRegistrationSetup { height: 180px; }
+.channel-registration-scan { display: flex; align-items: flex-start; gap: 24px; padding-left: clamp(24px, 4vw, 40px); height: 180px; }
+.channel-registration-qr-slot { position: relative; display: flex; align-items: center; justify-content: center; width: 176px; height: 176px; flex: 0 0 176px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--ui-radius); background: var(--console-readonly-surface); }
+.channel-registration-qr-slot:has(.channel-registration-qr:not([hidden])) { background: white; }
+.channel-registration-qr-placeholder { position: absolute; inset: 0; width: 100%; height: 100%; filter: blur(3px); opacity: .28; pointer-events: none; }
+.channel-registration-qr-slot:has(.channel-registration-qr:not([hidden])) .channel-registration-qr-placeholder { display: none; }
+.channel-registration-authorized { position: relative; z-index: 1; padding: 12px 16px; border-radius: var(--ui-radius); background: var(--console-surface); display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text-dim); font-size: 12px; }
+.channel-registration-authorized[hidden] { display: none; }
+.channel-registration-authorized svg { width: 36px; height: 36px; color: var(--success); }
+.channel-registration-authorized strong { color: var(--text); font-size: 14px; }
+.channel-registration-save-reminder { display: block; margin-bottom: 8px; color: var(--text); }
+.channel-registration-save-reminder[hidden] { display: none; }
+.channel-registration-qr-slot > button { position: absolute; z-index: 1; }
+.channel-registration-scan[hidden], #channelRegistrationSetup[hidden] { display: none; }
+.channel-registration-qr { position: relative; flex: 0 0 176px; background: white; padding: 0; border-radius: var(--ui-radius); }
+.channel-registration-qr svg { display: block; width: 176px; height: 176px; }
+.channel-registration-scan-copy { display: flex; flex-direction: column; min-width: 0; width: 320px; max-width: 100%; height: 176px; box-sizing: border-box; }
+.channel-registration-scan-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.channel-registration-scan-actions:not(:has(> :not([hidden]))) { display: none; }
+.channel-registration-console-link { display: block; width: fit-content; margin: auto 0 0 auto; padding-top: 12px; }
+.channel-registration-scan-copy p:empty { display: none; }
+.channel-registration-scan-copy p { margin: 0 0 var(--ui-group-content-gap); }
 
 .channel-form-grid {
   display: grid;

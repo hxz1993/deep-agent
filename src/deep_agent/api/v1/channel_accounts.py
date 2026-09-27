@@ -104,7 +104,10 @@ async def create_channel_account(
     body = body.model_copy(update={"agent_id": agent_id})
     try:
         if body.registration_id:
-            from deep_agent.services.feishu_registration import RegistrationError, registration_service
+            from deep_agent.services.channel_registration import RegistrationError
+            from deep_agent.services.feishu_registration import registration_service as feishu_registration
+            from deep_agent.services.wecom_registration import registration_service as wecom_registration
+            registration_service = feishu_registration if body.channel_type == "feishu" else wecom_registration
             try:
                 async with registration_service.credentials(body.registration_id, user) as (app_id, secret):
                     row = await store.create_account(body.model_copy(update={

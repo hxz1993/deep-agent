@@ -60,8 +60,8 @@ DeepFOS 应用及 API Key 的关联规则与企微相同。飞书凭据只用于
 
 先填写渠道名称再生成二维码，会将该次名称作为 `app_preset.name` 预填至飞书创建页；留空时使用 DeepAgent。名称按生成时快照生效，后续修改本地渠道名称不会重命名已经授权的飞书应用。
 
-AstrBot 4.28.1 直接将注册接口返回的 `verification_uri_complete` 编码为二维码；本项目使用官方 SDK 的增强注册 URL，额外携带 source、name、desc、createOnly 和 addons。addons 已由 SDK 使用 gzip + URL-safe Base64 压缩，包含本项目明确声明的消息权限与接收消息事件；因此比基础验证链接更长、二维码更密。不要仅为视觉稀疏删除权限配置。二维码不包含 App Secret；服务端在用户确认后轮询取得凭据。
+二维码编码飞书注册授权链接，使用 PersonalAgent 默认模板，仅附带本次应用名称预填；不附加自定义权限、事件或描述。二维码不包含 App Secret，服务端在用户确认后轮询取得凭据。
 
-官方可预填：名称、描述、头像候选 URL，权限、事件订阅、卡片回调；可限制仅创建，或为指定已有 App 发起配置更新。本项目目前预填名称/描述及所需权限/事件，不额外配置头像或卡片回调。最终仍由飞书授权页确认、租户策略决定是否可用，不承诺无需审批。
+默认权限与事件清单由飞书服务端维护，实际授权仍受应用发布、审批和可用范围约束；生成二维码不代表所有平台能力均已接入 DeepAgent。
 
-依据：AstrBot `astrbot/core/platform/sources/lark/app_registration.py`、`dashboard/src/components/platform/PlatformRegistrationAction.vue`，官方 `lark_oapi/scene/registration`（1.7.3）与 [注册文档](https://github.com/larksuite/oapi-sdk-python/blob/v2_main/_autodocs/api-reference/registration.md)。
+依据：`services/feishu_registration.py` 与官方 [注册文档](https://github.com/larksuite/oapi-sdk-python/blob/v2_main/_autodocs/api-reference/registration.md)。

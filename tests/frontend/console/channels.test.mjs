@@ -42,14 +42,16 @@ test("配置中心提供企微渠道页和完整运行状态", () => {
 
 function commandHarness(fetchCatalog) {
   const elements = {
-    channelCommandsModal: { open: false, showModal() { this.open = true; } },
+    channelHelpModal: { open: false, showModal() { this.open = true; } },
+    channelHelpMessagesPanel: { hidden: false },
+    channelHelpCommandsPanel: { hidden: true },
     channelCommandsContent: { innerHTML: "" },
     retryChannelCommandsBtn: { hidden: false },
   };
   const requests = [];
   const context = vm.createContext({
     window: {},
-    document: { addEventListener() {}, getElementById(id) { return elements[id]; } },
+    document: { addEventListener() {}, querySelectorAll() { return []; }, getElementById(id) { return elements[id]; } },
     apiFetch(path) { requests.push(path); return fetchCatalog(); },
     escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); },
   });
@@ -57,13 +59,15 @@ function commandHarness(fetchCatalog) {
   return { admin: context.window.channelsAdmin, elements, requests, context };
 }
 
-test("快捷命令与新建并排，网关胶囊包含刷新入口并跟随标题", () => {
+test("渠道操作独占第二行，一级切换与网关胶囊保留标题行", () => {
   const panel = templateHtml.split('id="panel-channels">')[1].split('<div class="table-wrap')[0];
-  const [title, actions] = panel.split('class="panel-toolbar-actions"');
+  const [title, actions] = panel.split('class="channel-content-toolbar"');
   assert.match(title, /channelRuntimeBanner[\s\S]*refreshChannelsBtn/);
-  assert.doesNotMatch(title, /channelCommandsBtn/);
-  assert.match(actions, /channelCommandsBtn[\s\S]*newChannelBtn/);
-  assert.match(styles, /\.channel-commands-btn\s*\{[^}]*border: 0;[^}]*background: var\(--bg-muted\);/);
+  assert.match(title, /class="panel-subtitle" id="channelViewDescription"/);
+  assert.doesNotMatch(title, /channelHelpBtn/);
+  assert.match(title, /channel-view-switch/);
+  assert.match(actions, /newChannelBtn[\s\S]*channelHelpBtn/);
+  assert.match(styles, /\.channel-help-btn\s*\{[^}]*border: 0;[^}]*background: transparent;/);
 });
 
 test("渠道标题沿用目录标题基线，状态胶囊不撑高标题行", () => {
@@ -71,20 +75,27 @@ test("渠道标题沿用目录标题基线，状态胶囊不撑高标题行", ()
   assert.match(sharedPrimitives, /#configurationHost \.channel-title-row \.channel-runtime-chip\s*\{\s*margin-block: -4px;/);
 });
 
-test("快捷命令弹框独立于网关读取统一只读目录并转义内容", async () => {
+test("帮助默认展示支持消息，切换快捷命令才读取目录并转义内容", async () => {
   const { admin, elements, requests } = commandHarness(async () => ({
     commands: [{ command: "/help", description: "说明 <script>" }],
     notes: ["群聊影响 <所有成员>"],
   }));
-  await admin.openCommands();
+  admin.openHelp();
+  assert.equal(elements.channelHelpModal.open, true);
+  assert.equal(elements.channelHelpMessagesPanel.hidden, false);
+  assert.equal(elements.channelHelpCommandsPanel.hidden, true);
+  assert.equal(requests.length, 0);
+  await admin.selectHelpTab("commands");
+  assert.equal(elements.channelHelpMessagesPanel.hidden, true);
+  assert.equal(elements.channelHelpCommandsPanel.hidden, false);
   assert.deepEqual(requests, ["/api/v1/channel-commands"]);
-  assert.equal(elements.channelCommandsModal.open, true);
+  assert.equal(elements.channelHelpModal.open, true);
   assert.match(elements.channelCommandsContent.innerHTML, /<code>\/help<\/code>/);
   assert.match(elements.channelCommandsContent.innerHTML, /说明 &lt;script&gt;/);
   assert.doesNotMatch(elements.channelCommandsContent.innerHTML, /<script>|<button|执行/);
   assert.equal(elements.retryChannelCommandsBtn.hidden, true);
-  assert.match(templateHtml, /id="channelCommandsBtn"[\s\S]*快捷命令/);
-  assert.match(templateHtml, /id="channelCommandsModal" aria-labelledby="channelCommandsModalTitle"/);
+  assert.match(templateHtml, /id="channelHelpCommandsTab"[\s\S]*快捷命令/);
+  assert.match(templateHtml, /id="channelHelpModal" aria-labelledby="channelHelpModalTitle"/);
   assert.doesNotMatch(source, /command: "\/(help|new|stop|status|whoami)"/);
 });
 
@@ -94,10 +105,10 @@ test("快捷命令请求失败就近展示错误并支持重试", async () => {
     if (!attempt++) throw new Error("HTTP 503：暂不可用");
     return { commands: [{ command: "/help", description: "帮助" }], notes: [] };
   });
-  await admin.openCommands();
+  await admin.loadCommands();
   assert.match(elements.channelCommandsContent.innerHTML, /role="alert".*HTTP 503：暂不可用/);
   assert.equal(elements.retryChannelCommandsBtn.hidden, false);
-  await admin.openCommands();
+  await admin.loadCommands();
   assert.equal(elements.retryChannelCommandsBtn.hidden, true);
   assert.match(elements.channelCommandsContent.innerHTML, /\/help/);
 });
@@ -167,7 +178,7 @@ function secretEditorHarness() {
     return elements.get(id);
   };
   const context = vm.createContext({
-    window: { createFeishuRegistration: () => ({ reset() {}, start() {} }) },
+    window: { createChannelRegistration: () => ({ reset() {}, start() {} }) },
     document: {
       addEventListener(type, listener) { if (type === "DOMContentLoaded") ready.push(listener); },
       getElementById: getElement,
@@ -262,9 +273,9 @@ test("渠道布局包含窄屏适配且不引入第二个页面结构", () => {
   assert.doesNotMatch(source, /localStorage|sessionStorage/);
 });
 
-test("快捷命令弹框随内容收缩，长说明仅正文滚动", () => {
-  assert.match(styles, /dialog\.console-detail-dialog\.modal\.channel-commands-modal\s*\{[^}]*height: fit-content;[^}]*min-height: 0;[^}]*max-height: calc\(100vh - 32px\);/);
-  assert.match(styles, /#channelCommandsModal > \.modal-body\s*\{[^}]*max-height: calc\(100vh - 160px\);[^}]*overflow-y: auto;/);
+test("帮助两页共用固定尺寸，长说明仅面板滚动", () => {
+  assert.match(styles, /dialog\.console-detail-dialog\.modal\.channel-help-modal\s*\{[^}]*height: min\(600px, calc\(100vh - 32px\)\);[^}]*min-height: 0;/);
+  assert.match(styles, /\.channel-help-panel\s*\{[^}]*min-height: 0;[^}]*overflow-y: auto;/);
 });
 
 
@@ -422,7 +433,7 @@ test("飞书手填复用表单且不请求企微应用，提交独立渠道类�
   const { admin, getElement, requests, context } = secretEditorHarness();
   admin.openCreate("feishu");
   assert.equal(getElement("channelBotId").disabled, true);
-  vm.runInContext('setChannelFeishuMode("manual")', context);
+  vm.runInContext('setChannelRegistrationMode("manual")', context);
   assert.equal(getElement("channelAccountModalTitle").textContent, "新建飞书渠道");
   assert.equal(getElement("channelBotIdLabel").textContent, "App ID");
   assert.equal(getElement("channelWecomMemberToggle").hidden, true);
@@ -443,7 +454,7 @@ test("飞书手填复用表单且不请求企微应用，提交独立渠道类�
 test("飞书扫码保存只提交授权句柄，不混入手填凭据", async () => {
   const { admin, getElement, requests, context } = secretEditorHarness();
   admin.openCreate("feishu");
-  vm.runInContext('setChannelFeishuMode("scan"); channelFeishuRegistration.authorizedId = "registration-ready";', context);
+  vm.runInContext('setChannelRegistrationMode("scan"); channelRegistration.authorizedId = "registration-ready";', context);
   getElement("channelBotId").value = "stale-cli";
   getElement("channelSecret").value = "stale-secret";
   assert.equal(getElement("channelBotId").disabled, true);
@@ -456,10 +467,11 @@ test("飞书扫码保存只提交授权句柄，不混入手填凭据", async ()
 });
 
 test("从飞书切回企微恢复原凭据和应用字段语义", () => {
-  const { admin, getElement } = secretEditorHarness();
+  const { admin, getElement, context } = secretEditorHarness();
   admin.openCreate("feishu"); admin.openCreate();
+  vm.runInContext('setChannelRegistrationMode("manual");', context);
   assert.equal(getElement("channelBotIdLabel").textContent, "Bot ID");
-  assert.equal(getElement("channelFeishuSetup").hidden, true);
+  assert.equal(getElement("channelRegistrationSetup").hidden, false);
   assert.equal(getElement("channelWecomMemberToggle").hidden, false);
   assert.equal(getElement("channelBotId").disabled, false);
   assert.equal(getElement("channelSecret").required, true);
@@ -468,26 +480,30 @@ test("从飞书切回企微恢复原凭据和应用字段语义", () => {
 test("飞书切换接入方式保留已生成的授权，重新打开表单才清理", () => {
   const { admin, context } = secretEditorHarness();
   admin.openCreate("feishu");
-  vm.runInContext('channelFeishuRegistration.reset = () => { throw new Error("must retain registration"); }; channelFeishuRegistration.authorizedId = "retained-authorization";', context);
-  vm.runInContext('setChannelFeishuMode("manual"); setChannelFeishuMode("scan");', context);
-  assert.equal(vm.runInContext('channelFeishuRegistration.authorizedId', context), "retained-authorization");
+  vm.runInContext('channelRegistration.reset = () => { throw new Error("must retain registration"); }; channelRegistration.authorizedId = "retained-authorization";', context);
+  vm.runInContext('setChannelRegistrationMode("manual"); setChannelRegistrationMode("scan");', context);
+  assert.equal(vm.runInContext('channelRegistration.authorizedId', context), "retained-authorization");
   assert.throws(() => admin.openCreate("feishu"), /must retain registration/);
 });
 
 test("扫码过期及失败在右侧提供重试，初始生成按钮只用于空态", () => {
   const { context, getElement } = secretEditorHarness();
   for (const status of ["expired", "failed", "denied", "cancelled"]) {
-    vm.runInContext(`renderFeishuRegistration({status: "${status}"})`, context);
-    assert.equal(getElement("channelFeishuRetryScan").hidden, false);
-    assert.equal(getElement("channelFeishuStartScan").hidden, true);
-    assert.equal(getElement("channelFeishuQr").hidden, true);
+    vm.runInContext(`renderChannelRegistration({status: "${status}"})`, context);
+    assert.equal(getElement("channelRegistrationRetryScan").hidden, false);
+    assert.equal(getElement("channelRegistrationStartScan").hidden, true);
+    assert.equal(getElement("channelRegistrationQr").hidden, true);
   }
-  vm.runInContext('renderFeishuRegistration({status: "starting"})', context);
-  assert.equal(getElement("channelFeishuRetryScan").hidden, true);
-  assert.equal(getElement("channelFeishuStartScan").disabled, true);
-  vm.runInContext('renderFeishuRegistration({})', context);
-  assert.equal(getElement("channelFeishuStartScan").hidden, false);
-  assert.equal(getElement("channelFeishuStartScan").disabled, false);
+  vm.runInContext('renderChannelRegistration({status: "waiting"})', context);
+  assert.equal(getElement("channelRegistrationRetryScan").hidden, false);
+  vm.runInContext('renderChannelRegistration({status: "authorized"})', context);
+  assert.equal(getElement("channelRegistrationRetryScan").hidden, true);
+  vm.runInContext('renderChannelRegistration({status: "starting"})', context);
+  assert.equal(getElement("channelRegistrationRetryScan").hidden, true);
+  assert.equal(getElement("channelRegistrationStartScan").disabled, true);
+  vm.runInContext('renderChannelRegistration({})', context);
+  assert.equal(getElement("channelRegistrationStartScan").hidden, false);
+  assert.equal(getElement("channelRegistrationStartScan").disabled, false);
 });
 
 
@@ -519,7 +535,7 @@ test("新建选择 Agent 覆盖名称，编辑渠道不自动重命名", () => {
 test("扫码后改为手填保存会取消未消费的注册任务", async () => {
   const { admin, getElement, context } = secretEditorHarness();
   admin.openCreate("feishu");
-  vm.runInContext('setChannelFeishuMode("manual"); channelFeishuRegistration.reset = options => { window.resetOptions = options; };', context);
+  vm.runInContext('setChannelRegistrationMode("manual"); channelRegistration.reset = options => { window.resetOptions = options; };', context);
   await admin.save({preventDefault() {}, currentTarget: getElement("channelAccountForm")});
   assert.equal(context.window.resetOptions.consumed, false);
 });
@@ -528,13 +544,70 @@ test("扫码后改为手填保存会取消未消费的注册任务", async () =>
 test("扫码授权成功明确提示待保存，不自动关闭或提交渠道", () => {
  const { admin, context, getElement, requests } = secretEditorHarness();
  admin.openCreate("feishu");
- vm.runInContext('renderFeishuRegistration({status:"authorized"})', context);
- assert.equal(getElement("channelFeishuAuthorized").hidden, false);
- assert.equal(getElement("channelFeishuSaveReminder").hidden, false);
- assert.match(getElement("channelFeishuScanStatus").textContent, /保存/);
+ vm.runInContext('renderChannelRegistration({status:"authorized"})', context);
+ assert.equal(getElement("channelRegistrationAuthorized").hidden, false);
+ assert.equal(getElement("channelRegistrationSaveReminder").hidden, false);
+ assert.match(getElement("channelRegistrationScanStatus").textContent, /保存/);
  assert.equal(getElement("channelAccountModal").open, true);
  assert.equal(requests.length, 0);
- vm.runInContext('renderFeishuRegistration({status:"expired"})', context);
- assert.equal(getElement("channelFeishuAuthorized").hidden, true);
- assert.equal(getElement("channelFeishuSaveReminder").hidden, true);
+ vm.runInContext('renderChannelRegistration({status:"expired"})', context);
+ assert.equal(getElement("channelRegistrationAuthorized").hidden, true);
+ assert.equal(getElement("channelRegistrationSaveReminder").hidden, true);
+});
+
+test("企微默认扫码且保留成员扩展，授权保存仅传企微句柄", async () => {
+  const { admin, getElement, requests, context } = secretEditorHarness();
+  admin.openCreate("wecom");
+  assert.equal(getElement("channelRegistrationSetup").hidden, false);
+  assert.equal(getElement("channelRegistrationScan").hidden, false);
+  assert.equal(getElement("channelBotId").disabled, true);
+  assert.equal(getElement("channelMemberTab").hidden, false);
+  assert.equal(getElement("channelRegistrationManualLabel").textContent, "手动关联");
+  assert.equal(getElement("channelRegistrationConsoleLink").href, "https://work.weixin.qq.com/");
+  assert.doesNotMatch(getElement("channelRegistrationScanStatus").textContent, /预填/);
+  vm.runInContext('channelRegistration.authorizedId = "wecom-ready";', context);
+  getElement("channelBotId").value = "stale-bot";
+  getElement("channelSecret").value = "stale-secret";
+  await admin.save({ preventDefault() {}, currentTarget: getElement("channelAccountForm") });
+  const payload = requests.at(-1).payload;
+  assert.equal(payload.channel_type, "wecom");
+  assert.equal(payload.registration_id, "wecom-ready");
+  assert.equal(Object.hasOwn(payload, "secret"), false);
+  assert.equal(Object.hasOwn(payload, "bot_id"), false);
+  assert.equal(Object.hasOwn(payload.settings, "feishu"), false);
+});
+
+test("企微二维码拒绝非官方域名及带凭据的授权地址", () => {
+  const { admin, getElement, context } = secretEditorHarness();
+  context.URL = URL;
+  context.qrcode = () => ({ addData() {}, make() {}, getModuleCount() { return 41; }, isDark() { return true; } });
+  admin.openCreate("wecom");
+  for (const url of ["https://evil.qq.com/", "https://work.weixin.qq.com.evil.test/", "http://work.weixin.qq.com/", "https://user:pass@work.weixin.qq.com/"]) {
+    vm.runInContext(`renderChannelRegistration({status: "waiting", verification_url: ${JSON.stringify(url)}})`, context);
+    assert.equal(getElement("channelRegistrationQr").hidden, true);
+    assert.equal(getElement("channelRegistrationAuthLink").hidden, true);
+    assert.equal(getElement("channelRegistrationRetryScan").hidden, false);
+  }
+  vm.runInContext('renderChannelRegistration({status:"waiting",verification_url:"https://work.weixin.qq.com/ai/qc/c?s=fixture"})', context);
+  assert.equal(getElement("channelRegistrationQr").hidden, false);
+  assert.equal(getElement("channelRegistrationAuthLink").hidden, true);
+  assert.match(getElement("channelRegistrationQr").innerHTML, /wecom\.png/);
+  admin.openCreate("feishu");
+  vm.runInContext('renderChannelRegistration({status:"waiting",verification_url:"https://accounts.feishu.cn/fixture"})', context);
+  assert.equal(getElement("channelRegistrationAuthLink").hidden, false);
+  assert.match(getElement("channelRegistrationQr").innerHTML, /feishu\.ico/);
+});
+
+test("帮助切回支持消息和重新打开不会被迟到命令结果切页", async () => {
+  let resolve;
+  const { admin, elements } = commandHarness(() => new Promise(done => { resolve = done; }));
+  admin.openHelp();
+  const pending = admin.selectHelpTab("commands");
+  admin.selectHelpTab("messages");
+  resolve({ commands: [{ command: "/help", description: "帮助" }], notes: [] });
+  await pending;
+  assert.equal(elements.channelHelpMessagesPanel.hidden, false);
+  assert.equal(elements.channelHelpCommandsPanel.hidden, true);
+  admin.openHelp();
+  assert.equal(elements.channelHelpMessagesPanel.hidden, false);
 });

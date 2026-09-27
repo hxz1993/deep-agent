@@ -1,6 +1,7 @@
 /** Registration secrets remain in the API process, never in this editor. */
-window.createFeishuRegistration = function createFeishuRegistration({ request = apiFetch, onChange = () => {} } = {}) {
-  const base = "/api/v1/channel-accounts/feishu/registrations";
+window.createChannelRegistration = function createChannelRegistration({ channelType = "feishu", request = apiFetch, onChange = () => {} } = {}) {
+  if (!["feishu", "wecom"].includes(channelType)) throw new Error("不支持的扫码渠道");
+  const base = `/api/v1/channel-accounts/${channelType}/registrations`;
   let generation = 0, timer = null, controller = null;
   let registration = null;
   const discard = id => request(`${base}/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
@@ -49,7 +50,7 @@ window.createFeishuRegistration = function createFeishuRegistration({ request = 
       // Keep the creation response so a late created registration can be cancelled.
       // API registrations also expire server-side if the page itself is unloaded.
       try {
-        const data = await request(base, { method: "POST", body: JSON.stringify({ app_name: appName.trim() }) });
+        const data = await request(base, { method: "POST", body: JSON.stringify(channelType === "feishu" ? { app_name: appName.trim() } : {}) });
         clearTimeout(creationTimeout);
         if (token !== generation) { if (data.registration_id) await discard(data.registration_id); return; }
         publish(data);

@@ -28,8 +28,10 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         from deep_agent.services.feishu_registration import registration_service
+        from deep_agent.services.wecom_registration import registration_service as wecom_registration_service
         try:
             await registration_service.aclose()
+            await wecom_registration_service.aclose()
         finally:
             await ctx.aclose()
             reset_context()

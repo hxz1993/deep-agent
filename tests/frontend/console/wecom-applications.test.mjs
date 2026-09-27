@@ -43,7 +43,7 @@ async function select(h) { await h.admin.refresh(); await h.admin.select('app-1'
 
 test('渠道标题同行切换，成员表模块在应用详情中按需加载', () => {
   const section = template.split('id="panel-channels">')[1].split('<!-- MCP panel -->')[0];
-  assert.match(section, /channelAccountActions[\s\S]*newWecomApplicationBtn[\s\S]*channel-view-switch/);
+  assert.match(section, /channel-view-switch[\s\S]*channel-content-toolbar[\s\S]*channelAccountActions[\s\S]*newWecomApplicationBtn/);
   assert.match(section, /data-channel-view="accounts"/);
   assert.match(section, /data-channel-view="applications"/);
   assert.match(section, /id="wecomApplicationList"[\s\S]*id="wecomApplicationDetail"/);

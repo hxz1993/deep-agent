@@ -7,7 +7,7 @@
 |------|-------------------------------------------------| --- | --- |
 | `01` | [`UI 工具`](01-ui-tools/README.md)                | 2026-06 | builtin/manual 已落地；MCP 自动发现方案已关闭 |
 | `02` | [`运维控制台`](02-operations-console/README.md)      | 2026-07 | 一体化 Console 已落地；过期原型已清理 |
-| `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | v0.6.0单Event压缩、八段摘要、Evidence、超大结果裁剪和历史回读已落地 |
+| `03` | [`上下文压缩`](03-context-compaction/README.md)      | 2026-07 | v0.11.6 D01：同轮闭合步骤、交接摘要与来源回读，移除55%目标；默认触发仍80% |
 | `04` | [`模型目录`](04-model-catalog/README.md)            | 2026-07 | 数据库目录与手工刷新已落地，结构并入 v0.3.0 基线 001 |
 | `05` | [`工具优化`](05-tool-optimization/README.md)        | 2026-07 | 工具体系映射、错误语义、Return Schema与v0.4.0大工具结果外置已落地；大型 MCP 检索见 13 课题 |
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |
@@ -30,6 +30,14 @@
 | `23` | [`诊断中心与日志`](23-diagnostics-and-logs/README.md) | 2026-09 | 日志、管理员会话查询与统计已发布；保留设计与实施说明，原型已清理 |
 | `24` | [`业务助手初始化与升级`](24-assistant-installation/README.md) | 2026-09 | 已由正式 Agent 安装包方案替代；旧稿已清理，保留指南入口 |
 | `26` | [`定时任务`](26-scheduled-tasks/README.md) | 2026-09-14 | 上游调研与初步设计；独立配置、Cron、会话归属及停机补跑，尚未开发 |
+| `27` | [`个人用量统计`](27-personal-usage/README.md) | 2026-09-23 | C04-USAGE 已在本地实现，版本 0.11.0 / 007；复用事件和 SDK Usage，管理员按人／日期／模型／Agent／用途统计，UI 验收中；价格／配额暂缓 |
+| `28` | [`Codex 订阅 Provider`](28-codex-provider/README.md) | 2026-09-24 | C10-CODEX 本机实验版；复用 Provider／模型链路，OAuth 凭据同表 JSON 保存；待真实授权联调 |
+| `29` | [`会话思考强度与模型能力范围`](29-reasoning-controls/README.md) | 2026-09-25 | C09-THINKING 研究归档；有潜力、暂不实施，保持供应商默认行为 |
+| `30` | [`UI 工具同 Run 等待与执行连续性`](30-ui-tool-inline-wait/README.md) | 2026-09-26 | 已验证官方 handler 保留 PTC 内存；保留 UI 定义与安装格式，运行／SSE／客户端待适配，发布兼容策略待决，尚未实施 |
+
+| `31` | [`敏感凭据数据库加密存储`](31-credential-encryption/README.md) | 2026-09-26 | 高优先级待实施；统一凭据边界、密钥部署、迁移与恢复，无业务客户端升级要求 |
+
+| `32` | [`新渠道接入`](32-new-channels/README.md) | 微信研究始于 2026-09-23；09-26 独立整理 | 微信原调研从 22 移入；企微自建应用公网回调/Gateway 交接；飞书 SDK、扫码与长连接专项调研；个人微信暂缓 |
 
 ## 文档命名
 

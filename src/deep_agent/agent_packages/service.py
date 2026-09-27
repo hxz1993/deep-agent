@@ -51,7 +51,7 @@ def snapshot_hash(data):
     for cls, rows in data.items():
         tables[cls.__tablename__] = sorted(
             [digest({column.key: str(getattr(row, 'metadata_' if column.key == 'metadata' else column.key))
-                     for column in cls.__table__.columns}) for row in rows]
+                     for column in cls.__table__.columns if not (cls is Agent and column.key == 'ui_tool_selection')}) for row in rows]
         )
     return digest(tables)
 
@@ -99,7 +99,6 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
                 add('skill', code, incoming['label'], 'reuse' if same else 'update' if existing else 'new')
         else:
             add('builtin_skill', code, code, 'reuse' if code in builtin_skills else 'missing')
-    selections = {}
     for incoming in package.ui:
         existing = packages.get(incoming.code)
         tools = [t for t in data[UiToolDefinition] if t.package_code == incoming.code]
@@ -122,21 +121,12 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
         if collisions or incoming.code in builtin_ui or (existing and existing.source == 'builtin'):
             status = 'blocked'
             blocked.append(f"UI 工具包 {incoming.label} 存在内置或跨包工具名冲突：{'、'.join(collisions) or incoming.code}")
-        selection = package.agent.ui_tool_selection.get(incoming.code, [t.name for t in incoming.tools])
-        selections[incoming.code] = list(selection)
         add('ui', incoming.code, incoming.label, status, tools=actions,
-            retained_tools=sorted(set(local_tools) - incoming_names), selected_tools=list(selection))
+            retained_tools=sorted(set(local_tools) - incoming_names))
     packed_ui = {p.code for p in package.ui}
     for code in package.agent.capabilities:
         if not code.startswith('mcp:') and code not in packed_ui:
             add('builtin_tool', code, code, 'reuse' if code in available else 'missing')
-            if code in available and code in package.agent.ui_tool_selection:
-                names = {t.name for t in builtin_ui_records() if t.package_code == code}
-                selected = package.agent.ui_tool_selection[code]
-                selections[code] = [n for n in selected if n in names]
-                for name in selected:
-                    if name not in names:
-                        add('builtin_tool', name, name, 'missing')
     reference = package.agent.model_reference
     matches = [m for m in models if reference and m['name'] == reference.name]
     refs = {
@@ -152,17 +142,12 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     if target:
         removed.extend({'kind': 'capability', 'code': c, 'label': c, 'status': 'unlinked'} for c in target.capabilities or [] if c not in resulting_caps)
         removed.extend({'kind': 'skill', 'code': c, 'label': c, 'status': 'unlinked'} for c in target.skills or [] if c not in resulting_skills)
-        for code, selected in selections.items():
-            if code in (target.capabilities or []):
-                old_names = (getattr(target, 'ui_tool_selection', None) or {}).get(code,
-                    [t.name for t in data[UiToolDefinition] if t.package_code == code])
-                removed.extend({'kind': 'ui_tool', 'code': n, 'label': n, 'status': 'unlinked'} for n in old_names if n not in selected)
     return {'digest': digest({'package': package.digest, 'target': snapshot_hash(data),
                              'builtin': sorted(available | builtin_skills), 'mode': mode, 'target_agent_id': target_agent_id}),
             'manifest': package.manifest.model_dump(), 'agent': package.agent.model_dump(),
             'mode': mode, 'target_agent': {'id': target.id, 'name': target.name} if target else None,
             'resources': resources, 'references': refs, 'models': models, 'mcps': mcps,
-            'ui_tool_selection': selections, 'removed_associations': removed, 'blocked': blocked}
+            'removed_associations': removed, 'blocked': blocked}
 
 
 async def preview_package(ctx, package, mode='create', target_agent_id=None):
@@ -187,7 +172,7 @@ async def export_package(ctx, agent_id, headers):
         data = await snapshot(db)
         source_hash = snapshot_hash(data)
         source_agent = digest({'name': row.name, 'prompt': row.prompt,
-                               'capabilities': row.capabilities, 'skills': row.skills, 'model_id': row.model_id, 'ui_tool_selection': row.ui_tool_selection})
+                               'capabilities': row.capabilities, 'skills': row.skills, 'model_id': row.model_id})
         models = {m.id: m for m in data[LlmModel]}
         providers = {p.id: p for p in data[LlmProvider]}
         model = models.get(row.model_id)
@@ -195,7 +180,7 @@ async def export_package(ctx, agent_id, headers):
         if row.model_id and (not model or not provider):
             raise PackageError('Agent 引用的模型或 Provider 已缺失')
         agent = PackageAgent(name=row.name, prompt=row.prompt,
-                             capabilities=row.capabilities, skills=row.skills, ui_tool_selection=row.ui_tool_selection or {},
+                             capabilities=row.capabilities, skills=row.skills,
                              model_reference={'name': model.name, 'provider_type': provider.provider_type} if model else None)
         custom_ui = []
         builtin_ui = {t.package_code for t in builtin_ui_records()}
@@ -228,7 +213,7 @@ async def export_package(ctx, agent_id, headers):
         after = (await db.execute(select(Agent).where(Agent.id == agent_id).options(lazyload('*')))).scalar_one_or_none()
         if not after or source_hash != snapshot_hash(await snapshot(db)) or source_agent != digest({
             'name': after.name, 'prompt': after.prompt,
-            'capabilities': after.capabilities, 'skills': after.skills, 'model_id': after.model_id, 'ui_tool_selection': after.ui_tool_selection,
+            'capabilities': after.capabilities, 'skills': after.skills, 'model_id': after.model_id,
         }):
             raise PackageConflict('导出期间配置发生变化，请重新导出')
     raw = await asyncio.to_thread(build_zip, files)
@@ -244,7 +229,7 @@ def agent_state(row):
     if row is None:
         return None
     return digest({k: getattr(row, k) for k in
-                   ('id', 'name', 'prompt', 'model_id', 'capabilities', 'skills', 'ui_tool_selection')})
+                   ('id', 'name', 'prompt', 'model_id', 'capabilities', 'skills')})
 
 
 def installation_results(preview, agent):
@@ -254,10 +239,6 @@ def installation_results(preview, agent):
     results.extend({'kind': 'mcp', 'code': r['code'], 'label': r['code'],
                     'status': 'reuse' if r['matched_code'] else 'missing'} for r in preview['references']['mcps'])
     results.extend(preview['removed_associations'])
-    # Extra tools remain in the shared package but are not enabled for this Agent.
-    unlinked = {r['code'] for r in results if r['status'] == 'unlinked'}
-    results.extend({'kind': 'ui_tool', 'code': name, 'label': name, 'status': 'unlinked'}
-                   for r in preview['resources'] for name in r.get('retained_tools', []) if name not in unlinked)
     return {'agent': agent, 'mode': preview['mode'], 'results': results,
             'missing': [r for r in results if r['status'] == 'missing']}
 
@@ -352,7 +333,7 @@ async def _install(ctx, package, options, headers):
                 row = await db.get(Agent, agent_id) if options.mode == 'overwrite' else Agent(id=agent_id)
                 row.name, row.prompt, row.model_id = options.name, package.agent.prompt, model_id
                 row.capabilities, row.skills = list(dict.fromkeys(caps)), list(dict.fromkeys(skills))
-                row.ui_tool_selection = current['ui_tool_selection']
+                row.ui_tool_selection = {}
                 if options.mode == 'create':
                     db.add(row)
                 await db.flush()

@@ -87,11 +87,44 @@ class McpToolsInspection(BaseModel):
     snapshot: McpToolSnapshot | None = Field(default=None, exclude=True)
 
 
+class McpResourceDefinition(BaseModel):
+    name: str = ""
+    title: str | None = None
+    uri: str = ""
+    description: str | None = None
+    mime_type: str | None = None
+
+
 class McpResourcesInspection(BaseModel):
     status: McpCapabilityStatus = "unknown"
     count: int = 0
     template_count: int = 0
+    definitions: list[McpResourceDefinition] | None = Field(default=None, exclude=True)
     error: McpInspectionError | None = None
+
+
+class McpCatalogTools(BaseModel):
+    status: McpCapabilityStatus
+    count: int
+    snapshot_status: McpToolSnapshotStatus
+    snapshot_at: UtcDatetime | None = None
+    definitions: list[McpToolSnapshotDefinition] = Field(default_factory=list)
+
+
+class McpCatalogResources(BaseModel):
+    count: int = 0
+    snapshot_status: McpToolSnapshotStatus = "missing"
+    definitions: list[McpResourceDefinition] = Field(default_factory=list)
+
+
+class McpCatalogResponse(BaseModel):
+    """On-demand administrator view of the last stored tool inventory."""
+
+    name: str
+    inspection_status: McpInspectionStatus
+    checked_at: UtcDatetime | None = None
+    tools: McpCatalogTools
+    resources: McpCatalogResources = Field(default_factory=McpCatalogResources)
 
 
 class McpInspection(BaseModel):
@@ -109,6 +142,8 @@ class McpInspection(BaseModel):
         value = self.model_dump(mode="json")
         if self.tools.snapshot is not None:
             value["tools"]["snapshot"] = self.tools.snapshot.model_dump(mode="json")
+        if self.resources.definitions is not None:
+            value["resources"]["definitions"] = [item.model_dump(mode="json") for item in self.resources.definitions]
         return value
 
     @classmethod

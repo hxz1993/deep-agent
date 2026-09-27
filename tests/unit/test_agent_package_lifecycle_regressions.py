@@ -54,7 +54,7 @@ class AgentPackageLifecycleRegressions(unittest.IsolatedAsyncioTestCase):
         preview = await preview_package(self.ctx, package, mode='overwrite', target_agent_id=agent.id)
         return InstallOptions(digest=preview['digest'], mode='overwrite', target_agent_id=agent.id, name=agent.name, model_id=None, **kwargs)
 
-    async def test_install_upgrade_reexport_reinstall_preserves_actual_scope_and_updated_skill(self):
+    async def test_install_upgrade_reexport_reinstall_uses_whole_package_and_updated_skill(self):
         initial = self.package(second=True)
         first = (await install_package(self.ctx, initial, await self.options(initial, name='Lifecycle original'), {}))['agent']
         updated = self.package(upgraded=True)
@@ -63,16 +63,16 @@ class AgentPackageLifecycleRegressions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(installed.prompt, 'Upgraded prompt')
         exported = archive.parse_package(await export_package(self.ctx, first.id, {}))
         self.assertEqual(exported.agent.prompt, 'Upgraded prompt')
-        self.assertEqual(exported.agent.ui_tool_selection, {'ui:package-fixture':['package_fixture_choice']})
+        self.assertNotIn('ui_tool_selection', exported.agent.model_dump())
         tools = {tool.name:tool.description for tool in exported.ui[0].tools}
         self.assertEqual(tools, {'package_fixture_choice':'Upgraded choice', 'package_fixture_extra':'Retained shared extra'})
         self.assertEqual(exported.skills['example-skill'][0], updated.skills['example-skill'][0])
         clone = (await install_package(self.ctx, exported, await self.options(exported, name='Lifecycle reinstalled'), {}))['agent']
         self.assertNotEqual(clone.id, first.id)
-        self.assertEqual(clone.ui_tool_selection, {'ui:package-fixture':['package_fixture_choice']})
-        spec = AgentSpec(name='check',model='test',instructions='',capabilities=clone.capabilities,ui_tool_selection=clone.ui_tool_selection)
+        self.assertEqual(next(row for row in await self.rows(Agent) if row.id == clone.id).ui_tool_selection, {})
+        spec = AgentSpec(name='check',model='test',instructions='',capabilities=clone.capabilities)
         packages, hints = await prepare_ui_tool_packages_for_spec(self.stores,spec)
-        self.assertEqual(set(hints), {'package_fixture_choice'})
+        self.assertEqual(set(hints), {'package_fixture_choice', 'package_fixture_extra'})
         self.assertEqual(len(await self.rows(UiToolPackage)),1)
         self.assertEqual(len(await self.rows(UiToolDefinition)),2)
         self.assertEqual(len(await self.rows(SkillPackage)),1)
@@ -84,7 +84,7 @@ class AgentPackageLifecycleRegressions(unittest.IsolatedAsyncioTestCase):
         persister=EventPersister(coordinator)
         await persister.start()
         async def runner_for(row):
-            spec=AgentSpec(name=row.name,model='test',instructions=row.prompt,capabilities=row.capabilities,ui_tool_selection=row.ui_tool_selection)
+            spec=AgentSpec(name=row.name,model='test',instructions=row.prompt,capabilities=row.capabilities)
             packages,hints=await prepare_ui_tool_packages_for_spec(self.stores,spec)
             model=TestModel(call_tools=['package_fixture_choice'],custom_output_text='Confirmed after upgrade')
             agent=RuntimeAgent(model,deps_type=AgentDeps,toolsets=[p.toolset for p in packages],output_type=[str,DeferredToolRequests])
@@ -203,8 +203,8 @@ class AgentScopeConfigurationRoundtrip(unittest.IsolatedAsyncioTestCase):
 
     async def test_actual_backup_export_and_import_keep_partial_and_empty_scope(self):
         from maintenance.config_backup import export_backup
-        await self._backup(revision='006')
-        source=self.root/'source-False-006.db'
+        await self._backup(revision='009')
+        source=self.root/'source-False-009.db'
         self.assertTrue(source.is_file())
         scope={'ui:builtin':['builtin__confirm']}
         with sqlite3.connect(source) as db:

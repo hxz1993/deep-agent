@@ -572,7 +572,7 @@ class AgentPackageServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.rows(UiToolDefinition))[0].description,package.ui[0].tools[0].description)
         self.assertEqual(self.active_files(),1)
 
-    async def test_explicit_ui_selection_survives_install_export_and_missing_selection_is_rejected(self):
+    async def test_old_ui_selection_is_ignored_during_install_and_export(self):
         files=package_files(resources=True)
         ui=json.loads(files['ui-tools.json'])
         additional={**ui[0]['tools'][0],'name':'package_fixture_second'}
@@ -581,13 +581,14 @@ class AgentPackageServiceTests(unittest.IsolatedAsyncioTestCase):
         files['agent.json']=archive.canonical(agent)
         package=archive.parse_package(archive.build_zip(files))
         installed=await install_package(self.ctx,package,await self.options(package),{})
-        self.assertEqual(installed.ui_tool_selection,agent['ui_tool_selection'])
+        self.assertNotIn('ui_tool_selection', installed.model_dump())
+        self.assertEqual((await self.rows(Agent))[0].ui_tool_selection, {})
         exported=archive.parse_package(await export_package(self.ctx,installed.id,{}))
-        self.assertEqual(exported.agent.ui_tool_selection,agent['ui_tool_selection'])
+        self.assertNotIn('ui_tool_selection', exported.agent.model_dump())
         self.assertEqual(len(exported.ui[0].tools),2)
         agent['ui_tool_selection']['ui:package-fixture']=['not-in-package']
         files['agent.json']=archive.canonical(agent)
-        with self.assertRaises(PackageError):archive.parse_package(archive.build_zip(files))
+        self.assertNotIn('ui_tool_selection', archive.parse_package(archive.build_zip(files)).agent.model_dump())
 
     async def test_checkpoint_cleanup_failure_does_not_replace_committed_success(self):
         from deep_agent.agent_packages.runtime_transaction import RuntimeCheckpoint

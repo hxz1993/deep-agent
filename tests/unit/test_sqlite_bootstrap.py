@@ -24,6 +24,7 @@ EXPECTED_TABLES = {
     "chat_sessions",
     "channel_accounts",
     "channel_message_runs",
+    "channel_message_operations",
     "channel_session_bindings",
     "global_settings",
     "integration_settings",
@@ -95,7 +96,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self._assert_current_baseline(db_path)
 
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "006")
+        self.assertEqual(self._revision(db_path), "009")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertEqual(self._primary_key(db_path, "chat_sessions"), ["session_id"])
         self.assertEqual(self._primary_key(db_path, "chat_session_events"), ["event_id"])
@@ -104,7 +105,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             {
                 "event_id", "session_id", "sequence", "schema_version",
                 "event_type", "status", "turn_id", "run_id", "search_text",
-                "payload", "created_at", "updated_at",
+                "payload", "created_at", "updated_at", "usage_model_id", "usage",
             },
         )
         self.assertEqual(
@@ -211,8 +212,8 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     search_before = connection.execute("SELECT * FROM global_settings").fetchall()
                 await asyncio.to_thread(command.upgrade, config, "head")
                 with sqlite3.connect(db_path) as connection:
-                    self.assertEqual(before, connection.execute("SELECT * FROM llm_providers").fetchall())
-                    self.assertEqual(models_before, connection.execute("SELECT * FROM llm_models").fetchall())
+                    self.assertEqual(before, [row[:len(before[0])] for row in connection.execute("SELECT * FROM llm_providers").fetchall()])
+                    self.assertEqual(models_before, [row[:len(models_before[0])] for row in connection.execute("SELECT * FROM llm_models").fetchall()])
                     self.assertEqual(search_before, connection.execute("SELECT * FROM global_settings").fetchall())
 
     async def test_restart_does_not_recreate_deleted_defaults(self) -> None:

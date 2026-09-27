@@ -7,6 +7,10 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from sqlalchemy import text
+from pydantic import ValidationError
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from deep_agent.channels.gateway.config import GatewayConfig
 from deep_agent.channels.gateway.runtime import ChannelRuntime
@@ -15,6 +19,9 @@ from deep_agent.db.factory import close_db, create_engine
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.url import get_database_url
 from deep_agent.diagnostics.runtime import observe_lifespan
+from deep_agent.agent.media_pipeline import max_upload_bytes
+from deep_agent.channels.operations import MessageOperationRequest
+from deep_agent.channels.outbound import DeliveryError, PreparedComponent
 
 
 @dataclass
@@ -84,6 +91,54 @@ def create_gateway_app() -> FastAPI:
             return await context.runtime.test_account(account_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail="Channel account not found") from exc
+
+    @app.post("/messages/send")
+    async def send_message(request: Request, context: GatewayContext = Depends(authorize)):
+        # Enforce the limit while receiving, before multipart spools files.
+        limit = max_upload_bytes() + 128 * 1024
+        received = 0
+        exceeded = False
+        original_receive = request.receive
+
+        async def bounded_receive():
+            nonlocal received, exceeded
+            message = await original_receive()
+            received += len(message.get("body", b""))
+            if received > limit:
+                exceeded = True
+                # MultipartParser closes its temporary files on this error.
+                raise MultiPartException("Channel message body is too large")
+            return message
+
+        bounded = Request(request.scope, receive=bounded_receive)
+        try:
+            async with bounded.form(max_files=10, max_fields=1) as form:
+                raw = form.get("metadata")
+                if not isinstance(raw, str):
+                    raise ValueError("Invalid metadata")
+                command = MessageOperationRequest.model_validate_json(raw)
+                prepared = []
+                total = 0
+                for index, component in enumerate(command.components):
+                    data = None
+                    if component.kind != "text":
+                        uploaded = form.get(f"media_{index}")
+                        if not isinstance(uploaded, UploadFile):
+                            raise ValueError("Missing media")
+                        data = await uploaded.read(max_upload_bytes() + 1)
+                        total += len(data)
+                        if total > max_upload_bytes():
+                            raise HTTPException(status_code=413, detail="附件总大小超过上限")
+                    prepared.append(PreparedComponent(**component.model_dump(), data=data))
+                return await context.runtime.operations.send(command, prepared)
+        except StarletteHTTPException:
+            if exceeded:
+                raise HTTPException(status_code=413, detail="附件总大小超过上限") from None
+            raise
+        except (ValidationError, ValueError):
+            raise HTTPException(status_code=422, detail="无效的渠道消息请求") from None
+        except DeliveryError as exc:
+            raise HTTPException(status_code=503 if exc.unknown else 409, detail=str(exc)) from None
 
     return app
 

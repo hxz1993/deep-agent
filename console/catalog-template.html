@@ -4,8 +4,8 @@
   <main class="settings-card models-card">
     <div class="panel-toolbar models-toolbar catalog-header">
       <div>
-        <h1 class="catalog-title">
-          模型目录
+        <h1 class="catalog-title settings-group-title">
+          <i data-lucide="library" aria-hidden="true"></i>模型目录
           <span class="catalog-info" tabindex="0" aria-label="查看模型目录说明">
             <i data-lucide="info"></i>
             <span class="catalog-info-tooltip" role="tooltip">
@@ -46,10 +46,10 @@
             <option value="video">视频</option>
           </select>
         </div>
+      <p class="models-status" id="catalogStatusLine">加载中…</p>
     </div>
 
     <div class="catalog-feedback hidden" id="catalogFeedback" role="alert"></div>
-    <p class="models-status" id="catalogStatusLine">加载中…</p>
 
     <div class="catalog-browser" id="catalogBrowser">
       <aside class="catalog-lab-sidebar" id="catalogSupplierSidebar" aria-label="供应商">
@@ -71,14 +71,16 @@
           <span>可以联网更新，也可以导入models.dev官方catalog.json后写入数据库。</span>
           <button type="button" class="btn primary" data-catalog-refresh><i data-lucide="cloud-download"></i>在线更新</button>
         </div>
+
+        <div class="models-pagination" id="catalogPaginationBar">
+          <button type="button" class="btn btn-sm" id="catalogPrevPageBtn" disabled>上一页</button>
+          <span class="models-page-info" id="catalogPageInfo">—</span>
+          <button type="button" class="btn btn-sm" id="catalogNextPageBtn" disabled>下一页</button>
+        </div>
       </section>
     </div>
 
-    <div class="models-pagination" id="catalogPaginationBar">
-      <button type="button" class="btn btn-sm" id="catalogPrevPageBtn" disabled>上一页</button>
-      <span class="models-page-info" id="catalogPageInfo">—</span>
-      <button type="button" class="btn btn-sm" id="catalogNextPageBtn" disabled>下一页</button>
-    </div>
+
 
   </main>
 </body>

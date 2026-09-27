@@ -10,6 +10,8 @@ from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.providers.openai_codex import CredentialsRefreshError, CredentialsPersistenceError
+from deep_agent.services.codex_provider import CodexUnavailable
 
 from deep_agent.models.provider_registry import ProviderRuntimeConfig, resolve_provider_model
 from deep_agent.schemas.llm_model import LlmModelTestResponse
@@ -23,8 +25,14 @@ def safe_failure(exc: Exception) -> tuple[str, str]:
     name = type(exc).__name__.lower()
     if isinstance(exc, TimeoutError) or "timeout" in name:
         return "timeout", "请求超时，请检查网络或稍后重试"
+    if isinstance(exc, CredentialsRefreshError):
+        return "authentication", "订阅授权已失效，请重新授权"
+    if isinstance(exc, CredentialsPersistenceError):
+        return "credential_persistence", "订阅凭据刷新后保存失败，本轮已停止"
+    if isinstance(exc, CodexUnavailable):
+        return "authentication", "订阅当前不可用，请检查开关或重新授权"
     if status == 401:
-        return "authentication", "认证失败（401），请检查 Provider 的 API Key"
+        return "authentication", "认证失败（401），请检查 Provider 授权"
     if status == 403:
         return "permission", "访问被拒绝（403），请检查模型权限"
     if status == 404:
@@ -56,10 +64,10 @@ async def probe_model(row, provider) -> LlmModelTestResponse:
             settings = {"max_tokens": min(row.max_output_tokens or 64, 64), "timeout": TEST_TIMEOUT_SECONDS}
             # This model/client belongs only to the probe; normal Agent clients are unchanged.
             client = getattr(model.provider, "client", None)
-            if isinstance(client, (AsyncOpenAI, AsyncAnthropic)):
+            if provider.provider_type != "openai_codex" and isinstance(client, (AsyncOpenAI, AsyncAnthropic)):
                 client.max_retries = 0
             try:
-                async with model:
+                async def request():
                     response = await model.request(
                         [ModelRequest(parts=[UserPromptPart("Reply with OK.")])],
                         settings,
@@ -67,6 +75,11 @@ async def probe_model(row, provider) -> LlmModelTestResponse:
                     )
                     if not response.parts or response.finish_reason in {"error", "content_filter"}:
                         raise UnexpectedModelBehavior("Unusable probe response")
+                if provider.provider_type == "openai_codex":
+                    await request()
+                else:
+                    async with model:
+                        await request()
             finally:
                 if isinstance(model.provider, GoogleProvider):
                     # Also close the probe-owned explicit proxy client, if configured.

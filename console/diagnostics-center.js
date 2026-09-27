@@ -1,54 +1,58 @@
 import { initDiagnosticLogs } from "./diagnostics.js?v=20260915-ui-polish";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260923-usage-tab-2";
-import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260915-app-filter";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260927-feishu-release-0117";
+import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260923-c04-1";
 
-import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260923-usage-tab-2";
+import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260927-platform-app-label";
+import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20260927-release-0118";
 
 let center = null;
 export function initDiagnostics() {
   if (center) return;
-  const logPage = document.getElementById("diagnosticsLogPage"), sessionPage = document.getElementById("diagnosticsSessionsPage"), channelPage = document.getElementById("diagnosticsChannelsPage");
-  let active = false, route = null, currentHash = "", lastSessions = diagnosticHash("overview"), lastLogs = diagnosticHash("logs");
-  const capture = () => route ? { kind: route.view === "channels" ? "channels" : route.kind, value: route.kind === "logs" ? logs.snapshot() : route.view === "channels" ? channels.snapshot() : sessions.snapshot() } : null;
+  const logPage = document.getElementById("diagnosticsLogPage"), sessionPage = document.getElementById("diagnosticsSessionsPage"), channelPage = document.getElementById("diagnosticsChannelsPage"), usagePage = document.getElementById("diagnosticsUsagePage");
+  let active = false, route = null, currentHash = "", lastSessions = diagnosticHash("overview"), lastLogs = diagnosticHash("logs"), lastUsage = diagnosticHash("usage");
+  const capture = () => route ? { kind: route.view === "channels" ? "channels" : route.kind, value: route.kind === "logs" ? logs.snapshot() : route.kind === "usage" ? usage.snapshot() : route.view === "channels" ? channels.snapshot() : sessions.snapshot() } : null;
   const navigation = createDiagnosticNavigation({ getHash: () => location.hash, history, getSnapshot: capture, onNavigate: () => showRoute() });
   const replace = hash => {
     currentHash = hash; navigation.replaceCurrent(hash);
     const parsed = parseDiagnosticRoute(hash);
     if (parsed?.kind === "logs") lastLogs = hash;
+    else if (parsed?.kind === "usage") lastUsage = hash;
     else if (parsed?.view !== "detail") lastSessions = hash;
   };
   const back = () => navigation.back(lastSessions);
   const logs = initDiagnosticLogs({ page: logPage, onQuery: filters => replace(diagnosticHash("logs", filters)), onOpenSession: id => navigation.navigate(diagnosticHash("detail", { view: "conversation" }, id)), onBack: back });
   const sessions = initDiagnosticSessions({ root: sessionPage, navigate: navigation.navigate, replace, onBack: back });
   const channels = initDiagnosticChannels({ root: channelPage, navigate: navigation.navigate, replace, onBack: fallback => navigation.back(fallback) });
+  const usage = initDiagnosticUsage({ root: usagePage, navigate: navigation.navigate, replace });
   function showRoute() {
     if (!active) return;
     const next = parseDiagnosticRoute(location.hash);
     if (!next) { navigation.navigate(lastLogs, { replace: true }); return; }
     if (route && currentHash === location.hash) return;
     const snapshot = navigation.enter();
-    logs.deactivate(); sessions.deactivate(); channels.deactivate();
+    logs.deactivate(); sessions.deactivate(); channels.deactivate(); usage.deactivate();
     route = next; currentHash = location.hash;
-    logPage.classList.toggle("hidden", next.kind !== "logs"); sessionPage.classList.toggle("hidden", next.kind === "logs" || next.view === "channels"); channelPage.classList.toggle("hidden", next.view !== "channels");
+    logPage.classList.toggle("hidden", next.kind !== "logs"); sessionPage.classList.toggle("hidden", next.kind !== "sessions" || next.view === "channels"); channelPage.classList.toggle("hidden", next.view !== "channels"); usagePage.classList.toggle("hidden", next.kind !== "usage");
     document.querySelectorAll("[data-diagnostics-nav]").forEach(button => {
       const selected = button.dataset.diagnosticsNav === next.kind;
       button.classList.toggle("active", selected); selected ? button.setAttribute("aria-current", "page") : button.removeAttribute("aria-current");
     });
     if (next.kind === "logs") logs.activate(next.filters, snapshot?.kind === "logs" ? snapshot.value : null, Boolean(parseDiagnosticRoute(history.state?.diagnosticsFrom)));
+    else if (next.kind === "usage") { lastUsage = location.hash; usage.activate(next, snapshot?.kind === "usage" ? snapshot.value : null); }
     else if (next.view === "channels") { lastSessions = diagnosticHash("channels", next.filters); channels.activate(next, snapshot?.kind === "channels" ? snapshot.value : null); }
     else { if (next.view !== "detail") lastSessions = diagnosticHash(next.view, next.filters); sessions.activate(next, snapshot?.kind === "sessions" ? snapshot.value : null); }
   }
   center = {
     setActive(value) {
-      if (!value) { if (active) navigation.remember(); active = false; logs.deactivate(); sessions.deactivate(); channels.deactivate(); route = null; currentHash = ""; return; }
+      if (!value) { if (active) navigation.remember(); active = false; logs.deactivate(); sessions.deactivate(); channels.deactivate(); usage.deactivate(); route = null; currentHash = ""; return; }
       active = true; showRoute();
     },
     open(kind) {
-      const target = kind === "sessions" ? lastSessions : lastLogs;
+      const target = kind === "sessions" ? lastSessions : kind === "usage" ? lastUsage : lastLogs;
       // The main page controller retains unsaved configuration guards.
       return window.DeepAgentConsole.showPage("diagnostics", { diagnosticTarget: target });
     },
-    clear() { navigation.clear(); logs.clear(); sessions.clear(); channels.clear(); route = null; currentHash = ""; active = false; },
+    clear() { navigation.clear(); logs.clear(); sessions.clear(); channels.clear(); usage.clear(); route = null; currentHash = ""; active = false; },
   };
   window.addEventListener("deep-agent-diagnostics-denied", event => {
     center.clear();

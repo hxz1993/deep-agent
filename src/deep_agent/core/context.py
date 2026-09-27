@@ -14,6 +14,8 @@ from deep_agent.agent.active_runs import ActiveRunRegistry
 from deep_agent.core.session_live import SessionLiveHub
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
+from deep_agent.capabilities.mcp.builtin_config import is_shipped_builtin
+from deep_agent.capabilities.mcp.inspection import inspect_mcp_server
 from deep_agent.capabilities.registry import ToolPackageRegistry
 from deep_agent.sandbox.backend import PythonExecutionBackend
 from deep_agent.sandbox.factory import SandboxInterpreterError, build_sandbox_backend
@@ -34,9 +36,28 @@ from deep_agent.db.conversation import SessionStore
 from deep_agent.files.storage import FileStore, PlatformFileStore, build_file_store
 from deep_agent.options import OPTION, validate_runtime_options
 from deep_agent.security import ConsoleAdminAuthorizer
+from deep_agent.schemas.mcp import McpInspection
 from deep_agent.skills.runtime import SkillRuntimeLibrary
 
 _context: AppContext | None = None
+
+
+async def _hydrate_builtin_mcp_catalogs(stores: DataStores) -> None:
+    """Fill missing builtin catalog snapshots without changing existing inspections."""
+    for row in await stores.mcp.list_all():
+        if row.transport != "builtin" or not is_shipped_builtin(row.name):
+            continue
+        previous = McpInspection.from_value(row.inspection, transport="builtin")
+        if previous.tools.snapshot is not None and (
+            previous.resources.count == 0 or previous.resources.definitions is not None
+        ):
+            continue
+        try:
+            result = await inspect_mcp_server(row)
+            if result.inspection.tools.snapshot is not None:
+                await stores.mcp.update_inspection(row.name, result.inspection.to_storage_value())
+        except Exception as exc:  # noqa: BLE001 - A catalog must not block startup
+            logger.warning("Builtin MCP catalog initialization failed name={} error_type={}", row.name, type(exc).__name__)
 
 
 @dataclass
@@ -163,6 +184,7 @@ class AppContext:
         )
         await ctx.event_persister.start()
         init_context(ctx)
+        await _hydrate_builtin_mcp_catalogs(ctx.stores)
         return ctx
 
     @classmethod

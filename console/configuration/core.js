@@ -315,9 +315,10 @@ function populateAgentModelSelect(selectedId = null) {
   if (!select) return;
   const models = state.llmModels || [];
   select.disabled = false;
-  select.innerHTML = `<option value="">未配置模型</option>` + (models.length
-    ? window.DeepAgentModelOptions.renderGroupedModelOptions(models, { selectedId })
-    : "");
+  select.innerHTML = `<option value="" hidden></option>`
+    + window.DeepAgentModelOptions.renderGroupedModelOptions(models, {
+      selectedId, emptyLabel: null, enabledOnly: true, groupIcon: (provider) => providerBrand(provider).src,
+    });
   select.value = selectedId || "";
 }
 
@@ -334,7 +335,7 @@ function initTabs() {
       const name = tab.dataset.tab;
       document
         .querySelector(".configuration-content")
-        ?.classList.toggle("catalog-active", name === "catalog");
+        ?.classList.toggle("global-settings-active", name === "global-settings");
       document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
       document.getElementById(`panel-${name}`)?.classList.add("active");
       document.dispatchEvent(new CustomEvent("deep-agent-configuration-tab", { detail: { name } }));
@@ -353,7 +354,6 @@ function initTabs() {
       if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
       if (name === "integrations") window.integrationsAdmin?.refresh();
       if (name === "channels" && window.channelsAdmin) window.channelsAdmin.refresh();
-      if (name === "catalog" && window.modelCatalogAdmin) window.modelCatalogAdmin.refresh();
     });
   });
 }

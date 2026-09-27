@@ -1,13 +1,13 @@
+import { DIAGNOSTIC_PERIODS as PERIODS, diagnosticRangeHelpHtml, bindDiagnosticRangeDismiss } from "./diagnostic-range-control.js?v=20260923-c04-8";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260915-release-audit";
 import { diagnosticTime } from "./diagnostics.js?v=20260915-ui-polish";
 import { diagnosticHash, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260915-app-filter";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260915-app-filter";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260923-usage-tab-2";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260927-feishu-release-0117";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
-const PERIODS = [["24", "最近 1 天"], ["168", "最近 7 天"], ["720", "最近 30 天"], ["custom", "自定义时间"]];
 const PAGE_SIZE = 50;
 const button = (label, action, extra = "", kind = "") => `<button type="button" class="btn diagnostics-button ${kind}" data-session-action="${action}" ${extra}>${label}</button>`;
 const empty = message => `<div class="diagnostics-empty">${e(message)}</div>`;
@@ -17,8 +17,8 @@ export function userCardHtml(id, profiles = {}) {
 }
 export function sessionAgentIconHtml(item) {
   if (item.source !== "channel") return `<span class="diagnostic-agent-icon">${icon("bot")}</span>`;
-  const channel = item.channel || {}, name = channel.account_name || (channel.channel_type === "wecom" ? "企微" : channel.channel_type) || "渠道会话";
-  return `<span class="diagnostic-agent-icon diagnostic-channel-icon" title="${e(name)}" aria-label="${e(name)}">${channel.channel_type === "wecom" ? '<img src="./assets/channel-logos/wecom.png" width="20" height="20" alt="企业微信" />' : icon("rss")}</span>`;
+  const channel = item.channel || {}, name = channel.account_name || (channel.channel_type === "wecom" ? "企微" : channel.channel_type === "feishu" ? "飞书" : channel.channel_type) || "渠道会话";
+  return `<span class="diagnostic-agent-icon diagnostic-channel-icon" title="${e(name)}" aria-label="${e(name)}">${channel.channel_type === "wecom" ? '<img src="./assets/channel-logos/wecom.png" width="20" height="20" alt="企业微信" />' : channel.channel_type === "feishu" ? '<img src="./assets/channel-logos/feishu.ico" width="20" height="20" alt="飞书" />' : icon("rss")}</span>`;
 }
 export function shortQuestionTime(value) {
   const full = diagnosticTime(value);
@@ -89,10 +89,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
         <div class="diagnostic-user-options hidden" id="diagnosticLoadedUsers" role="listbox" aria-label="平台用户查询结果"></div>
       </div></div>`;
   }
-  function rangeHelpHtml() {
-    const f = state.filters, custom = f.period === "custom";
-    return `<details class="diagnostic-range-settings"><summary aria-label="${custom ? "设置自定义时间" : "查看查询时间范围和时区"}" title="${custom ? "设置自定义时间" : "查看查询时间范围和时区"}">${icon(custom ? "settings" : "info")}</summary><div class="diagnostic-range-popover" role="group" aria-label="${custom ? "自定义时间设置" : "查询时间范围"}"><strong>${custom ? "自定义时间" : "查询时间范围"}</strong>${custom ? `<div class="diagnostics-custom-time"><label>开始时间<input form="diagnosticSessionFilters" type="datetime-local" name="start" aria-label="开始时间" value="${localInput(f.start)}" required autocomplete="off"/></label><label>结束时间<input form="diagnosticSessionFilters" type="datetime-local" name="end" aria-label="结束时间" value="${localInput(f.end)}" required autocomplete="off"/></label><span class="diagnostic-range-zone">时区 · ${e(f.timezone)}</span><button form="diagnosticSessionFilters" class="diagnostics-button primary" type="submit" ${state.busy ? "disabled" : ""}>应用</button></div>` : `<span class="diagnostic-range-line"><span>开始</span><time>${e(shortQuestionTime(f.start))}</time></span><span class="diagnostic-range-line"><span>结束</span><time>${e(shortQuestionTime(f.end))}</time></span><span class="diagnostic-range-zone">时区 · ${e(f.timezone)}</span>`}</div></details>`;
-  }
+  const rangeHelpHtml = () => diagnosticRangeHelpHtml(state.filters, { formId:"diagnosticSessionFilters", busy:state.busy, formatTime:shortQuestionTime });
   function filtersHtml() {
     const f = state.filters;
     return `<form id="diagnosticSessionFilters" class="diagnostic-session-filters" data-session-form="filters" autocomplete="off">
@@ -412,8 +409,8 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     }
     if (event.key === "Escape") { clearTimeout(userTimer); userReader.cancel(); menu?.classList.add("hidden"); input?.setAttribute("aria-expanded", "false"); }
   });
-  root.addEventListener("keydown", event => { if (event.key === "Escape") { const settings = root.querySelector(".diagnostic-range-settings[open]"); if (settings) { settings.open = false; settings.querySelector("summary")?.focus(); } } });
-  document.addEventListener("click", event => { if (!event.target.closest(".diagnostic-range-settings,[data-value=custom]")) { const settings = root.querySelector(".diagnostic-range-settings"); if (settings) settings.open = false; } if (!event.target.closest(".diagnostic-user-combobox")) { clearTimeout(userTimer); userReader.cancel(); root.querySelector("#diagnosticLoadedUsers")?.classList.add("hidden"); root.querySelector('input[name="user_id"]')?.setAttribute("aria-expanded", "false"); } });
+  bindDiagnosticRangeDismiss(root);
+  document.addEventListener("click", event => { if (!event.target.closest(".diagnostic-user-combobox")) { clearTimeout(userTimer); userReader.cancel(); root.querySelector("#diagnosticLoadedUsers")?.classList.add("hidden"); root.querySelector('input[name="user_id"]')?.setAttribute("aria-expanded", "false"); } });
   return {
     activate(route, saved = null) {
       cancelReaders(); state.active = true; state.route = route; detail?.destroy(); detail = null; state.busy = false; state.error = "";

@@ -18,7 +18,7 @@ from deep_agent.schemas.channel import (
     ChannelRuntimeResponse,
 )
 from deep_agent.schemas.llm_provider import mask_api_key
-from deep_agent.channels.app_context import public_channel_settings
+from deep_agent.channels.app_context import public_channel_settings, validate_channel_settings
 from deep_agent.services.channel_gateway_client import (
     ChannelGatewayClient,
     ChannelGatewayUnavailableError,
@@ -26,6 +26,13 @@ from deep_agent.services.channel_gateway_client import (
 
 
 router = APIRouter()
+
+
+@router.get("/channel-types", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
+async def channel_types():
+    return [{"type": "wecom", "name": "企业微信", "transport": "websocket"},
+            {"type": "feishu", "name": "飞书", "transport": "websocket"}]
+
 
 
 @router.get("/channel-commands", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
@@ -96,7 +103,20 @@ async def create_channel_account(
     agent_id = await _ensure_agent(ctx, body.agent_id)
     body = body.model_copy(update={"agent_id": agent_id})
     try:
-        row = await store.create_account(body)
+        if body.registration_id:
+            from deep_agent.services.channel_registration import RegistrationError
+            from deep_agent.services.feishu_registration import registration_service as feishu_registration
+            from deep_agent.services.wecom_registration import registration_service as wecom_registration
+            registration_service = feishu_registration if body.channel_type == "feishu" else wecom_registration
+            try:
+                async with registration_service.credentials(body.registration_id, user) as (app_id, secret):
+                    row = await store.create_account(body.model_copy(update={
+                        "bot_id": app_id, "secret": secret, "registration_id": None,
+                    }))
+            except RegistrationError as exc:
+                raise HTTPException(exc.status_code, str(exc)) from exc
+        else:
+            row = await store.create_account(body)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return await _response(row, ctx)
@@ -139,6 +159,7 @@ async def update_channel_account(
         updates["agent_id"] = await _ensure_agent(ctx, body.agent_id)
     body = ChannelAccountUpdate.model_validate(updates)
     try:
+        validate_channel_settings(current.channel_type, body.settings if body.settings is not None else current.settings or {})
         row = await store.update_account(account_id, body)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

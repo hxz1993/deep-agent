@@ -63,7 +63,7 @@ function missingInspectionAppHint(server, context) {
   const staticApp = Object.entries(server?.config?.headers || {})
     .find(([name]) => name.toLowerCase() === "app")?.[1];
   if (String(context?.app || staticApp || "").trim()) return "";
-  return "当前请求未提供测试 App；请到「对话测试」右上角「调试上下文」配置后，再返回 MCP 刷新。";
+  return "当前请求未提供测试 App；请到「对话测试」右上角「调试上下文」配置后，再返回 MCP 检测。";
 }
 
 async function inspectionFailureMessage(server, message) {
@@ -110,7 +110,7 @@ function inspectionView(inspection, transport) {
     unreachable: ["无法连接", "off"],
     unknown: ["待检测", ""],
     stale: ["配置已变更", "warn"],
-    not_applicable: ["内置运行时", ""],
+    not_applicable: ["正常", "on"],
   };
   const [text, className] = labels[info.status] || labels.unknown;
   const toolCount = Number(info.tools?.count || 0);
@@ -149,12 +149,26 @@ function inspectionView(inspection, transport) {
   };
 }
 
-function renderInspectionCounts(counts = {}) {
-  return [
-    ["wrench", "工具", counts.tools],
-    ["file-text", "资源", counts.resources],
-    ["file-text", "模板", counts.templates],
-  ].map(([iconName, label, count]) => `<span title="${label}"><i data-lucide="${iconName}"></i><strong>${Number(count || 0)}</strong></span>`).join("");
+function renderInspectionCounts(counts = {}, name = "") {
+  return [["wrench", "工具", counts.tools], ["file-text", "资源", counts.resources]]
+    .map(([iconName, label, count]) => {
+      const content = `<i data-lucide="${iconName}"></i><strong>${Number(count || 0)}</strong>`;
+      return `<button type="button" data-mcp-catalog="${escapeJsonEditorHtml(name)}" data-catalog-kind="${label === "工具" ? "tools" : "resources"}" aria-label="查看${label}明细" title="${label}">${content}</button>`;
+    }).join("");
+}
+
+function renderMcpCatalog(catalog, kind = "tools", query = "") {
+  const label = kind === "resources" ? "资源" : "工具";
+  const tools = catalog[kind] || {};
+  const all = Array.isArray(tools.definitions) ? tools.definitions : [];
+  const term = query.trim().toLowerCase();
+  const definitions = all.filter(item => !term || [item.name, item.title, item.description, item.uri, item.mime_type].some(value => String(value || "").toLowerCase().includes(term)));
+  const notice = tools.snapshot_status === "stale" ? "配置已变更，以下为上次检测结果。" : "";
+  if (!definitions.length) return `<p class="empty-cell">${term && all.length ? "没有匹配的内容" : tools.snapshot_status === "missing" && tools.count !== 0 ? `暂无${label}快照，请先检测此服务。` : `此服务暂无${label}。`}</p>`;
+  return `${notice ? `<p class="mcp-catalog-notice">${notice}</p>` : ""}
+    <table class="data-table mcp-catalog-table"><thead><tr><th>${label}</th><th>描述</th></tr></thead><tbody>
+    ${definitions.map((tool) => `<tr><td><strong>${escapeHtml(tool.name || "")}</strong>${tool.title ? `<div class="muted">${escapeHtml(tool.title)}</div>` : ""}${tool.uri ? `<div class="muted">${escapeHtml(tool.uri)}</div>` : ""}${tool.mime_type ? `<div class="muted">${escapeHtml(tool.mime_type)}</div>` : ""}</td><td>${tool.description?.length > 220 ? `<details><summary>${escapeHtml(tool.description.slice(0, 180))}…</summary><div class="mcp-catalog-description">${escapeHtml(tool.description)}</div></details>` : escapeHtml(tool.description || "—")}</td></tr>`).join("")}
+    </tbody></table>`;
 }
 
 function inspectionToast(result) {
@@ -284,12 +298,12 @@ const mcpAdmin = {
     if (!tbody) return;
     this.moreMenuDismissController?.abort();
     this.moreMenuDismissController = null;
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">加载中…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">加载中…</td></tr>`;
     try {
       const servers = await apiFetch("/api/v1/mcp");
       showDbBanner(false);
       if (!servers.length) {
-        tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">暂无 MCP 服务</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-cell">暂无 MCP 服务</td></tr>`;
         return;
       }
       const inherited = servers.find((item) => item.request_context?.inherited_headers?.length)
@@ -302,19 +316,20 @@ const mcpAdmin = {
             return `
         <tr class="mcp-list-row${s.transport === "stdio" ? " is-readonly" : ""}" ${s.transport === "stdio" ? "" : `data-open-mcp="${escapeHtml(s.name)}" tabindex="0"`}>
           <td><strong>${escapeHtml(s.name)}</strong></td>
-          <td><span class="badge">${escapeHtml(mcpTransportLabel(s.transport))}</span></td>
-          <td><span class="badge">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "内部继承")}</span></td>
+          <td><span class="badge mcp-transport-${s.transport === "url" ? "http" : "stdio"}">${escapeHtml(mcpTransportLabel(s.transport))}</span></td>
+          <td><span class="badge mcp-context-${s.request_context?.mode === "isolated" ? "isolated" : "inherit"}">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "内部继承")}</span></td>
           <td class="mcp-description-cell">
-            <div class="mcp-description-text">${escapeHtml(s.description || "—")}</div>
-            <div class="mcp-inspection" title="${escapeHtml(inspection.title)}">
+            <div class="mcp-description-text" title="${escapeJsonEditorHtml(s.description || "")}">${escapeHtml(s.description || "")}</div>
+          </td><td class="mcp-capabilities-cell">
+            <div class="mcp-inspection" title="${escapeJsonEditorHtml(inspection.title)}">
               <span class="badge ${inspection.className}">${escapeHtml(inspection.text)}</span>
-              <span class="mcp-inspection-counts">${renderInspectionCounts(inspection.counts)}</span>
+              <span class="mcp-inspection-counts">${renderInspectionCounts(inspection.counts, s.name)}</span>
             </div>
           </td>
           <td>${escapeHtml(formatDate(s.updated_at))}</td>
           <td class="mcp-actions-cell">
             <div class="row-actions mcp-row-actions">
-              ${s.transport === "url" || s.transport === "builtin" ? `<button class="mcp-direct-action" type="button" data-inspect-mcp="${escapeHtml(s.name)}"><i data-lucide="refresh-cw"></i><span>刷新</span></button>` : ""}
+              ${s.transport === "url" || s.transport === "builtin" ? `<button class="mcp-direct-action" type="button" data-inspect-mcp="${escapeHtml(s.name)}"><i data-lucide="refresh-cw"></i><span>检测</span></button>` : ""}
               ${canRenameMcp(s.transport) || canDeleteMcp(s.transport) ? `<div class="skill-more-actions mcp-more-actions">
                 <button class="skill-more-trigger" type="button" data-mcp-more-trigger aria-label="更多 MCP 操作" title="更多操作" aria-haspopup="menu" aria-expanded="false"><i data-lucide="ellipsis-vertical"></i></button>
                 <div class="skill-more-menu" data-mcp-more-menu role="menu" hidden>
@@ -345,6 +360,9 @@ const mcpAdmin = {
       tbody.querySelectorAll(".mcp-row-actions").forEach((actions) => {
         actions.addEventListener("click", (event) => event.stopPropagation());
         actions.addEventListener("keydown", (event) => event.stopPropagation());
+      });
+      tbody.querySelectorAll("[data-mcp-catalog]").forEach((btn) => {
+        btn.addEventListener("click", () => this.openCatalog(btn.dataset.mcpCatalog, btn.dataset.catalogKind));
       });
       tbody.querySelectorAll("[data-inspect-mcp]").forEach((btn) => {
         btn.addEventListener("click", (event) => {
@@ -404,6 +422,46 @@ const mcpAdmin = {
     }
   },
 
+  catalogController: null,
+  async openCatalog(name, kind = "tools") {
+    const modal = document.getElementById("mcpCatalogModal");
+    const content = document.getElementById("mcpCatalogContent");
+    const tabs = document.getElementById("mcpCatalogTabs");
+    const search = document.getElementById("mcpCatalogSearch");
+    this.catalogController?.abort();
+    const controller = new AbortController();
+    this.catalogController = controller;
+    document.getElementById("mcpCatalogTitle").textContent = `${name} · 工具与资源`;
+    this.catalog = null;
+    tabs.replaceChildren();
+    search.value = "";
+    content.innerHTML = '<p class="empty-cell">加载中…</p>';
+    if (!modal.open) modal.showModal();
+    try {
+      const catalog = await apiFetch(`/api/v1/mcp/${encodeURIComponent(name)}/catalog`, { signal: controller.signal });
+      if (this.catalogController !== controller || controller.signal.aborted) return;
+      this.catalog = catalog;
+      this.catalogKind = kind;
+      tabs.innerHTML = [["tools", "工具"], ["resources", "资源"]].map(([key, label]) => `<button type="button" role="tab" data-catalog-tab="${key}">${label} <span>${Number(catalog[key]?.count || 0)}</span></button>`).join("");
+      tabs.querySelectorAll("[data-catalog-tab]").forEach(button => button.addEventListener("click", () => {
+        this.catalogKind = button.dataset.catalogTab;
+        search.value = "";
+        this.renderCatalogResults();
+      }));
+      this.renderCatalogResults();
+    } catch (error) {
+      if (this.catalogController !== controller || controller.signal.aborted) return;
+      content.innerHTML = `<p class="empty-cell">${escapeHtml(error.message)}</p>`;
+    }
+  },
+
+  renderCatalogResults() {
+    const content = document.getElementById("mcpCatalogContent");
+    document.querySelectorAll("#mcpCatalogTabs [data-catalog-tab]").forEach(button => button.setAttribute("aria-selected", String(button.dataset.catalogTab === this.catalogKind)));
+    content.innerHTML = renderMcpCatalog(this.catalog, this.catalogKind, document.getElementById("mcpCatalogSearch").value);
+    content.scrollTop = 0;
+  },
+
   readRequestContextMode() {
     return document.querySelector('input[name="mcpRequestContextMode"]:checked')?.value || "isolated";
   },
@@ -456,10 +514,11 @@ const mcpAdmin = {
   },
 
   async inspect(name, button, server) {
-    const originalText = button?.textContent || "刷新";
+    const label = button?.querySelector("span");
+    const originalText = label?.textContent || "检测";
     if (button) {
       button.disabled = true;
-      button.textContent = "检测中…";
+      if (label) label.textContent = "检测中…";
     }
     try {
       const result = await apiFetch(
@@ -475,7 +534,7 @@ const mcpAdmin = {
     } finally {
       if (button?.isConnected) {
         button.disabled = false;
-        button.textContent = originalText;
+        if (label) label.textContent = originalText;
       }
     }
   },
@@ -780,6 +839,8 @@ const mcpAdmin = {
 
 window.mcpAdmin = mcpAdmin;
 window.__McpInspectionUI = {
+  renderMcpCatalog,
+  renderInspectionCounts,
   missingInspectionAppHint,
   inspectionFailureMessage,
   highlightJsonEditorSource,
@@ -793,6 +854,13 @@ window.__McpInspectionUI = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  const catalogModal = document.getElementById("mcpCatalogModal");
+  document.getElementById("mcpCatalogSearch")?.addEventListener("input", () => mcpAdmin.renderCatalogResults());
+  document.getElementById("closeMcpCatalogModal")?.addEventListener("click", () => catalogModal.close());
+  catalogModal?.addEventListener("close", () => {
+    mcpAdmin.catalogController?.abort();
+    mcpAdmin.catalogController = null;
+  });
   document.getElementById("newMcpBtn")?.addEventListener("click", () => mcpAdmin.openCreate());
   document.getElementById("mcpForm")?.addEventListener("submit", (e) => mcpAdmin.save(e));
   document.getElementById("mcpForm")?.addEventListener("input", () => { mcpAdmin.editorDirty = true; });

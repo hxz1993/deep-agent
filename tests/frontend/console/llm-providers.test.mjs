@@ -105,9 +105,20 @@ test("配置中心只保留供应商模型管理入口并继续保留独立模�
   assert.ok(provider < builtin);
   assert.doesNotMatch(indexHtml, /data-tab="llm-models"/);
   assert.doesNotMatch(template, /id="panel-llm-models"|id="llmModelsTableBody"/);
-  assert.match(indexHtml, /data-tab="catalog"/);
+  assert.match(template, /data-settings-page="models"[\s\S]*id="settings-models"/);
   assert.match(template, /id="llmModelModal"/);
   assert.match(template, /id="panel-llm-providers"[\s\S]*id="llmProviderList"[\s\S]*id="llmProviderDetail"/);
+});
+
+test("订阅供应商复用授权弹框并关联 OpenAI 目录", () => {
+  assert.match(template, /id="llmProviderAccessMode"/);
+  assert.match(template, /data-provider-access="subscription"/);
+  assert.match(template, /id="llmProviderCallbackUrl"/);
+  assert.match(providerSource, /authorization_flow_id/);
+  assert.match(providerSource, /llmProviderVerifyAuthorization/);
+  assert.equal(catalogProviderIdForType("openai_codex"), "openai");
+  assert.equal(isModelSelectable({ enabled: true, selectable: true, provider: { auth_method: "oauth", authenticated: true, api_key_set: false } }), true);
+  assert.equal(isModelSelectable({ enabled: true, selectable: false, provider: { auth_method: "oauth", authenticated: false, api_key_set: false } }), false);
 });
 
 test("供应商使用正式 API 和后端类型目录契约", () => {
@@ -152,12 +163,13 @@ test("供应商详情操作统一使用轻风格按钮", () => {
   assert.doesNotMatch(providerSource, /data-provider-toggle/);
 });
 
-test("供应商接入信息使用紧凑图标胶囊而不是纵向定义列表", () => {
+test("供应商认证状态使用胶囊，地址模式跟随第二行地址", () => {
   assert.match(providerSource, /class="provider-detail-title-line">[\s\S]*class="provider-facts" aria-label="供应商接入信息"/);
   assert.match(providerSource, /class="provider-facts" aria-label="供应商接入信息"/);
   assert.match(providerSource, /class="provider-fact provider-fact-url"/);
   assert.match(providerSource, /data-lucide="link-2"/);
-  assert.match(providerSource, /data-lucide="route"/);
+  assert.match(providerSource, /class="provider-address-mode">\$\{provider\.use_default_base_url/);
+  assert.match(providerSource, /user-round-check/);
   assert.match(providerSource, /Key 已配/);
   assert.doesNotMatch(providerSource, /<small><span>\$\{escapeHtml\(providerTypeLabel\(provider\)\)\}<\/span><code>/);
   assert.doesNotMatch(providerSource, /<dl class="provider-facts">|<dt>Base URL<\/dt>/);
@@ -263,9 +275,12 @@ test("业务模型选项隐藏不可用模型并仅保留既有 Agent 当前引�
   assert.doesNotMatch(html, /value="d"/);
   assert.doesNotMatch(html, /value="e"/);
   assert.equal(firstSelectableModelId(models), "a");
+  const enabledOptions = renderGroupedModelOptions(models, { enabledOnly: true });
+  assert.match(enabledOptions, /value="c"/);
+  assert.doesNotMatch(enabledOptions, /value="e"|未配置密钥|未授权|已停用/);
 
   const preserved = renderGroupedModelOptions(models, { selectedId: "c" });
-  assert.match(preserved, /value="c" selected[^>]*>C — model-c（供应商未配置密钥）<\/option>/);
+  assert.match(preserved, /value="c" selected[^>]*>C — model-c<\/option>/);
   assert.doesNotMatch(preserved, /value="d"|value="e"/);
 
   assert.equal(isModelSelectable({ enabled: false, provider: { api_key_set: true } }), false);

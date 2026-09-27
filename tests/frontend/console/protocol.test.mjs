@@ -29,14 +29,14 @@ test("SSE 多行 data 和非 JSON 响应保留原文", () => {
 test("上下文压缩事件提供短暂状态文案", () => {
   assert.deepEqual(
     contextCompactionPresentation({ phase: "preparing" }),
-    { phase: "preparing", message: "正在准备上下文压缩…", active: true },
+    { phase: "preparing", message: "正在压缩中…", active: true },
   );
   assert.equal(
     contextCompactionPresentation({
       phase: "committing",
       message: "正在写入压缩事件…",
     }).message,
-    "正在写入压缩事件…",
+    "正在压缩中…",
   );
   assert.equal(
     contextCompactionPresentation({ phase: "ignored" }).active,

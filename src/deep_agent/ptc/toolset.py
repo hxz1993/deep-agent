@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import keyword
-import json
+import asyncio
 import re
 from dataclasses import replace
 from typing import Any
@@ -14,6 +14,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai_harness.code_mode import CodeModeToolset
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.ptc.diagnostics import Collector, current_collector
 from deep_agent.ptc.file_payload import (
     CODE_MODE_CODE_ONLY,
     CODE_MODE_HYBRID,
@@ -29,7 +30,6 @@ from deep_agent.ptc.file_payload import (
 _RUN_CODE_NAME = "run_code"
 _INVALID_IDENTIFIER = re.compile(r"\W")
 _LONG_BASE64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{256,}={0,2}(?![A-Za-z0-9+/])")
-_MAX_NESTED_AUDIT_CHARS = 32_768
 DISCOVERY_POLICY = (
     "Default to ordinary native MCP calls. Discovery makes the ordinary tool schemas "
     "available; it does not request PTC. Reserve run_code for opaque file/binary relay "
@@ -158,34 +158,8 @@ def _scrub_error_text(value: str, *, sensitive_values: frozenset[str]) -> str:
     return _LONG_BASE64.sub("[base64-redacted]", value)
 
 
-def _bounded_nested_audit(
-    entries: list[dict[str, Any]],
-    *,
-    sensitive_values: frozenset[str],
-    max_chars: int = _MAX_NESTED_AUDIT_CHARS,
-) -> list[Any]:
-    """Project nested calls into a deterministic, aggregate-bounded audit list."""
-
-    projected: list[Any] = []
-    used = 2
-    for index, entry in enumerate(entries):
-        safe = safe_audit_value(entry, sensitive_values=sensitive_values)
-        encoded = json.dumps(safe, ensure_ascii=False, separators=(",", ":"))
-        if used + len(encoded) + 1 > max_chars:
-            projected.append(
-                {
-                    "truncated_calls": len(entries) - index,
-                    "reason": "nested_audit_limit",
-                }
-            )
-            break
-        projected.append(safe)
-        used += len(encoded) + 1
-    return projected
-
-
 class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
-    """Official CodeMode plus native MCP visibility and bounded audit projection."""
+    """Official CodeMode plus native MCP visibility and private diagnostics."""
 
     async def get_tools(
         self,
@@ -312,19 +286,26 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         if name != _RUN_CODE_NAME:
             return await super().call_tool(name, tool_args, ctx, tool)
 
-        audit_start = len(ctx.deps.code_mode_audit)
+        secrets = payload_secrets(ctx.deps)
+        collector = Collector(
+            parent_id=ctx.tool_call_id or "", run_id=ctx.deps.run_id,
+            session_id=ctx.deps.session_id, sensitive_values=secrets,
+        )
+        token = current_collector.set(collector)
         try:
             result = await super().call_tool(name, tool_args, ctx, tool)
         except ModelRetry as exc:
+            collector.finish("failed")
+            diagnostic = collector.safe_document()
+            ctx.deps.ptc_diagnostics[collector.parent_id] = diagnostic
             safe_message = _scrub_error_text(
                 str(exc),
-                sensitive_values=payload_secrets(ctx.deps),
+                sensitive_values=secrets,
             )
             # Preserve a real failed ToolReturnPart (including bounded audit) rather
             # than asking the model to retry code until the whole Agent run aborts.
             # This is the framework's native failure signal, not a successful result
             # with an application-only error flag. Cancellation/deferral is untouched.
-            secrets = payload_secrets(ctx.deps)
             raise ToolFailedError(ToolReturnPart(
                 tool_name=name,
                 tool_call_id=ctx.tool_call_id or "",
@@ -340,27 +321,32 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                 outcome="failed",
                 metadata={
                     "code_mode": True,
-                    "nested_calls": _bounded_nested_audit(
-                        ctx.deps.code_mode_audit[audit_start:],
-                        sensitive_values=secrets,
-                    ),
+                    "ptc_diagnostics": diagnostic,
                 },
             )) from exc
+        except asyncio.CancelledError:
+            collector.finish("interrupted")
+            ctx.deps.ptc_diagnostics[collector.parent_id] = collector.safe_document()
+            raise
+        except Exception:
+            collector.finish("failed")
+            ctx.deps.ptc_diagnostics[collector.parent_id] = collector.safe_document()
+            raise
+        else:
+            collector.finish("completed")
+            diagnostic = collector.safe_document()
+            ctx.deps.ptc_diagnostics[collector.parent_id] = diagnostic
+            if isinstance(result, ToolReturn):
+                return ToolReturn(
+                    return_value=safe_result_value(result.return_value, sensitive_values=secrets),
+                    metadata={"code_mode": True, "ptc_diagnostics": diagnostic},
+                )
+            return safe_result_value(result, sensitive_values=secrets)
+        finally:
+            current_collector.reset(token)
 
-        nested_calls = ctx.deps.code_mode_audit[audit_start:]
-        secrets = payload_secrets(ctx.deps)
-        if isinstance(result, ToolReturn):
-            return ToolReturn(
-                return_value=safe_result_value(
-                    result.return_value,
-                    sensitive_values=secrets,
-                ),
-                metadata={
-                    "code_mode": True,
-                    "nested_calls": _bounded_nested_audit(
-                        nested_calls,
-                        sensitive_values=secrets,
-                    ),
-                },
-            )
-        return safe_result_value(result, sensitive_values=secrets)
+    async def _execute_code(self, code, ctx, run_code_tool, execution):
+        collector = current_collector.get()
+        if collector is not None:
+            collector.execution = execution
+        return await super()._execute_code(code, ctx, run_code_tool, execution)

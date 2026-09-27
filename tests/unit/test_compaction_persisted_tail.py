@@ -31,7 +31,7 @@ class CompactionPersistedTailTests(unittest.IsolatedAsyncioTestCase):
             "tail", agent_id=self.agent_id, user_id="user-1", raw_history=self.raw,
             projected_history=[ModelRequest(parts=[UserPromptPart("Summary of previous conversation:\n\n"+summary)]), *tail],
             summary_markdown=summary, trigger="pressure", model_id="model",
-            estimated_before=100, estimated_after=50, target_tokens=60,
+            estimated_before=100, estimated_after=50, budget_limit_tokens=60,
             context_window_tokens=1000, preserved_tail_tokens=25, duration_ms=10,
         )
 

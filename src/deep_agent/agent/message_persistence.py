@@ -36,6 +36,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
 
     def __init__(self, store: Any, *, history_length: int,
                  skip_user_prompt: bool, model_name: str | None = None,
+                 provider_id: str | None = None,
                  event_queue: asyncio.Queue | None = None) -> None:
         self.store = store
         self.event_queue = event_queue
@@ -43,6 +44,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         self.history_length = history_length
         self.skip_user_prompt = skip_user_prompt
         self.model_name = model_name
+        self.provider_id = provider_id
         self.messages: list[ModelMessage] = []
         self.persistence_error: MessagePersistenceError | None = None
         self._ledger: list[ModelMessage] = []
@@ -170,7 +172,9 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                              "deepagent_message_ordinal": ordinal,
                              "deepagent_part_indices": indices}
             ordinal += 1
-            if copy.parts:
+            # Keep response headers for metering even when no accepted part
+            # belongs in History (for example a rejected tool-call attempt).
+            if copy.parts or isinstance(copy, ModelResponse):
                 messages.append(copy)
         if self._results:
             # Supplemental media has no call ID; save it in the official SDK
@@ -201,6 +205,8 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                         turn_id=deps.turn_id, run_id=deps.run_id,
                         messages=messages,
                         first_message_ordinal=1 if self.skip_user_prompt else 0,
+                        usage_model_id=self.model_name,
+                        usage_provider_id=self.provider_id,
                     )
                 self.messages = messages
                 if self.event_queue is not None:

@@ -145,33 +145,30 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.name, "myapp__custom_form")
         self.assertEqual(len(rows), 1)
 
-    async def test_delete_only_blocks_effectively_selected_tool(self) -> None:
+    async def test_delete_blocks_every_tool_in_an_enabled_package(self) -> None:
         for name in ("demo__selected", "demo__unselected"):
             await self.store.create_manual(UiToolCreate(name=name, package_code="ui:demo", description="test", parameters_json_schema={"type": "object"}))
-        agent = await self.stores.agent.create_unique(AgentCreate(name="Scoped UI", prompt="test", capabilities=["ui:demo"], ui_tool_selection={"ui:demo": ["demo__selected"]}))
+        agent = await self.stores.agent.create_unique(AgentCreate(name="Scoped UI", prompt="test", capabilities=["ui:demo"]))
+        for name in ("demo__selected", "demo__unselected"):
+            with self.assertRaises(ReferenceConflict):
+                await self.store.delete(name)
+            with self.assertRaises(HTTPException) as caught:
+                await delete_ui_tool(name, store=self.store, agent_store=self.stores.agent)
+            self.assertEqual(caught.exception.status_code, 409)
+        await self.stores.agent.update_unique(agent.id, AgentUpdate(capabilities=[]))
         await delete_ui_tool("demo__unselected", store=self.store, agent_store=self.stores.agent)
         self.assertIsNone(await self.store.get_by_name("demo__unselected"))
-        with self.assertRaises(ReferenceConflict):
-            await self.store.delete("demo__selected")
-        with self.assertRaises(HTTPException) as caught:
-            await delete_ui_tool("demo__selected", store=self.store, agent_store=self.stores.agent)
-        self.assertEqual(caught.exception.status_code, 409)
-        await self.stores.agent.update_unique(agent.id, AgentUpdate(ui_tool_selection={}))
-        with self.assertRaises(ReferenceConflict):
-            await self.store.delete("demo__selected")
-        await self.stores.agent.update_unique(agent.id, AgentUpdate(ui_tool_selection={"ui:demo": []}))
         await delete_ui_tool("demo__selected", store=self.store, agent_store=self.stores.agent)
         self.assertIsNone(await self.store.get_by_name("demo__selected"))
 
-    async def test_move_cannot_leave_explicit_agent_selection_dangling(self) -> None:
+    async def test_move_cannot_change_a_referenced_package(self) -> None:
         await self.stores.ui_tool_package.create_manual(UiToolPackageCreate(code="ui:target", label="Target"))
         await self.store.create_manual(UiToolCreate(name="demo__move", package_code="ui:demo", description="test", parameters_json_schema={"type": "object"}))
-        agent = await self.stores.agent.create_unique(AgentCreate(name="Scoped UI", prompt="test", capabilities=["ui:demo"], ui_tool_selection={"ui:demo": ["demo__move"]}))
+        agent = await self.stores.agent.create_unique(AgentCreate(name="Scoped UI", prompt="test", capabilities=["ui:demo"]))
         with self.assertRaises(ReferenceConflict):
             await self.store.update("demo__move", UiToolUpdate(package_code="ui:target"))
         self.assertEqual((await self.store.get_by_name("demo__move")).package_code, "ui:demo")
-        # Whole-package scope follows the package contents, without a stored tool reference.
-        await self.stores.agent.update_unique(agent.id, AgentUpdate(ui_tool_selection={}))
+        await self.stores.agent.update_unique(agent.id, AgentUpdate(capabilities=[]))
         moved = await self.store.update("demo__move", UiToolUpdate(package_code="ui:target"))
         self.assertEqual(moved.package_code, "ui:target")
         await self.stores.agent.update_unique(agent.id, AgentUpdate(prompt="still valid"))

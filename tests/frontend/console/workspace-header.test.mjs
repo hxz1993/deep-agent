@@ -111,7 +111,7 @@ test("会话详情使用会话、当前回合和上下文引用三页签", () =>
   assert.match(chatSource, /run_metrics/);
   assert.match(workspaceSource, /renderContextBudgetOverview\(contextStatus\)/);
   assert.match(workspaceSource, /context-budget-composite/);
-  assert.match(workspaceSource, /\["target", contextStatus\.target_tokens, "目标线"\]/);
+  assert.doesNotMatch(workspaceSource, /目标线|target_tokens|target_met/);
   assert.match(workspaceSource, /\["trigger", contextStatus\.trigger_tokens, "触发线"\]/);
   assert.doesNotMatch(workspaceSource, /eventRows|eventToolRows/);
   assert.doesNotMatch(chatSource, /deep-agent-console-event/);
@@ -350,7 +350,7 @@ test("普通聊天读取 History 投影且轨迹独立读取 Event API", () => {
   assert.match(chatSource, /after_sequence: afterSequence, limit: 500/);
   assert.match(chatSource, /page\.next_after_sequence/);
   assert.match(chatSource, /normalizeConversationHistory\(await response\.json\(\)\)/);
-  assert.match(chatSource, /if \(events\.response\.ok\) trajectory\?\.setHistory\(events\.data\)/);
+  assert.match(chatSource, /if \(events\.response\.ok\)\s*\{\s*trajectory\?\.setHistory\(events\.data\)/);
   assert.match(chatSource, /historyThroughRun\(events\.data, runId, \{ baselineSequence \}\)/);
   assert.match(chatSource, /trajectory\?\.setHistory\(history, \{ preserveView: trajectoryLoaded \}\)/);
   assert.doesNotMatch(chatSource, /projectSessionEvents|context_checkpoint|addContextCheckpointMarker/);

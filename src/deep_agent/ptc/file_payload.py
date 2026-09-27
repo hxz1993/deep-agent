@@ -21,6 +21,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 
 from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.ptc.diagnostics import current_collector
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.capabilities.codes import PTC_PACKAGE_CODE
 from deep_agent.files.storage import FileStore, PlatformFileStore
@@ -287,8 +288,15 @@ def build_code_mode_tool_package() -> "ToolPackage":
         max_chars: int = DEFAULT_TEXT_CHARS,
     ) -> FileData:
         """读取当前会话已授权文件或公网文件，供 run_code 原样中转。"""
-        started = time.perf_counter()
         status = "completed"
+        error_detail: dict[str, str] | None = None
+        collector = current_collector.get()
+        if collector is not None:
+            collector.begin(ctx.tool_call_id, "load_file_data", {
+                "file_id": file_id, "url": url, "encoding": encoding,
+                "text_encoding": text_encoding, "max_chars": max_chars,
+            })
+        result: FileData | None = None
         try:
             normalized_file_id = file_id.strip() if isinstance(file_id, str) else None
             normalized_url = url.strip() if isinstance(url, str) else None
@@ -339,7 +347,10 @@ def build_code_mode_tool_package() -> "ToolPackage":
                 ctx.deps.code_mode_file_payloads[token] = payload
                 content = token
 
-            return FileData(
+            if collector is not None and encoding == "text":
+                collector.add_sensitive_text(content)
+
+            result = FileData(
                 file_id=normalized_file_id,
                 url=final_url,
                 name=name,
@@ -349,28 +360,21 @@ def build_code_mode_tool_package() -> "ToolPackage":
                 encoding=encoding,
                 content=content,
             )
+            return result
         except asyncio.CancelledError:
             status = "interrupted"
             raise
-        except Exception:
+        except Exception as exc:
             status = "failed"
+            error_detail = {"type": type(exc).__name__}
+            if isinstance(exc, (ModelRetry, ToolFailed)) and exc.args and isinstance(exc.args[0], str):
+                error_detail["message"] = exc.args[0][:4096]
             raise
         finally:
-            ctx.deps.code_mode_audit.append(
-                {
-                    "tool_name": "load_file_data",
-                    "call_id": ctx.tool_call_id,
-                    "status": status,
-                    "duration_ms": round((time.perf_counter() - started) * 1000, 3),
-                    "args": {
-                        "file_id": file_id,
-                        "url": url,
-                        "encoding": encoding,
-                        "text_encoding": text_encoding,
-                        "max_chars": max_chars,
-                    },
-                }
-            )
+            if collector is not None:
+                collector.end(ctx.tool_call_id, status,
+                              {key: value for key, value in result.items() if key != "content"} if result else None,
+                              error_detail)
 
     return ToolPackage(
         code=PTC_PACKAGE_CODE,
@@ -628,10 +632,13 @@ class FilePayloadResolvingToolset(WrapperToolset[AgentDeps]):
     ) -> Any:
         if not isinstance(tool, _ResolvingTool):
             return await self.wrapped.call_tool(name, tool_args, ctx, tool)
-        started = time.perf_counter()
         status = "completed"
         result: Any = None
         error_type: str | None = None
+        error_detail: dict[str, str] | None = None
+        collector = current_collector.get()
+        if collector is not None:
+            collector.begin(ctx.tool_call_id, name, tool_args)
         try:
             resolved = _resolve_payload_value(tool_args, ctx.deps)
             result = await self.wrapped.call_tool(
@@ -648,26 +655,10 @@ class FilePayloadResolvingToolset(WrapperToolset[AgentDeps]):
         except Exception as exc:
             status = "failed"
             error_type = type(exc).__name__
+            error_detail = {"type": error_type}
+            if isinstance(exc, (ModelRetry, ToolFailed)) and exc.args and isinstance(exc.args[0], str):
+                error_detail["message"] = exc.args[0][:4096]
             raise
         finally:
-            secrets = payload_secrets(ctx.deps)
-            audit_entry = {
-                "tool_name": name,
-                "call_id": ctx.tool_call_id,
-                "status": status,
-                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
-                "args": safe_audit_value(
-                    tool_args,
-                    sensitive_values=secrets,
-                ),
-            }
-            if status == "completed":
-                audit_entry["result"] = safe_audit_value(
-                    result,
-                    sensitive_values=secrets,
-                )
-            elif error_type:
-                audit_entry["error_type"] = error_type
-            ctx.deps.code_mode_audit.append(
-                audit_entry
-            )
+            if collector is not None:
+                collector.end(ctx.tool_call_id, status, result, error_detail or error_type)

@@ -44,6 +44,21 @@ from maintenance.config_backup import (
 
 
 class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_codex_credentials_are_excluded_from_configuration_backup(self) -> None:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            root = Path(tmpdir)
+            source = root / "source.db"
+            await self._create_source(source, revision="007")
+            with sqlite3.connect(source) as connection:
+                connection.execute(
+                    "UPDATE llm_providers SET provider_type='openai_codex', auth_method='oauth', auth_status='connected', auth_revision=4, api_key=NULL, credential_json=?",
+                    (json.dumps({"schema_version": 1, "access_token": "backup-secret", "refresh_token": "refresh-secret", "account_id": "account"}),),
+                )
+            result = await export_backup(self._url(source), environment="test", output_root=root / "backups", git_commit="test")
+            with sqlite3.connect(result.path) as connection:
+                row = connection.execute("SELECT auth_method, auth_status, auth_revision, credential_json FROM llm_providers").fetchone()
+            self.assertEqual(row, ("oauth", "unconfigured", 0, None))
+
     async def test_exports_one_sqlite_database_with_config_only(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             root = Path(tmpdir)
@@ -82,7 +97,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 }
                 self.assertTrue(
                     set(CONFIG_TABLES)
-                    | set(SESSION_TABLES)
+                    | (set(SESSION_TABLES) - {"channel_message_operations"})
                     | {"alembic_version", "_backup_info"}
                     <= tables
                 )
@@ -346,8 +361,11 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 db.execute(profile_sql)
             result = await export_backup(self._url(source), environment="fixture",
                                          output_root=Path(tmpdir) / "backups", git_commit="test")
-            for name in STRUCTURE_ONLY_TABLES:
+            with sqlite3.connect(source) as db:
+                source_tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for name in set(STRUCTURE_ONLY_TABLES) & source_tables:
                 self.assertEqual(result.row_counts[name], 0)
+            self.assertNotIn("channel_message_operations", result.row_counts)
             with sqlite3.connect(source) as db:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM wecom_user_profiles").fetchone(), (1,))
             with sqlite3.connect(result.path) as db:
@@ -356,6 +374,34 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             engine = create_async_engine(self._url(result.path))
             try:
                 with self.assertRaisesRegex(ValueError, "Structure-only table must be empty: wecom_user_profiles"):
+                    await _validate_backup(engine, revision=result.revision,
+                                           expected_counts={name: result.row_counts[name] for name in CONFIG_TABLES},
+                                           copied_tables=CONFIG_TABLES)
+            finally:
+                await engine.dispose()
+
+    async def test_009_backup_keeps_receipts_empty_and_source_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_receipts_") as tmpdir:
+            source = Path(tmpdir) / "source.db"
+            await self._create_source(source, revision="009")
+            receipt_sql = "INSERT INTO channel_message_operations (id,account_id,channel_run_id,agent_run_id,tool_call_id,session_id,request_hash,state,results) VALUES ('operation','channel-1','channel-run','agent-run','call','session-1','hash','completed','[]')"
+            with sqlite3.connect(source) as db:
+                db.execute("INSERT INTO channel_session_bindings (id,account_id,peer_type,peer_id,peer_metadata,session_id) VALUES ('binding','channel-1','single','peer','{}','session-1')")
+                db.execute("INSERT INTO channel_message_runs (id,account_id,binding_id,external_message_id,payload_hash,session_id,agent_run_id) VALUES ('channel-run','channel-1','binding','message','hash','session-1','agent-run')")
+                db.execute(receipt_sql)
+            result = await export_backup(self._url(source), environment="fixture",
+                                         output_root=Path(tmpdir) / "backups", git_commit="test")
+            self.assertEqual(result.revision, "009")
+            self.assertEqual(result.row_counts["channel_message_operations"], 0)
+            with sqlite3.connect(source) as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM channel_message_operations").fetchone(), (1,))
+            with sqlite3.connect(result.path) as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM channel_message_operations").fetchone(), (0,))
+                self.assertEqual(db.execute("SELECT id FROM channel_accounts").fetchone(), ("channel-1",))
+                db.execute(receipt_sql)
+            engine = create_async_engine(self._url(result.path))
+            try:
+                with self.assertRaisesRegex(ValueError, "Structure-only table must be empty: channel_message_operations"):
                     await _validate_backup(engine, revision=result.revision,
                                            expected_counts={name: result.row_counts[name] for name in CONFIG_TABLES},
                                            copied_tables=CONFIG_TABLES)
@@ -389,11 +435,11 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             async with engine.begin() as connection:
                 for name in ("channel_message_runs", "channel_session_bindings",
                              "chat_session_events", "chat_sessions", *reversed(CONFIG_TABLES)):
-                    if name == "wecom_applications" and revision != "006":
+                    if name == "wecom_applications" and revision not in {"006", "007", "008", "009"}:
                         continue
-                    if name != "integration_settings" or revision in {"004", "005", "006"}:
+                    if name != "integration_settings" or revision in {"004", "005", "006", "007", "008", "009"}:
                         await connection.execute(Base.metadata.tables[name].delete())
-                if revision in {"004", "005", "006"}:
+                if revision in {"004", "005", "006", "007", "008", "009"}:
                     await connection.execute(insert(IntegrationSettings.__table__), {"code": "deeptable-assistant", "settings": {"enabled": True, "options": [1, None, "中文"]}})
                 await connection.execute(
                     insert(GlobalSetting.__table__),
@@ -473,7 +519,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
                 await connection.execute(
-                    insert(Agent.__table__ if revision in {"005", "006"} else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
+                    insert(Agent.__table__ if revision in {"005", "006", "007", "008", "009"} else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
                     {
                         "id": "agent-1",
                         "name": "agent",

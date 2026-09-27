@@ -16,4 +16,5 @@ PTC目录只包含已授权MCP与`load_file_data`，不包含Web Search、Web Fe
 Python沙箱。这条边界避免同一网络能力出现多套含义相近的代码入口。
 
 - [`hybrid-code-mode-design.md`](hybrid-code-mode-design.md)：架构、权限、文件变量、审计和失败边界。
+- [`monty-diagnostics-design.md`](monty-diagnostics-design.md)：2026-09-24 C12 执行诊断方案，待实现；增强现有 PTC 详情，数据库继续 007，不增加表或列。
 - [`../../guides/code-mode.md`](../../guides/code-mode.md)：配置、选择策略、示例和排障。

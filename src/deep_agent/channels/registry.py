@@ -24,6 +24,13 @@ class AdapterRegistry:
             raise ValueError("Channel adapter is not installed")
         return factory(account, infinite_retry=infinite_retry)
 
+    def message_capabilities(self, channel_type):
+        factory = self._factories.get(channel_type)
+        provider = getattr(factory, "message_capabilities", None)
+        if provider is None:
+            raise ValueError("Channel message operations are unavailable")
+        return provider()
+
     def fingerprint(self, account) -> str:
         fingerprint = self._fingerprints.get(account.channel_type)
         if fingerprint is None:
@@ -33,7 +40,9 @@ class AdapterRegistry:
 
 def default_registry() -> AdapterRegistry:
     from .adapters.wecom import WecomAdapter
+    from .adapters.feishu import FeishuAdapter
 
     registry = AdapterRegistry()
     registry.register("wecom", WecomAdapter, WecomAdapter.connection_fingerprint)
+    registry.register("feishu", FeishuAdapter, FeishuAdapter.connection_fingerprint)
     return registry

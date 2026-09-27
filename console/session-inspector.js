@@ -36,7 +36,6 @@ export function renderContextBudgetOverview(contextStatus = {}) {
     return `<span class="context-budget-segment tone-${tone}" style="width:${width.toFixed(2)}%" title="${escapeHtml(label)} ${escapeHtml(formatTokens(value))} Token"></span>`;
   }).join("");
   const markers = [
-    ["target", contextStatus.target_tokens, "目标线"],
     ["trigger", contextStatus.trigger_tokens, "触发线"],
   ].map(([tone, value, label]) => {
     const position = contextBudgetPercent(value, total);
@@ -137,12 +136,13 @@ export function renderSessionInspector({
   // triggered compaction may replace the last persisted comparison.
   const currentCompaction = contextStatus.last_compaction;
   const compaction = currentCompaction?.triggered === true
-    && currentCompaction.target_met === true && !currentCompaction.failure
+    && currentCompaction.summary_applied === true && !currentCompaction.summary_failed
+    && !currentCompaction.failure && currentCompaction.compaction_event_saved === true
     ? currentCompaction : {};
   const strategyLabels = {
     none: "未触发",
     tiered_deterministic: "确定性压缩",
-    tiered_summary: "分层摘要",
+    tiered_summary: "上下文摘要",
     sliding_window_fallback: "滑动窗口兜底",
   };
   const compactionState = contextStatus.compaction_event_id
@@ -191,7 +191,7 @@ export function renderSessionInspector({
     </div></section>` : `<section class="inspector-section">
       <p class="inspector-channel-note">${state.sessionId ? "当前会话不是由渠道发起的。" : "尚未选择渠道会话。"}</p>
       <header><strong>Agent 关联渠道</strong></header>
-      <div class="inspector-facts compact">${agentChannels.map((account) => inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(account.name)}<span class="inspector-channel-badge">${escapeHtml(account.channel_type === "wecom" ? "企微" : account.channel_type)}</span></span>`)).join("")}</div>
+      <div class="inspector-facts compact">${agentChannels.map((account) => inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(account.name)}<span class="inspector-channel-badge">${escapeHtml(account.channel_type === "wecom" ? "企微" : account.channel_type === "feishu" ? "飞书" : account.channel_type)}</span></span>`)).join("")}</div>
     </section>`;
   const sessionContent = `<section class="inspector-section inspector-session-group">
     <div class="inspector-facts">

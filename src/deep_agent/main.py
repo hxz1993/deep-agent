@@ -24,9 +24,17 @@ from deep_agent.diagnostics.runtime import observe_lifespan
 async def lifespan(app: FastAPI):
     configure_logging()
     ctx = await AppContext.bootstrap()
-    yield
-    await ctx.aclose()
-    reset_context()
+    try:
+        yield
+    finally:
+        from deep_agent.services.feishu_registration import registration_service
+        from deep_agent.services.wecom_registration import registration_service as wecom_registration_service
+        try:
+            await registration_service.aclose()
+            await wecom_registration_service.aclose()
+        finally:
+            await ctx.aclose()
+            reset_context()
 
 
 app = FastAPI(
@@ -98,25 +106,37 @@ def _deployment_aware_swagger_html() -> HTMLResponse:
     return HTMLResponse(
         f"""
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link type="text/css" rel="stylesheet"
         href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
-  <link rel="shortcut icon" href="https://fastapi.tiangolo.com/img/favicon.png">
-  <title>{app.title} - Swagger UI</title>
+  <link id="docs-icon" rel="icon" type="image/svg+xml">
+  <title>DeepAgent · 接口文档</title>
 </head>
 <body>
   <div id="swagger-ui"></div>
   <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>
     const serviceBasePath = window.location.pathname.replace(/\\/docs\\/?$/, "");
+    const style = document.createElement("link");
+    style.rel = "stylesheet";
+    style.href = `${{serviceBasePath}}/console/api-docs.css?v=20260924-1`;
+    document.head.appendChild(style);
+    document.getElementById("docs-icon").href = `${{serviceBasePath}}/console/favicon.svg`;
     const ui = SwaggerUIBundle({{
       url: `${{serviceBasePath}}{app.openapi_url}`,
       dom_id: "#swagger-ui",
       layout: "BaseLayout",
       deepLinking: true,
-      showExtensions: true,
-      showCommonExtensions: true,
+      filter: true,
+      docExpansion: "list",
+      defaultModelsExpandDepth: -1,
+      supportedSubmitMethods: [],
+      validatorUrl: null,
+      showExtensions: false,
+      showCommonExtensions: false,
       oauth2RedirectUrl:
         `${{window.location.origin}}${{serviceBasePath}}{app.swagger_ui_oauth2_redirect_url}`,
       presets: [

@@ -51,23 +51,31 @@ def score_search_text(query: str, text: str) -> float:
     return score
 
 
-def _cursor(query: str, offset: int) -> str:
+def _cursor(query: str, offset: int, scan_offset: int = 0, source_head: int | None = None) -> str:
     payload = {
         "q": hashlib.sha256(normalize_search_query(query).encode()).hexdigest()[:16],
         "o": offset,
+        "s": scan_offset,
+        "h": source_head,
     }
     return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
 
 
-def _cursor_offset(query: str, cursor: str | None) -> int:
+def _cursor_offset(query: str, cursor: str | None) -> tuple[int, int, int | None]:
     if not cursor:
-        return 0
+        return 0, 0, None
     try:
         payload = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
         expected = hashlib.sha256(normalize_search_query(query).encode()).hexdigest()[:16]
         if payload.get("q") != expected:
             raise ValueError
-        return max(0, int(payload.get("o") or 0))
+        offset, scan = int(payload.get("o") or 0), int(payload.get("s") or 0)
+        if offset < 0 or scan < 0:
+            raise ValueError
+        head = payload.get("h")
+        if head is not None and (not isinstance(head, int) or head < 0):
+            raise ValueError
+        return offset, scan, head
     except Exception as exc:
         raise ModelRetry("Invalid or stale history search cursor.") from exc
 
@@ -119,7 +127,7 @@ def build_history_toolset(
     @toolset.tool
     async def search_conversation_history(
         ctx: RunContext[AgentDeps],
-        query: str,
+        query: str = "",
         scope: Literal["current_session", "my_sessions"] = "current_session",
         session_id: str | None = None,
         event_types: list[str] | None = None,
@@ -127,13 +135,25 @@ def build_history_toolset(
         call_id: str | None = None,
         created_after: datetime | None = None,
         created_before: datetime | None = None,
+        from_sequence: int | None = None,
+        through_sequence: int | None = None,
         limit: int = 20,
         cursor: str | None = None,
     ) -> dict[str, Any]:
-        """Search authorized conversation Events, including Chinese text and exact IDs."""
+        """Find prior results before repeating business queries. Use a tool/call ID or
+        a current-session source sequence range when query text is unknown. Follow
+        next_cursor even on an empty page; ranking covers each bounded scan page.
+        """
 
-        if not normalize_search_query(query):
-            raise ModelRetry("query must not be empty")
+        has_query = bool(normalize_search_query(query))
+        if not has_query and not (tool_name or call_id or from_sequence is not None or through_sequence is not None):
+            raise ModelRetry("Empty query requires tool_name, call_id, or a source sequence range")
+        if (from_sequence is not None or through_sequence is not None) and scope != "current_session":
+            raise ModelRetry("Source sequence ranges require current_session scope")
+        if any(value is not None and value < 1 for value in (from_sequence, through_sequence)):
+            raise ModelRetry("Source sequence bounds must be positive")
+        if from_sequence is not None and through_sequence is not None and from_sequence > through_sequence:
+            raise ModelRetry("from_sequence must not exceed through_sequence")
         if not ctx.deps.agent_id or not ctx.deps.user:
             raise ModelRetry("Conversation history requires an authenticated agent and user")
         selected_session = None
@@ -143,7 +163,18 @@ def build_history_toolset(
                 raise ModelRetry("current_session cannot target another session")
         elif session_id is not None:
             selected_session = session_id
-        candidates = await store.search_event_candidates(
+        cursor_key = json.dumps({
+            "query": normalize_search_query(query), "scope": scope, "session": selected_session,
+            "agent": ctx.deps.agent_id, "user": ctx.deps.user,
+            "event_types": sorted(event_types or []), "tool_name": tool_name, "call_id": call_id,
+            "created_after": created_after, "created_before": created_before,
+            "from_sequence": from_sequence, "through_sequence": through_sequence,
+        }, sort_keys=True, default=str)
+        offset, scan_offset, source_head = _cursor_offset(cursor_key, cursor)
+        effective_through = through_sequence
+        if source_head is not None:
+            effective_through = min(through_sequence, source_head) if through_sequence is not None else source_head
+        scan = await store.search_event_candidates(
             agent_id=ctx.deps.agent_id,
             user_id=ctx.deps.user,
             session_id=selected_session,
@@ -152,10 +183,13 @@ def build_history_toolset(
             call_id=call_id,
             created_after=created_after,
             created_before=created_before,
+            from_sequence=from_sequence, through_sequence=effective_through,
+            offset=scan_offset, limit=200,
         )
+        source_head = scan["source_head"]
         ranked = [
-            (score_search_text(query, str(row.get("search_text") or "")), row)
-            for row in candidates
+            (score_search_text(query, str(row.get("search_text") or "")) if has_query else 1.0, row)
+            for row in scan["items"]
         ]
         ranked = [item for item in ranked if item[0] > 0]
         ranked.sort(
@@ -164,7 +198,6 @@ def build_history_toolset(
             ),
             reverse=True,
         )
-        offset = _cursor_offset(query, cursor)
         page_size = min(max(limit, 1), 50)
         page = ranked[offset : offset + page_size]
         items: list[dict[str, Any]] = []
@@ -215,9 +248,17 @@ def build_history_toolset(
                 }
             )
         next_offset = offset + len(page)
+        next_cursor = (
+            _cursor(cursor_key, next_offset, scan_offset, source_head) if next_offset < len(ranked)
+            else _cursor(cursor_key, 0, scan["next_offset"], source_head) if scan["next_offset"] is not None else None
+        )
         return {
             "items": items,
-            "next_cursor": _cursor(query, next_offset) if next_offset < len(ranked) else None,
+            "next_cursor": next_cursor,
+            "has_more": next_cursor is not None,
+            "search_complete": next_cursor is None,
+            "scanned_count": scan["scanned_count"],
+            "ranking_scope": "scan_page",
         }
 
     @toolset.tool
@@ -227,14 +268,30 @@ def build_history_toolset(
         call_id: str | None = None,
         before: int = 0,
         after: int = 0,
+        part_offset: int | None = None,
+        offset: int = 0,
+        limit: int = 12_000,
+        from_sequence: int | None = None,
+        through_sequence: int | None = None,
     ) -> dict[str, Any]:
-        """Read one authorized Event or a current-session Tool Call/Result pair."""
+        """Read saved evidence before rerunning a business query. Select an exact
+        Event/part or current-session Call ID. Large results return explicit JSON
+        text fragments; follow next_read and concatenate content to recover them.
+        """
 
         if not ctx.deps.agent_id or not ctx.deps.user:
             raise ModelRetry("Conversation history requires an authenticated agent and user")
         if bool(event_id) == bool(call_id):
             raise ModelRetry("Provide exactly one of event_id or call_id")
-        rows = await store.read_authorized_events(
+        if part_offset is not None and (not event_id or before or after or part_offset < 0):
+            raise ModelRetry("part_offset requires an exact event_id without adjacent events")
+        if offset < 0 or not 1 <= limit <= 32_000 or not 0 <= before <= 20 or not 0 <= after <= 20:
+            raise ModelRetry("offset must be non-negative; limit 1..32000; before/after 0..20")
+        if any(value is not None and value < 1 for value in (from_sequence, through_sequence)):
+            raise ModelRetry("Source sequence bounds must be positive")
+        if from_sequence is not None and through_sequence is not None and from_sequence > through_sequence:
+            raise ModelRetry("from_sequence must not exceed through_sequence")
+        batch = await store.read_authorized_events(
             agent_id=ctx.deps.agent_id,
             user_id=ctx.deps.user,
             event_id=event_id,
@@ -242,15 +299,40 @@ def build_history_toolset(
             call_id=call_id,
             before=before,
             after=after,
+            from_sequence=from_sequence, through_sequence=through_sequence, page_size=100,
         )
-        if not rows:
+        rows = batch["items"]
+        if not rows and batch["next_sequence"] is None and from_sequence is None:
             raise ModelRetry("Conversation event not found or not authorized")
         events = []
         for row in rows:
             item = row.public_dict()
+            if part_offset is not None:
+                parts = (item.get("payload", {}).get("message") or {}).get("parts", [])
+                if part_offset >= len(parts):
+                    raise ModelRetry("part_offset is outside the original Event")
+                item["payload"] = {"part_offset": part_offset, "part": parts[part_offset]}
             item["payload"] = _redact(item["payload"])
             events.append(item)
-        return {"events": events}
+        encoded = json.dumps(events, ensure_ascii=False, separators=(",", ":"), default=str)
+        if offset > len(encoded):
+            raise ModelRetry("offset exceeds this read page")
+        end = min(len(encoded), offset + limit)
+        next_read = None
+        if end < len(encoded) or batch["next_sequence"] is not None:
+            next_read = {"event_id": event_id, "call_id": call_id, "before": before, "after": after,
+                         "part_offset": part_offset, "limit": limit, "through_sequence": through_sequence,
+                         "from_sequence": from_sequence if end < len(encoded) else batch["next_sequence"],
+                         "offset": end if end < len(encoded) else 0}
+            next_read = {key: value for key, value in next_read.items() if value is not None}
+        complete_page = offset == 0 and end == len(encoded)
+        return {
+            "events": events if complete_page else [],
+            "content": None if complete_page else encoded[offset:end],
+            "content_format": "events" if complete_page else "json_fragment",
+            "offset": offset, "next_offset": end if end < len(encoded) else None,
+            "total_chars": len(encoded), "has_more": next_read is not None, "next_read": next_read,
+        }
 
     return toolset
 

@@ -38,47 +38,56 @@ function globalSettingMatches(group, item, query) {
   ].some((value) => String(value || "").toLocaleLowerCase().includes(normalized));
 }
 
-function globalSettingsTableHtml(groups, query = "") {
-  const rows = (Array.isArray(groups) ? groups : []).flatMap((group) => {
-    const items = (Array.isArray(group?.items) ? group.items : []).filter((item) =>
-      globalSettingMatches(group, item, query),
-    );
-    if (!items.length) return [];
-    return [
-      `<tr class="global-settings-group-row"><th colspan="5">${escapeHtml(group?.label || "未命名分组")}</th></tr>`,
-      ...items.map(
-        (item) => `<tr>
-          <td><strong>${escapeHtml(item.label)}</strong></td>
+function globalSettingsVisibleGroups(groups, query = "") {
+  return (Array.isArray(groups) ? groups : []).map((group) => ({
+    ...group,
+    items: (Array.isArray(group?.items) ? group.items : []).filter((item) => globalSettingMatches(group, item, query)),
+  })).filter((group) => group.items.length);
+}
+
+function globalSettingsSwitchHtml(groups, selectedKey) {
+  return groups.map((group) => `<button class="cap-tab${group.key === selectedKey ? " active" : ""}" type="button" data-global-settings-group="${escapeHtml(group.key)}" aria-pressed="${group.key === selectedKey}">${escapeHtml(group.label || "未命名分组")}</button>`).join("");
+}
+
+function globalSettingsTableHtml(group) {
+  const rows = (Array.isArray(group?.items) ? group.items : []).map(
+    (item) => `<tr>
+          <td class="global-setting-name"><strong>${escapeHtml(item.label)}</strong><code>${escapeHtml(item.env_name)}</code></td>
           <td class="global-setting-value">${escapeHtml(globalSettingValue(item))}</td>
-          <td><code>${escapeHtml(item.env_name)}</code></td>
           <td><span class="global-setting-source source-${escapeHtml(item.source)}">${escapeHtml(globalSettingSourceLabel(item.source))}</span></td>
           <td class="global-setting-description">${escapeHtml(item.description)}</td>
         </tr>`,
-      ),
-    ];
-  });
+  );
   if (!rows.length) return "";
   return `<div class="table-wrap">
     <table class="data-table global-settings-table">
-      <thead><tr><th>配置项</th><th>当前值</th><th>环境变量</th><th>来源</th><th>说明</th></tr></thead>
+      <thead><tr><th>环境变量</th><th>当前值</th><th>来源</th><th>说明</th></tr></thead>
       <tbody>${rows.join("")}</tbody>
     </table>
   </div>`;
 }
 
-function renderGlobalSettings(groups, query = "") {
+function renderGlobalSettings(groups, query = "", selectedKey = "") {
   const target = document.getElementById("globalSettingsGroups");
+  const switchTarget = document.getElementById("globalSettingsGroupSwitch");
   if (!target) return;
   if (!Array.isArray(groups) || groups.length === 0) {
+    if (switchTarget) switchTarget.innerHTML = "";
     target.innerHTML = `<div class="global-settings-state">暂无可展示的运行设置。</div>`;
     return;
   }
-  target.innerHTML = globalSettingsTableHtml(groups, query) || `<div class="global-settings-state">没有匹配的配置项。</div>`;
+  const visible = globalSettingsVisibleGroups(groups, query);
+  const selected = visible.find((group) => group.key === selectedKey) || visible[0];
+  if (switchTarget) switchTarget.innerHTML = selected ? globalSettingsSwitchHtml(visible, selected.key) : "";
+  target.innerHTML = selected ? globalSettingsTableHtml(selected) : `<div class="global-settings-state">没有匹配的配置项。</div>`;
+  return selected?.key || "";
 }
 
 function renderGlobalSettingsError(error) {
   const target = document.getElementById("globalSettingsGroups");
+  const switchTarget = document.getElementById("globalSettingsGroupSwitch");
   if (!target) return;
+  if (switchTarget) switchTarget.innerHTML = "";
   const message = error instanceof Error ? error.message : String(error);
   target.innerHTML = `<div class="global-settings-state error">
     <span>${escapeHtml(message || "运行设置加载失败")}</span>
@@ -409,10 +418,27 @@ function closeWebSearchSettings() {
 }
 
 const globalSettingsAdmin = {
+  page: "general",
+  selectPage(page, { refresh = true } = {}) {
+    if (!["general", "models", "operations"].includes(page)) return;
+    this.page = page;
+    document.querySelectorAll("[data-settings-page]").forEach(button => {
+      const selected = button.dataset.settingsPage === page;
+      button.classList.toggle("active", selected);
+      if (selected) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    });
+    document.querySelectorAll(".global-settings-page").forEach(section => {
+      section.hidden = section.id !== `settings-${page}`;
+    });
+    if (refresh) void this.refresh();
+  },
   groups: [],
   query: "",
+  selectedGroup: "",
   webSearch: null,
   async refresh() {
+    if (this.page === "models") return window.modelCatalogAdmin?.refresh();
     void window.databaseConnectionAdmin?.refresh();
     const runtimeTarget = document.getElementById("globalSettingsGroups");
     if (runtimeTarget) runtimeTarget.innerHTML = `<div class="global-settings-state">正在加载运行设置…</div>`;
@@ -427,7 +453,7 @@ const globalSettingsAdmin = {
       ]);
       this.groups = Array.isArray(runtime?.groups) ? runtime.groups : [];
       this.webSearch = webSearch?.invalid ? null : webSearch;
-      renderGlobalSettings(this.groups, this.query);
+      this.selectedGroup = renderGlobalSettings(this.groups, this.query, this.selectedGroup);
       renderWebSearchSettings(this.webSearch);
       if (webSearch?.invalid) {
         const summary = document.getElementById("webSearchSummaryValue");
@@ -440,7 +466,10 @@ const globalSettingsAdmin = {
   },
   search(query) {
     this.query = String(query || "");
-    renderGlobalSettings(this.groups, this.query);
+    this.selectedGroup = renderGlobalSettings(this.groups, this.query, this.selectedGroup);
+  },
+  selectGroup(key) {
+    this.selectedGroup = renderGlobalSettings(this.groups, this.query, key);
   },
   async saveWebSearch() {
     if (!selectedWebSearchCategory()) {
@@ -501,13 +530,23 @@ window.__GlobalSettingsUI = {
   sourceLabel: globalSettingSourceLabel,
   settingValue: globalSettingValue,
   tableHtml: globalSettingsTableHtml,
+  visibleGroups: globalSettingsVisibleGroups,
+  switchHtml: globalSettingsSwitchHtml,
   matches: globalSettingMatches,
   webSearchSummaryLabel,
   webSearchTestFeedbackPresentation,
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("[data-settings-page]").forEach(button => {
+    button.addEventListener("click", () => globalSettingsAdmin.selectPage(button.dataset.settingsPage));
+  });
+
   document.getElementById("globalSettingsSearch")?.addEventListener("input", (event) => globalSettingsAdmin.search(event.target.value));
+  document.getElementById("globalSettingsGroupSwitch")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-global-settings-group]");
+    if (button) globalSettingsAdmin.selectGroup(button.dataset.globalSettingsGroup);
+  });
   document.getElementById("globalSettingsGroups")?.addEventListener("click", (event) => {
     if (event.target.closest("[data-retry-global-settings]")) globalSettingsAdmin.refresh();
   });

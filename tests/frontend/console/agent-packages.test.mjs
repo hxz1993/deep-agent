@@ -137,10 +137,10 @@ test('后端默认匹配模型预选，用户显式留空保留null',async()=>{
  const data=fixture();data.references.model.matched_id='fallback';data.models=[{id:'fallback',name:'默认模型'}];const h=harness(async()=>response(data));upload(h);await h.admin.preflight();assert.equal(h.admin.choices.model_id,'fallback');h.admin.renderConfigure();assert.match(h.node('agentPackageContent').innerHTML,/value="fallback" selected/);h.node('agentPackageName').value='Agent';h.node('agentPackageModel').value='';assert.equal(h.admin.readChoices().model_id,null);
 });
 
-test('UI 工具逐项显示混合处理和单工具范围，不把整包都说成覆盖',()=>{
- const h=harness();const data=fixture();data.resources=[{kind:'ui',code:'ui:demo',label:'演示工具包',status:'update',tools:[{name:'a',status:'new'},{name:'b',status:'update'},{name:'c',status:'reuse'}],selected_tools:['a','b'],retained_tools:['d']}];staged(h,data);h.admin.render();
+test('UI 工具逐项显示变更，目标额外工具按整包可用提示',()=>{
+ const h=harness();const data=fixture();data.resources=[{kind:'ui',code:'ui:demo',label:'演示工具包',status:'update',tools:[{name:'a',status:'new'},{name:'b',status:'update'},{name:'c',status:'reuse'}],retained_tools:['d']}];staged(h,data);h.admin.render();
  const html=h.node('agentPackageContent').innerHTML;
- assert.match(html,/a<[^]*?新建/);assert.match(html,/b<[^]*?覆盖/);assert.match(html,/c<[^]*?保持不变[^]*?本次不使用/);assert.match(html,/d<[^]*?保留[^]*?本次不使用/);
+ assert.match(html,/a<[^]*?新建/);assert.match(html,/b<[^]*?覆盖/);assert.match(html,/c<[^]*?保持不变/);assert.match(html,/d<[^]*?保留[^]*?整包启用后可用/);
 });
 test('安装结果独立展示，名称模型回显且确定关闭不重新提交',async()=>{
  const h=harness(async()=>response({agent:{id:'new',name:'完成名称',model_id:'m'},results:[{kind:'agent',label:'完成名称',status:'new'},{kind:'skill',label:'技能甲',status:'reuse'}],missing:[],mode:'create'}));

@@ -154,7 +154,7 @@ class MessagePartStoreTests(unittest.IsolatedAsyncioTestCase):
             raw_history=raw,
             projected_history=[ModelRequest(parts=[UserPromptPart("Summary of previous conversation:\n\nsummary")]), *raw[1:]],
             summary_markdown="summary", trigger="manual", model_id="test",
-            estimated_before=100, estimated_after=50, target_tokens=60,
+            estimated_before=100, estimated_after=50, budget_limit_tokens=60,
             context_window_tokens=1000, preserved_tail_tokens=25, duration_ms=1,
         )
         self.assertIsNotNone(snapshot)

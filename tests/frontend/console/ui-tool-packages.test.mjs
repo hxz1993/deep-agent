@@ -22,6 +22,7 @@ const consoleStyles = await readFile(
   new URL("../../../console/console.css", import.meta.url),
   "utf8",
 );
+const sharedPrimitives = await readFile(new URL("../../../console/ui-primitives.css", import.meta.url), "utf8");
 
 test("UI 工具页使用左侧工具包树和右侧单一工具表", () => {
   assert.match(template, /id="uiToolPackageTree"/);
@@ -67,12 +68,14 @@ test("UI 工具页保留内部轻卡片，页面外壳直角并衔接导航", ()
   assert.doesNotMatch(styles, /\.ui-tool-selected-header \.row-actions \.btn:not\(\.primary\):not\(\.danger\)/);
   assert.match(styles, /\.ui-tool-selected-header \.row-actions \.btn\s*\{[^}]*border: 1px solid var\(--border\);[^}]*background: var\(--bg-soft\)/);
   assert.match(styles, /\.panel-title-copy \{[^}]*gap: 4px/);
-  assert.match(consoleStyles, /--config-radius: 8px/);
-  assert.match(consoleStyles, /--config-control-height: 32px/);
+  assert.match(sharedPrimitives, /--ui-radius: 8px/);
+  assert.match(sharedPrimitives, /--config-radius: var\(--ui-radius\)/);
+  assert.match(sharedPrimitives, /--ui-control-height: 32px/);
+  assert.match(sharedPrimitives, /--config-control-height: var\(--ui-control-height\)/);
   assert.match(consoleStyles, /#configurationHost > \.panel\s*\{[^}]*border: 0;[^}]*border-radius: 0;[^}]*box-shadow: none;/);
   assert.match(consoleStyles, /\.console-main \.configuration-shell\s*\{[^}]*padding: 0;[^}]*border-radius: 0;/);
-  assert.match(consoleStyles, /#configurationHost \.ui-tool-tree-node,[\s\S]*border-radius: var\(--config-radius\) !important/);
-  assert.match(consoleStyles, /#configurationHost \.btn,[\s\S]*height: var\(--config-control-height\)/);
+  assert.match(sharedPrimitives, /#configurationHost \.ui-tool-tree-node,[\s\S]*border-radius: var\(--config-radius\) !important/);
+  assert.match(sharedPrimitives, /height: var\(--config-control-height\)/);
 });
 
 test("工具创建入口依赖当前选中的自定义工具包", () => {

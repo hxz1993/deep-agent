@@ -96,7 +96,8 @@ test("Agent 能力页提交独立 Sandbox 工具包编码", () => {
 
   assert.match(card, /Python 沙箱/);
   assert.match(card, /value="builtin:sandbox"/);
-  assert.match(card, /execute_python/);
+  assert.doesNotMatch(card, /execute_python/);
+  assert.match(card, /data-lucide="hammer"/);
 });
 
 test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {
@@ -116,7 +117,8 @@ test("Agent 内置工具卡片优先展示中文名称和技术类型", () => {
   assert.match(card, /通用工具/);
   assert.match(card, /内置/);
   assert.match(card, /value="builtin:general"/);
-  assert.match(card, /get_current_time/);
+  assert.doesNotMatch(card, /get_current_time/);
+  assert.match(card, /data-lucide="hammer"/);
 });
 
 test("Agent 工具包卡片不展示内部披露策略且不提供工具级复选框", () => {

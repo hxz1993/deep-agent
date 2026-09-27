@@ -715,7 +715,7 @@ v0.3.22 同一Backend内部增加Skill脚本模式：宿主只复制已授权脚
 | `PrepareTools` | 按请求修改或过滤工具定义 | 优先用于权限、App、Space、模态和任务阶段过滤 |
 | `ToolSearch` | 工具很多时按需发现 | 工具达到数十个、Schema 占用明显后试点 |
 | `IncludeToolReturnSchemas` | 让模型看到工具返回结构 | 只对稳定、小型结果工具启用 |
-| `HandleDeferredToolCalls` | 通用 Deferred 处理 | 不替换现有产品化 HITL |
+| `HandleDeferredToolCalls` | 通用 Deferred 处理 | 原判断为不替换现有产品化 HITL；2026-09-26 重新评估为保留 UI 定义、通过 handler 同 Run 等待，见 [30 课题](../30-ui-tool-inline-wait/README.md)，尚未实施 |
 | Hooks / Instrumentation | 工具校验、执行和 Usage 观测 | 增加脱敏后接入 |
 | `ProcessHistory` | 请求前改写历史 | 若采用 Harness Compaction，不再维护第二套压缩器 |
 | `ProcessEventStream` | 处理原生运行事件 | 可做内部观测，不替换现有 SSE 契约 |

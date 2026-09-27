@@ -14,6 +14,8 @@ from deep_agent.db.reference_integrity import lock_optional, is_unique_conflict
 from deep_agent.db.stores.llm_model.base import _validate_runtime_metadata
 from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelUpdate
 from deep_agent.schemas.llm_provider import LlmProviderCreate, LlmProviderUpdate
+from deep_agent.services.codex_provider import credential_payload, require_codex_enabled, evict_provider
+from pydantic_ai.providers.openai_codex import OpenAICodexCredentials
 from deep_agent.web.settings import (
     WEB_SEARCH_SETTING_KEY,
     WebSearchConfigurationError,
@@ -68,7 +70,7 @@ class LlmConfigurationService(SessionBoundMixin):
 
     async def list_providers(self) -> list[LlmProvider]:
         async with self._read() as db:
-            result = await db.execute(select(LlmProvider).order_by(LlmProvider.name))
+            result = await db.execute(select(LlmProvider).order_by(LlmProvider.created_at, LlmProvider.id))
             return list(result.scalars().all())
 
     async def get_provider(self, provider_id: str) -> LlmProvider | None:
@@ -84,7 +86,22 @@ class LlmConfigurationService(SessionBoundMixin):
         async with self._read() as db:
             return await self._count_provider_models(db, provider_id)
 
-    async def create_provider(self, data: LlmProviderCreate) -> LlmProvider:
+    async def disconnect_provider(self, provider_id: str) -> LlmProvider | None:
+        async with self._write() as db:
+            row = await db.get(LlmProvider, provider_id, with_for_update=True)
+            if row is None:
+                return None
+            if row.provider_type != "openai_codex" or row.auth_method != "oauth":
+                raise LlmConfigurationValidationError("仅订阅供应商可以断开授权")
+            row.credential_json = None
+            row.auth_status = "disconnected"
+            row.auth_revision += 1
+            await db.flush()
+            await db.refresh(row)
+            evict_provider(provider_id)
+            return row
+
+    async def create_provider(self, data: LlmProviderCreate, *, codex_credentials: OpenAICodexCredentials | None = None) -> LlmProvider:
         try:
             async with self._write() as db:
                 existing = await db.execute(
@@ -99,12 +116,22 @@ class LlmConfigurationService(SessionBoundMixin):
                     use_default_base_url=data.use_default_base_url,
                     base_url=data.base_url,
                 )
+                if data.provider_type == "openai_codex":
+                    require_codex_enabled()
+                    if codex_credentials is None or data.api_key or not data.use_default_base_url:
+                        raise LlmConfigurationValidationError("Codex 订阅必须完成授权且使用默认地址")
+                elif codex_credentials is not None:
+                    raise LlmConfigurationValidationError("API Provider 不能使用订阅凭据")
                 row = LlmProvider(
                     name=data.name,
                     provider_type=data.provider_type,
                     use_default_base_url=data.use_default_base_url,
                     base_url=base_url,
                     api_key=data.api_key,
+                    auth_method="oauth" if codex_credentials else "api_key",
+                    credential_json=credential_payload(codex_credentials) if codex_credentials else None,
+                    auth_status="connected" if codex_credentials else "unconfigured",
+                    auth_revision=1 if codex_credentials else 0,
                 )
                 db.add(row)
                 await db.flush()
@@ -121,6 +148,7 @@ class LlmConfigurationService(SessionBoundMixin):
         self,
         provider_id: str,
         data: LlmProviderUpdate,
+        *, codex_credentials: OpenAICodexCredentials | None = None,
     ) -> LlmProvider | None:
         try:
             async with self._write() as db:
@@ -128,6 +156,18 @@ class LlmConfigurationService(SessionBoundMixin):
                 if row is None:
                     return None
                 updates = data.model_dump(exclude_unset=True)
+                updates.pop("authorization_flow_id", None)
+                if row.provider_type == "openai_codex":
+                    if any(field in updates for field in ("provider_type", "api_key", "clear_api_key", "base_url", "use_default_base_url")):
+                        raise LlmConfigurationValidationError("订阅供应商只能修改名称或重新授权")
+                    if codex_credentials is not None:
+                        require_codex_enabled()
+                        row.credential_json = credential_payload(codex_credentials)
+                        row.auth_revision += 1
+                        row.auth_status = "connected"
+                        evict_provider(provider_id)
+                elif codex_credentials is not None or updates.get("provider_type") == "openai_codex":
+                    raise LlmConfigurationValidationError("请新建订阅供应商并完成授权")
                 clear_api_key = bool(updates.pop("clear_api_key", False))
                 if clear_api_key:
                     updates["api_key"] = None
@@ -205,6 +245,7 @@ class LlmConfigurationService(SessionBoundMixin):
                 # Delete this Provider and its unreferenced models atomically.
                 await db.execute(delete(LlmModel).where(LlmModel.provider_id == provider_id))
                 await db.delete(provider)
+                evict_provider(provider_id)
                 await db.flush()
                 return True
         except IntegrityError as exc:
@@ -248,6 +289,7 @@ class LlmConfigurationService(SessionBoundMixin):
                     max_output_tokens=data.max_output_tokens,
                     tags=data.tags,
                     enabled=data.enabled,
+                    purpose=data.purpose,
                 )
                 db.add(row)
                 await db.flush()

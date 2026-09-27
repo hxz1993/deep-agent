@@ -10,7 +10,7 @@ import {
   parseSseBlock,
   readSse,
 } from "./protocol.js?v=20260912-21";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260918-release01012";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260927-feishu-release-0117";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import {
   applyAssistantPresentationActions,
@@ -21,7 +21,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20260912-21";
-import { createTrajectoryController } from "./trajectory.js?v=20260923-usage-tab-2";
+import { createTrajectoryController } from "./trajectory.js?v=20260924-ptc-execution-6";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
@@ -37,7 +37,7 @@ import {
   modelOptionLabel,
   preserveCurrentModel,
   renderGroupedModelOptions,
-} from "./model-options.js?v=20260912-21";
+} from "./model-options.js?v=20260925-codex-1";
 import { shouldFollowMessages } from "./message-scroll.js?v=20260912-21";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260912-21";
 import { createHistoryFollower } from "./history-follower.js?v=20260912-21";
@@ -166,6 +166,7 @@ const state = {
   automaticCompactionTimer: null,
   pendingAutomaticCompaction: null,
   automaticCompactionAnchor: null,
+  completedAutomaticCompactionEvents: new Set(),
   assistantPresenter: null,
   messageAutoFollow: true,
   messageScrollFrame: null,
@@ -202,7 +203,8 @@ const COMPOSER_PROVIDER_BRANDS = {
   alibaba: "./assets/provider-logos/qwen.png",
   zai: "./assets/provider-logos/zai.svg",
   openrouter: "./assets/provider-logos/openrouter.png",
-  openai: "./assets/provider-logos/openai.svg",
+  openai: "./assets/provider-logos/openai.svg?v=20260926-centered-2",
+  openai_codex: "./assets/provider-logos/openai.svg?v=20260926-centered-2",
   anthropic: "./assets/provider-logos/anthropic.png",
   google: "./assets/provider-logos/google-gemini.png",
   openai_compatible: "./assets/provider-logos/openai-compatible.svg",
@@ -341,6 +343,7 @@ function clearMessages() {
   for (const record of state.historyRendered) record.presenter?.dispose?.();
   state.historyRendered = [];
   clearAutomaticCompactionState();
+  state.completedAutomaticCompactionEvents = new Set();
   state.assistantPresenter = null;
   state.messageAutoFollow = true;
   clearComposerPlan();
@@ -1460,12 +1463,25 @@ function updateComposerContextControls() {
     el.contextBudgetBadge.classList.toggle("reminder", ratio != null && ratio >= 0.7 && ratio < 0.8);
     el.contextBudgetBadge.classList.toggle("warning", ratio != null && ratio >= 0.8);
     el.contextBudgetBadge.style.setProperty("--context-progress", `${(percent || 0) * 3.6}deg`);
+    const historyOnly = occupancy.label === "历史占用";
+    const usedLabel = compactTokenLabel(estimated);
+    const usableLabel = compactTokenLabel(usable);
     const detail = ratio == null
       ? "上下文用量暂不可用"
-      : `${occupancy.label}：${Math.round(ratio * 100)}% 可用输入\n${compactTokenLabel(estimated)} / ${compactTokenLabel(usable)} Token\n${occupancy.detail}`;
-    el.contextBudgetBadge.setAttribute("aria-label", detail.replaceAll("\n", "，"));
+      : `${historyOnly ? "历史估算" : "预计占用"} ${percent}%：已用 ${usedLabel}，共 ${usableLabel} Token`;
+    el.contextBudgetBadge.setAttribute("aria-label", detail);
     el.contextBudgetBadge.removeAttribute("title");
-    if (el.contextBudgetTooltip) el.contextBudgetTooltip.textContent = detail;
+    if (el.contextBudgetTooltip) {
+      const percentLine = el.contextBudgetTooltip.querySelector(".context-budget-tooltip-percent");
+      const totalsLine = el.contextBudgetTooltip.querySelector(".context-budget-tooltip-totals");
+      if (percentLine) percentLine.textContent = ratio == null
+        ? "用量暂不可用"
+        : `${percent}% 已用${historyOnly ? " · 历史估算" : ""}`;
+      if (totalsLine) {
+        totalsLine.textContent = ratio == null ? "" : `已用 ${usedLabel}   共 ${usableLabel}`;
+        totalsLine.hidden = ratio == null;
+      }
+    }
   }
 
   if (el.attachBtn) el.attachBtn.disabled = state.streaming || state.awaitingHitl;
@@ -1475,7 +1491,7 @@ function createContextCompactionRow(beforeNode = null) {
   hideEmptyState();
   const row = document.createElement("div");
   row.className = "context-compaction-row";
-  row.innerHTML = '<span class="spinner" aria-hidden="true"></span><span class="status-text">正在分析上下文…</span>';
+  row.innerHTML = '<span class="spinner" aria-hidden="true"></span><span class="status-text">正在压缩中…</span>';
   if (beforeNode?.parentNode === el.messages) {
     el.messages.insertBefore(row, beforeNode);
   } else {
@@ -1505,6 +1521,7 @@ function clearAutomaticCompactionState({ remove = false } = {}) {
 }
 
 function showAutomaticContextCompaction(data, beforeNode) {
+  if (data.event_id && state.completedAutomaticCompactionEvents.has(data.event_id)) return;
   state.pendingAutomaticCompaction = data;
   state.automaticCompactionAnchor = beforeNode || state.automaticCompactionAnchor;
   if (state.automaticCompactionRow) {
@@ -1528,7 +1545,22 @@ function showAutomaticContextCompaction(data, beforeNode) {
   }, 150);
 }
 
+function updateAutomaticContextCompactionEvent(data) {
+  const event = data.event;
+  if (data.persisted !== true || event?.event_type !== "compaction" || !event.event_id) return;
+  if (event.status !== "completed" || state.completedAutomaticCompactionEvents.has(event.event_id)) return;
+  const activeId = state.pendingAutomaticCompaction?.event_id;
+  if (activeId && activeId !== event.event_id) return;
+  const row = state.automaticCompactionRow || createContextCompactionRow(state.automaticCompactionAnchor);
+  setContextCompactionRow(row,
+    "上下文已压缩",
+    { active: false });
+  state.completedAutomaticCompactionEvents.add(event.event_id);
+  clearAutomaticCompactionState();
+}
+
 function finalizeAutomaticContextCompaction(context, runStatus) {
+  if (!state.pendingAutomaticCompaction && state.completedAutomaticCompactionEvents.size) return;
   const compaction = context?.compaction;
   if (!compaction?.triggered && !state.pendingAutomaticCompaction) {
     clearAutomaticCompactionState({ remove: true });
@@ -1540,28 +1572,16 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
     );
   }
   const row = state.automaticCompactionRow;
-  if (runStatus === "pending") {
-    setContextCompactionRow(
-      row,
-      "本轮上下文已整理，完成工具交互后再生成压缩事件",
-      { active: false },
-    );
-    state.automaticCompactionRow = null;
-    state.pendingAutomaticCompaction = null;
-    state.automaticCompactionAnchor = null;
-    window.setTimeout(() => row.remove(), 2500);
-    return;
-  }
   if (
     compaction?.summary_applied
     && !compaction?.summary_failed
-    && compaction?.target_met
+    && !compaction?.failure
     && compaction?.strategy !== "sliding_window_fallback"
     && compaction?.compaction_event_saved === true
   ) {
     setContextCompactionRow(
       row,
-      `上下文已压缩：${compactTokenLabel(compaction.estimated_tokens_before)} → ${compactTokenLabel(compaction.estimated_tokens_after)} Token`,
+      "上下文已压缩",
       { active: false },
     );
     clearAutomaticCompactionState();
@@ -1569,7 +1589,8 @@ function finalizeAutomaticContextCompaction(context, runStatus) {
   }
   if (
     compaction?.summary_applied
-    && compaction?.target_met
+    && !compaction?.summary_failed
+    && !compaction?.failure
     && compaction?.compaction_event_saved === false
   ) {
     setContextCompactionRow(
@@ -2300,6 +2321,7 @@ async function resumeDeferred(deferredResults) {
 }
 
 async function runChatStream(payload, assistant) {
+  state.completedAutomaticCompactionEvents = new Set();
   state.historyFollower?.stop();
   state.historyController?.abort();
   state.historyFollower = null;
@@ -2575,6 +2597,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       break;
     case "session_event_appended":
     case "session_event_updated":
+      updateAutomaticContextCompactionEvent(data);
       break;
     case "thinking":
       applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
@@ -2645,7 +2668,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       break;
     case "error":
       state.lastRunMetrics = { ...state.lastRunMetrics, status: "error" };
-      failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
+      failAutomaticContextCompaction("本次上下文压缩未完成，后续请求失败");
       applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data));
       // Error is transient SSE only — refreshing history would wipe the bubble.
       state.refreshHistoryAfterStream = false;
@@ -2654,7 +2677,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       break;
     case "cancelled":
       state.runCache = data.run_metrics?.cache_usage || state.runCache;
-      failAutomaticContextCompaction("上下文压缩已取消，未生成压缩事件");
+      failAutomaticContextCompaction("本次上下文压缩已取消");
       // Keep the current streamed conversation in place. The official
       // interrupted history remains the source of truth when the session is
       // reopened, but re-rendering it here causes a disruptive visual reload.

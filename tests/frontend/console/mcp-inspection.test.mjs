@@ -63,12 +63,13 @@ test("API 鉴权或网络失败不会被改写成缺少测试 App", async () => 
     apiFetch: async () => { throw new Error("权限不足"); },
     showToast: (message) => messages.push(message),
   });
-  const button = { textContent: "刷新", isConnected: true };
+  const label = { textContent: "检测" };
+  const button = { querySelector: () => label, isConnected: true };
   await window.mcpAdmin.inspect("deepfos", button, { request_context: { mode: "inherit" } });
   assert.deepEqual(messages, ["权限不足"]);
   assert.equal(contextRequests, 0);
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "刷新");
+  assert.equal(label.textContent, "检测");
 });
 
 test("App 已生效或上下文查询失败时不推断为 App 未配置", async () => {
@@ -225,7 +226,7 @@ test("URL MCP 明确展示缺失、失效和沿用快照状态", () => {
   );
 });
 
-test("Builtin 显示内置运行时且不伪装成待检测", () => {
+test("Builtin 默认显示正常", () => {
   const ui = loadInspectionUi();
   const view = ui.inspectionView({
     status: "not_applicable",
@@ -233,7 +234,7 @@ test("Builtin 显示内置运行时且不伪装成待检测", () => {
     tools: { count: 18 },
     resources: { count: 2, template_count: 1 },
   }, "builtin");
-  assert.equal(view.text, "内置运行时");
+  assert.equal(view.text, "正常");
   assert.deepEqual(JSON.parse(JSON.stringify(view.counts)), { tools: 18, resources: 2, templates: 1 });
   assert.equal(ui.canDeleteMcp("builtin"), false);
   assert.equal(ui.canDeleteMcp("url"), true);
@@ -335,4 +336,24 @@ test("检测结果区分变化、无变化、部分异常和无法连接", () =>
     }).message,
     "检测失败：MCP 初始化失败（TimeoutError）",
   );
+});
+
+
+test("工具明细保留快照顺序并区分未检测", () => {
+  const ui = loadInspectionUi();
+  const html = ui.renderMcpCatalog({tools: {snapshot_status: "stale", definitions: [{name: "z_first", description: "first"}, {name: "a_second"}]}});
+  assert.ok(html.indexOf("z_first") < html.indexOf("a_second"));
+  assert.match(html, /上次检测结果/);
+  assert.match(ui.renderMcpCatalog({tools: {snapshot_status: "missing"}}), /请先检测/);
+  assert.doesNotMatch(ui.renderInspectionCounts({tools: 2, resources: 1, templates: 5}, "test"), /模板/);
+});
+
+
+test("清单搜索覆盖描述和资源 URI，保持工具顺序", () => {
+  const ui = loadInspectionUi();
+  const catalog = {resources: {count: 2, snapshot_status: "ready", definitions: [{name: "one", uri: "docs://one", description: "订单"}, {name: "two", uri: "docs://two"}]}};
+  assert.match(ui.renderMcpCatalog(catalog, "resources", "订单"), /docs:\/\/one/);
+  assert.doesNotMatch(ui.renderMcpCatalog(catalog, "resources", "订单"), /docs:\/\/two/);
+  assert.match(ui.renderMcpCatalog(catalog, "resources", "absent"), /没有匹配/);
+  assert.match(ui.renderInspectionCounts({tools: 2, resources: 1}, "demo"), /data-catalog-kind="resources"/);
 });

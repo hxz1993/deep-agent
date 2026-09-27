@@ -4,6 +4,7 @@ export const PROVIDER_CATALOG_IDS = Object.freeze({
   alibaba: "alibaba",
   zai: "zhipuai",
   openai: "openai",
+  openai_codex: "openai",
   anthropic: "anthropic",
   google: "google",
 });

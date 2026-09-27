@@ -110,11 +110,16 @@ export function enhanceSelect(select) {
       if (option.hidden) return;
       const group = option.parentElement?.tagName === "OPTGROUP" ? option.parentElement : null;
       if (group && group !== previousGroup) {
-        const heading = document.createElement("div"); heading.className = "da-select-group"; heading.textContent = group.label; menu.append(heading);
+        const heading = document.createElement("div"); heading.className = "da-select-group";
+        if (group.dataset.iconSrc) {
+          const icon = document.createElement("img"); icon.src = group.dataset.iconSrc; icon.alt = ""; heading.append(icon);
+        }
+        heading.append(document.createTextNode(group.label)); menu.append(heading);
       }
       previousGroup = group;
       const row = document.createElement("div");
       row.className = "da-select-option";
+      row.classList.toggle("is-grouped", Boolean(group));
       row.id = `${menu.id}-${index}`;
       row.dataset.index = String(index);
       row.setAttribute("role", "option");
@@ -132,10 +137,10 @@ export function enhanceSelect(select) {
     const current = options();
     for (const [option, restore] of optionRestores) if (!current.includes(option)) { restore(); optionRestores.delete(option); }
     current.forEach(option => { if (!optionRestores.has(option)) optionRestores.set(option, observeSelectProperty(option, "selected", refresh)); });
-    text.textContent = current.filter(option => option.selected).map(option => option.label).join("、") || "—";
+    text.textContent = current.filter(option => option.selected).map(option => option.label).join("、") || (select.dataset.placeholder ?? "—");
     const selectedOption = current.find(option => option.selected);
     text.classList.toggle("da-select-placeholder", select.selectedIndex < 0
-      || Boolean(selectedOption && selectedOption.value === "" && selectedOption.hidden && selectedOption.disabled));
+      || Boolean(selectedOption && selectedOption.value === "" && selectedOption.hidden));
     trigger.disabled = select.disabled || select.matches(":disabled");
     trigger.title = select.title || text.textContent;
     trigger.setAttribute("aria-required", String(select.required));

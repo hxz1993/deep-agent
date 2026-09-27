@@ -365,19 +365,9 @@ const agentsAdmin = {
     const displayName = cap.label || capDisplayName(cap.code, cap.category);
     const kindLabel = cap.category === "ui" ? "UI" : capKindLabel(cap);
     const toolCount = Number(cap.tool_count ?? cap.tools?.length ?? 0);
-    const toolsHtml = cap.category === "ui" || cap.code.startsWith("ui:")
-      ? this.renderUiToolChoices(cap)
-      : toolCount
-      ? `<details class="cap-card-tools">
-          <summary>${toolCount} 个工具</summary>
-          <ul>${cap.tools
-            .map(
-              (t) =>
-                `<li><strong>${escapeHtml(t.name)}</strong>${t.description ? ` — ${escapeHtml(t.description)}` : ""}</li>`
-            )
-            .join("")}</ul>
-        </details>`
-      : "";
+    const toolIcon = cap.category === "ui" ? "monitor-check" : cap.category === "mcp" ? "wrench" : "hammer";
+    const resourceCount = Number(cap.resource_count ?? 0);
+    const counts = `<span class="cap-card-counts"><span title="工具"><i data-lucide="${toolIcon}" aria-hidden="true"></i>${toolCount}</span>${cap.category === "mcp" ? `<span title="资源"><i data-lucide="file-text" aria-hidden="true"></i>${resourceCount}</span>` : ""}</span>`;
 
     return `<article class="cap-card kind-${escapeHtml(cap.category)}" data-cap-name="${escapeHtml(cap.code)}">
       <div class="cap-card-header">
@@ -393,43 +383,11 @@ const agentsAdmin = {
           ${cap.description ? `<p class="cap-card-desc">${escapeHtml(cap.description)}</p>` : ""}
         </div>
       </div>
-      ${toolsHtml}
+      ${counts}
     </article>`;
   },
 
-  renderUiToolChoices(cap) {
-    const tools = cap.tools || [];
-    const limited = Object.hasOwn(this.uiToolSelection || {}, cap.code);
-    const selected = new Set(limited ? this.uiToolSelection[cap.code] : tools.map(tool => tool.name));
-    return `<details class="cap-card-tools cap-ui-tool-range"><summary data-ui-tool-count="${escapeHtml(cap.code)}">已选 ${selected.size} / ${tools.length} 个工具</summary><label class="cap-ui-all"><input type="checkbox" data-ui-tool-all="${escapeHtml(cap.code)}" ${limited ? '' : 'checked'} />整个工具包（包含后续新增工具）</label><ul>${tools.map(tool => `<li><label title="${escapeHtml(tool.description || tool.name)}"><input type="checkbox" data-ui-tool-package="${escapeHtml(cap.code)}" value="${escapeHtml(tool.name)}" ${selected.has(tool.name) ? 'checked' : ''} /><span>${escapeHtml(tool.name)}</span></label></li>`).join('')}</ul></details>`;
-  },
-
-  setUiToolEnabled(code, name, checked) {
-    this.uiToolSelection ||= {};
-    const tools = (state.capabilities || []).find(cap => cap.code === code)?.tools || [];
-    const allowed = tools.map(tool => tool.name);
-    const selected = new Set(Object.hasOwn(this.uiToolSelection, code) ? this.uiToolSelection[code] : allowed);
-    if (checked && allowed.includes(name)) selected.add(name); else selected.delete(name);
-    this.uiToolSelection[code] = [...selected];
-  },
-
-  syncUiToolChoices(code) {
-    const card = Array.from(document.querySelectorAll('[data-cap-name]')).find(node => node.dataset.capName === code);
-    if (!card) return;
-    const all = !Object.hasOwn(this.uiToolSelection || {}, code);
-    card.querySelector('[data-ui-tool-all]').checked = all;
-    const selected = new Set(this.uiToolSelection?.[code] || []);
-    const boxes = [...card.querySelectorAll('[data-ui-tool-package]')];
-    boxes.forEach(box => { box.checked = all || selected.has(box.value); });
-    card.querySelector('[data-ui-tool-count]').textContent = `已选 ${boxes.filter(box => box.checked).length} / ${boxes.length} 个工具`;
-  },
-
-  getSelectedUiToolSelection(capabilities) {
-    return Object.fromEntries((capabilities || this.getSelectedCapabilities()).filter(code => Object.hasOwn(this.uiToolSelection || {}, code)).map(code => [code, [...this.uiToolSelection[code]]]));
-  },
-
-  renderCapabilityCheckboxes(selected = [], uiToolSelection = {}) {
-    this.uiToolSelection = Object.fromEntries(Object.entries(uiToolSelection || {}).map(([code, names]) => [code, [...names]]));
+  renderCapabilityCheckboxes(selected = []) {
     const container = document.getElementById("agentCapGroups");
     if (!container) return;
 
@@ -447,8 +405,10 @@ const agentsAdmin = {
         const label = GROUP_LABELS[group] || group;
         return `<div class="cap-panel ${hidden}" data-kind-panel="${escapeHtml(group)}">
           <div class="cap-panel-toolbar">
-            <button type="button" class="btn-link cap-select-all" data-kind="${escapeHtml(group)}">全选 ${escapeHtml(label)}</button>
-            <button type="button" class="btn-link cap-select-none" data-kind="${escapeHtml(group)}">全不选</button>
+            <label class="cap-group-toggle">
+              <input type="checkbox" data-cap-group-toggle="${escapeHtml(group)}" aria-label="全选${escapeHtml(label)}" />
+              <span>全选</span><span class="cap-group-selection-state"></span>
+            </label>
           </div>
           <div class="cap-grid" data-kind-grid="${escapeHtml(group)}">${cards}</div>
         </div>`;
@@ -456,6 +416,7 @@ const agentsAdmin = {
       .join("");
 
     this.updateCapCounter();
+    window.lucide?.createIcons();
   },
 
   switchCapTab(kind) {
@@ -484,6 +445,19 @@ const agentsAdmin = {
       '#agentCapGroups input[name="cap"]:checked:not(:disabled)'
     );
     const selectedSet = new Set(Array.from(configurableChecked).map((b) => b.value));
+
+    document.querySelectorAll("[data-cap-group-toggle]").forEach((toggle) => {
+      const panel = toggle.closest(".cap-panel");
+      const inputs = Array.from(panel.querySelectorAll('input[name="cap"]:not(:disabled)'));
+      const count = inputs.filter(input => input.checked).length;
+      toggle.checked = inputs.length > 0 && count === inputs.length;
+      toggle.indeterminate = count > 0 && count < inputs.length;
+      toggle.disabled = inputs.length === 0;
+      toggle.title = toggle.checked ? "点击全部关闭" : "点击全部启用";
+      panel.querySelector(".cap-group-selection-state").textContent = inputs.length
+        ? (toggle.checked ? "已全部启用" : count ? `已启用 ${count} / ${inputs.length}` : "未启用")
+        : "暂无可选项";
+    });
 
     document.querySelectorAll("[data-kind-badge]").forEach((badge) => {
       const group = badge.dataset.kindBadge;
@@ -543,8 +517,8 @@ const agentsAdmin = {
           </span>
         </span>
           <span class="agent-skill-card-meta">
-            <span title="参考文件">${Number(skill.reference_count || 0)} <i data-lucide="book-open"></i></span>
-            <span title="附件">${Number(skill.asset_count || 0)} <i data-lucide="paperclip"></i></span>
+            <span title="参考文件"><i data-lucide="book-open"></i>${Number(skill.reference_count || 0)}</span>
+            <span title="附件"><i data-lucide="paperclip"></i>${Number(skill.asset_count || 0)}</span>
             ${disabled ? '<span class="agent-skill-unavailable">不可用</span>' : ""}
           </span>
       </label>`;
@@ -600,7 +574,7 @@ const agentsAdmin = {
       this.syncEditorTitle();
       populateAgentModelSelect(agent.model_id);
       document.getElementById("agentPrompt").value = agent.prompt;
-      this.renderCapabilityCheckboxes(agent.capabilities, agent.ui_tool_selection);
+      this.renderCapabilityCheckboxes(agent.capabilities);
       this.renderSkillChoices(agent.skills || []);
       document.getElementById("testAgentBtn")?.classList.remove("hidden");
       this.openEditor();
@@ -640,7 +614,6 @@ const agentsAdmin = {
           model_id: agent.model_id,
           prompt: agent.prompt,
           capabilities: [...(agent.capabilities || [])],
-          ui_tool_selection: agent.ui_tool_selection || {},
           skills: [...(agent.skills || [])],
         }),
       });
@@ -670,7 +643,6 @@ const agentsAdmin = {
       model_id: modelId || null,
       prompt,
       capabilities,
-      ui_tool_selection: this.getSelectedUiToolSelection(capabilities),
       skills: this.getSelectedSkills(),
     };
 
@@ -745,28 +717,13 @@ const agentsAdmin = {
         this.switchCapTab(tab.dataset.kind);
         return;
       }
-      const selectAll = e.target.closest(".cap-select-all");
-      if (selectAll) {
-        this.setCapsInKind(selectAll.dataset.kind, true);
-        return;
-      }
-      const selectNone = e.target.closest(".cap-select-none");
-      if (selectNone) {
-        this.setCapsInKind(selectNone.dataset.kind, false);
-      }
+
     });
 
     resources.addEventListener("change", (e) => {
-      if (e.target.matches('[data-ui-tool-package]')) {
-        this.setUiToolEnabled(e.target.dataset.uiToolPackage, e.target.value, e.target.checked);
-        this.syncUiToolChoices(e.target.dataset.uiToolPackage);
-      }
-      if (e.target.matches('[data-ui-tool-all]')) {
-        const code = e.target.dataset.uiToolAll;
-        this.uiToolSelection ||= {};
-        if (e.target.checked) delete this.uiToolSelection[code];
-        else this.uiToolSelection[code] = ((state.capabilities || []).find(cap => cap.code === code)?.tools || []).map(tool => tool.name);
-        this.syncUiToolChoices(code);
+      if (e.target.matches("[data-cap-group-toggle]")) {
+        this.setCapsInKind(e.target.dataset.capGroupToggle, e.target.checked);
+        return;
       }
       if (e.target.matches('input[name="cap"]')) {
         this.updateCapCounter();
@@ -802,6 +759,13 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("agentForm")?.addEventListener("submit", (e) => agentsAdmin.save(e));
   document.getElementById("agentForm")?.addEventListener("input", () => { agentEditorDirty = true; });
   document.getElementById("agentForm")?.addEventListener("change", () => { agentEditorDirty = true; });
+  document.getElementById("clearAgentModelBtn")?.addEventListener("click", () => {
+    const select = document.getElementById("agentModelId");
+    if (!select || !select.value) return;
+    select.value = "";
+    select.dispatchEvent(new Event("input", { bubbles: true }));
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
   document.getElementById("agentName")?.addEventListener("input", () => agentsAdmin.syncEditorTitle());
   document.getElementById("closeAgentModal")?.addEventListener("click", () => agentsAdmin.requestCloseEditor());
   document.getElementById("testAgentBtn")?.addEventListener("click", async () => {

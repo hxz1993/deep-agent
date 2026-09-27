@@ -24,41 +24,15 @@
   font-family: var(--font);
   line-height: 1.5;
 }
-.diagnostics-page :is(.diagnostics-button, .console-select-trigger) {
-  height: 32px; min-height: 32px; padding: 0 10px; border: 1px solid var(--diag-border-strong);
-  border-radius: 8px; background: var(--diag-surface); color: var(--diag-text); font: inherit;
-  box-shadow: none; transition: border-color .15s ease, background .15s ease, color .15s ease;
-}
-.diagnostics-page .diagnostics-button { gap: 7px; font-weight: 500; }
-.diagnostics-page .diagnostics-button.primary {
-  background: var(--diag-accent); border-color: var(--diag-accent); color: var(--send-fg, #fff);
-}
-.diagnostics-page :is(.diagnostics-button, .console-select-trigger):hover {
-  border-color: var(--diag-accent); color: var(--diag-accent); background: var(--diag-accent-soft);
-}
-.diagnostics-page .diagnostics-button.primary:hover {
-  color: #fff; background: color-mix(in srgb, var(--diag-accent) 90%, #000);
-}
-.diagnostics-page .diagnostics-button.text {
-  background: transparent; border: 0; min-height: 28px; height: 28px; padding: 0;
-  font-size: 12px; color: var(--diag-accent); box-shadow: none;
-}
 .diagnostics-page :is(button, input, summary):focus-visible {
   outline: 2px solid var(--diag-accent); outline-offset: 2px;
 }
 .diagnostics-page #diagnosticsFilters input:focus,
 .diagnostic-sessions-page .diagnostic-list-search input:focus {
-  outline:none; box-shadow:none; border-color:var(--diag-border-strong);
+  outline:none; box-shadow:none; border-color:var(--diag-accent);
 }
 .diagnostics-page #diagnosticsFilters .compact-search:focus-within {
-  outline:none; box-shadow:none; border-color:var(--diag-border-strong);
-}
-.diagnostics-page .console-select-menu {
-  background: var(--diag-surface); border: 1px solid var(--diag-border); border-radius: 9px;
-  padding: 5px; box-shadow: var(--diag-popover-shadow); z-index: 50;
-}
-.diagnostics-page .console-select-option {
-  min-height: 34px; font-size: 13px; color: var(--diag-text); padding: 7px 10px; border-radius: 5px;
+  outline:none; box-shadow:none; border-color:var(--diag-accent);
 }
 .diagnostics-page svg { width: 16px; height: 16px; }
 .diagnostics-page .diagnostics-notice { border-radius: 8px; }

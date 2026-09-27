@@ -17,6 +17,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [domain.code for domain in domains],
             [
+                "runtime:channel",
                 "runtime:planning",
                 "runtime:conversation-history",
                 "runtime:skill",
@@ -29,6 +30,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [[tool.name for tool in domain.tools] for domain in domains],
             [
+                ["channel_message"],
                 ["write_plan"],
                 ["search_conversation_history", "read_conversation_event"],
                 ["load_capability", "list_skill_resources", "execute_skill_script"],

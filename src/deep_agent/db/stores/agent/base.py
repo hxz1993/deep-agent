@@ -4,12 +4,11 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.db.models import Agent, LlmModel, UiToolPackage, UiToolDefinition, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
+from deep_agent.db.models import Agent, LlmModel, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
 from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate
-from deep_agent.capabilities.ui.selection import validate_ui_tool_selection
 
 
 class AgentStoreBase(SessionBoundMixin):
@@ -32,14 +31,13 @@ class AgentStoreBase(SessionBoundMixin):
                     await lock_reference(db, LlmModel, LlmModel.id, data.model_id, "LLM model")
                 await self._lock_ui_packages(db, data.capabilities)
                 await self._lock_mcp_servers(db, data.capabilities)
-                await self._validate_ui_selection(db, data.ui_tool_selection, data.capabilities)
                 if await self._get_by_name(db, data.name) is not None:
                     raise ValueError(f"Agent already exists: {data.name}")
                 row = Agent(
                     name=data.name,
                     model_id=data.model_id,
                     capabilities=data.capabilities,
-                    ui_tool_selection=data.ui_tool_selection,
+                    ui_tool_selection={},
                     skills=data.skills,
                     prompt=data.prompt,
                 )
@@ -75,12 +73,8 @@ class AgentStoreBase(SessionBoundMixin):
                     if conflict is not None:
                         raise ValueError(f"Agent already exists: {data.name}")
                 updates = data.model_dump(exclude_unset=True)
-                new_caps = updates.get("capabilities", row.capabilities or [])
-                selection = updates.get("ui_tool_selection", row.ui_tool_selection or {})
-                if "ui_tool_selection" not in updates:
-                    selection = {code: names for code, names in selection.items() if code in new_caps}
-                await self._validate_ui_selection(db, selection, new_caps)
-                updates["ui_tool_selection"] = selection
+                # Keep the legacy column for existing databases, but never use its old per-tool scope.
+                updates["ui_tool_selection"] = {}
                 for field, value in updates.items():
                     setattr(row, field, value)
                 await db.flush()
@@ -138,11 +132,6 @@ class AgentStoreBase(SessionBoundMixin):
             row = await lock_optional(db, McpServer, McpServer.name, name)
             if row is None and f"mcp:{name}" in capabilities and not is_shipped_builtin(name):
                 raise ReferenceConflict(f"MCP not found: {name}")
-
-    @staticmethod
-    async def _validate_ui_selection(db: AsyncSession, selection, capabilities) -> None:
-        rows = (await db.execute(select(UiToolDefinition.name, UiToolDefinition.package_code))).all()
-        validate_ui_tool_selection(selection, capabilities, dict(rows))
 
     @staticmethod
     async def _lock_ui_packages(db: AsyncSession, capabilities: list[str]) -> None:

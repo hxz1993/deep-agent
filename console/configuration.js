@@ -1,13 +1,13 @@
 let initialized = false;
-import "./model-options.js?v=20260913-49";
-import * as ProviderCatalog from "./provider-catalog.js?v=20260913-49";
+import "./model-options.js?v=20260925-codex-1";
+import * as ProviderCatalog from "./provider-catalog.js?v=20260925-codex-1";
 import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260913-49";
 import * as SchemaText from "./schema-editor.js?v=20260913-49";
 if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCatalog;
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260919-search-editor-2";
+const CONFIGURATION_ASSET_VERSION = "20260928-channel-message";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -17,13 +17,12 @@ const CONFIGURATION_TABS = new Set([
   "channels",
   "integrations",
   "global-settings",
-  "catalog",
 ]);
 let activeConfigurationTab = "agents";
 
 export function rememberConfigurationTab(name) {
   if (name === "builtin-tools" || name === "ui-tools") name = "tools";
-  if (name === "database-connection") name = "global-settings";
+  if (name === "database-connection" || name === "catalog") name = "global-settings";
   if (CONFIGURATION_TABS.has(name)) activeConfigurationTab = name;
   return activeConfigurationTab;
 }
@@ -61,14 +60,11 @@ function appendAdminStructure(adminDoc, modelsDoc) {
 
   adminApp.querySelectorAll(":scope > section.panel").forEach((panel) => host.appendChild(panel));
 
-  const catalog = document.createElement("section");
-  catalog.className = "panel catalog-panel";
-  catalog.id = "panel-catalog";
+  const catalog = document.getElementById("settings-models");
   const card = modelsDoc.querySelector(".models-card");
   if (!card) throw new Error("模型目录结构不完整");
   card.querySelector(".settings-theme-field")?.remove();
   catalog.append(...Array.from(card.children));
-  host.insertBefore(catalog, document.getElementById("panel-mcp"));
 
   adminDoc.querySelectorAll("body > dialog").forEach((dialog) => {
     dialog.classList.add("console-detail-dialog");
@@ -106,6 +102,8 @@ async function loadAdminScripts() {
     "./configuration/ui-tools.js",
     "./configuration/tools.js",
     "./configuration/wecom-applications.js",
+    "./vendor/qrcode.js",
+    "./configuration/channel-registration.js",
     "./configuration/channels.js",
     "./configuration/integrations.js",
   ];
@@ -153,7 +151,6 @@ export function refreshCurrentConfiguration() {
   if (active === "mcp") return window.mcpAdmin?.refresh();
   if (active === "integrations") return window.integrationsAdmin?.refresh();
   if (active === "channels") return window.channelsAdmin?.refresh();
-  if (active === "catalog") return window.modelCatalogAdmin?.refresh();
   return null;
 }
 

@@ -190,6 +190,7 @@ def _toolsets_for_spec(
     skill_resource_toolset: Any | None = None,
     skill_script_toolset: Any | None = None,
     history_toolset: Any | None = None,
+    channel_toolset: Any | None = None,
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
     web_toolset: Any | None = None,
@@ -200,12 +201,7 @@ def _toolsets_for_spec(
     def add_package(package: ToolPackage) -> None:
         if package.code not in spec.capabilities:
             return
-        if package.code.startswith("ui:") and package.code in spec.ui_tool_selection:
-            allowed = frozenset(spec.ui_tool_selection[package.code])
-            if allowed:
-                toolsets.append(package.toolset.filtered(lambda _ctx, definition: definition.name in allowed))
-        else:
-            toolsets.append(package.toolset)
+        toolsets.append(package.toolset)
 
     for package in registry.selected(spec.capabilities):
         if package.code == "builtin:web":
@@ -242,6 +238,8 @@ def _toolsets_for_spec(
         toolsets.append(skill_script_toolset)
     if history_toolset is not None:
         toolsets.append(history_toolset)
+    if channel_toolset is not None:
+        toolsets.append(channel_toolset)
 
     if dynamic_ui_packages:
         for package in dynamic_ui_packages:
@@ -262,6 +260,7 @@ def build_agent(
     skill_resource_toolset: Any | None = None,
     skill_script_toolset: Any | None = None,
     history_toolset: Any | None = None,
+    channel_toolset: Any | None = None,
     skill_capability: AbstractCapability[AgentDeps] | None = None,
     context_compaction: AbstractCapability[AgentDeps] | None = None,
     tool_output_limits: AbstractCapability[AgentDeps] | None = None,
@@ -292,6 +291,7 @@ def build_agent(
         skill_resource_toolset=skill_resource_toolset,
         skill_script_toolset=skill_script_toolset,
         history_toolset=history_toolset,
+        channel_toolset=channel_toolset,
         mcp_server_names=mcp_server_names,
         estimator=estimator,
         web_toolset=web_toolset,

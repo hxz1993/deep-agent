@@ -317,7 +317,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /renderSummarySection\("Input"[\s\S]*renderSummarySection\("Result"/);
   assert.match(trajectorySource, /data-trajectory-detail-tab-target/);
   assert.match(trajectorySource, /data-trajectory-event-target/);
-  assert.match(trajectorySource, /renderDetail\(selected, detailTab, events, attachmentUrl\)/);
+  assert.match(trajectorySource, /renderDetail\(selected, detailTab, events, attachmentUrl,/);
   assert.match(trajectorySource, /renderSummarySection\("Attachments"/);
   assert.match(trajectorySource, /renderSummarySection\("Context references"/);
   assert.doesNotMatch(trajectorySource, /Object\.entries\(reference\.payload/);
@@ -417,7 +417,7 @@ test("Console正文不低于12px，只有明确的辅助标签使用紧凑字号
     [".inspector-facts .inspector-channel-badge", "font-size: 11px"],
     [".catalog-model-table .model-tag-cell .badge", "font-size: 11px"],
   ]);
-  assert.deepEqual(lowFontDeclarations(configurationCss), []);
+  assert.deepEqual(lowFontDeclarations(configurationCss), [[".provider-address-mode", "font-size: 11px"]]);
   assert.deepEqual(lowFontDeclarations(themesCss), []);
   assert.match(consoleCss, /\.agent-select-label[^}]*font-size:\s*14px/);
 });

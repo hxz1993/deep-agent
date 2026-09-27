@@ -10,6 +10,7 @@ SESSION_TABLES = (
     "chat_session_events",
     "channel_session_bindings",
     "channel_message_runs",
+    "channel_message_operations",
 )
 CACHE_TABLES = ("wecom_user_profiles",)
 STRUCTURE_ONLY_TABLES = SESSION_TABLES + CACHE_TABLES

@@ -49,7 +49,6 @@ class AgentSpec:
     model: str
     instructions: str
     capabilities: list[str] = field(default_factory=list)
-    ui_tool_selection: dict[str, list[str]] = field(default_factory=dict)
     skills: list[str] = field(default_factory=list)
     base_url: str | None = None
     api_key: str | None = None
@@ -74,7 +73,6 @@ class AgentSpec:
             model=llm_model.model,
             instructions=row.prompt,
             capabilities=canonical_tool_package_codes(row.capabilities),
-            ui_tool_selection={code: list(names) for code, names in (getattr(row, "ui_tool_selection", None) or {}).items()},
             skills=list(row.skills or []),
             agent_id=row.id,
             input_modalities=_input_modalities(llm_model),

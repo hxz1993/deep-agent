@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy import case, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +13,7 @@ from deep_agent.db.models import (
     Agent,
     ChannelAccount,
     ChannelMessageRun,
+    ChannelMessageOperation,
     ChannelSessionBinding,
     ChatSession,
     ChatSessionEvent,
@@ -27,7 +28,7 @@ from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.stores.wecom import validate_channel_wecom_settings
 from deep_agent.db.stores.event.base import SessionEventStore
 from deep_agent.channels.metadata import channel_session_title, normalize_channel_origin, normalize_peer_metadata, wecom_application_id
-from deep_agent.channels.app_context import channel_deepfos_app, merge_channel_settings
+from deep_agent.channels.app_context import channel_deepfos_app, merge_channel_settings, validate_channel_settings
 from deep_agent.agent.request_context import derive_space_from_app
 from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
 
@@ -72,10 +73,14 @@ class ChannelStore(SessionBoundMixin):
     async def create_account(
         self, data: ChannelAccountCreate
     ) -> ChannelAccount:
+        if data.registration_id or not data.bot_id or not data.secret:
+            raise ValueError("请先完成渠道凭据配置")
         try:
             async with self._write(exclusive=True) as db:
                 await lock_reference(db, Agent, Agent.id, data.agent_id, "Agent")
-                await validate_channel_wecom_settings(db, data.settings)
+                validate_channel_settings(data.channel_type, data.settings)
+                if data.channel_type == "wecom":
+                    await validate_channel_wecom_settings(db, data.settings)
                 row = ChannelAccount(
                     id=uuid4().hex,
                     **{**data.model_dump(), "settings": merge_channel_settings(data.settings)},
@@ -87,7 +92,7 @@ class ChannelStore(SessionBoundMixin):
         except IntegrityError as exc:
             if not is_unique_conflict(exc):
                 raise
-            raise ValueError("同一企微 Bot 只能配置一次") from exc
+            raise ValueError("同一渠道机器人只能配置一次") from exc
 
     async def update_account(
         self,
@@ -101,7 +106,9 @@ class ChannelStore(SessionBoundMixin):
                 )
                 if row is None:
                     return None
-                await validate_channel_wecom_settings(db, data.settings if "settings" in data.model_fields_set else row.settings)
+                validate_channel_settings(row.channel_type, data.settings if "settings" in data.model_fields_set else row.settings)
+                if row.channel_type == "wecom":
+                    await validate_channel_wecom_settings(db, data.settings if "settings" in data.model_fields_set else row.settings)
                 for field, value in data.model_dump(exclude_unset=True).items():
                     if field == "settings":
                         value = merge_channel_settings(value, row.settings)
@@ -113,7 +120,7 @@ class ChannelStore(SessionBoundMixin):
         except IntegrityError as exc:
             if not is_unique_conflict(exc):
                 raise
-            raise ValueError("同一企微 Bot 只能配置一次") from exc
+            raise ValueError("同一渠道机器人只能配置一次") from exc
 
     async def _deletion_impact(self, db, account_id: str, user_id: str) -> DeletionImpact | None:
         if await self._lock_account_for_write(db, account_id) is None:
@@ -140,6 +147,7 @@ class ChannelStore(SessionBoundMixin):
             if (impact.counts["binding_count"] or impact.counts["run_count"] or confirmation_token) and confirmation_token != impact.token:
                 raise DeletionConfirmationRequired(impact)
             # Keep Agent and ChatSession history; only remove the channel ledger.
+            await db.execute(delete(ChannelMessageOperation).where(ChannelMessageOperation.account_id == account_id))
             await db.execute(delete(ChannelMessageRun).where(ChannelMessageRun.account_id == account_id))
             await db.execute(delete(ChannelSessionBinding).where(ChannelSessionBinding.account_id == account_id))
             await db.execute(delete(ChannelAccount).where(ChannelAccount.id == account_id))
@@ -160,6 +168,116 @@ class ChannelStore(SessionBoundMixin):
     ) -> ChannelSessionBinding | None:
         async with self._read() as db:
             return await self._get_binding(db, account_id, peer_type, peer_id)
+
+    async def get_binding_by_id(self, binding_id: str) -> ChannelSessionBinding | None:
+        async with self._read() as db:
+            return await db.get(ChannelSessionBinding, binding_id)
+
+    async def get_run(self, run_id: str) -> ChannelMessageRun | None:
+        async with self._read() as db:
+            return await db.get(ChannelMessageRun, run_id)
+
+    @staticmethod
+    def _receipt_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # Metadata only. Refuse accidental body/blob/prompt persistence rather
+        # than silently copying a transport response into the receipt ledger.
+        allowed = {"index", "kind", "requested_kind", "state", "message_id",
+                   "request_id", "text_hash", "error_code", "error_message", "note"}
+        if not isinstance(results, list):
+            raise ValueError("Operation results must be a list")
+        copied = []
+        for item in results:
+            if not isinstance(item, dict) or item.keys() - allowed:
+                raise ValueError("Operation results contain unsupported receipt fields")
+            if any(not isinstance(value, (str, int, bool, type(None))) for value in item.values()):
+                raise ValueError("Operation receipt values must be scalar metadata")
+            copied.append(dict(item))
+        return copied
+
+    async def claim_operation(
+        self, *, account_id: str, channel_run_id: str, agent_run_id: str,
+        tool_call_id: str, session_id: str, request_hash: str,
+        results: list[dict[str, Any]],
+    ) -> tuple[ChannelMessageOperation, bool]:
+        values = self._receipt_results(results)
+        operation_id = uuid5(NAMESPACE_URL, "deep-agent-channel:" + agent_run_id + ":" + tool_call_id).hex
+        async def attempt(db):
+            account = await self._lock_account_for_write(db, account_id)
+            if account is None:
+                raise ReferenceConflict("Channel account not found")
+            session = await lock_reference(db, ChatSession, ChatSession.session_id, session_id, "Session")
+            run = await lock_reference(db, ChannelMessageRun, ChannelMessageRun.id, channel_run_id, "Channel run")
+            if (run.account_id != account_id or run.session_id != session_id
+                    or run.agent_run_id != agent_run_id
+                    or session.agent_id != account.agent_id
+                    or session.user_id != account.session_user_id):
+                raise ReferenceConflict("Outbound operation source does not match its channel run")
+            existing = (await db.execute(select(ChannelMessageOperation).where(
+                ChannelMessageOperation.agent_run_id == agent_run_id,
+                ChannelMessageOperation.tool_call_id == tool_call_id,
+            ).with_for_update())).scalar_one_or_none()
+            if existing is not None:
+                if (existing.request_hash != request_hash or existing.account_id != account_id
+                        or existing.channel_run_id != channel_run_id or existing.session_id != session_id):
+                    raise ValueError("Outbound operation idempotency conflict")
+                return existing, False
+            row = ChannelMessageOperation(
+                id=operation_id, account_id=account_id, channel_run_id=channel_run_id,
+                agent_run_id=agent_run_id, tool_call_id=tool_call_id,
+                session_id=session_id, request_hash=request_hash, state="pending", results=values,
+            )
+            db.add(row)
+            await db.flush()
+            await db.refresh(row)
+            return row, True
+        try:
+            async with self._write() as db:
+                return await attempt(db)
+        except IntegrityError as exc:
+            if not is_unique_conflict(exc):
+                raise
+            # Another worker won the unique (run, tool call) claim. Re-read in
+            # a fresh transaction after rollback; do not repeat external I/O.
+            async with self._write() as db:
+                return await attempt(db)
+
+    async def get_operation(self, operation_id: str) -> ChannelMessageOperation | None:
+        async with self._read() as db:
+            return await db.get(ChannelMessageOperation, operation_id)
+
+    async def update_operation(
+        self, operation_id: str, *, state: str, results: list[dict[str, Any]],
+    ) -> ChannelMessageOperation | None:
+        if state not in {"pending", "running", "completed", "failed", "cancelled", "unknown"}:
+            raise ValueError("Invalid outbound operation state")
+        values = self._receipt_results(results)
+        async with self._write() as db:
+            row = await lock_optional(db, ChannelMessageOperation, ChannelMessageOperation.id, operation_id)
+            if row is None:
+                return None
+            if row.state not in {"pending", "running"}:
+                # A restarted/cancelled operation can never become sendable.
+                return row
+            row.state = state
+            row.results = values
+            row.updated_at = datetime.now(timezone.utc)
+            await db.flush()
+            return row
+
+    async def recover_operations(self) -> int:
+        """Startup recovery preserves receipts and never schedules a resend."""
+        async with self._write() as db:
+            rows = (await db.execute(select(ChannelMessageOperation).where(
+                ChannelMessageOperation.state.in_({"pending", "running"}),
+            ).order_by(ChannelMessageOperation.id).with_for_update())).scalars().all()
+            for row in rows:
+                row.state = "unknown"
+                row.results = [
+                    {**item, "state": "unknown"} if item.get("state") in {"pending", "running"} else dict(item)
+                    for item in row.results
+                ]
+                row.updated_at = datetime.now(timezone.utc)
+            return len(rows)
 
     async def account_summary(self, account_id: str) -> dict[str, str]:
         async with self._read() as db:
@@ -527,6 +645,10 @@ class ChannelStore(SessionBoundMixin):
         session_id: str | None,
         payload_hash: str,
         stream_id: str | None = None,
+        sender_name: str | None = None,
+        tenant_id: str | None = None,
+        thread_id: str | None = None,
+        source_metadata: dict | None = None,
     ) -> ClaimedChannelMessage:
         now = datetime.now(timezone.utc)
         try:
@@ -539,6 +661,10 @@ class ChannelStore(SessionBoundMixin):
                     external_message_id=external_message_id,
                     external_request_id=external_request_id,
                     sender_id=sender_id,
+                    sender_name=sender_name,
+                    tenant_id=tenant_id,
+                    thread_id=thread_id,
+                    source_metadata=source_metadata or None,
                     session_id=session_id,
                     payload_hash=payload_hash,
                     stream_id=stream_id,

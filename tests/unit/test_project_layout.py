@@ -281,7 +281,7 @@ class ProjectLayoutTest(unittest.TestCase):
                         values[target.id] = ast.literal_eval(statement.value)
             if "revision" in values:
                 revision_chain[values["revision"]] = values["down_revision"]
-        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003", "005": "004", "006": "005"})
+        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003", "005": "004", "006": "005", "007": "006", "008": "007", "009": "008"})
         configuration = configparser.ConfigParser(defaults={"here": str(REPO_ROOT)})
         configuration.read(REPO_ROOT / "alembic.ini", encoding="utf-8")
         self.assertEqual(

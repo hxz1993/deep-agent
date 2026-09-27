@@ -14,6 +14,8 @@ MCP 发现 RFC 和同步机制评审，只用于解释为什么最终没有采�
 
 后续事项统一登记在 [`../TODO.md`](../TODO.md)。
 
+2026-09-26 新增独立课题 [`30 · UI 工具同 Run 等待与执行连续性`](../30-ui-tool-inline-wait/README.md)：保留工具定义及安装格式，研究通过官方 `HandleDeferredToolCalls` 改变等待生命周期。尚未实施，现有跨 Run 协议仍是当前行为。
+
 当前页面业务工具、Harness `BrowserUse` 和 Provider Computer Use 的区别及旧
 `feat/web-capabilities` 分支取舍，见
 [`15 · 浏览器与页面操作`](../15-browser-and-page-actions/README.md)。

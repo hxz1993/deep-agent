@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.10.19`，数据库Head为`006` |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.0`，数据库Head为`009`（渠道消息发送回执） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -22,7 +22,7 @@
 新增平台身份适配必须复用 `deepfos_platform.discovery.target.normalize_service_target`，
 保留显式 IP/端口、真实域名及网关路径的直连语义。
 
-诊断中心分「日志 / 会话」两个入口：见[日志指南](docs/guides/diagnostic-logs.md)和[会话指南](docs/guides/diagnostic-sessions.md)。
+诊断中心依次为「会话 / 用量 / 日志」：见[会话指南](docs/guides/diagnostic-sessions.md)、[用量指南](docs/guides/diagnostic-usage.md)和[日志指南](docs/guides/diagnostic-logs.md)。
 会话概览、列表和跨用户只读详情统一使用管理员 `/diagnostics/sessions` 接口；统计只读取现有会话与真实事件，
 平台会话概览/列表的用户维度为平台账号（包含渠道会话的归属账号）；新增渠道详情独立按渠道账户、用户/群聊和发言人统计，读取已有渠道台账与会话事件，不新增统计表或事件。
 `diagnostics/` 是独立、尽力写入的管道分隔文本日志模块（`.log`），不写会话事件、不改变业务执行。
@@ -31,7 +31,7 @@
 
 集成入口见[集成配置](docs/guides/integrations.md)：固定目录由后端定义，`004`新增`integration_settings`但不插入初始记录。仅保存非空配置才落库；清空删除配置记录。普通组件按集成编码读取JSON，未配置返回409；管理操作仍需企业管理员。
 
-Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格包取自 Alpha 正式导出的 V91 资产，DeepCube 保留 2026-09-14 Test 官方导出包，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。Agent.ui_tool_selection 保存单工具范围（缺省整包、显式名单限定）。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型并保存工具范围；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
+Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格包取自 Alpha 正式导出的 V91 资产，DeepCube 保留 2026-09-14 Test 官方导出包，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。旧 Agent.ui_tool_selection 列仅为历史数据库兼容保留，运行与安装只按 capabilities 启用整包；旧 ZIP 名单忽略，新保存清空旧列，新导出不携带名单。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
 
 
 企微应用与成员资料见[使用指南](docs/guides/wecom-applications.md)及[渠道接入](docs/guides/wecom-channel.md)。本次 v0.10.1 功能增量 `006` 新增企业应用配置和可重建成员缓存，保留已发布 `005`。渠道页面在标题同行切换账户与应用；应用采用左侧列表、右侧应用标题及合并企业信息的配置卡、缓存统计与按需加载的只读成员分页表。渠道 `settings.wecom.user_details_enabled` 默认为关闭，开启必须引用有效应用；查询开关独立于渠道启停，关闭时不访问资料接口。
@@ -43,7 +43,7 @@ Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包�
 
 ### 本地 Test 联调固定启动命令
 
-用户要求“启动/重启本地 8000”时，在仓库根直接执行：
+日常“启动/重启本地 8000”默认使用下节稳定 SQLite＋渠道网关。以下命令仅用于用户明确要求连接共享 Test 的联调：
 
 ```bash
 # 首次或缺 .venv-sandbox 时：local_dev 默认会自动 setup；也可手动：
@@ -76,8 +76,8 @@ v0.10.16 本地升级验证使用仓库 `.venv/bin/python`，依赖按 `requirem
 当前 SQLite 启动命令：
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m deep_agent.local_dev \
-  --config ~/.config/deep-agent/sqlite.env --port 8000
+PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
+  --local-config ~/.config/deep-agent/sqlite.env --api-port 8000
 ```
 
 后续日常本地开发、Console 联调和人工验收，不再随任务创建全新的空 SQLite。默认固定复用：
@@ -89,10 +89,10 @@ Profile:         ~/.config/deep-agent/sqlite.env
 启动端口:        8000
 ```
 
-需要同时运行本地渠道网关时，使用与部署相同的统一监督顺序，同时保留`local_dev`身份与文件能力：
+用户要求日常本地启动／重启必须同时带渠道网关（2026-09-27）。默认使用以下统一监督入口，同时保留 `local_dev` 身份与文件能力；不要只起 API：
 
 ```bash
-PYTHONPATH=src python3.12 -m deep_agent.combined_runtime \
+PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
   --local-config ~/.config/deep-agent/sqlite.env \
   --api-port 8000
 ```
@@ -335,3 +335,11 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 功能落地并发布后，删除对应一次性 HTML 原型、图片评审稿、测试截图和临时报告，保留当前指南、设计决策与正式回归；历史材料通过 Git 恢复，不另存一份备份。尚未实施的课题材料（如数据流 AI 集成）继续保留。
 测试夹具应放在 `tests/`，不能依赖随时可清理的原型目录；测试报告默认写到忽略的 `output/TMP_to_delete-*`。
 清理前核对在用文件；不删除本地数据库、用户文件、环境配置、依赖环境及正式内置安装包。
+
+## 飞书渠道开发约定（2026-09-27）
+
+扫码注册直接使用飞书 PersonalAgent 默认模板，不传 addons，只通过 app_preset.name 预填渠道名称，保持二维码简洁。不要重新加入未确认必要的权限/事件增量或关闭默认模板。默认清单由飞书服务端维护，事件已添加不等于对应权限已获批，用户身份能力也不等于仅有 App ID/Secret 即可调用。注册改动仅作用于新生成二维码，不能宣称已有应用自动获得新权限。
+
+飞书回复底部三点参考的是 `larksuite/openclaw-lark` 官方插件的独立 `loading_icon` 图片组件，不能把 OpenClaw 内置 `extensions/feishu` 的 `streaming_mode` 当作自带底部动画。正文更新保留独立组件，终态及关闭网关时尽力移除；SDK 测试只能确认协议，实际动效仍需飞书客户端验证。飞书展示调整不要修改企微适配器或共享消息投影。
+
+飞书与企微共用 Gateway，适配器在 `channels/adapters/feishu/`；官方 SDK 有模块级 WS loop，飞书 SDK 按账号在受控子进程隔离，父网关负责数据库与业务调度，匿名管道通信，不新增公网端口。不得绕过公开接口改写 SDK 私有 loop。扫码凭据只在服务端短期保存，查询接口不返 Secret。群聊每条消息独立保存 sender_id/name，tenant/thread 单列，个性化字段放 source_metadata；均不授予平台权限。008 仅加可空列，无新表。无真实租户时受控 SDK 测试与真实授权验收必须分开报告。详见 `docs/guides/feishu-channel.md`。

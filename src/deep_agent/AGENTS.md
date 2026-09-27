@@ -121,7 +121,10 @@ MCP 在请求时由 `resolve_mcp_toolsets` 解析（DB 行 + `mcp_servers/` buil
 FileStore协议。`channels/gateway/runtime.py`负责Account轮询与Adapter生命周期；`channels/service.py`
 负责同Peer队列、命令、消息处理和SSE投影；`channels/contracts.py/registry.py`提供公共接口与注册表。
 只有`channels/adapters/wecom/`引用官方`wecom-aibot-python-sdk==1.0.2`；连接、认证、心跳、重连、
-事件分发、媒体下载解密和回复协议均调用SDK，不写第二套协议。当前仅企微Adapter，不宣称飞书已实现。
+事件分发、媒体下载解密和回复协议均调用SDK，不写第二套协议。飞书已由`channels/adapters/feishu/`
+独立适配，按账号在受控子进程运行官方 SDK；注册生命周期由`services/channel_registration.py`共用，
+平台注册协议分别由`feishu_registration.py`和`wecom_registration.py`处理。
+以下累计正文及原生占位约定描述企微；飞书卡片、表情与底部加载组件由其适配器独立处理。
 加载通过公共`reply_loading`交给Adapter，并传入累计公开正文；首段正文之前企微使用`<think></think>`原生占位，正文和终态复用同一Stream ID。
 占位不入历史、不外发思考/工具细节；停止和失败以非空文本及`finish=true`收尾，不用定时器反复发送假省略号。
 渠道临时正文按阶段换行累加；thinking、tool_call和context_compaction_progress必须保留已有正文，
@@ -346,14 +349,14 @@ Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Stor
 首次增量保存前写入，摘要响应不能成为主会话基准。原始 Usage 不改写，累计消耗与当前占用分开。
 只读 context-status 未准备最终请求参数时保持 history_only 并说明回退，不能冒充完整请求预算。
 自动、主动和Provider Overflow调用同一安全前缀、
-八段摘要、Evidence与目标复检流程；Compaction从Running原位更新到终态，失败不改变Surface。
+交接摘要、受保护请求、来源索引与完整输入预算复检流程；Compaction从Running原位更新到终态，失败不改变Surface。
 摘要总预算300秒，每约10秒发送非持久化进度；客户端取消复用正式Run Cancellation Token。Timeout不重试，
 仅满足时间与剩余预算条件的429/502/503/504快速失败可重试一次。Provider原生CompactionPart作为普通
 Provider Part保存，不能替代DeepAgent跨Provider摘要。
 
 摘要安全边界将带 `tool_call_id` 的 `RetryPromptPart` 视为对应调用的终结，不能把已拒绝的调用永久保留为等待。
 DeepSeek 摘要请求使用 `max_tokens` 并关闭辅助请求的思考，主对话思考配置不受影响；保留 SDK 原有 Profile 能力。
-摘要输出最多分配目标预算的 20%，受模型上限及 4096 tokens 封顶，仍须通过最终目标与持久化前复检。
+摘要输出受模型上限及 4096 tokens 封顶，与旧目标比例无关；最终请求须变小且在可用预算内，持久化前再次复检。
 截断或格式校验失败也应保留 `summary_call` 的 usage、finish_reason 和输出上限，便于真实归因。
 
 压缩前的预算估算、安全边界选择和Evidence整理必须在线性复杂度内完成，并把CPU准备工作移出SSE事件
@@ -501,6 +504,23 @@ Search和MCP Resource分组说明工具来源与自动注入条件。`read_tool_
 任务规划在Harness 0.26中只启用`write_plan`完整替换工具。成功Tool Result的metadata保存完整快照并
 作为普通Event持久化；Deferred新Run沿用Turn并恢复最近成功快照，新用户Turn使用空Store。不得新增
 Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
+
+### 渠道消息系统工具
+
+`channel_message` 归入系统工具目录 `runtime:channel`，不是 Agent 需要勾选的能力或 MCP。
+仅由可信渠道 Run 自动加载，同时支持飞书和企微；来源来自渠道 Run/Binding，不能靠正文或
+context_refs 授权。每次执行重新检查账号、Agent、会话、Run 与文件权限，只发本轮群或私聊。
+普通 Console 和历史浏览不加载；首轮不必有附件，沙箱新生成的授权 file_id 也可发送。
+
+公共消息服务负责预校验和文件授权，网关持有操作生命周期；各操作适配器负责格式、上传、
+平台发送及安全错误。保持已有入站／流式接口，新增渠道通过注册可选操作适配器接入。
+首版仅 send，有序文字／图片／文件／已有音频视频；飞书支持当前消息引用，企微不伪造引用。
+不预建 targets/history、跨用户发送、通用 SDK 透传或任意 URL/宿主路径读取。
+
+009 新增 channel_message_operations，唯一键为 agent_run_id + tool_call_id，只存安全回执与摘要；
+网关重启将未完成项标记 unknown，不盲目重发。Session 删除保留幂等事实但失去继续发送权限；
+确认删除渠道连带清理回执。配置备份仅建空结构，旧 Revision 不要求含新表；非空表拒绝降级。
+真实验收与实施状态见 [Message 设计](../../docs/design/32-new-channels/channel-tools-abstraction.md)。
 
 ### Skill
 
@@ -746,9 +766,9 @@ SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protoco
 7. `model_catalog` 不是运行时事实源，目录刷新不得修改已有 `llm_models`。模型名称和 Base URL 不再用于猜测模态；上下文缺失时当前自动压缩保持关闭。
 8. 配置中心必填文本会去除首尾空白并拒绝空值，显式把必填更新字段传为 `null` 返回 422；重复名称返回 409。删除仍被 Agent 引用的 MCP、UI 工具包或包内工具返回 409，并在 `detail.referenced_by` 列出引用方。
 9. 请求上下文以 App 为主键：标准 App 必须以三位数字结尾；Space 自动取 `app[:-3]`。App 与显式 Space 不一致时返回 422，Language 缺失时默认 `zh-cn`。
-10. 上下文压缩只在八段Summary、Evidence、来源Hash和目标预算全部通过时把同一Compaction Event更新为
+10. 上下文压缩只在有效交接摘要、受保护内容、Evidence、来源Hash和输入预算全部通过时把同一Compaction Event更新为
     Completed；失败终态保留审计但不改变模型Surface。
-11. 自动压缩持久化必须验证“单个摘要锚点 + 完整保留尾部”；不能仅凭部分公共后缀推断覆盖边界。仅允许归一化 ModelRequest 顶层运行 ID、时间戳和原本缺失的 instructions；parts、工具调用 ID、内容及已有指令必须严格匹配。失败保留旧 checkpoint 与原始事件。
+11. 自动压缩持久化必须验证“单个摘要锚点 + 完整保留尾部”；不能仅凭部分公共后缀推断覆盖边界。仅允许归一化 ModelRequest 顶层运行 ID、时间戳和原本缺失的 instructions；ToolReturnPart 的 SDK 封装时间戳也可归一化；其他 parts、工具调用 ID、内容、metadata 时间戳及已有指令必须严格匹配。失败保留旧 checkpoint 与原始事件。
 12. 附件读取授权从当前上传与原始会话历史恢复，不能从压缩后的模型历史建立；摘要提及的文件 ID 不构成授权。
 13. Console压缩测试会话是管理员功能；后端按当前模型实时预算构造可往返的普通Event，不得直接伪造
     Completed Compaction或新增测试专用表。
@@ -766,3 +786,5 @@ SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protoco
 ### MCP 工具发现范围
 
 MCP 工具合计不超过 10 个时全部直接披露，超过 10 个时预选最多 3 个，其余通过 `search_tools`（显示名“搜索工具”）按需搜索，每次最多返回 5 个。已知准确协议名时用最多 3 个查询项批量加载；未知名称才按能力描述搜索，不混填名称与中英文描述，不要求凑满查询项。预选、搜索及异常回退不按用户提问、上下文数据或工具名推断读写权限，也不因关键词排除写入/删除工具；候选范围始终受 Agent 显式关联的 MCP 限定。保留相关性排序、已披露工具去重和重复查询去重。
+
+- D01 压缩落库前必须核对摘要实际使用的模型历史与 Event Store 投影；不能只比较保存前重新采样的 raw history，否则可能把摘要期间新追加的事件错误地纳入来源。完成事件需在下一次推理前提交，Console 按 event_id 即时确认，后续业务失败不回滚已完成压缩。

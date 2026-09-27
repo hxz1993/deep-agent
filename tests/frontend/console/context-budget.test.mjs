@@ -104,6 +104,9 @@ test("a normal follow-up or failed attempt cannot overwrite the saved successful
   for (const telemetry of [
     { triggered: false, estimated_tokens_before: 21895, estimated_tokens_after: 21895 },
     { triggered: true, target_met: false, failure: "SummaryUnavailable", estimated_tokens_before: 22000, estimated_tokens_after: 22000 },
+    { triggered: true, summary_applied: true, compaction_event_saved: false, estimated_tokens_before: 22000, estimated_tokens_after: 22000 },
+    { triggered: true, summary_applied: true, summary_failed: true, compaction_event_saved: true, estimated_tokens_before: 22000, estimated_tokens_after: 22000 },
+    { triggered: true, summary_applied: true, failure: "PersistFailed", compaction_event_saved: true, estimated_tokens_before: 22000, estimated_tokens_after: 22000 },
   ]) {
     const html = renderSessionInspector({ contextStatus: { ...saved, last_compaction: telemetry } });
     assert.match(html, /压缩前<\/small><strong>19,714/);
@@ -112,9 +115,11 @@ test("a normal follow-up or failed attempt cannot overwrite the saved successful
     assert.doesNotMatch(html, /21,895|22,000/);
   }
   const triggered = renderSessionInspector({ contextStatus: { ...saved, last_compaction: {
-    triggered: true, target_met: true, estimated_tokens_before: 23000, estimated_tokens_after: 8000,
+    triggered: true, summary_applied: true, compaction_event_saved: true, target_met: false,
+    estimated_tokens_before: 23000, estimated_tokens_after: 8000,
   } } });
   assert.match(triggered, /压缩前<\/small><strong>23,000/);
   assert.match(triggered, /压缩后<\/small><strong>8,000/);
   assert.match(triggered, /同次完整请求/);
+  assert.doesNotMatch(triggered, /目标线/);
 });

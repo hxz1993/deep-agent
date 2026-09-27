@@ -5,6 +5,7 @@ import hashlib
 import os
 import sqlite3
 import uuid
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +13,9 @@ from typing import Mapping, Protocol, runtime_checkable
 
 from deep_agent.db.dialect import DbDialect
 from deep_agent.local_security import local_runtime_enabled
-from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE, PlatformAPI
+from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE, PlatformAPI, File
+from deepfos_platform.client.base import ContentType
+from deepfos_platform.lib.httpcli import AioHttpCli
 from deepfos_platform.client.space import SpaceAPI
 
 
@@ -73,6 +76,10 @@ class FileStore(Protocol):
         request_headers: Mapping[str, str],
     ) -> bytes: ...
 
+    async def download_bounded(
+        self, file_id: str, request_headers: Mapping[str, str], *, max_bytes: int,
+    ) -> bytes: ...
+
     async def delete(
         self,
         file_id: str,
@@ -102,6 +109,67 @@ def _display_size(byte_size: int) -> tuple[float, str]:
         size /= 1024
         unit = candidate
     return round(size, 2), unit
+
+
+class _BoundedPlatformFile(File):
+    """Keep platform discovery/auth/request construction, bound response bytes."""
+
+    def __init__(self, root: PlatformAPI, max_bytes: int):
+        super().__init__(root)
+        self.max_bytes = max_bytes
+        # The generic SDK logger includes request headers. This new path never
+        # logs caller credentials or full file URLs.
+        self.log = lambda *_args, **_kwargs: None
+
+    async def get(self, url, params=None, header=None):
+        # Keep the component's standard header merge (including internal auth)
+        # but disable eager decompression before our byte budget is applied.
+        headers = {**self._merge_header(header), "Accept-Encoding": "identity"}
+        return await AioHttpCli.get(url, params=params, headers=headers, auto_decompress=False)
+
+    async def check_response(self, response, request, data_wrapped=True, content_type=ContentType.json):
+        try:
+            if not 200 <= response.status < 300:
+                raise FileStoreError("Platform file download failed")
+            if content_type is not ContentType.bytes:
+                raise FileStoreError("Invalid platform file response type")
+            encoding = response.headers.get("Content-Encoding", "identity").strip().lower()
+            if encoding not in {"identity", "gzip", "deflate"}:
+                raise FileStoreError("Unsupported platform file transfer encoding")
+            declared = response.content_length
+            if encoding == "identity" and declared is not None and declared > self.max_bytes:
+                raise FileStoreError("File exceeds download size limit")
+            # Bound the encoded body too: a gzip header may contain an
+            # arbitrarily long filename/comment without producing any output.
+            # Allow normal compression overhead even for an empty/tiny file.
+            wire_limit = self.max_bytes + max(64 * 1024, self.max_bytes // 100)
+            if declared is not None and declared > wire_limit:
+                raise FileStoreError("File exceeds download size limit")
+            decoder = zlib.decompressobj(31 if encoding == "gzip" else 15) if encoding != "identity" else None
+            wire_size = 0
+            payload = bytearray()
+            async for chunk in response.content.iter_chunked(64 * 1024):
+                wire_size += len(chunk)
+                if wire_size > wire_limit:
+                    raise FileStoreError("File exceeds download size limit")
+                while chunk:
+                    decoded = decoder.decompress(chunk, self.max_bytes - len(payload) + 1) if decoder else chunk
+                    if len(payload) + len(decoded) > self.max_bytes:
+                        raise FileStoreError("File exceeds download size limit")
+                    payload.extend(decoded)
+                    chunk = decoder.unconsumed_tail if decoder else b""
+            if decoder and (not decoder.eof or decoder.unused_data):
+                raise FileStoreError("Invalid platform file transfer encoding")
+            return True, bytes(payload)
+        finally:
+            # Closing an unread over-limit/error response prevents draining an
+            # arbitrarily large body; complete responses remain pool-reusable.
+            response.close()
+
+
+def _validate_download_limit(max_bytes: int) -> None:
+    if type(max_bytes) is not int or max_bytes < 0:
+        raise FileStoreError("Invalid download size limit")
 
 
 class PlatformFileStore:
@@ -143,6 +211,18 @@ class PlatformFileStore:
         if not isinstance(payload, (bytes, bytearray)):
             raise FileStoreError("Platform file download did not return bytes")
         return bytes(payload)
+
+    async def download_bounded(
+        self, file_id: str, request_headers: Mapping[str, str], *, max_bytes: int,
+    ) -> bytes:
+        _validate_download_limit(max_bytes)
+        try:
+            client = _BoundedPlatformFile(PlatformAPI(header=dict(request_headers)), max_bytes)
+            return await client.download(file_id)
+        except FileStoreError:
+            raise
+        except Exception:
+            raise FileStoreError("Platform file download failed") from None
 
     async def delete(
         self,
@@ -406,6 +486,37 @@ class LocalFileStore:
         except FileNotFoundError as exc:
             raise FileStoreIntegrityError("Local file Blob is missing") from exc
         if len(data) != int(row["byte_size"]):
+            raise FileStoreIntegrityError("Local file size mismatch")
+        if hashlib.sha256(data).hexdigest() != row["sha256"]:
+            raise FileStoreIntegrityError("Local file hash mismatch")
+        return data
+
+    async def download_bounded(
+        self, file_id: str, request_headers: Mapping[str, str], *, max_bytes: int,
+    ) -> bytes:
+        _validate_download_limit(max_bytes)
+        try:
+            return await asyncio.to_thread(self._download_bounded_sync, file_id, dict(request_headers), max_bytes)
+        except FileStoreError:
+            raise
+        except Exception:
+            raise FileStoreError("Local file download failed") from None
+
+    def _download_bounded_sync(self, file_id, request_headers, max_bytes):
+        row = self._row(file_id)
+        self._authorize(row, request_headers)
+        size = int(row["byte_size"])
+        if size > max_bytes:
+            raise FileStoreError("File exceeds download size limit")
+        target = self._blob_path(row)
+        try:
+            with target.open("rb") as handle:
+                data = handle.read(max_bytes + 1)
+        except FileNotFoundError:
+            raise FileStoreIntegrityError("Local file Blob is missing") from None
+        if len(data) > max_bytes:
+            raise FileStoreError("File exceeds download size limit")
+        if len(data) != size:
             raise FileStoreIntegrityError("Local file size mismatch")
         if hashlib.sha256(data).hexdigest() != row["sha256"]:
             raise FileStoreIntegrityError("Local file hash mismatch")

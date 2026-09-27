@@ -121,11 +121,6 @@ async def delete_ui_tool(
     if row.source == "builtin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Builtin UI tools cannot be deleted")
     referenced_by = await agent_store.list_referencing_capability(row.package_code)
-    referenced_by = [
-        agent for agent in referenced_by
-        if row.package_code not in (agent.ui_tool_selection or {})
-        or name in agent.ui_tool_selection[row.package_code]
-    ]
     if referenced_by:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

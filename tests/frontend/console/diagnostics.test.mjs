@@ -8,6 +8,7 @@ import { diagnosticFilters, diagnosticRowsHtml, diagnosticDetailHtml, diagnostic
 
 const root = new URL("../../../console/", import.meta.url);
 const html = await readFile(new URL("index.html", root), "utf8");
+const selectCss = await readFile(new URL("ui-select.css", root), "utf8");
 const css = await readFile(new URL("diagnostics.css", root), "utf8");
 const source = await readFile(new URL("diagnostics.js", root), "utf8");
 const main = await readFile(new URL("main.js", root), "utf8");
@@ -404,7 +405,7 @@ test("compact Console log composition places its header above the split workbenc
   assert.doesNotMatch(section, /diagnostics-footer|id="diagnosticsRange"/);
   assert.match(section, /diagnostics-result-title[\s\S]*diagnosticsMeta[\s\S]*diagnosticsMore/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-split[^}]*border:0; border-radius:0/);
-  assert.match(css, /#diagnosticsLogPage \.diagnostics-filters \.console-select-trigger[^}]*height:32px/);
+  assert.match(selectCss, /:is\(\.da-select-trigger, \.console-select-trigger\) \{[^}]*height: var\(--ui-control-height\)/);
   assert.match(css, /#diagnosticsLogPage \.diagnostics-split[^}]*--diagnostic-drawer-width:436px/);
   assert.match(source, /bindDiagnosticResizer\(byId\("diagnosticsResizer"\), split, "--diagnostic-drawer-width", 436\)/);
 });

@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from deep_agent.time import UtcDatetime
-from deep_agent.channels.app_context import channel_deepfos_app
+from deep_agent.channels.app_context import channel_deepfos_app, validate_channel_settings
 
 
 ChannelRuntimeState = Literal[
@@ -20,18 +20,42 @@ ChannelRuntimeState = Literal[
 ]
 
 
+class FeishuRegistrationCreate(BaseModel):
+    app_name: str = Field(default="", max_length=191)
+
+    @field_validator("app_name", mode="before")
+    @classmethod
+    def trim_app_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+class WecomRegistrationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class ChannelAccountCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., max_length=191)
-    channel_type: Literal["wecom"] = "wecom"
+    channel_type: Literal["wecom", "feishu"] = "wecom"
     transport: Literal["websocket"] = "websocket"
-    bot_id: str = Field(..., max_length=191)
-    secret: str
+    bot_id: str = Field(default="", max_length=191)
+    secret: str = ""
+    registration_id: str | None = Field(default=None, exclude=True, max_length=128)
     agent_id: str
     session_user_id: str = Field(..., max_length=128)
     enabled: bool = False
     settings: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_credentials(self):
+        validate_channel_settings(self.channel_type, self.settings)
+        if self.registration_id:
+            if self.bot_id or self.secret:
+                raise ValueError("扫码授权不能同时提交机器人凭据")
+        elif not self.bot_id or not self.secret:
+            raise ValueError("bot_id and secret are required")
+        return self
 
     @field_validator("settings")
     @classmethod

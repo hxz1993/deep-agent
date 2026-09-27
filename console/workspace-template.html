@@ -122,7 +122,11 @@
             <div class="composer-toolbar-end">
               <span class="context-budget-wrap">
                 <button type="button" class="context-budget-badge" id="contextBudgetBadge" aria-label="上下文用量暂不可用"></button>
-                <span class="composer-tooltip context-budget-tooltip" id="contextBudgetTooltip" role="tooltip">历史上下文估算尚不可用</span>
+                <span class="composer-tooltip context-budget-tooltip" id="contextBudgetTooltip" role="tooltip">
+                  <span class="context-budget-tooltip-title">上下文预算</span>
+                  <span class="context-budget-tooltip-percent">用量暂不可用</span>
+                  <span class="context-budget-tooltip-totals" hidden></span>
+                </span>
               </span>
               <div class="composer-model-picker" id="composerMeta">
                 <select id="modelSelect" class="composer-model-select" aria-hidden="true" tabindex="-1"></select>

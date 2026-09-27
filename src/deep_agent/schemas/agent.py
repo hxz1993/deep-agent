@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from deep_agent.capabilities.codes import canonical_tool_package_codes
-from deep_agent.capabilities.ui.selection import normalize_ui_tool_selection
 from deep_agent.schemas.llm_model import LlmModelSummary
 from deep_agent.time import UtcDatetime
 
@@ -20,11 +19,6 @@ AGENT_REQUIRED_FIELDS = ("name", "prompt")
 
 
 class _RejectRemovedAgentFields(BaseModel):
-    @field_validator("ui_tool_selection", check_fields=False)
-    @classmethod
-    def validate_ui_tool_scope(cls, value):
-        return normalize_ui_tool_selection(value) if value is not None else value
-
     @model_validator(mode="before")
     @classmethod
     def reject_removed_fields(cls, value):
@@ -53,7 +47,6 @@ class AgentCreate(_RejectRemovedAgentFields):
         default_factory=list,
         description="Tool package codes explicitly associated with this agent.",
     )
-    ui_tool_selection: dict[str, list[str]] = Field(default_factory=dict)
     skills: list[str] = Field(
         default_factory=list,
         description="Skill package codes explicitly associated with this agent.",
@@ -90,7 +83,6 @@ class AgentUpdate(_RejectRemovedAgentFields):
     prompt: str | None = None
     capabilities: list[str] | None = None
     skills: list[str] | None = None
-    ui_tool_selection: dict[str, list[str]] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -99,8 +91,6 @@ class AgentUpdate(_RejectRemovedAgentFields):
             for field in AGENT_REQUIRED_FIELDS:
                 if field in value and value[field] is None:
                     raise ValueError(f"{field} cannot be null")
-            if "ui_tool_selection" in value and value["ui_tool_selection"] is None:
-                raise ValueError("ui_tool_selection cannot be null")
             if "skills" in value and value["skills"] is None:
                 raise ValueError("skills cannot be null")
             if "capabilities" in value and value["capabilities"] is None:
@@ -157,7 +147,6 @@ class AgentResponse(BaseModel):
     prompt: str
     capabilities: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
-    ui_tool_selection: dict[str, list[str]] = Field(default_factory=dict)
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
@@ -171,7 +160,6 @@ class AgentResponse(BaseModel):
             prompt=row.prompt,
             capabilities=canonical_tool_package_codes(row.capabilities),
             skills=row.skills or [],
-            ui_tool_selection=getattr(row, "ui_tool_selection", None) or {},
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

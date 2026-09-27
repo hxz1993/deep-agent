@@ -31,6 +31,16 @@ from deep_agent.diagnostics.sessions import (
 from deep_agent.time import utc_rfc3339
 
 
+def _deepfos_application_summary(settings):
+    config = settings.get("deepfos") if isinstance(settings, dict) else None
+    config = config if isinstance(config, dict) else {}
+    return {
+        "enabled": config.get("enabled") is True,
+        "app_id": config.get("app_id") if isinstance(config.get("app_id"), str) else None,
+        "api_key_set": bool(config.get("api_key")),
+    }
+
+
 class _OpaqueIdentity(FunctionElement):
     """Keep opaque IDs case-sensitive even with a MySQL CI table collation."""
 
@@ -60,6 +70,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                             ChannelAccount.id,
                             ChannelAccount.name,
                             ChannelAccount.channel_type,
+                            ChannelAccount.bot_id,
                             ChannelAccount.transport,
                             ChannelAccount.enabled,
                             ChannelAccount.agent_id,
@@ -110,11 +121,13 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                         "id": r["id"],
                         "name": r["name"],
                         "channel_type": r["channel_type"],
+                        "bot_id": r["bot_id"],
                         "transport": r["transport"],
                         "enabled": r["enabled"],
                         "agent": {"id": r["agent_id"], "name": r["agent_name"]},
                         "user_id": r["session_user_id"],
                         "user_name": None,
+                        "deepfos_application": _deepfos_application_summary(r["settings"]),
                         "user_details_enabled": settings[r["id"]].get("user_details_enabled") is True,
                         "application": applications.get(settings[r["id"]].get("application_id")),
                     }
@@ -183,7 +196,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
             user_id = func.coalesce(opaque.userid, plain.userid, r.sender_id)
             name = func.coalesce(opaque.name, plain.name)
         else:
-            user_id, name = r.sender_id, literal(None)
+            user_id, name = r.sender_id, r.sender_name
         return stmt.add_columns(
             _OpaqueIdentity(user_id).label("user_id"), name.label("name")
         ).subquery("channel_questions")

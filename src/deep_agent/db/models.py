@@ -51,6 +51,7 @@ class LlmModel(Base):
     name: Mapped[str] = mapped_column(KeyText, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     model: Mapped[str] = mapped_column(Text, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False, server_default="chat")
     input_modalities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
     context_window_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -79,6 +80,10 @@ class LlmProvider(Base):
     use_default_base_url: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     base_url: Mapped[str] = mapped_column(Text, nullable=False)
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auth_method: Mapped[str] = mapped_column(String(32), nullable=False, server_default="api_key")
+    credential_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    auth_revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    auth_status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="unconfigured")
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UtcTimestamp(),
@@ -338,6 +343,7 @@ class ChatSessionEvent(Base):
             "status",
             "sequence",
         ),
+        Index("ix_chat_session_events_usage_created", "created_at", "usage_model_id"),
     )
 
     event_id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -353,6 +359,8 @@ class ChatSessionEvent(Base):
     run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    usage_model_id: Mapped[str | None] = mapped_column(String(AGENT_ID_LENGTH), nullable=True)
+    usage: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UtcTimestamp(),
@@ -498,6 +506,12 @@ class ChannelMessageRun(Base):
     external_message_id: Mapped[str] = mapped_column(KeyText, nullable=False)
     external_request_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     sender_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    # Shared source facts, scoped by account/channel; not DeepFOS identity.
+    sender_name: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    thread_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    # Channel-specific facts are namespaced (wecom_* / lark_*).
+    source_metadata: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     session_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     agent_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     stream_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
@@ -517,3 +531,27 @@ class ChannelMessageRun(Base):
     created_at: Mapped[datetime] = mapped_column(
         UtcTimestamp(), server_default=func.now(), nullable=False
     )
+
+
+class ChannelMessageOperation(Base):
+    """Outbound idempotency receipts; never a second conversation history."""
+
+    __tablename__ = "channel_message_operations"
+    __table_args__ = (
+        UniqueConstraint("agent_run_id", "tool_call_id", name="uq_channel_operations_run_tool"),
+        Index("ix_channel_operations_account", "account_id"),
+        Index("ix_channel_operations_session", "session_id"),
+        Index("ix_channel_operations_state", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    channel_run_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    agent_run_id: Mapped[str] = mapped_column(String(128).with_variant(String(128, collation="utf8mb4_bin"), "mysql"), nullable=False)
+    tool_call_id: Mapped[str] = mapped_column(String(191).with_variant(String(191, collation="utf8mb4_bin"), "mysql"), nullable=False)
+    session_id: Mapped[str] = mapped_column(KeyText, nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default="pending")
+    results: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False)

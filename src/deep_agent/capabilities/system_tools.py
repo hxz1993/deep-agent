@@ -7,6 +7,15 @@ __all__ = ["list_system_tool_domains"]
 
 _SYSTEM_TOOL_DOMAINS = (
     SystemToolDomain(
+        code="runtime:channel", label="渠道消息",
+        description="向本轮来源群聊或私聊发送消息和附件，无需配置MCP。",
+        tools=(SystemToolDescription(
+            name="channel_message", display_name="渠道消息", source="DeepAgent",
+            injection_condition="来自已启用飞书或企微渠道的可信当前会话Run",
+            description="按顺序发送文字、图片、文件和已有音视频；飞书支持引用当前消息。",
+        ),),
+    ),
+    SystemToolDomain(
         code="runtime:planning",
         label="任务规划",
         description="由模型按需创建和维护当前单轮任务的执行计划。",

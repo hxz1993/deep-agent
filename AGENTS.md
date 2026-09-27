@@ -12,7 +12,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.11.7`，数据库Head为`008`（飞书来源列） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.11.8`，数据库Head为`008`（飞书来源列） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -337,5 +337,9 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 清理前核对在用文件；不删除本地数据库、用户文件、环境配置、依赖环境及正式内置安装包。
 
 ## 飞书渠道开发约定（2026-09-27）
+
+扫码注册直接使用飞书 PersonalAgent 默认模板，不传 addons，只通过 app_preset.name 预填渠道名称，保持二维码简洁。不要重新加入未确认必要的权限/事件增量或关闭默认模板。默认清单由飞书服务端维护，事件已添加不等于对应权限已获批，用户身份能力也不等于仅有 App ID/Secret 即可调用。注册改动仅作用于新生成二维码，不能宣称已有应用自动获得新权限。
+
+飞书回复底部三点参考的是 `larksuite/openclaw-lark` 官方插件的独立 `loading_icon` 图片组件，不能把 OpenClaw 内置 `extensions/feishu` 的 `streaming_mode` 当作自带底部动画。正文更新保留独立组件，终态及关闭网关时尽力移除；SDK 测试只能确认协议，实际动效仍需飞书客户端验证。飞书展示调整不要修改企微适配器或共享消息投影。
 
 飞书与企微共用 Gateway，适配器在 `channels/adapters/feishu/`；官方 SDK 有模块级 WS loop，飞书 SDK 按账号在受控子进程隔离，父网关负责数据库与业务调度，匿名管道通信，不新增公网端口。不得绕过公开接口改写 SDK 私有 loop。扫码凭据只在服务端短期保存，查询接口不返 Secret。群聊每条消息独立保存 sender_id/name，tenant/thread 单列，个性化字段放 source_metadata；均不授予平台权限。008 仅加可空列，无新表。无真实租户时受控 SDK 测试与真实授权验收必须分开报告。详见 `docs/guides/feishu-channel.md`。

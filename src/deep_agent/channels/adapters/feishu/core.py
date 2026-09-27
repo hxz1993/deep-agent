@@ -38,12 +38,17 @@ class ReplyState:
     static: bool = False
     sent: bool = False
     send_attempted: bool = False
+    message_id: str = ""
+    reaction_attempted: bool = False
+    reaction_id: str | None = None
+    loading_visible: bool = False
 
 
 class FeishuSDKAdapter:
     """One app connection; the shared gateway still owns all business execution."""
     max_pending = 128
     close_timeout = 12.0
+    reaction_timeout = 2.0
 
     def __init__(self, account: Any, infinite_retry: bool = True) -> None:
         self.account = account
@@ -83,6 +88,7 @@ class FeishuSDKAdapter:
         self._slots = threading.BoundedSemaphore(self.max_pending)
         self._envelopes: OrderedDict[str, dict] = OrderedDict()
         self._replies: dict[str, ReplyState] = {}
+        self._reaction_warning: str | None = None
         self.client.on("raw", self._capture_envelope)
         self.client.on("message", self._receive)
         self.client.on("reconnecting", lambda *_: self._set_state("reconnecting", "飞书连接中断，正在重连"))
@@ -96,7 +102,8 @@ class FeishuSDKAdapter:
         self._updated_at = datetime.now(timezone.utc)
 
     def status(self) -> dict[str, Any]:
-        return {"state": self._state, "message": self._message,
+        return {"state": self._state, "message": self._message + (
+                    f"；{self._reaction_warning}" if self._reaction_warning and self._state == "connected" else ""),
                 "authenticated": self._state == "connected",
                 "updated_at": self._updated_at.isoformat()}
 
@@ -152,6 +159,7 @@ class FeishuSDKAdapter:
                 await asyncio.gather(self._connect_task, return_exceptions=True)
             self._connect_task = None
             try:
+                await asyncio.gather(*(self._close_reply(state) for state in list(self._replies.values())))
                 await self.client.stop_background()
             except Exception:
                 self._set_state("failed", "飞书连接关闭失败")
@@ -264,8 +272,90 @@ class FeishuSDKAdapter:
     def new_reply_id(self) -> str:
         return str(uuid.uuid4())
 
+    def _reaction_result(self, operation: str, result=None, *, reason: str = "响应无效") -> None:
+        if result is not None and result.success:
+            self._reaction_warning = None
+        else:
+            # SDK hints/raw responses may contain tokens, URLs or message text.
+            # Only an integer platform error code leaves the isolated worker.
+            code = getattr(getattr(result, "error", None), "raw_code", None)
+            detail = f"飞书错误码 {code}" if type(code) is int else reason
+            if type(code) is int and code in {99991672, 99991679}:
+                detail += "，请开通 im:message.reactions:write_only 权限并发布应用"
+            self._reaction_warning = f"Get 表情{operation}失败（{detail}）"
+        self._updated_at = datetime.now(timezone.utc)
+
+    async def _add_processing_reaction(self, state: ReplyState) -> None:
+        if state.reaction_attempted:
+            return
+        state.reaction_attempted = True
+        try:
+            async with asyncio.timeout(self.reaction_timeout):
+                # The convenience typing helper discards all platform errors.
+                result = await self.client.add_reaction(state.message_id, "Get")
+            raw = result.raw if isinstance(result.raw, dict) else {}
+            data = raw.get("data") or {}
+            reaction_id = data.get("reaction_id") if isinstance(data, dict) else None
+            if result.success and isinstance(reaction_id, str) and reaction_id:
+                state.reaction_id = reaction_id
+                self._reaction_result("添加", result)
+            else:
+                self._reaction_result("添加", result if not result.success else None)
+        except TimeoutError:
+            self._reaction_result("添加", reason="请求超时")
+        except Exception:
+            # Optional feedback must not block delivering the actual reply.
+            self._reaction_result("添加", reason="请求不可用")
+
+    async def _remove_processing_reaction(self, state: ReplyState) -> None:
+        reaction_id, state.reaction_id = state.reaction_id, None
+        if not reaction_id:
+            return
+        try:
+            async with asyncio.timeout(self.reaction_timeout):
+                result = await self.client.remove_reaction(state.message_id, reaction_id)
+            self._reaction_result("移除", result)
+        except TimeoutError:
+            self._reaction_result("移除", reason="请求超时")
+        except Exception:
+            self._reaction_result("移除", reason="请求不可用")
+
     async def reply_loading(self, message: InboundMessage, reply_id: str, content: str = "") -> None:
-        await self.reply(message, reply_id, f"{content}\n\n处理中…" if content else "处理中…", False)
+        # Preserve cumulative text; the separate loading icon remains beneath it.
+        await self.reply(message, reply_id, content, False)
+
+    async def _remove_loading(self, state: ReplyState) -> None:
+        if not state.loading_visible:
+            return
+        from lark_channel.api.cardkit.v1.model.delete_card_element_request import DeleteCardElementRequest
+        from lark_channel.api.cardkit.v1.model.delete_card_element_request_body import DeleteCardElementRequestBody
+        state.sequence += 1
+        request = (DeleteCardElementRequest.builder().card_id(state.card_id)
+                   .element_id("loading_icon")
+                   .request_body(DeleteCardElementRequestBody.builder().sequence(state.sequence).build())
+                   .build())
+        result = await self.client.client.cardkit.v1.card_element.adelete(request)
+        if not result.success():
+            raise RuntimeError("Feishu loading indicator removal failed")
+        state.loading_visible = False
+
+    async def _finish_card(self, state: ReplyState) -> None:
+        if not state.card_id or not state.send_attempted or state.static:
+            return
+        try:
+            state.sequence += 1
+            await self.client.finish_streaming_card(state.card_id, state.sequence)
+        finally:
+            await self._remove_loading(state)
+
+    async def _close_reply(self, state: ReplyState) -> None:
+        try:
+            async with asyncio.timeout(self.close_timeout), state.lock:
+                await self._finish_card(state)
+        except Exception:
+            logger.warning("Feishu card cleanup could not be confirmed")
+        finally:
+            await self._remove_processing_reaction(state)
 
     async def reply(self, message: InboundMessage, reply_id: str, content: str, finish: bool) -> None:
         handle = message.reply_handle
@@ -275,16 +365,34 @@ class FeishuSDKAdapter:
         if state is None:
             if len(self._replies) >= self.max_pending:
                 raise RuntimeError("Feishu reply capacity reached")
-            state = self._replies[reply_id] = ReplyState()
+            state = self._replies[reply_id] = ReplyState(message_id=handle.message_id)
         try:
             async with state.lock:
+                if not finish:
+                    await self._add_processing_reaction(state)
                 if state.card_id is None and not state.static:
                     try:
+                        elements = [{"tag": "markdown", "element_id": "answer", "content": content}]
+                        if not finish:
+                            # Official openclaw-lark builder.ts loading footer (MIT).
+                            # streaming_mode only controls text updates, not this animation.
+                            elements.append({
+                                "tag": "markdown", "element_id": "loading_icon", "content": " ",
+                                "icon": {"tag": "custom_icon", "size": "16px 16px",
+                                         "img_key": "img_v3_02vb_496bec09-4b43-4773-ad6b-0cdd103cd2bg"},
+                            })
                         state.card_id = await self.client.create_card_instance({
-                            "schema": "2.0", "config": {"streaming_mode": True},
-                            "body": {"elements": [{"tag": "markdown", "element_id": "answer",
-                                                     "content": content or "处理中…"}]},
+                            "schema": "2.0", "config": {
+                                "streaming_mode": True,
+                                "streaming_config": {
+                                    "print_frequency_ms": {"default": 50},
+                                    "print_step": {"default": 2},
+                                    "print_strategy": "fast",
+                                },
+                            },
+                            "body": {"elements": elements},
                         })
+                        state.loading_visible = not finish
                     except Exception:
                         # Without CardKit permission, ordinary final replies
                         # still work. No visible message has been sent yet.
@@ -313,16 +421,25 @@ class FeishuSDKAdapter:
                     if not result.success:
                         raise RuntimeError("Feishu card reply rejected")
                     state.sent = True
-                state.sequence += 1
-                await self.client.update_card_element_content(state.card_id, "answer", content or " ", state.sequence)
-                if finish:
+                if content:
                     state.sequence += 1
-                    await self.client.finish_streaming_card(state.card_id, state.sequence)
+                    await self.client.update_card_element_content(state.card_id, "answer", content, state.sequence)
         except Exception:
             raise RuntimeError("Feishu reply failed") from None
         finally:
             if finish:
-                self._replies.pop(reply_id, None)
+                try:
+                    # Also close cards whose send or last text update had an
+                    # uncertain result; never resend a second visible message.
+                    async with state.lock:
+                        await self._finish_card(state)
+                except Exception:
+                    raise RuntimeError("Feishu reply failed") from None
+                finally:
+                    try:
+                        await self._remove_processing_reaction(state)
+                    finally:
+                        self._replies.pop(reply_id, None)
 
 
 __all__ = ["FeishuSDKAdapter"]

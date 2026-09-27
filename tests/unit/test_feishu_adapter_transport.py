@@ -46,8 +46,17 @@ class FeishuTransportTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await adapter.download_media(media), (b"real-sdk-resource-bytes", "fixture.txt"))
                 self.assertTrue(any("/messages/om_ws/resources/file_fixture?type=file" in path
                                     for path, _ in platform.http_calls))
+                await adapter.reply_loading(delivered[0], "r")
+                await adapter.reply(delivered[0], "r", "第一段正文", False)
                 await adapter.reply(delivered[0], "r", "最终回复", True)
                 self.assertTrue(any(path.endswith("/reply") for path, _ in platform.http_calls))
+                import json
+                card = next(json.loads(body["data"]) for path, body in platform.http_calls
+                            if path == "/open-apis/cardkit/v1/cards")
+                self.assertEqual(card["body"]["elements"][-1]["element_id"], "loading_icon")
+                calls = [(path, body) for path, body in platform.http_calls if "/card_local/" in path]
+                self.assertTrue(calls[-1][0].endswith("/elements/loading_icon"))
+                self.assertEqual([body["sequence"] for _, body in calls], [1, 2, 3, 4])
             finally:
                 release.set()
                 process = adapter._process

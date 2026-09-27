@@ -523,3 +523,18 @@ test("扫码后改为手填保存会取消未消费的注册任务", async () =>
   await admin.save({preventDefault() {}, currentTarget: getElement("channelAccountForm")});
   assert.equal(context.window.resetOptions.consumed, false);
 });
+
+
+test("扫码授权成功明确提示待保存，不自动关闭或提交渠道", () => {
+ const { admin, context, getElement, requests } = secretEditorHarness();
+ admin.openCreate("feishu");
+ vm.runInContext('renderFeishuRegistration({status:"authorized"})', context);
+ assert.equal(getElement("channelFeishuAuthorized").hidden, false);
+ assert.equal(getElement("channelFeishuSaveReminder").hidden, false);
+ assert.match(getElement("channelFeishuScanStatus").textContent, /保存/);
+ assert.equal(getElement("channelAccountModal").open, true);
+ assert.equal(requests.length, 0);
+ vm.runInContext('renderFeishuRegistration({status:"expired"})', context);
+ assert.equal(getElement("channelFeishuAuthorized").hidden, true);
+ assert.equal(getElement("channelFeishuSaveReminder").hidden, true);
+});

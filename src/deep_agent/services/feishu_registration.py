@@ -104,14 +104,11 @@ class FeishuRegistrationService:
 
         try:
             async with asyncio.timeout(max(0, entry.deadline - time.monotonic())) as timeout:
-                result = await self.register(on_qr_code=qr, on_status_change=status,
-                                             source="deep-agent", create_only=True,
-                                             addons={"preset": False, "scopes": {"tenant": [
-                                                 "im:message.p2p_msg:readonly", "im:message.group_at_msg:readonly",
-                                                 "im:message:send_as_bot", "im:message:readonly",
-                                                 "im:resource", "cardkit:card:write",
-                                             ]}, "events": {"items": {"tenant": ["im.message.receive_v1"]}}},
-                                             app_preset={"name": entry.app_name, "desc": "DeepAgent 飞书助手"})
+                # Omitting addons uses Feishu's PersonalAgent default template.
+                result = await self.register(
+                    on_qr_code=qr, on_status_change=status,
+                    app_preset={"name": entry.app_name},
+                )
             app_id, secret = result.get("client_id"), result.get("client_secret")
             if not isinstance(app_id, str) or not app_id.strip() or not isinstance(secret, str) or not secret.strip():
                 raise ValueError("Missing credentials")

@@ -33,6 +33,29 @@ class FeishuRegistrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(names, ['财务助手', 'DeepAgent'])
         self.assertEqual(self.service.entries[first['registration_id']].app_name, '财务助手')
 
+    async def test_registration_uses_default_template_with_name_only(self):
+        captured = {}
+        async def register(**kwargs):
+            captured.update(kwargs)
+            return {'client_id': 'cli_fixture', 'client_secret': 'fixture-secret'}
+        self.service.register = register
+        await self.authorized()
+        self.assertEqual(set(captured), {'on_qr_code', 'on_status_change', 'app_preset'})
+        self.assertEqual(captured['app_preset'], {'name': 'DeepAgent'})
+
+        # Exercise the real SDK URL builder so custom lists cannot silently return.
+        from urllib.parse import parse_qs, urlsplit
+        from lark_oapi.scene.registration import _RegistrationFlow
+        flow = _RegistrationFlow(**captured, source=None, domain='https://accounts.feishu.cn',
+                                 lark_domain='https://accounts.larksuite.com')
+        url = flow._build_qr_url('https://open.feishu.cn/page/cli?user_code=fixture')
+        query = parse_qs(urlsplit(url).query)
+        self.assertEqual(query['name'], ['DeepAgent'])
+        self.assertEqual(query['user_code'], ['fixture'])
+        for key in ('addons', 'desc', 'createOnly', 'clientID'):
+            self.assertNotIn(key, query)
+        self.assertLess(len(url.encode()), 150)
+
     async def test_credentials_private_owner_bound_and_one_time(self):
         key = await self.authorized()
         self.assertEqual(self.service.snapshot(key, 'admin')['status'], 'authorized')

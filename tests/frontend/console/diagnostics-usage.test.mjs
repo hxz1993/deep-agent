@@ -22,8 +22,44 @@ function harness(request, extra = {}) {
   const controller=context.initDiagnosticUsage({root,navigate(){},replace(){}});
   const saved={filters,draft:filters,report:{},details:{items:[],total:21},...extra};
   controller.activate({filters},saved);
-  return {controller,requests,nodes, event(selector,dataset) { return listeners.click({target:{closest(wanted) { return wanted===selector ? {dataset} : null; }}}); }, click(action) { return listeners.click({target:{closest(selector) { return selector==='[data-usage-action]' ? {dataset:{usageAction:action}} : null; }}}); }};
+  return {controller,requests,nodes, dispatch:event=>listeners.click(event), event(selector,dataset) { return listeners.click({target:{closest(wanted) { return wanted===selector ? {dataset} : null; }}}); }, click(action) { return listeners.click({target:{closest(selector) { return selector==='[data-usage-action]' ? {dataset:{usageAction:action}} : null; }}}); }};
 }
+
+test('multi-channel contribution icons deduplicate and cycle without new requests', async () => {
+  const items = [{key:'a',name:'A',channel_types:['feishu','wecom','feishu'],requests:1}];
+  const h = harness(() => Promise.resolve({items,total:1}), {
+    contributing:{dimension:'agent',key:'a',name:'A'}, contributions:{items:[],total:0},
+  });
+  await settle();
+  const html = h.nodes.get('#usageContributionRows').innerHTML;
+  assert.equal((html.match(/class="usage-icon-layer"/g) || []).length, 2);
+  assert.match(html, /type="button"[^>]*data-usage-icon-cycle/);
+  const layers = ['飞书','企业微信'].map((title,index)=>({title,dataset:new Proxy({depth:String(index)}, {
+    set(target,key,value) { target[key]=String(value); return true; },
+  })}));
+  const attrs = {};
+  const stack = {querySelectorAll:()=>layers,setAttribute:(name,value)=>{attrs[name]=value;}};
+  const event = {target:{closest:selector=>selector==='[data-usage-icon-cycle]'?stack:null}};
+  const requests = h.requests.length;
+  await h.dispatch(event);
+  assert.deepEqual(layers.map(layer=>layer.dataset.depth), ['1','0']);
+  assert.equal(attrs['aria-label'], '当前企业微信，点击切换渠道图标');
+  await h.dispatch(event);
+  assert.deepEqual(layers.map(layer=>layer.dataset.depth), ['0','1']);
+  assert.equal(attrs['aria-label'], '当前飞书，点击切换渠道图标');
+  assert.equal(h.requests.length, requests);
+});
+
+test('single-channel contribution retains a noninteractive identity icon', async () => {
+  const items = [{key:'a',name:'A',channel_types:['feishu'],requests:1}];
+  const h = harness(() => Promise.resolve({items,total:1}), {
+    contributing:{dimension:'agent',key:'a',name:'A'}, contributions:{items:[],total:0},
+  });
+  await settle();
+  const html = h.nodes.get('#usageContributionRows').innerHTML;
+  assert.match(html, /class="usage-object-icon"><img/);
+  assert.doesNotMatch(html, /data-usage-icon-cycle/);
+});
 
 test('usage pagination ignores repeated clicks while pending and clamps a shrinking result', async()=>{
   const pending=deferred(); let count=0;

@@ -20,9 +20,12 @@ function renderFeishuRegistration(data) {
   const link = document.getElementById("channelFeishuAuthLink");
   const button = document.getElementById("channelFeishuStartScan");
   const retry = document.getElementById("channelFeishuRetryScan");
+  const authorized = data.status === "authorized";
+  document.getElementById("channelFeishuAuthorized").hidden = !authorized;
+  document.getElementById("channelFeishuSaveReminder").hidden = !authorized;
   const retryable = ["failed", "expired", "denied", "cancelled"].includes(data.status);
   retry.hidden = !retryable;
-  const labels = { starting: "正在准备二维码…", waiting: "使用飞书扫码，完成应用创建和授权。", authorized: "应用已授权，填写渠道信息后保存。", expired: "二维码已过期，请重新生成。", denied: "授权已拒绝，可重新扫码或关联已有应用。", failed: "授权失败，请重试。", cancelled: "授权已取消。" };
+  const labels = { starting: "正在准备二维码…", waiting: "使用飞书扫码，完成应用创建和授权。", authorized: "请补齐渠道名称、关联 Agent 和会话关联用户，点击右下角「保存」。保存后启用渠道，机器人才能接收消息。", expired: "二维码已过期，请重新生成。", denied: "授权已拒绝，可重新扫码或关联已有应用。", failed: "授权失败，请重试。", cancelled: "授权已取消。" };
   status.textContent = data.error || labels[data.status] || "可先填写渠道名称，生成二维码后用手机飞书扫码。应用名称会自动预填，确认创建和授权后保存渠道。";
   button.disabled = ["starting", "waiting"].includes(data.status);
   button.hidden = retryable || ["waiting", "authorized"].includes(data.status);
@@ -63,7 +66,7 @@ function prepareChannelPlatform(type) {
   document.getElementById("channelBotIdLabel").textContent = feishu ? "App ID" : "Bot ID";
   document.getElementById("channelBotId").placeholder = feishu ? "请输入 App ID" : "请输入 Bot ID";
   document.getElementById("channelConnectionHelp").innerHTML = feishu
-    ? "<strong>使用飞书企业自建应用</strong><p>在飞书开放平台获取 App ID 和 App Secret，开启机器人能力。</p><p>事件订阅选择长连接，添加接收消息事件并发布应用。</p>"
+    ? '<strong>使用飞书企业自建应用</strong><p>在<a class="channel-platform-link" href="https://open.feishu.cn/app" target="_blank" rel="noopener noreferrer" title="打开飞书开发者后台（新标签页）">飞书开放平台</a>获取 App ID 和 App Secret，开启机器人能力。</p><p>事件订阅选择长连接，添加接收消息事件并发布应用。</p>'
     : "<strong>使用企微智能机器人</strong><p>在企业微信创建智能机器人，选择 API 模式，获取 Bot ID 和 Secret。</p><p>通过长连接接收消息，无需配置公网回调地址。</p>";
   document.getElementById("channelSecretLabel").textContent = feishu ? "App Secret" : "Secret";
   document.getElementById("channelName").placeholder = feishu ? "例如：飞书助手" : "例如：企微助手";

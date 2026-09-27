@@ -785,12 +785,17 @@
               <div class="channel-feishu-qr-slot">
                 <img class="channel-feishu-qr-placeholder" src="./assets/channel-logos/qr-placeholder.svg" alt="" aria-hidden="true" />
                 <div id="channelFeishuQr" class="channel-feishu-qr" hidden></div>
+                <div id="channelFeishuAuthorized" class="channel-feishu-authorized" hidden><i data-lucide="circle-check" aria-hidden="true"></i><strong>授权成功</strong><span>待保存渠道</span></div>
                 <button type="button" class="btn" id="channelFeishuStartScan">生成二维码</button>
               </div>
-              <div class="channel-feishu-scan-copy">
+              <div class="channel-feishu-scan-copy channel-connection-help">
+                <strong id="channelFeishuSaveReminder" class="channel-feishu-save-reminder" hidden>授权成功，渠道尚未保存</strong>
                 <p id="channelFeishuScanStatus" role="status" aria-live="polite"></p>
-                <button type="button" class="btn" id="channelFeishuRetryScan" hidden>重新生成</button>
-                <a id="channelFeishuAuthLink" class="btn" target="_blank" rel="noopener noreferrer" hidden>打开授权页面</a>
+                <div class="channel-feishu-scan-actions">
+                  <button type="button" class="btn" id="channelFeishuRetryScan" hidden>重新生成</button>
+                  <a id="channelFeishuAuthLink" class="btn" target="_blank" rel="noopener noreferrer" hidden>打开授权页面</a>
+                </div>
+                <a class="channel-platform-link channel-feishu-console-link" href="https://open.feishu.cn/app" target="_blank" rel="noopener noreferrer" title="在新标签页打开">前往飞书开发者后台 ↗</a>
               </div>
             </div>
           </div>

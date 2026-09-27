@@ -122,6 +122,8 @@ class LocalFeishuPlatform:
                 self.do_POST()
             def do_PATCH(self):
                 self.do_POST()
+            def do_DELETE(self):
+                self.do_POST()
             def respond(self, response):
                 raw = json.dumps(response).encode()
                 self.send_response(200); self.send_header("Content-Type", "application/json")

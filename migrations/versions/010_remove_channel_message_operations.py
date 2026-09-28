@@ -4,9 +4,10 @@ Revision ID: 010
 Revises: 009
 
 Only obsolete outbound receipts are deleted. Channel runs, sessions, files and
-configuration retain their existing schema and data.
+configuration retain their data. Adds nullable session creation source columns.
 """
 from alembic import op
+from deep_agent.db.session_source_schema import ensure_session_source_columns
 
 revision = "010"
 down_revision = "009"
@@ -15,6 +16,7 @@ depends_on = None
 
 
 def upgrade():
+    ensure_session_source_columns(op)
     op.drop_table("channel_message_operations")
 
 

@@ -22,6 +22,7 @@ from deep_agent.db.models import (
 from deep_agent.db.reference_integrity import (
     ReferenceConflict, is_unique_conflict, lock_optional, lock_reference,
 )
+from deep_agent.db.session_source import channel_source_type
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.stores.wecom import validate_channel_wecom_settings
@@ -289,6 +290,7 @@ class ChannelStore(SessionBoundMixin):
         session = ChatSession(
             session_id=uuid4().hex, agent_id=account.agent_id,
             user_id=account.session_user_id, next_sequence=1,
+            source_type=channel_source_type(account.channel_type), source_id=account.id,
             app_id=app_id, space_id=derive_space_from_app(app_id) if app_id else None,
             created_at=now, updated_at=now,
         )
@@ -337,6 +339,8 @@ class ChannelStore(SessionBoundMixin):
                     or session.user_id != account.session_user_id
                 ):
                     session = None
+            if session is not None and (session.source_type != channel_source_type(account.channel_type) or session.source_id != account.id):
+                raise PermissionError("Channel binding session source does not match account")
             created_session = session is None
             if created_session:
                 session = await self._create_session(db, account, binding, peer_metadata)
@@ -394,17 +398,14 @@ class ChannelStore(SessionBoundMixin):
 
     async def get_channel_session(self, account_id: str, session_id: str) -> ChatSession | None:
         """Resolve current or historical sessions, never by caller-supplied user."""
-        bindings = select(ChannelSessionBinding.id).where(
-            ChannelSessionBinding.account_id == account_id,
-            ChannelSessionBinding.session_id == session_id,
-        ).exists()
-        runs = select(ChannelMessageRun.id).where(
-            ChannelMessageRun.account_id == account_id,
-            ChannelMessageRun.session_id == session_id,
-        ).exists()
         async with self._read() as db:
+            account = await db.get(ChannelAccount, account_id)
+            if account is None:
+                return None
             return (await db.execute(select(ChatSession).where(
-                ChatSession.session_id == session_id, or_(bindings, runs),
+                ChatSession.session_id == session_id,
+                ChatSession.source_type == channel_source_type(account.channel_type),
+                ChatSession.source_id == account_id,
             ))).scalar_one_or_none()
 
     async def adopt_session_scope(
@@ -417,20 +418,16 @@ class ChannelStore(SessionBoundMixin):
         can change. Ordinary sessions keep their original scope semantics. Values
         come from the same request snapshot used by MCP, not a later config read.
         """
-        bindings = select(ChannelSessionBinding.id).where(
-            ChannelSessionBinding.account_id == account_id,
-            ChannelSessionBinding.session_id == session_id,
-        ).exists()
-        runs = select(ChannelMessageRun.id).where(
-            ChannelMessageRun.account_id == account_id,
-            ChannelMessageRun.session_id == session_id,
-        ).exists()
         async with self._write() as db:
+            account = await db.get(ChannelAccount, account_id)
+            if account is None:
+                return False
             result = await db.execute(update(ChatSession).where(
                 ChatSession.session_id == session_id,
                 ChatSession.agent_id == agent_id,
                 ChatSession.user_id == user_id,
-                or_(bindings, runs),
+                ChatSession.source_type == channel_source_type(account.channel_type),
+                ChatSession.source_id == account_id,
             ).values(app_id=app_id, space_id=space_id))
             return bool(result.rowcount)
 
@@ -438,18 +435,44 @@ class ChannelStore(SessionBoundMixin):
         return (await self.get_session_origins([session_id])).get(session_id)
 
     async def get_session_origins(self, session_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
+        async with self._read() as db:
+            return await self._get_session_origins(db, session_ids)
+
+    @staticmethod
+    async def _get_session_origins(db: AsyncSession, session_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
         if not session_ids:
             return {}
-        async with self._read() as db:
-            rows = (await db.execute(select(ChatSessionEvent).where(
-                ChatSessionEvent.session_id.in_(session_ids),
-                ChatSessionEvent.event_type == "session/title",
-            ).order_by(ChatSessionEvent.sequence))).scalars().all()
-        result: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            origin = row.payload.get("channel")
-            if row.payload.get("source") == "channel" and isinstance(origin, dict) and row.session_id not in result:
-                result[row.session_id] = normalize_channel_origin(origin)
+        sessions = (await db.execute(select(ChatSession.session_id, ChatSession.source_type,
+            ChatSession.source_id, ChannelAccount.name).outerjoin(ChannelAccount,
+            ChatSession.source_id == ChannelAccount.id).where(
+            ChatSession.session_id.in_(session_ids),
+            ChatSession.source_type.in_([channel_source_type(t) for t in ("wecom", "feishu", "dingtalk")]),
+        ))).all()
+        result = {row.session_id: {
+            "account_id": row.source_id,
+            "account_name": row.name or "账户已删除",
+            "account_deleted": row.name is None,
+            "channel_type": row.source_type.split(":", 1)[1],
+            "peer_type": None, "peer_id": None, "peer_metadata": {},
+        } for row in sessions}
+        if not result:
+            return {}
+        rows = (await db.execute(select(ChatSessionEvent.session_id, ChatSessionEvent.payload).where(
+            ChatSessionEvent.session_id.in_(result),
+            ChatSessionEvent.event_type == "session/title",
+        ).order_by(ChatSessionEvent.sequence))).all()
+        completed = set()
+        for session_id, payload in rows:
+            origin = payload.get("channel")
+            if payload.get("source") != "channel" or not isinstance(origin, dict) or session_id in completed:
+                continue
+            current = result[session_id]
+            if origin.get("account_id") != current["account_id"] or origin.get("channel_type") != current["channel_type"]:
+                continue
+            normalized = normalize_channel_origin(origin)
+            for key in ("peer_type", "peer_id", "peer_metadata"):
+                current[key] = normalized.get(key)
+            completed.add(session_id)
         return result
 
     async def claim_message(

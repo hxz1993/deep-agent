@@ -42,3 +42,5 @@
 自动化测试覆盖扫码协议、身份隔离、回调解析、昵称更新、引用上下文、原生媒体请求、失败回执及流式卡片终态发送。真实租户仍需验收发布权限、私聊/群聊、媒体事件、音视频呈现、转写、正文与断线重连；自动化通过不能替代钉钉客户端验收。
 
 参考：[OpenClaw 钉钉连接器](https://github.com/DingTalk-Real-AI/dingtalk-openclaw-connector)、[官方 Python Stream SDK](https://github.com/open-dingtalk/dingtalk-stream-sdk-python)、[AstrBot 钉钉适配](https://github.com/AstrBotDevs/AstrBot/tree/master/astrbot/core/platform/sources/dingtalk)。
+
+会话来源、统计归属与控制台续问提醒遵循三个渠道共用的 [会话来源规则](session-sources.md)。010 增加两个会话来源字段，历史空值按内部读取；历史修复独立执行。

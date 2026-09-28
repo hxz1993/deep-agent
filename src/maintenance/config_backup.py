@@ -143,6 +143,9 @@ async def export_backup(
     partial_path: Path | None = None
     try:
         revision = await _source_revision(source_engine)
+        # Configuration exports omit session rows. Record the source physical
+        # variant without migrating it; the empty target uses current revision DDL.
+        source_schema = await _session_source_schema(source_engine)
         backup_time = exported_at or datetime.now().astimezone()
         timestamp = backup_time.strftime("%Y%m%d-%H%M%S")
         revision_label = re.sub(r"[^A-Za-z0-9_-]", "_", revision)
@@ -183,12 +186,14 @@ async def export_backup(
             revision=revision,
             git_commit=git_commit or _current_git_commit(),
             copied_tables=copied_tables,
+            source_schema=source_schema,
         )
         await _validate_backup(
             target_engine,
             revision=revision,
             expected_counts=row_counts,
             copied_tables=copied_tables,
+            expected_source_schema=source_schema,
         )
         await target_engine.dispose()
         target_engine = None
@@ -223,6 +228,15 @@ async def _source_revision(engine: AsyncEngine) -> str:
     if not revision:
         raise ValueError("Source database does not contain an Alembic revision")
     return str(revision)
+
+
+async def _session_source_schema(engine: AsyncEngine) -> dict[str, bool]:
+    """Record physical source facts, independently of the shared 010 revision."""
+    async with engine.connect() as connection:
+        columns = await connection.run_sync(lambda conn: {
+            item["name"] for item in inspect(conn).get_columns("chat_sessions")
+        })
+    return {name: name in columns for name in ("source_type", "source_id")}
 
 
 def _upgrade_target_schema(database_url: str, revision: str = "head") -> None:
@@ -286,7 +300,8 @@ async def _create_backup_info_table(engine: AsyncEngine) -> None:
                     source_dialect VARCHAR(32) NOT NULL,
                     alembic_revision VARCHAR(32) NOT NULL,
                     git_commit VARCHAR(64) NOT NULL,
-                    scope_manifest TEXT NOT NULL
+                    scope_manifest TEXT NOT NULL,
+                    source_session_schema TEXT NOT NULL
                 )
                 """
             )
@@ -364,6 +379,7 @@ async def _write_backup_metadata(
     revision: str,
     git_commit: str,
     copied_tables: Sequence[str],
+    source_schema: Mapping[str, bool],
 ) -> None:
     async with engine.begin() as connection:
         await connection.execute(
@@ -371,10 +387,10 @@ async def _write_backup_metadata(
                 """
                 INSERT INTO _backup_info (
                     id, environment, exported_at, source_dialect,
-                    alembic_revision, git_commit, scope_manifest
+                    alembic_revision, git_commit, scope_manifest, source_session_schema
                 ) VALUES (
                     1, :environment, :exported_at, :source_dialect,
-                    :revision, :git_commit, :scope_manifest
+                    :revision, :git_commit, :scope_manifest, :source_session_schema
                 )
                 """
             ),
@@ -384,6 +400,7 @@ async def _write_backup_metadata(
                 "source_dialect": source_dialect,
                 "revision": revision,
                 "git_commit": git_commit,
+                "source_session_schema": json.dumps(dict(source_schema), separators=(",", ":")),
                 "scope_manifest": json.dumps(
                     _revision_backup_scope_manifest(copied_tables, revision),
                     ensure_ascii=False,
@@ -399,6 +416,7 @@ async def _validate_backup(
     revision: str,
     expected_counts: Mapping[str, int],
     copied_tables: Sequence[str],
+    expected_source_schema: Mapping[str, bool] | None = None,
 ) -> None:
     async with engine.connect() as connection:
         integrity = await connection.execute(text("PRAGMA integrity_check"))
@@ -436,13 +454,20 @@ async def _validate_backup(
             await connection.execute(
                 text(
                     "SELECT environment, exported_at, source_dialect, "
-                    "alembic_revision, git_commit, scope_manifest "
+                    "alembic_revision, git_commit, scope_manifest, source_session_schema "
                     "FROM _backup_info WHERE id = 1"
                 )
             )
         ).mappings().one()
         if not all(info.values()) or info["alembic_revision"] != revision:
             raise ValueError("Backup metadata is incomplete")
+        source_schema = json.loads(str(info["source_session_schema"]))
+        if (not isinstance(source_schema, dict)
+                or set(source_schema) != {"source_type", "source_id"}
+                or any(type(value) is not bool for value in source_schema.values())):
+            raise ValueError("Backup source session schema metadata is invalid")
+        if expected_source_schema is not None and source_schema != dict(expected_source_schema):
+            raise ValueError("Backup source session schema does not match the source")
         scope_manifest = json.loads(str(info["scope_manifest"]))
         if scope_manifest != _revision_backup_scope_manifest(copied_tables, revision):
             raise ValueError("Backup scope manifest does not match the current contract")

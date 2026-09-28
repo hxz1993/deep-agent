@@ -128,17 +128,20 @@ class ToolPackageDescription(BaseModel):
 
 
 class ChannelSessionOrigin(BaseModel):
-    """Presentation-only origin, persisted with the initial channel title event."""
+    """Channel details for an explicitly channel-sourced session."""
 
     account_id: str
     account_name: str
     channel_type: str
-    peer_type: str
-    peer_id: str
+    peer_type: str | None = None
+    peer_id: str | None = None
+    account_deleted: bool = False
     peer_metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class SessionInfo(BaseModel):
+    source_type: str = Field(default="internal", description="Immutable creation source; legacy NULL is internal.")
+    source_id: str | None = Field(default=None, description="Source instance ID, not necessarily a channel account.")
     app_id: str | None = Field(default=None, description="App recorded when the session was created.")
     space_id: str | None = Field(default=None, description="Space recorded when the session was created.")
     session_id: str

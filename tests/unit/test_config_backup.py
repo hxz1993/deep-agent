@@ -5,6 +5,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +45,39 @@ from maintenance.config_backup import (
 
 
 class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Every migration/export in this suite must use its explicit temp SQLite URL.
+        guard = patch("deep_agent.db.url.get_database_url", side_effect=AssertionError("Implicit database target forbidden"))
+        guard.start()
+        self.addCleanup(guard.stop)
+
+    async def test_010_export_records_old_partial_and_current_source_schema(self):
+        for missing in (("source_type", "source_id"), ("source_id",), ()):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_010_") as tmpdir:
+                source = Path(tmpdir) / "source.db"
+                await self._create_source(source, revision="010")
+                with sqlite3.connect(source) as db:
+                    for name in missing:
+                        db.execute(f"ALTER TABLE chat_sessions DROP COLUMN {name}")
+                    before = list(db.iterdump())
+                result = await export_backup(self._url(source), environment="fixture",
+                    output_root=Path(tmpdir) / "backups", git_commit="test")
+                expected = {name: name not in missing for name in ("source_type", "source_id")}
+                with sqlite3.connect(source) as db:
+                    self.assertEqual(list(db.iterdump()), before)
+                with sqlite3.connect(result.path) as db:
+                    self.assertEqual(json.loads(db.execute("SELECT source_session_schema FROM _backup_info").fetchone()[0]), expected)
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM chat_sessions").fetchone()[0], 0)
+                    # Export is configuration-only; its empty session schema is current 010.
+                    self.assertTrue({"source_type", "source_id"} <= {r[1] for r in db.execute("PRAGMA table_info(chat_sessions)")})
+                    db.execute("UPDATE _backup_info SET source_session_schema = ?", (json.dumps({"source_type": "yes", "source_id": True}),))
+                engine = create_async_engine(self._url(result.path))
+                try:
+                    with self.assertRaisesRegex(ValueError, "source session schema metadata is invalid"):
+                        await _validate_backup(engine, revision="010", expected_counts={}, copied_tables=CONFIG_TABLES)
+                finally:
+                    await engine.dispose()
+
     async def test_codex_credentials_are_excluded_from_configuration_backup(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             root = Path(tmpdir)

@@ -125,5 +125,20 @@ test('model usage distinguishes legacy and deleted records without leaking inter
   assert.match(html, />测试模型<\/span>/);
   assert.match(html, />未记录模型<\/span>/);
   assert.match(html, /provider-logos\/deepseek.ico/);
-  assert.match(h.nodes.get('#usageDetailFooter').innerHTML, /1 次用量不完整/);
+  assert.equal(h.nodes.get('#usageDetailFooter').innerHTML, '');
+});
+
+
+test('Agent contribution heading abbreviates ID but retains full copy value', async () => {
+  const id = 'd0a8eb06-dcbc-493e-8157-254aa29b2ac5';
+  const h = harness(() => Promise.resolve({items:[{key:id,name:'Agent fixture',requests:1}],total:1}), {
+    contributing:{dimension:'agent',key:id,name:'Agent fixture'},
+    contributions:{items:[],total:0},
+  });
+  await settle();
+  const html = h.nodes.get('#usageContributionRows').innerHTML;
+  assert.match(html, />d0a8eb06<\/code>/);
+  assert.ok(html.includes(`data-usage-copy="${id}"`));
+  assert.match(html, /aria-label="复制 Agent ID"/);
+  assert.doesNotMatch(html, /Agent ·/);
 });

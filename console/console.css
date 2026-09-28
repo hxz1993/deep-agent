@@ -438,8 +438,8 @@ textarea {
 #workspaceLegacyHost .session-item .session-title { line-height: 18px; }
 #workspaceLegacyHost .session-title-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
 #workspaceLegacyHost .session-title-row .session-title { min-width: 0; flex: 1; }
-#workspaceLegacyHost .session-channel-source { display: inline-flex; align-items: center; flex: 0 0 auto; color: var(--text-faint); }
-#workspaceLegacyHost .session-channel-source svg { width: 12px; height: 12px; }
+#workspaceLegacyHost .session-channel-source { height: 15px; line-height: 0; display: inline-flex; align-items: center; flex: 0 0 auto; color: var(--text-faint); }
+#workspaceLegacyHost .session-stat-group .session-channel-source img { width: 12px; height: 12px; object-fit: contain; display: block; }
 #workspaceLegacyHost .session-item .session-meta {
   display: flex;
   align-items: center;
@@ -449,10 +449,10 @@ textarea {
   font-size: 12px;
   line-height: 15px;
   white-space: nowrap;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 #workspaceLegacyHost .session-item .session-meta > span { display: inline-flex; align-items: center; gap: 3px; }
-#workspaceLegacyHost .session-item .session-stat-group { margin-left: auto; gap: 7px; }
+#workspaceLegacyHost .session-item .session-stat-group { margin-left: 0; gap: 7px; }
 #workspaceLegacyHost .session-item .session-stat-group > span { display: inline-flex; align-items: center; gap: 3px; }
 #workspaceLegacyHost .session-item .session-meta svg { width: 12px; height: 12px; }
 #workspaceLegacyHost .session-item:not(.active):hover {
@@ -2408,6 +2408,7 @@ body.workspace-pane-resizing { cursor: col-resize; user-select: none; }
   border-radius: 0;
   box-shadow: none;
 }
+#workspaceLegacyHost > .chat:has(.composer-model-picker.open) { z-index: 8; }
 #workspaceLegacyHost .chat-header {
   width: calc(100% + var(--console-resizer-width) + var(--console-inspector-width));
   margin: -1px 0 0 -1px;

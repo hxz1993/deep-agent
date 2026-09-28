@@ -1,3 +1,4 @@
+import { channelOriginPresentation } from "./session-display.js?v=20260929-session-source";
 import { DIAGNOSTIC_PERIODS as PERIODS, diagnosticRangeHelpHtml, bindDiagnosticRangeDismiss } from "./diagnostic-range-control.js?v=20260923-c04-8";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260915-release-audit";
@@ -5,7 +6,7 @@ import { diagnosticTime } from "./diagnostics.js?v=20260915-ui-polish";
 import { diagnosticHash, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260915-app-filter";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260915-app-filter";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260928-channel-audit";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20260929-session-source";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PAGE_SIZE = 50;
@@ -16,9 +17,9 @@ export function userCardHtml(id, profiles = {}) {
   return `<span class="diagnostic-user diagnostic-username" title="${e(id)}">${e(name)}</span>`;
 }
 export function sessionAgentIconHtml(item) {
-  if (item.source !== "channel") return `<span class="diagnostic-agent-icon">${icon("bot")}</span>`;
-  const channel = item.channel || {}, name = channel.account_name || (channel.channel_type === "wecom" ? "企微" : channel.channel_type === "feishu" ? "飞书" : channel.channel_type === "dingtalk" ? "钉钉" : channel.channel_type) || "渠道会话";
-  return `<span class="diagnostic-agent-icon diagnostic-channel-icon" title="${e(name)}" aria-label="${e(name)}">${channel.channel_type === "wecom" ? '<img src="./assets/channel-logos/wecom.png" width="20" height="20" alt="企业微信" />' : channel.channel_type === "feishu" ? '<img src="./assets/channel-logos/feishu.ico" width="20" height="20" alt="飞书" />' : channel.channel_type === "dingtalk" ? '<img src="./assets/channel-logos/dingtalk.svg" width="20" height="20" alt="钉钉" />' : icon("rss")}</span>`;
+  const origin = channelOriginPresentation(item);
+  if (!origin) return `<span class="diagnostic-agent-icon">${icon("bot")}</span>`;
+  return `<span class="diagnostic-agent-icon diagnostic-channel-icon" title="${e(origin.accountName === "未记录" ? origin.platform : origin.accountName)}" aria-label="${e(origin.accountName === "未记录" ? origin.platform : origin.accountName)}"><img src="${origin.logo}" width="20" height="20" alt="${e(origin.platform)}" /></span>`;
 }
 export function shortQuestionTime(value) {
   const full = diagnosticTime(value);

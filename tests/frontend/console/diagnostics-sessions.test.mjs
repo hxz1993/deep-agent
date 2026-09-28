@@ -1,3 +1,4 @@
+import { channelOriginPresentation } from "../../../console/session-display.js";
 import { renderUserIdentity } from "../../../console/user-identity.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -56,7 +57,7 @@ function sessionHarness(request = async () => overview()) {
   };
   let selectCallback;
   const copied = [], toasts = [];
-  const context = vm.createContext({ renderUserIdentity,
+  const context = vm.createContext({ channelOriginPresentation, renderUserIdentity,
     URL, URLSearchParams, Date, Intl, AbortController, setTimeout, clearTimeout,
     document: { baseURI: "https://console.example/console/", addEventListener(name, handler) { documentListeners.set(name, handler); } },
     window: { location: { href: "https://console.example/console/" }, DeepAgentConsole: { toast: (...args) => toasts.push(args) } },
@@ -109,7 +110,7 @@ function centerHarness(initialHash = diagnosticHash("logs", { q: "original", lev
   const logs = { activated: [], saved: { scroll: 88, selectedId: "log-record" }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const sessions = { activated: [], saved: { scroll: 321, filters: { ...filters, offset: 50 } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const channels = { activated: [], saved: { filters: { period: "720", account_id: "account-a" } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
-  const context = vm.createContext({ renderUserIdentity,
+  const context = vm.createContext({ channelOriginPresentation, renderUserIdentity,
     location: { get hash() { return navigation.hash; } }, history: navigation.history,
     document: { getElementById: () => node(), querySelectorAll: () => [] },
     window: { addEventListener(name, callback) { handlers.set(name, callback); }, dispatchEvent() {}, DeepAgentConsole: { showPage(page, options) { navCalls.push({ page, options }); } } },
@@ -636,7 +637,7 @@ test("production session controller does not import live workspace state or writ
 
 test("diagnostic request uses same-origin API helper, no App, no cache and propagates permission loss", async () => {
   const calls = [], events = [];
-  const context = vm.createContext({ renderUserIdentity,  AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ channelOriginPresentation, renderUserIdentity,  AbortController, setTimeout, clearTimeout,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     window: { serviceUrl: path => `/prefix/${path}`, daFetch: async (path, options) => { calls.push({ path, options }); return { ok: false, status: 403, json: async () => ({ detail: "denied" }) }; }, dispatchEvent: event => events.push(event) },
   });

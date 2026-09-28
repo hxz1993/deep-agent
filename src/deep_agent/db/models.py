@@ -257,6 +257,8 @@ class ChatSession(Base):
     user_id: Mapped[str] = mapped_column(String(128), nullable=False)
     app_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
     space_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    source_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_sequence: Mapped[int] = mapped_column(
         BigInteger,

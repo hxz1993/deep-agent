@@ -1,11 +1,11 @@
 import { sessionLoadingHtml, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
 import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentation } from "./session-presentation.js?v=20260923-usage-tab-2";
-import { renderSessionInspector } from "./session-inspector.js?v=20260928-channel-audit";
-import { channelOriginPresentation } from "./session-display.js?v=20260928-channel-audit";
+import { renderSessionInspector } from "./session-inspector.js?v=20260929-release0123-final";
+import { channelOriginPresentation } from "./session-display.js?v=20260929-release0123-final";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20260928-channel-audit";
+const WORKSPACE_ASSET_VERSION = "20260929-release0123-final";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -525,13 +525,20 @@ function renderInspector() {
     ? state.llmModels.find(item => item.id === run.model_id || item.model === run.model_id) : null);
   const requestedModel = !state.sessionId || (state.streaming && !state.observingRun)
     ? state.llmModels.find(item => item.id === state.llmModelId) : null;
+  const persistedModel = run.model_id ? state.llmModels.find(item => item.id === run.model_id) : null;
+  const historicalProvider = persistedModel?.provider || persistedModel?.llm_provider
+    || historicalModel?.provider || historicalModel?.llm_provider
+    || (run.provider_name ? { name: run.provider_name } : null);
   const model = historicalModel || requestedModel || (activeSession.modelName ? { name: activeSession.modelName } : null);
-  const channelOrigin = channelOriginPresentation(activeSession.channel);
+  const channelOrigin = channelOriginPresentation(activeSession);
   const agentChannels = workspaceChannelAccounts.filter((account) => account.agent_id === state.agentId);
   if (!channelOrigin && !agentChannels.length && inspectorActiveTab === "channel") inspectorActiveTab = "session";
   host.innerHTML = renderSessionInspector({
     state, activeSession: state.sessionId ? activeSession : { ...activeSession, turnCount: 0, messageCount: 0, attachmentCount: 0 }, run, channelOrigin, agentChannels,
     model,
+    modelProvider: historicalModel
+      ? historicalProvider
+      : requestedModel?.provider || requestedModel?.llm_provider || null,
     runModel: historicalModel,
     context: { language: activeSession.language },
     identity: window.DeepAgentConsoleContext?.identity || {},
@@ -568,7 +575,7 @@ function startStateMonitor() {
       conversationId: api.state.conversationId,
       sessionMetrics: api.state.sessions
         .filter((session) => session.id === api.state.sessionId && (session.agentId || "") === (api.state.agentId || ""))
-        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount, session.channel, session.modelName, session.appId, session.spaceId]),
+        .map((session) => [session.turnCount, session.messageCount, session.attachmentCount, session.channel, session.source_type, session.source_id, session.modelName, session.appId, session.spaceId]),
     });
     if (key === lastRenderKey) return;
     lastRenderKey = key;

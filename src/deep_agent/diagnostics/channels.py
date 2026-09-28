@@ -1,7 +1,7 @@
-"""Channel-account diagnostics over the durable dispatch ledger.
+"""Channel-account diagnostics over immutable session sources and user events.
 
 Counts stay in SQL. Only the current page's latest user events are projected;
-no history or JSON payload is scanned for identity or aggregation. Commands and
+Structured creation facts supply the chat peer; message bodies are not scanned. Commands and
 pre-dispatch failures have no persisted user event and do not count as questions.
 """
 
@@ -19,7 +19,6 @@ from deep_agent.db.models import (
     Agent,
     ChannelAccount,
     ChannelMessageRun,
-    ChannelSessionBinding,
     ChatSession,
     ChatSessionEvent,
     WecomApplication,
@@ -150,6 +149,10 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 if ids
                 else {}
             )
+            deleted = (await db.execute(select(ChatSession.source_id, ChatSession.source_type)
+                .outerjoin(ChannelAccount, ChannelAccount.id == ChatSession.source_id)
+                .where(ChatSession.source_type.in_(("channel:wecom", "channel:feishu", "channel:dingtalk")),
+                    ChatSession.source_id.is_not(None), ChannelAccount.id.is_(None)).distinct())).all()
             return {
                 "items": [
                     {
@@ -167,7 +170,11 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                         "application": applications.get(settings[r["id"]].get("application_id")),
                     }
                     for r in rows
-                ]
+                ] + [{"id": r.source_id, "name": "账户已删除", "channel_type": r.source_type.split(":", 1)[1],
+                    "bot_id": None, "transport": None, "enabled": False, "account_deleted": True,
+                    "agent": {"id": None, "name": None}, "user_id": None, "user_name": None,
+                    "deepfos_application": _deepfos_application_summary(None), "user_details_enabled": False,
+                    "application": None} for r in deleted]
             }
 
     async def _account(self, db, account_id):
@@ -182,36 +189,70 @@ class DiagnosticChannelQueries(SessionBoundMixin):
             )
         ).first()
         if row is None:
-            raise DiagnosticQueryError("渠道账户不存在", 404)
+            types = list((await db.scalars(select(ChatSession.source_type).where(
+                ChatSession.source_id == account_id, ChatSession.source_type.like("channel:%")).distinct())).all())
+            if len(types) != 1:
+                raise DiagnosticQueryError("渠道账户不存在", 404)
+            return SimpleNamespace(id=account_id, channel_type=types[0].split(":", 1)[1], enabled=False, settings={})
         return row
 
-    def _base(self, account, f):
-        r, b, e = ChannelMessageRun, ChannelSessionBinding, ChatSessionEvent
-        # Account index bounds the ledger; existing session/run/sequence index
-        # supports the existence probe and avoids joining potentially split events.
-        stmt = select(
-            r.id.label("message_id"),
-            r.session_id,
-            r.agent_run_id,
-            r.sender_id,
-            _OpaqueIdentity(b.peer_id).label("group_id"),
-            b.peer_type,
-            r.created_at.label("activity"),
-        ).join(b, and_(b.id == r.binding_id, b.account_id == r.account_id))
-        stmt = stmt.join(ChatSession, ChatSession.session_id == r.session_id).where(
-            r.account_id == account.id,
-            r.created_at >= f.start,
-            r.created_at < f.end,
-            r.agent_run_id.is_not(None),
-            exists(
-                select(1).where(
-                    e.session_id == r.session_id,
-                    e.run_id == r.agent_run_id,
-                    e.event_type == "user/message",
-                )
-            ),
-        )
-        stmt, user_id = self._canonical_identity(stmt, account, r.sender_id)
+    async def _base(self, db, account, f, *, load_peers=True):
+        e, r, session = ChatSessionEvent, ChannelMessageRun, ChatSession
+        from deep_agent.db.session_source import session_source_conditions
+        scope = [session.source_type == "channel:" + account.channel_type, session.source_id == account.id,
+                 *session_source_conditions(f.source_type, f.source_id)]
+        if f.agent_id:
+            scope.append(session.agent_id == f.agent_id)
+        if f.user_id:
+            scope.append(session.user_id == f.user_id)
+        if f.app_id:
+            scope.append(session.app_id == f.app_id)
+        question_runs = (select(e.session_id, e.run_id)
+            .join(session, session.session_id == e.session_id)
+            .where(*scope, e.event_type == "user/message",
+                   e.created_at >= f.start, e.created_at < f.end, e.run_id.is_not(None))
+            .distinct().subquery("scoped_question_runs"))
+        # One sender per actual Run. Conflicting ledger entries remain unattributed.
+        ledger = (select(r.session_id, r.agent_run_id,
+            case((func.count(func.distinct(_OpaqueIdentity(r.sender_id))) == 1, func.min(_OpaqueIdentity(r.sender_id))), else_=None).label("sender_id"))
+            .join(question_runs, and_(question_runs.c.session_id == r.session_id,
+                                      question_runs.c.run_id == r.agent_run_id))
+            .where(r.account_id == account.id, r.agent_run_id.is_not(None))
+            .group_by(r.session_id, r.agent_run_id).subquery("sender_ledger"))
+        peer, kind = literal(None), literal(None)
+        if load_peers:
+            active_sessions = select(e.session_id).join(session, session.session_id == e.session_id).where(
+                *scope, e.event_type == "user/message", e.created_at >= f.start, e.created_at < f.end).distinct()
+            # TextJSON deliberately supports MySQL 5.6: read only structured title
+            # facts for active source sessions, never JSON operators or message bodies.
+            origins = (await db.execute(select(e.session_id, e.payload).where(
+                e.session_id.in_(active_sessions), e.event_type == "session/title").order_by(e.sequence))).all()
+            peers, kinds = {}, {}
+            for sid, payload in origins:
+                origin = payload.get("channel")
+                if sid in peers or payload.get("source") != "channel" or not isinstance(origin, dict):
+                    continue
+                if origin.get("account_id") != account.id or origin.get("channel_type") != account.channel_type:
+                    continue
+                if isinstance(origin.get("peer_id"), str) and isinstance(origin.get("peer_type"), str):
+                    peers[sid], kinds[sid] = origin["peer_id"], origin["peer_type"]
+            def grouped_case(values):
+                groups = {}
+                for sid, value in values.items():
+                    groups.setdefault(value, []).append(sid)
+                return case(*[(e.session_id.in_(ids), value) for value, ids in groups.items()], else_=None) if groups else literal(None)
+            peer, kind = grouped_case(peers), grouped_case(kinds)
+        stmt = (select(e.event_id.label("message_id"), e.session_id,
+            e.run_id.label("agent_run_id"), ledger.c.sender_id,
+            session.source_type, session.source_id,
+            _OpaqueIdentity(peer).label("group_id"),
+            kind.label("peer_type"),
+            e.created_at.label("activity"))
+            .join(session, session.session_id == e.session_id)
+            .outerjoin(ledger, and_(ledger.c.session_id == e.session_id, ledger.c.agent_run_id == e.run_id))
+            .where(*scope, e.event_type == "user/message",
+                e.created_at >= f.start, e.created_at < f.end))
+        stmt, user_id = self._canonical_identity(stmt, account, ledger.c.sender_id)
         return stmt.add_columns(_OpaqueIdentity(user_id).label("user_id")).subquery("channel_questions")
 
     @staticmethod
@@ -242,13 +283,14 @@ class DiagnosticChannelQueries(SessionBoundMixin):
     async def overview(self, account_id, f):
         async with self._read() as db:
             account = await self._account(db, account_id)
-            base = self._base(account, f)
-            users, sessions, questions = (
+            base = await self._base(db, account, f, load_peers=False)
+            users, sessions, questions, unattributed = (
                 await db.execute(
                     select(
                         func.count(func.distinct(func.nullif(base.c.user_id, ""))),
                         func.count(func.distinct(base.c.session_id)),
                         func.count(),
+                        func.sum(case((or_(base.c.sender_id.is_(None), base.c.sender_id == ""), 1), else_=0)),
                     ).select_from(base)
                 )
             ).one()
@@ -277,6 +319,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 "active_users": users,
                 "session_count": sessions,
                 "question_count": questions,
+                "unattributed_question_count": unattributed or 0,
             },
             "active_users": [dict(r, name=names.get(r["user_id"])) for r in top],
         }
@@ -294,7 +337,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
     async def peers(self, account_id, f, kind="user", *, options_only=False, peer_id=None, sender_id=None, include_group_senders=False):
         async with self._read() as db:
             account = await self._account(db, account_id)
-            base = self._base(account, f)
+            base = await self._base(db, account, f)
             if kind == "group" and sender_id:
                 base = select(base).where(base.c.user_id == sender_id).subquery("sender_questions")
             identity, conditions = self._identity(base, kind)
@@ -308,6 +351,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 name.label("name"),
                 func.count(func.distinct(base.c.session_id)).label("session_count"),
                 func.count().label("question_count"),
+                func.sum(case((or_(base.c.sender_id.is_(None), base.c.sender_id == ""), 1), else_=0)).label("unattributed_question_count"),
                 func.max(base.c.activity).label("last_activity"),
             )
             if options_only:
@@ -434,7 +478,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
     async def sessions(self, account_id, f, kind, peer_id, sender_id=None):
         async with self._read() as db:
             account = await self._account(db, account_id)
-            base = self._base(account, f)
+            base = await self._base(db, account, f)
             if kind == "group" and sender_id:
                 base = select(base).where(
                     base.c.user_id == sender_id,
@@ -481,24 +525,20 @@ class DiagnosticChannelQueries(SessionBoundMixin):
             }
 
     async def _matching_questions(self, db, base, f):
-        # Page ledger identities first. Only this page's user events are loaded.
+        # Page actual user-event identities first. Only this page's user events are loaded.
         total = await db.scalar(select(func.count()).select_from(base))
         rows = (await db.execute(
-            select(base.c.message_id, base.c.session_id, base.c.agent_run_id, base.c.activity)
+            select(base.c.message_id, base.c.session_id, base.c.agent_run_id, base.c.activity, base.c.source_type, base.c.source_id)
             .order_by(base.c.activity.desc(), base.c.message_id.desc())
             .limit(f.limit).offset(f.offset)
         )).all()
         items = []
         if rows:
             event = ChatSessionEvent
-            latest = (select(base.c.message_id, event.session_id, func.max(event.sequence).label("sequence"))
-                .join(event, and_(event.session_id == base.c.session_id, event.run_id == base.c.agent_run_id))
-                .where(base.c.message_id.in_([r.message_id for r in rows]), event.event_type == "user/message")
-                .group_by(base.c.message_id, event.session_id).subquery())
-            events = (await db.execute(select(latest.c.message_id, event).join(event,
-                and_(event.session_id == latest.c.session_id, event.sequence == latest.c.sequence)))).all()
-            summaries = {mid: question_summary(e) for mid, e in events}
+            events = (await db.scalars(select(event).where(event.event_id.in_([r.message_id for r in rows])))).all()
+            summaries = {e.event_id: question_summary(e) for e in events}
             items = [{"session_id": r.session_id, "message_id": r.message_id,
+                "source_type": r.source_type, "source_id": r.source_id,
                 "question_count": 1, "latest_question": summaries.get(r.message_id),
                 "last_activity": utc_rfc3339(r.activity), "is_latest": f.offset == 0 and i == 0,
                 "is_question": True} for i, r in enumerate(rows)]
@@ -514,7 +554,10 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 await db.execute(
                     select(
                         base.c.session_id,
+                        func.min(base.c.source_type).label("source_type"),
+                        func.min(base.c.source_id).label("source_id"),
                         func.count().label("question_count"),
+                        func.sum(case((or_(base.c.sender_id.is_(None), base.c.sender_id == ""), 1), else_=0)).label("unattributed_question_count"),
                         func.max(base.c.activity).label("last_activity"),
                     )
                     .where(base.c.session_id.in_(ids))
@@ -529,9 +572,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
             select(e.session_id, func.max(e.sequence).label("sequence"))
             .join(
                 base,
-                and_(
-                    base.c.session_id == e.session_id, base.c.agent_run_id == e.run_id
-                ),
+                base.c.message_id == e.event_id,
             )
             .where(e.session_id.in_(ids), e.event_type == "user/message")
             .group_by(e.session_id)
@@ -552,7 +593,9 @@ class DiagnosticChannelQueries(SessionBoundMixin):
         return {
             r["session_id"]: {
                 "session_id": r["session_id"],
+                "source_type": r["source_type"], "source_id": r["source_id"],
                 "question_count": r["question_count"],
+                "unattributed_question_count": r["unattributed_question_count"] or 0,
                 "last_activity": utc_rfc3339(r["last_activity"]),
                 "latest_question": summaries.get(r["session_id"]),
             }

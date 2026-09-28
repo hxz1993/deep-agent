@@ -90,7 +90,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
     return source ? fmt(row[field]) : "—";
   };
   const chartLabels = () => seriesKeys(state.report, state.dimension);
-  const stat = (name, value, glyph, tone, detail = "") => `<div class="usage-stat"><span class="usage-stat-icon ${tone}">${icon(glyph)}</span><span><small>${name}</small><strong>${value}</strong>${detail ? `<span class="usage-stat-detail">${detail}</span>` : ""}</span></div>`;
+  const stat = (name, value, glyph, tone, detail = "", hint = "") => `<div class="usage-stat"><span class="usage-stat-icon ${tone}">${icon(glyph)}</span><span><small class="${hint ? "usage-stat-label-with-hint" : ""}">${name}${hint ? `<span class="usage-info" tabindex="0" aria-label="${title(hint)}">${icon("info")}</span><span class="usage-info-tooltip" role="tooltip">${title(hint)}</span>` : ""}</small><strong>${value}</strong>${detail ? `<span class="usage-stat-detail">${detail}</span>` : ""}</span></div>`;
   const rangeHelpHtml = range => diagnosticRangeHelpHtml(range, { formId:"usageFilters", busy:state.busy, formatTime:value => { const full = diagnosticTime(value); return /^\d{4}-\d{2}-\d{2} /.test(full) ? full.slice(5,16) : full; } });
   const legendHtml = report => {
     const rows = report?.trend?.[state.dimension] || [], totals = new Map();
@@ -130,7 +130,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
       <div class="usage-view-toolbar">${dimensionSwitchHtml()}<button type="button" class="diagnostics-button" data-usage-action="export">${icon("download")}导出</button></div>
       <div class="usage-overview">
         <section class="usage-surface usage-trend"><div class="usage-panel-head"><div><h2>用量趋势</h2><small>按日期查看 Token 与模型请求次数</small></div><div class="usage-chart-tools">${chartSwitchHtml("metric", "统计指标", METRICS)}<div class="agent-view-switch diagnostic-view-switch usage-chart-types" role="group" aria-label="图表类型">${[["line","折线图","chart-line"],["stack","堆叠图","chart-column-stacked"]].map(([key,name,glyph]) => `<button type="button" class="${state.chartType === key ? "active" : ""}" data-usage-chart-field="chartType" data-usage-chart-value="${key}" aria-label="${name}" title="${name}" aria-pressed="${state.chartType === key}">${icon(glyph)}</button>`).join("")}</div></div></div><div class="usage-chart-body"><div class="usage-chart">${usageChartSvg(data, state.dimension, state.metric, state.chartType, state.focused)}</div><div class="usage-legend">${legendHtml(data)}</div></div></section>
-        <div class="usage-summary"><div class="usage-stats">${stat("累计 Token", measured(summary, "total_tokens"), "layers-3", "purple")}${stat("日均 Token", (summary.input_reported_requests || summary.output_reported_requests) && data?.dates?.length ? short(summary.total_tokens/data.dates.length) : "—", "calendar-days", "blue")}${stat("单次平均 Token", summary.requests && !summary.missing_requests ? short(summary.total_tokens/summary.requests) : "—", "chart-no-axes-combined", "green")}${stat("峰值日期", peakUsage(data)?.[1] ? `${title(peakUsage(data)[0].slice(5))} <span class="usage-peak-secondary">${short(peakUsage(data)[1])}</span>` : "—", "calendar-check", "orange")}</div>${insightsHtml(data)}</div>
+        <div class="usage-summary"><div class="usage-stats">${stat("累计 Token", measured(summary, "total_tokens"), "layers-3", "purple", "", summary.missing_requests ? `有 ${fmt(summary.missing_requests)} 次请求缺少 Token 数据，总量仅包含已记录部分。` : "")}${stat("日均 Token", (summary.input_reported_requests || summary.output_reported_requests) && data?.dates?.length ? short(summary.total_tokens/data.dates.length) : "—", "calendar-days", "blue")}${stat("单次平均 Token", summary.requests && !summary.missing_requests ? short(summary.total_tokens/summary.requests) : "—", "chart-no-axes-combined", "green")}${stat("峰值日期", peakUsage(data)?.[1] ? `${title(peakUsage(data)[0].slice(5))} <span class="usage-peak-secondary">${short(peakUsage(data)[1])}</span>` : "—", "calendar-check", "orange")}</div>${insightsHtml(data)}</div>
       </div>
       <section class="usage-details"><div class="usage-workbench"><div class="usage-table-area"><div class="usage-table-frame"><div id="usageDetailRows"></div></div><div id="usageDetailFooter"></div></div><div class="channel-resizer usage-resizer" role="separator" aria-label="调整贡献会话宽度" aria-orientation="vertical" tabindex="0"></div><aside class="usage-contributions diagnostic-channels-page" aria-label="贡献会话"><div id="usageContributionRows"></div><div id="usageContributionFooter"></div></aside></div></section>
       ${state.busy ? '<p class="usage-loading" role="status">正在查询用量…</p>' : ""}${exportDialog()}</div>`;
@@ -166,9 +166,9 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
     if (state.contributing) {
       const rows = state.contributions?.items || [], total = state.contributions?.total || 0;
       const selected = state.details?.items?.find(row => row.key === state.contributing.key), dimension = state.contributing.dimension;
-      const description = dimension === "model" ? selected?.model?.provider_name || "模型用量" : dimension === "user" ? state.details?.users?.[state.contributing.key]?.email || "用户用量" : `Agent · ${state.contributing.key}`;
+      const description = dimension === "model" ? selected?.model?.provider_name || "模型用量" : dimension === "user" ? state.details?.users?.[state.contributing.key]?.email || "用户用量" : state.contributing.key;
       const name = dimension === "user" ? state.details?.users?.[state.contributing.key]?.username || state.contributing.name : dimension === "model" ? modelName(selected?.model) : selected?.name || state.contributing.name;
-      contributionHost.innerHTML = `<div class="usage-panel-head">${contributionIcon(selected || {})}<div class="usage-object-copy"><h2>${title(name)}</h2><small>${title(description)}</small></div><span class="usage-session-count" title="${total} 个会话">${icon("messages-square")}${fmt(total)}</span></div>${rows.map(row => `<article class="usage-session-entry"><div class="usage-session-content"><div class="usage-session-heading"><button type="button" class="channel-last-question" data-usage-session="${title(row.session_id)}">${title(row.title || "未命名会话")}</button><strong class="usage-token-count" title="Token">${measured(row,"total_tokens")}</strong></div><div class="diagnostic-session-id channel-session-meta"><span class="channel-session-time"><code title="${title(row.session_id)}">${title(row.session_id.slice(0,8))}</code><button type="button" class="diagnostic-copy-separator" data-usage-copy="${title(row.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${title(row.session_id)}">${icon("copy")}</button><time>${title(diagnosticTime(row.last_activity))}</time></span><span class="usage-session-counts"><span title="模型请求次数">${icon("activity")}${fmt(row.requests)}</span></span></div></div></article>`).join("") || `<p class="diagnostics-empty">${state.contributions ? "暂无贡献会话" : "正在加载贡献会话…"}</p>`}`;
+      contributionHost.innerHTML = `<div class="usage-panel-head">${contributionIcon(selected || {})}<div class="usage-object-copy"><h2>${title(name)}</h2><small>${dimension === "agent" ? `<span class="usage-agent-id"><code title="${title(description)}">${title(description.slice(0,8))}</code><button type="button" class="usage-agent-copy" data-usage-copy="${title(description)}" data-usage-copy-label="Agent ID" aria-label="复制 Agent ID" title="复制完整 Agent ID">${icon("copy")}</button></span>` : title(description)}</small></div><span class="usage-session-count" title="${total} 个会话">${icon("messages-square")}${fmt(total)}</span></div>${rows.map(row => `<article class="usage-session-entry"><div class="usage-session-content"><div class="usage-session-heading"><button type="button" class="channel-last-question" data-usage-session="${title(row.session_id)}">${title(row.title || "未命名会话")}</button><strong class="usage-token-count" title="Token">${measured(row,"total_tokens")}</strong></div><div class="diagnostic-session-id channel-session-meta"><span class="channel-session-time"><code title="${title(row.session_id)}">${title(row.session_id.slice(0,8))}</code><button type="button" class="diagnostic-copy-separator" data-usage-copy="${title(row.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${title(row.session_id)}">${icon("copy")}</button><time>${title(diagnosticTime(row.last_activity))}</time></span><span class="usage-session-counts"><span title="模型请求次数">${icon("activity")}${fmt(row.requests)}</span></span></div></div></article>`).join("") || `<p class="diagnostics-empty">${state.contributions ? "暂无贡献会话" : "正在加载贡献会话…"}</p>`}`;
       contributionFooter.innerHTML = rows.length < total ? `<button type="button" class="usage-load-more" data-usage-action="contribution-more" ${state.contributionBusy ? "disabled" : ""} title="已加载 ${rows.length} / ${total} 个会话">加载更多</button>` : "";
     } else {
       contributionHost.innerHTML = `<div class="usage-panel-head"><h2>贡献会话</h2></div><p class="diagnostics-empty">选择左侧条目，查看贡献会话</p>`;
@@ -182,7 +182,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
       return title(row.name || row.key);
     };
     host.innerHTML = `${headers}${rows.map(row => `<button type="button" class="usage-detail-row ${state.contributing?.key === row.key && state.contributing?.dimension === state.dimension ? "is-selected" : ""}" data-usage-key="${title(row.key)}"><span class="usage-detail-identity">${rowIcon(row)}<span class="usage-detail-name">${names(row)}</span></span><strong>${measured(row, "total_tokens")}</strong><span>${fmt(row.requests)}</span><span>${row.requests && !row.missing_requests ? short(row.total_tokens/row.requests) : "—"}</span><span>${state.details?.summary?.total_tokens ? (row.total_tokens/state.details.summary.total_tokens*100).toFixed(1)+"%" : "—"}</span></button>`).join("") || `<p class="diagnostics-empty">${state.busy ? "正在加载…" : "当前条件暂无用量"}</p>`}`;
-    footer.innerHTML = (total > 10 ? pagination(total, state.offset, "previous", "next") : "") + (state.details?.summary?.missing_requests ? `<span class="usage-detail-incomplete">${fmt(state.details.summary.missing_requests)} 次用量不完整</span>` : "");
+    footer.innerHTML = (total > 10 ? pagination(total, state.offset, "previous", "next") : "");
     restoreScroll(scroll);
   }
 
@@ -264,16 +264,17 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
     if (copy) {
       if (copy.disabled) return;
       copy.disabled = true;
+      const copyLabel = copy.dataset.usageCopyLabel || "会话 ID";
       try {
         await navigator.clipboard.writeText(copy.dataset.usageCopy);
         copy.classList.add("copied"); copy.innerHTML = icon("check");
-        copy.title = "会话 ID 已复制"; copy.setAttribute("aria-label", "会话 ID 已复制"); icons();
-        window.DeepAgentConsole?.toast("会话 ID 已复制");
+        copy.title = `${copyLabel} 已复制`; copy.setAttribute("aria-label", `${copyLabel} 已复制`); icons();
+        window.DeepAgentConsole?.toast(`${copyLabel} 已复制`);
         setTimeout(() => {
           if (!copy.isConnected) return;
           copy.classList.remove("copied"); copy.innerHTML = icon("copy");
-          copy.title = `复制 Session ID：${copy.dataset.usageCopy}`;
-          copy.setAttribute("aria-label", "复制 Session ID"); copy.disabled = false; icons();
+          copy.title = `复制 ${copyLabel}：${copy.dataset.usageCopy}`;
+          copy.setAttribute("aria-label", `复制 ${copyLabel}`); copy.disabled = false; icons();
         }, 1500);
       } catch { copy.disabled = false; window.DeepAgentConsole?.toast("复制失败，请手动选择", true); }
       return;

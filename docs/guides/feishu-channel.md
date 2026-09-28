@@ -62,7 +62,7 @@ DeepFOS 应用及 API Key 的关联规则与企微相同。飞书凭据只用于
 
 ## 数据库与回退
 
-当前数据库 Head 为 010。经用户单独确认，009→010 仅删除 channel_message_operations 及其中发送回执；008 的 channel_message_runs 来源字段、原有渠道配置、会话绑定、消息与附件不变。保留已发布 009 迁移，通过正常增量升级处理已部署环境；升级前备份数据库，API 完成升级后再启动新网关。
+当前数据库 Head 为 010。经用户单独确认，009→010 删除 channel_message_operations 及其中发送回执，并增加 chat_sessions.source_type/source_id 两列；历史空来源按内部读取，见 [会话来源](session-sources.md)；008 的 channel_message_runs 来源字段、原有渠道配置、会话绑定、消息与附件不变。保留已发布 009 迁移，通过正常增量升级处理已部署环境；升级前备份数据库，API 完成升级后再启动新网关。
 
 Message 不再维护独立发送记录，也不新增 Runs 字段或缓存替代；仅返回本次调用的逐项结果，不承诺跨请求、跨重启发送去重。
 

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from deep_agent.db.conversation import SqlConversationCoordinator
 from deep_agent.db.dialect import DbDialect
-from deep_agent.db.models import Agent, Base, ChatSessionEvent, LlmModel, LlmProvider
+from deep_agent.db.models import Agent, Base, ChatSession, ChatSessionEvent, LlmModel, LlmProvider
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.diagnostics.sessions import SessionFilters
 from deep_agent.diagnostics.usage import UsageQueries
@@ -60,6 +60,30 @@ class UsageLedgerTests(unittest.IsolatedAsyncioTestCase):
     def filters(self):
         now = datetime.now(UTC)
         return SessionFilters(start=now - timedelta(days=1), end=now + timedelta(minutes=1), timezone="Asia/Shanghai")
+
+    async def test_source_filters_keep_console_continuation_usage_in_channel(self):
+        for sid, kind, source_id in (("internal", None, None), ("channel", "channel:dingtalk", "deleted-account")):
+            for n in range(2):
+                run = sid + str(n)
+                await self.store.append_message_parts(sid,
+                    messages=[ModelResponse(parts=[TextPart("reply")], usage=RequestUsage(input_tokens=10, output_tokens=2), run_id=run)],
+                    agent_id=self.agent_id, user_id="owner", turn_id=run, run_id=run,
+                    usage_model_id=self.model_id, usage_provider_id=self.provider_id)
+            async with self.factory() as db:
+                await db.execute(update(ChatSession).where(ChatSession.session_id == sid).values(source_type=kind, source_id=source_id))
+                await db.commit()
+        query = UsageQueries(self.factory)
+        f = self.filters()
+        all_usage = await query.report(f)
+        self.assertEqual(all_usage["summary"]["requests"], 4)
+        for kind, source_id in (("internal", None), ("channel:dingtalk", "deleted-account")):
+            scoped = SessionFilters(f.start, f.end, source_type=kind, source_id=source_id)
+            report = await query.report(scoped)
+            self.assertEqual(report["summary"]["requests"], 2)
+            sessions, total = await query.sessions(scoped, dimension="agent", key=self.agent_id)
+            self.assertEqual(total, 1)
+            self.assertEqual(sessions[0]["source_type"], kind)
+            self.assertEqual(sessions[0]["source_id"], source_id)
 
     async def test_split_response_and_replay_use_one_carrier_and_one_request(self):
         message = ModelResponse(parts=[TextPart("first"), TextPart("second")],

@@ -223,7 +223,7 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
         session_id = resolved.session.session_id
         self.assertEqual(resolved.session.title, "wecom｜User｜小明(external-fixture)")
         self.assertEqual(resolved.session.next_sequence, 2)
-        expected = dict(self.peer, account_name="测试渠道", channel_type="wecom", peer_metadata={"user_id": "external-fixture", "display_name": "小明"})
+        expected = dict(self.peer, account_deleted=False, account_name="测试渠道", channel_type="wecom", peer_metadata={"user_id": "external-fixture", "display_name": "小明"})
         self.assertEqual(await self.store.get_session_origin(session_id), expected)
         self.assertIsNone(await self.stores.coordinator.ensure_title_fallback(
             session_id, agent_id=self.agent_id, user_id="platform-fixture", title="不应替换",
@@ -343,7 +343,7 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
         async with self.factory() as db:
             before = (await db.get(ChatSession, session_id)).updated_at
         self.assertEqual((await repair_channel_origins(self.store))["repaired"], 1)
-        self.assertIsNone(await self.store.get_session_origin(session_id))
+        self.assertIsNone((await self.store.get_session_origin(session_id))["peer_id"])
         self.assertEqual((await repair_channel_origins(self.store, apply=True))["repaired"], 1)
         self.assertEqual((await repair_channel_origins(self.store, apply=True))["already_present"], 1)
         async with self.factory() as db:

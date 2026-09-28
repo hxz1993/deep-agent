@@ -264,8 +264,7 @@ test("输入区使用内嵌模型菜单并把非文本模态放到模型选项",
   assert.match(chatSource, /\["image", "audio", "video"\]/);
   assert.doesNotMatch(template, /composerModelModalities|composerUploadCapabilities/);
   assert.doesNotMatch(template, /deep-agent 可能会出错|composer-hint/);
-  assert.match(chatSource, /COMPOSER_PROVIDER_BRANDS/);
-  assert.match(chatSource, /assets\/provider-logos\/deepseek\.ico/);
+  assert.match(chatSource, /provider-icons\.js/);
   assert.match(chatSource, /class="composer-model-option-name"/);
   assert.doesNotMatch(chatSource, /composer-model-option-copy[\s\S]*<small>/);
 });
@@ -363,9 +362,10 @@ test("会话标题由持久化 Event 实时更新且不再轮询或自动重命�
   assert.doesNotMatch(chatSource, /auto-rename-btn|自动重命名|JSON\.stringify\(\{ auto: true \}\)/);
 });
 
-test("会话列表只展示活动时间和单气泡提问统计", () => {
+test("会话列表展示来源提问图标与活动时间", () => {
   assert.match(chatSource, /class="session-activity">\$\{escapeHtml\(activity\)\}/);
-  assert.match(chatSource, /title="提问数"[^\n]*message-circle-more/);
+  assert.match(chatSource, /title="提问数">\$\{questionIcon\}/);
+  assert.match(chatSource, /const questionIcon = origin \?[^\n]*message-circle-more/);
   assert.doesNotMatch(chatSource, /title="消息事件数"[^\n]*repeat-2/);
   assert.doesNotMatch(chatSource, /title="附件数"[^\n]*paperclip/);
   assert.match(consoleCss, /\.session-item:not\(\.active\):hover\s*\{[^}]*border-color: color-mix[^}]*background:\s*var\(--bg\)[^}]*box-shadow:/);

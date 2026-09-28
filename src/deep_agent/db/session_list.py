@@ -20,6 +20,8 @@ class SessionListFilters:
     has_messages: bool | None = None
     sort: SortField = "updated_at"
     query: str | None = None
+    source_type: str | None = None
+    source_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -36,3 +38,5 @@ class SessionSummaryRow:
     title: str | None = None
     app_id: str | None = None
     space_id: str | None = None
+    source_type: str = "internal"
+    source_id: str | None = None

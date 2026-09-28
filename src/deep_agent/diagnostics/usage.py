@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, or_, select
 
 from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent, LlmModel, LlmProvider
+from deep_agent.db.session_source import session_source_conditions
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, SessionFilters
 
@@ -69,8 +70,10 @@ class UsageQueries(SessionBoundMixin):
                            ChatSessionEvent.created_at < filters.end,
                            ChatSessionEvent.usage.is_not(None))
                     .order_by(ChatSessionEvent.created_at, ChatSessionEvent.event_id).limit(PAGE))
+                statement = statement.where(*session_source_conditions(filters.source_type, filters.source_id))
                 if filters.agent_id: statement = statement.where(ChatSession.agent_id == filters.agent_id)
                 if filters.user_id: statement = statement.where(ChatSession.user_id == filters.user_id)
+                if filters.app_id: statement = statement.where(ChatSession.app_id == filters.app_id)
                 if cursor:
                     statement = statement.where(or_(ChatSessionEvent.created_at > cursor[0],
                         and_(ChatSessionEvent.created_at == cursor[0], ChatSessionEvent.event_id > cursor[1])))
@@ -158,8 +161,9 @@ class UsageQueries(SessionBoundMixin):
         result = result[offset:offset + limit]
         if result:
             async with self._read() as db:
-                titles = dict((await db.execute(select(ChatSession.session_id, ChatSession.title)
-                    .where(ChatSession.session_id.in_([row["session_id"] for row in result])))).all())
+                titles = {r.session_id: r for r in (await db.execute(select(ChatSession.session_id, ChatSession.title, ChatSession.source_type, ChatSession.source_id)
+                    .where(ChatSession.session_id.in_([row["session_id"] for row in result])))).all()}
             for row in result:
-                row["title"] = titles.get(row["session_id"])
+                item = titles.get(row["session_id"])
+                row.update(title=item.title if item else None, source_type=(item.source_type or "internal") if item else "internal", source_id=item.source_id if item else None)
         return result, total

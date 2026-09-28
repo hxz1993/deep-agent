@@ -31,7 +31,7 @@ async def channel_accounts(
     async with query_budget():
         result = await DiagnosticChannelQueries(ctx.db_session_factory, profiles=ChannelProfileService(ctx)).accounts()
     result = await with_users(
-        request, caller_user_id, result, {r["user_id"] for r in result["items"]}
+        request, caller_user_id, result, {r["user_id"] for r in result["items"] if r["user_id"]}
     )
     for item in result["items"]:
         user = result["users"].get(item["user_id"])

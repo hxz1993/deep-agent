@@ -46,6 +46,8 @@ def filters(
     agent_id: str | None = Query(default=None, max_length=256),
     user_id: str | None = Query(default=None, max_length=128),
     app_id: str | None = Query(default=None, max_length=256),
+    source_type: Literal["internal", "channel:wecom", "channel:feishu", "channel:dingtalk"] | None = Query(default=None),
+    source_id: str | None = Query(default=None, min_length=1, max_length=255),
     query: str | None = Query(default=None, max_length=256),
     has_questions: bool | None = Query(default=None), has_execution_error: bool | None = Query(default=None),
     latest_status: Literal["running", "waiting", "completed", "stopped", "error", "unknown", "not_started"] | None = Query(default=None),
@@ -54,6 +56,7 @@ def filters(
     actual_end = end or datetime.now(UTC)
     return SessionFilters(start=start or actual_end - timedelta(days=7), end=actual_end, timezone=timezone,
         agent_id=agent_id, user_id=user_id, app_id=app_id, query=query, has_questions=has_questions,
+        source_type=source_type, source_id=source_id,
         has_execution_error=has_execution_error, latest_status=latest_status, limit=limit, offset=offset)
 
 

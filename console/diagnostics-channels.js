@@ -4,7 +4,7 @@ import { escapeHtml as e, icon, icons, selectHtml, bindDiagnosticSelects, diagno
 import { diagnosticHash, sessionRange, channelEntryFilters } from "./diagnostics-navigation.js?v=20260915-release-audit";
 import { createSessionReader, sessionQueryError } from "./diagnostics-session-query.js?v=20260915-release-audit";
 import { bindChannelResizer } from "./channel-resizer.js?v=20260915-release-audit";
-import { shortQuestionTime } from "./diagnostics-sessions.js?v=20260928-channel-audit";
+import { shortQuestionTime } from "./diagnostics-sessions.js?v=20260929-session-source";
 
 const PERIODS = [["24", "最近 1 天"], ["168", "最近 7 天"], ["720", "最近 30 天"]];
 const PAGE_SIZE = 25;
@@ -46,7 +46,7 @@ export function initDiagnosticChannels({ root, navigate, replace, onBack }) {
   }
   function metricsHtml() {
     const summary = state.overview?.summary;
-    return `<div class="channel-metrics">${[["active_users", "活跃用户", "users-round", "purple"], ["session_count", "会话数", "messages-square", ""], ["question_count", "提问数", "message-circle-more", "green"]].map(([key, label, glyph, tone]) => `<div class="channel-metric"><span class="diagnostic-stat-icon ${tone}">${icon(glyph)}</span><span class="channel-metric-copy"><small>${label}</small><strong>${summary ? count(summary[key]) : "—"}</strong></span></div>`).join("")}</div>`;
+    return `<div class="channel-metrics">${[["active_users", "活跃用户", "users-round", "purple"], ["session_count", "会话数", "messages-square", ""], ["question_count", "提问数", "message-circle-more", "green"], ["unattributed_question_count", "无渠道发送者", "user-round-minus", ""]].map(([key, label, glyph, tone]) => `<div class="channel-metric"><span class="diagnostic-stat-icon ${tone}">${icon(glyph)}</span><span class="channel-metric-copy"><small${key === "unattributed_question_count" ? ' title="包含控制台续问等无法关联渠道发送者的提问；计入渠道总量，不计入成员排名。"' : ""}>${label}</small><strong>${summary ? count(summary[key]) : "—"}</strong></span></div>`).join("")}</div>`;
   }
   function rankingHtml() {
     const users = state.overview?.active_users || [];

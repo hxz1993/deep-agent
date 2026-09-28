@@ -120,8 +120,7 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 
 .usage-session-entry { display:flex; align-items:center; gap:10px; padding:7px 0; }
 .usage-object-icon { display:grid; place-items:center; flex:0 0 36px; width:36px; height:36px; border-radius:8px; color:var(--diag-accent); background:var(--diag-accent-soft); }
-.usage-object-icon svg { width:28px; height:28px; }
-.usage-object-icon > svg[data-lucide="bot"] { width:22px; height:22px; }
+.usage-object-icon svg { width:24px; height:24px; }
 .usage-session-content,.usage-object-copy { flex:1; min-width:0; }
 .usage-session-content .channel-session-meta { margin-left:0; margin-top:3px; }
 .usage-session-content .channel-session-time { gap:6px; flex-wrap:wrap; }
@@ -218,13 +217,12 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-icon-layer[data-depth="0"] { transform:translate(0,10px); z-index:2; }
 .usage-icon-layer[data-depth="1"] { transform:translate(10px,0); z-index:1; }
 .usage-icon-layer:not([data-depth="0"]):not([data-depth="1"]) { opacity:0; transform:translate(10px,0); pointer-events:none; }
-.usage-object-icon .usage-icon-layer .usage-identity-logo,.usage-icon-layer svg { width:20px; height:20px; }
+.usage-object-icon .usage-icon-layer .usage-identity-logo,.usage-icon-layer svg { width:24px; height:24px; }
 @media (prefers-reduced-motion:reduce) { .usage-icon-layer { transition:none; } }
 
 /* DingTalk already has its own filled tile; avoid a second frame. */
 .usage-icon-layer:has(img[src$="/dingtalk.svg"]) { border:0; background:transparent; }
 
-.usage-object-icon .usage-icon-layer img[src$="/dingtalk.svg"] { width:26px; height:26px; }
 
 .usage-stat-label-with-hint { position:relative; width:fit-content; cursor:help; }
 .usage-info-tooltip { display:none; position:absolute; top:calc(100% + 6px); right:0; z-index:20; width:220px; max-width:calc(100vw - 40px); padding:8px 10px; border:1px solid var(--diag-border); border-radius:6px; background:var(--diag-surface); color:var(--text-dim); box-shadow:0 4px 14px #00000014; font-size:12px; font-weight:400; line-height:1.5; white-space:normal; }

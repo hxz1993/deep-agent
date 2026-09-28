@@ -21,6 +21,7 @@ from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.projector import ConversationProjectionError
 from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, DiagnosticSessionQueries, SessionFilters, detail_event_metadata, project_diagnostic_history, query_budget
+from deep_agent.services.channel_profiles import ChannelProfileService
 from deep_agent.time import UtcDatetime, utc_rfc3339
 
 
@@ -45,6 +46,8 @@ def filters(
     agent_id: str | None = Query(default=None, max_length=256),
     user_id: str | None = Query(default=None, max_length=128),
     app_id: str | None = Query(default=None, max_length=256),
+    source_type: Literal["internal", "channel:wecom", "channel:feishu", "channel:dingtalk"] | None = Query(default=None),
+    source_id: str | None = Query(default=None, min_length=1, max_length=255),
     query: str | None = Query(default=None, max_length=256),
     has_questions: bool | None = Query(default=None), has_execution_error: bool | None = Query(default=None),
     latest_status: Literal["running", "waiting", "completed", "stopped", "error", "unknown", "not_started"] | None = Query(default=None),
@@ -53,6 +56,7 @@ def filters(
     actual_end = end or datetime.now(UTC)
     return SessionFilters(start=start or actual_end - timedelta(days=7), end=actual_end, timezone=timezone,
         agent_id=agent_id, user_id=user_id, app_id=app_id, query=query, has_questions=has_questions,
+        source_type=source_type, source_id=source_id,
         has_execution_error=has_execution_error, latest_status=latest_status, limit=limit, offset=offset)
 
 
@@ -84,6 +88,9 @@ async def get_diagnostic_overview(request: Request, ctx: AppContextDep, caller_u
 async def list_diagnostic_sessions(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep, selected: FiltersDep):
     async with query_budget():
         result = await service(ctx).list(selected)
+    origins = await ChannelProfileService(ctx).enrich_origins({row["session_id"]: row.get("channel") for row in result["items"]})
+    for row in result["items"]:
+        row["channel"] = origins.get(row["session_id"])
     return await with_users(request, caller_user_id, result, {row["user_id"] for row in result["items"]})
 
 
@@ -143,6 +150,7 @@ async def get_diagnostic_session(request: Request, ctx: AppContextDep, caller_us
                 # No current model/provider/configuration must not hide history.
                 # Context is a best-effort estimate, never a historical snapshot.
                 result["context_error"] = "当前配置无法估算上下文；会话正文和轨迹仍可查看"
+    result["channel"] = (await ChannelProfileService(ctx).enrich_origins({session_id: result.get("channel")})).get(session_id)
     return await with_users(request, caller_user_id, result, [result["user_id"]])
 
 

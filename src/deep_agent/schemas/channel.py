@@ -33,11 +33,15 @@ class WecomRegistrationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DingtalkRegistrationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class ChannelAccountCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., max_length=191)
-    channel_type: Literal["wecom", "feishu"] = "wecom"
+    channel_type: Literal["wecom", "feishu", "dingtalk"] = "wecom"
     transport: Literal["websocket"] = "websocket"
     bot_id: str = Field(default="", max_length=191)
     secret: str = ""

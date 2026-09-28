@@ -19,7 +19,11 @@ if not is_configured():
 
 target_metadata = Base.metadata
 
-database_url = config.attributes.get("database_url") or get_database_url()
+# Never replace an explicitly supplied test/maintenance target with ambient settings.
+configured_url = config.get_main_option("sqlalchemy.url")
+if configured_url == "driver://user:pass@localhost/dbname":
+    configured_url = None
+database_url = config.attributes.get("database_url") or configured_url or get_database_url()
 if database_url:
     config.set_main_option("sqlalchemy.url", escape_for_ini(database_url))
 

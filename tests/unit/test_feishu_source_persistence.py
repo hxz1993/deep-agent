@@ -21,6 +21,7 @@ class FeishuSourcePersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_group_senders_share_session_but_keep_separate_durable_identity(self):
         account = await self.store.create_account(ChannelAccountCreate(
             name="飞书测试", channel_type="feishu", bot_id="cli_fixture", secret="fixture",
+            settings={"feishu": {"user_details_enabled": True}},
             agent_id=self.account.agent_id, session_user_id=self.account.session_user_id, enabled=True,
         ))
         captured = []

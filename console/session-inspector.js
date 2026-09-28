@@ -1,5 +1,6 @@
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
+import { composerProviderIcon } from "./provider-icons.js?v=20260929-model-provider";
 // Pure shared inspector markup. Hosts supply identity, historical data and tab state.
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -128,7 +129,7 @@ export function renderCacheFacts(summary = {}, { scope = "会话累计", ratioLa
 }
 
 export function renderSessionInspector({
-  state = {}, activeSession = {}, model = null, context = {}, identity = {}, contextStatus = {},
+  state = {}, activeSession = {}, model = null, modelProvider = null, context = {}, identity = {}, contextStatus = {},
   usage = {}, run = {}, sessionCache = {}, runCache = {}, runModel = null, agentName = "—", channelOrigin = null, agentChannels = [],
   activeTab = "session", contextContent = "", statusText = "", statusClass = "idle",
 } = {}) {
@@ -183,21 +184,24 @@ export function renderSessionInspector({
   if (!hasChannelTab && activeTab === "channel") activeTab = "session";
   const channelSource = channelOrigin ? `<section class="inspector-section">
     <div class="inspector-facts compact">
-      ${inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(channelOrigin.accountName)}<span class="inspector-channel-badge">${escapeHtml(channelOrigin.platform)}</span></span>`, { wide: true })}
-      ${channelOrigin.displayName ? inspectorFact("会话对象", channelOrigin.peerName, { wide: true }) : ""}
+      ${inspectorFactHtml("渠道", `<span class="inspector-channel-name"><img class="session-source-logo" src="${channelOrigin.logo}" alt="" />${escapeHtml(channelOrigin.platform)}</span>`)}
+      ${inspectorFact("来源 ID", channelOrigin.sourceId, { mono: true, wide: true, copy: true })}
+      ${inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(channelOrigin.accountName)}</span>`, { wide: true })}
+      ${inspectorFact("会话对象", channelOrigin.displayName || "未记录", { wide: true })}
       ${inspectorFact(channelOrigin.conversationType, channelOrigin.peerId, { mono: true, wide: true, copy: true, copyLabel: channelOrigin.peerKey })}
       ${channelOrigin.peerKey === "User ID" && channelOrigin.chatId ? inspectorFact("Chat ID", channelOrigin.chatId, { mono: true, wide: true, copy: true }) : ""}
       ${inspectorFact("会话 ID", state.sessionId, { mono: true, wide: true, copy: true, displayValue: state.sessionId?.slice(0, 8) })}
     </div></section>` : `<section class="inspector-section">
       <p class="inspector-channel-note">${state.sessionId ? "当前会话不是由渠道发起的。" : "尚未选择渠道会话。"}</p>
       <header><strong>Agent 关联渠道</strong></header>
-      <div class="inspector-facts compact">${agentChannels.map((account) => inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(account.name)}<span class="inspector-channel-badge">${escapeHtml(account.channel_type === "wecom" ? "企微" : account.channel_type === "feishu" ? "飞书" : account.channel_type)}</span></span>`)).join("")}</div>
+      <div class="inspector-facts compact">${agentChannels.map((account) => inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(account.name)}<span class="inspector-channel-badge">${escapeHtml(account.channel_type === "wecom" ? "企微" : account.channel_type === "feishu" ? "飞书" : account.channel_type === "dingtalk" ? "钉钉" : account.channel_type)}</span></span>`)).join("")}</div>
     </section>`;
   const sessionContent = `<section class="inspector-section inspector-session-group">
     <div class="inspector-facts">
       ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true, copy: Boolean(state.sessionId), displayValue: state.sessionId?.slice(0, 8) })}
       ${inspectorFact("Agent", agentName, { wide: true })}
-      ${inspectorFact("模型", model?.name || model?.model || "未记录")}
+      ${inspectorFactHtml("模型", `<span class="inspector-channel-name">${modelProvider ? `<span class="composer-provider-icon">${composerProviderIcon(modelProvider)}</span>` : ""}${escapeHtml(model?.name || model?.model || "未记录")}</span>`)}
+      ${inspectorFactHtml("会话来源", channelOrigin ? `<span class="inspector-channel-name"><img class="session-source-logo" src="${channelOrigin.logo}" alt="" />${escapeHtml(channelOrigin.platform)}</span>` : `<span class="inspector-channel-name"><img class="session-source-logo" src="./favicon.svg?v=20260922-d-rounded" alt="" />DeepFOS</span>`)}
       ${inspectorFactHtml("App / Space", sessionScope, { wide: true })}
       ${inspectorFactHtml("会话统计", sessionCounts)}
       ${inspectorFact("Language", context.language || "未记录")}

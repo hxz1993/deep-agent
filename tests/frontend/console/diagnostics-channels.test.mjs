@@ -114,3 +114,27 @@ test("clearing diagnostics removes cached identities and searches before another
  assert.equal(h.pickerCallbacks.user.initialQuery,"");
  h.controller.deactivate();
 });
+
+
+test("current identity uses ID without a name; incomplete profile data has a retry", async () => {
+ const h=harness(path=>path.includes('/peers?') ? {items:[peer('id-only')],total:1,user_details_enabled:true,profiles_complete:false,unresolved_count:1} : response(path));
+ h.activate(); await settle();
+ assert.equal(vm.runInContext("channelPeerName({peer_id:'id-only', name:null, title:'旧姓名'})", h.context),'id-only');
+ assert.match(h.root.innerHTML,/部分用户资料未取得/);
+ assert.match(h.root.innerHTML,/retry-profiles/);
+ const before=h.calls.length;
+ await h.click({channelAction:'retry-profiles'}); await settle();
+ assert.ok(h.calls.length>before);
+ h.controller.deactivate();
+});
+
+
+test("DingTalk account details reflect the nickname switch", async () => {
+ for (const enabled of [false, true]) {
+  const h=harness(path=>path.endsWith("/accounts") ? {items:[{id:"one",name:"钉钉账号",channel_type:"dingtalk",enabled:true,user_details_enabled:enabled}]} : response(path));
+  h.activate();await settle();
+  assert.match(h.root.innerHTML, /钉钉应用/);
+  assert.match(h.root.innerHTML, enabled ? /用户详情<\/dt><dd>已开启，由消息提供昵称/ : /用户详情<\/dt><dd>未开启/);
+  h.controller.deactivate();
+ }
+});

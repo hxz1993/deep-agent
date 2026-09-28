@@ -21,13 +21,14 @@ from lark_channel.core import AccessTokenType, HttpMethod
 from lark_channel.core.model import BaseRequest, RequestOption
 from lark_channel.channel.config import (
     ChannelConfig, ChatQueueConfig, DedupConfig, InboundConfig, MediaCacheConfig,
-    PolicyConfig, SafetyConfig, SecurityConfig, TextBatchConfig, TransportConfig,
+    PolicyConfig, SafetyConfig, SecurityConfig, TextBatchConfig, TransportConfig, NameCacheConfig,
 )
 from loguru import logger
 
 from deep_agent.channels.contracts import InboundMedia, InboundMessage, MessageCallback
 from .messages import MediaHandle, ReplyHandle, UnsupportedMessage, parse_message
 from .sdk_logging import configure_sdk_logging
+from .profiles import FeishuProfiles
 
 
 @dataclass
@@ -54,13 +55,15 @@ class FeishuSDKAdapter:
         self.account = account
         self._infinite_retry = infinite_retry
         settings = (account.settings or {}).get("feishu") or {}
+        self._profiles_enabled = settings.get("user_details_enabled") is True
+        self._profiles = FeishuProfiles(self._fetch_names)
         policy = PolicyConfig(
             require_mention=True,
             group_policy="allowlist" if settings.get("group_allowlist") else "open",
             group_allowlist=settings.get("group_allowlist") or None,
         )
         configure_sdk_logging()
-        self.client = FeishuChannel(config=ChannelConfig(
+        self.client = FeishuChannel(name_lookup=self._lookup_sender_names, config=ChannelConfig(
             app_id=account.bot_id, app_secret=account.secret, log_level=LogLevel.ERROR,
             transport=TransportConfig(kind="ws", auto_reconnect=infinite_retry,
                                       http_timeout_seconds=15, handshake_timeout_seconds=15),
@@ -71,12 +74,13 @@ class FeishuSDKAdapter:
                                 text_batch=TextBatchConfig(delay_ms=0, long_delay_ms=0, max_messages=1),
                                 chat_queue=ChatQueueConfig(enabled=False, merge_while_busy=False)),
             inbound=InboundConfig(emit_raw_events=True, expand_merge_forward=False,
-                                  fetch_interactive_card=False),
+                                  fetch_interactive_card=False, name_cache=NameCacheConfig(enabled=False)),
             security=SecurityConfig(mode="strict", max_concurrent_ws_handlers=64,
                                     max_ws_fragment_bytes=8 * 1024 * 1024,
                                     max_ws_fragment_parts=128),
             media_cache=MediaCacheConfig(enabled=False),
-            resolve_sender_names=True,
+            # Roster lookup requires extra permissions and bypasses our opt-in.
+            resolve_sender_names=False,
         ))
         self._state, self._message = "closed", "渠道已关闭"
         self._updated_at = datetime.now(timezone.utc)
@@ -94,6 +98,48 @@ class FeishuSDKAdapter:
         self.client.on("reconnecting", lambda *_: self._set_state("reconnecting", "飞书连接中断，正在重连"))
         self.client.on("reconnected", lambda *_: self._set_state("connected", "已连接飞书"))
         self.client.on("error", lambda *_: logger.warning("Feishu SDK operation failed"))
+
+    async def _fetch_names(self, user_ids: list[str]) -> dict[str, str]:
+        from lark_channel.api.contact.v3.model.batch_user_request import BatchUserRequest
+        request = BatchUserRequest.builder().user_id_type("open_id").user_ids(user_ids).build()
+        response = await self.client.client.contact.v3.user.abatch(request)
+        if not response.success():
+            return {}
+        requested = set(user_ids)
+        return {item.open_id: getattr(item, "name", None) or getattr(item, "en_name", None)
+                for item in (getattr(getattr(response, "data", None), "items", None) or [])
+                if getattr(item, "open_id", None) in requested
+                and (getattr(item, "name", None) or getattr(item, "en_name", None))}
+
+    async def _lookup_sender_names(self, user_ids: list[str]) -> dict[str, str]:
+        if not self._profiles_enabled or not self._started or self._loop is None:
+            return {}
+        # The official SDK normalizes events on its background loop. All
+        # profile state and HTTP lookup live on the worker's owning loop.
+        async def lookup():
+            async with asyncio.timeout(3):
+                return await self._profiles.resolve(user_ids)
+        try:
+            if asyncio.get_running_loop() is self._loop:
+                return await lookup()
+            future = asyncio.run_coroutine_threadsafe(lookup(), self._loop)
+            return await asyncio.wrap_future(future)
+        except Exception:
+            return {}
+
+    async def resolve_users(self, user_ids: list[str], timeout: float = 3.0) -> dict:
+        status = "disabled" if not self._profiles_enabled else "unavailable"
+        names = {}
+        if self._profiles_enabled and self._started:
+            try:
+                async with asyncio.timeout(timeout):
+                    names = await self._profiles.resolve(user_ids)
+            except TimeoutError:
+                names = self._profiles.cached(user_ids)
+        items = [{"sender_id": uid, "userid": None, "name": names.get(uid),
+                  "status": "resolved" if uid in names else status}
+                 for uid in dict.fromkeys(user_ids)]
+        return {"items": items, "complete": all(item["status"] == "resolved" for item in items)}
 
     @staticmethod
     def message_capabilities():
@@ -179,6 +225,7 @@ class FeishuSDKAdapter:
             finally:
                 self._replies.clear()
                 self._envelopes.clear()
+                self._profiles.clear()
 
     async def test_connection(self, timeout: float) -> dict[str, Any]:
         # A second WS connection load-balances messages away from production.

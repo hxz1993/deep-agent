@@ -32,11 +32,11 @@ def local_sdk_worker(connection, account, infinite_retry):
     from deep_agent.channels.adapters.feishu.core import FeishuSDKAdapter
     from lark_channel import FeishuChannel
     def factory(values, retry):
-        def client_factory(*, config):
+        def client_factory(*, config, name_lookup=None):
             config.domain = values.settings["_test_domain"]
             config.transport.trust_env_proxy = False
             config.resolve_sender_names = False
-            return FeishuChannel(config=config, name_lookup=lambda ids: {})
+            return FeishuChannel(config=config, name_lookup=name_lookup or (lambda ids: {}))
         with patch("deep_agent.channels.adapters.feishu.core.FeishuChannel", side_effect=client_factory):
             return FeishuSDKAdapter(values, retry)
     run_worker(connection, account, infinite_retry, adapter_factory=factory)
@@ -109,6 +109,11 @@ class LocalFeishuPlatform:
                 self.respond(response)
             def do_GET(self):
                 fixture.http_calls.append((self.path, None))
+                if self.path.startswith("/open-apis/contact/v3/users/batch"):
+                    query = parse_qs(urlparse(self.path).query)
+                    self.respond({"code": 0, "data": {"items": [
+                        {"open_id": uid, "name": "当前姓名"} for uid in query.get("user_ids", [])]}})
+                    return
                 if "/resources/" in self.path:
                     raw = b"real-sdk-resource-bytes"
                     self.send_response(200)

@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import json
 import uuid
+from io import BytesIO
+
+from deep_agent.channels.media_metadata import inspect_media
 
 from deep_agent.channels.outbound import (
     ComponentReceipt, DeliveryError, MessageCapabilities, MessageTarget, PreparedComponent,
@@ -27,6 +30,8 @@ async def send_component(client, target: MessageTarget, component: PreparedCompo
     from lark_channel.api.im.v1.model.create_message_request_body import CreateMessageRequestBody
     from lark_channel.api.im.v1.model.reply_message_request import ReplyMessageRequest
     from lark_channel.api.im.v1.model.reply_message_request_body import ReplyMessageRequestBody
+    from lark_channel.api.im.v1.model.create_file_request import CreateFileRequest
+    from lark_channel.api.im.v1.model.create_file_request_body import CreateFileRequestBody
 
     if component.kind not in message_capabilities().kinds:
         raise DeliveryError("unsupported_content", "飞书不支持此消息类型")
@@ -38,19 +43,37 @@ async def send_component(client, target: MessageTarget, component: PreparedCompo
     if component.kind == "text":
         content = {"text": component.text}
     else:
+        metadata = await inspect_media(component.data or b"", video=component.kind == "video") if component.kind in {"audio", "video"} else None
+        cover_key = None
         try:
-            key = await client.upload_media(
-                MediaSource(kind="buffer", buffer=component.data),
-                kind="image" if component.kind == "image" else "file",
-                file_name=component.filename,
-                file_type={"audio": "opus", "video": "mp4"}.get(component.kind, "stream")
-                if component.kind != "image" else None,
-            )
+            if metadata:
+                # upload_media() omits duration; use the public SDK file endpoint.
+                with BytesIO(component.data or b"") as media:
+                    body = (CreateFileRequestBody.builder()
+                            .file_type("mp4" if component.kind == "video" else "opus")
+                            .file_name(component.filename).duration(metadata.duration_ms).file(media).build())
+                    response = await client.client.im.v1.file.acreate(CreateFileRequest.builder().request_body(body).build())
+                if not response.success():
+                    raise DeliveryError("upload_failed", "飞书媒体上传失败，请检查文件及应用权限")
+                key = getattr(getattr(response, "data", None), "file_key", None)
+                if metadata.cover:
+                    cover_key = await client.upload_media(MediaSource(kind="buffer", buffer=metadata.cover), kind="image", file_name="cover.jpg")
+                    if not cover_key:
+                        raise DeliveryError("upload_failed", "飞书未返回视频封面上传标识")
+            else:
+                key = await client.upload_media(
+                    MediaSource(kind="buffer", buffer=component.data),
+                    kind="image" if component.kind == "image" else "file",
+                    file_name=component.filename,
+                    file_type="stream" if component.kind != "image" else None,
+                )
         except Exception:
             raise DeliveryError("upload_failed", "飞书媒体上传失败，请检查文件及应用权限") from None
         if not key:
             raise DeliveryError("upload_failed", "飞书未返回媒体上传标识")
         content = {"image_key" if component.kind == "image" else "file_key": key}
+        if cover_key:
+            content["image_key"] = cover_key
     msg_type = "media" if component.kind == "video" else component.kind
     encoded = json.dumps(content, ensure_ascii=False)
     # The high-level send() retries and chunks internally. Use its same public

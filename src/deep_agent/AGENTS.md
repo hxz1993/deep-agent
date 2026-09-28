@@ -153,7 +153,7 @@ Jenkins网关启动版`Jenkinsfile.gateway`可由`combined_runtime.py`在同一�
 平台可信身份鉴权。企微Peer类型沿用原生`single/group`，ID分别取`from.userid/chatid`；Binding的
 `peer_metadata` JSON保存来源会话的`user_id/chat_id/display_name`白名单，缺失名称不造值。
 私聊身份直接从Binding读取；群发送者不作为群身份。仅Session改绑或来源信息确实变化时更新Binding。
-私聊标题为 `User｜名称(原始 ID)`，无姓名时为 `User｜原始 ID`；群标题固定为 `Group｜Chat ID`，不附加群名。括号使用半角，保留原始定位 ID。
+新会话生成标题时，私聊为 `渠道｜User｜名称(原始 ID)`，无姓名时为 `渠道｜User｜原始 ID`；群聊为 `渠道｜Group｜Chat ID`。渠道前缀为 wecom/feishu。已有标题原样读取，不按姓名刷新、补前缀或重建；括号使用半角，保留原始定位 ID。
 Run只保留created_at/finished_at，接收即认领再排队；调用前必须落running以防未收到SSE Run ID时误重跑。
 处理终态与投递状态分别更新，不能因最后回复失败重跑Agent或`/new`。不按SSE片段/心跳写台账。
 
@@ -517,9 +517,10 @@ context_refs 授权。每次执行重新检查账号、Agent、会话、Run 与�
 首版仅 send，有序文字／图片／文件／已有音频视频；飞书支持当前消息引用，企微不伪造引用。
 不预建 targets/history、跨用户发送、通用 SDK 透传或任意 URL/宿主路径读取。
 
-009 新增 channel_message_operations，唯一键为 agent_run_id + tool_call_id，只存安全回执与摘要；
-网关重启将未完成项标记 unknown，不盲目重发。Session 删除保留幂等事实但失去继续发送权限；
-确认删除渠道连带清理回执。配置备份仅建空结构，旧 Revision 不要求含新表；非空表拒绝降级。
+Message 不再另存发送回执、请求摘要或去重状态，不新增缓存、Runs 字段或行作为替代。
+仅在调用内顺序发送并即时返回逐项结果；失败或结果未知停止后续项，取消阻止待发送内容。
+不自动重发，不承诺跨请求、跨重启发送去重。010 仅删除历史 009 创建的
+channel_message_operations 及其中回执，保留已发布迁移；不改变原有 Runs、配置、会话与文件。
 真实验收与实施状态见 [Message 设计](../../docs/design/32-new-channels/channel-tools-abstraction.md)。
 
 ### Skill
@@ -754,6 +755,9 @@ SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protoco
 
 ## 约定与陷阱
 
+- 钉钉使用官方 Stream SDK 隔离 worker；昵称仅来自消息回调，按账号内存 LRU，不从历史回填。发送目标从当前 Run 的可信来源解析，不依赖昵称缓存。入站语音保留平台转写和 `input_mode=reference` 原音频引用，避免对文本模型自动注入音频；无转写不自行 STT。
+- 渠道音视频元数据复用 `channels/media_metadata.py`，FFmpeg/ffprobe 按需子进程、取消回收、临时文件清理；不在模型或 API 初始化时加载。飞书上传传 duration，视频另传 image_key。钉钉不支持格式须明确失败，普通文件需显式选择，不静默降级。上述功能不新增数据库结构，不改历史内容。
+
 0. **重构风格**：事件多态映射集中在 `agent/events.py`；多入口共享组装集中在 `api/v1/deps.py`，变化量留在调用入口
    - 事件多态映射 → `agent/events.py`（`singledispatch` 分层）
    - 多入口共享组装 → `api/v1/deps.py`（变化量留在入口，上下文在 `_build_*` 内统一解包）
@@ -788,3 +792,5 @@ SSE 协议：[`../../docs/guides/sse-protocol.md`](../../docs/guides/sse-protoco
 MCP 工具合计不超过 10 个时全部直接披露，超过 10 个时预选最多 3 个，其余通过 `search_tools`（显示名“搜索工具”）按需搜索，每次最多返回 5 个。已知准确协议名时用最多 3 个查询项批量加载；未知名称才按能力描述搜索，不混填名称与中英文描述，不要求凑满查询项。预选、搜索及异常回退不按用户提问、上下文数据或工具名推断读写权限，也不因关键词排除写入/删除工具；候选范围始终受 Agent 显式关联的 MCP 限定。保留相关性排序、已披露工具去重和重复查询去重。
 
 - D01 压缩落库前必须核对摘要实际使用的模型历史与 Event Store 投影；不能只比较保存前重新采样的 raw history，否则可能把摘要期间新追加的事件错误地纳入来源。完成事件需在下一次推理前提交，Console 按 event_id 即时确认，后续业务失败不回滚已完成压缩。
+
+钉钉扫码实测状态包含 `WAITING / SCANNED / SELECTING / CREATING / SUCCESS`；选择已有机器人和新建机器人必须分别验证，未知中间状态只作有界等待，不能直接当成功或立即终止。钉钉默认 AI 流式卡片，固定使用官方 OpenClaw 连接器当前同款模板，不提供流式开关或模板配置扩展；卡片失败不得回退普通正文，普通消息仅用于独立消息工具路径。用户详情独立开关 user_details_enabled 默认关闭，开启才使用回调昵称及网关内存缓存，无通讯录查询和新表。API 成功不能替代客户端正文可见验收。

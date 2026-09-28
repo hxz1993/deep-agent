@@ -13,6 +13,11 @@ const channelAdminState = {
   clearApiKey: false,
 };
 
+const channelPlatforms = {
+  feishu: { name: "飞书", logo: "feishu.ico", consoleUrl: "https://open.feishu.cn/app", consoleLabel: "飞书开发者后台", credential: "App ID", secret: "App Secret", subtitle: "飞书应用机器人" },
+  wecom: { name: "企微", logo: "wecom.png", consoleUrl: "https://work.weixin.qq.com/", consoleLabel: "企业微信管理后台", credential: "Bot ID", secret: "Secret", subtitle: "企微智能机器人" },
+  dingtalk: { name: "钉钉", logo: "dingtalk.svg", consoleUrl: "https://open-dev.dingtalk.com/", consoleLabel: "钉钉开发者后台", credential: "Client ID", secret: "Client Secret", subtitle: "钉钉应用机器人" },
+};
 let channelRegistration = null;
 function renderChannelRegistration(data) {
   const status = document.getElementById("channelRegistrationScanStatus");
@@ -24,12 +29,14 @@ function renderChannelRegistration(data) {
   document.getElementById("channelRegistrationAuthorized").hidden = !authorized;
   document.getElementById("channelRegistrationSaveReminder").hidden = !authorized;
   const retryable = ["failed", "expired", "denied", "cancelled"].includes(data.status);
-  retry.hidden = !(retryable || data.status === "waiting");
+  retry.hidden = !(retryable || ["waiting", "scanned", "selecting", "creating"].includes(data.status));
   const feishu = channelAdminState.channelType === "feishu";
-  const labels = { starting: "正在准备二维码…", waiting: feishu ? "使用飞书扫码，完成应用创建和授权。修改渠道名称后可重新生成。" : "使用手机企业微信扫码，创建或关联智能机器人。请在企业微信确认机器人名称。", authorized: "请补齐渠道名称、关联 Agent 和会话关联用户，点击右下角「保存」。保存后启用渠道，机器人才能接收消息。", expired: "二维码已过期，请重新生成。", denied: "授权已拒绝，可重新扫码或使用已有凭据。", failed: "授权失败，请重试。", cancelled: "授权已取消。" };
-  status.textContent = data.error || labels[data.status] || (feishu ? "可先填写渠道名称，生成二维码后用手机飞书扫码。应用名称会自动预填，确认创建和授权后保存渠道。" : "使用手机企业微信扫码，创建或关联智能机器人。机器人名称需在企业微信确认，完成后请保存渠道。");
-  button.disabled = ["starting", "waiting"].includes(data.status);
-  button.hidden = retryable || ["waiting", "authorized"].includes(data.status);
+  const dingtalk = channelAdminState.channelType === "dingtalk";
+  const platform = channelPlatforms[channelAdminState.channelType];
+  const labels = { scanned: "扫码成功，请在钉钉完成机器人创建并确认连接。", selecting: "扫码成功，请在钉钉选择机器人并点击「立即连接」。", creating: "扫码已确认，钉钉正在创建应用，请稍候，无需重复扫码。", starting: "正在准备二维码…", waiting: dingtalk ? "使用钉钉扫码，完成应用创建和授权，然后保存渠道。" : feishu ? "使用飞书扫码，完成应用创建和授权。修改渠道名称后可重新生成。" : "使用手机企业微信扫码，创建或关联智能机器人。请在企业微信确认机器人名称。", authorized: "请补齐渠道名称、关联 Agent 和会话关联用户，点击右下角「保存」。保存后启用渠道，机器人才能接收消息。", expired: "二维码已过期，请重新生成。", denied: "授权已拒绝，可重新扫码或使用已有凭据。", failed: "授权失败，请重试。", cancelled: "授权已取消。" };
+  status.textContent = data.error || labels[data.status] || (dingtalk ? "使用钉钉扫码创建应用；确认授权后补齐信息并保存渠道。" : feishu ? "可先填写渠道名称，生成二维码后用手机飞书扫码。应用名称会自动预填，确认创建和授权后保存渠道。" : "使用手机企业微信扫码，创建或关联智能机器人。机器人名称需在企业微信确认，完成后请保存渠道。");
+  button.disabled = ["starting", "waiting", "scanned", "selecting", "creating"].includes(data.status);
+  button.hidden = retryable || ["waiting", "scanned", "selecting", "creating", "authorized"].includes(data.status);
   button.textContent = data.status === "starting" ? "正在生成…" : "生成二维码";
   qr.hidden = true; qr.innerHTML = ""; link.hidden = true; link.removeAttribute("href");
   if (data.status === "waiting" && data.verification_url) {
@@ -37,7 +44,7 @@ function renderChannelRegistration(data) {
       const url = new URL(data.verification_url);
       const officialHost = feishu
         ? ["feishu.cn", "larksuite.com"].some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))
-        : url.hostname === "work.weixin.qq.com";
+        : dingtalk ? (url.hostname === "dingtalk.com" || url.hostname.endsWith(".dingtalk.com")) : url.hostname === "work.weixin.qq.com";
       if (url.protocol !== "https:" || url.username || url.password || url.port || !officialHost) throw new Error("授权地址不是平台官方地址");
       const code = qrcode(0, "H"); code.addData(url.href); code.make();
       // Reserve whole modules for the brand, rather than overlaying a rounded tile.
@@ -50,7 +57,7 @@ function renderChannelRegistration(data) {
         if (code.isDark(row, col)) paths.push(`M${col + quiet},${row + quiet}h1v1h-1z`);
       }
       const inset = .6, brandSize = gap - inset * 2, brandStart = first + quiet + inset;
-      qr.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="${feishu ? "飞书" : "企业微信"}授权二维码"><rect width="${size}" height="${size}" fill="white"/><path d="${paths.join("")}" fill="black" shape-rendering="crispEdges"/><image href="./assets/channel-logos/${feishu ? "feishu.ico" : "wecom.png"}" x="${brandStart}" y="${brandStart}" width="${brandSize}" height="${brandSize}"/></svg>`;
+      qr.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="${platform.name}授权二维码"><rect width="${size}" height="${size}" fill="white"/><path d="${paths.join("")}" fill="black" shape-rendering="crispEdges"/><image href="./assets/channel-logos/${platform.logo}" x="${brandStart}" y="${brandStart}" width="${brandSize}" height="${brandSize}"/></svg>`;
       qr.hidden = false;
       // WeCom's QR target is a mobile-client flow, not a desktop authorization page.
       if (feishu) { link.href = url.href; link.hidden = false; }
@@ -74,31 +81,105 @@ function setChannelRegistrationMode(mode) {
   document.getElementById("channelSecret").required = !scan && !channelAdminState.editingId;
 }
 function prepareChannelPlatform(type) {
+  clearChannelPermissionCheck();
   channelRegistration?.reset();
-  channelAdminState.channelType = type === "feishu" ? "feishu" : "wecom";
+  channelAdminState.channelType = Object.hasOwn(channelPlatforms, type) ? type : "wecom";
   const feishu = channelAdminState.channelType === "feishu";
+  const dingtalk = channelAdminState.channelType === "dingtalk";
+  const platform = channelPlatforms[channelAdminState.channelType];
   channelRegistration = window.createChannelRegistration({ channelType: channelAdminState.channelType, onChange: renderChannelRegistration });
   renderChannelRegistration({});
   const consoleLink = document.getElementById("channelRegistrationConsoleLink");
-  consoleLink.href = feishu ? "https://open.feishu.cn/app" : "https://work.weixin.qq.com/";
-  consoleLink.textContent = feishu ? "前往飞书开发者后台 ↗" : "前往企业微信管理后台 ↗";
-  document.getElementById("channelRegistrationMode").setAttribute("aria-label", feishu ? "飞书接入方式" : "企微接入方式");
+  consoleLink.href = platform.consoleUrl;
+  consoleLink.textContent = `前往${platform.consoleLabel} ↗`;
+  document.getElementById("channelRegistrationMode").setAttribute("aria-label", `${platform.name}接入方式`);
   document.getElementById("channelRegistrationManualLabel").textContent = "手动关联";
-  document.getElementById("channelPlatformSubtitle").textContent = feishu ? "飞书应用机器人" : "企微智能机器人";
-  document.getElementById("channelBotIdLabel").textContent = feishu ? "App ID" : "Bot ID";
-  document.getElementById("channelBotId").placeholder = feishu ? "请输入 App ID" : "请输入 Bot ID";
-  document.getElementById("channelConnectionHelp").innerHTML = feishu
+  document.getElementById("channelPlatformSubtitle").textContent = platform.subtitle;
+  document.getElementById("channelBotIdLabel").textContent = platform.credential;
+  document.getElementById("channelBotId").placeholder = `请输入 ${platform.credential}`;
+  document.getElementById("channelConnectionHelp").innerHTML = dingtalk
+    ? '<strong>使用钉钉企业内部应用</strong><p>在<a class="channel-platform-link" href="https://open-dev.dingtalk.com/" target="_blank" rel="noopener noreferrer" title="打开钉钉开发者后台（新标签页）">钉钉开发者后台</a>获取 Client ID 和 Client Secret，开启机器人能力。</p><p>消息接收选择 Stream 模式，配置权限并发布应用，无需公网回调。</p>'
+    : feishu
     ? '<strong>使用飞书企业自建应用</strong><p>在<a class="channel-platform-link" href="https://open.feishu.cn/app" target="_blank" rel="noopener noreferrer" title="打开飞书开发者后台（新标签页）">飞书开放平台</a>获取 App ID 和 App Secret，开启机器人能力。</p><p>事件订阅选择长连接，添加接收消息事件并发布应用。</p>'
     : '<strong>使用企微智能机器人</strong><p>在企业微信创建智能机器人，选择 API 模式，获取 Bot ID 和 Secret。</p><p>通过长连接接收消息，无需配置公网回调地址。</p><a class="channel-platform-link" href="https://work.weixin.qq.com/" target="_blank" rel="noopener noreferrer">前往企业微信管理后台 ↗</a>';
-  document.getElementById("channelSecretLabel").textContent = feishu ? "App Secret" : "Secret";
-  document.getElementById("channelName").placeholder = feishu ? "例如：飞书助手" : "例如：企微助手";
-  document.getElementById("channelConnectionTitle").textContent = feishu ? "飞书连接" : "企微连接";
+  document.getElementById("channelSecretLabel").textContent = platform.secret;
+  document.getElementById("channelName").placeholder = `例如：${platform.name}助手`;
+  document.getElementById("channelConnectionTitle").textContent = `${platform.name}连接`;
   document.getElementById("channelRegistrationMode").hidden = Boolean(channelAdminState.editingId);
   document.getElementById("channelRegistrationSetup").hidden = Boolean(channelAdminState.editingId);
   document.getElementById(!channelAdminState.editingId ? "channelRegistrationCredentials" : "channelCredentialHome").append(document.getElementById("channelCredentialLayout"));
-  document.getElementById("channelMemberTab").hidden = feishu;
-  document.getElementById("channelWecomMemberToggle").hidden = feishu;
+  document.getElementById("channelMemberTab").hidden = false;
+  document.getElementById("channelDingtalkUserDetails").hidden = !dingtalk;
+  document.getElementById("channelUserDetailsLabel").textContent = dingtalk ? "启用用户详情" : "启用用户详情查询";
+  document.getElementById("channelWecomMemberToggle").hidden = false;
+  document.getElementById("channelUserDetailsHint").textContent = dingtalk ? "使用消息自带的用户昵称" : feishu ? "使用当前飞书应用查询姓名" : "获取企微成员账号和姓名";
+  document.getElementById("channelFeishuUserDetails").hidden = true;
   setChannelRegistrationMode(!channelAdminState.editingId ? "scan" : "manual");
+}
+
+const channelPermissionCheck = { generation: 0, controller: null };
+
+function clearChannelPermissionCheck() {
+  channelPermissionCheck.generation++;
+  channelPermissionCheck.controller?.abort();
+  channelPermissionCheck.controller = null;
+  const result = document.getElementById("channelUserDetailsCheckResult");
+  if (result) { result.textContent = ""; result.hidden = true; delete result.dataset.state; result.removeAttribute?.("title"); }
+  const button = document.getElementById("channelUserDetailsCheckBtn");
+  if (button) { button.disabled = false; button.textContent = "检测权限"; }
+}
+
+function channelCredentialsAreSaved() {
+  const account = channelAdminState.accounts.find(item => item.id === channelAdminState.editingId);
+  const secretInput = document.getElementById("channelSecret");
+  const secret = secretInput.value.trim();
+  return account && document.getElementById("channelBotId").value.trim() === account.bot_id
+    && (!secret || secret === secretInput.dataset.maskedValue);
+}
+
+function officialFeishuLink(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "open.feishu.cn" && !url.username && !url.password && !url.port ? url.href : "";
+  } catch { return ""; }
+}
+
+async function checkChannelUserDetails() {
+  if (channelAdminState.channelType !== "feishu" || channelAdminState.saving || document.getElementById("channelUserDetailsEnabled").getAttribute("aria-checked") !== "true") return;
+  clearChannelPermissionCheck();
+  const result = document.getElementById("channelUserDetailsCheckResult");
+  result.hidden = false;
+  if (!channelCredentialsAreSaved()) {
+    result.dataset.state = "missing";
+    result.textContent = "请先保存渠道及当前应用凭据，再检测权限。";
+    return;
+  }
+  const button = document.getElementById("channelUserDetailsCheckBtn");
+  const accountId = channelAdminState.editingId;
+  const generation = channelPermissionCheck.generation;
+  const controller = new AbortController();
+  channelPermissionCheck.controller = controller;
+  const current = () => generation === channelPermissionCheck.generation
+    && channelAdminState.editingId === accountId && document.getElementById("channelAccountModal").open
+    && channelCredentialsAreSaved();
+  button.disabled = true; button.textContent = "检测中…";
+  result.textContent = "正在检测已保存应用的权限…";
+  try {
+    const data = await apiFetch(`/api/v1/channel-accounts/${encodeURIComponent(accountId)}/user-details/check`, { method: "POST", signal: controller.signal });
+    if (!current()) return;
+    const status = { authorized: "已授权", missing: "尚未授权", error: "检测失败" }[data.status] || "检测失败";
+    const permissions = Array.isArray(data.permissions) ? data.permissions : [];
+    const consoleUrl = officialFeishuLink(data.console_url), docsUrl = officialFeishuLink(data.docs_url);
+    result.dataset.state = ["authorized", "missing"].includes(data.status) ? data.status : "error";
+    result.innerHTML = `<strong>${escapeHtml(status)}</strong><p class="channel-permission-summary" title="${escapeHtml(data.message || "")}">${escapeHtml(data.status === "authorized" ? "姓名读取权限已授权；请确认通讯录范围及应用发布状态。" : data.message || "请核对姓名读取权限及应用发布状态。")}</p><p class="channel-permission-scopes" title="${escapeHtml(permissions.map(item => `${item.scope}: ${item.authorized ? "已授权" : "未授权"}`).join("；"))}">${permissions.map(item => `<span>${escapeHtml(item.name || item.scope)}：${item.authorized ? "已授权" : "未授权"}</span>`).join(" · ")}</p><p>${consoleUrl ? `<a class="channel-platform-link" href="${escapeHtml(consoleUrl)}" target="_blank" rel="noopener noreferrer">前往权限管理 ↗</a>` : ""} ${docsUrl ? `<a class="channel-platform-link" href="${escapeHtml(docsUrl)}" target="_blank" rel="noopener noreferrer">配置说明 ↗</a>` : ""}</p>`;
+  } catch (error) {
+    if (current()) { result.dataset.state = "error"; result.textContent = error.message || "权限检测失败，请重试。"; result.title = result.textContent; }
+  } finally {
+    if (generation === channelPermissionCheck.generation) {
+      channelPermissionCheck.controller = null;
+      button.disabled = channelAdminState.saving; button.textContent = "检测权限";
+    }
+  }
 }
 
 const channelUserQuery = { generation: 0, controller: null };
@@ -227,10 +308,20 @@ function setChannelUserDetailsEnabled(enabled) {
   button.setAttribute("aria-checked", String(enabled));
   button.classList.toggle("on", enabled);
   button.classList.toggle("off", !enabled);
-  document.querySelector('#channelMemberTab .channel-extension-dot')?.classList.toggle("on", enabled);
-  enabled = enabled && channelAdminState.channelType !== "feishu";
+  setChannelExtensionStatus("channelMemberTab", enabled);
+  document.getElementById("channelFeishuUserDetails").hidden = !(enabled && channelAdminState.channelType === "feishu");
+  if (!enabled) clearChannelPermissionCheck();
+  enabled = enabled && channelAdminState.channelType === "wecom";
   document.getElementById("channelWecomApplicationField").hidden = !enabled;
   document.getElementById("channelWecomApplicationId").required = enabled;
+}
+
+function setChannelExtensionStatus(tabId, enabled) {
+  const status = document.querySelector(`#${tabId} .channel-extension-status`);
+  if (!status) return;
+  status.classList.toggle("on", enabled);
+  status.setAttribute("aria-label", enabled ? "已开启" : "未开启");
+  status.setAttribute("title", enabled ? "已开启" : "未开启");
 }
 
 function setChannelDeepfosEnabled(enabled) {
@@ -238,7 +329,7 @@ function setChannelDeepfosEnabled(enabled) {
   button.setAttribute("aria-checked", String(enabled));
   button.classList.toggle("on", enabled);
   button.classList.toggle("off", !enabled);
-  document.querySelector('#channelDeepfosTab .channel-extension-dot')?.classList.toggle("on", enabled);
+  setChannelExtensionStatus("channelDeepfosTab", enabled);
   document.getElementById("channelDeepfosAppField").hidden = !enabled;
   const input = document.getElementById("channelDeepfosAppId");
   input.required = enabled;
@@ -254,9 +345,9 @@ async function prepareChannelApplicationEditor(settings = {}) {
   const select = document.getElementById("channelWecomApplicationId");
   if (!select) return;
   const generation = ++channelAdminState.applicationLoadGeneration;
-  if (channelAdminState.channelType === "feishu") {
+  if (channelAdminState.channelType !== "wecom") {
     channelAdminState.applications = [];
-    setChannelUserDetailsEnabled(false);
+    setChannelUserDetailsEnabled(settings?.[channelAdminState.channelType]?.user_details_enabled === true);
     select.disabled = true;
     return;
   }
@@ -395,7 +486,7 @@ const channelsAdmin = {
       return `<tr class="channel-list-row" data-open-channel="${escapeHtml(account.id)}" tabindex="0">
         <td class="channel-enabled-cell"><button type="button" class="model-enabled-switch ${account.enabled ? "on" : "off"}" data-toggle-channel="${escapeHtml(account.id)}" role="switch" aria-checked="${account.enabled}" title="${account.enabled ? "停用渠道" : "启用渠道"}" aria-label="${account.enabled ? "停用渠道" : "启用渠道"}"><span></span></button></td>
         <td><strong>${escapeHtml(account.name)}</strong></td>
-        <td class="channel-type-cell"><span class="channel-type-label"><img src="./assets/channel-logos/${account.channel_type === "feishu" ? "feishu.ico" : "wecom.png"}" width="18" height="18" alt="" />${account.channel_type === "feishu" ? "飞书" : "企微"}（WS）</span></td>
+        <td class="channel-type-cell"><span class="channel-type-label"><img src="./assets/channel-logos/${channelPlatforms[account.channel_type]?.logo || "wecom.png"}" width="18" height="18" alt="" />${channelPlatforms[account.channel_type]?.name || account.channel_type}（WS）</span></td>
         <td>${escapeHtml(account.agent_name || account.agent_id)}</td>
         <td><span class="channel-status" data-state="${escapeHtml(runtime.state)}" title="${escapeHtml(runtime.message || "")}"><span></span>${escapeHtml(CHANNEL_STATE_LABELS[runtime.state] || runtime.state)}</span></td>
         <td>${escapeHtml(formatDate(account.updated_at))}</td>
@@ -442,7 +533,7 @@ const channelsAdmin = {
     clearChannelUserQuery();
     channelAdminState.editingId = null;
     prepareChannelPlatform(channelType);
-    document.getElementById("channelAccountModalTitle").textContent = channelType === "feishu" ? "新建飞书渠道" : "新建企微渠道";
+    document.getElementById("channelAccountModalTitle").textContent = `新建${channelPlatforms[channelType]?.name || "企微"}渠道`;
     document.getElementById("channelName").value = "";
     renderChannelAgentOptions();
     document.getElementById("channelBotId").value = "";
@@ -480,17 +571,18 @@ const channelsAdmin = {
     const applicationSelect = document.getElementById("channelWecomApplicationId");
     const applicationId = applicationSelect.disabled ? applicationSelect.dataset.selectedId : applicationSelect.value;
     const feishu = channelAdminState.channelType === "feishu";
+    const dingtalk = channelAdminState.channelType === "dingtalk";
     const scan = !editingId && channelAdminState.registrationMode === "scan";
     if (scan && !channelRegistration?.authorizedId) {
       AdminFormFeedback.show(form, "请先完成扫码授权，或切换到手动关联。"); return;
     }
-    if (!feishu && enabled && !channelAdminState.applications.some(item => item.id === applicationId)) {
+    if (channelAdminState.channelType === "wecom" && enabled && !channelAdminState.applications.some(item => item.id === applicationId)) {
       AdminFormFeedback.show(form, "请选择有效的企微应用；没有应用时，请先创建。");
       return;
     }
     const payload = {
       settings: {
-        ...(feishu ? { ...account?.settings, feishu: { domain: "feishu", require_mention: true, ...account?.settings?.feishu } } : channelUserDetailsSettings(account?.settings || {}, enabled, applicationId)),
+        ...(dingtalk ? { ...account?.settings, dingtalk: { ...account?.settings?.dingtalk, user_details_enabled: enabled } } : feishu ? { ...account?.settings, feishu: { domain: "feishu", require_mention: true, ...account?.settings?.feishu, user_details_enabled: enabled } } : channelUserDetailsSettings(account?.settings || {}, enabled, applicationId)),
         deepfos: {
           ...channelApiKeySettings(account?.settings?.deepfos),
           enabled: document.getElementById("channelDeepfosEnabled").getAttribute("aria-checked") === "true",
@@ -507,6 +599,7 @@ const channelsAdmin = {
     if (secret && secret !== secretInput.dataset.maskedValue) payload.secret = secret;
     if (!editingId) { payload.enabled = false; payload.channel_type = channelAdminState.channelType; }
     if (scan) { payload.registration_id = channelRegistration.authorizedId; delete payload.bot_id; delete payload.secret; }
+    clearChannelPermissionCheck();
     channelAdminState.saving = true;
     form.querySelectorAll("button").forEach(button => { button.disabled = true; });
     try {
@@ -608,7 +701,7 @@ function bindChannelCreateMenu() {
   const options = Array.from(menu.querySelectorAll("[role=menuitem]"));
   options.forEach(item => item.addEventListener("click", () => {
     close();
-    channelsAdmin.openCreate(item.id === "createFeishuChannelBtn" ? "feishu" : "wecom");
+    channelsAdmin.openCreate(item.id === "createDingtalkChannelBtn" ? "dingtalk" : item.id === "createFeishuChannelBtn" ? "feishu" : "wecom");
   }));
   menu.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
@@ -702,6 +795,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
   document.getElementById("channelDeepfosEnabled")?.addEventListener("click", event => setChannelDeepfosEnabled(event.currentTarget.getAttribute("aria-checked") !== "true"));
+  document.getElementById("channelUserDetailsCheckBtn")?.addEventListener("click", checkChannelUserDetails);
+  ["channelBotId", "channelSecret"].forEach(id => document.getElementById(id)?.addEventListener("input", clearChannelPermissionCheck));
   document.getElementById("channelUserDetailsEnabled")?.addEventListener("click", event => setChannelUserDetailsEnabled(event.currentTarget.getAttribute("aria-checked") !== "true"));
   document.getElementById("clearChannelWecomApplicationBtn")?.addEventListener("click", () => {
     const select = document.getElementById("channelWecomApplicationId");
@@ -739,6 +834,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("channelAccountModal")?.addEventListener("cancel", event => { event.preventDefault(); closeAccount(); });
   document.getElementById("channelAccountModal")?.addEventListener("close", () => {
     clearChannelUserQuery();
+    clearChannelPermissionCheck();
     channelRegistration?.reset();
     channelAdminState.applicationLoadGeneration++;
     document.getElementById("channelSecret").value = "";

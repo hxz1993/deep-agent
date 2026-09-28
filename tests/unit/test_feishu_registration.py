@@ -1,4 +1,7 @@
 import asyncio
+import base64
+import gzip
+import json
 import time
 import unittest
 
@@ -34,17 +37,17 @@ class FeishuRegistrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(names, ['财务助手', 'DeepAgent'])
         self.assertEqual(self.service.entries[first['registration_id']].app_name, '财务助手')
 
-    async def test_registration_uses_default_template_with_name_only(self):
+    async def test_registration_keeps_default_template_and_adds_only_name_read_scope(self):
         captured = {}
         async def register(**kwargs):
             captured.update(kwargs)
             return {'client_id': 'cli_fixture', 'client_secret': 'fixture-secret'}
         self.service.register = register
         await self.authorized()
-        self.assertEqual(set(captured), {'on_qr_code', 'on_status_change', 'app_preset'})
+        self.assertEqual(set(captured), {'on_qr_code', 'on_status_change', 'app_preset', 'addons'})
         self.assertEqual(captured['app_preset'], {'name': 'DeepAgent'})
 
-        # Exercise the real SDK URL builder so custom lists cannot silently return.
+        # Exercise the real SDK URL builder: only the approved scope is added.
         from urllib.parse import parse_qs, urlsplit
         from lark_oapi.scene.registration import _RegistrationFlow
         flow = _RegistrationFlow(**captured, source=None, domain='https://accounts.feishu.cn',
@@ -53,9 +56,12 @@ class FeishuRegistrationTests(unittest.IsolatedAsyncioTestCase):
         query = parse_qs(urlsplit(url).query)
         self.assertEqual(query['name'], ['DeepAgent'])
         self.assertEqual(query['user_code'], ['fixture'])
-        for key in ('addons', 'desc', 'createOnly', 'clientID'):
+        encoded = query['addons'][0]
+        addons = json.loads(gzip.decompress(base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4))))
+        self.assertEqual(addons, {'scopes': {'tenant': ['contact:user.base:readonly']}})
+        for key in ('desc', 'createOnly', 'clientID'):
             self.assertNotIn(key, query)
-        self.assertLess(len(url.encode()), 150)
+        self.assertLess(len(url.encode()), 350)
 
     async def test_credentials_private_owner_bound_and_one_time(self):
         key = await self.authorized()

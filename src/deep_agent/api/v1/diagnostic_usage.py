@@ -38,7 +38,9 @@ Sort = Literal["total_tokens", "input_tokens", "output_tokens", "requests"]
 
 def filters(start: UtcDatetime | None = None, end: UtcDatetime | None = None,
             timezone: str = Query(default="UTC", max_length=64),
-            agent_id: str | None = Query(default=None, max_length=256)):
+            agent_id: str | None = Query(default=None, max_length=256),
+            source_type: Literal["internal", "channel:wecom", "channel:feishu", "channel:dingtalk"] | None = Query(default=None),
+            source_id: str | None = Query(default=None, min_length=1, max_length=255)):
     actual_end = end or datetime.now(UTC)
     try:
         zone = ZoneInfo(timezone)
@@ -47,7 +49,7 @@ def filters(start: UtcDatetime | None = None, end: UtcDatetime | None = None,
     default_start = datetime.combine(actual_end.astimezone(zone).date() - timedelta(days=6),
         time.min, zone).astimezone(UTC)
     return SessionFilters(start=start or default_start, end=actual_end,
-        timezone=timezone, agent_id=agent_id)
+        timezone=timezone, agent_id=agent_id, source_type=source_type, source_id=source_id)
 
 
 FiltersDep = Annotated[SessionFilters, Depends(filters)]

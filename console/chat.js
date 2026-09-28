@@ -1,3 +1,4 @@
+import { composerProviderIcon } from "./provider-icons.js?v=20260929-model-provider";
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-usage-tab-2";
 import { renderPlanItems } from "./plan-view.js?v=20260922-trajectory-8";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
@@ -10,7 +11,7 @@ import {
   parseSseBlock,
   readSse,
 } from "./protocol.js?v=20260912-21";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260927-feishu-release-0117";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-ui-corrections";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import {
   applyAssistantPresentationActions,
@@ -197,19 +198,6 @@ const LLM_MODALITY_LABELS = {
 };
 
 const UPLOAD_KIND_ORDER = ["image", "text_file", "docx", "xlsx", "audio", "video"];
-const COMPOSER_PROVIDER_BRANDS = {
-  deepseek: "./assets/provider-logos/deepseek.ico",
-  moonshotai: "./assets/provider-logos/kimi.ico",
-  alibaba: "./assets/provider-logos/qwen.png",
-  zai: "./assets/provider-logos/zai.svg",
-  openrouter: "./assets/provider-logos/openrouter.png",
-  openai: "./assets/provider-logos/openai.svg?v=20260926-centered-2",
-  openai_codex: "./assets/provider-logos/openai.svg?v=20260926-centered-2",
-  anthropic: "./assets/provider-logos/anthropic.png",
-  google: "./assets/provider-logos/google-gemini.png",
-  openai_compatible: "./assets/provider-logos/openai-compatible.svg",
-};
-
 /* ----------------------------- DOM ----------------------------- */
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -417,6 +405,8 @@ function currentSessionSnapshot() {
     turnCount: persisted?.turnCount || 0,
     attachmentCount: persisted?.attachmentCount || 0,
     channel: persisted?.channel || null,
+    source_type: persisted?.source_type || "internal",
+    source_id: persisted?.source_id ?? null,
     appId: persisted?.appId ?? null,
     spaceId: persisted?.spaceId ?? null,
   });
@@ -437,6 +427,8 @@ function mergeSessionsFromBackend(rows, { append = false, agentId = state.agentI
       turnCount: Number(row.turn_count) || 0,
       attachmentCount: Number(row.attachment_count) || 0,
       channel: row.channel || null,
+      source_type: row.source_type || "internal",
+      source_id: row.source_id ?? null,
       appId: row.app_id ?? null,
       spaceId: row.space_id ?? null,
     });
@@ -976,7 +968,17 @@ function applySessionTitle(session, title) {
   renderSessions();
 }
 
+function renderComposerSource() {
+  const host = document.getElementById("composerChannelSource");
+  if (!host) return;
+  const session = state.sessions.find(item => item.id === state.sessionId && (item.agentId || "") === (state.agentId || ""));
+  const origin = channelOriginPresentation(session);
+  host.hidden = !origin;
+  host.innerHTML = origin ? `<span class="composer-channel-warning" role="note" title="建议回原渠道续问，避免干扰会话">建议回原渠道续问，避免干扰会话</span><span class="composer-channel-label"><img src="${origin.logo}" alt="" />${escapeHtml(origin.platform)}会话</span>` : "";
+}
+
 function renderSessions() {
+  renderComposerSource();
   const scrollTop = el.sessionList.scrollTop;
   el.sessionList.innerHTML = "";
   const activeAgent = state.agents.find((agent) => agent.id === state.agentId);
@@ -1003,9 +1005,9 @@ function renderSessions() {
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
     const activity = formatSessionActivity(s);
-    const origin = channelOriginPresentation(s.channel);
-    const sourceMarker = origin ? `<span class="session-channel-source" title="${escapeHtml(origin.description)}" aria-label="${escapeHtml(origin.description)}">${lucideIcon("radio")}</span>` : "";
-    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title-row"><span class="session-title">${escapeHtml(s.title)}</span>${sourceMarker}</span><span class="session-meta"><span class="session-activity">${escapeHtml(activity)}</span><span class="session-stat-group"><span title="提问数">${lucideIcon("message-circle-more")}${escapeHtml(String(s.turnCount || 0))}</span></span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
+    const origin = channelOriginPresentation(s);
+    const questionIcon = origin ? `<span class="session-channel-source" title="${escapeHtml(origin.description)}" aria-label="${escapeHtml(origin.description)}"><img src="${origin.logo}" alt="${escapeHtml(origin.platform)}" /></span>` : lucideIcon("message-circle-more");
+    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title-row"><span class="session-title">${escapeHtml(s.title)}</span></span><span class="session-meta"><span class="session-stat-group"><span title="提问数">${questionIcon}${escapeHtml(String(s.turnCount || 0))}</span></span><span class="session-meta-dot" aria-hidden="true">·</span><span class="session-activity">${escapeHtml(activity)}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -2009,26 +2011,6 @@ function composerModelLabel(model) {
   return String(model?.name || model?.model || "模型").trim();
 }
 
-function composerProviderType(provider) {
-  const configured = String(provider?.provider_type || "").trim().toLowerCase();
-  if (COMPOSER_PROVIDER_BRANDS[configured]) return configured;
-  const hint = `${provider?.name || ""} ${provider?.id || ""}`.toLowerCase();
-  if (hint.includes("deepseek")) return "deepseek";
-  if (hint.includes("moonshot") || hint.includes("kimi")) return "moonshotai";
-  if (hint.includes("qwen") || hint.includes("alibaba")) return "alibaba";
-  if (hint.includes("zhipu") || hint.includes("zai")) return "zai";
-  if (hint.includes("openrouter")) return "openrouter";
-  if (hint.includes("anthropic") || hint.includes("claude")) return "anthropic";
-  if (hint.includes("google") || hint.includes("gemini")) return "google";
-  if (hint.includes("openai")) return "openai";
-  return "openai_compatible";
-}
-
-function composerProviderIcon(provider) {
-  const providerType = composerProviderType(provider);
-  const src = COMPOSER_PROVIDER_BRANDS[providerType];
-  return `<img src="${escapeHtml(src)}" alt="" data-provider-type="${escapeHtml(providerType)}" />`;
-}
 
 function selectComposerModel(modelId) {
   if (!modelId || modelId === state.llmModelId) {
@@ -2138,17 +2120,24 @@ function updateComposerModelInfo() {
   }
   if (el.composerModelMenu) {
     const visible = state.llmModels.filter((model) => isModelSelectable(model) || model.id === state.llmModelId);
+    const groups = new Map();
+    for (const model of visible) {
+      const provider = modelProvider(model);
+      const key = provider?.id || model.provider_id || "unassigned";
+      if (!groups.has(key)) groups.set(key, { provider, models: [] });
+      groups.get(key).models.push(model);
+    }
     el.composerModelMenu.innerHTML = visible.length
-      ? visible.map((model) => {
+      ? [...groups.values()].map(({ provider, models }) => `<div role="group" aria-label="${escapeHtml(provider?.name || "未关联供应商")}">
+          <div class="da-select-group"><span class="composer-provider-icon">${composerProviderIcon(provider)}</span>${escapeHtml(provider?.name || "未关联供应商")}</div>
+          ${models.map((model) => {
           const active = model.id === state.llmModelId;
-          const provider = modelProvider(model)?.name || "Provider";
           return `<button type="button" class="composer-model-option${active ? " active" : ""}" role="option" aria-selected="${active}" data-model-id="${escapeHtml(model.id)}">
-            <span class="composer-provider-icon" title="${escapeHtml(provider)}">${composerProviderIcon(modelProvider(model))}</span>
-            <strong class="composer-model-option-name">${escapeHtml(composerModelLabel(model))}</strong>
+            <strong class="composer-model-option-name" title="${escapeHtml(composerModelLabel(model))}">${escapeHtml(composerModelLabel(model))}</strong>
             <span class="composer-model-option-badges">${nonTextModalityBadges(model.input_modalities || [])}</span>
             ${active ? `<span class="composer-model-check">${lucideIcon("check")}</span>` : ""}
           </button>`;
-        }).join("")
+        }).join("")}</div>`).join("")
       : '<div class="composer-model-empty">无可用模型</div>';
     el.composerModelMenu.querySelectorAll("[data-model-id]").forEach((button) => {
       button.addEventListener("click", () => selectComposerModel(button.dataset.modelId));

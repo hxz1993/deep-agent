@@ -5,6 +5,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +45,39 @@ from maintenance.config_backup import (
 
 
 class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Every migration/export in this suite must use its explicit temp SQLite URL.
+        guard = patch("deep_agent.db.url.get_database_url", side_effect=AssertionError("Implicit database target forbidden"))
+        guard.start()
+        self.addCleanup(guard.stop)
+
+    async def test_010_export_records_old_partial_and_current_source_schema(self):
+        for missing in (("source_type", "source_id"), ("source_id",), ()):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_010_") as tmpdir:
+                source = Path(tmpdir) / "source.db"
+                await self._create_source(source, revision="010")
+                with sqlite3.connect(source) as db:
+                    for name in missing:
+                        db.execute(f"ALTER TABLE chat_sessions DROP COLUMN {name}")
+                    before = list(db.iterdump())
+                result = await export_backup(self._url(source), environment="fixture",
+                    output_root=Path(tmpdir) / "backups", git_commit="test")
+                expected = {name: name not in missing for name in ("source_type", "source_id")}
+                with sqlite3.connect(source) as db:
+                    self.assertEqual(list(db.iterdump()), before)
+                with sqlite3.connect(result.path) as db:
+                    self.assertEqual(json.loads(db.execute("SELECT source_session_schema FROM _backup_info").fetchone()[0]), expected)
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM chat_sessions").fetchone()[0], 0)
+                    # Export is configuration-only; its empty session schema is current 010.
+                    self.assertTrue({"source_type", "source_id"} <= {r[1] for r in db.execute("PRAGMA table_info(chat_sessions)")})
+                    db.execute("UPDATE _backup_info SET source_session_schema = ?", (json.dumps({"source_type": "yes", "source_id": True}),))
+                engine = create_async_engine(self._url(result.path))
+                try:
+                    with self.assertRaisesRegex(ValueError, "source session schema metadata is invalid"):
+                        await _validate_backup(engine, revision="010", expected_counts={}, copied_tables=CONFIG_TABLES)
+                finally:
+                    await engine.dispose()
+
     async def test_codex_credentials_are_excluded_from_configuration_backup(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             root = Path(tmpdir)
@@ -97,7 +131,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 }
                 self.assertTrue(
                     set(CONFIG_TABLES)
-                    | (set(SESSION_TABLES) - {"channel_message_operations"})
+                    | set(SESSION_TABLES)
                     | {"alembic_version", "_backup_info"}
                     <= tables
                 )
@@ -408,6 +442,19 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await engine.dispose()
 
+    async def test_010_backup_has_no_receipt_table_or_manifest_entry(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_removed_receipts_") as tmpdir:
+            source = Path(tmpdir) / "source.db"
+            await self._create_source(source, revision="010")
+            result = await export_backup(self._url(source), environment="fixture",
+                                         output_root=Path(tmpdir) / "backups", git_commit="test")
+            self.assertEqual(result.revision, "010")
+            self.assertNotIn("channel_message_operations", result.row_counts)
+            with sqlite3.connect(result.path) as db:
+                self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='channel_message_operations'").fetchone())
+                manifest = json.loads(db.execute("SELECT scope_manifest FROM _backup_info").fetchone()[0])
+                self.assertNotIn("channel_message_operations", manifest["structure_only_tables"])
+
     def test_session_and_cache_tables_are_excluded_from_configuration_copy(self) -> None:
         _validate_table_classification()
         self.assertEqual(
@@ -435,11 +482,11 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             async with engine.begin() as connection:
                 for name in ("channel_message_runs", "channel_session_bindings",
                              "chat_session_events", "chat_sessions", *reversed(CONFIG_TABLES)):
-                    if name == "wecom_applications" and revision not in {"006", "007", "008", "009"}:
+                    if name == "wecom_applications" and revision not in {"006", "007", "008", "009", "010"}:
                         continue
-                    if name != "integration_settings" or revision in {"004", "005", "006", "007", "008", "009"}:
+                    if name != "integration_settings" or revision in {"004", "005", "006", "007", "008", "009", "010"}:
                         await connection.execute(Base.metadata.tables[name].delete())
-                if revision in {"004", "005", "006", "007", "008", "009"}:
+                if revision in {"004", "005", "006", "007", "008", "009", "010"}:
                     await connection.execute(insert(IntegrationSettings.__table__), {"code": "deeptable-assistant", "settings": {"enabled": True, "options": [1, None, "中文"]}})
                 await connection.execute(
                     insert(GlobalSetting.__table__),
@@ -519,7 +566,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
                 await connection.execute(
-                    insert(Agent.__table__ if revision in {"005", "006", "007", "008", "009"} else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
+                    insert(Agent.__table__ if revision in {"005", "006", "007", "008", "009", "010"} else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
                     {
                         "id": "agent-1",
                         "name": "agent",

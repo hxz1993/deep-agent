@@ -132,6 +132,8 @@ def normalize_media(component: PreparedComponent, caps: MessageCapabilities) -> 
         formats = getattr(caps, f"{kind}_formats", ())
         limit = getattr(caps, f"{kind}_limit", 0)
         if not fmt or fmt not in formats or len(data) > limit:
+            if not caps.media_fallback_to_file:
+                raise DeliveryError("unsupported_media", "当前格式或大小不适合原生媒体发送；如需按文件发送，请显式选择 file")
             kind = "file"
     if kind not in caps.kinds:
         raise DeliveryError("unsupported_content", "当前渠道不支持此消息类型")
@@ -192,9 +194,9 @@ def build_channel_message_toolset(store, gateway, source: ChannelRunContext, cap
             if current != source:
                 raise DeliveryError("source_changed", "渠道目标已变更")
             items = await prepare_components(deps, components, caps)
-            if not deps.run_id or not ctx.tool_call_id:
-                raise DeliveryError("run_unavailable", "缺少有效运行和工具调用标识")
-            return await gateway.send_message(source, deps.run_id, ctx.tool_call_id, items, reply=reply)
+            if not deps.run_id:
+                raise DeliveryError("run_unavailable", "缺少有效运行标识")
+            return await gateway.send_message(source, deps.run_id, items, reply=reply)
         except DeliveryError as exc:
             # Preflight errors are safe for the model to correct. Delivery
             # failures/unknown outcomes are returned by the gateway, not retried.

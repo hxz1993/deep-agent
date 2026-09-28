@@ -61,6 +61,25 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         return saved
 
+    async def test_source_filters_and_null_internal_are_session_facts(self):
+        await self.question("legacy")
+        await self.question("channel")
+        async with self.factory() as db:
+            await db.execute(update(ChatSession).where(ChatSession.session_id == "legacy").values(source_type=None))
+            await db.execute(update(ChatSession).where(ChatSession.session_id == "channel")
+                .values(source_type="channel:feishu", source_id="deleted-account"))
+            await db.commit()
+        from dataclasses import replace
+        for kind, sid in (("internal", "legacy"), ("channel:feishu", "channel")):
+            f = replace(self.filters, source_type=kind)
+            listing = await self.queries.list(f)
+            self.assertEqual(listing["total"], 1)
+            self.assertEqual(listing["items"][0]["session_id"], sid)
+            self.assertEqual(listing["items"][0]["source_type"], kind)
+            self.assertEqual((await self.queries.overview(f))["metrics"]["question_count"], 1)
+        f = replace(self.filters, source_id="deleted-account")
+        self.assertEqual((await self.queries.list(f))["items"][0]["session_id"], "channel")
+
     async def test_stats_platform_owner_cross_agent_and_channel_dedupe(self):
         other_agent = "00000000-0000-4000-8000-000000000002"
         async with self.factory() as db:
@@ -73,6 +92,8 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         await self.question("other-owner", user="user-two")
         async with self.stores.events._write() as db:
             session = (await db.execute(select(ChatSession).where(ChatSession.session_id == "channel"))).scalar_one()
+            session.source_type = "channel:wecom"
+            session.source_id = "account"
             await self.stores.events._append_title(db, session, title="Channel", source="channel", source_event_id=None,
                 turn_id=None, run_id=None, details={"channel": {"platform": "wecom", "account_id": "account", "peer_type": "group", "peer_id": "group"}})
         overview = await self.queries.overview(self.filters)

@@ -3,14 +3,15 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.12.0`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.12.3`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
 
 v0.12.0 增加通用 `channel_message`：飞书与企微可信渠道对话自动获得当前聊天发送能力，
 支持文字、图片、文件和适配格式的音视频，不需要单独关联发送用 MCP。
-数据库升级到 `009`，新增发送回执，不另存聊天历史。
+当前修订移除独立发送回执持久化；`009→010` 仅删除 `channel_message_operations` 及其中回执，
+不改变原有 Runs、配置、会话或文件。发送能力保留，不承诺跨请求、跨重启发送去重。
 
 各版本功能变更与迁移说明见 [`CHANGELOG.md`](CHANGELOG.md)。
 
@@ -57,7 +58,7 @@ v0.7.0新增可选渠道网关：同仓、同镜像独立运行，公共Gateway/
 | [`src/deepfos_platform/`](src/deepfos_platform/README.md) | 平台配置、客户端、服务发现和部署运行时支撑 |
 | [`src/maintenance/`](src/maintenance/README.md) | 人工维护程序，不属于 Agent 工具 |
 | [`deploy/`](deploy/README.md) | Jenkins、Gunicorn 和 Docker Compose 部署配置 |
-| [`migrations/`](migrations/) | 数据库迁移；结构版本为 `007` |
+| [`migrations/`](migrations/) | 数据库迁移；结构版本为 `010` |
 | [`scripts/`](scripts/) | 开发、构建与环境准备脚本 |
 | [`tests/`](tests/README.md) | Python、接口、MCP 和 Console 测试 |
 | [`docs/`](docs/README.md) | 当前说明、技术设计和交互原型 |

@@ -44,9 +44,7 @@ class WecomIdentityEventsTests(unittest.IsolatedAsyncioTestCase):
 
         async def resolve(account, *, sender_id, peer_type, peer_id, session_id):
             profile = await ctx.stores.wecom.find_profile("fixture-app", sender_id)
-            await ctx.stores.channel.refresh_wecom_titles(account.id, application_id="fixture-app",
-                sender_id=sender_id, userid=profile.userid, name=profile.name, revision=1, session_id=session_id)
-            return {"status": "resolved", "application_id": "fixture-app", "userid": profile.userid, "name": profile.name}
+            return {"status": "resolved", "application_id": "fixture-app", "application_revision": 1, "userid": profile.userid, "name": profile.name}
 
         async def send(index, peer_type, sender_id):
             handler.handle_frame(frame(payload={"content": f"独立身份消息 {index}"}, msgid=f"identity-{index}",
@@ -63,6 +61,15 @@ class WecomIdentityEventsTests(unittest.IsolatedAsyncioTestCase):
             await send(2, "single", "sender-test")
             await send(3, "group", "sender-test")
             await send(4, "group", "member-b")
+        from sqlalchemy import select
+        from deep_agent.db.models import ChannelMessageRun
+        async with ctx.db_session_factory() as db:
+            rows = (await db.execute(select(ChannelMessageRun).where(ChannelMessageRun.account_id == account.id)
+                                    .order_by(ChannelMessageRun.created_at))).scalars().all()
+            self.assertEqual([row.sender_name for row in rows], ["成员甲", "成员甲", "成员甲", "成员乙"])
+            self.assertEqual(rows[-1].source_metadata["wecom_userid"], "SecondMember")
+            self.assertEqual(rows[-1].tenant_id, "isolated-corp")
+            self.assertIsNone(rows[-1].thread_id)
         self.assertEqual(len(requests), 4)
         self.assertEqual(len(model_inputs), 4)
         self.assertIn("FirstMember", model_inputs[0])
@@ -81,6 +88,7 @@ class WecomIdentityEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["userid"] for row in sources], ["FirstMember", "SecondMember"])
         self.assertEqual([row["peer_id"] for row in sources], ["isolated-group", "isolated-group"])
         events = await ctx.stores.coordinator.list_events(requests[0]["session_id"], event_type="session/title")
-        self.assertEqual(events[-1].payload["title"], "User｜成员甲(sender-test)")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[-1].payload["title"], "wecom｜User｜sender-test")
         events = await ctx.stores.coordinator.list_events(requests[2]["session_id"], event_type="session/title")
-        self.assertEqual(events[-1].payload["title"], "Group｜isolated-group")
+        self.assertEqual(events[-1].payload["title"], "wecom｜Group｜isolated-group")

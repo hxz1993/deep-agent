@@ -39,6 +39,23 @@ _backup_scope_manifest = backup_scope_manifest
 _validate_table_classification = validate_table_classification
 
 
+def _structure_only_tables(revision: str) -> tuple[str, ...]:
+    # Released 009 backups retain their source schema; current backups do not
+    # create, copy or require the removed outbound receipt table.
+    if revision == "009":
+        return (*SESSION_TABLES, "channel_message_operations", *(
+            name for name in STRUCTURE_ONLY_TABLES if name not in SESSION_TABLES
+        ))
+    return STRUCTURE_ONLY_TABLES
+
+
+def _revision_backup_scope_manifest(copied_tables: Sequence[str], revision: str) -> dict[str, Any]:
+    manifest = _backup_scope_manifest(copied_tables)
+    if revision == "009":
+        manifest["structure_only_tables"] = list(_structure_only_tables(revision))
+    return manifest
+
+
 @dataclass(frozen=True)
 class BackupResult:
     path: Path
@@ -126,6 +143,9 @@ async def export_backup(
     partial_path: Path | None = None
     try:
         revision = await _source_revision(source_engine)
+        # Configuration exports omit session rows. Record the source physical
+        # variant without migrating it; the empty target uses current revision DDL.
+        source_schema = await _session_source_schema(source_engine)
         backup_time = exported_at or datetime.now().astimezone()
         timestamp = backup_time.strftime("%Y%m%d-%H%M%S")
         revision_label = re.sub(r"[^A-Za-z0-9_-]", "_", revision)
@@ -146,7 +166,7 @@ async def export_backup(
         target_engine = create_async_engine(target_url)
         copied_tables = await _discover_copied_tables(target_engine)
         target_tables = await _database_table_names(target_engine)
-        structure_only_tables = tuple(name for name in STRUCTURE_ONLY_TABLES if name in target_tables)
+        structure_only_tables = tuple(name for name in _structure_only_tables(revision) if name in target_tables)
         await _validate_source_tables(source_engine, copied_tables)
         await _create_backup_info_table(target_engine)
         await _clear_seed_configuration(target_engine, copied_tables)
@@ -166,12 +186,14 @@ async def export_backup(
             revision=revision,
             git_commit=git_commit or _current_git_commit(),
             copied_tables=copied_tables,
+            source_schema=source_schema,
         )
         await _validate_backup(
             target_engine,
             revision=revision,
             expected_counts=row_counts,
             copied_tables=copied_tables,
+            expected_source_schema=source_schema,
         )
         await target_engine.dispose()
         target_engine = None
@@ -208,6 +230,15 @@ async def _source_revision(engine: AsyncEngine) -> str:
     return str(revision)
 
 
+async def _session_source_schema(engine: AsyncEngine) -> dict[str, bool]:
+    """Record physical source facts, independently of the shared 010 revision."""
+    async with engine.connect() as connection:
+        columns = await connection.run_sync(lambda conn: {
+            item["name"] for item in inspect(conn).get_columns("chat_sessions")
+        })
+    return {name: name in columns for name in ("source_type", "source_id")}
+
+
 def _upgrade_target_schema(database_url: str, revision: str = "head") -> None:
     config = Config(str(repository_root() / "alembic.ini"))
     config.set_main_option("script_location", str(repository_root() / "migrations"))
@@ -231,7 +262,7 @@ async def _discover_copied_tables(engine: AsyncEngine) -> tuple[str, ...]:
             + ", ".join(sorted(missing_session_tables))
         )
 
-    copied_names = table_names - set(STRUCTURE_ONLY_TABLES) - {"alembic_version"}
+    copied_names = table_names - set(_structure_only_tables(await _source_revision(engine))) - {"alembic_version"}
     return order_configuration_tables(tuple(copied_names))
 
 
@@ -252,8 +283,8 @@ async def _validate_source_tables(
 async def _required_session_tables(engine: AsyncEngine) -> set[str]:
     required = set(SESSION_TABLES)
     revision = await _source_revision(engine)
-    if revision in {f"{number:03}" for number in range(1, 9)}:
-        required.discard("channel_message_operations")
+    if revision == "009":
+        required.add("channel_message_operations")
     return required
 
 
@@ -269,7 +300,8 @@ async def _create_backup_info_table(engine: AsyncEngine) -> None:
                     source_dialect VARCHAR(32) NOT NULL,
                     alembic_revision VARCHAR(32) NOT NULL,
                     git_commit VARCHAR(64) NOT NULL,
-                    scope_manifest TEXT NOT NULL
+                    scope_manifest TEXT NOT NULL,
+                    source_session_schema TEXT NOT NULL
                 )
                 """
             )
@@ -347,6 +379,7 @@ async def _write_backup_metadata(
     revision: str,
     git_commit: str,
     copied_tables: Sequence[str],
+    source_schema: Mapping[str, bool],
 ) -> None:
     async with engine.begin() as connection:
         await connection.execute(
@@ -354,10 +387,10 @@ async def _write_backup_metadata(
                 """
                 INSERT INTO _backup_info (
                     id, environment, exported_at, source_dialect,
-                    alembic_revision, git_commit, scope_manifest
+                    alembic_revision, git_commit, scope_manifest, source_session_schema
                 ) VALUES (
                     1, :environment, :exported_at, :source_dialect,
-                    :revision, :git_commit, :scope_manifest
+                    :revision, :git_commit, :scope_manifest, :source_session_schema
                 )
                 """
             ),
@@ -367,8 +400,9 @@ async def _write_backup_metadata(
                 "source_dialect": source_dialect,
                 "revision": revision,
                 "git_commit": git_commit,
+                "source_session_schema": json.dumps(dict(source_schema), separators=(",", ":")),
                 "scope_manifest": json.dumps(
-                    _backup_scope_manifest(copied_tables),
+                    _revision_backup_scope_manifest(copied_tables, revision),
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ),
@@ -382,6 +416,7 @@ async def _validate_backup(
     revision: str,
     expected_counts: Mapping[str, int],
     copied_tables: Sequence[str],
+    expected_source_schema: Mapping[str, bool] | None = None,
 ) -> None:
     async with engine.connect() as connection:
         integrity = await connection.execute(text("PRAGMA integrity_check"))
@@ -396,7 +431,7 @@ async def _validate_backup(
                     f"expected {expected}, got {actual}"
                 )
         table_names = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names()))
-        for table_name in STRUCTURE_ONLY_TABLES:
+        for table_name in _structure_only_tables(revision):
             if table_name in table_names and await _table_count(connection, table_name) != 0:
                 raise ValueError(f"Structure-only table must be empty: {table_name}")
 
@@ -419,15 +454,22 @@ async def _validate_backup(
             await connection.execute(
                 text(
                     "SELECT environment, exported_at, source_dialect, "
-                    "alembic_revision, git_commit, scope_manifest "
+                    "alembic_revision, git_commit, scope_manifest, source_session_schema "
                     "FROM _backup_info WHERE id = 1"
                 )
             )
         ).mappings().one()
         if not all(info.values()) or info["alembic_revision"] != revision:
             raise ValueError("Backup metadata is incomplete")
+        source_schema = json.loads(str(info["source_session_schema"]))
+        if (not isinstance(source_schema, dict)
+                or set(source_schema) != {"source_type", "source_id"}
+                or any(type(value) is not bool for value in source_schema.values())):
+            raise ValueError("Backup source session schema metadata is invalid")
+        if expected_source_schema is not None and source_schema != dict(expected_source_schema):
+            raise ValueError("Backup source session schema does not match the source")
         scope_manifest = json.loads(str(info["scope_manifest"]))
-        if scope_manifest != _backup_scope_manifest(copied_tables):
+        if scope_manifest != _revision_backup_scope_manifest(copied_tables, revision):
             raise ValueError("Backup scope manifest does not match the current contract")
 
 

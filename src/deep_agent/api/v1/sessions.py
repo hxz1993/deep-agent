@@ -29,6 +29,7 @@ from deep_agent.conversation.projector import ConversationProjectionError, proje
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
 from deep_agent.schemas.chat import ChannelSessionOrigin, SessionInfo, SessionListResponse
 from deep_agent.time import UtcDatetime
+from deep_agent.services.channel_profiles import ChannelProfileService
 
 router = APIRouter()
 
@@ -68,6 +69,7 @@ async def _resolve_agent_name(ctx: AppContextDep, agent_id: str | None) -> str |
 def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
     return SessionInfo(
         session_id=row.session_id,
+        source_type=row.source_type, source_id=row.source_id,
         app_id=row.app_id, space_id=row.space_id,
         message_count=row.message_count,
         turn_count=row.turn_count,
@@ -97,6 +99,7 @@ async def _build_session_info(
     title: str | None = None
     app_id: str | None = None
     space_id: str | None = None
+    source_type, source_id = "internal", None
     if ctx.stores.chat_session is not None:
         from deep_agent.db.session_scope import normalize_agent_scope
 
@@ -107,11 +110,16 @@ async def _build_session_info(
         app_id, space_id = await ctx.stores.chat_session.get_initial_scope(
             normalize_agent_scope(agent_id), session_id,
         )
+        source_type, source_id = await ctx.stores.chat_session.get_source(
+            normalize_agent_scope(agent_id), session_id,
+        )
         # 通过 coordinator 获取标题（封装了 db_session 管理）
         title = await ctx.store.get_session_title(session_id, agent_id=agent_id)
     if updated_at is None and history:
         created_at, updated_at = session_activity_timestamps(history)
 
+    origin = await ctx.stores.channel.get_session_origin(session_id) if ctx.stores.channel else None
+    origin = (await ChannelProfileService(ctx).enrich_origins({session_id: origin})).get(session_id)
     return SessionInfo(
         session_id=session_id,
         app_id=app_id, space_id=space_id,
@@ -122,7 +130,8 @@ async def _build_session_info(
         title=title,
         created_at=created_at,
         updated_at=updated_at,
-        channel=await ctx.stores.channel.get_session_origin(session_id) if ctx.stores.channel else None,
+        channel=origin,
+        source_type=source_type, source_id=source_id,
     )
 
 
@@ -131,6 +140,8 @@ async def list_sessions(
     ctx: AppContextDep,
     user_id: RequestUserDep,
     agent_id: str | None = Query(default=None, description="Filter by agent id."),
+    source_type: Literal["internal", "channel:wecom", "channel:feishu", "channel:dingtalk"] | None = Query(default=None),
+    source_id: str | None = Query(default=None, min_length=1, max_length=255),
     limit: int = Query(default=50, ge=1, le=MAX_LIST_LIMIT, description="Page size."),
     offset: int = Query(default=0, ge=0, description="Page offset."),
     query: str | None = Query(
@@ -151,6 +162,7 @@ async def list_sessions(
     filters = SessionListFilters(
         agent_id=agent_id,
         user_id=user_id,
+        source_type=source_type, source_id=source_id,
         limit=limit,
         offset=offset,
         query=query,
@@ -161,6 +173,7 @@ async def list_sessions(
     )
     rows, total = await ctx.store.list_session_summaries(filters)
     origins = await ctx.stores.channel.get_session_origins([row.session_id for row in rows]) if ctx.stores.channel else {}
+    origins = await ChannelProfileService(ctx).enrich_origins(origins)
     items = [_summary_to_session_info(row) for row in rows]
     for item in items:
         origin = origins.get(item.session_id)

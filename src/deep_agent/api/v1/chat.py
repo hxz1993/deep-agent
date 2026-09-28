@@ -183,6 +183,7 @@ async def _current_channel_context(ctx, body, account):
     if account is None:
         return
     from deep_agent.services.wecom_profiles import application_for_account
+    from deep_agent.services.channel_profiles import user_details_enabled
     current = await ctx.stores.channel.get_account(account.id)
     if current is None or not current.enabled or current.agent_id != account.agent_id or current.session_user_id != account.session_user_id:
         raise HTTPException(status_code=409, detail="渠道已删除、停用或变更，请刷新渠道配置")
@@ -191,7 +192,7 @@ async def _current_channel_context(ctx, body, account):
         if reference.type != "channel.message_source":
             continue
         payload = reference.payload
-        if current.channel_type == "feishu":
+        if current.channel_type in {"feishu", "dingtalk"}:
             # Enrichment is display-only and comes from the persisted inbound
             # event, never from client-provided names or tenant claims.
             for key in ("userid", "name", "tenant_id", "thread_id"):
@@ -200,7 +201,7 @@ async def _current_channel_context(ctx, body, account):
             record = await ctx.stores.channel.get_message(current.id, message_id) if isinstance(message_id, str) else None
             if record and record.sender_id == payload.get("sender_id"):
                 payload.update({key: value for key, value in {
-                    "name": record.sender_name, "tenant_id": record.tenant_id,
+                    "name": record.sender_name if user_details_enabled(current) else None, "tenant_id": record.tenant_id,
                     "thread_id": record.thread_id,
                 }.items() if value})
             continue

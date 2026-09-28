@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from deep_agent.channels.adapters.feishu import FeishuAdapter
 from deep_agent.channels.adapters.feishu.outbound import message_capabilities, send_component
 from deep_agent.channels.adapters.feishu.worker import _serve
+from deep_agent.channels.media_metadata import MediaMetadata
 from deep_agent.channels.outbound import ComponentReceipt, DeliveryError, MessageTarget, PreparedComponent
 
 
@@ -43,7 +44,7 @@ class OutboundTest(unittest.IsolatedAsyncioTestCase):
         sdk.client.im.v1.message.areply.assert_not_awaited()
 
     async def test_all_media_upload_first_and_use_native_message_type(self):
-        for kind, wire in (("image", "image"), ("file", "file"), ("audio", "audio"), ("video", "media")):
+        for kind, wire in (("image", "image"), ("file", "file")):
             with self.subTest(kind=kind):
                 sdk = client()
                 await send_component(sdk, target(), PreparedComponent(kind, data=b"fixture", filename="sample.dat"))
@@ -56,6 +57,35 @@ class OutboundTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(request.body.msg_type, wire)
                 self.assertEqual(json.loads(request.body.content), {"image_key" if kind == "image" else "file_key": "uploaded_key"})
                 sdk.client.im.v1.message.acreate.assert_awaited_once()
+
+    async def test_audio_video_duration_and_video_cover_use_public_sdk(self):
+        for kind in ("audio", "video"):
+            sdk = client()
+            sdk.client.im.v1.file = SimpleNamespace(acreate=AsyncMock(return_value=SimpleNamespace(
+                success=lambda: True, data=SimpleNamespace(file_key="file_media"))))
+            metadata = MediaMetadata(2350, 320, 180, b"jpeg" if kind == "video" else None)
+            with patch("deep_agent.channels.adapters.feishu.outbound.inspect_media", AsyncMock(return_value=metadata)):
+                await send_component(sdk, target(), PreparedComponent(kind, data=b"media", filename="sample"))
+            upload = sdk.client.im.v1.file.acreate.call_args.args[0].request_body
+            self.assertEqual(upload.duration, 2350)
+            self.assertEqual(upload.file_type, "opus" if kind == "audio" else "mp4")
+            content = json.loads(sdk.client.im.v1.message.acreate.call_args.args[0].body.content)
+            self.assertEqual(content["file_key"], "file_media")
+            if kind == "video":
+                self.assertEqual(content["image_key"], "uploaded_key")
+                self.assertEqual(sdk.upload_media.call_args.args[0].buffer, b"jpeg")
+            else:
+                sdk.upload_media.assert_not_awaited()
+
+    async def test_inspection_failure_does_not_upload_or_send(self):
+        sdk = client()
+        with patch("deep_agent.channels.adapters.feishu.outbound.inspect_media", AsyncMock(
+                side_effect=DeliveryError("media_metadata_failed", "invalid"))):
+            with self.assertRaises(DeliveryError) as caught:
+                await send_component(sdk, target(), PreparedComponent("video", data=b"invalid"))
+        self.assertFalse(caught.exception.unknown)
+        sdk.upload_media.assert_not_awaited()
+        sdk.client.im.v1.message.acreate.assert_not_awaited()
 
     async def test_quote_and_thread_inherit_trigger(self):
         for quote, thread in ((True, None), (False, "omt_current")):

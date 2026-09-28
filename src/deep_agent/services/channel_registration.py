@@ -66,7 +66,7 @@ class RegistrationService:
                 del self.entries[key]
         if len(self.entries) >= self.capacity:
             raise RegistrationError(429, "扫码任务已满，请稍后重试")
-        if sum(e.owner == owner and e.status in {"starting", "waiting", "authorized"}
+        if sum(e.owner == owner and e.status in {"starting", "waiting", "scanned", "selecting", "creating", "authorized"}
                for e in self.entries.values()) >= 2:
             raise RegistrationError(429, "请先完成或取消已有扫码任务")
         key = secrets.token_urlsafe(32)

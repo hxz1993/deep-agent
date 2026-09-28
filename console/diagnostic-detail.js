@@ -5,8 +5,8 @@ import { projectConversationItems, sortConversationItems } from "./conversation-
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260912-21";
 import { createTrajectoryController } from "./trajectory.js?v=20260924-ptc-execution-6";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20260927-feishu-release-0117";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260927-feishu-release-0117";
+import { renderSessionInspector } from "./session-inspector.js?v=20260929-release0123-final";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0123-final";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { bindAttachmentImagePreviews, attachmentDownloadUrl } from "./attachment-preview.js?v=20260922-trajectory-8";
@@ -89,10 +89,11 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
       state: { sessionId: session.session_id, agentId: session.agent_id, conversationId: session.conversation_id, modelMessageCount: data.history.items?.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length },
       activeSession: { appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
       model, runModel,
+      modelProvider: session.provider_name ? { name: session.provider_name } : null,
       run, usage, contextStatus, agentName: session.agent_name || session.agent_id || "未记录",
       sessionCache: session.cache_usage || {}, runCache: run.cache_usage || {},
       context: { app: session.app_id, space: session.space_id, language: session.language }, identity: { user: userId || "", profile: data.users[userId] || {} },
-      channelOrigin: channelOriginPresentation(session.channel), activeTab: inspectorTab,
+      channelOrigin: channelOriginPresentation(session), activeTab: inspectorTab,
       contextContent: contextReferenceContent(selectedReference?.reference),
       statusText: statusLabels[status] || "未确认", statusClass: status === "running" ? "running" : ["pending", "waiting", "awaiting_input"].includes(status) ? "waiting" : "idle",
     });

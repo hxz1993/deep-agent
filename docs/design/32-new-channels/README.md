@@ -12,7 +12,7 @@
 
 ## 已有材料
 
-- [通用渠道 Message 工具](channel-tools-abstraction.md)：v0.12.0 实现共享工具、可信当前聊天目标和两渠道适配器；媒体发送无需另配 MCP，新增 009 回执迁移。
+- [通用渠道 Message 工具](channel-tools-abstraction.md)：v0.12.0 实现共享工具、可信当前聊天目标和两渠道适配器；媒体发送无需另配 MCP；当前修订移除独立回执持久化，010 仅删除旧表。
 
 - [个人微信与 AstrBot 调研](weixin-astrbot-research.md)：保留 2026-09-23 微信扫码、长轮询、连续对话落库、渠道会话查看、身份和回复边界的原研究。
 - [渠道扩展复盘](channel-expansion-review.md)：2026-09-26 回顾 AstrBot 配置、会话隔离、能力声明等可参考做法；其中飞书候选分析属于历史研究，现已实现，当前状态以[飞书使用指南](../../guides/feishu-channel.md)为准。
@@ -25,6 +25,6 @@
 
 凭据存储引用 [31 加密课题](../31-credential-encryption/README.md)。UI 同 Run 改造不自动赋予渠道渲染浏览器 UI 表单的能力；需要渠道交互时另定映射。
 
-开发状态与优先级统一见 [TODO](../TODO.md)。飞书实现及配置见[使用指南](../../guides/feishu-channel.md)；公共来源字段使用增量迁移 008；Message 发送回执使用增量迁移 009。
+开发状态与优先级统一见 [TODO](../TODO.md)。飞书实现及配置见[使用指南](../../guides/feishu-channel.md)；公共来源字段使用增量迁移 008；Message 不再使用独立回执表，增量迁移 010 删除历史 009 创建的旧表，不修改公共来源字段。
 
 - [飞书实现与验收记录](../../reports/20260927-feishu-channel/README.md)：官方 SDK、多账号隔离、来源持久化、企微回归和 Console 验收；明确真实租户未覆盖项。

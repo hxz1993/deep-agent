@@ -7,7 +7,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260928-channel-message";
+const CONFIGURATION_ASSET_VERSION = "20260928-channel-help-height";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",

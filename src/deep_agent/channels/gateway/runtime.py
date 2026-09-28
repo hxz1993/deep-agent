@@ -44,7 +44,6 @@ class ChannelRuntime:
         self._stopping = False
 
     async def start(self) -> None:
-        await self.store.recover_operations()
         interrupted = await self.store.interrupt_incomplete()
         if interrupted:
             logger.warning("Channel Gateway recovered {} interrupted records", interrupted)
@@ -126,6 +125,35 @@ class ChannelRuntime:
         accounts.extend(self._failed.values())
         return {"state": "connected", "message": "渠道网关运行正常", "accounts": accounts}
 
+    async def resolve_users(self, account_id: str, user_ids: list[str], *, timeout: float = 3.0) -> dict:
+        ids = list(dict.fromkeys(user_ids))
+        def unavailable(state="unavailable"):
+            return {"items": [{"sender_id": uid, "userid": None, "name": None, "status": state}
+                              for uid in ids], "complete": not ids}
+
+        account = await self.store.get_account(account_id)
+        if account is None:
+            raise LookupError("Channel account not found")
+        if not account.enabled or account.channel_type not in {"feishu", "dingtalk"}:
+            return unavailable("disabled")
+        if ((account.settings or {}).get(account.channel_type) or {}).get("user_details_enabled") is not True:
+            return unavailable("disabled")
+        current = self._accounts.get(account_id)
+        fingerprint = self.registry.fingerprint(account)
+        if current is None or current.stopping or current.fingerprint != fingerprint:
+            return unavailable()
+        try:
+            result = await current.adapter.resolve_users(ids, timeout=timeout)
+        except Exception:
+            return unavailable()
+        # Configuration can change while the provider is queried. Never return
+        # names from a disabled, removed, rotated or replaced account instance.
+        fresh = await self.store.get_account(account_id)
+        if (fresh is None or not fresh.enabled or self._accounts.get(account_id) is not current
+                or current.stopping or self.registry.fingerprint(fresh) != fingerprint):
+            return unavailable()
+        return result
+
     async def test_account(self, account_id: str) -> dict[str, Any]:
         # A temporary test must not race reconciliation or another test into
         # creating a second client for the same Bot.
@@ -145,7 +173,7 @@ class ChannelRuntime:
                     return None
 
                 try:
-                    if account.channel_type == "feishu":
+                    if account.channel_type in {"feishu", "dingtalk"}:
                         result = await adapter.test_connection(self.config.test_timeout)
                         return {"account_id": account_id, **result}
                     await adapter.start(ignore_message)

@@ -6,7 +6,7 @@
 .diagnostic-channels-page h2 { font-size:14px; line-height:24px; font-weight:600; margin:0 0 8px; color:var(--diag-text); }
 .diagnostic-channels-page img { object-fit:contain; flex-shrink:0; }
 .diagnostic-channels-page .channel-analytics-card { min-width:0; }
-.diagnostic-channels-page .channel-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:0; }
+.diagnostic-channels-page .channel-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:0; }
 .diagnostic-channels-page .channel-metric { display:flex; align-items:center; gap:10px; color:var(--diag-muted); font-size:12px; }
 .diagnostic-channels-page .channel-metrics strong { display:block; font-size:20px; line-height:24px; color:var(--diag-text); font-weight:600; font-variant-numeric:tabular-nums; }
 .diagnostic-channels-page .channel-account-card,.diagnostic-channels-page .channel-analytics-card,.diagnostic-channels-page .channel-metric,.diagnostic-channels-page .channel-session-inspector { border:1px solid var(--diag-border); border-radius:8px; background:var(--diag-surface); padding:16px; min-width:0; box-sizing:border-box; }

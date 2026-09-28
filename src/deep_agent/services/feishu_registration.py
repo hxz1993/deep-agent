@@ -39,10 +39,11 @@ class FeishuRegistrationService(RegistrationService):
 
         try:
             async with asyncio.timeout(max(0, entry.deadline - time.monotonic())) as timeout:
-                # Omitting addons uses Feishu's PersonalAgent default template.
+                # Keep the PersonalAgent template; only add sender-name field access.
                 result = await self.register(
                     on_qr_code=qr, on_status_change=status,
                     app_preset={"name": entry.app_name},
+                    addons={"scopes": {"tenant": ["contact:user.base:readonly"]}},
                 )
             app_id, secret = result.get("client_id"), result.get("client_secret")
             if not isinstance(app_id, str) or not app_id.strip() or not isinstance(secret, str) or not secret.strip():

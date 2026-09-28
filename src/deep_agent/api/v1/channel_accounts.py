@@ -31,7 +31,8 @@ router = APIRouter()
 @router.get("/channel-types", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 async def channel_types():
     return [{"type": "wecom", "name": "企业微信", "transport": "websocket"},
-            {"type": "feishu", "name": "飞书", "transport": "websocket"}]
+            {"type": "feishu", "name": "飞书", "transport": "websocket"},
+            {"type": "dingtalk", "name": "钉钉", "transport": "websocket"}]
 
 
 
@@ -107,7 +108,9 @@ async def create_channel_account(
             from deep_agent.services.channel_registration import RegistrationError
             from deep_agent.services.feishu_registration import registration_service as feishu_registration
             from deep_agent.services.wecom_registration import registration_service as wecom_registration
-            registration_service = feishu_registration if body.channel_type == "feishu" else wecom_registration
+            from deep_agent.services.dingtalk_registration import registration_service as dingtalk_registration
+            registration_service = {"feishu": feishu_registration, "wecom": wecom_registration,
+                                    "dingtalk": dingtalk_registration}[body.channel_type]
             try:
                 async with registration_service.credentials(body.registration_id, user) as (app_id, secret):
                     row = await store.create_account(body.model_copy(update={
@@ -165,8 +168,6 @@ async def update_channel_account(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=404, detail="Channel account not found")
-    if (current.settings or {}).get("wecom") != (row.settings or {}).get("wecom"):
-        await store.refresh_wecom_titles(account_id)
     return await _response(row, ctx)
 
 
@@ -243,3 +244,15 @@ async def test_channel_connection(
     except ChannelGatewayUnavailableError as exc:
         raise HTTPException(status_code=503, detail="渠道网关当前不可达") from exc
     return ChannelConnectionTestResponse.model_validate(payload)
+
+
+@router.post("/channel-accounts/{account_id}/user-details/check", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
+async def check_channel_user_details(account_id: str, user: RequestUserDep,
+                                     store: ChannelStore = Depends(get_channel_store)):
+    account = await store.get_account(account_id)
+    if account is None:
+        raise HTTPException(404, "渠道账户不存在")
+    if account.channel_type != "feishu":
+        raise HTTPException(422, "此检测适用于飞书应用；企微请使用关联应用的测试连接")
+    from deep_agent.services.feishu_permissions import check_user_details_permissions
+    return await check_user_details_permissions(account)

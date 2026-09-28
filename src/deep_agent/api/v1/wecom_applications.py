@@ -228,5 +228,6 @@ async def resolve_user(body: ResolveUser, ctx: AppContextDep, account: ChannelAc
         raise HTTPException(422, "当前渠道不是企微渠道")
     if body.session_id and await ctx.stores.channel.get_channel_session(account.id, body.session_id) is None:
         raise HTTPException(403, "会话不属于当前渠道")
-    return await ctx.get_wecom_profiles().resolve(account, body.sender_id,
-        peer_type=body.peer_type, session_id=body.session_id)
+    from deep_agent.services.channel_profiles import ChannelProfileService
+    result = await ChannelProfileService(ctx).resolve_many(account, [body.sender_id], budget=3)
+    return result["items"][body.sender_id]

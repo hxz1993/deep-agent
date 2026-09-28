@@ -35,64 +35,17 @@ class WecomIdentityChannelTests(unittest.IsolatedAsyncioTestCase):
         async with self.factory() as db:
             return (await db.get(ChatSession, session_id)).title
 
-    async def enrich(self, **kwargs):
-        return await self.store.refresh_wecom_titles(self.account.id, application_id="application",
-            sender_id="open-member", userid="Member", name="成员姓名", revision=1, **kwargs)
-
-    async def test_title_enrichment_is_separate_from_callback_and_off_restores_original(self):
+    async def test_profile_settings_do_not_rewrite_existing_title_or_events(self):
         await self.enable()
-        single = await self.bind()
-        group = await self.bind(peer_id="group-id", peer_type="group")
-        self.assertEqual(await self.title(single.session.session_id), "User｜open-member")
-        self.assertEqual(await self.enrich(session_id=single.session.session_id), 1)
-        self.assertEqual(await self.title(single.session.session_id), "User｜成员姓名(open-member)")
-        self.assertEqual(await self.title(group.session.session_id), "Group｜group-id")
-        refreshed = await self.bind()
-        self.assertEqual(refreshed.binding.peer_metadata["display_name"], "回调名称")
-        self.assertEqual(refreshed.binding.peer_metadata["wecom_name"], "成员姓名")
+        bound = await self.bind()
+        sid = bound.session.session_id
+        original = await self.title(sid)
+        before = await self.stores.coordinator.list_events(sid, event_type="session/title")
         await self.enable(enabled=False)
-        await self.store.refresh_wecom_titles(self.account.id)
-        self.assertEqual(await self.title(single.session.session_id), "User｜回调名称(open-member)")
-        self.assertEqual(await self.enrich(), 0)
-        self.assertNotIn("wecom_name", (await self.bind()).binding.peer_metadata)
-
-    async def test_manual_title_and_stale_session_application_revision_are_protected(self):
-        await self.enable()
-        bound = await self.bind()
-        self.assertEqual(await self.enrich(session_id="an-old-ended-session"), 0)
-        async with self.factory.begin() as db:
-            (await db.get(WecomApplication, "application")).revision = 2
-        self.assertEqual(await self.enrich(), 0)
-        async with self.factory.begin() as db:
-            (await db.get(WecomApplication, "application")).revision = 1
-        await self.stores.coordinator.apply_session_title(bound.session.session_id,
-            agent_id=self.account.agent_id, user_id=self.account.session_user_id,
-            title="我自己起的标题", source="user", source_event_id=None, turn_id=None, run_id=None)
-        self.assertEqual(await self.enrich(), 0)
-        self.assertEqual(await self.title(bound.session.session_id), "我自己起的标题")
         await self.enable(application_id="different-application")
-        self.assertEqual(await self.enrich(), 0)
-
-    async def test_bulk_name_refresh_only_updates_matching_member(self):
-        await self.enable()
-        matched = await self.bind()
-        other = await self.bind(peer_id="another-member")
-        await self.enrich()
-        changed = await self.store.refresh_wecom_titles(self.account.id, application_id="application",
-            userid="member", name="更名后", revision=1)
-        self.assertEqual(changed, 1)
-        self.assertEqual(await self.title(matched.session.session_id), "User｜更名后(open-member)")
-        self.assertEqual(await self.title(other.session.session_id), "User｜another-member")
-
-    async def test_new_application_partial_identity_never_reuses_old_application_name(self):
-        await self.enable()
-        bound = await self.bind()
-        await self.enrich()
-        await self.enable(application_id="different-application")
-        await self.store.refresh_wecom_titles(self.account.id, application_id="different-application",
-            sender_id="open-member", userid="AnotherMember", name=None, revision=1)
-        self.assertEqual(await self.title(bound.session.session_id), "User｜open-member")
-        self.assertNotIn("wecom_name", (await self.bind()).binding.peer_metadata)
+        self.assertEqual(await self.title(sid), original)
+        after = await self.stores.coordinator.list_events(sid, event_type="session/title")
+        self.assertEqual([e.payload for e in before], [e.payload for e in after])
 
     async def _send(self, *, sender="open-member", group=False, lookup=None, persisted=False):
         calls = []

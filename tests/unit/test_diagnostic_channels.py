@@ -6,12 +6,14 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi import FastAPI
 from pydantic_ai.messages import ModelRequest, UserPromptPart
-from sqlalchemy import event
+from sqlalchemy import event, update, select
 
 from deep_agent.api.v1.admin import resolve_console_admin_access
 from deep_agent.api.v1.diagnostic_channels import router
 from deep_agent.core.context import get_app_context
 from deep_agent.db.models import (
+    ChatSession,
+    ChatSessionEvent,
     ChannelAccount,
     ChannelMessageRun,
     ChannelSessionBinding,
@@ -29,7 +31,17 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         await fixture.SessionEventStoreTests.asyncSetUp(self)
         self.now = datetime(2026, 9, 14, tzinfo=UTC)
         self.f = SessionFilters(self.now - timedelta(days=7), self.now)
-        self.queries = DiagnosticChannelQueries(self.factory)
+        self.profile_calls = []
+        async def resolve(account, ids, *, budget):
+            from deep_agent.db.stores._session import sqlite_session_lock
+            self.assertFalse(sqlite_session_lock(self.factory).locked())
+            self.profile_calls.append((account.id, list(ids), budget))
+            return {"items": {raw: {"sender_id": raw, "userid": raw,
+                                  "name": "Alice Current" if raw in {"opaque-A", "ALICE"} else None,
+                                  "status": "resolved"} for raw in ids},
+                    "profiles_complete": True, "unresolved_count": 0, "user_details_enabled": True}
+        self.profiles = SimpleNamespace(resolve_many=AsyncMock(side_effect=resolve))
+        self.queries = DiagnosticChannelQueries(self.factory, profiles=self.profiles)
         self.n = 0
         async with self.factory() as db:
             db.add(
@@ -56,6 +68,7 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
                     ChannelAccount(
                         id=a,
                         name=a,
+                        enabled=True,
                         bot_id=a,
                         secret="DO-NOT-RETURN",
                         agent_id=self.agent_id,
@@ -100,7 +113,7 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
     ):
         self.n += 1
         run = f"run-{self.n}"
-        if persisted:
+        if persisted and agent_run:
             await self.store.append(
                 sid,
                 [ModelRequest(parts=[UserPromptPart(text)], run_id=run)],
@@ -110,6 +123,21 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
                 turn_id=run,
             )
         async with self.factory() as db:
+            session = await db.get(ChatSession, sid)
+            if session:
+                account_row = await db.get(ChannelAccount, account)
+                session.source_type = "channel:" + account_row.channel_type
+                session.source_id = account
+                await db.execute(update(ChatSessionEvent).where(ChatSessionEvent.session_id == sid,
+                    ChatSessionEvent.run_id == run).values(created_at=self.now - timedelta(days=days)))
+                binding_row = await db.get(ChannelSessionBinding, binding)
+                if not await db.scalar(select(ChatSessionEvent.event_id).where(
+                    ChatSessionEvent.session_id == sid, ChatSessionEvent.event_type == "session/title")):
+                    db.add(ChatSessionEvent(event_id="title-" + sid, session_id=sid, sequence=0,
+                        event_type="session/title", payload={"source":"channel", "channel":{
+                            "account_id":account, "channel_type":account_row.channel_type,
+                            "peer_type":binding_row.peer_type,"peer_id":binding_row.peer_id}},
+                        created_at=self.now - timedelta(days=days)))
             db.add(
                 ChannelMessageRun(
                     id=f"msg-{self.n}",
@@ -125,6 +153,129 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
             )
             await db.commit()
 
+    async def test_group_statistics_do_not_reject_more_than_1000_sessions(self):
+        # A single group can span many /new sessions without losing its history.
+        async with self.factory() as db:
+            for index in range(1001):
+                sid = f"bulk-{index}"
+                db.add(ChatSession(session_id=sid, agent_id=self.agent_id,
+                    user_id="platform-owner", source_type="channel:wecom", source_id="a"))
+                db.add(ChatSessionEvent(event_id=f"origin-{index}", session_id=sid, sequence=0,
+                    event_type="session/title", payload={"source": "channel", "channel": {
+                        "account_id": "a", "channel_type": "wecom",
+                        "peer_type": "group", "peer_id": "large-group"}},
+                    created_at=self.now - timedelta(days=1)))
+                db.add(ChatSessionEvent(event_id=f"question-{index}", session_id=sid, sequence=1,
+                    event_type="user/message", payload={},
+                    created_at=self.now - timedelta(days=1)))
+            await db.commit()
+        result = await self.queries.peers("a", self.f, kind="group")
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["items"][0]["question_count"], 1001)
+        self.assertEqual(result["items"][0]["session_count"], 1001)
+        self.assertEqual(result["items"][0]["unattributed_question_count"], 1001)
+
+    async def test_console_followup_counts_once_without_a_sender_for_all_channels(self):
+        for channel in ("wecom", "feishu", "dingtalk"):
+            async with self.factory() as db:
+                account = await db.get(ChannelAccount, "b")
+                account.channel_type = channel
+                await db.commit()
+            sid = "mixed-" + channel
+            await self.question(sid, account="b", binding="single-b")
+            run = "console-" + channel
+            await self.store.append(sid, [ModelRequest(parts=[UserPromptPart("console")], run_id=run)],
+                agent_id=self.agent_id, user_id="platform-owner", run_id=run, turn_id=run)
+            async with self.factory() as db:
+                await db.execute(update(ChatSessionEvent).where(ChatSessionEvent.run_id == run)
+                    .values(created_at=self.now-timedelta(hours=1)))
+                await db.commit()
+            result = await self.queries.overview("b", self.f)
+            self.assertEqual(result["summary"], {"active_users": 1, "session_count": 1,
+                "question_count": 2, "unattributed_question_count": 1})
+            sessions = await self.queries.sessions("b", self.f, "user", "opaque-A")
+            self.assertEqual(sessions["items"][0]["question_count"], 2)
+            self.assertEqual(sessions["items"][0]["unattributed_question_count"], 1)
+            self.assertEqual(sessions["items"][0]["source_type"], "channel:" + channel)
+
+    async def test_group_console_followup_is_not_assigned_to_last_speaker(self):
+        from sqlalchemy import delete
+        await self.question("group-chat", binding="group", sender="alice", days=3)
+        await self.question("group-chat", binding="group", sender="bob", days=2)
+        await self.question("group-chat", binding="group", sender=None, text="console", days=1)
+        async with self.factory() as db:
+            await db.execute(delete(ChannelMessageRun).where(ChannelMessageRun.id == "msg-3"))
+            await db.commit()
+        groups = await self.queries.peers("a", self.f, kind="group")
+        self.assertEqual(groups["items"][0]["question_count"], 3)
+        self.assertEqual(groups["items"][0]["unattributed_question_count"], 1)
+        self.assertEqual(groups["items"][0]["latest_session"]["latest_question"], "console")
+        member = await self.queries.sessions("a", self.f, "group", "group-1", sender_id="bob")
+        self.assertEqual(member["total"], 1)
+        self.assertEqual(member["items"][0]["latest_question"], "Hello")
+        all_sessions = await self.queries.sessions("a", self.f, "group", "group-1")
+        self.assertEqual(all_sessions["items"][0]["question_count"], 3)
+
+    async def test_overview_does_not_load_peer_metadata(self):
+        await self.question("overview-source", account="b", binding="single-b")
+        statements = []
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+        event.listen(self.engine.sync_engine, "before_cursor_execute", capture)
+        try:
+            result = await self.queries.overview("b", self.f)
+        finally:
+            event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
+        self.assertEqual(result["summary"]["question_count"], 1)
+        self.assertFalse(any("payload" in sql.lower() for sql in statements))
+        self.assertFalse(any("session/title" in sql.lower() for sql in statements))
+
+    async def test_event_time_boundaries_and_duplicate_runs_do_not_inflate(self):
+        await self.question("start", account="b", binding="single-b", days=7)
+        await self.question("end", account="b", binding="single-b", days=0)
+        async with self.factory() as db:
+            original = await db.get(ChannelMessageRun, "msg-1")
+            original.created_at = self.now + timedelta(days=1)
+            db.add(ChannelMessageRun(id="duplicate", account_id="b", binding_id="single-b",
+                external_message_id="duplicate", payload_hash="hash", sender_id="opaque-A",
+                session_id="start", agent_run_id=original.agent_run_id))
+            await db.commit()
+        result = await self.queries.overview("b", self.f)
+        self.assertEqual(result["summary"]["question_count"], 1)
+        self.assertEqual(result["summary"]["active_users"], 1)
+        async with self.factory() as db:
+            await db.execute(update(ChannelMessageRun).where(ChannelMessageRun.id == "duplicate").values(sender_id="other"))
+            await db.commit()
+        result = await self.queries.overview("b", self.f)
+        self.assertEqual(result["summary"]["question_count"], 1)
+        self.assertEqual(result["summary"]["unattributed_question_count"], 1)
+
+    async def test_deleted_account_still_has_source_statistics(self):
+        from sqlalchemy import delete
+        await self.question("retained", account="b", binding="single-b")
+        async with self.factory() as db:
+            await db.execute(delete(ChannelMessageRun).where(ChannelMessageRun.account_id == "b"))
+            await db.execute(delete(ChannelSessionBinding).where(ChannelSessionBinding.account_id == "b"))
+            await db.execute(delete(ChannelAccount).where(ChannelAccount.id == "b"))
+            await db.commit()
+        result = await self.queries.overview("b", self.f)
+        self.assertEqual(result["summary"]["question_count"], 1)
+        self.assertEqual(result["summary"]["unattributed_question_count"], 1)
+        account = next(x for x in (await self.queries.accounts())["items"] if x["id"] == "b")
+        self.assertTrue(account["account_deleted"])
+
+    async def test_historical_metadata_does_not_override_source_and_scope_filters(self):
+        await self.question("ordinary", account="b", binding="single-b")
+        async with self.factory() as db:
+            await db.execute(update(ChatSession).where(ChatSession.session_id == "ordinary")
+                .values(source_type=None, source_id=None))
+            await db.commit()
+        self.assertEqual((await self.queries.overview("b", self.f))["summary"]["question_count"], 0)
+        await self.question("channel", account="b", binding="single-b")
+        for kwargs in ({"source_id":"a"}, {"source_type":"internal"}, {"agent_id":"foreign"}, {"user_id":"foreign"}):
+            filters = SessionFilters(self.f.start, self.f.end, **kwargs)
+            self.assertEqual((await self.queries.overview("b", filters))["summary"]["question_count"], 0)
+
     async def test_account_scope_commands_time_range_and_group_sender_dedupe(self):
         await self.question("private", days=3)
         await self.question("shared", binding="group", days=2, text="Alice asks")
@@ -139,11 +290,11 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         result = await self.queries.overview("a", self.f)
         self.assertEqual(
             result["summary"],
-            {"active_users": 2, "session_count": 2, "question_count": 4},
+            {"active_users": 2, "session_count": 2, "question_count": 4, "unattributed_question_count": 0},
         )
         self.assertEqual(
             result["active_users"][0],
-            {"user_id": "Alice", "name": "Alice Name", "question_count": 3},
+            {"user_id": "Alice", "name": "Alice Current", "question_count": 3},
         )
         peers = await self.queries.peers("a", self.f)
         alice = next(r for r in peers["items"] if r["peer_id"] == "Alice")
@@ -208,9 +359,9 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         finally:
             event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
         self.assertEqual(result["total"], 1)
-        self.assertEqual(result["items"], [{"peer_id": "Alice", "name": "Alice Name", "kind": "user"}])
-        self.assertLessEqual(len(statements), 3)
-        self.assertFalse(any("payload" in q.lower() for q in statements))
+        self.assertEqual(result["items"], [{"peer_id": "Alice", "name": "Alice Current", "kind": "user"}])
+        self.assertLessEqual(len(statements), 4)
+        self.assertLessEqual(sum("chat_session_events.payload" in q.lower() for q in statements), 2)
         selected = await self.queries.peers("a", self.f, peer_id="Alice")
         self.assertEqual(selected["total"], 1)
         self.assertEqual(selected["items"][0]["question_count"], 2)
@@ -274,7 +425,7 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_pagination_empty_and_latest_page(self):
         await self.question("first", days=1)
         await self.question("second", days=2)
-        f = SessionFilters(self.f.start, self.f.end, query="Alice Name", limit=1)
+        f = SessionFilters(self.f.start, self.f.end, query="Alice Current", limit=1)
         self.assertEqual((await self.queries.peers("a", f))["total"], 1)
         f = SessionFilters(self.f.start, self.f.end, query="%")
         self.assertEqual((await self.queries.peers("a", f))["total"], 0)
@@ -304,10 +455,10 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         finally:
             event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
         self.assertEqual(len(result["items"]), 3)
-        self.assertLessEqual(len(statements), 6)
+        self.assertLessEqual(len(statements), 8)
         payload_reads = [s for s in statements if "chat_session_events.payload" in s]
-        self.assertEqual(len(payload_reads), 1)
-        self.assertIn("max(chat_session_events.sequence)", payload_reads[0])
+        self.assertEqual(len(payload_reads), 2)
+        self.assertIn("max(chat_session_events.sequence)", payload_reads[1])
         self.assertNotIn("channel_accounts.secret", " ".join(statements))
 
     async def test_opaque_identity_case_and_mysql_57_sql(self):
@@ -325,13 +476,15 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([row["session_id"] for row in sessions["items"]], [sid])
         from sqlalchemy.dialects import mysql
 
-        base = self.queries._base(
-            SimpleNamespace(id="b", channel_type="wecom", settings={}), self.f
-        )
+        async with self.factory() as db:
+            base = await self.queries._base(db,
+                SimpleNamespace(id="b", channel_type="wecom", settings={}), self.f
+            )
         sql = str(base.select().compile(dialect=mysql.dialect()))
         self.assertIn("COLLATE utf8mb4_bin", sql)
         self.assertNotIn("WITH ", sql)
         self.assertNotIn("row_number", sql)
+        self.assertNotIn("json_extract", sql.lower())
 
     async def test_search_uses_aggregate_output_where_on_mysql(self):
         await self.question("first")
@@ -344,7 +497,7 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         try:
             for query, expected in [
                 ("Alice", 1),
-                ("Alice Name", 1),
+                ("Alice Current", 1),
                 ("中文", 0),
                 ("", 1),
                 ("%", 0),
@@ -356,9 +509,171 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         finally:
             event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
         self.assertFalse(any("HAVING" in sql for sql in statements))
-        self.assertTrue(any(".peer_id) LIKE" in sql for sql in statements))
+        self.assertFalse(any("sender_name" in sql or "wecom_user_profiles_1.name" in sql for sql in statements))
+
+    async def test_names_only_come_from_current_profiles_never_ledger_or_cache(self):
+        from sqlalchemy import update
+        await self.question("private")
+        async with self.factory() as db:
+            await db.execute(update(ChannelMessageRun).values(sender_name="HISTORIC NAME"))
+            await db.commit()
+        for query in ("HISTORIC NAME", "Alice Name"):
+            result = await self.queries.peers("a", SessionFilters(self.f.start, self.f.end, query=query))
+            self.assertEqual(result["total"], 0)
+        self.profiles.resolve_many.return_value = {
+            "items": {}, "profiles_complete": False, "unresolved_count": 1,
+            "user_details_enabled": True}
+        self.profiles.resolve_many.side_effect = None
+        result = await self.queries.peers("a", self.f)
+        self.assertIsNone(result["items"][0]["name"])
+        self.assertEqual(result["items"][0]["peer_id"], "Alice")
+        self.assertFalse(result["profiles_complete"])
+        self.assertEqual(result["unresolved_count"], 1)
+
+    async def test_name_search_resolves_all_candidates_before_paging_and_keeps_counts(self):
+        for sender, days in (("first", 1), ("second", 2), ("third", 3)):
+            await self.question(sender, sender=sender, days=days)
+        await self.question("outside-range", sender="outside", days=9)
+        async def resolve(account, ids, *, budget):
+            self.assertEqual(set(ids), {"first", "second", "third"})
+            self.assertEqual(budget, 10)
+            return {"items": {raw: {"name": "Match", "userid": "SAME-FRESH-ID"} for raw in ids},
+                    "profiles_complete": False, "unresolved_count": 1, "user_details_enabled": True}
+        self.profiles.resolve_many.side_effect = resolve
+        result = await self.queries.peers("a", SessionFilters(self.f.start, self.f.end, query="Match", limit=1, offset=1))
+        self.assertEqual(result["total"], 3)
+        self.assertEqual([r["peer_id"] for r in result["items"]], ["second"])
+        self.assertFalse(result["profiles_complete"])
+        self.assertEqual(self.profiles.resolve_many.await_count, 1)
+
+    async def test_fresh_profile_mapping_cannot_regroup_search_results(self):
+        from sqlalchemy import update
+        await self.question("private", sender="opaque-A")
+        await self.question("private-2", sender="ALICE")
+        async def resolve(account, ids, *, budget):
+            async with self.factory() as db:
+                await db.execute(update(WecomUserProfile).values(userid="Different canonical ID"))
+                await db.commit()
+            return {"items": {raw: {"name": "Current Match", "userid": "Different canonical ID"} for raw in ids},
+                    "profiles_complete": True, "unresolved_count": 0, "user_details_enabled": True}
+        self.profiles.resolve_many.side_effect = resolve
+        result = await self.queries.peers("a", SessionFilters(self.f.start, self.f.end, query="Different canonical ID"))
+        self.assertEqual(result["total"], 1)
+        item = result["items"][0]
+        self.assertEqual(item["peer_id"], "Alice")
+        self.assertEqual(item["question_count"], 2)
+        self.assertEqual(item["session_count"], 2)
+        self.assertIsNotNone(item["latest_session"])
+
+    async def test_profile_resolution_releases_sqlite_lock_and_pool_connection(self):
+        from deep_agent.db.stores._session import sqlite_session_lock
+        from sqlalchemy import select
+        checked_out = set()
+        def checkout(connection, record, proxy):
+            checked_out.add(id(connection))
+        def checkin(connection, record):
+            checked_out.discard(id(connection))
+        await self.question("private")
+        event.listen(self.engine.sync_engine, "checkout", checkout)
+        event.listen(self.engine.sync_engine, "checkin", checkin)
+        async def resolve(account, ids, *, budget):
+            self.assertFalse(sqlite_session_lock(self.factory).locked())
+            self.assertEqual(checked_out, set())
+            # The real profile provider uses the same serialized store. This
+            # would deadlock if diagnostics still held its read context.
+            async with self.queries._read() as db:
+                self.assertEqual(await db.scalar(select(ChannelAccount.id).where(ChannelAccount.id == account.id)), account.id)
+            return {"items": {raw: {"name": "Current"} for raw in ids},
+                    "profiles_complete": True, "unresolved_count": 0, "user_details_enabled": True}
+        self.profiles.resolve_many.side_effect = resolve
+        try:
+            await self.queries.overview("a", self.f)
+            await self.queries.peers("a", self.f)
+            await self.queries.peers("a", self.f, options_only=True)
+            await self.queries.peers("a", SessionFilters(self.f.start, self.f.end, query="Current"))
+        finally:
+            event.remove(self.engine.sync_engine, "checkout", checkout)
+            event.remove(self.engine.sync_engine, "checkin", checkin)
+
+    async def test_ordinary_page_only_resolves_page_ids(self):
+        for sender, days in (("first", 1), ("second", 2), ("third", 3)):
+            await self.question(sender, sender=sender, days=days)
+        await self.queries.peers("a", SessionFilters(self.f.start, self.f.end, limit=1, offset=1))
+        self.assertEqual(self.profile_calls, [("a", ["second"], 3)])
+
+    async def test_feishu_optin_and_disabled_lookup_never_uses_historic_name(self):
+        from sqlalchemy import update
+        async with self.factory() as db:
+            account = await db.get(ChannelAccount, "b")
+            account.channel_type = "feishu"
+            account.settings = {"feishu": {"user_details_enabled": False}}
+            await db.commit()
+        await self.question("feishu", account="b", binding="single-b")
+        async with self.factory() as db:
+            await db.execute(update(ChannelMessageRun).values(sender_name="OLD-FEISHU"))
+            await db.commit()
+        result = await self.queries.peers("b", self.f)
+        self.assertIsNone(result["items"][0]["name"])
+        self.assertFalse(result["user_details_enabled"])
+        self.assertEqual(self.profiles.resolve_many.await_count, 0)
+        async with self.factory() as db:
+            account = await db.get(ChannelAccount, "b")
+            account.settings = {"feishu": {"user_details_enabled": True}}
+            await db.commit()
+        result = await self.queries.peers("b", self.f)
+        self.assertEqual(result["items"][0]["name"], "Alice Current")
+        self.assertTrue(result["user_details_enabled"])
+        self.assertTrue(next(r for r in (await self.queries.accounts())["items"] if r["id"] == "b")["user_details_enabled"])
+
+    async def test_three_channels_share_statistics_and_name_search_contract(self):
+        """Only the profile adapter varies; counts, scope and paging do not."""
+        from sqlalchemy import update
+
+        await self.question("first", sender="opaque-A", account="b", binding="single-b", days=2)
+        await self.question("second", sender="different-id", account="b", binding="single-b")
+        async with self.factory() as db:
+            await db.execute(update(ChannelMessageRun).values(sender_name="historic-only-name"))
+            await db.commit()
+        for channel in ("wecom", "feishu", "dingtalk"):
+            with self.subTest(channel=channel):
+                async with self.factory() as db:
+                    account = await db.get(ChannelAccount, "b")
+                    account.channel_type = channel
+                    await db.execute(update(ChatSession).where(ChatSession.source_id == "b").values(source_type="channel:" + channel))
+                    for origin in (await db.scalars(select(ChatSessionEvent).where(ChatSessionEvent.event_type == "session/title"))).all():
+                        origin.payload = {**origin.payload, "channel": {**origin.payload["channel"], "channel_type": channel}}
+                    account.settings = {channel: {"user_details_enabled": True,
+                        **({"application_id": "app"} if channel == "wecom" else {})}}
+                    await db.commit()
+                overview = await self.queries.overview("b", self.f)
+                self.assertEqual(overview["summary"], {
+                    "active_users": 2, "session_count": 2, "question_count": 2, "unattributed_question_count": 0})
+                # Matching happens before pagination, including a user outside
+                # the latest unfiltered page; stored names never participate.
+                found = await self.queries.peers("b", SessionFilters(
+                    self.f.start, self.f.end, query="Current", limit=1))
+                self.assertEqual(found["total"], 1)
+                self.assertEqual(found["items"][0]["latest_session"]["session_id"], "first")
+                self.assertEqual(found["items"][0]["name"], "Alice Current")
+                old = await self.queries.peers("b", SessionFilters(
+                    self.f.start, self.f.end, query="historic-only-name"))
+                self.assertEqual(old["total"], 0)
+                async with self.factory() as db:
+                    account = await db.get(ChannelAccount, "b")
+                    account.settings = {channel: {"user_details_enabled": False}}
+                    await db.commit()
+                self.profiles.resolve_many.reset_mock()
+                disabled = await self.queries.peers("b", self.f)
+                self.assertFalse(disabled["user_details_enabled"])
+                self.assertTrue(all(row["name"] is None for row in disabled["items"]))
+                self.profiles.resolve_many.assert_not_awaited()
 
     async def test_admin_api_and_batched_platform_owner_names(self):
+        await self.question("deleted-account-session", account="b", binding="single-b")
+        async with self.factory() as db:
+            await db.execute(update(ChatSession).where(ChatSession.session_id == "deleted-account-session")
+                .values(source_id="deleted-account"))
+            await db.commit()
         app = FastAPI()
         app.include_router(router, prefix="/api/v1")
         app.dependency_overrides[get_app_context] = lambda: SimpleNamespace(
@@ -383,6 +698,10 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 200, response.text)
                 self.assertEqual(response.json()["items"][0]["user_name"], "Owner")
                 self.assertEqual(resolver.await_count, 1)
+                self.assertEqual(resolver.await_args.args[2], {"platform-owner"})
+                deleted = next(row for row in response.json()["items"] if row["id"] == "deleted-account")
+                self.assertTrue(deleted["account_deleted"])
+                self.assertIsNone(deleted["user_name"])
             result = await client.get("/api/v1/diagnostics/channels/missing/overview")
             self.assertEqual(result.status_code, 404)
             self.assertEqual(result.headers["cache-control"], "no-store")

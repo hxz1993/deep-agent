@@ -8,12 +8,13 @@ import { renderSessionInspector } from "../../../console/session-inspector.js";
 
 const source = await readFile(new URL("../../../console/workspace.js", import.meta.url), "utf8");
 
-function inspector({ accounts = [], channel = null, tab = "channel" } = {}) {
+function inspector({ accounts = [], channel = null, tab = "channel", extraState = {} } = {}) {
   const host = { innerHTML: "", querySelectorAll: () => [] };
   const state = {
     agentId: "agent-1", sessionId: "session-1", llmModels: [], agents: [{ id: "agent-1", name: "Agent" }],
-    sessions: [{ id: "session-1", agentId: "agent-1", channel }],
+    sessions: [{ id: "session-1", agentId: "agent-1", channel, source_type: channel ? "channel:wecom" : "internal", source_id: channel ? "account-1" : null }],
   };
+  Object.assign(state, extraState);
   const context = vm.createContext({
     window: { DeepAgentConsoleChat: { state } },
     document: { getElementById: () => host, querySelector: () => null },
@@ -54,4 +55,33 @@ test("历史来源独立于当前Agent绑定，ID转义并可复制", () => {
   const overview = inspector({ channel: origin, tab: "session" });
   assert.doesNotMatch(overview, /Original bot|chat&lt;/);
   assert.match(overview, /data-inspector-copy="session-1"/);
+});
+
+
+test("概览模型图标取实际Run Provider，不跟随当前选择模型", () => {
+  const html = inspector({ tab: "session", extraState: {
+    llmModelId: "new-model", llmModels: [{ id: "new-model", name: "other", provider: { provider_type: "openai" } }],
+    lastRunMetrics: { run_id: "r", model_name: "deepseek-flash", provider_name: "deepseek" },
+  } });
+  assert.match(html, /data-provider-type="deepseek"/);
+  assert.doesNotMatch(html, /data-provider-type="openai"/);
+});
+
+test("未开始会话采用所选模型Provider，未知历史Provider不伪造", () => {
+  const html = inspector({ tab: "session", extraState: { sessionId: null, llmModelId: "m",
+    llmModels: [{ id: "m", name: "model", provider: { provider_type: "moonshotai" } }],
+  } });
+  assert.match(html, /data-provider-type="moonshotai"/);
+  const unknown = inspector({ tab: "session", extraState: { lastRunMetrics: { model_name: "unknown" } } });
+  assert.doesNotMatch(unknown, /data-provider-type=/);
+});
+
+
+test("历史模型精确ID关联Provider类型优先于自定义名称", () => {
+  const html = inspector({ tab: "session", extraState: {
+    llmModels: [{ id: "historical-model", name: "same-name", provider: { name: "GPT", provider_type: "openai" } }],
+    lastRunMetrics: { run_id: "r", model_id: "historical-model", model_name: "same-name", provider_name: "GPT" },
+  } });
+  assert.match(html, /data-provider-type="openai"/);
+  assert.doesNotMatch(html, /data-provider-type="openai_compatible"/);
 });

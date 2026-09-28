@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
-import json
 
 
 @dataclass(frozen=True)
@@ -14,6 +12,7 @@ class MessageTarget:
     message_id: str
     thread_id: str | None = None
     chat_id: str | None = None
+    recipient_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +44,7 @@ class MessageCapabilities:
     audio_formats: tuple[str, ...] = ()
     video_formats: tuple[str, ...] = ("mp4",)
     image_formats: tuple[str, ...] = ("png", "jpeg", "gif", "webp", "bmp")
+    media_fallback_to_file: bool = True
 
 
 class DeliveryError(Exception):
@@ -77,18 +77,13 @@ async def resolve_run_context(store, *, account_id: str, channel_run_id: str,
             or run.processing_status != "running" or binding is None
             or binding.account_id != account_id or binding.session_id != session_id):
         raise DeliveryError("source_unavailable", "当前渠道会话已结束、停用或变更")
+    # Receipt persistence previously performed this check. Keep the actual
+    # session authority independent of Runs/binding metadata and persistence.
+    session = await store.get_channel_session(account_id, session_id)
+    if session is None or session.agent_id != agent_id or session.user_id != user_id:
+        raise DeliveryError("source_unavailable", "当前渠道会话归属已变更")
     return ChannelRunContext(account_id, channel_run_id, session_id, agent_id, user_id,
                              MessageTarget(account_id, binding.peer_type, binding.peer_id,
                                            run.external_message_id, run.thread_id,
-                                           (run.source_metadata or {}).get("lark_chat_id")))
-
-
-def component_hash(component: PreparedComponent) -> str:
-    content = {"kind": component.kind, "text": component.text, "filename": component.filename,
-               "mime": component.mime, "requested_kind": component.requested_kind,
-               "sha256": hashlib.sha256(component.data or b"").hexdigest()}
-    return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
-
-
-def request_hash(components: list[PreparedComponent], reply: bool) -> str:
-    return hashlib.sha256(json.dumps([reply, [component_hash(c) for c in components]]).encode()).hexdigest()
+                                           (run.source_metadata or {}).get("dingtalk_conversation_id" if account.channel_type == "dingtalk" else "lark_chat_id"),
+                                           (run.source_metadata or {}).get("dingtalk_staff_id") if account.channel_type == "dingtalk" else None))

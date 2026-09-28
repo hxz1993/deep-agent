@@ -38,7 +38,7 @@ class DiagnosticQueryError(ValueError):
 
 
 @asynccontextmanager
-async def query_budget():
+async def query_budget(*, timeout_seconds=8):
     """Bound concurrent heavy reads, queue wait and total read duration."""
     loop = asyncio.get_running_loop()
     slots = _SLOTS.setdefault(loop, asyncio.Semaphore(2))
@@ -48,7 +48,7 @@ async def query_budget():
         raise DiagnosticQueryError("诊断查询繁忙，请稍后重试", 503) from exc
     try:
         try:
-            async with asyncio.timeout(8):
+            async with asyncio.timeout(timeout_seconds):
                 yield
         except TimeoutError as exc:
             raise DiagnosticQueryError("诊断查询超时，请缩小时间范围或筛选条件", 503) from exc
@@ -64,6 +64,8 @@ class SessionFilters:
     agent_id: str | None = None
     user_id: str | None = None
     app_id: str | None = None
+    source_type: str | None = None
+    source_id: str | None = None
     query: str | None = None
     has_questions: bool | None = None
     has_execution_error: bool | None = None
@@ -84,7 +86,7 @@ class SessionFilters:
             raise DiagnosticQueryError("无效的会话状态")
         if not 1 <= self.limit <= 200 or self.offset < 0:
             raise DiagnosticQueryError("无效的分页参数")
-        for name in ("query", "agent_id", "user_id", "app_id"):
+        for name in ("query", "agent_id", "user_id", "app_id", "source_type", "source_id"):
             value = getattr(self, name)
             if value is not None:
                 value = value.strip()
@@ -228,7 +230,7 @@ class DiagnosticSessionQueries(SessionBoundMixin):
     async def user_option_ids(self, f, *, after=None):
         # One bounded identity page, independent of the session table's page and user filter.
         scoped = SessionFilters(f.start, f.end, timezone=f.timezone,
-                                agent_id=f.agent_id)
+                                agent_id=f.agent_id, source_type=f.source_type, source_id=f.source_id)
         identity = ChatSession.user_id
         stmt = select(identity).where(*self._filters(scoped), identity != "")
         if after is not None:
@@ -251,7 +253,8 @@ class DiagnosticSessionQueries(SessionBoundMixin):
         ).distinct().order_by(identity).limit(200))).all())
 
     def _filters(self, f, *, activity=True):
-        conditions = []
+        from deep_agent.db.session_source import session_source_conditions
+        conditions = session_source_conditions(f.source_type, f.source_id)
         if f.agent_id:
             conditions.append(ChatSession.agent_id == f.agent_id)
         if f.user_id:
@@ -381,17 +384,8 @@ class DiagnosticSessionQueries(SessionBoundMixin):
             event.event_type == "execution/error", in_range).group_by(event.session_id))).all())
         execution = {sid: (run, state) for sid, run, state in (await db.execute(
             execution_summary_statement(ids, self.active_entries))).all()}
-        origins = {}
-        title_rows = (await db.execute(select(event.session_id, event.payload).where(event.session_id.in_(ids),
-            event.event_type == "session/title").order_by(event.sequence))).all()
-        from deep_agent.channels.metadata import normalize_channel_origin
-        for sid, payload in title_rows:
-            if payload.get("source") == "channel" and isinstance(payload.get("channel"), dict) and sid not in origins:
-                origin = normalize_channel_origin(payload["channel"])
-                # Match the ordinary SessionInfo public origin fields, even
-                # when an old source snapshot carries additional internals.
-                origins[sid] = {key: value for key, value in origin.items() if key in
-                    {"account_id", "account_name", "channel_type", "peer_type", "peer_id", "peer_metadata"}}
+        from deep_agent.db.stores.channel import ChannelStore
+        origins = await ChannelStore._get_session_origins(db, ids)
         items = []
         for session, name, state, activity in rows:
             question = questions.get(session.session_id)
@@ -400,7 +394,8 @@ class DiagnosticSessionQueries(SessionBoundMixin):
             items.append({"session_id": session.session_id, "title": session.title,
                 "app_id": session.app_id,
                 "agent_id": agent_scope_to_api(session.agent_id), "agent_name": name, "user_id": session.user_id,
-                "source": "channel" if session.session_id in origins else "direct", "channel": origins.get(session.session_id),
+                "source_type": session.source_type or "internal", "source_id": session.source_id,
+                "source": "channel" if (session.source_type or "").startswith("channel:") else "direct", "channel": origins.get(session.session_id),
                 "created_at": utc_rfc3339(session.created_at), "updated_at": utc_rfc3339(activity),
                 "last_activity_at": utc_rfc3339(activity), "latest_status": execution[session.session_id][1] if state is None else state,
                 "run_id": active.run_id if active else execution[session.session_id][0],

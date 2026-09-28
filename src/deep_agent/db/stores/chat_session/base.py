@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent, ChannelSessionBinding
 from deep_agent.db.reference_integrity import lock_reference, lock_optional
 from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionSummaryRow, SortField
+from deep_agent.db.session_source import normalize_session_source, session_source_conditions
 from deep_agent.db.session_scope import SessionOwner, agent_scope_to_api
 from deep_agent.db.stores._session import SessionBoundMixin
 
@@ -32,6 +33,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             row = ChatSession(
                 session_id=session_id, agent_id=agent_id, user_id=user_id,
                 app_id=app_id, space_id=space_id, title=title, next_sequence=1,
+                source_type="internal", source_id=None,
                 created_at=timestamp, updated_at=timestamp,
             )
             db.add(row)
@@ -91,6 +93,13 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 ChatSession.agent_id == agent_id, ChatSession.session_id == session_id,
             ))).one_or_none()
             return (row.app_id, row.space_id) if row else (None, None)
+
+    async def get_source(self, agent_id: str, session_id: str) -> tuple[str, str | None]:
+        async with self._read() as db:
+            row = (await db.execute(select(ChatSession.source_type, ChatSession.source_id).where(
+                ChatSession.agent_id == agent_id, ChatSession.session_id == session_id,
+            ))).one_or_none()
+        return normalize_session_source(*row) if row else ("internal", None)
 
     async def get_timestamps(
         self, agent_id: str, session_id: str,
@@ -174,6 +183,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         stmt: Select, *, agent_id: str | None, user_id: str | None,
         updated_after: datetime | None, updated_before: datetime | None,
         query: str | None = None,
+        source_type: str | None = None, source_id: str | None = None,
     ) -> Select:
         if agent_id is not None:
             stmt = stmt.where(ChatSession.agent_id == agent_id)
@@ -183,6 +193,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             stmt = stmt.where(ChatSession.updated_at >= updated_after)
         if updated_before is not None:
             stmt = stmt.where(ChatSession.updated_at <= updated_before)
+        stmt = stmt.where(*session_source_conditions(source_type, source_id))
         search = (query or "").strip()
         if search:
             # Literal title substring, not SQL wildcard syntax. Never broaden
@@ -200,6 +211,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         updated_before: datetime | None = None,
         has_messages: bool | None = None, sort: SortField = "updated_at",
         query: str | None = None,
+        source_type: str | None = None, source_id: str | None = None,
     ) -> tuple[list[SessionSummaryRow], int]:
         limit = min(max(limit, 1), MAX_LIST_LIMIT)
         offset = max(offset, 0)
@@ -209,6 +221,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             select(
                 ChatSession.session_id, ChatSession.agent_id, ChatSession.title,
                 ChatSession.created_at, ChatSession.updated_at, ChatSession.app_id, ChatSession.space_id,
+                ChatSession.source_type, ChatSession.source_id,
                 Agent.name.label("agent_name"), message_count.label("message_count"),
                 turn_count.label("turn_count"),
             )
@@ -223,13 +236,14 @@ class ChatSessionStoreBase(SessionBoundMixin):
             )
             .group_by(
                 ChatSession.session_id, ChatSession.agent_id, ChatSession.title,
-                ChatSession.created_at, ChatSession.updated_at, ChatSession.app_id, ChatSession.space_id, Agent.name,
+                ChatSession.created_at, ChatSession.updated_at, ChatSession.app_id, ChatSession.space_id,
+                ChatSession.source_type, ChatSession.source_id, Agent.name,
             )
         )
         stmt = self._apply_session_filters(
             stmt, agent_id=agent_id, user_id=user_id,
             updated_after=updated_after, updated_before=updated_before,
-            query=query,
+            query=query, source_type=source_type, source_id=source_id,
         )
         if has_messages is True:
             stmt = stmt.having(message_count > 0)
@@ -250,7 +264,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 select(func.count()).select_from(ChatSession),
                 agent_id=agent_id, user_id=user_id,
                 updated_after=updated_after, updated_before=updated_before,
-                query=query,
+                query=query, source_type=source_type, source_id=source_id,
             )
             message_exists = exists(
                 select(ChatSessionEvent.event_id).where(
@@ -274,6 +288,8 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 attachment_count=attachment_counts.get(row.session_id, 0),
                 user_prompt=prompts.get(row.session_id), title=row.title,
                 app_id=row.app_id, space_id=row.space_id,
+                source_type=normalize_session_source(row.source_type, row.source_id)[0],
+                source_id=normalize_session_source(row.source_type, row.source_id)[1],
             )
             for row in rows
         ]

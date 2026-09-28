@@ -43,6 +43,8 @@ def attachment_ref_dict(ref: AttachmentRef) -> dict[str, Any]:
     }
     if ref.extracted_text:
         payload["extracted_text"] = ref.extracted_text
+    if ref.input_mode != "auto":
+        payload["input_mode"] = ref.input_mode
     return payload
 
 
@@ -61,6 +63,7 @@ def _merge_attachment_ref(
         name=existing.name or incoming.name,
         mime=existing.mime or incoming.mime,
         extracted_text=existing.extracted_text or incoming.extracted_text,
+        input_mode=existing.input_mode,
     )
 
 
@@ -89,6 +92,7 @@ def index_attachment_refs(
                     name=item.get("name"),
                     mime=item.get("mime"),
                     extracted_text=item.get("extracted_text"),
+                    input_mode=item.get("input_mode", "auto"),
                 )
                 indexed[ref.id] = _merge_attachment_ref(indexed.get(ref.id), ref)
     return indexed
@@ -259,6 +263,7 @@ async def _resolve_user_prompt_part(
                 name=item.get("name"),
                 mime=item.get("mime"),
                 extracted_text=item.get("extracted_text"),
+                input_mode=item.get("input_mode", "auto"),
             )
             resolved.extend(
                 await _resolve_ref(
@@ -287,6 +292,8 @@ async def _resolve_ref(
 ) -> list[UserContent]:
     mime = (ref.mime or "").split(";", 1)[0].strip().lower()
     name = ref.name or ref.id
+    if ref.input_mode == "reference":
+        return [TextContent(f"[附件: {name}] (file_id: {ref.id}, mime: {ref.mime or 'unknown'})（保留原文件，本轮未将文件内容交给模型）")]
     if not full:
         if ref.extracted_text:
             return [TextContent(ref.extracted_text)]

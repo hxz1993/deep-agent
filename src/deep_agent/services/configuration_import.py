@@ -248,7 +248,7 @@ def _validate_channel_rows(rows: Sequence[Mapping[str, Any]]) -> None:
     from deep_agent.channels.app_context import validate_channel_settings
     for row in rows:
         channel_type = row.get("channel_type")
-        if channel_type not in {"wecom", "feishu"} or row.get("transport") != "websocket":
+        if channel_type not in {"wecom", "feishu", "dingtalk"} or row.get("transport") != "websocket":
             raise ConfigurationImportError("channel_accounts contains an unsupported channel type or transport")
         try:
             settings = row.get("settings") or {}

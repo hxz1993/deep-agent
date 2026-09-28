@@ -221,7 +221,7 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_title_origin_blocks_fallback_and_model_but_allows_rename(self):
         resolved = await self.store.resolve_binding(**self.peer, peer_metadata={"display_name": "小明"})
         session_id = resolved.session.session_id
-        self.assertEqual(resolved.session.title, "User｜小明(external-fixture)")
+        self.assertEqual(resolved.session.title, "wecom｜User｜小明(external-fixture)")
         self.assertEqual(resolved.session.next_sequence, 2)
         expected = dict(self.peer, account_name="测试渠道", channel_type="wecom", peer_metadata={"user_id": "external-fixture", "display_name": "小明"})
         self.assertEqual(await self.store.get_session_origin(session_id), expected)
@@ -376,7 +376,7 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
             peer_metadata={"user_id": "message-sender", "chat_id": "wrong-id", "display_name": "业务群"},
         )
         self.assertEqual(group.peer_metadata, {"chat_id": "actual-group", "display_name": "业务群"})
-        self.assertEqual(self.store.session_title(self.account, group), "Group｜actual-group")
+        self.assertEqual(self.store.session_title(self.account, group), "wecom｜Group｜actual-group")
         private = await self.store.ensure_binding(**self.peer, peer_metadata={
             "user_id": "wrong-user", "chat_id": "actual-private-chat",
         })
@@ -439,7 +439,7 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
         current = await self.store.get_binding(**self.peer)
         self.assertEqual(current.session_id, second.session.session_id)
         old = await self.store.get_channel_session(self.account.id, first.session.session_id)
-        self.assertEqual(old.title, "User｜external-fixture")
+        self.assertEqual(old.title, "wecom｜User｜external-fixture")
 
 
 if __name__ == "__main__":

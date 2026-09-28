@@ -63,6 +63,29 @@ class FeishuTransportTest(unittest.IsolatedAsyncioTestCase):
                 await adapter.stop()
                 self.assertFalse(process.is_alive())
 
+    async def test_profile_ipc_and_inbound_use_same_worker_cache(self):
+        async with LocalFeishuPlatform() as platform:
+            adapter = adapter_for(platform, "cli_profile")
+            adapter.account.settings["feishu"] = {"user_details_enabled": True}
+            received = asyncio.Queue()
+            async def callback(message):
+                received.put_nowait(message)
+            try:
+                await adapter.start(callback)
+                await wait_connected(adapter)
+                await platform.send("cli_profile", message_id="profile_first")
+                message = await asyncio.wait_for(received.get(), 5)
+                self.assertEqual(message.sender_name, "当前姓名")
+                result = await adapter.resolve_users(["ou_human"])
+                self.assertEqual(result["items"][0]["name"], "当前姓名")
+                await platform.send("cli_profile", message_id="profile_second")
+                self.assertEqual((await asyncio.wait_for(received.get(), 5)).sender_name, "当前姓名")
+                calls = [path for path, _ in platform.http_calls if "/contact/v3/users/batch" in path]
+                self.assertEqual(len(calls), 1)
+                self.assertFalse(any("/members" in path for path, _ in platform.http_calls))
+            finally:
+                await adapter.stop()
+
     async def test_two_accounts_are_isolated_and_stopping_one_keeps_other_receiving(self):
         async with LocalFeishuPlatform() as platform:
             a, b = adapter_for(platform, "cli_a"), adapter_for(platform, "cli_b")

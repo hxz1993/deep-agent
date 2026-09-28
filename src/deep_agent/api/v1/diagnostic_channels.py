@@ -13,6 +13,7 @@ from deep_agent.api.v1.diagnostic_sessions import (
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.channels import DiagnosticChannelQueries
+from deep_agent.services.channel_profiles import ChannelProfileService
 from deep_agent.diagnostics.sessions import SessionFilters, query_budget
 
 router = APIRouter(
@@ -28,7 +29,7 @@ async def channel_accounts(
     request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep
 ):
     async with query_budget():
-        result = await DiagnosticChannelQueries(ctx.db_session_factory).accounts()
+        result = await DiagnosticChannelQueries(ctx.db_session_factory, profiles=ChannelProfileService(ctx)).accounts()
     result = await with_users(
         request, caller_user_id, result, {r["user_id"] for r in result["items"]}
     )
@@ -41,7 +42,7 @@ async def channel_accounts(
 @router.get("/{account_id}/overview")
 async def channel_overview(ctx: AppContextDep, account_id: str, selected: FiltersDep):
     async with query_budget():
-        return await DiagnosticChannelQueries(ctx.db_session_factory).overview(
+        return await DiagnosticChannelQueries(ctx.db_session_factory, profiles=ChannelProfileService(ctx)).overview(
             account_id, selected
         )
 
@@ -57,8 +58,8 @@ async def channel_peers(
     sender_id: str | None = Query(default=None, min_length=1, max_length=256),
     peer_id: str | None = Query(default=None, min_length=1, max_length=256),
 ):
-    async with query_budget():
-        return await DiagnosticChannelQueries(ctx.db_session_factory).peers(
+    async with query_budget(timeout_seconds=18 if selected.query and kind == "user" else 8):
+        return await DiagnosticChannelQueries(ctx.db_session_factory, profiles=ChannelProfileService(ctx)).peers(
             account_id, selected, kind, options_only=options_only, peer_id=peer_id, sender_id=sender_id, include_group_senders=include_group_senders
         )
 
@@ -73,6 +74,6 @@ async def channel_sessions(
     kind: Literal["user", "group"] = "user",
 ):
     async with query_budget():
-        return await DiagnosticChannelQueries(ctx.db_session_factory).sessions(
+        return await DiagnosticChannelQueries(ctx.db_session_factory, profiles=ChannelProfileService(ctx)).sessions(
             account_id, selected, kind, peer_id, sender_id=sender_id
         )

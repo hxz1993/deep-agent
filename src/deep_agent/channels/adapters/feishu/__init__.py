@@ -144,9 +144,9 @@ class FeishuAdapter:
             raise RuntimeError("Feishu worker unavailable") from None
         finally:
             self._pending.pop(identifier, None)
-            if method == "send_component" and not future.done():
+            if method in {"send_component", "resolve_users"} and not future.done():
                 future.cancel()
-            if method == "send_component" and future.cancelled():
+            if method in {"send_component", "resolve_users"} and future.cancelled():
                 try:
                     await asyncio.to_thread(self._send, {"kind": "cancel", "id": identifier})
                 except (RuntimeError, OSError):
@@ -269,6 +269,11 @@ class FeishuAdapter:
             raise
         except Exception:
             raise DeliveryError("send_unknown", "飞书发送结果未知，请确认是否已收到，勿重复发送", unknown=True) from None
+
+    async def resolve_users(self, user_ids: list[str], *, timeout: float = 3.0) -> dict:
+        if self._closing or not self._started:
+            raise RuntimeError("Feishu worker unavailable")
+        return await self._rpc("resolve_users", user_ids, timeout, timeout=timeout + 1)
 
     async def download_media(self, media: InboundMedia) -> tuple[bytes, str | None]:
         return await self._rpc("download_media", media)

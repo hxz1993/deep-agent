@@ -3456,6 +3456,16 @@ code {
 .wecom-detail-fields dt { color: var(--text-dim); }
 .wecom-detail-fields dd { margin: 0; overflow-wrap: anywhere; }
 #configurationHost #wecomApplicationsView { grid-template-columns: 180px minmax(0, 1fr); }
+/* The application view shares the remaining height after both toolbar rows. */
+@media (min-width: 901px) {
+  #configurationHost > #panel-channels.active:has(#wecomApplicationsView:not([hidden])) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  #panel-channels > :is(.panel-toolbar, .channel-content-toolbar) { flex-shrink: 0; }
+  #configurationHost #wecomApplicationsView { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+  #configurationHost #wecomApplicationList { min-height: 0; overflow-y: auto; }
+  #wecomApplicationDetail .wecom-detail-content { min-height: 0; }
+  #wecomApplicationDetail :is(.wecom-detail-heading, .wecom-inline-status, .wecom-card-heading, .wecom-member-toolbar, .wecom-member-pager) { flex-shrink: 0; }
+  #wecomApplicationDetail .wecom-member-table { min-height: 0; overflow: auto; }
+}
 #configurationHost #wecomApplicationList { padding-right: 16px; }
 #configurationHost .wecom-application-list-item { height: 52px; min-height: 52px; }
 .wecom-cache-summary { display: flex; flex: 1; align-items: center; flex-wrap: wrap; gap: 12px; color: var(--text-dim); font-size: 12px; }
@@ -3527,6 +3537,9 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
   .channel-extension-layout { grid-template-columns: 145px minmax(0, 1fr); gap: 14px; height: 218px; }
   .channel-extension-tabs { padding-right: 8px; }
 }
+#channelUserDetailsCheckResult { overflow-wrap: anywhere; }
+#channelUserDetailsCheckResult p { margin: 0 0 6px; }
+#channelFeishuUserDetails > .field-hint { margin: 0; }
 #channelWecomApplicationField { max-width: 100%; }
 #channelWecomApplicationField .field-label-row { justify-content: space-between; }
 #channelWecomApplicationField .btn-link { border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }

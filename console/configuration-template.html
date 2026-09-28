@@ -856,9 +856,14 @@
             </div>
             <div id="channelMemberPanel" class="channel-extension-panel" role="tabpanel" aria-labelledby="channelMemberTab" hidden>
               <div id="channelWecomMemberToggle" class="channel-extension-panel-head"><div class="channel-extension-label">
-                <button type="button" id="channelUserDetailsEnabled" class="model-enabled-switch off" role="switch" aria-checked="false" aria-label="查询用户详情" aria-controls="channelWecomApplicationField"><span></span></button>
+                <button type="button" id="channelUserDetailsEnabled" class="model-enabled-switch off" role="switch" aria-checked="false" aria-label="查询用户详情" aria-controls="channelWecomApplicationField channelFeishuUserDetails"><span></span></button>
                 <label for="channelUserDetailsEnabled">启用用户详情查询</label>
-              </div><small class="field-subtitle">获取企微成员账号和姓名</small></div>
+              </div><small class="field-subtitle" id="channelUserDetailsHint">获取企微成员账号和姓名</small></div>
+              <div id="channelFeishuUserDetails" class="channel-extension-fields" hidden>
+                <p class="field-hint">使用当前机器人应用，无需另外关联应用。开启后按用户 ID 查询姓名；查询不到时显示 ID。</p>
+                <div><button type="button" class="btn" id="channelUserDetailsCheckBtn">检测权限</button></div>
+                <div class="field-hint" id="channelUserDetailsCheckResult" role="status" aria-live="polite" hidden></div>
+              </div>
               <div class="field channel-application-field" id="channelWecomApplicationField" hidden>
                 <span class="field-label-row"><label for="channelWecomApplicationId">企微应用</label><button type="button" class="btn-link" id="clearChannelWecomApplicationBtn">清空</button></span>
                 <select id="channelWecomApplicationId" aria-describedby="channelWecomApplicationHint"><option value="" hidden disabled selected>请选择</option></select>

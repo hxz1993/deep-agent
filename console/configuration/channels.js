@@ -74,6 +74,7 @@ function setChannelRegistrationMode(mode) {
   document.getElementById("channelSecret").required = !scan && !channelAdminState.editingId;
 }
 function prepareChannelPlatform(type) {
+  clearChannelPermissionCheck();
   channelRegistration?.reset();
   channelAdminState.channelType = type === "feishu" ? "feishu" : "wecom";
   const feishu = channelAdminState.channelType === "feishu";
@@ -96,9 +97,74 @@ function prepareChannelPlatform(type) {
   document.getElementById("channelRegistrationMode").hidden = Boolean(channelAdminState.editingId);
   document.getElementById("channelRegistrationSetup").hidden = Boolean(channelAdminState.editingId);
   document.getElementById(!channelAdminState.editingId ? "channelRegistrationCredentials" : "channelCredentialHome").append(document.getElementById("channelCredentialLayout"));
-  document.getElementById("channelMemberTab").hidden = feishu;
-  document.getElementById("channelWecomMemberToggle").hidden = feishu;
+  document.getElementById("channelMemberTab").hidden = false;
+  document.getElementById("channelWecomMemberToggle").hidden = false;
+  document.getElementById("channelUserDetailsHint").textContent = feishu ? "使用当前飞书应用查询姓名" : "获取企微成员账号和姓名";
+  document.getElementById("channelFeishuUserDetails").hidden = !feishu;
   setChannelRegistrationMode(!channelAdminState.editingId ? "scan" : "manual");
+}
+
+const channelPermissionCheck = { generation: 0, controller: null };
+
+function clearChannelPermissionCheck() {
+  channelPermissionCheck.generation++;
+  channelPermissionCheck.controller?.abort();
+  channelPermissionCheck.controller = null;
+  const result = document.getElementById("channelUserDetailsCheckResult");
+  if (result) { result.textContent = ""; result.hidden = true; }
+  const button = document.getElementById("channelUserDetailsCheckBtn");
+  if (button) { button.disabled = false; button.textContent = "检测权限"; }
+}
+
+function channelCredentialsAreSaved() {
+  const account = channelAdminState.accounts.find(item => item.id === channelAdminState.editingId);
+  const secretInput = document.getElementById("channelSecret");
+  const secret = secretInput.value.trim();
+  return account && document.getElementById("channelBotId").value.trim() === account.bot_id
+    && (!secret || secret === secretInput.dataset.maskedValue);
+}
+
+function officialFeishuLink(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "open.feishu.cn" && !url.username && !url.password && !url.port ? url.href : "";
+  } catch { return ""; }
+}
+
+async function checkChannelUserDetails() {
+  if (channelAdminState.channelType !== "feishu" || channelAdminState.saving) return;
+  clearChannelPermissionCheck();
+  const result = document.getElementById("channelUserDetailsCheckResult");
+  result.hidden = false;
+  if (!channelCredentialsAreSaved()) {
+    result.textContent = "请先保存渠道及当前应用凭据，再检测权限。";
+    return;
+  }
+  const button = document.getElementById("channelUserDetailsCheckBtn");
+  const accountId = channelAdminState.editingId;
+  const generation = channelPermissionCheck.generation;
+  const controller = new AbortController();
+  channelPermissionCheck.controller = controller;
+  const current = () => generation === channelPermissionCheck.generation
+    && channelAdminState.editingId === accountId && document.getElementById("channelAccountModal").open
+    && channelCredentialsAreSaved();
+  button.disabled = true; button.textContent = "检测中…";
+  result.textContent = "正在检测已保存应用的权限…";
+  try {
+    const data = await apiFetch(`/api/v1/channel-accounts/${encodeURIComponent(accountId)}/user-details/check`, { method: "POST", signal: controller.signal });
+    if (!current()) return;
+    const status = { authorized: "已授权", missing: "尚未授权", error: "检测失败" }[data.status] || "检测失败";
+    const permissions = Array.isArray(data.permissions) ? data.permissions : [];
+    const consoleUrl = officialFeishuLink(data.console_url), docsUrl = officialFeishuLink(data.docs_url);
+    result.innerHTML = `<p>${escapeHtml(status)}${data.message ? `：${escapeHtml(data.message)}` : ""}</p>${permissions.map(item => `<p>${escapeHtml(item.name || item.scope)}（${escapeHtml(item.scope)}）：${item.authorized ? "已授权" : "未授权"}</p>`).join("")}<p>姓名读取还受通讯录数据范围限制；修改权限后请完成应用发布。</p><p>${consoleUrl ? `<a class="channel-platform-link" href="${escapeHtml(consoleUrl)}" target="_blank" rel="noopener noreferrer">前往权限管理 ↗</a>` : ""} ${docsUrl ? `<a class="channel-platform-link" href="${escapeHtml(docsUrl)}" target="_blank" rel="noopener noreferrer">查看配置说明 ↗</a>` : ""}</p>`;
+  } catch (error) {
+    if (current()) result.textContent = error.message || "权限检测失败，请重试。";
+  } finally {
+    if (generation === channelPermissionCheck.generation) {
+      channelPermissionCheck.controller = null;
+      button.disabled = channelAdminState.saving; button.textContent = "检测权限";
+    }
+  }
 }
 
 const channelUserQuery = { generation: 0, controller: null };
@@ -256,7 +322,7 @@ async function prepareChannelApplicationEditor(settings = {}) {
   const generation = ++channelAdminState.applicationLoadGeneration;
   if (channelAdminState.channelType === "feishu") {
     channelAdminState.applications = [];
-    setChannelUserDetailsEnabled(false);
+    setChannelUserDetailsEnabled(settings?.feishu?.user_details_enabled === true);
     select.disabled = true;
     return;
   }
@@ -490,7 +556,7 @@ const channelsAdmin = {
     }
     const payload = {
       settings: {
-        ...(feishu ? { ...account?.settings, feishu: { domain: "feishu", require_mention: true, ...account?.settings?.feishu } } : channelUserDetailsSettings(account?.settings || {}, enabled, applicationId)),
+        ...(feishu ? { ...account?.settings, feishu: { domain: "feishu", require_mention: true, ...account?.settings?.feishu, user_details_enabled: enabled } } : channelUserDetailsSettings(account?.settings || {}, enabled, applicationId)),
         deepfos: {
           ...channelApiKeySettings(account?.settings?.deepfos),
           enabled: document.getElementById("channelDeepfosEnabled").getAttribute("aria-checked") === "true",
@@ -507,6 +573,7 @@ const channelsAdmin = {
     if (secret && secret !== secretInput.dataset.maskedValue) payload.secret = secret;
     if (!editingId) { payload.enabled = false; payload.channel_type = channelAdminState.channelType; }
     if (scan) { payload.registration_id = channelRegistration.authorizedId; delete payload.bot_id; delete payload.secret; }
+    clearChannelPermissionCheck();
     channelAdminState.saving = true;
     form.querySelectorAll("button").forEach(button => { button.disabled = true; });
     try {
@@ -702,6 +769,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
   document.getElementById("channelDeepfosEnabled")?.addEventListener("click", event => setChannelDeepfosEnabled(event.currentTarget.getAttribute("aria-checked") !== "true"));
+  document.getElementById("channelUserDetailsCheckBtn")?.addEventListener("click", checkChannelUserDetails);
+  ["channelBotId", "channelSecret"].forEach(id => document.getElementById(id)?.addEventListener("input", clearChannelPermissionCheck));
   document.getElementById("channelUserDetailsEnabled")?.addEventListener("click", event => setChannelUserDetailsEnabled(event.currentTarget.getAttribute("aria-checked") !== "true"));
   document.getElementById("clearChannelWecomApplicationBtn")?.addEventListener("click", () => {
     const select = document.getElementById("channelWecomApplicationId");
@@ -739,6 +808,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("channelAccountModal")?.addEventListener("cancel", event => { event.preventDefault(); closeAccount(); });
   document.getElementById("channelAccountModal")?.addEventListener("close", () => {
     clearChannelUserQuery();
+    clearChannelPermissionCheck();
     channelRegistration?.reset();
     channelAdminState.applicationLoadGeneration++;
     document.getElementById("channelSecret").value = "";

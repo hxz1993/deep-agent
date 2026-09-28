@@ -21,6 +21,7 @@ from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.projector import ConversationProjectionError
 from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, DiagnosticSessionQueries, SessionFilters, detail_event_metadata, project_diagnostic_history, query_budget
+from deep_agent.services.channel_profiles import ChannelProfileService
 from deep_agent.time import UtcDatetime, utc_rfc3339
 
 
@@ -84,6 +85,9 @@ async def get_diagnostic_overview(request: Request, ctx: AppContextDep, caller_u
 async def list_diagnostic_sessions(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep, selected: FiltersDep):
     async with query_budget():
         result = await service(ctx).list(selected)
+    origins = await ChannelProfileService(ctx).enrich_origins({row["session_id"]: row.get("channel") for row in result["items"]})
+    for row in result["items"]:
+        row["channel"] = origins.get(row["session_id"])
     return await with_users(request, caller_user_id, result, {row["user_id"] for row in result["items"]})
 
 
@@ -143,6 +147,7 @@ async def get_diagnostic_session(request: Request, ctx: AppContextDep, caller_us
                 # No current model/provider/configuration must not hide history.
                 # Context is a best-effort estimate, never a historical snapshot.
                 result["context_error"] = "当前配置无法估算上下文；会话正文和轨迹仍可查看"
+    result["channel"] = (await ChannelProfileService(ctx).enrich_origins({session_id: result.get("channel")})).get(session_id)
     return await with_users(request, caller_user_id, result, [result["user_id"]])
 
 

@@ -29,8 +29,6 @@ LOGICAL_REFERENCES = (
     Relation("channel_session_bindings", "session_id", "chat_sessions", "session_id", "SET NULL"),
     Relation("channel_message_runs", "account_id", "channel_accounts", "id", "CASCADE"),
     Relation("channel_message_runs", "binding_id", "channel_session_bindings", "id", "CASCADE"),
-    Relation("channel_message_operations", "account_id", "channel_accounts", "id", "CASCADE"),
-    Relation("channel_message_operations", "channel_run_id", "channel_message_runs", "id", "CASCADE"),
 )
 
 

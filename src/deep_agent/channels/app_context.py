@@ -95,13 +95,15 @@ def validate_channel_settings(channel_type: str, settings: dict[str, Any]) -> No
     config = settings.get("feishu", {})
     if not isinstance(config, dict):
         raise ValueError("settings.feishu 必须是对象")
-    allowed = {"domain", "require_mention", "group_allowlist"}
+    allowed = {"domain", "require_mention", "group_allowlist", "user_details_enabled"}
     if set(config) - allowed:
         raise ValueError("包含不支持的飞书配置项")
     if config.get("domain", "feishu") != "feishu":
         raise ValueError("当前仅支持国内飞书长连接")
     if config.get("require_mention", True) is not True:
         raise ValueError("飞书群聊仅响应提及机器人的消息")
+    if type(config.get("user_details_enabled", False)) is not bool:
+        raise ValueError("user_details_enabled 必须是布尔值")
     for name in ("group_allowlist",):
         values = config.get(name, [])
         if not isinstance(values, list) or len(values) > 1000 or any(

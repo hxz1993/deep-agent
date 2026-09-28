@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
 from sqlalchemy import case, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +13,6 @@ from deep_agent.db.models import (
     Agent,
     ChannelAccount,
     ChannelMessageRun,
-    ChannelMessageOperation,
     ChannelSessionBinding,
     ChatSession,
     ChatSessionEvent,
@@ -147,7 +146,6 @@ class ChannelStore(SessionBoundMixin):
             if (impact.counts["binding_count"] or impact.counts["run_count"] or confirmation_token) and confirmation_token != impact.token:
                 raise DeletionConfirmationRequired(impact)
             # Keep Agent and ChatSession history; only remove the channel ledger.
-            await db.execute(delete(ChannelMessageOperation).where(ChannelMessageOperation.account_id == account_id))
             await db.execute(delete(ChannelMessageRun).where(ChannelMessageRun.account_id == account_id))
             await db.execute(delete(ChannelSessionBinding).where(ChannelSessionBinding.account_id == account_id))
             await db.execute(delete(ChannelAccount).where(ChannelAccount.id == account_id))
@@ -176,108 +174,6 @@ class ChannelStore(SessionBoundMixin):
     async def get_run(self, run_id: str) -> ChannelMessageRun | None:
         async with self._read() as db:
             return await db.get(ChannelMessageRun, run_id)
-
-    @staticmethod
-    def _receipt_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        # Metadata only. Refuse accidental body/blob/prompt persistence rather
-        # than silently copying a transport response into the receipt ledger.
-        allowed = {"index", "kind", "requested_kind", "state", "message_id",
-                   "request_id", "text_hash", "error_code", "error_message", "note"}
-        if not isinstance(results, list):
-            raise ValueError("Operation results must be a list")
-        copied = []
-        for item in results:
-            if not isinstance(item, dict) or item.keys() - allowed:
-                raise ValueError("Operation results contain unsupported receipt fields")
-            if any(not isinstance(value, (str, int, bool, type(None))) for value in item.values()):
-                raise ValueError("Operation receipt values must be scalar metadata")
-            copied.append(dict(item))
-        return copied
-
-    async def claim_operation(
-        self, *, account_id: str, channel_run_id: str, agent_run_id: str,
-        tool_call_id: str, session_id: str, request_hash: str,
-        results: list[dict[str, Any]],
-    ) -> tuple[ChannelMessageOperation, bool]:
-        values = self._receipt_results(results)
-        operation_id = uuid5(NAMESPACE_URL, "deep-agent-channel:" + agent_run_id + ":" + tool_call_id).hex
-        async def attempt(db):
-            account = await self._lock_account_for_write(db, account_id)
-            if account is None:
-                raise ReferenceConflict("Channel account not found")
-            session = await lock_reference(db, ChatSession, ChatSession.session_id, session_id, "Session")
-            run = await lock_reference(db, ChannelMessageRun, ChannelMessageRun.id, channel_run_id, "Channel run")
-            if (run.account_id != account_id or run.session_id != session_id
-                    or run.agent_run_id != agent_run_id
-                    or session.agent_id != account.agent_id
-                    or session.user_id != account.session_user_id):
-                raise ReferenceConflict("Outbound operation source does not match its channel run")
-            existing = (await db.execute(select(ChannelMessageOperation).where(
-                ChannelMessageOperation.agent_run_id == agent_run_id,
-                ChannelMessageOperation.tool_call_id == tool_call_id,
-            ).with_for_update())).scalar_one_or_none()
-            if existing is not None:
-                if (existing.request_hash != request_hash or existing.account_id != account_id
-                        or existing.channel_run_id != channel_run_id or existing.session_id != session_id):
-                    raise ValueError("Outbound operation idempotency conflict")
-                return existing, False
-            row = ChannelMessageOperation(
-                id=operation_id, account_id=account_id, channel_run_id=channel_run_id,
-                agent_run_id=agent_run_id, tool_call_id=tool_call_id,
-                session_id=session_id, request_hash=request_hash, state="pending", results=values,
-            )
-            db.add(row)
-            await db.flush()
-            await db.refresh(row)
-            return row, True
-        try:
-            async with self._write() as db:
-                return await attempt(db)
-        except IntegrityError as exc:
-            if not is_unique_conflict(exc):
-                raise
-            # Another worker won the unique (run, tool call) claim. Re-read in
-            # a fresh transaction after rollback; do not repeat external I/O.
-            async with self._write() as db:
-                return await attempt(db)
-
-    async def get_operation(self, operation_id: str) -> ChannelMessageOperation | None:
-        async with self._read() as db:
-            return await db.get(ChannelMessageOperation, operation_id)
-
-    async def update_operation(
-        self, operation_id: str, *, state: str, results: list[dict[str, Any]],
-    ) -> ChannelMessageOperation | None:
-        if state not in {"pending", "running", "completed", "failed", "cancelled", "unknown"}:
-            raise ValueError("Invalid outbound operation state")
-        values = self._receipt_results(results)
-        async with self._write() as db:
-            row = await lock_optional(db, ChannelMessageOperation, ChannelMessageOperation.id, operation_id)
-            if row is None:
-                return None
-            if row.state not in {"pending", "running"}:
-                # A restarted/cancelled operation can never become sendable.
-                return row
-            row.state = state
-            row.results = values
-            row.updated_at = datetime.now(timezone.utc)
-            await db.flush()
-            return row
-
-    async def recover_operations(self) -> int:
-        """Startup recovery preserves receipts and never schedules a resend."""
-        async with self._write() as db:
-            rows = (await db.execute(select(ChannelMessageOperation).where(
-                ChannelMessageOperation.state.in_({"pending", "running"}),
-            ).order_by(ChannelMessageOperation.id).with_for_update())).scalars().all()
-            for row in rows:
-                row.state = "unknown"
-                row.results = [
-                    {**item, "state": "unknown"} if item.get("state") in {"pending", "running"} else dict(item)
-                    for item in row.results
-                ]
-                row.updated_at = datetime.now(timezone.utc)
-            return len(rows)
 
     async def account_summary(self, account_id: str) -> dict[str, str]:
         async with self._read() as db:
@@ -380,86 +276,8 @@ class ChannelStore(SessionBoundMixin):
         if application_id and binding.peer_type in {"single", "userid"}:
             metadata = binding.peer_metadata or {}
             name = metadata.get("wecom_name") if metadata.get("wecom_application_id") == application_id else None
-            return channel_session_title(binding.peer_type, binding.peer_id, {"display_name": name})
-        return channel_session_title(binding.peer_type, binding.peer_id, binding.peer_metadata)
-
-    async def refresh_wecom_titles(
-        self, account_id: str, *, application_id: str | None = None,
-        sender_id: str | None = None, userid: str | None = None,
-        name: str | None = None, session_id: str | None = None, revision: int | None = None,
-    ) -> int:
-        """Refresh active private bindings without rewriting user titles/history.
-
-        No application_id means a settings change: clear previous enrichment.
-        A background result must carry the application and original session ID
-        to avoid changing a new conversation after /new or an account edit.
-        """
-        async with self._read() as db:
-            peers = list((await db.execute(select(
-                ChannelSessionBinding.peer_type, ChannelSessionBinding.peer_id,
-            ).where(
-                ChannelSessionBinding.account_id == account_id,
-                ChannelSessionBinding.peer_type.in_({"single", "userid"}),
-            ).order_by(ChannelSessionBinding.id))).all())
-        changed = 0
-        for peer_type, peer_id in peers:
-            async with self._write() as db:
-                account, expected_session = await self._lock_peer_account(db, account_id, peer_type, peer_id)
-                if account is None or account.channel_type != "wecom":
-                    continue
-                if application_id and (not account.enabled or wecom_application_id(account) != application_id):
-                    continue
-                if application_id:
-                    application = await lock_optional(db, WecomApplication, WecomApplication.id, application_id)
-                    if application is None or (revision is not None and application.revision != revision):
-                        continue
-                binding = await self._get_binding(db, account_id, peer_type, peer_id, for_update=True)
-                if binding is None:
-                    continue
-                self._check_binding_snapshot(binding, expected_session)
-                if session_id is not None and binding.session_id != session_id:
-                    continue
-                metadata = dict(binding.peer_metadata or {})
-                if application_id:
-                    # Batch cache refresh can match an already confirmed userid;
-                    # an initial query must match the original private peer ID.
-                    if peer_id != sender_id and not (
-                        userid and metadata.get("wecom_application_id") == application_id
-                        and str(metadata.get("wecom_userid", "")).casefold() == userid.casefold()
-                    ):
-                        continue
-                    if metadata.get("wecom_application_id") != application_id or (
-                        userid and metadata.get("wecom_userid")
-                        and str(metadata["wecom_userid"]).casefold() != userid.casefold()
-                    ):
-                        metadata.pop("wecom_name", None)
-                        metadata.pop("wecom_userid", None)
-                    metadata["wecom_application_id"] = application_id
-                    if userid:
-                        metadata["wecom_userid"] = userid
-                    if name:
-                        metadata["wecom_name"] = name
-                else:
-                    for key in ("wecom_application_id", "wecom_userid", "wecom_name"):
-                        metadata.pop(key, None)
-                if metadata != binding.peer_metadata:
-                    binding.peer_metadata = metadata
-                    binding.updated_at = datetime.now(timezone.utc)
-                if not binding.session_id:
-                    continue
-                session = await lock_optional(db, ChatSession, ChatSession.session_id, binding.session_id)
-                if session is None or session.agent_id != account.agent_id or session.user_id != account.session_user_id:
-                    continue
-                latest = await self._events._latest_title(db, session.session_id)
-                title = self.session_title(account, binding)
-                if latest is None or latest.payload.get("source") != "channel" or latest.payload.get("title") == title:
-                    continue
-                await self._events._append_title(
-                    db, session, title=title, source="channel", source_event_id=None,
-                    turn_id=None, run_id=None, details={"channel": self.session_origin(account, binding)},
-                )
-                changed += 1
-        return changed
+            return channel_session_title(binding.peer_type, binding.peer_id, {"display_name": name}, channel_type=account.channel_type)
+        return channel_session_title(binding.peer_type, binding.peer_id, binding.peer_metadata, channel_type=account.channel_type)
 
     async def _create_session(
         self, db: AsyncSession, account: ChannelAccount,
@@ -727,6 +545,32 @@ class ChannelStore(SessionBoundMixin):
                 ChannelMessageRun.account_id == account_id,
                 ChannelMessageRun.external_message_id == message_id,
             ))).scalar_one_or_none()
+
+    async def record_wecom_sender_profile(self, run_id: str, *, account_id: str,
+                                          application_id: str, application_revision: int,
+                                          userid: str | None, name: str | None) -> bool:
+        """Write only this message's source snapshot after rechecking its authority."""
+        async with self._write() as db:
+            account = await self._get_account(db, account_id, for_update=True)
+            if not account or not account.enabled or wecom_application_id(account) != application_id:
+                return False
+            app = await db.get(WecomApplication, application_id)
+            if app is None or app.revision != application_revision:
+                return False
+            row = (await db.execute(select(ChannelMessageRun).where(
+                ChannelMessageRun.id == run_id, ChannelMessageRun.account_id == account_id
+            ).with_for_update())).scalar_one_or_none()
+            if row is None:
+                return False
+            metadata = dict(row.source_metadata or {})
+            metadata["wecom_application_id"] = application_id
+            if userid:
+                metadata["wecom_userid"] = userid
+            row.source_metadata = metadata
+            if name:
+                row.sender_name = name
+            row.tenant_id = app.corp_id
+            return True
 
     async def update_run(
         self,

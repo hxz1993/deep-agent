@@ -192,9 +192,9 @@ def build_channel_message_toolset(store, gateway, source: ChannelRunContext, cap
             if current != source:
                 raise DeliveryError("source_changed", "渠道目标已变更")
             items = await prepare_components(deps, components, caps)
-            if not deps.run_id or not ctx.tool_call_id:
-                raise DeliveryError("run_unavailable", "缺少有效运行和工具调用标识")
-            return await gateway.send_message(source, deps.run_id, ctx.tool_call_id, items, reply=reply)
+            if not deps.run_id:
+                raise DeliveryError("run_unavailable", "缺少有效运行标识")
+            return await gateway.send_message(source, deps.run_id, items, reply=reply)
         except DeliveryError as exc:
             # Preflight errors are safe for the model to correct. Delivery
             # failures/unknown outcomes are returned by the gateway, not retried.

@@ -153,7 +153,7 @@ Jenkins网关启动版`Jenkinsfile.gateway`可由`combined_runtime.py`在同一�
 平台可信身份鉴权。企微Peer类型沿用原生`single/group`，ID分别取`from.userid/chatid`；Binding的
 `peer_metadata` JSON保存来源会话的`user_id/chat_id/display_name`白名单，缺失名称不造值。
 私聊身份直接从Binding读取；群发送者不作为群身份。仅Session改绑或来源信息确实变化时更新Binding。
-私聊标题为 `User｜名称(原始 ID)`，无姓名时为 `User｜原始 ID`；群标题固定为 `Group｜Chat ID`，不附加群名。括号使用半角，保留原始定位 ID。
+新会话生成标题时，私聊为 `渠道｜User｜名称(原始 ID)`，无姓名时为 `渠道｜User｜原始 ID`；群聊为 `渠道｜Group｜Chat ID`。渠道前缀为 wecom/feishu。已有标题原样读取，不按姓名刷新、补前缀或重建；括号使用半角，保留原始定位 ID。
 Run只保留created_at/finished_at，接收即认领再排队；调用前必须落running以防未收到SSE Run ID时误重跑。
 处理终态与投递状态分别更新，不能因最后回复失败重跑Agent或`/new`。不按SSE片段/心跳写台账。
 
@@ -517,9 +517,10 @@ context_refs 授权。每次执行重新检查账号、Agent、会话、Run 与�
 首版仅 send，有序文字／图片／文件／已有音频视频；飞书支持当前消息引用，企微不伪造引用。
 不预建 targets/history、跨用户发送、通用 SDK 透传或任意 URL/宿主路径读取。
 
-009 新增 channel_message_operations，唯一键为 agent_run_id + tool_call_id，只存安全回执与摘要；
-网关重启将未完成项标记 unknown，不盲目重发。Session 删除保留幂等事实但失去继续发送权限；
-确认删除渠道连带清理回执。配置备份仅建空结构，旧 Revision 不要求含新表；非空表拒绝降级。
+Message 不再另存发送回执、请求摘要或去重状态，不新增缓存、Runs 字段或行作为替代。
+仅在调用内顺序发送并即时返回逐项结果；失败或结果未知停止后续项，取消阻止待发送内容。
+不自动重发，不承诺跨请求、跨重启发送去重。010 仅删除历史 009 创建的
+channel_message_operations 及其中回执，保留已发布迁移；不改变原有 Runs、配置、会话与文件。
 真实验收与实施状态见 [Message 设计](../../docs/design/32-new-channels/channel-tools-abstraction.md)。
 
 ### Skill

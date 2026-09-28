@@ -7,6 +7,8 @@ pre-dispatch failures have no persisted user event and do not count as questions
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from sqlalchemy import String, and_, case, exists, func, literal, or_, select
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import aliased
@@ -29,6 +31,7 @@ from deep_agent.diagnostics.sessions import (
     question_summary,
 )
 from deep_agent.time import utc_rfc3339
+from deep_agent.services.channel_profiles import user_details_enabled
 
 
 def _deepfos_application_summary(settings):
@@ -60,6 +63,38 @@ def _identity_mysql(element, compiler, **kw):
 
 
 class DiagnosticChannelQueries(SessionBoundMixin):
+    def __init__(self, session_factory, *, profiles=None):
+        super().__init__(session_factory)
+        self._profiles = profiles
+
+    _details_enabled = staticmethod(user_details_enabled)
+
+    async def _resolve_profiles(self, account, pairs, *, budget=3):
+        raw_ids = sorted({raw for _, raw in pairs if raw})
+        enabled = self._details_enabled(account)
+        result = {"items": {}, "profiles_complete": not enabled or not raw_ids,
+                  "unresolved_count": len(raw_ids) if enabled else 0,
+                  "user_details_enabled": enabled}
+        if enabled and raw_ids and self._profiles is not None:
+            result = await self._profiles.resolve_many(account, raw_ids, budget=budget)
+        profiles = result.get("items", {})
+        names, aliases = {}, {}
+        for canonical, raw in sorted(pairs, key=lambda pair: (pair[0] or "", pair[1] or "")):
+            profile = profiles.get(raw) or {}
+            userid = profile.get("userid")
+            if canonical and isinstance(userid, str) and userid:
+                aliases.setdefault(canonical, set()).add(userid)
+            name = profile.get("name")
+            if canonical and isinstance(name, str) and name.strip():
+                names.setdefault(canonical, name.strip())
+        flags = {key: result[key] for key in ("profiles_complete", "unresolved_count", "user_details_enabled")}
+        return names, flags, aliases
+
+    @staticmethod
+    async def _identity_pairs(db, base, conditions=()):
+        return (await db.execute(select(base.c.user_id, base.c.sender_id)
+                                .where(*conditions).distinct())).all()
+
     async def accounts(self):
         async with self._read() as db:
             # Explicit projections deliberately never load channel/app secrets.
@@ -128,7 +163,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                         "user_id": r["session_user_id"],
                         "user_name": None,
                         "deepfos_application": _deepfos_application_summary(r["settings"]),
-                        "user_details_enabled": settings[r["id"]].get("user_details_enabled") is True,
+                        "user_details_enabled": self._details_enabled(SimpleNamespace(**dict(r))),
                         "application": applications.get(settings[r["id"]].get("application_id")),
                     }
                     for r in rows
@@ -141,6 +176,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 select(
                     ChannelAccount.id,
                     ChannelAccount.channel_type,
+                    ChannelAccount.enabled,
                     ChannelAccount.settings,
                 ).where(ChannelAccount.id == account_id)
             )
@@ -175,6 +211,13 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 )
             ),
         )
+        stmt, user_id = self._canonical_identity(stmt, account, r.sender_id)
+        return stmt.add_columns(_OpaqueIdentity(user_id).label("user_id")).subquery("channel_questions")
+
+    @staticmethod
+    def _canonical_identity(stmt, account, sender_id):
+        # Persisted official WeCom ID aliases alone determine grouping. Current
+        # external names/mappings never change this query's counts or ordering.
         app_id = wecom_application_id(account)
         if app_id:
             opaque, plain = aliased(WecomUserProfile), aliased(WecomUserProfile)
@@ -182,7 +225,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 opaque,
                 and_(
                     opaque.wecom_application_id == app_id,
-                    opaque.open_userid == r.sender_id,
+                    opaque.open_userid == sender_id,
                 ),
             )
             stmt = stmt.outerjoin(
@@ -190,20 +233,16 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 and_(
                     opaque.id.is_(None),
                     plain.wecom_application_id == app_id,
-                    plain.userid_key == func.lower(r.sender_id),
+                    plain.userid_key == func.lower(sender_id),
                 ),
             )
-            user_id = func.coalesce(opaque.userid, plain.userid, r.sender_id)
-            name = func.coalesce(opaque.name, plain.name)
-        else:
-            user_id, name = r.sender_id, r.sender_name
-        return stmt.add_columns(
-            _OpaqueIdentity(user_id).label("user_id"), name.label("name")
-        ).subquery("channel_questions")
+            return stmt, func.coalesce(opaque.userid, plain.userid, sender_id)
+        return stmt, sender_id
 
     async def overview(self, account_id, f):
         async with self._read() as db:
-            base = self._base(await self._account(db, account_id), f)
+            account = await self._account(db, account_id)
+            base = self._base(account, f)
             users, sessions, questions = (
                 await db.execute(
                     select(
@@ -218,7 +257,6 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                     await db.execute(
                         select(
                             base.c.user_id,
-                            func.max(base.c.name).label("name"),
                             func.count().label("question_count"),
                         )
                         .where(base.c.user_id.is_not(None), base.c.user_id != "")
@@ -230,15 +268,18 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 .mappings()
                 .all()
             )
-            return {
-                "range": f.public_range(),
-                "summary": {
-                    "active_users": users,
-                    "session_count": sessions,
-                    "question_count": questions,
-                },
-                "active_users": [dict(r) for r in top],
-            }
+            pairs = await self._identity_pairs(db, base, (base.c.user_id.in_([r["user_id"] for r in top]),)) if top else []
+        names, flags, _ = await self._resolve_profiles(account, pairs)
+        return {
+            **flags,
+            "range": f.public_range(),
+            "summary": {
+                "active_users": users,
+                "session_count": sessions,
+                "question_count": questions,
+            },
+            "active_users": [dict(r, name=names.get(r["user_id"])) for r in top],
+        }
 
     @staticmethod
     def _identity(base, kind):
@@ -252,7 +293,8 @@ class DiagnosticChannelQueries(SessionBoundMixin):
 
     async def peers(self, account_id, f, kind="user", *, options_only=False, peer_id=None, sender_id=None, include_group_senders=False):
         async with self._read() as db:
-            base = self._base(await self._account(db, account_id), f)
+            account = await self._account(db, account_id)
+            base = self._base(account, f)
             if kind == "group" and sender_id:
                 base = select(base).where(base.c.user_id == sender_id).subquery("sender_questions")
             identity, conditions = self._identity(base, kind)
@@ -260,7 +302,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                 conditions = [base.c.user_id.is_not(None), base.c.user_id != ""]
             if peer_id is not None:
                 conditions.append(identity == peer_id)
-            name = func.max(base.c.name) if kind == "user" else literal(None)
+            name = literal(None)
             stmt = select(
                 identity.label("peer_id"),
                 name.label("name"),
@@ -271,45 +313,58 @@ class DiagnosticChannelQueries(SessionBoundMixin):
             if options_only:
                 stmt = select(identity.label("peer_id"), name.label("name"), func.max(base.c.activity).label("last_activity"))
             stmt = stmt.where(*conditions).group_by(identity)
-            pattern = None
-            if f.query:
-                pattern = (
-                    "%"
-                    + f.query.replace("\\", "\\\\")
-                    .replace("%", "\\%")
-                    .replace("_", "\\_")
-                    + "%"
-                )
-                if kind == "user":
-                    stmt = stmt.add_columns(func.max(case((base.c.sender_id.ilike(pattern, escape="\\"), 1), else_=0)).label("alias_match"))
             grouped = stmt.subquery()
-            if pattern is not None:
-                search = grouped.c.peer_id.ilike(pattern, escape="\\")
-                if kind == "user":
-                    search = or_(search, grouped.c.name.ilike(pattern, escape="\\"), grouped.c.alias_match == 1)
-                # Filter aggregate output columns outside GROUP BY. MySQL 5.7
-                # cannot resolve the original derived identity in HAVING.
-                grouped = select(grouped).where(search).subquery()
-            total = await db.scalar(select(func.count()).select_from(grouped))
-            rows = (
-                (
-                    await db.execute(
-                        select(grouped)
-                        .order_by(grouped.c.last_activity.desc(), grouped.c.peer_id)
-                        .limit(f.limit)
-                        .offset(f.offset)
-                    )
-                )
-                .mappings()
-                .all()
-            )
-            items = [dict(r, kind=kind) for r in rows]
-            for item in items:
-                item.pop("alias_match", None)
-            ids = [r["peer_id"] for r in items]
-            if options_only:
-                return {"items": [{"peer_id": r["peer_id"], "name": r["name"], "kind": kind} for r in items], "total": total, "limit": f.limit, "offset": f.offset}
-            if ids:
+            searching_users = bool(f.query and kind == "user")
+            if searching_users:
+                pairs = await self._identity_pairs(db, base, conditions)
+                rows = (await db.execute(select(grouped).order_by(
+                    grouped.c.last_activity.desc(), grouped.c.peer_id))).mappings().all()
+                total = len(rows)
+            else:
+                if f.query:
+                    pattern = "%" + f.query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+                    grouped = select(grouped).where(grouped.c.peer_id.ilike(pattern, escape="\\")).subquery()
+                total = await db.scalar(select(func.count()).select_from(grouped))
+                rows = (await db.execute(select(grouped)
+                    .order_by(grouped.c.last_activity.desc(), grouped.c.peer_id)
+                    .limit(f.limit).offset(f.offset))).mappings().all()
+                ids = [row["peer_id"] for row in rows]
+                pairs = await self._identity_pairs(db, base, (*conditions, identity.in_(ids))) if kind == "user" and ids else []
+
+        # Never hold a pool connection or the SQLite session lock while external
+        # profile resolution performs I/O or persists its own profile cache.
+        names = {}
+        flags = {"profiles_complete": True, "unresolved_count": 0,
+                 "user_details_enabled": self._details_enabled(account)}
+        if searching_users:
+            names, flags, aliases = await self._resolve_profiles(account, pairs, budget=10)
+            needle = f.query.casefold()
+            matched = {canonical for canonical, raw in pairs if any(
+                needle in str(value).casefold()
+                for value in (canonical, raw, names.get(canonical), *aliases.get(canonical, ())) if value
+            )}
+            rows = [row for row in rows if row["peer_id"] in matched]
+            total = len(rows)
+            rows = rows[f.offset:f.offset + f.limit]
+        items = [dict(row, kind=kind) for row in rows]
+        ids = [row["peer_id"] for row in items]
+        if kind == "user" and f.query and ids:
+            # Current profile refresh cannot regroup the page. Freeze only
+            # its original ID aliases, keeping SQL parameter counts bounded
+            # by the displayed users rather than the full search population.
+            mappings = {raw: canonical for canonical, raw in pairs if raw and canonical in ids}
+            if mappings:
+                base = select(
+                    *[base.c[key] for key in base.c.keys() if key != "user_id"],
+                    case(mappings, value=base.c.sender_id, else_=base.c.user_id).label("user_id"),
+                ).subquery("snapshot_questions")
+                identity, conditions = self._identity(base, kind)
+                if options_only and include_group_senders:
+                    conditions = [base.c.user_id.is_not(None), base.c.user_id != ""]
+                if peer_id is not None:
+                    conditions.append(identity == peer_id)
+        if ids and not options_only:
+            async with self._read() as db:
                 session_activity = (
                     select(
                         base.c.session_id, func.max(base.c.activity).label("activity")
@@ -352,30 +407,34 @@ class DiagnosticChannelQueries(SessionBoundMixin):
                         ),
                     )
                 )
-                pairs = (
+                session_pairs = (
                     await db.execute(
                         select(candidates.c.peer_id, candidates.c.session_id).where(
                             ~newer_exists
                         )
                     )
                 ).all()
-                details = await self._session_items(db, base, [sid for _, sid in pairs])
+                details = await self._session_items(db, base, [sid for _, sid in session_pairs])
                 # READ COMMITTED can observe a concurrent deletion between reads.
-                by_peer = {pid: details[sid] for pid, sid in pairs if sid in details}
+                by_peer = {pid: details[sid] for pid, sid in session_pairs if sid in details}
                 for item in items:
                     item["last_activity"] = utc_rfc3339(item["last_activity"])
                     item["latest_session"] = by_peer.get(item["peer_id"])
-            return {
-                "items": items,
-                "total": total,
-                "limit": f.limit,
-                "offset": f.offset,
-                "range": f.public_range(),
-            }
+        if kind == "user":
+            if not searching_users:
+                names, flags, _ = await self._resolve_profiles(account, pairs)
+            for item in items:
+                item["name"] = names.get(item["peer_id"])
+        if options_only:
+            return {**flags, "items": [{"peer_id": row["peer_id"], "name": row["name"], "kind": kind} for row in items],
+                    "total": total, "limit": f.limit, "offset": f.offset}
+        return {**flags, "items": items, "total": total,
+                "limit": f.limit, "offset": f.offset, "range": f.public_range()}
 
     async def sessions(self, account_id, f, kind, peer_id, sender_id=None):
         async with self._read() as db:
-            base = self._base(await self._account(db, account_id), f)
+            account = await self._account(db, account_id)
+            base = self._base(account, f)
             if kind == "group" and sender_id:
                 base = select(base).where(
                     base.c.user_id == sender_id,

@@ -29,6 +29,7 @@ from deep_agent.conversation.projector import ConversationProjectionError, proje
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
 from deep_agent.schemas.chat import ChannelSessionOrigin, SessionInfo, SessionListResponse
 from deep_agent.time import UtcDatetime
+from deep_agent.services.channel_profiles import ChannelProfileService
 
 router = APIRouter()
 
@@ -112,6 +113,8 @@ async def _build_session_info(
     if updated_at is None and history:
         created_at, updated_at = session_activity_timestamps(history)
 
+    origin = await ctx.stores.channel.get_session_origin(session_id) if ctx.stores.channel else None
+    origin = (await ChannelProfileService(ctx).enrich_origins({session_id: origin})).get(session_id)
     return SessionInfo(
         session_id=session_id,
         app_id=app_id, space_id=space_id,
@@ -122,7 +125,7 @@ async def _build_session_info(
         title=title,
         created_at=created_at,
         updated_at=updated_at,
-        channel=await ctx.stores.channel.get_session_origin(session_id) if ctx.stores.channel else None,
+        channel=origin,
     )
 
 
@@ -161,6 +164,7 @@ async def list_sessions(
     )
     rows, total = await ctx.store.list_session_summaries(filters)
     origins = await ctx.stores.channel.get_session_origins([row.session_id for row in rows]) if ctx.stores.channel else {}
+    origins = await ChannelProfileService(ctx).enrich_origins(origins)
     items = [_summary_to_session_info(row) for row in rows]
     for item in items:
         origin = origins.get(item.session_id)

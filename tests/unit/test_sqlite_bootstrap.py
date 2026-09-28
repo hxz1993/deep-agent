@@ -24,7 +24,6 @@ EXPECTED_TABLES = {
     "chat_sessions",
     "channel_accounts",
     "channel_message_runs",
-    "channel_message_operations",
     "channel_session_bindings",
     "global_settings",
     "integration_settings",
@@ -78,7 +77,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await engine.dispose()
 
-    async def test_single_production_baseline_round_trip(self) -> None:
+    async def test_historical_baseline_round_trip_then_current_upgrade(self) -> None:
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete-bootstrap-", ignore_cleanup_errors=True) as tmpdir:
             db_path = Path(tmpdir) / "baseline.db"
             url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
@@ -86,9 +85,10 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
             with patch("deep_agent.db.url.get_database_url", return_value=url):
                 with patch("deep_agent.db.migrate.get_database_url", return_value=url):
                     config = migrate._build_alembic_config()
-                    await asyncio.to_thread(command.upgrade, config, "head")
-                    self._assert_current_baseline(db_path)
-
+                    # Historical empty schemas remain reversible. The current
+                    # removal migration intentionally requires backup restoration.
+                    await asyncio.to_thread(command.upgrade, config, "009")
+                    self.assertEqual(self._revision(db_path), "009")
                     await asyncio.to_thread(command.downgrade, config, "base")
                     self.assertEqual(self._business_tables(db_path), set())
 
@@ -96,7 +96,7 @@ class SqliteBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     self._assert_current_baseline(db_path)
 
     def _assert_current_baseline(self, db_path: Path) -> None:
-        self.assertEqual(self._revision(db_path), "009")
+        self.assertEqual(self._revision(db_path), "010")
         self.assertEqual(self._business_tables(db_path), EXPECTED_TABLES)
         self.assertEqual(self._primary_key(db_path, "chat_sessions"), ["session_id"])
         self.assertEqual(self._primary_key(db_path, "chat_session_events"), ["event_id"])

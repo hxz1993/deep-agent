@@ -1,4 +1,4 @@
-"""Shared outbound boundary with real SQLite receipts, file store and gateway ASGI."""
+"""Shared outbound boundary with real SQLite channel context, file store and gateway ASGI."""
 import asyncio
 import hashlib
 import json
@@ -7,7 +7,6 @@ import unittest
 from dataclasses import asdict
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
-from uuid import NAMESPACE_URL, uuid5
 
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai import RunContext
@@ -53,34 +52,25 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
 
     def command(self, components, **changes):
         return MessageOperationRequest(**{**{key: getattr(self.source, key) for key in ("account_id", "channel_run_id", "session_id", "agent_id", "user_id")},
-            "agent_run_id": "agent-run", "tool_call_id": "tool-call", "components": [{key: value for key,value in asdict(item).items() if key != "data"} for item in components], **changes})
+            "agent_run_id": "agent-run", "components": [{key: value for key,value in asdict(item).items() if key != "data"} for item in components], **changes})
 
     def items(self):
         return [PreparedComponent("text", text="first", requested_kind="text"), PreparedComponent("file", data=b"content", filename="test.txt", requested_kind="file"), PreparedComponent("text", text="last", requested_kind="text")]
 
-    async def test_order_and_persistent_idempotency_preserve_per_component_receipts(self):
+    async def test_order_preserves_platform_results_without_receipt_identity(self):
         items = self.items(); command = self.command(items)
         result = await self.operations.send(command, items)
-        retry = await self.operations.send(command, items)
-        self.assertEqual(result, retry)
+        self.assertNotIn("operation_id", result)
         self.assertEqual(result["status"], "completed")
         self.assertEqual([r["message_id"] for r in result["components"]], ["message-1", "message-2", "message-3"])
         self.assertEqual([c.text if c.kind == "text" else c.data for _, c, _ in self.sent], ["first", b"content", "last"])
         self.assertTrue(all(t.peer_id == "current-peer" and t.account_id == self.account.id for t, _, _ in self.sent))
         self.assertEqual(self.job.sent_text_hashes, {hashlib.sha256(x.encode()).hexdigest() for x in ("first", "last")})
-        changed = [PreparedComponent("text", text="changed", requested_kind="text")]
-        with self.assertRaises(DeliveryError) as caught:
-            await self.operations.send(self.command(changed), changed)
-        self.assertEqual(caught.exception.code, "operation_conflict")
-        self.assertEqual(len(self.sent), 3)
-
-    async def test_partial_failure_stops_rest_and_retry_does_not_repeat(self):
+    async def test_partial_failure_stops_rest_without_automatic_retry(self):
         self.adapter.send_component.side_effect = [ComponentReceipt("text", message_id="first"), DeliveryError("permission_denied", "拒绝发送")]
         result = await self.operations.send(self.command(self.items()), self.items())
         self.assertEqual(result["status"], "failed")
         self.assertEqual([r["state"] for r in result["components"]], ["succeeded", "failed", "skipped"])
-        retry = await self.operations.send(self.command(self.items()), self.items())
-        self.assertEqual(retry, result)
         self.assertEqual(self.adapter.send_component.await_count, 2)
 
     async def test_unknown_send_is_not_retried_or_marked_visible(self):
@@ -96,25 +86,8 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(DeliveryError):
             await self.operations.send(self.command(items), items)
         self.adapter.send_component.assert_not_awaited()
-        self.assertIsNone(await self.store.get_operation(uuid5(NAMESPACE_URL, "deep-agent-channel:agent-run:tool-call").hex))
 
-    async def test_concurrent_duplicate_during_send_does_not_start_second_delivery(self):
-        entered, release = asyncio.Event(), asyncio.Event()
-        async def block(*args, **kwargs):
-            entered.set(); await release.wait()
-            return ComponentReceipt("text", message_id="only-once")
-        self.adapter.send_component.side_effect = block
-        items = [self.items()[0]]; command = self.command(items)
-        task = asyncio.create_task(self.operations.send(command, items))
-        try:
-            await asyncio.wait_for(entered.wait(), 2)
-            duplicate = await self.operations.send(command, items)
-            self.assertEqual(duplicate["status"], "running")
-            self.adapter.send_component.assert_awaited_once()
-        finally:
-            release.set(); await asyncio.wait_for(task, 2)
-
-    async def test_quote_unsupported_and_disconnected_adapter_do_not_claim_or_send(self):
+    async def test_quote_unsupported_and_disconnected_adapter_do_not_send(self):
         from dataclasses import replace
         self.caps = replace(self.caps, supports_reply=False)
         with self.assertRaises(DeliveryError) as caught:
@@ -142,7 +115,7 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
             client.internal_token = "fixture"
             import aiohttp
             with patch("deep_agent.services.channel_gateway_client.aiohttp.ClientSession", wraps=aiohttp.ClientSession) as sessions:
-                result = await client.send_message(self.source, "agent-run", "test-call", self.items())
+                result = await client.send_message(self.source, "agent-run", self.items())
             self.assertEqual(result["status"], "unknown")
             self.assertEqual(sessions.call_args.kwargs["timeout"].total, 390)
         finally:
@@ -158,6 +131,20 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
             await self.operations.send(command, self.items())
         self.adapter.send_component.assert_not_awaited()
 
+    async def test_session_owner_change_rejects_send_without_receipt_store(self):
+        from sqlalchemy import update
+        from deep_agent.db.models import ChatSession
+
+        async with self.factory() as db:
+            await db.execute(update(ChatSession).where(
+                ChatSession.session_id == self.session_id
+            ).values(user_id="another-owner"))
+            await db.commit()
+        with self.assertRaises(DeliveryError) as caught:
+            await self.operations.send(self.command(self.items()), self.items())
+        self.assertEqual(caught.exception.code, "source_unavailable")
+        self.adapter.send_component.assert_not_awaited()
+
     async def test_mid_batch_account_change_stops_following_component(self):
         async def sent_then_disable(*args, **kwargs):
             await self.store.update_account(self.account.id, ChannelAccountUpdate(enabled=False))
@@ -168,7 +155,7 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["components"][0]["state"], "succeeded")
         self.adapter.send_component.assert_awaited_once()
 
-    async def test_cancel_inflight_marks_unknown_and_cancels_remaining(self):
+    async def test_cancel_inflight_stops_remaining_and_releases_tasks(self):
         entered = asyncio.Event()
         async def block(*args, **kwargs):
             entered.set(); await asyncio.Future()
@@ -178,9 +165,7 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await task
-        record = await self.store.get_operation(uuid5(NAMESPACE_URL, "deep-agent-channel:agent-run:tool-call").hex)
-        self.assertEqual(record.state, "unknown")
-        self.assertEqual([x["state"] for x in record.results], ["unknown", "cancelled", "cancelled"])
+        self.adapter.send_component.assert_awaited_once()
         self.assertFalse(self.operations.tasks); self.assertFalse(self.job.outbound_tasks)
 
     async def test_tool_reads_real_authorized_filestore_and_delivers_to_operations(self):
@@ -188,8 +173,8 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
             files = LocalFileStore(directory); await files.initialize()
             artifact = await files.upload(file_type="attachment", file_name="result.txt", mime="text/plain", data=b"generated", request_headers={"user": "owner"})
             deps = AgentDeps(session_id=self.session_id, agent_id=self.agent_id, user="owner", run_id="agent-run", file_store=files, request_headers={"user": "owner"}, session_file_artifacts={artifact.id: {"file_name": artifact.file_name, "mime": artifact.mime}})
-            async def gateway_send(source, run_id, call_id, components, *, reply):
-                return await self.operations.send(self.command(components, tool_call_id=call_id, reply=reply), components)
+            async def gateway_send(source, run_id, components, *, reply):
+                return await self.operations.send(self.command(components, reply=reply), components)
             gateway = SimpleNamespace(send_message=gateway_send)
             function = build_channel_message_toolset(self.store, gateway, self.source, self.caps).tools["channel_message"].function
             ctx = RunContext(deps=deps, model=TestModel(), usage=RunUsage(), tool_call_id="generated-file")
@@ -200,7 +185,7 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_gateway_multipart_auth_payload_and_missing_media(self):
         app = create_gateway_app()
-        app.state.gateway = GatewayContext(SimpleNamespace(internal_token="fixture-token"), self.runtime, self.engine, "009")
+        app.state.gateway = GatewayContext(SimpleNamespace(internal_token="fixture-token"), self.runtime, self.engine, "010")
         items = self.items(); metadata = self.command(items).model_dump_json()
         form = {"metadata": (None, metadata, "application/json"), "media_1": ("test.txt", b"content", "text/plain")}
         async with AsyncClient(transport=ASGITransport(app), base_url="http://fixture") as http:
@@ -221,8 +206,8 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
     async def test_gateway_preserves_unknown_delivery_errors_as_503(self):
         app = create_gateway_app()
         self.runtime.operations = SimpleNamespace(send=AsyncMock(side_effect=
-            DeliveryError("operation_removed", "发送回执无法保存，请勿重复发送", unknown=True)))
-        app.state.gateway = GatewayContext(SimpleNamespace(internal_token="fixture-token"), self.runtime, self.engine, "009")
+            DeliveryError("send_unknown", "发送结果无法确认，请勿重复发送", unknown=True)))
+        app.state.gateway = GatewayContext(SimpleNamespace(internal_token="fixture-token"), self.runtime, self.engine, "010")
         items = [self.items()[0]]
         async with AsyncClient(transport=ASGITransport(app), base_url="http://fixture") as http:
             response = await http.post("/messages/send",

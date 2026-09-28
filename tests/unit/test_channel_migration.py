@@ -21,7 +21,7 @@ class ChannelMigrationTests(unittest.TestCase):
             with patch("deep_agent.db.migrate.get_database_url", return_value=url):
                 config = migrate._build_alembic_config()
             config.attributes["database_url"] = url
-            self.assertEqual(ScriptDirectory.from_config(config).get_heads(), ["009"])
+            self.assertEqual(ScriptDirectory.from_config(config).get_heads(), ["010"])
             command.upgrade(config, "head")
             with sqlite3.connect(path) as db:
                 db.execute("PRAGMA foreign_keys=ON")
@@ -41,7 +41,7 @@ class ChannelMigrationTests(unittest.TestCase):
                             'completed','sent',CURRENT_TIMESTAMP)""")
             command.upgrade(config, "head")
             with sqlite3.connect(path) as db:
-                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("009",))
+                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("010",))
                 self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
                 self.assertEqual(db.execute("SELECT session_user_id,secret FROM channel_accounts").fetchone(),
                                  ("operator", "test-secret"))
@@ -53,16 +53,9 @@ class ChannelMigrationTests(unittest.TestCase):
                     table = model.__table__
                     columns = {row[1] for row in db.execute(f"PRAGMA table_info({table.name})")}
                     self.assertEqual(columns, set(table.columns.keys()))
-            # Destructive downgrade is tested only on this disposable database.
-            command.downgrade(config, "001")
-            with sqlite3.connect(path) as db:
-                self.assertEqual(db.execute("SELECT user_id FROM chat_sessions WHERE session_id='session'").fetchone(),
-                                 ("operator",))
-            command.upgrade(config, "head")
-            with sqlite3.connect(path) as db:
-                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("009",))
-                self.assertEqual(db.execute("SELECT COUNT(*) FROM channel_accounts").fetchone(), (0,))
-                self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+            # The receipt removal is irreversible; ordinary upgrades remain safe.
+            with self.assertRaisesRegex(RuntimeError, "010 cannot be downgraded"):
+                command.downgrade(config, "001")
 
     def test_007_keeps_event_data_and_refuses_usage_loss_on_downgrade(self):
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete_usage_migration_") as directory:

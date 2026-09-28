@@ -33,3 +33,29 @@ test('ArrowUp enters at the last result and disposal aborts delayed searches', a
     assert.equal(list.innerHTML,loading);
   } finally { globalThis.window=originalWindow; }
 });
+
+
+test('incomplete name search warns with retry instead of claiming no result; disabled search is ID-only', async () => {
+  const {bindPeerPicker} = await import('../../../console/channel-peer-picker.js');
+  const listeners = {}, attributes = {};
+  const input = {value:'', focus(){}, setAttribute(k,v){attributes[k]=v;}, addEventListener(n,fn){listeners[n]=fn;},removeEventListener(){}};
+  const list = {innerHTML:'',addEventListener(n,fn){listeners[`list-${n}`]=fn;},removeEventListener(){}};
+  const host = {open:true,querySelector:s=>s==='input'?input:list,addEventListener(n,fn){listeners[n]=fn;},removeEventListener(){}};
+  const root = {querySelector:()=>host,ownerDocument:{addEventListener(){},removeEventListener(){}}};
+  const originalWindow=globalThis.window; globalThis.window={};
+  let complete=false, calls=0;
+  try {
+    const dispose=bindPeerPicker(root,{kind:'user',initialQuery:'张三',fetchPage:async()=>{calls++;return {items:[],total:0,profiles_complete:complete,user_details_enabled:!complete};},onSelect(){}});
+    listeners.toggle(); await new Promise(setImmediate);
+    assert.match(list.innerHTML,/姓名搜索结果可能不完整/);
+    assert.match(list.innerHTML,/data-peer-retry/);
+    assert.doesNotMatch(list.innerHTML,/没有匹配结果/);
+    complete=true;
+    listeners['list-click']({target:{closest:s=>s==='[data-peer-retry]'?{}:null}});
+    await new Promise(setImmediate); assert.equal(calls,2);
+    assert.match(list.innerHTML,/仅支持 ID 搜索/);
+    assert.equal(attributes.placeholder,'搜索用户 ID');
+    dispose();
+  } finally { globalThis.window=originalWindow; }
+  assert.match(peerPickerHtml('user', null, false),/placeholder="搜索用户 ID"/);
+});

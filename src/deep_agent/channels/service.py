@@ -250,6 +250,15 @@ class ChannelService:
                 if current_application != identity_application:
                     identity = None
                 identity_application = current_application
+            if identity_application and isinstance(identity, dict) and identity.get("application_id") == identity_application:
+                if identity.get("application_revision") is not None and (identity.get("name") or identity.get("userid")):
+                    recorded = await self.store.record_wecom_sender_profile(
+                        job.run_id, account_id=account.id, application_id=identity_application,
+                        application_revision=identity["application_revision"],
+                        userid=identity.get("userid"), name=identity.get("name"),
+                    )
+                    if not recorded:
+                        identity = None
             if job.message.peer_type != "single" or not await self.store.has_user_messages(job.session_id):
                 source = {
                     "channel_type": account.channel_type,

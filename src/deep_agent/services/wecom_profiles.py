@@ -25,7 +25,6 @@ class WecomProfileService:
         self._negative: OrderedDict[tuple, float] = OrderedDict()
         self._jobs: OrderedDict[str, dict] = OrderedDict()
         self._bulk_tasks: dict[str, asyncio.Task] = {}
-        self._callbacks: set[asyncio.Task] = set()
         self._refresh_lock = asyncio.Lock()
         self.wait_seconds = 5
         self.task_seconds = 20
@@ -39,7 +38,7 @@ class WecomProfileService:
         await asyncio.shield(self._close_task)
 
     async def _close(self):
-        tasks = set(self._queries.values()) | set(self._bulk_tasks.values()) | self._callbacks
+        tasks = set(self._queries.values()) | set(self._bulk_tasks.values())
         for task in tasks:
             task.cancel()
         await self.client.close()
@@ -144,23 +143,14 @@ class WecomProfileService:
         return bool(not self._closed and account and account.enabled and application_for_account(account) == app_id
                     and app and app.revision == revision)
 
-    async def _finish_title(self, task, account_id, app, raw_id, session_id):
-        await asyncio.shield(task)
-        if await self._account_matches(account_id, app.id, app.revision):
-            profile = await self.store.find_profile(app.id, raw_id)
-            if profile:
-                await self.channels.refresh_wecom_titles(
-                    account_id, application_id=app.id, revision=app.revision,
-                    sender_id=raw_id, userid=profile.userid, name=profile.name, session_id=session_id,
-                )
-
-    async def resolve(self, account, raw_id, *, peer_type="single", session_id=None):
+    async def resolve(self, account, raw_id, *, await_refresh=False):
         app_id = application_for_account(account)
         empty = {"status": "disabled", "userid": None, "name": None, "application_id": None}
         if self._closed or not app_id:
             return empty
         app = await self.store.get_application(app_id)
-        result = {**empty, "status": "unresolved", "application_id": app_id}
+        result = {**empty, "status": "unresolved", "application_id": app_id,
+                  "tenant_id": app.corp_id if app else None, "application_revision": app.revision if app else None}
         if app is None:
             return result
         profile = await self.store.find_profile(app.id, raw_id)
@@ -173,15 +163,7 @@ class WecomProfileService:
             return empty
         if not fresh and not retry_wait and not self._negative_hit((app.id, app.revision, *identity)):
             task = self._query(app, raw_id, profile)
-            if peer_type == "single":
-                callback = asyncio.create_task(self._finish_title(task, account.id, app, raw_id, session_id))
-                self._callbacks.add(callback)
-                def done(t):
-                    self._callbacks.discard(t)
-                    if not t.cancelled():
-                        t.exception()
-                callback.add_done_callback(done)
-            if not profile or not profile.name:
+            if await_refresh or not profile or not profile.name:
                 try:
                     await asyncio.wait_for(asyncio.shield(task), self.wait_seconds)
                 except TimeoutError:
@@ -195,13 +177,11 @@ class WecomProfileService:
         if not await self._account_matches(account.id, app.id, app.revision):
             return empty
         if profile:
-            result.update(userid=profile.userid, name=profile.name)
-            result["status"] = "resolved" if profile.name else "partial"
-            if peer_type == "single":
-                await self.channels.refresh_wecom_titles(
-                    account.id, application_id=app.id, revision=app.revision,
-                    sender_id=raw_id, userid=profile.userid, name=profile.name, session_id=session_id,
-                )
+            name = profile.name
+            if await_refresh and (not profile.expires_at or profile.expires_at <= datetime.now(timezone.utc)):
+                name = None
+            result.update(userid=profile.userid, name=name)
+            result["status"] = "resolved" if name else "partial"
         return result
 
     async def start_refresh(self, app_id):
@@ -249,17 +229,10 @@ class WecomProfileService:
                     results = await asyncio.gather(*(
                         asyncio.shield(self._query(app, p.open_userid or p.userid, p)) for p in batch
                     ), return_exceptions=True)
-                    for profile, result in zip(batch, results):
+                    for result in results:
                         job["completed"] += 1
                         if result is not None and not isinstance(result, BaseException) and result.name:
                             job["succeeded"] += 1
-                            for account in await self.channels.list_accounts():
-                                if application_for_account(account) == app.id:
-                                    for raw_id in {profile.open_userid, profile.userid} - {None}:
-                                        await self.channels.refresh_wecom_titles(
-                                            account.id, application_id=app.id, revision=app.revision,
-                                            sender_id=raw_id, userid=result.userid, name=result.name,
-                                        )
                         else:
                             job["failed"] += 1
             job["status"] = "completed"

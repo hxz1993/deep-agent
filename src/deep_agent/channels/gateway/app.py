@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from sqlalchemy import text
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -22,6 +22,12 @@ from deep_agent.diagnostics.runtime import observe_lifespan
 from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.channels.operations import MessageOperationRequest
 from deep_agent.channels.outbound import DeliveryError, PreparedComponent
+
+
+class ResolveUsersRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user_ids: list[Annotated[str, Field(min_length=1, max_length=191)]] = Field(max_length=500)
+    timeout: float = Field(default=3.0, gt=0, le=10)
 
 
 @dataclass
@@ -89,6 +95,16 @@ def create_gateway_app() -> FastAPI:
     ) -> dict:
         try:
             return await context.runtime.test_account(account_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="Channel account not found") from exc
+
+    @app.post("/accounts/{account_id}/users/resolve")
+    async def resolve_users(
+        account_id: str, body: ResolveUsersRequest,
+        context: GatewayContext = Depends(authorize),
+    ) -> dict:
+        try:
+            return await context.runtime.resolve_users(account_id, body.user_ids, timeout=body.timeout)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail="Channel account not found") from exc
 

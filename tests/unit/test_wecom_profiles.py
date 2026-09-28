@@ -102,13 +102,23 @@ class WecomProfileTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     async def resolve(self, raw="opaque"):
-        return await self.service.resolve(self.account, raw, peer_type="group")
+        return await self.service.resolve(self.account, raw)
 
     async def test_disabled_defaults_no_external_calls(self):
         for settings in ({}, {"wecom": {"application_id": self.app.id}}, {"wecom": {"user_details_enabled": False, "application_id": self.app.id}}):
             self.account.settings = settings
             self.assertEqual((await self.resolve())["status"], "disabled")
         self.client.convert.assert_not_awaited()
+
+    async def test_current_profile_lookup_does_not_fall_back_to_expired_name(self):
+        await self.resolve()
+        await self.stores.wecom.invalidate_cache(self.app.id)
+        self.client.member.side_effect = WecomError("profile", "denied")
+        result = await self.service.resolve(self.account, "opaque",
+                                            await_refresh=True)
+        self.assertIsNone(result["name"])
+        self.assertEqual(result["userid"], "Member")
+        self.assertEqual(result["status"], "partial")
 
     async def test_cipher_then_plain_share_record_and_cache(self):
         results = await asyncio.gather(*(self.resolve() for _ in range(12)))
@@ -185,6 +195,17 @@ class WecomProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result["status"], result["succeeded"], result["failed"]), ("completed", 1, 0))
         self.assertEqual((await self.stores.wecom.cache_stats(self.app.id))["pending"], 0)
         self.assertEqual(self.client.convert.await_count, 1)
+
+    async def test_resolve_and_bulk_refresh_only_need_channel_read_access(self):
+        # Profile maintenance must not require a title-writing channel API.
+        self.service.channels = SimpleNamespace(get_account=self.stores.channel.get_account)
+        self.assertEqual((await self.resolve())["name"], "成员姓名")
+        await self.stores.wecom.invalidate_cache(self.app.id)
+        self.client.member.return_value = ("Member", "更新姓名")
+        job = await self.service.start_refresh(self.app.id)
+        await asyncio.gather(*list(self.service._bulk_tasks.values()))
+        self.assertEqual(self.service.refresh_status(self.app.id, job["task_id"])["status"], "completed")
+        self.assertEqual((await self.stores.wecom.find_profile(self.app.id, "opaque")).name, "更新姓名")
 
     async def test_background_hard_deadline(self):
         self.service.task_seconds = .02

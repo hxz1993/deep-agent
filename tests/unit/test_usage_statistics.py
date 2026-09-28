@@ -115,6 +115,20 @@ class UsageLedgerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sessions[0]["requests"], 3)
 
 
+    async def test_usage_returns_stored_channel_title_unchanged(self):
+        from deep_agent.db.models import ChatSession
+        response = ModelResponse(parts=[TextPart("reply")], usage=RequestUsage(input_tokens=10, output_tokens=2), run_id="run")
+        await self.store.append_message_parts("channel-session", messages=[response],
+            agent_id=self.agent_id, user_id="owner", turn_id="c" * 32, run_id="run",
+            usage_model_id=self.model_id, usage_provider_id=self.provider_id)
+        stored_title = "User｜Old Name(A)"
+        async with self.factory() as db:
+            await db.execute(update(ChatSession).where(ChatSession.session_id == "channel-session")
+                .values(title=stored_title))
+            await db.commit()
+        rows, _ = await UsageQueries(self.factory).sessions(self.filters(), dimension="agent", key=self.agent_id)
+        self.assertEqual(rows[0]["title"], stored_title)
+
     async def test_timezone_and_deleted_model_keep_historical_usage(self):
         response = ModelResponse(parts=[TextPart("reply")],
             usage=RequestUsage(input_tokens=10, output_tokens=2),

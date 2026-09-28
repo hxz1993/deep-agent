@@ -38,7 +38,7 @@ class DiagnosticQueryError(ValueError):
 
 
 @asynccontextmanager
-async def query_budget():
+async def query_budget(*, timeout_seconds=8):
     """Bound concurrent heavy reads, queue wait and total read duration."""
     loop = asyncio.get_running_loop()
     slots = _SLOTS.setdefault(loop, asyncio.Semaphore(2))
@@ -48,7 +48,7 @@ async def query_budget():
         raise DiagnosticQueryError("诊断查询繁忙，请稍后重试", 503) from exc
     try:
         try:
-            async with asyncio.timeout(8):
+            async with asyncio.timeout(timeout_seconds):
                 yield
         except TimeoutError as exc:
             raise DiagnosticQueryError("诊断查询超时，请缩小时间范围或筛选条件", 503) from exc

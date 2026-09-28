@@ -436,8 +436,8 @@ test("飞书手填复用表单且不请求企微应用，提交独立渠道类�
   vm.runInContext('setChannelRegistrationMode("manual")', context);
   assert.equal(getElement("channelAccountModalTitle").textContent, "新建飞书渠道");
   assert.equal(getElement("channelBotIdLabel").textContent, "App ID");
-  assert.equal(getElement("channelWecomMemberToggle").hidden, true);
-  assert.equal(getElement("channelMemberTab").hidden, true);
+  assert.equal(getElement("channelWecomMemberToggle").hidden, false);
+  assert.equal(getElement("channelMemberTab").hidden, false);
   assert.equal(getElement("channelWecomApplicationId").required, false);
   getElement("channelBotId").value = "cli_demo";
   getElement("channelSecret").value = "fixture-app-secret";
@@ -448,6 +448,7 @@ test("飞书手填复用表单且不请求企微应用，提交独立渠道类�
   assert.equal(payload.channel_type, "feishu"); assert.equal(payload.bot_id, "cli_demo");
   assert.equal(payload.secret, "fixture-app-secret"); assert.equal(payload.enabled, false);
   assert.equal(payload.settings.feishu.require_mention, true);
+  assert.equal(payload.settings.feishu.user_details_enabled, false);
   assert.equal(Object.hasOwn(payload.settings, "wecom"), false);
 });
 
@@ -610,4 +611,44 @@ test("帮助切回支持消息和重新打开不会被迟到命令结果切页",
   assert.equal(elements.channelHelpCommandsPanel.hidden, true);
   admin.openHelp();
   assert.equal(elements.channelHelpMessagesPanel.hidden, false);
+});
+
+
+test("飞书资料开关回显并保存，保留其他渠道设置", async () => {
+  const h = secretEditorHarness();
+  vm.runInContext('channelAdminState.accounts[0].channel_type = "feishu"; channelAdminState.accounts[0].settings = {feishu:{user_details_enabled:true, require_mention:false}}', h.context);
+  h.admin.openEdit("channel-1");
+  assert.equal(h.getElement("channelUserDetailsEnabled").getAttribute("aria-checked"), "true");
+  assert.equal(h.getElement("channelWecomApplicationField").hidden, true);
+  vm.runInContext('setChannelUserDetailsEnabled(false)', h.context);
+  await h.admin.save({preventDefault(){}, currentTarget:h.getElement("channelAccountForm")});
+  assert.equal(h.requests.at(-1).payload.settings.feishu.user_details_enabled, false);
+  assert.equal(h.requests.at(-1).payload.settings.feishu.require_mention, false);
+});
+
+test("权限检测只用已保存凭据，允许开关关闭时检测并拒绝迟到结果", async () => {
+  const h = secretEditorHarness();
+  h.context.AbortController = AbortController; h.context.URL = URL;
+  const requests = []; let resolve;
+  h.context.apiFetch = (path, options) => { requests.push({path, options}); return new Promise(r => {resolve = r;}); };
+  vm.runInContext('channelAdminState.accounts[0].channel_type = "feishu"', h.context);
+  h.admin.openEdit("channel-1");
+  const check = () => vm.runInContext('checkChannelUserDetails()', h.context);
+  h.getElement("channelBotId").value = "new-id";
+  await check(); assert.equal(requests.length, 0);
+  assert.match(h.getElement("channelUserDetailsCheckResult").textContent, /先保存/);
+  h.getElement("channelBotId").value = "bot-1";
+  const pending = check();
+  assert.equal(requests[0].path, "/api/v1/channel-accounts/channel-1/user-details/check");
+  assert.equal(requests[0].options.method, "POST");
+  vm.runInContext('clearChannelPermissionCheck()', h.context);
+  assert.equal(requests[0].options.signal.aborted, true);
+  resolve({status:"authorized", message:"old"}); await pending;
+  assert.equal(h.getElement("channelUserDetailsCheckResult").hidden, true);
+  const current = check();
+  resolve({status:"authorized", message:"当前权限", permissions:[], console_url:"https://open.feishu.cn/app/demo/auth", docs_url:"javascript:alert(1)"});
+  await current;
+  assert.match(h.getElement("channelUserDetailsCheckResult").innerHTML, /当前权限/);
+  assert.match(h.getElement("channelUserDetailsCheckResult").innerHTML, /前往权限管理/);
+  assert.doesNotMatch(h.getElement("channelUserDetailsCheckResult").innerHTML, /javascript:/);
 });

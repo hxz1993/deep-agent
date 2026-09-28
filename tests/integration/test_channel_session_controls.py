@@ -45,7 +45,7 @@ class ChannelSessionControlTests(unittest.IsolatedAsyncioTestCase):
         events = await self.stores.coordinator.list_events(session.session_id, event_type="session/title")
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].payload["source"], "channel")
-        self.assertEqual(events[0].payload["title"], "User｜external")
+        self.assertEqual(events[0].payload["title"], "wecom｜User｜external")
 
     async def test_commands_catalog_has_admin_gate_and_no_gateway_dependency(self):
         with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_GATEWAY_URL": ""}):

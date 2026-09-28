@@ -88,7 +88,7 @@ async def _serve(connection, adapter: Any, *, on_disconnect=None) -> None:
             elif method == "send_component":
                 target, component, reply_to_current = args
                 result = await adapter.send_component(target, component, reply_to_current=reply_to_current)
-            elif method in {"download_media", "reply_loading", "reply"}:
+            elif method in {"download_media", "reply_loading", "reply", "resolve_users"}:
                 result = await getattr(adapter, method)(*args)
             else:
                 raise ValueError("Unknown worker operation")

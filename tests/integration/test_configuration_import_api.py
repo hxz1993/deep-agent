@@ -176,7 +176,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
                 member_cancelled.set()
 
         runtime.client._request = AsyncMock(side_effect=old_wire)
-        old_query = asyncio.create_task(runtime.resolve(account, "opaque", peer_type="group"))
+        old_query = asyncio.create_task(runtime.resolve(account, "opaque", await_refresh=True))
         async def close_query():
             old_query.cancel()
             await asyncio.gather(old_query, return_exceptions=True)

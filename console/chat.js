@@ -10,7 +10,7 @@ import {
   parseSseBlock,
   readSse,
 } from "./protocol.js?v=20260912-21";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260927-feishu-release-0117";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260928-channel-audit";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import {
   applyAssistantPresentationActions,

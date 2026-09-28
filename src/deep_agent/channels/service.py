@@ -217,7 +217,10 @@ class ChannelService:
             attachments = []
             for media in job.message.media:
                 data, filename = await job.adapter.download_media(media)
-                attachments.append(await self.deep_agent.upload_media(account, media, data, filename or media.filename))
+                uploaded = await self.deep_agent.upload_media(account, media, data, filename or media.filename)
+                if media.input_mode == "reference":
+                    uploaded["input_mode"] = "reference"
+                attachments.append(uploaded)
             input_options = {}
             if job.message.quote is not None:
                 quote = job.message.quote
@@ -225,6 +228,8 @@ class ChannelService:
                 for media in quote.media:
                     data, filename = await job.adapter.download_media(media)
                     uploaded = await self.deep_agent.upload_media(account, media, data, filename or media.filename)
+                    if media.input_mode == "reference":
+                        uploaded["input_mode"] = "reference"
                     attachments.append(uploaded)
                     quoted_attachments.append({key: uploaded[key] for key in ("id", "name", "mime") if key in uploaded})
                 # Reuse the existing context/history path. Never forward the
@@ -267,7 +272,7 @@ class ChannelService:
                     "peer_id": job.message.peer_id,
                     "sender_id": job.message.sender_id,
                 }
-                if account.channel_type == "feishu":
+                if account.channel_type in {"feishu", "dingtalk"}:
                     source.update({key: value for key, value in {
                         "message_id": job.message.message_id,
                         "name": job.message.sender_name, "tenant_id": job.message.tenant_id,

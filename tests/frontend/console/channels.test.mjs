@@ -253,7 +253,7 @@ test("渠道启停只在列表使用Switch切换", () => {
 });
 
 test("渠道列表使用单行类型、行点击编辑与统一纯图标操作", () => {
-  assert.match(source, /account.channel_type === "feishu" \? "飞书" : "企微"/);
+  assert.match(source, /channelPlatforms\[account.channel_type\]\?\.name/);
   assert.doesNotMatch(source, /channel-account-code|channel-transport/);
   assert.match(source, /<td><strong>\$\{escapeHtml\(account\.name\)\}<\/strong><\/td>\s*<td class="channel-type-cell">/);
   assert.match(source, /class="channel-list-row" data-open-channel=/);
@@ -274,7 +274,7 @@ test("渠道布局包含窄屏适配且不引入第二个页面结构", () => {
 });
 
 test("帮助两页共用固定尺寸，长说明仅面板滚动", () => {
-  assert.match(styles, /dialog\.console-detail-dialog\.modal\.channel-help-modal\s*\{[^}]*height: min\(600px, calc\(100vh - 32px\)\);[^}]*min-height: 0;/);
+  assert.match(styles, /dialog\.console-detail-dialog\.modal\.channel-help-modal\s*\{[^}]*height: min\(800px, calc\(100dvh - 32px\)\);[^}]*min-height: 0;/);
   assert.match(styles, /\.channel-help-panel\s*\{[^}]*min-height: 0;[^}]*overflow-y: auto;/);
 });
 
@@ -626,7 +626,7 @@ test("飞书资料开关回显并保存，保留其他渠道设置", async () =>
   assert.equal(h.requests.at(-1).payload.settings.feishu.require_mention, false);
 });
 
-test("权限检测只用已保存凭据，允许开关关闭时检测并拒绝迟到结果", async () => {
+test("权限检测只用已保存凭据，仅开启后允许检测并拒绝迟到结果", async () => {
   const h = secretEditorHarness();
   h.context.AbortController = AbortController; h.context.URL = URL;
   const requests = []; let resolve;
@@ -634,6 +634,10 @@ test("权限检测只用已保存凭据，允许开关关闭时检测并拒绝�
   vm.runInContext('channelAdminState.accounts[0].channel_type = "feishu"', h.context);
   h.admin.openEdit("channel-1");
   const check = () => vm.runInContext('checkChannelUserDetails()', h.context);
+  await check(); assert.equal(requests.length, 0);
+  assert.equal(h.getElement("channelFeishuUserDetails").hidden, true);
+  vm.runInContext("setChannelUserDetailsEnabled(true)", h.context);
+  assert.equal(h.getElement("channelFeishuUserDetails").hidden, false);
   h.getElement("channelBotId").value = "new-id";
   await check(); assert.equal(requests.length, 0);
   assert.match(h.getElement("channelUserDetailsCheckResult").textContent, /先保存/);
@@ -651,4 +655,60 @@ test("权限检测只用已保存凭据，允许开关关闭时检测并拒绝�
   assert.match(h.getElement("channelUserDetailsCheckResult").innerHTML, /当前权限/);
   assert.match(h.getElement("channelUserDetailsCheckResult").innerHTML, /前往权限管理/);
   assert.doesNotMatch(h.getElement("channelUserDetailsCheckResult").innerHTML, /javascript:/);
+});
+
+
+test("钉钉复用扫码创建，手填凭据不引入企微资料设置", async () => {
+  const h = secretEditorHarness();
+  h.admin.openCreate("dingtalk");
+  assert.equal(h.getElement("channelBotIdLabel").textContent, "Client ID");
+  assert.equal(h.getElement("channelSecretLabel").textContent, "Client Secret");
+  assert.equal(h.getElement("channelMemberTab").hidden, false);
+  vm.runInContext('channelRegistration.authorizedId = "ding-ready";', h.context);
+  await h.admin.save({preventDefault(){}, currentTarget:h.getElement("channelAccountForm")});
+  const payload = h.requests.at(-1).payload;
+  assert.equal(payload.channel_type, "dingtalk");
+  assert.equal(payload.registration_id, "ding-ready");
+  assert.equal(Object.hasOwn(payload.settings, "wecom"), false);
+  assert.equal(Object.hasOwn(payload.settings, "feishu"), false);
+});
+
+
+test("飞书编辑后新建钉钉清理凭据、授权及检测结果", () => {
+  const h = secretEditorHarness();
+  vm.runInContext('channelAdminState.accounts[0].channel_type = "feishu"; channelAdminState.accounts[0].settings = {feishu:{user_details_enabled:true}}', h.context);
+  h.admin.openEdit("channel-1");
+  h.getElement("channelSecret").value = "unsaved-credential";
+  h.getElement("channelUserDetailsCheckResult").textContent = "已授权";
+  let resets = 0;
+  h.context.countRegistrationReset = () => { resets++; };
+  vm.runInContext('channelRegistration.reset = countRegistrationReset; channelRegistration.authorizedId = "old-feishu";', h.context);
+  h.admin.openCreate("dingtalk");
+  assert.equal(resets, 1);
+  assert.equal(h.getElement("channelBotId").value, "");
+  assert.equal(h.getElement("channelSecret").value, "");
+  assert.equal(h.getElement("channelSecret").dataset.maskedValue, "");
+  assert.equal(h.getElement("channelSessionUserId").value, "");
+  assert.equal(h.getElement("channelUserDetailsCheckResult").hidden, true);
+  assert.equal(h.getElement("channelUserDetailsCheckResult").textContent, "");
+  assert.equal(h.getElement("channelFeishuUserDetails").hidden, true);
+  assert.equal(h.getElement("channelUserDetailsEnabled").getAttribute("aria-checked"), "false");
+  assert.equal(vm.runInContext('channelRegistration.authorizedId', h.context), undefined);
+});
+
+test("钉钉仅保留应用与用户详情扩展，用户详情默认关闭并独立保存", async () => {
+  const h = secretEditorHarness();
+  h.admin.openCreate("dingtalk");
+  assert.equal(h.getElement("channelDingtalkUserDetails").hidden, false);
+  assert.doesNotMatch(templateHtml, /id="channelStreaming|id="channelCardTemplate|id="channelCardContent/);
+  assert.equal(h.getElement("channelUserDetailsEnabled").getAttribute("aria-checked"), "false");
+  vm.runInContext('channelAdminState.accounts[0].channel_type = "dingtalk"; channelAdminState.accounts[0].settings = {dingtalk:{user_details_enabled:true}}', h.context);
+  h.admin.openEdit("channel-1");
+  assert.equal(h.getElement("channelUserDetailsEnabled").getAttribute("aria-checked"), "true");
+  await h.admin.save({preventDefault(){}, currentTarget:h.getElement("channelAccountForm")});
+  assert.deepEqual(Object.keys(h.requests.at(-1).payload.settings.dingtalk), ["user_details_enabled"]);
+  assert.equal(h.requests.at(-1).payload.settings.dingtalk.user_details_enabled, true);
+  h.admin.openCreate("feishu");
+  assert.equal(h.getElement("channelDingtalkUserDetails").hidden, true);
+  assert.match(templateHtml, /不主动查询通讯录/);
 });

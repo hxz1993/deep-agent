@@ -31,7 +31,8 @@ router = APIRouter()
 @router.get("/channel-types", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 async def channel_types():
     return [{"type": "wecom", "name": "企业微信", "transport": "websocket"},
-            {"type": "feishu", "name": "飞书", "transport": "websocket"}]
+            {"type": "feishu", "name": "飞书", "transport": "websocket"},
+            {"type": "dingtalk", "name": "钉钉", "transport": "websocket"}]
 
 
 
@@ -107,7 +108,9 @@ async def create_channel_account(
             from deep_agent.services.channel_registration import RegistrationError
             from deep_agent.services.feishu_registration import registration_service as feishu_registration
             from deep_agent.services.wecom_registration import registration_service as wecom_registration
-            registration_service = feishu_registration if body.channel_type == "feishu" else wecom_registration
+            from deep_agent.services.dingtalk_registration import registration_service as dingtalk_registration
+            registration_service = {"feishu": feishu_registration, "wecom": wecom_registration,
+                                    "dingtalk": dingtalk_registration}[body.channel_type]
             try:
                 async with registration_service.credentials(body.registration_id, user) as (app_id, secret):
                     row = await store.create_account(body.model_copy(update={

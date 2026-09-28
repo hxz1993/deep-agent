@@ -24,6 +24,8 @@
 | [`console-ui-guidelines.md`](console-ui-guidelines.md) | Console 页面、弹窗、表单、容器、控件和视觉验收规范 |
 | [`message-event-persistence.md`](message-event-persistence.md) | 真实事件及时落库、刷新跟随、必要异常与部署边界 |
 | [`wecom-channel.md`](wecom-channel.md) | 渠道网关与企微Adapter部署、五个快捷命令、会话来源和排障 |
+| [`feishu-channel.md`](feishu-channel.md) | 飞书扫码、权限、流式回复与媒体发送 |
+| [`dingtalk-channel.md`](dingtalk-channel.md) | 钉钉扫码、Stream 接入、默认卡片与消息昵称 |
 | [`wecom-applications.md`](wecom-applications.md) | 企微应用共享配置、按需成员资料、一周缓存与 006 迁移 |
 | [`deploy/jenkins/README.md`](../../deploy/jenkins/README.md) | Jenkins 网关启动版、仅 API 版与只读诊断入口；原始脚本单独保存于 docs/archive/jenkins |
 | [`project-structure.md`](project-structure.md) | 当前项目目录、运行链路和职责边界 |

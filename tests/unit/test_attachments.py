@@ -20,6 +20,19 @@ from tests.helpers.conversation import project_model_messages
 
 class TestAttachments(unittest.IsolatedAsyncioTestCase):
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
+    async def test_audio_reference_keeps_authorization_without_native_input(self, download):
+        ref = AttachmentRef(id="audio-file", name="voice.amr", mime="audio/amr", input_mode="reference")
+        raw = ModelRequest(parts=[UserPromptPart(content=refs_from_attachments("平台转写", [ref]))])
+        restored = deserialize_message(serialize_message(raw))
+        indexed = index_attachment_refs(messages=[restored])
+        self.assertIn("audio-file", indexed)
+        self.assertEqual(indexed["audio-file"].input_mode, "reference")
+        resolved = await resolve_history_for_llm([restored], current_user_index=0, request_headers={})
+        self.assertIn("audio-file", str(resolved[0].parts[0].content))
+        self.assertNotIn("BinaryContent", str(resolved))
+        download.assert_not_awaited()
+
+    @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
     async def test_resolve_user_prompt_image(self, mock_download: AsyncMock) -> None:
         mock_download.return_value = b"img-bytes"
         headers = {"space": "test"}

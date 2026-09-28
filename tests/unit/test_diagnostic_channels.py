@@ -483,6 +483,46 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["user_details_enabled"])
         self.assertTrue(next(r for r in (await self.queries.accounts())["items"] if r["id"] == "b")["user_details_enabled"])
 
+    async def test_three_channels_share_statistics_and_name_search_contract(self):
+        """Only the profile adapter varies; counts, scope and paging do not."""
+        from sqlalchemy import update
+
+        await self.question("first", sender="opaque-A", account="b", binding="single-b", days=2)
+        await self.question("second", sender="different-id", account="b", binding="single-b")
+        async with self.factory() as db:
+            await db.execute(update(ChannelMessageRun).values(sender_name="historic-only-name"))
+            await db.commit()
+        for channel in ("wecom", "feishu", "dingtalk"):
+            with self.subTest(channel=channel):
+                async with self.factory() as db:
+                    account = await db.get(ChannelAccount, "b")
+                    account.channel_type = channel
+                    account.settings = {channel: {"user_details_enabled": True,
+                        **({"application_id": "app"} if channel == "wecom" else {})}}
+                    await db.commit()
+                overview = await self.queries.overview("b", self.f)
+                self.assertEqual(overview["summary"], {
+                    "active_users": 2, "session_count": 2, "question_count": 2})
+                # Matching happens before pagination, including a user outside
+                # the latest unfiltered page; stored names never participate.
+                found = await self.queries.peers("b", SessionFilters(
+                    self.f.start, self.f.end, query="Current", limit=1))
+                self.assertEqual(found["total"], 1)
+                self.assertEqual(found["items"][0]["latest_session"]["session_id"], "first")
+                self.assertEqual(found["items"][0]["name"], "Alice Current")
+                old = await self.queries.peers("b", SessionFilters(
+                    self.f.start, self.f.end, query="historic-only-name"))
+                self.assertEqual(old["total"], 0)
+                async with self.factory() as db:
+                    account = await db.get(ChannelAccount, "b")
+                    account.settings = {channel: {"user_details_enabled": False}}
+                    await db.commit()
+                self.profiles.resolve_many.reset_mock()
+                disabled = await self.queries.peers("b", self.f)
+                self.assertFalse(disabled["user_details_enabled"])
+                self.assertTrue(all(row["name"] is None for row in disabled["items"]))
+                self.profiles.resolve_many.assert_not_awaited()
+
     async def test_admin_api_and_batched_platform_owner_names(self):
         app = FastAPI()
         app.include_router(router, prefix="/api/v1")

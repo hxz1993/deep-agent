@@ -132,6 +132,8 @@ def normalize_media(component: PreparedComponent, caps: MessageCapabilities) -> 
         formats = getattr(caps, f"{kind}_formats", ())
         limit = getattr(caps, f"{kind}_limit", 0)
         if not fmt or fmt not in formats or len(data) > limit:
+            if not caps.media_fallback_to_file:
+                raise DeliveryError("unsupported_media", "当前格式或大小不适合原生媒体发送；如需按文件发送，请显式选择 file")
             kind = "file"
     if kind not in caps.kinds:
         raise DeliveryError("unsupported_content", "当前渠道不支持此消息类型")

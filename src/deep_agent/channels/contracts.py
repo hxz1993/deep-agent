@@ -12,6 +12,7 @@ class InboundMedia:
     filename: str
     mime: str
     handle: object = field(repr=False)
+    input_mode: str = "auto"
 
 
 @dataclass(frozen=True)

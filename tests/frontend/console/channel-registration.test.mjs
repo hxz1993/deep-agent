@@ -234,3 +234,90 @@ test("取消旧注册超时后允许重试，不永久卡在正在生成", async
   await h.registration.reset({ consumed: true });
   assert.equal(h.timers.size, 0);
 });
+
+
+test("钉钉注册使用独立端点与空入参，授权句柄可用于保存", async () => {
+  const calls = [];
+  const h = harness(async (path, options = {}) => {
+    calls.push({path, options});
+    if (options.method === "POST") return {registration_id:"ding-r1",status:"waiting",expires_in:60,verification_url:"https://open.dingtalk.com/fixture"};
+    return {registration_id:"ding-r1",status:"authorized",expires_in:60};
+  }, "dingtalk");
+  await h.registration.start({appName:"不应传递"});
+  assert.equal(calls[0].path, "/api/v1/channel-accounts/dingtalk/registrations");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {});
+  await h.tick();
+  assert.equal(h.registration.authorizedId, "ding-r1");
+  assert.equal(calls[1].path, "/api/v1/channel-accounts/dingtalk/registrations/ding-r1");
+  await h.registration.reset({consumed:true});
+});
+
+test("钉钉创建中继续轮询直到凭据就绪", async () => {
+  let reads = 0;
+  const h = harness(async (path, options = {}) => {
+    if (options.method === "POST") return {registration_id: "ding", status: "waiting"};
+    return {registration_id: "ding", status: ["scanned", "selecting", "creating", "authorized"][reads++], expires_in: 600};
+  }, "dingtalk");
+  await h.registration.start(); await h.tick();
+  assert.equal(h.changes.at(-1).status, "scanned");
+  await h.tick();
+  assert.equal(h.changes.at(-1).status, "selecting");
+  await h.tick();
+  assert.equal(h.changes.at(-1).status, "creating");
+  assert.equal(h.registration.authorizedId, null);
+  await h.tick(); assert.equal(h.registration.authorizedId, "ding");
+  await h.registration.reset({consumed: true});
+});
+
+test("钉钉状态查询瞬断恢复同一授权任务，不再次创建", async () => {
+  let gets = 0;
+  const calls = [];
+  const h = harness(async (path, options = {}) => {
+    calls.push(options.method || "GET");
+    if (options.method === "POST") return {registration_id: "ding", status: "selecting", expires_in: 600};
+    if (++gets <= 2) { const error = new Error("temporary"); error.status = gets === 1 ? 503 : 429; throw error; }
+    return {registration_id: "ding", status: "authorized", expires_in: 600};
+  }, "dingtalk");
+  await h.registration.start();
+  await h.tick(); await h.tick();
+  assert.equal(h.changes.at(-1).status, "selecting");
+  assert.match(h.changes.at(-1).error, /正在重试/);
+  await h.tick();
+  assert.equal(h.registration.authorizedId, "ding");
+  assert.deepEqual(calls, ["POST", "GET", "GET", "GET"]);
+  await h.registration.reset({consumed: true});
+});
+
+test("查询连续失败有界，权限错误立即停止，不暴露旧二维码", async () => {
+  for (const status of [undefined, 403]) {
+    let gets = 0;
+    const h = harness(async (path, options = {}) => {
+      if (options.method === "POST") return {registration_id: "ding", status: "waiting", expires_in: 600, verification_url: "https://qr.dingtalk.com/fixture"};
+      gets++;
+      const error = new Error("offline"); error.status = status; throw error;
+    }, "dingtalk");
+    await h.registration.start();
+    for (let n = 0; n < (status ? 1 : 6); n++) await h.tick();
+    assert.equal(h.changes.at(-1).status, "failed");
+    assert.equal(h.changes.at(-1).verification_url, null);
+    assert.equal(h.timers.size, 0);
+    assert.equal(gets, status ? 1 : 6);
+    await h.registration.reset({consumed: true});
+  }
+});
+
+test("状态查询重试不越过授权期限，关闭清理重试计时器", async () => {
+  for (const expires of [true, false]) {
+    const h = harness(async (path, options = {}) => {
+      if (options.method === "POST") return {registration_id: "ding", status: "creating", expires_in: 2};
+      if (options.method === "DELETE") return;
+      throw new Error("offline");
+    }, "dingtalk");
+    await h.registration.start();
+    if (expires) h.advance(2000);
+    await h.tick();
+    assert.equal(h.changes.at(-1).status, expires ? "failed" : "creating");
+    await h.registration.reset();
+    assert.equal(h.timers.size, 0);
+  }
+});

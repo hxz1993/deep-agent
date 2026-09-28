@@ -6,7 +6,7 @@ export function formatSessionIdSubtitle(sessionId) {
 /** Read-only presentation of the Session's persisted channel origin snapshot. */
 export function channelOriginPresentation(channel) {
   if (!channel || typeof channel !== "object" || !channel.channel_type || !channel.peer_id) return null;
-  const platform = channel.channel_type === "wecom" ? "企微" : channel.channel_type === "feishu" ? "飞书" : String(channel.channel_type);
+  const platform = channel.channel_type === "wecom" ? "企微" : channel.channel_type === "feishu" ? "飞书" : channel.channel_type === "dingtalk" ? "钉钉" : String(channel.channel_type);
   const peerKey = channel.peer_type === "group" ? "Chat ID" : "User ID";
   const metadata = channel.peer_metadata && typeof channel.peer_metadata === "object" ? channel.peer_metadata : {};
   const displayName = String(metadata.display_name || "");

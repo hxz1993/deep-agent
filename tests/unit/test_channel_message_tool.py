@@ -46,6 +46,15 @@ def context():
 
 
 class MessageToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_strict_channel_requires_explicit_file_for_invalid_native_media(self):
+        strict = replace(caps(), media_fallback_to_file=False)
+        for item in (PreparedComponent("audio", data=b"RIFFnot-opus", filename="audio.wav"),
+                     PreparedComponent("audio", data=b"OggSOpusHead" + b"x" * 1100),
+                     PreparedComponent("video", data=b"invalid", filename="video.mp4")):
+            with self.assertRaises(DeliveryError):
+                normalize_media(item, strict)
+            self.assertEqual(normalize_media(replace(item, kind="file"), strict).kind, "file")
+
     async def test_schema_has_no_routing_fields_and_quote_depends_on_capability(self):
         for supports in (True, False):
             tools = await build_channel_message_toolset(None, None, source(), caps(supports)).get_tools(context())

@@ -183,6 +183,7 @@
             <div class="channel-create-menu" id="newChannelMenu" role="menu" aria-label="选择渠道" hidden>
               <button class="console-select-option" type="button" id="createWecomChannelBtn" role="menuitem"><img src="./assets/channel-logos/wecom.png" width="16" height="16" alt="" /><span>企微（WS）</span></button>
               <button class="console-select-option" type="button" id="createFeishuChannelBtn" role="menuitem"><img src="./assets/channel-logos/feishu.ico" width="16" height="16" alt="" /><span>飞书（WS）</span></button>
+              <button class="console-select-option" type="button" id="createDingtalkChannelBtn" role="menuitem"><img src="./assets/channel-logos/dingtalk.svg" width="16" height="16" alt="" /><span>钉钉（WS）</span></button>
             </div>
           </div>
           <button class="btn channel-help-btn" type="button" id="channelHelpBtn"><i data-lucide="info"></i><span>帮助</span></button>
@@ -728,23 +729,26 @@
       <section class="channel-help-panel" id="channelHelpMessagesPanel" role="tabpanel" aria-labelledby="channelHelpMessagesTab">
         <div class="table-wrap">
           <table class="data-table channel-support-table" aria-label="当前渠道支持能力">
-            <thead><tr><th scope="col">内容</th><th scope="col">企微</th><th scope="col">飞书</th></tr></thead>
+            <thead><tr><th scope="col">内容</th><th scope="col">企微</th><th scope="col">飞书</th><th scope="col">钉钉</th></tr></thead>
             <tbody>
-              <tr><th scope="row">私聊 / 群聊</th><td>支持，群聊请 @</td><td>支持，群聊需 @</td></tr>
-              <tr><th scope="row">流式文字回复</th><td>支持</td><td>支持</td></tr>
-              <tr><th scope="row">接收图片</th><td>支持</td><td>支持</td></tr>
-              <tr><th scope="row">发送图片</th><td>支持，无需配置 MCP</td><td>支持，无需配置 MCP</td></tr>
-              <tr><th scope="row">接收文件</th><td>支持</td><td>支持</td></tr>
-              <tr><th scope="row">发送文件</th><td>支持，无需配置 MCP</td><td>支持，无需配置 MCP</td></tr>
-              <tr><th scope="row">发送音频 / 视频</th><td>支持，不兼容格式按文件发送</td><td>支持，不兼容格式按文件发送</td></tr>
-              <tr><th scope="row">引用本轮消息</th><td>暂不支持原生引用</td><td>支持</td></tr>
-              <tr><th scope="row">语音转文字</th><td>接收企微转写结果</td><td>请先转成文字发送</td></tr>
+              <tr><th scope="row">私聊 / 群聊</th><td>支持，群聊请 @</td><td>支持，群聊需 @</td><td>支持，群聊需 @</td></tr>
+              <tr><th scope="row">流式文字回复</th><td>支持</td><td>支持，流式卡片</td><td>支持，AI 流式卡片</td></tr>
+              <tr><th scope="row">接收图片 / 文件</th><td>支持</td><td>支持</td><td>支持</td></tr>
+              <tr><th scope="row">发送图片 / 文件</th><td>支持</td><td>支持</td><td>支持</td></tr>
+              <tr><th scope="row">发送音频 / 视频</th><td>支持；不兼容格式按文件发送</td><td>支持；不兼容格式按文件发送</td><td>语音 AMR / OGG(Opus)，最长 60 秒；视频 MP4</td></tr>
+              <tr><th scope="row">引用本轮消息</th><td>原生引用暂未接入</td><td>支持</td><td>原生引用暂未接入</td></tr>
+              <tr><th scope="row">语音转文字</th><td>接收企微转写结果</td><td>请先转成文字发送</td><td>接收平台转写文本（若有）</td></tr>
+              <tr><th scope="row">用户姓名</th><td>开启查询并关联企微应用</td><td>开启查询并授权当前应用</td><td>开启后使用消息昵称，同 ID 更新缓存</td></tr>
+              <tr><th scope="row">初始化</th><td>扫码创建 / 手动关联</td><td>扫码创建 / 手动关联</td><td>扫码创建 / 手动关联</td></tr>
             </tbody>
           </table>
         </div>
         <ul class="channel-command-notes">
           <li>以上为当前接入范围；图片识别和文件读取取决于所选模型与文件格式。</li>
-          <li>消息和附件发送到当前聊天；跨聊天发送暂未开放。</li>
+          <li>图片和文件通过内置渠道消息工具发送，无需额外配置 MCP；仅限当前聊天。</li>
+          <li>钉钉语音保留原始附件与平台转写文本（若有）；不自动调用语音识别模型。原生媒体格式不支持时明确报错，可改发普通文件。</li>
+          <li>钉钉使用 Stream 长连接，无需公网回调。请配置机器人、媒体与卡片权限并发布应用；原生音视频发送需部署 FFmpeg 以读取时长和提取封面。</li>
+          <li>钉钉用户详情默认关闭；开启后使用消息自带昵称，不主动查询通讯录。昵称按账号和用户 ID 缓存在网关；重启后等待该用户再次发言取得昵称，不改写历史会话。</li>
         </ul>
       </section>
       <section class="channel-help-panel" id="channelHelpCommandsPanel" role="tabpanel" aria-labelledby="channelHelpCommandsTab" hidden>
@@ -822,7 +826,7 @@
                 <strong id="channelRegistrationSaveReminder" class="channel-registration-save-reminder" hidden>授权成功，渠道尚未保存</strong>
                 <p id="channelRegistrationScanStatus" role="status" aria-live="polite"></p>
                 <div class="channel-registration-scan-actions">
-                  <button type="button" class="btn" id="channelRegistrationRetryScan" hidden>重新生成</button>
+                  <button type="button" class="btn" id="channelRegistrationRetryScan" hidden><i data-lucide="refresh-cw" aria-hidden="true"></i>重新生成</button>
                   <a id="channelRegistrationAuthLink" class="btn" target="_blank" rel="noopener noreferrer" hidden>打开授权页面</a>
                 </div>
                 <a id="channelRegistrationConsoleLink" class="channel-platform-link channel-registration-console-link" href="https://open.feishu.cn/app" target="_blank" rel="noopener noreferrer" title="在新标签页打开">前往飞书开发者后台 ↗</a>
@@ -834,8 +838,8 @@
           <h4 class="channel-extension-heading">扩展设置</h4>
           <div class="channel-extension-layout">
             <div class="channel-extension-tabs" role="tablist" aria-label="扩展功能" aria-orientation="vertical">
-              <button type="button" id="channelDeepfosTab" role="tab" data-channel-extension="deepfos" aria-controls="channelDeepfosPanel" aria-selected="true">关联 DeepFOS 应用<span class="channel-extension-dot"></span></button>
-              <button type="button" id="channelMemberTab" role="tab" data-channel-extension="member" aria-controls="channelMemberPanel" aria-selected="false" tabindex="-1">查询用户详情<span class="channel-extension-dot"></span></button>
+              <button type="button" id="channelDeepfosTab" role="tab" data-channel-extension="deepfos" aria-controls="channelDeepfosPanel" aria-selected="true">关联 DeepFOS 应用<span class="channel-extension-status" role="img" aria-label="未开启" title="未开启"><i data-lucide="circle-check" class="extension-on" aria-hidden="true"></i><i data-lucide="circle-minus" class="extension-off" aria-hidden="true"></i></span></button>
+              <button type="button" id="channelMemberTab" role="tab" data-channel-extension="member" aria-controls="channelMemberPanel" aria-selected="false" tabindex="-1">查询用户详情<span class="channel-extension-status" role="img" aria-label="未开启" title="未开启"><i data-lucide="circle-check" class="extension-on" aria-hidden="true"></i><i data-lucide="circle-minus" class="extension-off" aria-hidden="true"></i></span></button>
             </div>
             <div id="channelDeepfosPanel" class="channel-extension-panel" role="tabpanel" aria-labelledby="channelDeepfosTab">
               <div class="channel-extension-panel-head">
@@ -857,11 +861,11 @@
             <div id="channelMemberPanel" class="channel-extension-panel" role="tabpanel" aria-labelledby="channelMemberTab" hidden>
               <div id="channelWecomMemberToggle" class="channel-extension-panel-head"><div class="channel-extension-label">
                 <button type="button" id="channelUserDetailsEnabled" class="model-enabled-switch off" role="switch" aria-checked="false" aria-label="查询用户详情" aria-controls="channelWecomApplicationField channelFeishuUserDetails"><span></span></button>
-                <label for="channelUserDetailsEnabled">启用用户详情查询</label>
+                <label id="channelUserDetailsLabel" for="channelUserDetailsEnabled">启用用户详情查询</label>
               </div><small class="field-subtitle" id="channelUserDetailsHint">获取企微成员账号和姓名</small></div>
+              <p id="channelDingtalkUserDetails" class="field-hint" hidden>开启后使用消息自带的昵称，不主动查询通讯录，也无需额外授权。同一用户再次发言时更新网关中的昵称；重启后等待新消息补充。关闭或未取得昵称时显示用户 ID，不改写历史会话。</p>
               <div id="channelFeishuUserDetails" class="channel-extension-fields" hidden>
-                <p class="field-hint">使用当前机器人应用，无需另外关联应用。开启后按用户 ID 查询姓名；查询不到时显示 ID。</p>
-                <div><button type="button" class="btn" id="channelUserDetailsCheckBtn">检测权限</button></div>
+                <p class="field-hint">使用当前机器人应用，无需另外关联应用。开启后按用户 ID 查询姓名；查询不到时显示 ID。<button type="button" class="field-text-action" id="channelUserDetailsCheckBtn">检测权限</button></p>
                 <div class="field-hint" id="channelUserDetailsCheckResult" role="status" aria-live="polite" hidden></div>
               </div>
               <div class="field channel-application-field" id="channelWecomApplicationField" hidden>

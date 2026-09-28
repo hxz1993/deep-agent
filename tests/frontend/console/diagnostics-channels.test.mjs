@@ -127,3 +127,14 @@ test("current identity uses ID without a name; incomplete profile data has a ret
  assert.ok(h.calls.length>before);
  h.controller.deactivate();
 });
+
+
+test("DingTalk account details reflect the nickname switch", async () => {
+ for (const enabled of [false, true]) {
+  const h=harness(path=>path.endsWith("/accounts") ? {items:[{id:"one",name:"钉钉账号",channel_type:"dingtalk",enabled:true,user_details_enabled:enabled}]} : response(path));
+  h.activate();await settle();
+  assert.match(h.root.innerHTML, /钉钉应用/);
+  assert.match(h.root.innerHTML, enabled ? /用户详情<\/dt><dd>已开启，由消息提供昵称/ : /用户详情<\/dt><dd>未开启/);
+  h.controller.deactivate();
+ }
+});

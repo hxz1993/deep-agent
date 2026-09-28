@@ -86,6 +86,20 @@ def public_channel_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
 def validate_channel_settings(channel_type: str, settings: dict[str, Any]) -> None:
     """Keep provider configuration isolated; Feishu never accepts arbitrary SDK URLs."""
     channel_deepfos_app(settings)
+    if "dingtalk" in settings and channel_type != "dingtalk":
+        raise ValueError("钉钉配置只能用于钉钉渠道")
+    if channel_type == "dingtalk":
+        if "wecom" in settings or "feishu" in settings:
+            raise ValueError("钉钉渠道不能配置其他渠道应用")
+        config = settings.get("dingtalk", {})
+        if not isinstance(config, dict):
+            raise ValueError("settings.dingtalk 必须是对象")
+        if set(config) - {"user_details_enabled"}:
+            raise ValueError("不支持的钉钉配置项")
+        for key in ("user_details_enabled",):
+            if type(config.get(key, False)) is not bool:
+                raise ValueError(f"{key} 必须是布尔值")
+        return
     if channel_type != "feishu":
         if "feishu" in settings:
             raise ValueError("飞书配置只能用于飞书渠道")

@@ -6,10 +6,10 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260928-channel-profiles";
+} from "./configuration.js?v=20260928-channel-audit";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260928-channel-profiles";
-import { initWorkspace } from "./workspace.js?v=20260927-feishu-release-0117";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260928-channel-audit";
+import { initWorkspace } from "./workspace.js?v=20260928-channel-audit";
 import "./time.js?v=20260913-49";
 
 initUserIdentityControls();

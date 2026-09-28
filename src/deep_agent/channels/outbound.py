@@ -12,6 +12,7 @@ class MessageTarget:
     message_id: str
     thread_id: str | None = None
     chat_id: str | None = None
+    recipient_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class MessageCapabilities:
     audio_formats: tuple[str, ...] = ()
     video_formats: tuple[str, ...] = ("mp4",)
     image_formats: tuple[str, ...] = ("png", "jpeg", "gif", "webp", "bmp")
+    media_fallback_to_file: bool = True
 
 
 class DeliveryError(Exception):
@@ -83,4 +85,5 @@ async def resolve_run_context(store, *, account_id: str, channel_run_id: str,
     return ChannelRunContext(account_id, channel_run_id, session_id, agent_id, user_id,
                              MessageTarget(account_id, binding.peer_type, binding.peer_id,
                                            run.external_message_id, run.thread_id,
-                                           (run.source_metadata or {}).get("lark_chat_id")))
+                                           (run.source_metadata or {}).get("dingtalk_conversation_id" if account.channel_type == "dingtalk" else "lark_chat_id"),
+                                           (run.source_metadata or {}).get("dingtalk_staff_id") if account.channel_type == "dingtalk" else None))

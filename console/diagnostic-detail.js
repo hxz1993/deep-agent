@@ -5,8 +5,8 @@ import { projectConversationItems, sortConversationItems } from "./conversation-
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20260912-21";
 import { createTrajectoryController } from "./trajectory.js?v=20260924-ptc-execution-6";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20260927-feishu-release-0117";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260927-feishu-release-0117";
+import { renderSessionInspector } from "./session-inspector.js?v=20260928-channel-audit";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260928-channel-audit";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { bindAttachmentImagePreviews, attachmentDownloadUrl } from "./attachment-preview.js?v=20260922-trajectory-8";

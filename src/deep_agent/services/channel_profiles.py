@@ -13,6 +13,9 @@ def user_details_enabled(account) -> bool:
         return False
     if account.channel_type == "wecom":
         return bool(wecom_application_id(account))
+    if account.channel_type == "dingtalk":
+        # No directory lookup: the live gateway owns nicknames received in messages.
+        return ((account.settings or {}).get("dingtalk") or {}).get("user_details_enabled") is True
     config = (account.settings or {}).get("feishu") or {}
     return account.channel_type == "feishu" and config.get("user_details_enabled") is True
 

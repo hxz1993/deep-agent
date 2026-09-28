@@ -12,6 +12,29 @@ def account(channel='feishu', enabled=True):
 
 
 class ChannelProfilesTests(IsolatedAsyncioTestCase):
+    async def test_api_rechecks_name_switch_for_both_gateway_profile_channels(self):
+        from deep_agent.api.v1.chat import _current_channel_context
+
+        for channel in ('feishu', 'dingtalk'):
+            for enabled in (False, True):
+                with self.subTest(channel=channel, enabled=enabled):
+                    current = account(channel)
+                    current.agent_id = 'agent'
+                    current.session_user_id = 'owner'
+                    current.settings = {channel: {'user_details_enabled': enabled}}
+                    record = SimpleNamespace(sender_id='A', sender_name='trusted-name',
+                                             tenant_id='tenant', thread_id='thread')
+                    store = SimpleNamespace(get_account=AsyncMock(return_value=current),
+                                            get_message=AsyncMock(return_value=record))
+                    ctx = SimpleNamespace(stores=SimpleNamespace(channel=store))
+                    payload = {'sender_id': 'A', 'message_id': 'message', 'name': 'untrusted'}
+                    body = SimpleNamespace(context_refs=[SimpleNamespace(
+                        type='channel.message_source', payload=payload)])
+                    await _current_channel_context(ctx, body, current)
+                    self.assertEqual(payload.get('name'), 'trusted-name' if enabled else None)
+                    self.assertEqual(payload['tenant_id'], 'tenant')
+                    self.assertEqual(record.sender_name, 'trusted-name')
+
     def service(self, row):
         store = SimpleNamespace(get_account=AsyncMock(return_value=row))
         self.provider = SimpleNamespace(resolve=AsyncMock(return_value={
@@ -21,6 +44,17 @@ class ChannelProfilesTests(IsolatedAsyncioTestCase):
             {'sender_id': 'A', 'userid': None, 'name': '姓名', 'status': 'resolved'}]}))
         self.store = store
         return ChannelProfileService(ctx, gateway=self.gateway)
+
+    async def test_dingtalk_passive_profiles_without_feishu_switch_or_wecom_app(self):
+        row = account('dingtalk')
+        row.settings = {'dingtalk': {'user_details_enabled': True}}
+        service = self.service(row)
+        result = await service.resolve_many(SimpleNamespace(id='account'), ['A', 'B'])
+        self.assertTrue(result['user_details_enabled'])
+        self.assertEqual(result['items']['A']['name'], '姓名')
+        self.assertFalse(result['profiles_complete'])
+        self.provider.resolve.assert_not_called()
+        self.gateway.resolve_users.assert_awaited_once()
 
     async def test_disabled_does_not_query_and_does_not_reuse_snapshot(self):
         service = self.service(account(enabled=False))

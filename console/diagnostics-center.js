@@ -1,9 +1,9 @@
 import { initDiagnosticLogs } from "./diagnostics.js?v=20260915-ui-polish";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260927-feishu-release-0117";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260928-channel-audit";
 import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260923-c04-1";
 
-import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260928-channel-profiles";
-import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20260927-release-0118";
+import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260928-channel-audit";
+import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20260928-channel-audit";
 
 let center = null;
 export function initDiagnostics() {

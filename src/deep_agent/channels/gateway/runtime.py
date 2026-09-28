@@ -134,9 +134,9 @@ class ChannelRuntime:
         account = await self.store.get_account(account_id)
         if account is None:
             raise LookupError("Channel account not found")
-        if not account.enabled or account.channel_type != "feishu":
+        if not account.enabled or account.channel_type not in {"feishu", "dingtalk"}:
             return unavailable("disabled")
-        if ((account.settings or {}).get("feishu") or {}).get("user_details_enabled") is not True:
+        if ((account.settings or {}).get(account.channel_type) or {}).get("user_details_enabled") is not True:
             return unavailable("disabled")
         current = self._accounts.get(account_id)
         fingerprint = self.registry.fingerprint(account)
@@ -173,7 +173,7 @@ class ChannelRuntime:
                     return None
 
                 try:
-                    if account.channel_type == "feishu":
+                    if account.channel_type in {"feishu", "dingtalk"}:
                         result = await adapter.test_connection(self.config.test_timeout)
                         return {"account_id": account_id, **result}
                     await adapter.start(ignore_message)

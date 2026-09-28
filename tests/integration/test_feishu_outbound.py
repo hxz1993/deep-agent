@@ -2,6 +2,8 @@
 import asyncio
 import json
 import unittest
+from unittest.mock import AsyncMock, patch
+from deep_agent.channels.media_metadata import MediaMetadata
 
 from deep_agent.channels.adapters.feishu.outbound import send_component
 from deep_agent.channels.outbound import MessageTarget, PreparedComponent
@@ -45,17 +47,22 @@ class OfficialHTTPTest(unittest.IsolatedAsyncioTestCase):
                             transport=TransportConfig(trust_env_proxy=False))
         try:
             for kind in ("image", "file", "audio", "video"):
-                result = await send_component(sdk, target(thread_id="omt_thread"),
-                    PreparedComponent(kind, data=b"fixture-content-123", filename=f"test.{kind}"))
+                with patch("deep_agent.channels.adapters.feishu.outbound.inspect_media", AsyncMock(return_value=MediaMetadata(2350, 320, 180, b"fixture-cover" if kind == "video" else None))):
+                    result = await send_component(sdk, target(thread_id="omt_thread"),
+                        PreparedComponent(kind, data=b"fixture-content-123", filename=f"test.{kind}"))
                 self.assertEqual(result.message_id, "om_wire")
             uploads = [call for call in calls if call[0].endswith(("/images", "/files"))]
-            self.assertEqual(len(uploads), 4)
+            self.assertEqual(len(uploads), 5)
             for _, mime, body in uploads:
                 self.assertIn("multipart/form-data", mime)
-                self.assertIn(b"fixture-content-123", body)
+                self.assertTrue(b"fixture-content-123" in body or b"fixture-cover" in body)
             self.assertIn(b"opus", uploads[2][2]); self.assertIn(b"mp4", uploads[3][2])
+            for upload in uploads[2:4]:
+                self.assertIn(b'name="duration"', upload[2])
+                self.assertIn(b"2350", upload[2])
             replies = [json.loads(body) for path, _, body in calls if path.endswith("/reply")]
             self.assertEqual(len(replies), 4)
+            self.assertEqual(json.loads(replies[-1]["content"])["image_key"], "img_wire")
             self.assertTrue(all(body["reply_in_thread"] for body in replies))
             self.assertEqual([body["msg_type"] for body in replies], ["image", "file", "audio", "media"])
             self.assertTrue(all(path.endswith("/om_inbound/reply") for path, _, _ in calls if path.endswith("/reply")))

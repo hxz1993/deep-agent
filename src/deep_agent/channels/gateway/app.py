@@ -12,6 +12,7 @@ from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from deep_agent.channels.gateway.webhook import WebhookMessage
 from deep_agent.channels.gateway.config import GatewayConfig
 from deep_agent.channels.gateway.runtime import ChannelRuntime
 from deep_agent.db.dialect import resolve_dialect
@@ -107,6 +108,18 @@ def create_gateway_app() -> FastAPI:
             return await context.runtime.resolve_users(account_id, body.user_ids, timeout=body.timeout)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail="Channel account not found") from exc
+
+    @app.post("/accounts/{account_id}/webhook")
+    async def receive_webhook(account_id: str, body: WebhookMessage,
+                              context: GatewayContext = Depends(authorize)) -> dict:
+        try:
+            return await context.runtime.receive_webhook(account_id, body)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Channel account not found") from None
+        except ValueError:
+            raise HTTPException(status_code=409, detail="Webhook message or configuration conflict") from None
+        except Exception:
+            raise HTTPException(status_code=503, detail="Webhook message could not be accepted") from None
 
     @app.post("/messages/send")
     async def send_message(request: Request, context: GatewayContext = Depends(authorize)):

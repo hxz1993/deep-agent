@@ -86,6 +86,18 @@ def public_channel_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
 def validate_channel_settings(channel_type: str, settings: dict[str, Any]) -> None:
     """Keep provider configuration isolated; Feishu never accepts arbitrary SDK URLs."""
     channel_deepfos_app(settings)
+    if channel_type == "wecom_app":
+        if any(key in settings for key in ("wecom", "feishu", "dingtalk")):
+            raise ValueError("企微应用不能配置其他渠道设置")
+        config = settings.get("wecom_app")
+        if not isinstance(config, dict) or set(config) != {"application_id"}:
+            raise ValueError("企微应用必须且仅配置 application_id")
+        app_id = config["application_id"]
+        if not isinstance(app_id, str) or not app_id.strip() or app_id != app_id.strip():
+            raise ValueError("企微应用引用无效")
+        return
+    if "wecom_app" in settings:
+        raise ValueError("企微应用配置只能用于企微应用渠道")
     if "dingtalk" in settings and channel_type != "dingtalk":
         raise ValueError("钉钉配置只能用于钉钉渠道")
     if channel_type == "dingtalk":

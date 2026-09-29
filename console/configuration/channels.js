@@ -14,6 +14,7 @@ const channelAdminState = {
 };
 
 const channelPlatforms = {
+  wecom_app: { name: "企微应用", logo: "wecom-app.svg", consoleUrl: "https://work.weixin.qq.com/", consoleLabel: "企业微信管理后台", subtitle: "企微应用" },
   feishu: { name: "飞书", logo: "feishu.ico", consoleUrl: "https://open.feishu.cn/app", consoleLabel: "飞书开发者后台", credential: "App ID", secret: "App Secret", subtitle: "飞书应用机器人" },
   wecom: { name: "企微", logo: "wecom.png", consoleUrl: "https://work.weixin.qq.com/", consoleLabel: "企业微信管理后台", credential: "Bot ID", secret: "Secret", subtitle: "企微智能机器人" },
   dingtalk: { name: "钉钉", logo: "dingtalk.svg", consoleUrl: "https://open-dev.dingtalk.com/", consoleLabel: "钉钉开发者后台", credential: "Client ID", secret: "Client Secret", subtitle: "钉钉应用机器人" },
@@ -67,7 +68,8 @@ function renderChannelRegistration(data) {
 function setChannelRegistrationMode(mode) {
   if (channelAdminState.saving) return;
   channelAdminState.registrationMode = mode === "scan" ? "scan" : "manual";
-  const scan = !channelAdminState.editingId && channelAdminState.registrationMode === "scan";
+  const webhook = channelAdminState.channelType === "wecom_app";
+  const scan = !webhook && !channelAdminState.editingId && channelAdminState.registrationMode === "scan";
   document.querySelectorAll("[data-registration-mode]").forEach(button => {
     const selected = button.dataset.registrationMode === channelAdminState.registrationMode;
     button.classList.toggle("active", selected); button.setAttribute("aria-pressed", String(selected));
@@ -75,10 +77,10 @@ function setChannelRegistrationMode(mode) {
   document.getElementById("channelRegistrationScan").hidden = !scan;
   document.getElementById("channelRegistrationManualHint").hidden = scan;
   ["channelBotId", "channelSecret"].forEach(id => {
-    const input = document.getElementById(id); input.closest(".field").hidden = scan; input.disabled = scan;
+    const input = document.getElementById(id); input.closest(".field").hidden = scan; input.disabled = scan || webhook;
   });
-  document.getElementById("channelBotId").required = !scan;
-  document.getElementById("channelSecret").required = !scan && !channelAdminState.editingId;
+  document.getElementById("channelBotId").required = !scan && !webhook;
+  document.getElementById("channelSecret").required = !scan && !webhook && !channelAdminState.editingId;
 }
 function prepareChannelPlatform(type) {
   clearChannelPermissionCheck();
@@ -87,9 +89,10 @@ function prepareChannelPlatform(type) {
   const feishu = channelAdminState.channelType === "feishu";
   const dingtalk = channelAdminState.channelType === "dingtalk";
   const platform = channelPlatforms[channelAdminState.channelType];
-  channelRegistration = window.createChannelRegistration({ channelType: channelAdminState.channelType, onChange: renderChannelRegistration });
+  channelRegistration = channelAdminState.channelType === "wecom_app" ? null : window.createChannelRegistration({ channelType: channelAdminState.channelType, onChange: renderChannelRegistration });
   renderChannelRegistration({});
   const consoleLink = document.getElementById("channelRegistrationConsoleLink");
+  consoleLink.hidden = channelAdminState.channelType === "wecom";
   consoleLink.href = platform.consoleUrl;
   consoleLink.textContent = `前往${platform.consoleLabel} ↗`;
   document.getElementById("channelRegistrationMode").setAttribute("aria-label", `${platform.name}接入方式`);
@@ -101,7 +104,7 @@ function prepareChannelPlatform(type) {
     ? '<strong>使用钉钉企业内部应用</strong><p>在<a class="channel-platform-link" href="https://open-dev.dingtalk.com/" target="_blank" rel="noopener noreferrer" title="打开钉钉开发者后台（新标签页）">钉钉开发者后台</a>获取 Client ID 和 Client Secret，开启机器人能力。</p><p>消息接收选择 Stream 模式，配置权限并发布应用，无需公网回调。</p>'
     : feishu
     ? '<strong>使用飞书企业自建应用</strong><p>在<a class="channel-platform-link" href="https://open.feishu.cn/app" target="_blank" rel="noopener noreferrer" title="打开飞书开发者后台（新标签页）">飞书开放平台</a>获取 App ID 和 App Secret，开启机器人能力。</p><p>事件订阅选择长连接，添加接收消息事件并发布应用。</p>'
-    : '<strong>使用企微智能机器人</strong><p>在企业微信创建智能机器人，选择 API 模式，获取 Bot ID 和 Secret。</p><p>通过长连接接收消息，无需配置公网回调地址。</p><a class="channel-platform-link" href="https://work.weixin.qq.com/" target="_blank" rel="noopener noreferrer">前往企业微信管理后台 ↗</a>';
+    : '<strong>使用企微智能机器人</strong><p>在企业微信创建智能机器人，选择 API 模式，获取 Bot ID 和 Secret。</p><p>通过长连接接收消息，无需配置公网回调地址。</p>';
   document.getElementById("channelSecretLabel").textContent = platform.secret;
   document.getElementById("channelName").placeholder = `例如：${platform.name}助手`;
   document.getElementById("channelConnectionTitle").textContent = `${platform.name}连接`;
@@ -114,7 +117,19 @@ function prepareChannelPlatform(type) {
   document.getElementById("channelWecomMemberToggle").hidden = false;
   document.getElementById("channelUserDetailsHint").textContent = dingtalk ? "使用消息自带的用户昵称" : feishu ? "使用当前飞书应用查询姓名" : "获取企微成员账号和姓名";
   document.getElementById("channelFeishuUserDetails").hidden = true;
-  setChannelRegistrationMode(!channelAdminState.editingId ? "scan" : "manual");
+  const webhook = channelAdminState.channelType === "wecom_app";
+  setChannelRegistrationMode(!webhook && !channelAdminState.editingId ? "scan" : "manual");
+  document.getElementById("channelAccountModal").classList.toggle("webhook-channel-modal", webhook);
+  document.getElementById("channelHeaderLogo").src = `./assets/channel-logos/${channelPlatforms[channelAdminState.channelType].logo}`;
+  document.getElementById("channelWebhookSettings").hidden = !webhook;
+  document.getElementById("channelCredentialLayout").hidden = webhook;
+  document.getElementById("channelCredentialHome").hidden = webhook;
+  document.getElementById("channelRegistrationMode").hidden = webhook || Boolean(channelAdminState.editingId);
+  document.getElementById("channelRegistrationSetup").hidden = webhook || Boolean(channelAdminState.editingId);
+  document.getElementById("channelMemberTab").hidden = webhook;
+  document.getElementById("channelTransportTag").dataset.transport = webhook ? "webhook" : "websocket";
+  document.getElementById("channelTransportTag").textContent = webhook ? "WebHook" : "WebSocket";
+  ["channelWebhookToken", "channelWebhookAesKey", "channelWebhookApplicationId"].forEach(id => { document.getElementById(id).disabled = !webhook; });
 }
 
 const channelPermissionCheck = { generation: 0, controller: null };
@@ -268,9 +283,41 @@ function setChannelSecretEditor({ maskedValue = "", secretSet = false, required 
   const masked = String(maskedValue || "");
   input.dataset.maskedValue = masked;
   input.value = masked;
-  input.type = masked ? "text" : "password";
+
   input.required = required;
   input.placeholder = masked || secretSet ? "留空则保持不变" : "请输入 Secret";
+}
+
+function channelApplicationAssociation(applicationId) {
+  const names = channelAdminState.accounts.filter(item => item.channel_type === "wecom_app" && item.settings?.wecom_app?.application_id === applicationId).map(item => item.name);
+  return names.join("、");
+}
+function channelWebhookAddress(account) {
+  return account.id ? `${window.location.origin}/webhooks/agent/channel/${encodeURIComponent(account.id)}` : "";
+}
+function prepareChannelWebhookEditor(account = {}) {
+  const url = channelWebhookAddress(account);
+  const webhook = channelAdminState.channelType === "wecom_app";
+  const identity = document.getElementById("channelFullId");
+  identity.hidden = !account.id;
+  document.getElementById("channelFullIdValue").textContent = account.id || "";
+  for (const [id, key] of [["channelWebhookToken", "webhook_token"], ["channelWebhookAesKey", "webhook_aes_key"]]) {
+    const input = document.getElementById(id);
+    input.dataset.maskedValue = account[`${key}_masked`] || "";
+    input.value = input.dataset.maskedValue;
+    input.required = webhook && !account[`${key}_set`];
+    input.placeholder = account[`${key}_set`] ? "留空保持不变" : "请输入";
+  }
+  document.getElementById("channelWebhookApplicationId").required = webhook;
+  document.getElementById("channelWebhookUrl").value = channelWebhookAddress(account);
+  document.getElementById("channelWebhookUrl").hidden = !url;
+  document.getElementById("channelWebhookUrlPlaceholder").hidden = Boolean(url);
+  document.getElementById("channelWebhookUrlPlaceholder").innerHTML = account.id
+    ? ""
+    : '先<strong>保存渠道</strong>以生成地址，再复制至企业微信后台<strong>「接收消息 → URL」</strong>完成验证。';
+  document.getElementById("copyChannelWebhookUrl").disabled = !url;
+  document.getElementById("copyChannelWebhookUrl").hidden = !url;
+
 }
 
 function channelUserDetailsSettings(settings, enabled, applicationId) {
@@ -292,7 +339,7 @@ function setChannelApiKeyEditor(settings = {}) {
   channelAdminState.clearApiKey = false;
   input.dataset.maskedValue = settings.api_key_masked || "";
   input.value = input.dataset.maskedValue;
-  input.type = input.value ? "text" : "password";
+
 }
 
 function channelApiKeySettings(previous = {}) {
@@ -342,28 +389,29 @@ async function prepareChannelApplicationEditor(settings = {}) {
   setChannelApiKeyEditor(settings?.deepfos || {});
   document.getElementById("channelDeepfosAppId").value = settings?.deepfos?.app_id || "";
   setChannelDeepfosEnabled(settings?.deepfos?.enabled === true);
-  const select = document.getElementById("channelWecomApplicationId");
+  const webhook = channelAdminState.channelType === "wecom_app";
+  const select = document.getElementById(webhook ? "channelWebhookApplicationId" : "channelWecomApplicationId");
   if (!select) return;
   const generation = ++channelAdminState.applicationLoadGeneration;
-  if (channelAdminState.channelType !== "wecom") {
+  if (!webhook && channelAdminState.channelType !== "wecom") {
     channelAdminState.applications = [];
     setChannelUserDetailsEnabled(settings?.[channelAdminState.channelType]?.user_details_enabled === true);
     select.disabled = true;
     return;
   }
-  const selectedId = settings?.wecom?.application_id || "";
+  const selectedId = settings?.[webhook ? "wecom_app" : "wecom"]?.application_id || "";
   select.dataset.selectedId = selectedId;
   select.innerHTML = '<option value="" hidden disabled selected>正在加载企微应用…</option>';
   select.disabled = true;
   channelAdminState.applications = [];
   setChannelUserDetailsEnabled(settings?.wecom?.user_details_enabled === true);
-  const hint = document.getElementById("channelWecomApplicationHint");
+  const hint = document.getElementById(webhook ? "channelWebhookApplicationHint" : "channelWecomApplicationHint");
   hint.textContent = "";
   try {
     const items = await apiFetch("/api/v1/wecom-applications");
     if (generation !== channelAdminState.applicationLoadGeneration) return;
     channelAdminState.applications = items;
-    select.innerHTML = `<option value="" hidden disabled ${!selectedId ? "selected" : ""}>请选择</option>${selectedId && !items.some(item => item.id === selectedId) ? `<option value="${escapeHtml(selectedId)}" hidden disabled selected>应用已不可用</option>` : ""}${items.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === selectedId ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}`;
+    select.innerHTML = `<option value="" hidden disabled ${!selectedId ? "selected" : ""}>请选择</option>${selectedId && !items.some(item => item.id === selectedId) ? `<option value="${escapeHtml(selectedId)}" hidden disabled selected>应用已不可用</option>` : ""}${items.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === selectedId ? "selected" : ""} data-badge="${webhook && channelApplicationAssociation(item.id) ? `已关联 ${escapeHtml(channelApplicationAssociation(item.id))}` : ""}">${escapeHtml(item.name)}</option>`).join("")}`;
     select.disabled = !items.length;
     hint.textContent = !items.length ? "暂无企微应用，请先在渠道 → 企微应用中新建。" : "";
   } catch (error) {
@@ -486,7 +534,7 @@ const channelsAdmin = {
       return `<tr class="channel-list-row" data-open-channel="${escapeHtml(account.id)}" tabindex="0">
         <td class="channel-enabled-cell"><button type="button" class="model-enabled-switch ${account.enabled ? "on" : "off"}" data-toggle-channel="${escapeHtml(account.id)}" role="switch" aria-checked="${account.enabled}" title="${account.enabled ? "停用渠道" : "启用渠道"}" aria-label="${account.enabled ? "停用渠道" : "启用渠道"}"><span></span></button></td>
         <td><strong>${escapeHtml(account.name)}</strong></td>
-        <td class="channel-type-cell"><span class="channel-type-label"><img src="./assets/channel-logos/${channelPlatforms[account.channel_type]?.logo || "wecom.png"}" width="18" height="18" alt="" />${channelPlatforms[account.channel_type]?.name || account.channel_type}（WS）</span></td>
+        <td class="channel-type-cell"><span class="channel-type-label"><img src="./assets/channel-logos/${channelPlatforms[account.channel_type]?.logo || "wecom.png"}" width="18" height="18" alt="" />${channelPlatforms[account.channel_type]?.name || account.channel_type}<span class="channel-transport-tag" data-transport="${account.transport === "webhook" ? "webhook" : "websocket"}">${account.transport === "webhook" ? "WebHook" : "WebSocket"}</span></span></td>
         <td>${escapeHtml(account.agent_name || account.agent_id)}</td>
         <td><span class="channel-status" data-state="${escapeHtml(runtime.state)}" title="${escapeHtml(runtime.message || "")}"><span></span>${escapeHtml(CHANNEL_STATE_LABELS[runtime.state] || runtime.state)}</span></td>
         <td>${escapeHtml(formatDate(account.updated_at))}</td>
@@ -538,7 +586,8 @@ const channelsAdmin = {
     renderChannelAgentOptions();
     document.getElementById("channelBotId").value = "";
     document.getElementById("channelSessionUserId").value = "";
-    setChannelSecretEditor({ required: true });
+    setChannelSecretEditor({ required: channelType !== "wecom_app" });
+    prepareChannelWebhookEditor();
     void prepareChannelApplicationEditor();
     AdminFormFeedback.clear(document.getElementById("channelAccountForm"));
     document.getElementById("channelAccountModal").showModal();
@@ -556,6 +605,7 @@ const channelsAdmin = {
     document.getElementById("channelBotId").value = account.bot_id;
     document.getElementById("channelSessionUserId").value = account.session_user_id;
     setChannelSecretEditor({ maskedValue: account.secret_masked, secretSet: account.secret_set });
+    prepareChannelWebhookEditor(account);
     void prepareChannelApplicationEditor(account.settings);
     AdminFormFeedback.clear(document.getElementById("channelAccountForm"));
     document.getElementById("channelAccountModal").showModal();
@@ -568,21 +618,22 @@ const channelsAdmin = {
     const editingId = channelAdminState.editingId;
     const account = channelAdminState.accounts.find(item => item.id === editingId);
     const enabled = document.getElementById("channelUserDetailsEnabled").getAttribute("aria-checked") === "true";
-    const applicationSelect = document.getElementById("channelWecomApplicationId");
+    const webhook = channelAdminState.channelType === "wecom_app";
+    const applicationSelect = document.getElementById(webhook ? "channelWebhookApplicationId" : "channelWecomApplicationId");
     const applicationId = applicationSelect.disabled ? applicationSelect.dataset.selectedId : applicationSelect.value;
     const feishu = channelAdminState.channelType === "feishu";
     const dingtalk = channelAdminState.channelType === "dingtalk";
-    const scan = !editingId && channelAdminState.registrationMode === "scan";
+    const scan = !webhook && !editingId && channelAdminState.registrationMode === "scan";
     if (scan && !channelRegistration?.authorizedId) {
       AdminFormFeedback.show(form, "请先完成扫码授权，或切换到手动关联。"); return;
     }
-    if (channelAdminState.channelType === "wecom" && enabled && !channelAdminState.applications.some(item => item.id === applicationId)) {
+    if ((webhook || (channelAdminState.channelType === "wecom" && enabled)) && !channelAdminState.applications.some(item => item.id === applicationId)) {
       AdminFormFeedback.show(form, "请选择有效的企微应用；没有应用时，请先创建。");
       return;
     }
     const payload = {
       settings: {
-        ...(dingtalk ? { ...account?.settings, dingtalk: { ...account?.settings?.dingtalk, user_details_enabled: enabled } } : feishu ? { ...account?.settings, feishu: { domain: "feishu", require_mention: true, ...account?.settings?.feishu, user_details_enabled: enabled } } : channelUserDetailsSettings(account?.settings || {}, enabled, applicationId)),
+        ...(webhook ? { ...account?.settings, wecom_app: { ...account?.settings?.wecom_app, application_id: applicationId } } : dingtalk ? { ...account?.settings, dingtalk: { ...account?.settings?.dingtalk, user_details_enabled: enabled } } : feishu ? { ...account?.settings, feishu: { domain: "feishu", require_mention: true, ...account?.settings?.feishu, user_details_enabled: enabled } } : channelUserDetailsSettings(account?.settings || {}, enabled, applicationId)),
         deepfos: {
           ...channelApiKeySettings(account?.settings?.deepfos),
           enabled: document.getElementById("channelDeepfosEnabled").getAttribute("aria-checked") === "true",
@@ -597,13 +648,20 @@ const channelsAdmin = {
     const secretInput = document.getElementById("channelSecret");
     const secret = secretInput.value.trim();
     if (secret && secret !== secretInput.dataset.maskedValue) payload.secret = secret;
-    if (!editingId) { payload.enabled = false; payload.channel_type = channelAdminState.channelType; }
+    if (webhook) {
+      delete payload.bot_id; delete payload.secret;
+      for (const [id, key] of [["channelWebhookToken", "webhook_token"], ["channelWebhookAesKey", "webhook_aes_key"]]) {
+        const input = document.getElementById(id), value = input.value.trim();
+        if (value && value !== input.dataset.maskedValue) payload[key] = value;
+      }
+    }
+    if (!editingId) { payload.transport = webhook ? "webhook" : "websocket"; payload.enabled = false; payload.channel_type = channelAdminState.channelType; }
     if (scan) { payload.registration_id = channelRegistration.authorizedId; delete payload.bot_id; delete payload.secret; }
     clearChannelPermissionCheck();
     channelAdminState.saving = true;
     form.querySelectorAll("button").forEach(button => { button.disabled = true; });
     try {
-      await apiFetch(editingId ? `/api/v1/channel-accounts/${editingId}` : "/api/v1/channel-accounts", {
+      const saved = await apiFetch(editingId ? `/api/v1/channel-accounts/${editingId}` : "/api/v1/channel-accounts", {
         method: editingId ? "PUT" : "POST",
         body: JSON.stringify(payload),
       });
@@ -611,11 +669,15 @@ const channelsAdmin = {
       document.getElementById("channelAccountModal").close();
       showToast(editingId ? "渠道已更新" : "渠道已创建");
       await refreshAfterSuccessfulMutation(editingId ? "渠道已更新" : "渠道已创建", () => this.refresh());
+      if (webhook && !editingId && saved?.id) {
+        showChannelCreated(saved);
+      }
     } catch (error) {
       AdminFormFeedback.show(form, error.message);
     } finally {
       channelAdminState.saving = false;
       form.querySelectorAll("button").forEach(button => { button.disabled = false; });
+      document.getElementById("copyChannelWebhookUrl").disabled = !document.getElementById("channelWebhookUrl").value;
     }
   },
 
@@ -701,7 +763,7 @@ function bindChannelCreateMenu() {
   const options = Array.from(menu.querySelectorAll("[role=menuitem]"));
   options.forEach(item => item.addEventListener("click", () => {
     close();
-    channelsAdmin.openCreate(item.id === "createDingtalkChannelBtn" ? "dingtalk" : item.id === "createFeishuChannelBtn" ? "feishu" : "wecom");
+    channelsAdmin.openCreate(item.id === "createWecomAppChannelBtn" ? "wecom_app" : item.id === "createDingtalkChannelBtn" ? "dingtalk" : item.id === "createFeishuChannelBtn" ? "feishu" : "wecom");
   }));
   menu.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
@@ -730,6 +792,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("[data-registration-mode]").forEach(button => button.addEventListener("click", () => setChannelRegistrationMode(button.dataset.registrationMode)));
   ["channelRegistrationStartScan", "channelRegistrationRetryScan"].forEach(id => document.getElementById(id)?.addEventListener("click", () => channelRegistration.start({ appName: document.getElementById("channelName").value.trim() })));
   document.getElementById("queryChannelSessionUserBtn")?.addEventListener("click", queryChannelSessionUser);
+  document.getElementById("fillChannelCurrentUser")?.addEventListener("click", () => {
+    const user = window.DeepAgentConsoleContext?.identity?.user;
+    if (!user) { showToast("当前用户身份未就绪，请稍后重试"); return; }
+    document.getElementById("channelSessionUserId").value = user;
+    clearChannelUserQuery();
+  });
   document.getElementById("channelSessionUserId")?.addEventListener("input", clearChannelUserQuery);
   document.addEventListener("click", event => {
     if (!event.target.closest(".channel-user-query")) clearChannelUserQuery();
@@ -765,25 +833,19 @@ document.addEventListener("DOMContentLoaded", () => {
   const keyInput = document.getElementById("channelDeepfosApiKey");
   keyInput?.addEventListener("focus", () => {
     if (channelAdminState.apiKeyDraft) {
-      keyInput.type = "password";
       keyInput.value = channelAdminState.apiKeyDraft;
     }
     keyInput.select();
   });
   keyInput?.addEventListener("input", () => {
     channelAdminState.apiKeyDraft = keyInput.value === keyInput.dataset.maskedValue ? "" : keyInput.value.trim();
-    keyInput.type = "password";
-  });
-  keyInput?.addEventListener("blur", () => {
-    const key = channelAdminState.apiKeyDraft;
-    keyInput.value = key ? (key.length > 10 ? `${key.slice(0, 6)}********${key.slice(-4)}` : "********") : channelAdminState.clearApiKey ? "" : keyInput.dataset.maskedValue;
-    keyInput.type = keyInput.value ? "text" : "password";
+
   });
   document.getElementById("clearChannelDeepfosApiKeyBtn")?.addEventListener("click", () => {
     channelAdminState.apiKeyDraft = "";
     channelAdminState.clearApiKey = true;
     keyInput.value = "";
-    keyInput.type = "password";
+
   });
   const viewButtons = Array.from(document.querySelectorAll("[data-channel-view]"));
   viewButtons.forEach((button, index) => {
@@ -819,14 +881,25 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("retryChannelCommandsBtn")?.addEventListener("click", () => channelsAdmin.loadCommands());
   ["closeChannelHelpModal", "dismissChannelHelpBtn"].forEach(id => document.getElementById(id)?.addEventListener("click", () => document.getElementById("channelHelpModal").close()));
   document.getElementById("channelHelpModal")?.addEventListener("close", () => { channelsAdmin.commandsRequestId = (channelsAdmin.commandsRequestId || 0) + 1; });
+  document.getElementById("manageChannelWebhookApplications")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (channelAdminState.saving) return;
+    if (!(await confirmAction({ title: "前往应用管理？", message: "此操作将关闭当前渠道配置弹窗，未保存的内容将丢失。是否前往企微应用管理页？", icon: "external-link", confirmLabel: "前往管理" }))) return;
+    document.getElementById("channelAccountModal").close();
+    channelsAdmin.selectView("applications");
+  });
+  document.getElementById("copyChannelWebhookUrl")?.addEventListener("click", async () => {
+    const value = document.getElementById("channelWebhookUrl").value;
+    if (!value) return;
+    try { await navigator.clipboard.writeText(value); showToast("回调地址已复制"); }
+    catch { showToast("复制失败，请选中地址手动复制"); }
+  });
   document.getElementById("channelAccountForm")?.addEventListener("submit", (event) => channelsAdmin.save(event));
+  ["channelWebhookToken", "channelWebhookAesKey"].forEach(id => document.getElementById(id)?.addEventListener("focus", event => { if (event.currentTarget.value === event.currentTarget.dataset.maskedValue) event.currentTarget.select(); }));
   document.getElementById("channelSecret")?.addEventListener("focus", (event) => {
     const input = event.currentTarget;
     if (input.value === input.dataset.maskedValue) input.select();
-  });
-  document.getElementById("channelSecret")?.addEventListener("input", (event) => {
-    const input = event.currentTarget;
-    input.type = input.value && input.value === input.dataset.maskedValue ? "text" : "password";
   });
   const closeAccount = () => { if (!channelAdminState.saving) document.getElementById("channelAccountModal").close(); };
   document.getElementById("closeChannelAccountModal")?.addEventListener("click", closeAccount);
@@ -842,5 +915,39 @@ document.addEventListener("DOMContentLoaded", () => {
     channelAdminState.clearApiKey = false;
     keyInput.value = "";
     keyInput.dataset.maskedValue = "";
+  });
+});
+
+function showChannelCreated(account) {
+  const url = channelWebhookAddress(account);
+  document.getElementById("channelCreatedUrl").value = url;
+  document.getElementById("channelCreatedAddress").hidden = !url;
+  document.getElementById("channelCreatedMessage").textContent = url
+    ? "请复制回调地址，填入企业微信管理后台「接收消息 → URL」，保存并完成验证。"
+    : "渠道已保存。";
+  document.getElementById("channelCreatedModal").showModal();
+}
+async function copyChannelValue(button, value) {
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    button.innerHTML = '<i data-lucide="check"></i>';
+    button.setAttribute("aria-label", "复制成功");
+    window.lucide?.createIcons();
+    setTimeout(() => { button.innerHTML = '<i data-lucide="copy"></i>'; button.setAttribute("aria-label", "复制"); window.lucide?.createIcons(); }, 1600);
+  } catch { showToast("复制失败，请手动复制"); }
+}
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("copyChannelFullId")?.addEventListener("click", event => copyChannelValue(event.currentTarget, document.getElementById("channelFullIdValue").textContent));
+  document.getElementById("copyChannelCreatedUrl")?.addEventListener("click", event => copyChannelValue(event.currentTarget, document.getElementById("channelCreatedUrl").value));
+  document.getElementById("closeChannelCreated")?.addEventListener("click", () => document.getElementById("channelCreatedModal").close());
+  document.getElementById("finishChannelCreated")?.addEventListener("click", async () => {
+    const url = document.getElementById("channelCreatedUrl").value;
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      document.getElementById("channelCreatedModal").close();
+      showToast("回调地址已复制");
+    } catch { showToast("复制失败，请手动复制回调地址"); }
   });
 });

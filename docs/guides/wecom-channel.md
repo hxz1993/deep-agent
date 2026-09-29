@@ -6,7 +6,7 @@ Gateway 是可选独立进程：不使用渠道的环境无需启动，也不会
 
 ## 前置条件
 
-- 数据库由 API 升级到当前 Head `010`；本次 010 删除独立发送回执表，并增加会话主表来源类型和来源 ID 两列；历史空来源按内部读取，详见 [会话来源](session-sources.md)。
+- 数据库由 API 升级到当前 Head `011`；010 删除独立发送回执表，并增加会话主表来源类型和来源 ID 两列，011 增加[企微应用 Webhook 渠道](wecom-app-channel.md)凭据并允许其不使用 Bot 凭据；历史空来源按内部读取，详见 [会话来源](session-sources.md)。
 - 已安装 `requirements.txt` 中固定的 `wecom-aibot-python-sdk==1.0.2`。
 - API 与 Gateway 可以访问同一数据库，Gateway 可以访问 DeepAgent API 和企微公网地址。
 - 生产环境生成高熵内部 Token，并只通过 Secret/私有环境变量注入。

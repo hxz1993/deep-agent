@@ -3599,3 +3599,34 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 
 .global-setting-name strong { display: block; font-size: 13px; line-height: 1.5; }
 .global-settings-table .global-setting-name code { display: block; margin-top: 4px; color: var(--text-faint); font-size: var(--ui-font-meta); line-height: 1.5; }
+
+/* Webhook credentials share the channel editor without registration controls. */
+#channelFullId[hidden], #channelWebhookSettings[hidden], #channelCredentialHome[hidden], #channelCredentialLayout[hidden], #channelMemberTab[hidden] { display: none; }
+.channel-full-id { display: block; overflow-wrap: anywhere; color: var(--text-dim); font-family: var(--mono); }
+.channel-webhook-url-field { margin-top: 14px; }
+.channel-webhook-url { display: flex; align-items: center; gap: 6px; }
+.channel-webhook-address { min-width: 0; flex: 1; border-radius: var(--ui-radius); background: var(--console-readonly-surface); }
+.channel-webhook-url input { width: 100%; font-family: var(--mono); border: 0; box-shadow: none; background: transparent; }
+#channelWebhookUrlPlaceholder { margin: 0; padding: 9px 12px; font-size: 12px; line-height: 1.6; color: var(--text-dim); }
+#channelWebhookUrl[hidden], #channelWebhookUrlPlaceholder[hidden] { display: none; }
+
+.webhook-channel-modal .channel-account-form-body { overflow-y: auto; grid-template-rows: auto minmax(min-content, 1fr) auto; align-content: start; }
+.webhook-channel-modal .channel-extension-layout { flex: none; height: 196px; min-height: 196px; }
+.webhook-channel-modal .channel-extension-panel { overflow-y: auto; }
+.webhook-channel-modal .channel-credentials { gap: 14px; }
+.webhook-channel-modal .field-hint:empty { display: none; }
+
+#channelAccountModal .modal-title-copy { flex: 1; }
+#channelHeaderLogo { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; margin-right: 10px; }
+.webhook-channel-modal .channel-webhook-url-field .field-label-row { justify-content: space-between; width: 100%; }
+.webhook-channel-modal #manageChannelWebhookApplications { display: inline-flex; align-items: center; gap: 4px; width: max-content; flex: none; min-height: 0; color: var(--accent); border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; }
+
+#manageChannelWebhookApplications svg { width: 12px; height: 12px; }
+
+.channel-account-modal.webhook-channel-modal { height: min(920px, calc(100dvh - 48px)); }
+#panel-channels .channel-create-menu { min-width: 235px; }
+#newChannelMenu .channel-transport-tag { margin-left: auto; }
+.channel-type-label .channel-transport-tag { margin-left: 6px; }
+.channel-user-label { justify-content: space-between; }
+.channel-user-label-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+#fillChannelCurrentUser { border: 0; padding: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; width: auto; }

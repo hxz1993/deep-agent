@@ -47,6 +47,43 @@ class DeepAgentChannelClient:
             headers["cookie"] = self.config.platform_cookie
         return headers
 
+    async def _wecom_app_request(self, account, action, payload=None):
+        await self.start()
+        assert self._session is not None
+        async with self._session.request(
+            "GET" if payload is None else "POST",
+            f"{self.config.api_url}/api/v1/internal/channels/wecom-app/{action}",
+            headers=self._headers(account), json=payload,
+            timeout=aiohttp.ClientTimeout(total=90, connect=10),
+        ) as response:
+            if response.status >= 400:
+                raise RuntimeError(f"Application bridge rejected {action}: HTTP {response.status}")
+            if action == "media":
+                from deep_agent.agent.media_pipeline import max_upload_bytes
+                chunks, size = [], 0
+                async for chunk in response.content.iter_chunked(65536):
+                    size += len(chunk)
+                    if size > max_upload_bytes():
+                        raise ValueError("Application media exceeds upload limit")
+                    chunks.append(chunk)
+                disposition = response.content_disposition
+                return b"".join(chunks), disposition.filename if disposition else None
+            result = await response.json(content_type=None)
+            if not isinstance(result, dict):
+                raise RuntimeError("Invalid application bridge response")
+            return result
+
+    async def wecom_app_info(self, account):
+        return await self._wecom_app_request(account, "info")
+
+    async def wecom_app_media(self, account, run_id, media_id):
+        return await self._wecom_app_request(account, "media", {
+            "channel_run_id": run_id, "media_id": media_id})
+
+    async def wecom_app_send_text(self, account, run_id, text):
+        return await self._wecom_app_request(account, "send-text", {
+            "channel_run_id": run_id, "text": text})
+
     async def upload_media(self, account, media: InboundMedia, data: bytes, filename: str) -> dict[str, Any]:
         await self.start()
         assert self._session is not None
@@ -55,7 +92,7 @@ class DeepAgentChannelClient:
         guessed_mime, _ = mimetypes.guess_type(resolved_name)
         content_type = (
             guessed_mime
-            if media.mime == "application/octet-stream" and guessed_mime
+            if (media.mime == "application/octet-stream" or resolved_name.lower().endswith(".wav")) and guessed_mime
             else media.mime
         )
         form.add_field(

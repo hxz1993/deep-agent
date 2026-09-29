@@ -32,7 +32,8 @@ router = APIRouter()
 async def channel_types():
     return [{"type": "wecom", "name": "企业微信", "transport": "websocket"},
             {"type": "feishu", "name": "飞书", "transport": "websocket"},
-            {"type": "dingtalk", "name": "钉钉", "transport": "websocket"}]
+            {"type": "dingtalk", "name": "钉钉", "transport": "websocket"},
+            {"type": "wecom_app", "name": "企微应用", "transport": "webhook"}]
 
 
 
@@ -53,6 +54,10 @@ async def _ensure_agent(ctx: AppContextDep, agent_id: str) -> str:
     return normalized
 
 
+def webhook_url(account_id: str) -> str:
+    return f"/webhooks/agent/channel/{account_id}"
+
+
 async def _response(row, ctx: AppContextDep) -> ChannelAccountResponse:
     agent = await ctx.stores.agent.get_by_id(row.agent_id)
     return ChannelAccountResponse(
@@ -61,6 +66,11 @@ async def _response(row, ctx: AppContextDep) -> ChannelAccountResponse:
         channel_type=row.channel_type,
         transport=row.transport,
         bot_id=row.bot_id,
+        webhook_token_set=bool(row.webhook_token),
+        webhook_token_masked=mask_api_key(row.webhook_token),
+        webhook_aes_key_set=bool(row.webhook_aes_key),
+        webhook_aes_key_masked=mask_api_key(row.webhook_aes_key),
+        webhook_url=webhook_url(row.id) if row.transport == "webhook" else None,
         secret_set=bool(row.secret),
         secret_masked=mask_api_key(row.secret),
         agent_id=row.agent_id,

@@ -17,6 +17,7 @@ const FIELD_LABELS = {
   profile_service: "用户资料服务", discovery_type: "服务发现方式", discovery_namespace: "发现命名空间",
   auth_context: "认证头类型（不含值）", target_origin: "请求目标", requested_count: "请求用户数", resolved_count: "解析用户数",
   phase: "阶段", status: "状态", result_status: "执行结果", error_type: "错误类型", error_code: "错误码", command: "命令", mode: "模式",
+  external_message_id: "平台消息 ID", message_type: "消息类型", count: "数量",
   finish_reason: "结束原因", compaction: "压缩", reason: "原因", duration_ms: "耗时（ms）", request_index: "请求轮次",
   attempt: "尝试次数", queue_depth: "队列长度", input_tokens: "输入 Token", output_tokens: "输出 Token",
   total_tokens: "总 Token", requests: "请求数", tool_calls: "工具调用数", tool_search_calls: "工具搜索数",

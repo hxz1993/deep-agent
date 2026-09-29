@@ -1,15 +1,16 @@
+import { initSecretInputs } from "./ui-secret-input.js?v=20260929-release0124";
 import "./assets/deepagent-pet/sprite-pet.js?v=20260922-pet-1";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
-import { initConsoleSelects } from "./ui-select.js?v=20260924-config-catalog-5";
+import { initConsoleSelects } from "./ui-select.js?v=20260929-release0124";
 import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260928-channel-audit";
+} from "./configuration.js?v=20260929-release0124";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260929-release0123-final";
-import { initWorkspace } from "./workspace.js?v=20260929-release0123-final";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260929-release0124";
+import { initWorkspace } from "./workspace.js?v=20260929-release0124";
 import "./time.js?v=20260913-49";
 
 initUserIdentityControls();
@@ -405,4 +406,5 @@ window.__ProductVersionUI = { loadProductVersion };
 
 initConsoleSelects();
 initFieldHelp();
+initSecretInputs();
 boot();

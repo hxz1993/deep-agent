@@ -132,9 +132,11 @@ class WecomClient:
                 raise WecomError("token", "configuration_changed") from None
             raise
 
-    async def call(self, app, method, path, *, stage, params=None, body=None):
+    async def call(self, app, method, path, *, stage, params=None, body=None, before_request=None):
         for attempt in range(2):
             token = await self.token(app)
+            if before_request is not None:
+                await before_request()
             data = await self._request(method, path, stage=stage,
                 params={**(params or {}), "access_token": token}, body=body)
             code = data.get("errcode")
@@ -171,3 +173,75 @@ class WecomClient:
             raise WecomError("profile", "identity_mismatch")
         name = data.get("name")
         return actual, name.strip() if isinstance(name, str) and name.strip() else None
+
+    async def media(self, app, media_id: str, *, limit: int) -> tuple[bytes, str | None, str]:
+        """Download only the official media endpoint; never follow a supplied URL."""
+        for attempt in range(2):
+            token = await self.token(app)
+            # token() has initialized the shared, bounded session.
+            if self._session is None or self._closed:
+                raise WecomError('media', 'service_closed')
+            try:
+                async with self._slots:
+                    async with self._session.get(self.BASE_URL + '/media/get',
+                            params={'access_token': token, 'media_id': media_id},
+                            allow_redirects=False) as response:
+                        if response.status != 200:
+                            raise WecomError('media', f'http_{response.status}')
+                        if response.content_length is not None and response.content_length > limit:
+                            raise WecomError('media', 'size_limit')
+                        chunks, size = [], 0
+                        async for chunk in response.content.iter_chunked(65536):
+                            size += len(chunk)
+                            if size > limit:
+                                raise WecomError('media', 'size_limit')
+                            chunks.append(chunk)
+                        data = b''.join(chunks)
+                        mime = response.content_type
+                        disposition = response.content_disposition
+                        filename = disposition.filename if disposition else None
+                if mime in {'application/json', 'text/json'} and not filename:
+                    import json
+                    error = json.loads(data)
+                    code = error.get('errcode') if isinstance(error, dict) else None
+                    if type(code) is int and code in self.TOKEN_ERRORS and attempt == 0:
+                        cached = self._tokens.get((app.id, app.revision))
+                        if cached and cached.value == token:
+                            self._tokens.pop((app.id, app.revision), None)
+                        continue
+                    raise WecomError('media', code if type(code) is int else 'invalid_response')
+                if not data:
+                    raise WecomError('media', 'empty_media')
+                return data, filename, mime
+            except (aiohttp.ClientError, TimeoutError, ValueError):
+                raise WecomError('media', 'network_error') from None
+        raise WecomError('media', 'invalid_response')
+
+    async def send_text(self, app, recipient: str, text: str, *, before_send=None) -> dict:
+        # Official text limit is UTF-8 bytes, not Python character count.
+        if not text.strip():
+            raise WecomError('send', 'empty_text')
+        agent_id = str(app.wecom_agent_id)
+        if not agent_id.isascii() or not agent_id.isdecimal() or len(agent_id) > 12:
+            raise WecomError('send', 'invalid_agent_id')
+        chunks, current, size = [], [], 0
+        for char in text:
+            length = len(char.encode('utf-8'))
+            if size + length > 2048:
+                chunks.append(''.join(current))
+                current, size = [], 0
+            current.append(char)
+            size += length
+        if current:
+            chunks.append(''.join(current))
+        ids = []
+        for chunk in chunks:
+            result = await self.call(app, 'POST', '/message/send', stage='send', body={
+                'touser': recipient, 'msgtype': 'text', 'agentid': int(app.wecom_agent_id),
+                'text': {'content': chunk}, 'safe': 0,
+            }, **({'before_request': before_send} if before_send is not None else {}))
+            if result.get('invaliduser') or result.get('unlicenseduser'):
+                raise WecomError('send', 'recipient_unavailable')
+            if result.get('msgid'):
+                ids.append(str(result['msgid']))
+        return {'status': 'sent', 'message_id': ids[-1] if ids else None, 'part_count': len(chunks)}

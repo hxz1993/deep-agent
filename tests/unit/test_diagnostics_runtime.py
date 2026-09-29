@@ -115,6 +115,18 @@ class DiagnosticRuntimeTests(unittest.TestCase):
         self.drain(writer)
         self.assertEqual(self.records()[0]["request_id"], "request-123")
 
+    def test_webhook_correlation_survives_context_and_does_not_log_payload(self):
+        writer = self.writer()
+        with patch.object(module, "get_request_id", return_value="unrelated-http-request"):
+            writer.emit("webhook_received", request_id="verified-request", account_id="account", http_method="POST",
+                        body="PRIVATE_XML", signature="PRIVATE_SIGNATURE", webhook_token="PRIVATE_TOKEN")
+            writer.emit("webhook_bridge_completed", request_id="verified-request", channel_run_id="run", phase="send")
+        self.drain(writer)
+        records = self.records()
+        self.assertEqual(len(records), 2)
+        self.assertEqual({r["request_id"] for r in records}, {"verified-request"})
+        self.assertNotIn("PRIVATE", json.dumps(records))
+
     def test_size_rotation_and_active_file_is_never_cleaned(self):
         writer = self.writer(max_file_bytes=600)
         for _ in range(5):

@@ -271,6 +271,38 @@ class ChannelAccountsApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self.request("DELETE", f"/api/v1/channel-accounts/{account_id}")
         self.assertEqual(response.status_code, 409, response.text)
 
+    async def test_webhook_config_secrets_reference_and_duplicate_application(self):
+        application = await self.stores.wecom.create_application(
+            name="app", corp_id="corp", wecom_agent_id="1", app_secret="fixture-secret")
+        payload = {"name": "app channel", "channel_type": "wecom_app", "transport": "webhook",
+                   "agent_id": self.agent_id, "session_user_id": "owner", "webhook_token": "Token123",
+                   "webhook_aes_key": "A" * 43, "settings": {"wecom_app": {"application_id": application.id}}}
+        response = await self.request("POST", "/api/v1/channel-accounts", json=payload)
+        self.assertEqual(response.status_code, 201, response.text)
+        data = response.json()
+        self.assertIsNone(data["bot_id"])
+        self.assertTrue(data["webhook_token_set"])
+        self.assertNotIn('"webhook_token":', response.text)
+        self.assertNotIn('"webhook_aes_key":', response.text)
+        self.assertEqual(data["webhook_url"], "/webhooks/agent/channel/" + data["id"])
+        path = "/api/v1/channel-accounts/" + data["id"]
+        response = await self.request("PUT", path, json={"webhook_token": "", "webhook_aes_key": ""})
+        self.assertEqual(response.status_code, 200, response.text)
+        row = await self.stores.channel.get_account(data["id"])
+        self.assertEqual(row.webhook_token, "Token123")
+        response = await self.request("PUT", path, json={"webhook_token": None})
+        self.assertEqual(response.status_code, 422)
+        response = await self.request("PUT", path, json={"webhook_token": data["webhook_token_masked"]})
+        self.assertEqual(response.status_code, 409)
+        response = await self.request("POST", "/api/v1/channel-accounts", json=payload)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(await self.stores.wecom.application_channel_count(application.id), 2)
+        with self.assertRaises(ValueError):
+            await self.stores.wecom.delete_application(application.id)
+        payload["settings"]["wecom_app"]["application_id"] = "missing"
+        response = await self.request("POST", "/api/v1/channel-accounts", json=payload)
+        self.assertEqual(response.status_code, 409, response.text)
+
 
 if __name__ == "__main__":
     unittest.main()

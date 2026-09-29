@@ -482,11 +482,11 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             async with engine.begin() as connection:
                 for name in ("channel_message_runs", "channel_session_bindings",
                              "chat_session_events", "chat_sessions", *reversed(CONFIG_TABLES)):
-                    if name == "wecom_applications" and revision not in {"006", "007", "008", "009", "010"}:
+                    if name == "wecom_applications" and revision not in {"006", "007", "008", "009", "010", "011"}:
                         continue
-                    if name != "integration_settings" or revision in {"004", "005", "006", "007", "008", "009", "010"}:
+                    if name != "integration_settings" or revision in {"004", "005", "006", "007", "008", "009", "010", "011"}:
                         await connection.execute(Base.metadata.tables[name].delete())
-                if revision in {"004", "005", "006", "007", "008", "009", "010"}:
+                if revision in {"004", "005", "006", "007", "008", "009", "010", "011"}:
                     await connection.execute(insert(IntegrationSettings.__table__), {"code": "deeptable-assistant", "settings": {"enabled": True, "options": [1, None, "中文"]}})
                 await connection.execute(
                     insert(GlobalSetting.__table__),
@@ -566,7 +566,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
                 await connection.execute(
-                    insert(Agent.__table__ if revision in {"005", "006", "007", "008", "009", "010"} else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
+                    insert(Agent.__table__ if revision in {"005", "006", "007", "008", "009", "010", "011"} else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
                     {
                         "id": "agent-1",
                         "name": "agent",

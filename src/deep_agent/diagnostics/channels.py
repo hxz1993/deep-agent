@@ -7,6 +7,8 @@ pre-dispatch failures have no persisted user event and do not count as questions
 
 from __future__ import annotations
 
+from deep_agent.schemas.session_source import CHANNEL_SOURCE_TYPES
+
 from types import SimpleNamespace
 
 from sqlalchemy import String, and_, case, exists, func, literal, or_, select
@@ -122,9 +124,9 @@ class DiagnosticChannelQueries(SessionBoundMixin):
             # A null wecom value is valid configuration (lookup disabled).
             # Normalize it once before projecting the public account facts.
             settings = {
-                r["id"]: (r["settings"].get("wecom") or {})
+                r["id"]: (r["settings"].get("wecom_app" if r["channel_type"] == "wecom_app" else "wecom") or {})
                 if isinstance(r["settings"], dict)
-                and isinstance(r["settings"].get("wecom"), (dict, type(None)))
+                and isinstance(r["settings"].get("wecom_app" if r["channel_type"] == "wecom_app" else "wecom"), (dict, type(None)))
                 else {}
                 for r in rows
             }
@@ -151,7 +153,7 @@ class DiagnosticChannelQueries(SessionBoundMixin):
             )
             deleted = (await db.execute(select(ChatSession.source_id, ChatSession.source_type)
                 .outerjoin(ChannelAccount, ChannelAccount.id == ChatSession.source_id)
-                .where(ChatSession.source_type.in_(("channel:wecom", "channel:feishu", "channel:dingtalk")),
+                .where(ChatSession.source_type.in_(CHANNEL_SOURCE_TYPES),
                     ChatSession.source_id.is_not(None), ChannelAccount.id.is_(None)).distinct())).all()
             return {
                 "items": [

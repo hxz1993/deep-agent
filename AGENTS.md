@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.3`，数据库Head为`010`（删除独立渠道发送回执表并增加会话来源两列） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.4`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -373,3 +373,16 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 `chat_sessions.source_type/source_id` 在创建时确定，查询只允许 NULL 视为 internal，不从标题、历史事件、Runs、Binding 或 Agent 当前配置推断来源。渠道会话 Console 续问仍归该渠道；Events 决定提问与用量，Runs 仅关联真实发送者；无发送者单列，不冒充群成员。来源不授予发送权限。
 
 用户明确批准两可空来源列合并未发布010，不新增011；旧010仅在迁移入口补结构，不自动回填数据。本地/Test历史来源修复只用项目外一次性TMP_to_delete脚本，Test发布后另行安排，不纳入产品维护工具、启动或查询。任何其他DDL仍需单独确认。详见 docs/guides/session-sources.md。
+
+
+### 企微应用 Webhook 渠道（011）
+
+- 入口与配置见 [企微应用渠道](docs/guides/wecom-app-channel.md)。`wecom_app/webhook` 独立于 `wecom/websocket`，不要将机器人身份映射或姓名查询套到应用回调。
+- `webhook_token`、`webhook_aes_key` 是渠道账户独立可空列；仅企微应用允许 `bot_id/secret` 为空。应用引用为 `settings.wecom_app.application_id`，允许重复关联但必须校验存在并保护删除。
+- 已发布 010 不再改写。011 只新增上述两列、改变 Bot 两列可空性，无新表、索引、外键及 Runs 字段。迁移和远端执行仍遵守本文件顶部单独确认规则。
+- 回调地址用部署配置 `DEEP_AGENT_WEBHOOK_PUBLIC_BASE_URL` 完整公网前缀加 `/channels/{id}`，不从 Host 猜测。新建保存后生成 ID，普通 API 只返回密钥状态/掩码。
+- 会话来源是 `channel:wecom_app`；Events 决定提问和用量，Runs 关联发送者，不按当前 Agent 渠道关联推断来源。应用渠道不调用姓名服务。
+- 沿用内存队列，不扩充重启恢复。联调阶段日志记录入口及各阶段关联 ID/结果，禁止密钥、完整 Query、原始 XML、正文和文件内容。
+
+## 环境变量变更约定
+新增环境变量与修改数据库表结构同样需要事先向用户明确说明用途、必要性、默认行为、部署申请及兼容影响，并获得确认后再实施。不得擅自增加部署配置要求。渠道公网回调地址使用当前页面 origin + `/webhooks/agent/channel/{id}`，不增加基址环境变量。

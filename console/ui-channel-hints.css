@@ -28,3 +28,27 @@
 #channelAccountModal .modal-title-copy { display: flex; flex-direction: row; align-items: center; gap: 12px; min-width: 0; }
 #channelAccountModal .modal-title-copy h3 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #channelAccountModal .channel-modal-subtitle { margin-top: 0; flex: none; flex-wrap: nowrap; white-space: nowrap; }
+
+.channel-transport-tag[data-transport="websocket"] { color: var(--accent); background: var(--accent-soft); }
+.channel-transport-tag[data-transport="webhook"] { color: var(--success, #16803d); background: color-mix(in srgb, var(--success, #16803d) 12%, transparent); }
+#newChannelMenu .channel-transport-tag { flex: 0 0 auto; width: auto; }
+#manageChannelWebhookApplications { margin-left: auto; }
+#copyChannelWebhookUrl[hidden] { display: none; }
+.secret-input-control { position: relative; display: flex; width: 100%; min-width: 0; }
+.secret-input-control > input { width: 100%; padding-right: 36px !important; }
+.secret-input-control > .secret-input-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 5px; border: 0; border-radius: 4px; background: transparent; color: var(--text-dim); cursor: pointer; }
+.secret-input-toggle svg { width: 16px; height: 16px; }
+.secret-input-toggle:hover { color: var(--accent); background: var(--accent-soft); }
+
+#channelAccountModal .modal-title-copy { flex-direction: column; align-items: flex-start; gap: 5px; }
+.channel-title-line { display: flex; align-items: center; gap: 12px; min-width: 0; }
+#channelFullId { display: flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: 11px; }
+#channelFullId[hidden] { display: none; }
+#channelFullId code { font-family: var(--mono); }
+#copyChannelFullId { width: 20px; height: 20px; padding: 3px; }
+#channelCreatedModal { width: min(720px, calc(100vw - 28px)); }
+#channelCreatedModal .modal-body { padding: 18px; }
+#channelCreatedModal p { margin: 0 0 12px; line-height: 1.7; color: var(--text-dim); }
+#channelCreatedAddress[hidden] { display: none; }
+
+#channelCreatedModal .channel-created-hint { margin: 12px 0 0; font-size: 12px; color: var(--text-faint); }

@@ -12,6 +12,10 @@ class ChannelGatewayUnavailableError(ConnectionError):
     pass
 
 
+class ChannelWebhookConflictError(RuntimeError):
+    status_code = 409
+
+
 class ChannelGatewayClient:
     def __init__(self) -> None:
         self.base_url = os.environ.get("DEEP_AGENT_CHANNEL_GATEWAY_URL", "").strip().rstrip("/")
@@ -23,6 +27,9 @@ class ChannelGatewayClient:
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.internal_token}"}
+
+    async def receive_webhook(self, account_id: str, payload: dict) -> dict:
+        return await self._request("POST", f"/accounts/{account_id}/webhook", payload=payload, webhook_conflict=True)
 
     async def statuses(self) -> dict[str, Any]:
         return await self._request("GET", "/accounts/status")
@@ -64,7 +71,7 @@ class ChannelGatewayClient:
             return {"status": "unknown",
                     "error": "渠道发送结果无法确认，请勿盲目重复发送"}
 
-    async def _request(self, method: str, path: str, *, payload: dict | None = None, timeout: float = 12) -> dict[str, Any]:
+    async def _request(self, method: str, path: str, *, payload: dict | None = None, timeout: float = 12, webhook_conflict: bool = False) -> dict[str, Any]:
         if not self.configured:
             raise ChannelGatewayUnavailableError("Channel Gateway is not deployed")
         timeout = aiohttp.ClientTimeout(total=timeout)
@@ -76,6 +83,8 @@ class ChannelGatewayClient:
                     headers=self._headers(), json=payload,
                 ) as response:
                     payload = await response.json(content_type=None)
+                    if webhook_conflict and response.status == 409:
+                        raise ChannelWebhookConflictError("Webhook message or channel configuration conflict")
                     if response.status >= 400:
                         detail = payload.get("detail") if isinstance(payload, dict) else None
                         raise ChannelGatewayUnavailableError(
@@ -90,4 +99,4 @@ class ChannelGatewayClient:
             raise ChannelGatewayUnavailableError(type(exc).__name__) from exc
 
 
-__all__ = ["ChannelGatewayClient", "ChannelGatewayUnavailableError"]
+__all__ = ["ChannelGatewayClient", "ChannelGatewayUnavailableError", "ChannelWebhookConflictError"]

@@ -96,8 +96,9 @@ async def _response(ctx, row):
     channels = [
         {"id": account.id, "name": account.name}
         for account in await ctx.stores.channel.list_accounts()
-        if isinstance((account.settings or {}).get("wecom"), dict)
-        and account.settings["wecom"].get("application_id") == row.id
+        if any(isinstance((account.settings or {}).get(key), dict)
+               and account.settings[key].get("application_id") == row.id
+               for key in ("wecom", "wecom_app"))
     ]
     return {
         "id": row.id, "name": row.name, "corp_id": row.corp_id,

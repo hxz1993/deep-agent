@@ -57,7 +57,7 @@ test('旧渠道设置默认关闭，修改保留未知 settings 和企微扩展�
   const result = vm.runInContext('channelUserDetailsSettings({custom: 4, wecom: {other: "keep", application_id: "old"}}, false, "old")', context);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), { custom: 4, wecom: { other: 'keep', user_details_enabled: false, application_id: 'old' } });
   assert.match(channelSource, /settings\?\.wecom\?\.user_details_enabled === true/);
-  assert.match(channelSource, /enabled && !channelAdminState\.applications\.some/);
+  assert.match(channelSource, /webhook \|\| \(channelAdminState\.channelType === "wecom" && enabled\)\) && !channelAdminState\.applications\.some/);
   assert.match(template, /id="channelUserDetailsEnabled"[^>]*aria-checked="false"/);
 });
 

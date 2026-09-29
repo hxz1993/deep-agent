@@ -246,15 +246,23 @@ async def _actual_primary_keys(
 
 def _validate_channel_rows(rows: Sequence[Mapping[str, Any]]) -> None:
     from deep_agent.channels.app_context import validate_channel_settings
+    from deep_agent.schemas.channel import validate_webhook_credentials
     for row in rows:
         channel_type = row.get("channel_type")
-        if channel_type not in {"wecom", "feishu", "dingtalk"} or row.get("transport") != "websocket":
+        expected_transport = "webhook" if channel_type == "wecom_app" else "websocket"
+        if channel_type not in {"wecom", "feishu", "dingtalk", "wecom_app"} or row.get("transport") != expected_transport:
             raise ConfigurationImportError("channel_accounts contains an unsupported channel type or transport")
         try:
             settings = row.get("settings") or {}
             if not isinstance(settings, dict):
                 raise ValueError("settings must be an object")
             validate_channel_settings(channel_type, settings)
+            if channel_type == "wecom_app":
+                if row.get("bot_id") or row.get("secret"):
+                    raise ValueError("Application channel must not contain bot credentials")
+                validate_webhook_credentials(row.get("webhook_token"), row.get("webhook_aes_key"))
+            elif not row.get("bot_id") or not row.get("secret") or row.get("webhook_token") or row.get("webhook_aes_key"):
+                raise ValueError("Robot credentials are required and must not contain webhook credentials")
         except (ValueError, TypeError) as exc:
             raise ConfigurationImportError("channel_accounts contains an invalid channel configuration") from exc
 

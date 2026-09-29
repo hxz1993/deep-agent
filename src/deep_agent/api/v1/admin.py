@@ -36,10 +36,10 @@ async def resolve_console_admin_access(
     except ConsoleAdminAuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="平台登录状态已失效，请重新登录",
+            detail="平台身份凭据无效或已失效，请检查鉴权信息",
         ) from exc
     except ConsoleAdminUnavailableError as exc:
-        logger.exception('暂时无法验证企业管理员权限')
+        logger.warning('暂时无法验证企业管理员权限')
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="暂时无法验证企业管理员权限，请稍后重试",

@@ -131,10 +131,10 @@ test("网关状态与机器人认证状态分开表达", () => {
 
 test("渠道表单绑定Agent且Secret只展示脱敏值并支持留空保留", () => {
   assert.match(templateHtml, /id="channelAgentId"/);
-  assert.match(templateHtml, /<span>会话关联用户<\/span>/);
+  assert.match(templateHtml, /<label for="channelSessionUserId">会话关联用户<\/label>/);
   assert.match(templateHtml, /type="text" id="channelSessionUserId" maxlength="128" required/);
-  assert.match(templateHtml, /id="channelSessionUserId"[^>]*aria-describedby="channelSessionUserHint"/);
-  assert.match(templateHtml, /field-label-row[^\n]*<span>会话关联用户<\/span><small class="field-subtitle" id="channelSessionUserHint">使用此平台账号记录渠道会话。<\/small>/);
+  assert.doesNotMatch(templateHtml, /channelSessionUserHint/);
+  assert.match(templateHtml, /id="fillChannelCurrentUser">填充我的 ID/);
   assert.match(source, /session_user_id: document.getElementById\("channelSessionUserId"\).value.trim\(\)/);
   assert.match(source, /channelSessionUserId"\).value = account.session_user_id/);
   assert.match(templateHtml, /id="channelBotId"/);
@@ -178,7 +178,7 @@ function secretEditorHarness() {
     return elements.get(id);
   };
   const context = vm.createContext({
-    window: { createChannelRegistration: () => ({ reset() {}, start() {} }) },
+    window: { location: {origin:"http://127.0.0.1:8000"}, createChannelRegistration: () => ({ reset() {}, start() {} }) },
     document: {
       addEventListener(type, listener) { if (type === "DOMContentLoaded") ready.push(listener); },
       getElementById: getElement,
@@ -202,25 +202,20 @@ function secretEditorHarness() {
   return { admin, getElement, requests, context };
 }
 
-test("渠道Secret回显安全掩码，聚焦全选且编辑后隐藏新值", () => {
+test("渠道Secret回显安全掩码，聚焦全选并由公共控件管理显示", () => {
   const { admin, getElement } = secretEditorHarness();
   admin.openEdit("channel-1");
   const secret = getElement("channelSecret");
   assert.equal(secret.value, "sample********1234");
-  assert.equal(secret.type, "text");
   assert.equal(secret.required, false);
   secret.listeners.focus({ currentTarget: secret });
   assert.equal(secret.selected, true);
   secret.value = "replacement-fixture";
-  secret.listeners.input({ currentTarget: secret });
-  assert.equal(secret.type, "password");
   admin.openEdit("channel-2");
   assert.equal(secret.value, "other-********5678");
-  assert.equal(secret.type, "text");
   admin.openCreate();
   assert.equal(secret.value, "");
   assert.equal(secret.dataset.maskedValue, "");
-  assert.equal(secret.type, "password");
   assert.equal(secret.required, true);
 });
 
@@ -254,7 +249,7 @@ test("渠道启停只在列表使用Switch切换", () => {
 
 test("渠道列表使用单行类型、行点击编辑与统一纯图标操作", () => {
   assert.match(source, /channelPlatforms\[account.channel_type\]\?\.name/);
-  assert.doesNotMatch(source, /channel-account-code|channel-transport/);
+  assert.doesNotMatch(source, /channel-account-code/);
   assert.match(source, /<td><strong>\$\{escapeHtml\(account\.name\)\}<\/strong><\/td>\s*<td class="channel-type-cell">/);
   assert.match(source, /class="channel-list-row" data-open-channel=/);
   assert.match(source, /if \(event\.target\.closest\("a, button"\)\) return/);
@@ -311,23 +306,21 @@ test("新建渠道先选择企微，支持键盘和外部关闭且不提前创�
   trigger.listeners.click();
   documentEvents.click({ target: {} });
   assert.equal(menu.hidden, true);
-  assert.match(templateHtml, /id="createWecomChannelBtn" role="menuitem"[^\n]*<span>企微（WS）<\/span>/);
+  assert.match(templateHtml, /id="createWecomChannelBtn" role="menuitem"[^\n]*<span>企微<\/span>[^\n]*WebSocket/);
 });
 
 
-test("渠道Key草稿脱敏回显，保存发送原值，显式清空不回传掩码", async () => {
+test("渠道Key草稿保留输入供公共眼睛查看，保存发送原值，显式清空不回传掩码", async () => {
   const { admin, getElement, requests } = secretEditorHarness();
   admin.openEdit("channel-1");
   const key = getElement("channelDeepfosApiKey");
   key.value = "demo-only-key-123456";
   key.listeners.input();
-  key.listeners.blur();
-  assert.equal(key.value, "demo-o********3456");
+  assert.equal(key.value, "demo-only-key-123456");
   const submit = () => admin.save({ preventDefault() {}, currentTarget: getElement("channelAccountForm") });
   await submit();
   assert.equal(requests.at(-1).payload.settings.deepfos.api_key, "demo-only-key-123456");
   getElement("clearChannelDeepfosApiKeyBtn").listeners.click();
-  key.listeners.blur();
   assert.equal(key.value, "");
   await submit();
   assert.equal(requests.at(-1).payload.settings.deepfos.clear_api_key, true);

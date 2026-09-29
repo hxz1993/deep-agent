@@ -91,6 +91,8 @@ class ChannelRuntime:
                     if current is not None:
                         await self._stop_account(row.id)
                     adapter = self.registry.create(row)
+                    if row.channel_type == "wecom_app":
+                        adapter.client = self.deep_agent
                     managed = AccountRuntime(row, adapter, fingerprint)
                     self._accounts[row.id] = managed
                     self.service.open_account(row.id)
@@ -154,6 +156,28 @@ class ChannelRuntime:
             return unavailable()
         return result
 
+    async def receive_webhook(self, account_id, body):
+        from deep_agent.services.wecom_webhook import account_fingerprint
+        await self.reconcile()
+        async with self._reconcile_lock:
+            account = await self.store.get_account(account_id)
+            if account is None:
+                raise LookupError("Channel account not found")
+            if account.channel_type != "wecom_app":
+                raise ValueError("webhook_not_supported")
+            managed = self._accounts.get(account_id)
+            if not account.enabled or not managed or managed.stopping:
+                raise RuntimeError("Webhook channel is unavailable")
+            if (account_fingerprint(account) != body.expected_fingerprint
+                    or managed.fingerprint != self.registry.fingerprint(account)):
+                raise ValueError("Webhook channel configuration changed")
+            log_event("webhook_gateway_received", account_id=account_id, request_id=body.request_id)
+            result = await self.service.receive(account, managed.adapter, body.message(), strict=True)
+            if result["status"] == "duplicate":
+                log_event("webhook_gateway_duplicate", account_id=account_id, request_id=body.request_id,
+                          channel_run_id=result["channel_run_id"])
+            return result
+
     async def test_account(self, account_id: str) -> dict[str, Any]:
         # A temporary test must not race reconciliation or another test into
         # creating a second client for the same Bot.
@@ -168,12 +192,14 @@ class ChannelRuntime:
                     result = await current.adapter.test_connection(self.config.test_timeout)
                     return {"account_id": account_id, **result}
                 adapter = self.registry.create(account, infinite_retry=False)
+                if account.channel_type == "wecom_app":
+                    adapter.client = self.deep_agent
 
                 async def ignore_message(_message):
                     return None
 
                 try:
-                    if account.channel_type in {"feishu", "dingtalk"}:
+                    if account.channel_type in {"feishu", "dingtalk", "wecom_app"}:
                         result = await adapter.test_connection(self.config.test_timeout)
                         return {"account_id": account_id, **result}
                     await adapter.start(ignore_message)

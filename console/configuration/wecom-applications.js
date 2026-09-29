@@ -246,7 +246,7 @@
       clearButton.textContent = '清空';
       clearButton.classList.toggle('is-undo', false);
       input.value = input.dataset.maskedValue;
-      input.type = input.value ? 'text' : 'password';
+
       input.required = !item;
       renderSecretHint();
       AdminFormFeedback.clear(el('wecomApplicationForm'));
@@ -342,7 +342,7 @@
     el('wecomApplicationModal')?.addEventListener('cancel', event => { event.preventDefault(); admin.closeEditor(); });
     el('wecomApplicationSecret')?.addEventListener('focus', event => { if (event.target.value === event.target.dataset.maskedValue) event.target.select(); });
     el('wecomApplicationSecret')?.addEventListener('input', event => {
-      event.target.type = event.target.value && event.target.value === event.target.dataset.maskedValue ? 'text' : 'password';
+
       event.target.dataset.clearRequested = 'false';
       const button = el('clearWecomApplicationSecretBtn');
       button.textContent = '清空'; button.classList.toggle('is-undo', false);
@@ -354,7 +354,7 @@
       const clear = input.dataset.clearRequested !== 'true';
       input.dataset.clearRequested = String(clear);
       input.value = clear ? '' : input.dataset.maskedValue;
-      input.type = clear || !input.value ? 'password' : 'text';
+
       const button = el('clearWecomApplicationSecretBtn');
       button.textContent = clear ? '保留原密钥' : '清空'; button.classList.toggle('is-undo', clear);
       renderSecretHint();

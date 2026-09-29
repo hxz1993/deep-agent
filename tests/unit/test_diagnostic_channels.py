@@ -175,8 +175,19 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["items"][0]["session_count"], 1001)
         self.assertEqual(result["items"][0]["unattributed_question_count"], 1001)
 
+    async def test_wecom_app_account_details_use_application_reference_without_names(self):
+        async with self.factory() as db:
+            account = await db.get(ChannelAccount, "b")
+            account.channel_type = "wecom_app"
+            account.transport = "webhook"
+            account.settings = {"wecom_app": {"application_id": "app"}}
+            await db.commit()
+        row = next(item for item in (await self.queries.accounts())["items"] if item["id"] == "b")
+        self.assertEqual(row["application"]["id"], "app")
+        self.assertFalse(row["user_details_enabled"])
+
     async def test_console_followup_counts_once_without_a_sender_for_all_channels(self):
-        for channel in ("wecom", "feishu", "dingtalk"):
+        for channel in ("wecom", "feishu", "dingtalk", "wecom_app"):
             async with self.factory() as db:
                 account = await db.get(ChannelAccount, "b")
                 account.channel_type = channel
@@ -634,7 +645,7 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         async with self.factory() as db:
             await db.execute(update(ChannelMessageRun).values(sender_name="historic-only-name"))
             await db.commit()
-        for channel in ("wecom", "feishu", "dingtalk"):
+        for channel in ("wecom", "feishu", "dingtalk", "wecom_app"):
             with self.subTest(channel=channel):
                 async with self.factory() as db:
                     account = await db.get(ChannelAccount, "b")
@@ -652,6 +663,13 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
                 # the latest unfiltered page; stored names never participate.
                 found = await self.queries.peers("b", SessionFilters(
                     self.f.start, self.f.end, query="Current", limit=1))
+                if channel == "wecom_app":
+                    self.assertEqual(found["total"], 0)
+                    self.assertFalse(found["user_details_enabled"])
+                    by_id = await self.queries.peers("b", SessionFilters(
+                        self.f.start, self.f.end, query="opaque-A"))
+                    self.assertEqual(by_id["total"], 1)
+                    continue
                 self.assertEqual(found["total"], 1)
                 self.assertEqual(found["items"][0]["latest_session"]["session_id"], "first")
                 self.assertEqual(found["items"][0]["name"], "Alice Current")

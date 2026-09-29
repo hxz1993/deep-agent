@@ -19,6 +19,7 @@ from deep_agent.capabilities.display_names import resolve_tool_display_name_map
 from deep_agent.conversation.display_names import decorate_history_display_names
 from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.projector import ConversationProjectionError
+from deep_agent.schemas.session_source import SessionSourceType
 from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, DiagnosticSessionQueries, SessionFilters, detail_event_metadata, project_diagnostic_history, query_budget
 from deep_agent.services.channel_profiles import ChannelProfileService
@@ -46,7 +47,7 @@ def filters(
     agent_id: str | None = Query(default=None, max_length=256),
     user_id: str | None = Query(default=None, max_length=128),
     app_id: str | None = Query(default=None, max_length=256),
-    source_type: Literal["internal", "channel:wecom", "channel:feishu", "channel:dingtalk"] | None = Query(default=None),
+    source_type: SessionSourceType | None = Query(default=None),
     source_id: str | None = Query(default=None, min_length=1, max_length=255),
     query: str | None = Query(default=None, max_length=256),
     has_questions: bool | None = Query(default=None), has_execution_error: bool | None = Query(default=None),

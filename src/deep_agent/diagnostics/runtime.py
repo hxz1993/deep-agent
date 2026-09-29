@@ -152,7 +152,7 @@ class DiagnosticRuntime:
                     "level": level if level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL") else "INFO",
                     "source": self.source, "instance_id": self.config.instance_id,
                     "process_id": self.pid, "boot_id": self.boot_id,
-                    **safe_fields({**fields, "request_id": get_request_id()}),
+                    **safe_fields({"request_id": get_request_id(), **fields}),
                 }
                 data = (format_record(payload) + "\n").encode()
                 if len(data) > MAX_RECORD_BYTES:
@@ -409,7 +409,7 @@ def emit(event: str, *, level: str = "INFO", **fields) -> None:
             # Outside an initialized ASGI service, retain the original
             # operational logging path (CLI/tests). No diagnostic file I/O.
             payload = {"event": event, "summary": EVENTS[event],
-                       **safe_fields({**fields, "request_id": get_request_id()}),
+                       **safe_fields({"request_id": get_request_id(), **fields}),
                        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
                        "process_id": os.getpid(), "level": level, "source": "api",
                        "record_id": uuid.uuid4().hex, "boot_id": uuid.uuid4().hex,

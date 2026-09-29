@@ -1,0 +1,32 @@
+[
+  {
+    "type": "file",
+    "oid": "53d7257ace88cda1144353e6bbdd2fe8dba8b9a5",
+    "size": 2075,
+    "path": ".gitattributes"
+  },
+  {
+    "type": "file",
+    "oid": "335a704fb67d9e72fb28464a619f9199fd0705ef",
+    "size": 531066496,
+    "lfs": {
+      "oid": "3f3523429c880d675c0330cb3de78240452bc40a961d037e24f91ab8488f03e7",
+      "size": 531066496,
+      "pointerSize": 134
+    },
+    "xetHash": "190c7982a2c920cbb6b3b9591d0494c836baac224ba8a8f3ea9d1964a3ef2b87",
+    "path": "MinerU2.5-Pro-2605-1.2B-Q8_0.gguf"
+  },
+  {
+    "type": "file",
+    "oid": "e65844d5ca78c214856e0a2c9fb5ef5ca8122da2",
+    "size": 709409600,
+    "lfs": {
+      "oid": "b6c08ab50352677f7396af45ee60682f353f55488e26911d8154bfc37514d3f8",
+      "size": 709409600,
+      "pointerSize": 134
+    },
+    "xetHash": "0c002eb952ec74cec769ed4f85f4c7a6a48f42f058fc1de82ffd7afbcc7fd725",
+    "path": "mmproj-MinerU2.5-Pro-2605-1.2B-Q8_0.gguf"
+  }
+]

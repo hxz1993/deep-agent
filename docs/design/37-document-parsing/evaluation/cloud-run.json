@@ -1,0 +1,39 @@
+{
+  "request": {
+    "file_name": "complex-numbers-two-pages.pdf",
+    "language": "ch",
+    "enable_table": true,
+    "enable_formula": true,
+    "is_ocr": false
+  },
+  "submitted_at": "2026-09-29T02:53:50+0800",
+  "submit_elapsed_s": 0.225,
+  "upload_finished_elapsed_s": 1.606,
+  "polls": [
+    {
+      "elapsed_s": 1.718,
+      "state": "waiting-file"
+    },
+    {
+      "elapsed_s": 4.828,
+      "state": "running"
+    },
+    {
+      "elapsed_s": 7.961,
+      "state": "running"
+    },
+    {
+      "elapsed_s": 11.066,
+      "state": "running"
+    },
+    {
+      "elapsed_s": 16.181,
+      "state": "done"
+    }
+  ],
+  "output_bytes": 3191,
+  "total_elapsed_s": 16.43,
+  "engine": "MinerU unauthenticated Agent API / pipeline",
+  "source": "https://mineru.net/apiManage/docs",
+  "fixture_sha256": "14e40703d91c233d2ac36948615ad70080eadccc3e275d88e8cc0676134e4747"
+}

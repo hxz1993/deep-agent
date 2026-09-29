@@ -1,0 +1,3 @@
+standard-first: artifact produced; exit -6
+onnxruntime native thread: recursive_mutex lock failed: Invalid argument
+standard-repeat: independent output path; exit 0; same Markdown SHA256 as first run

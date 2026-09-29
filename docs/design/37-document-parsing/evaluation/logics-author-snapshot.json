@@ -1,0 +1,26 @@
+{
+  "source_url": "https://raw.githubusercontent.com/alibaba/Logics-Parsing/main/imgs/mpdocbench_results.png",
+  "verified_date": "2026-09-29",
+  "evidence": "visually transcribed official author result image, not independent benchmark leaderboard",
+  "model": "Logics-Parsing-V3",
+  "parameters": "0.8B",
+  "overall": 85.26,
+  "textEdit": 0.042,
+  "truncTextEdit": 0.065,
+  "cdm": 91.35,
+  "teds": 87.74,
+  "truncTeds": 88.05,
+  "figF1": 71.84,
+  "readOrder": 0.084,
+  "headTeds": 62.33,
+  "author_efficiency": {
+    "hardware": "NVIDIA H100 GPUs",
+    "batch_size": 1,
+    "window_size": 3,
+    "documents": 420,
+    "pages": 3135,
+    "seconds_per_page": 1.39,
+    "total_minutes": 72.46,
+    "source_url": "https://github.com/alibaba/Logics-Parsing"
+  }
+}

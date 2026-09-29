@@ -1,0 +1,188 @@
+[
+  {
+    "type": "directory",
+    "oid": "e60bc48fa596be14efe5ce8a286f8ba4d5eb0ac4",
+    "size": 0,
+    "path": "Layout"
+  },
+  {
+    "type": "directory",
+    "oid": "c14af1350338bad128d482a93f9766b3b2642d75",
+    "size": 0,
+    "path": "Layout/PP-DocLayoutV2"
+  },
+  {
+    "type": "directory",
+    "oid": "c0e8f6a06fe1842584215b110ce35b758cc39b4b",
+    "size": 0,
+    "path": "MFR"
+  },
+  {
+    "type": "directory",
+    "oid": "7820f2b8b16447bd9462bb90474ac35f94aaf539",
+    "size": 0,
+    "path": "MFR/pp_formulanet_plus_m"
+  },
+  {
+    "type": "directory",
+    "oid": "be30b0a5212df33db6bea6cb2fcb91886d098eab",
+    "size": 0,
+    "path": "OCR"
+  },
+  {
+    "type": "directory",
+    "oid": "9ed081228518678e9141d24edf32237398e81e8b",
+    "size": 0,
+    "path": "OCR/paddleocr"
+  },
+  {
+    "type": "directory",
+    "oid": "3ffb6ceb60157405f0cd374113bbc36067975acd",
+    "size": 0,
+    "path": "Table"
+  },
+  {
+    "type": "file",
+    "oid": "a6344aac8c09253b3b630fb776ae94478aa0275b",
+    "size": 1519,
+    "path": ".gitattributes"
+  },
+  {
+    "type": "file",
+    "oid": "f2578555f858262a8430eb0f22e47fb0fbb6dd53",
+    "size": 213963712,
+    "lfs": {
+      "oid": "cd540dc296ff3115fe78efa65b68501e6a8dc74b198acc9834a725ffaa095aac",
+      "size": 213963712,
+      "pointerSize": 134
+    },
+    "xetHash": "0ddac0e2b6600790ca69f0e8376e44717859ddb151cdbb3c63d7a5383a71263c",
+    "path": "Layout/PP-DocLayoutV2/inference.onnx"
+  },
+  {
+    "type": "file",
+    "oid": "5cc9ec8970c00fc1b0ca7a37824d9e09acbb451e",
+    "size": 1482,
+    "path": "Layout/PP-DocLayoutV2/inference.yml"
+  },
+  {
+    "type": "file",
+    "oid": "797937725d57fe5702a6a950f220902841fa5a86",
+    "size": 591263297,
+    "lfs": {
+      "oid": "20a32595c2b30282dcd069e6295e9fad96115697beb66acb9b681b814006d193",
+      "size": 591263297,
+      "pointerSize": 134
+    },
+    "xetHash": "570b764750ee15db5aaed0c8ad636aeb0b570ce251abcbdda8c179a69c200ad6",
+    "path": "MFR/pp_formulanet_plus_m/PP-FormulaNet_plus-M.onnx"
+  },
+  {
+    "type": "file",
+    "oid": "88ab97b97b97567d5b71d418115f49e449c7c07c",
+    "size": 2244564,
+    "path": "MFR/pp_formulanet_plus_m/PP-FormulaNet_plus-M_inference.yml"
+  },
+  {
+    "type": "file",
+    "oid": "666cee731b98bee55376f02690226d60db9a8187",
+    "size": 21159378,
+    "lfs": {
+      "oid": "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634",
+      "size": 21159378,
+      "pointerSize": 133
+    },
+    "xetHash": "b620020542891e03945057270f878896653aa76d2ff70420a79ab7add42829ec",
+    "path": "OCR/paddleocr/ch_PP-OCRv6_small_rec_infer.onnx"
+  },
+  {
+    "type": "file",
+    "oid": "6eece2c57a185b5a1bfef8b53d2d4d6cb4c526fa",
+    "size": 150752,
+    "path": "OCR/paddleocr/ch_PP-OCRv6_small_rec_inference.yml"
+  },
+  {
+    "type": "file",
+    "oid": "cd551d0ec8f49b28ac306ae7bab6328c66bd156f",
+    "size": 1780590,
+    "lfs": {
+      "oid": "193bab7a04fca699a6c82e6abb5b81bdb28177f0abd4062552b04908dafb19f8",
+      "size": 1780590,
+      "pointerSize": 132
+    },
+    "xetHash": "0f0b672e7a5f3231b05b9e10f9e4d3b44408f81bdf107dfcff496da0ec1c4bde",
+    "path": "OCR/paddleocr/ch_PP-OCRv6_tiny_det_infer.onnx"
+  },
+  {
+    "type": "file",
+    "oid": "0bd33a4c87de36ba27c7de81ab7c2928647010b4",
+    "size": 1068,
+    "path": "OCR/paddleocr/ch_PP-OCRv6_tiny_det_inference.yml"
+  },
+  {
+    "type": "file",
+    "oid": "68b4df2bb38897d157082d63da37a30c54ebf5f0",
+    "size": 4769171,
+    "lfs": {
+      "oid": "3e190df84542c2756975febe8f73603b587a23c7f7badfdd3fc8a986540d5bc0",
+      "size": 4769171,
+      "pointerSize": 132
+    },
+    "xetHash": "c42d3fe94df0efec5ff1637284de44e316dbaa9040535f2cffb4c53e076eb726",
+    "path": "OCR/paddleocr/seal_PP-OCRv4_det_infer.onnx"
+  },
+  {
+    "type": "file",
+    "oid": "ad9d0da9027cbf818c67e7f8535cf2abcd6cbc85",
+    "size": 711,
+    "path": "OCR/paddleocr/seal_PP-OCRv4_det_inference.yml"
+  },
+  {
+    "type": "file",
+    "oid": "02610689041ee1976b63811b8ed4af014d9e4688",
+    "size": 1298,
+    "path": "README.md"
+  },
+  {
+    "type": "file",
+    "oid": "f10e1f63985c1610c5e7cbc75f86fed567dd7952",
+    "size": 6776877,
+    "lfs": {
+      "oid": "c84bf1d79c1c74d534b5b12adb14dd12151c42f7ae3e4be4f1042b830f80b949",
+      "size": 6776877,
+      "pointerSize": 132
+    },
+    "xetHash": "b334b52f7eaeeec8fb00c5258972245ea99ad2b6cc973f3a313fc9802c3bde57",
+    "path": "Table/PP-LCNet_x1_0_table_cls.onnx"
+  },
+  {
+    "type": "file",
+    "oid": "0ba44aff759cf891c38f6b5c14c6918ba3a04bdb",
+    "size": 7758305,
+    "lfs": {
+      "oid": "d57a942af6a2f57d6a4a0372573c696a2379bf5857c45e2ac69993f3b334514b",
+      "size": 7758305,
+      "pointerSize": 132
+    },
+    "xetHash": "442f6218dc52c9900705ff8a3fe41b4e9f9d4a7d9d3f9a80aa1e52ecad9dd002",
+    "path": "Table/slanet-plus.onnx"
+  },
+  {
+    "type": "file",
+    "oid": "d6d7fb54aa43a862aeb7a7e419c35ad728efd687",
+    "size": 8335007,
+    "lfs": {
+      "oid": "0ea48d3a17e35ef5c2e498a5e799566073234d39b1079ca21d9f4fafe73c6d20",
+      "size": 8335007,
+      "pointerSize": 132
+    },
+    "xetHash": "d3c5dac3e4741aebdd1e2ab6937154548f8aecdc741d090cab0f0d250038f0c5",
+    "path": "Table/unet.onnx"
+  },
+  {
+    "type": "file",
+    "oid": "bf1eae4944f446721e0e4a2915a659381645e379",
+    "size": 12920,
+    "path": "manifest.json"
+  }
+]

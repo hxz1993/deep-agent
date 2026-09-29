@@ -18,6 +18,7 @@ from deep_agent.db.models import (
     ChatSessionEvent,
     LlmModel,
     WecomApplication,
+    WecomUserProfile,
 )
 from deep_agent.db.reference_integrity import (
     ReferenceConflict, is_unique_conflict, lock_optional, lock_reference,
@@ -26,7 +27,7 @@ from deep_agent.db.session_source import channel_source_type
 from deep_agent.schemas.session_source import CHANNEL_SOURCE_TYPES
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
-from deep_agent.db.stores.wecom import validate_channel_wecom_settings
+from deep_agent.db.stores.wecom import userid_key, validate_channel_wecom_settings
 from deep_agent.db.stores.event.base import SessionEventStore
 from deep_agent.channels.metadata import channel_session_title, normalize_channel_origin, normalize_peer_metadata, wecom_application_id
 from deep_agent.channels.app_context import channel_deepfos_app, merge_channel_settings, validate_channel_settings
@@ -289,13 +290,29 @@ class ChannelStore(SessionBoundMixin):
         }
 
     @staticmethod
-    def session_title(account: ChannelAccount, binding: ChannelSessionBinding) -> str:
+    def session_title(
+        account: ChannelAccount, binding: ChannelSessionBinding, *, name: str | None = None,
+    ) -> str:
+        metadata = {"display_name": name} if account.channel_type in {"wecom", "wecom_app"} else binding.peer_metadata
+        return channel_session_title(binding.peer_type, binding.peer_id, metadata, channel_type=account.channel_type)
+
+    async def _persisted_peer_name(
+        self, db: AsyncSession, account: ChannelAccount, binding: ChannelSessionBinding,
+        now: datetime,
+    ) -> str | None:
         application_id = wecom_application_id(account)
-        if application_id and binding.peer_type in {"single", "userid"}:
-            metadata = binding.peer_metadata or {}
-            name = metadata.get("wecom_name") if metadata.get("wecom_application_id") == application_id else None
-            return channel_session_title(binding.peer_type, binding.peer_id, {"display_name": name}, channel_type=account.channel_type)
-        return channel_session_title(binding.peer_type, binding.peer_id, binding.peer_metadata, channel_type=account.channel_type)
+        if not application_id or binding.peer_type not in {"single", "userid"}:
+            return None
+        if await db.get(WecomApplication, application_id) is None:
+            return None
+        profiles = select(WecomUserProfile).where(WecomUserProfile.wecom_application_id == application_id)
+        # Opaque IDs are case-sensitive and take precedence over plaintext User IDs.
+        profile = await db.scalar(profiles.where(WecomUserProfile.open_userid == binding.peer_id))
+        if profile is None:
+            profile = await db.scalar(profiles.where(WecomUserProfile.userid_key == userid_key(binding.peer_id)))
+        if profile is None or not profile.profile_synced_at or not profile.expires_at or profile.expires_at <= now:
+            return None
+        return profile.name
 
     async def _create_session(
         self, db: AsyncSession, account: ChannelAccount,
@@ -313,8 +330,9 @@ class ChannelStore(SessionBoundMixin):
         )
         db.add(session)
         await db.flush()
+        name = await self._persisted_peer_name(db, account, binding, now)
         await self._events._append_title(
-            db, session, title=self.session_title(account, binding), source="channel",
+            db, session, title=self.session_title(account, binding, name=name), source="channel",
             source_event_id=None, turn_id=None, run_id=None,
             details={"channel": self.session_origin(account, binding)}, now=now,
         )

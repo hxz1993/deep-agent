@@ -104,6 +104,23 @@ class WecomProfileTests(unittest.IsolatedAsyncioTestCase):
     async def resolve(self, raw="opaque"):
         return await self.service.resolve(self.account, raw)
 
+    async def test_application_plain_userid_uses_member_api_and_shared_persistence(self):
+        # Exercise the provider contract with the actual store authority check.
+        self.account.channel_type = "wecom_app"
+        self.account.settings = {"wecom_app": {"application_id": self.app.id}}
+        original = self.service.channels
+        self.service.channels = SimpleNamespace(get_account=AsyncMock(return_value=self.account))
+        try:
+            first = await self.resolve("Member")
+            second = await self.resolve("Member")
+            self.assertEqual(first["name"], "成员姓名")
+            self.assertEqual(second["name"], "成员姓名")
+            self.client.convert.assert_not_awaited()
+            self.client.member.assert_awaited_once()
+            self.assertEqual((await self.stores.wecom.find_profile(self.app.id, "Member")).name, "成员姓名")
+        finally:
+            self.service.channels = original
+
     async def test_disabled_defaults_no_external_calls(self):
         for settings in ({}, {"wecom": {"application_id": self.app.id}}, {"wecom": {"user_details_enabled": False, "application_id": self.app.id}}):
             self.account.settings = settings
@@ -138,19 +155,18 @@ class WecomProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(profiles), 1)
         self.assertEqual(profiles[0].open_userid, "opaque")
 
-    async def test_unknown_failure_negative_cache_and_no_placeholder(self):
+    async def test_unknown_failure_retries_without_process_cache_or_placeholder(self):
         self.client.convert.side_effect = WecomError("convert", 60020)
         with patch("deep_agent.services.wecom_profiles.log_event") as log:
             await self.resolve()
             await self.resolve()
-        log.assert_called_once_with("wecom_profile_failed", wecom_application_id=self.app.id,
-                                    phase="convert", error_code="60020")
-        self.assertEqual(self.client.convert.await_count, 1)
+        self.assertEqual(log.call_count, 2)
+        self.assertEqual(self.client.convert.await_count, 2)
         self.client.member.assert_not_awaited()
         self.assertEqual((await self.stores.wecom.cache_stats(self.app.id))["total"], 0)
         self.service.invalidate_runtime(self.app.id)
         await self.resolve()
-        self.assertEqual(self.client.convert.await_count, 2)
+        self.assertEqual(self.client.convert.await_count, 3)
 
     async def test_confirmed_identity_missing_name_remains_pending(self):
         self.client.member.return_value = ("Member", None)
@@ -260,11 +276,3 @@ class WecomProfileTests(unittest.IsolatedAsyncioTestCase):
         job = self.service.refresh_status(self.app.id, jobs[0]["task_id"])
         self.assertEqual((job["total"], job["completed"], job["succeeded"]), (1, 1, 1))
         self.client.invalidate.assert_not_called()
-
-    async def test_negative_cache_is_bounded_and_expiry_is_removed(self):
-        for index in range(2050):
-            self.service._remember_failure((self.app.id, 1, "raw", str(index)))
-        self.assertEqual(len(self.service._negative), 2048)
-        self.service._negative[(self.app.id, 1, "raw", "2049")] = 0
-        self.assertFalse(self.service._negative_hit((self.app.id, 1, "raw", "2049")))
-        self.assertEqual(len(self.service._negative), 2047)

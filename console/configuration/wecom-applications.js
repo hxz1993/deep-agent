@@ -158,12 +158,13 @@
       if (!state.active || state.selectedId !== id || state.generation !== generation) return;
       state.members?.dispose();
       state.members = createWecomMemberTable({ host: el('wecomMemberTable'), applicationId: id, request: apiFetch, escapeHtml, formatDate });
-      await state.members.load();
+      return await state.members.load();
     } catch (error) {
       if (state.active && state.selectedId === id && state.generation === generation) {
         const host = el('wecomMemberTable');
         host.innerHTML = `<p class="wecom-inline-status error">成员列表加载失败：${escapeHtml(error.message)}</p><button type="button" class="btn" data-members-retry>重试</button>`;
         host.querySelector('[data-members-retry]')?.addEventListener('click', () => void loadMembers(id, generation));
+        return false;
       }
     }
   }
@@ -327,9 +328,16 @@
       try {
         await mutate(`${path(id)}/cache/invalidate`, 'POST');
         state.jobs.delete(id); renderJob();
-        if (await loadCache(id, state.generation)) cacheStatus('成员资料已标记为过期，姓名和 ID 映射保留。');
-        if (state.members) await state.members.load();
-        else await loadMembers(id, state.generation);
+        // The table must reload immediately, even if the statistics read is slow.
+        const generation = state.generation;
+        const [statsLoaded, membersLoaded] = await Promise.all([
+          loadCache(id, generation),
+          state.members ? state.members.load() : loadMembers(id, generation),
+        ]);
+        if (state.selectedId !== id || state.generation !== generation) return;
+        if (!statsLoaded || !membersLoaded) {
+          cacheStatus('缓存已重置，但页面数据读取失败，请重新打开应用或重试成员列表。', true);
+        } else cacheStatus('成员资料已标记为过期，姓名和 ID 映射保留。');
       } catch (error) { cacheStatus(error.message, true); }
       finally { setBusy(false); }
     },

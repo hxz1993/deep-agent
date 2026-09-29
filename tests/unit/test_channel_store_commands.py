@@ -3,17 +3,18 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.factory import create_engine
 from deep_agent.db.models import (
     Agent, Base, ChannelAccount, ChannelMessageRun, ChannelSessionBinding, ChatSession,
-    ChatSessionEvent, LlmModel, LlmProvider,
+    ChatSessionEvent, LlmModel, LlmProvider, WecomApplication, WecomUserProfile,
 )
 from deep_agent.db.reference_integrity import ReferenceConflict
 from deep_agent.db.stores.bundle import create_data_stores
@@ -218,10 +219,74 @@ class ChannelStoreCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._count(ChannelSessionBinding), 1)
         self.assertEqual(await self._count(ChannelMessageRun), 1)
 
+    async def _seed_wecom_profile(self, *, channel_type="wecom", enabled=True, expired=False, wrong_app=False):
+        now = datetime.now(timezone.utc)
+        async with self.factory.begin() as db:
+            db.add(WecomApplication(id="profile-app", name="应用", corp_id="fixture-corp", wecom_agent_id="1", app_secret="fixture"))
+            db.add(WecomUserProfile(
+                id="profile", wecom_application_id="other-app" if wrong_app else "profile-app",
+                userid="Member", userid_key="member", open_userid="external-fixture", name="持久化姓名",
+                profile_synced_at=now, expires_at=now + timedelta(days=-1 if expired else 1),
+            ))
+            settings = {"wecom": {"application_id": "profile-app", "user_details_enabled": enabled}} if channel_type == "wecom" else {"wecom_app": {"application_id": "profile-app"}}
+            await db.execute(update(ChannelAccount).where(ChannelAccount.id == self.account.id).values(channel_type=channel_type, settings=settings))
+
+    async def test_persisted_name_used_for_both_wecom_channels_without_binding_metadata(self):
+        await self._seed_wecom_profile()
+        for channel_type in ("wecom", "wecom_app"):
+            with self.subTest(channel_type=channel_type):
+                async with self.factory.begin() as db:
+                    settings = {"wecom": {"application_id": "profile-app", "user_details_enabled": True}} if channel_type == "wecom" else {"wecom_app": {"application_id": "profile-app"}}
+                    await db.execute(update(ChannelAccount).where(ChannelAccount.id == self.account.id).values(channel_type=channel_type, settings=settings))
+                resolved = await self.store.resolve_binding(**self.peer)
+                self.assertEqual(resolved.session.title, f"{channel_type}｜User｜持久化姓名(external-fixture)")
+                self.assertNotIn("wecom_name", resolved.binding.peer_metadata)
+                async with self.factory.begin() as db:
+                    await db.execute(delete(ChatSession).where(ChatSession.session_id == resolved.session.session_id))
+
+    async def test_new_uses_current_profile_but_preserves_previous_session_title(self):
+        await self._seed_wecom_profile()
+        old = await self.store.resolve_binding(**self.peer)
+        async with self.factory.begin() as db:
+            await db.execute(update(WecomUserProfile).values(name="新姓名"))
+        unchanged = await self.store.resolve_binding(**self.peer)
+        self.assertEqual(unchanged.session.title, old.session.title)
+        claimed = await self._claim()
+        new = await self.store.rotate_binding(**self.peer, command_run_id=claimed.run.id)
+        self.assertEqual(new.session.title, "wecom｜User｜新姓名(external-fixture)")
+        async with self.factory() as db:
+            previous = await db.get(ChatSession, old.session.session_id)
+            self.assertEqual(previous.title, "wecom｜User｜持久化姓名(external-fixture)")
+
+    async def test_disabled_lookup_ignores_profile_and_legacy_binding_name(self):
+        await self._seed_wecom_profile(enabled=False)
+        resolved = await self.store.resolve_binding(**self.peer, peer_metadata={"wecom_application_id": "profile-app", "wecom_name": "旧姓名", "display_name": "旧姓名"})
+        self.assertEqual(resolved.session.title, "wecom｜User｜external-fixture")
+
+    async def test_stale_profile_is_not_used(self):
+        await self._seed_wecom_profile(expired=True)
+        resolved = await self.store.resolve_binding(**self.peer)
+        self.assertEqual(resolved.session.title, "wecom｜User｜external-fixture")
+
+    async def test_profile_from_different_application_is_not_used(self):
+        await self._seed_wecom_profile(channel_type="wecom_app", wrong_app=True)
+        resolved = await self.store.resolve_binding(**self.peer)
+        self.assertEqual(resolved.session.title, "wecom_app｜User｜external-fixture")
+
+    async def test_exact_opaque_id_precedes_plaintext_casefold_match(self):
+        await self._seed_wecom_profile()
+        now = datetime.now(timezone.utc)
+        async with self.factory.begin() as db:
+            db.add(WecomUserProfile(id="collision", wecom_application_id="profile-app", userid="external-fixture", userid_key="external-fixture", name="错误姓名", profile_synced_at=now, expires_at=now + timedelta(days=1)))
+        resolved = await self.store.resolve_binding(**self.peer)
+        self.assertEqual(resolved.session.title, "wecom｜User｜持久化姓名(external-fixture)")
+        plaintext = await self.store.resolve_binding(account_id=self.account.id, peer_type="single", peer_id="MEMBER")
+        self.assertEqual(plaintext.session.title, "wecom｜User｜持久化姓名(MEMBER)")
+
     async def test_title_origin_blocks_fallback_and_model_but_allows_rename(self):
         resolved = await self.store.resolve_binding(**self.peer, peer_metadata={"display_name": "小明"})
         session_id = resolved.session.session_id
-        self.assertEqual(resolved.session.title, "wecom｜User｜小明(external-fixture)")
+        self.assertEqual(resolved.session.title, "wecom｜User｜external-fixture")
         self.assertEqual(resolved.session.next_sequence, 2)
         expected = dict(self.peer, account_deleted=False, account_name="测试渠道", channel_type="wecom", peer_metadata={"user_id": "external-fixture", "display_name": "小明"})
         self.assertEqual(await self.store.get_session_origin(session_id), expected)

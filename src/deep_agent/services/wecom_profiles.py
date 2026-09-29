@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -22,7 +21,6 @@ class WecomProfileService:
         self.channels = channel_store
         self.client = client or WecomClient()
         self._queries: dict[tuple, asyncio.Task] = {}
-        self._negative: OrderedDict[tuple, float] = OrderedDict()
         self._jobs: OrderedDict[str, dict] = OrderedDict()
         self._bulk_tasks: dict[str, asyncio.Task] = {}
         self._refresh_lock = asyncio.Lock()
@@ -44,35 +42,18 @@ class WecomProfileService:
         await self.client.close()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    def invalidate_runtime(self, app_id, *, invalidate_token=True):
-        if invalidate_token:
-            self.client.invalidate(app_id)
-        for key in list(self._negative):
-            if key[0] == app_id:
-                self._negative.pop(key, None)
+    def invalidate_runtime(self, app_id):
+        self.client.invalidate(app_id)
 
-    def _negative_hit(self, key):
-        now = time.monotonic()
-        for item, expiry in list(self._negative.items()):
-            if expiry <= now:
-                self._negative.pop(item, None)
-        return self._negative.get(key, 0) > now
-
-    def _remember_failure(self, key):
-        self._negative[key] = time.monotonic() + 300
-        self._negative.move_to_end(key)
-        while len(self._negative) > 2048:
-            self._negative.popitem(last=False)
-
-    def _query(self, app, raw_id, profile=None):
+    def _query(self, app, raw_id, profile=None, *, plaintext=False):
         if self._closed:
             raise WecomError("resolve", "service_closed")
         # Once an identity is known, both incoming ID forms share the same job.
-        identity = ("userid", profile.userid_key) if profile else ("raw", raw_id)
+        identity = ("userid", profile.userid_key) if profile else ("plaintext" if plaintext else "raw", raw_id)
         key = (app.id, app.revision, *identity)
         task = self._queries.get(key)
         if task is None:
-            task = asyncio.create_task(self._bounded_query(app, raw_id, profile, key))
+            task = asyncio.create_task(self._bounded_query(app, raw_id, profile, plaintext=plaintext))
             self._queries[key] = task
             def done(t):
                 # A raw-ID task acquires a userid alias after conversion. Drop
@@ -95,12 +76,13 @@ class WecomProfileService:
         self._queries[key] = current
         return None
 
-    async def _bounded_query(self, app, raw_id, profile, key):
+    async def _bounded_query(self, app, raw_id, profile, *, plaintext=False):
         userid = profile.userid if profile else None
         try:
             async with asyncio.timeout(self.task_seconds):
                 if userid is None:
-                    userid, explicitly_invalid = await self.client.convert(app, raw_id)
+                    # Application callbacks contain the authenticated plain UserID.
+                    userid, explicitly_invalid = (None, True) if plaintext else await self.client.convert(app, raw_id)
                     if userid:
                         profile = await self.store.upsert_identity(app.id, app.revision, userid, open_userid=raw_id)
                     elif explicitly_invalid:
@@ -131,8 +113,6 @@ class WecomProfileService:
             log_event("wecom_profile_failed", wecom_application_id=app.id, phase=stage, error_code=code)
             if userid and profile is not None:
                 await self.store.record_failure(app.id, app.revision, userid, stage, code)
-            else:
-                self._remember_failure(key)
             return None
 
     async def _account_matches(self, account_id, app_id, revision):
@@ -157,12 +137,11 @@ class WecomProfileService:
         now = datetime.now(timezone.utc)
         fresh = profile and profile.expires_at and profile.expires_at > now
         retry_wait = profile and profile.next_retry_at and profile.next_retry_at > now
-        identity = ("userid", profile.userid_key) if profile else ("raw", raw_id)
         task = None
         if self._closed:
             return empty
-        if not fresh and not retry_wait and not self._negative_hit((app.id, app.revision, *identity)):
-            task = self._query(app, raw_id, profile)
+        if not fresh and not retry_wait:
+            task = self._query(app, raw_id, profile, plaintext=account.channel_type == "wecom_app")
             if await_refresh or not profile or not profile.name:
                 try:
                     await asyncio.wait_for(asyncio.shield(task), self.wait_seconds)
@@ -198,9 +177,7 @@ class WecomProfileService:
         app = await self.store.get_application(app_id)
         if app is None:
             raise ValueError("企微应用不存在")
-        # Refreshing names does not change credentials. Keep a valid/in-flight
-        # token and any shared member query; only clear failure waiting here.
-        self.invalidate_runtime(app_id, invalidate_token=False)
+        # Refreshing names keeps the valid token and joins in-flight member queries.
         task_id = uuid.uuid4().hex
         job = {"task_id": task_id, "application_id": app_id, "status": "running",
                "total": 0, "completed": 0, "succeeded": 0, "failed": 0}

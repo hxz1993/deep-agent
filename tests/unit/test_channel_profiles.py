@@ -35,6 +35,28 @@ class ChannelProfilesTests(IsolatedAsyncioTestCase):
                     self.assertEqual(payload['tenant_id'], 'tenant')
                     self.assertEqual(record.sender_name, 'trusted-name')
 
+    async def test_wecom_context_uses_only_fresh_persisted_names_for_both_channels(self):
+        from datetime import datetime, timedelta, timezone
+        from deep_agent.api.v1.chat import _current_channel_context
+        for channel in ('wecom', 'wecom_app'):
+            for days in (-1, 1):
+                with self.subTest(channel=channel, days=days):
+                    current = account(channel)
+                    current.agent_id, current.session_user_id = 'agent', 'owner'
+                    current.settings = {channel: {'application_id': 'app', 'user_details_enabled': True}}
+                    profile = SimpleNamespace(userid='member', name='缓存姓名',
+                        expires_at=datetime.now(timezone.utc) + timedelta(days=days))
+                    lookup = AsyncMock(return_value=profile)
+                    ctx = SimpleNamespace(stores=SimpleNamespace(
+                        channel=SimpleNamespace(get_account=AsyncMock(return_value=current)),
+                        wecom=SimpleNamespace(find_profile=lookup)))
+                    payload = {'sender_id': 'raw', 'name': '旧姓名'}
+                    body = SimpleNamespace(context_refs=[SimpleNamespace(type='channel.message_source', payload=payload)])
+                    await _current_channel_context(ctx, body, current)
+                    lookup.assert_awaited_once_with('app', 'raw')
+                    self.assertEqual(payload['name'], '缓存姓名' if days > 0 else None)
+                    self.assertEqual(payload['userid'], 'member')
+
     def service(self, row):
         store = SimpleNamespace(get_account=AsyncMock(return_value=row))
         self.provider = SimpleNamespace(resolve=AsyncMock(return_value={
@@ -44,6 +66,15 @@ class ChannelProfilesTests(IsolatedAsyncioTestCase):
             {'sender_id': 'A', 'userid': None, 'name': '姓名', 'status': 'resolved'}]}))
         self.store = store
         return ChannelProfileService(ctx, gateway=self.gateway)
+
+    async def test_wecom_app_uses_persisted_provider_not_gateway_cache(self):
+        row = account('wecom_app')
+        row.settings = {'wecom_app': {'application_id': 'app'}}
+        service = self.service(row)
+        result = await service.resolve_many(row, ['A'])
+        self.assertEqual(result['items']['A']['name'], '姓名')
+        self.provider.resolve.assert_awaited_once_with(row, 'A', await_refresh=True)
+        self.gateway.resolve_users.assert_not_called()
 
     async def test_dingtalk_passive_profiles_without_feishu_switch_or_wecom_app(self):
         row = account('dingtalk')

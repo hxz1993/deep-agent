@@ -245,21 +245,6 @@ class ChannelService:
                     await self.store.update_run(job.run_id, processing_status="completed")
                     await self._deliver(job, job.message.text or "暂不支持此类型的消息，请发送文字、图片、语音或文件。")
                     return
-            resolved = await self.store.resolve_binding(
-                account_id=account.id, peer_type=job.message.peer_type,
-                peer_id=job.message.peer_id, peer_metadata=job.message.peer_metadata,
-            )
-            # Session creation and its routing identity share one DB snapshot.
-            # A concurrent account edit must not pair a new Session with the
-            # previously loaded Agent/user configuration.
-            account = resolved.account or account
-            job.account = account
-            if account.channel_type == "wecom_app":
-                if account_fingerprint(account) != job.message.source_metadata.get("wecom_app_fingerprint"):
-                    raise ValueError("Webhook account configuration changed")
-            job.session_id = resolved.session.session_id
-            job.agent_id = resolved.session.agent_id
-            await self.store.update_run(job.run_id, session_id=job.session_id)
             # Start native feedback before media/model I/O, and reuse this reply
             # ID for text and terminal replies so there is only one bubble.
             loading_started = True
@@ -275,7 +260,7 @@ class ChannelService:
                         identity = await self.deep_agent.resolve_wecom_user(
                             account, sender_id=job.message.sender_id,
                             peer_type=job.message.peer_type, peer_id=job.message.peer_id,
-                            session_id=job.session_id,
+                            session_id=None,
                         )
                 except Exception as exc:
                     _log_job("channel_identity_unavailable", job, error_type=type(exc).__name__,
@@ -283,6 +268,22 @@ class ChannelService:
                     # Identity is optional; auth/network/permission failures
                     # must not turn an otherwise valid chat into a failed Run.
                     identity = None
+            # Resolve and persist member data before the initial title snapshot.
+            resolved = await self.store.resolve_binding(
+                account_id=account.id, peer_type=job.message.peer_type,
+                peer_id=job.message.peer_id, peer_metadata=job.message.peer_metadata,
+            )
+            # Session creation and its routing identity share one DB snapshot.
+            # A concurrent account edit must not pair a new Session with the
+            # previously loaded Agent/user configuration.
+            account = resolved.account or account
+            job.account = account
+            if account.channel_type == "wecom_app":
+                if account_fingerprint(account) != job.message.source_metadata.get("wecom_app_fingerprint"):
+                    raise ValueError("Webhook account configuration changed")
+            job.session_id = resolved.session.session_id
+            job.agent_id = resolved.session.agent_id
+            await self.store.update_run(job.run_id, session_id=job.session_id)
             attachments = []
             for media in job.message.media:
                 data, filename = await job.adapter.download_media(media)

@@ -35,6 +35,18 @@ class WecomIdentityChannelTests(unittest.IsolatedAsyncioTestCase):
         async with self.factory() as db:
             return (await db.get(ChatSession, session_id)).title
 
+    async def test_first_lookup_persists_name_before_new_session_title(self):
+        await self.enable()
+        async def lookup():
+            await self.stores.wecom.upsert_identity("application", 1, "Member", open_userid="open-member")
+            await self.stores.wecom.save_profile("application", 1, "Member", "新成员")
+            return {"application_id": "application", "application_revision": 1,
+                    "userid": "Member", "name": "新成员"}
+        calls = await self._send(lookup=lookup)
+        session_id = next(value["session_id"] for kind, value in calls if kind == "model")
+        self.assertEqual(await self.title(session_id), "wecom｜User｜新成员(open-member)")
+        self.assertIsNone(next(value["session_id"] for kind, value in calls if kind == "lookup"))
+
     async def test_profile_settings_do_not_rewrite_existing_title_or_events(self):
         await self.enable()
         bound = await self.bind()

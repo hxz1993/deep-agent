@@ -7,6 +7,11 @@ from typing import Any, Mapping
 def wecom_application_id(account: Any) -> str | None:
     """Only an explicit opt-in enables identity enrichment on a channel."""
     settings = getattr(account, "settings", None)
+    channel_type = getattr(account, "channel_type", None)
+    if channel_type == "wecom_app":
+        config = settings.get("wecom_app") if isinstance(settings, dict) else None
+        value = config.get("application_id") if isinstance(config, dict) else None
+        return value if isinstance(value, str) and value else None
     wecom = settings.get("wecom") if isinstance(settings, dict) else None
     if getattr(account, "channel_type", None) != "wecom" or not isinstance(wecom, dict):
         return None

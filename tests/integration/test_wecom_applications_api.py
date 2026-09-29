@@ -116,6 +116,26 @@ class WecomApplicationsApiTests(unittest.IsolatedAsyncioTestCase):
             response = await self.http.post(path, json=body, headers={**headers, "X-Deep-Agent-Channel-Token": "bad"})
             self.assertEqual(response.status_code, 401)
 
+    async def test_application_channel_resolves_persisted_member_via_internal_api(self):
+        app = await self.create()
+        agent = await seed_default_agent(self.stores)
+        account = await self.stores.channel.create_account(ChannelAccountCreate(
+            name="应用渠道", channel_type="wecom_app", transport="webhook",
+            webhook_token="fixture", webhook_aes_key="abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+            agent_id=agent, session_user_id="owner", enabled=True,
+            settings={"wecom_app": {"application_id": app["id"]}},
+        ))
+        await self.stores.wecom.upsert_identity(app["id"], 1, "Member")
+        await self.stores.wecom.save_profile(app["id"], 1, "Member", "成员姓名")
+        headers = {"X-Deep-Agent-Channel-Token": "fixture-internal", "X-Deep-Agent-Channel-Account": account.id}
+        with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "fixture-internal"}):
+            response = await self.http.post("/api/v1/internal/channels/wecom/resolve-user",
+                json={"sender_id": "Member"}, headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["name"], "成员姓名")
+        bound = await self.stores.channel.resolve_binding(account_id=account.id, peer_type="single", peer_id="Member")
+        self.assertEqual(bound.session.title, "wecom_app｜User｜成员姓名(Member)")
+
     async def test_empty_cache_refresh_and_unknown_job(self):
         app = await self.create()
         path = self.path + "/" + app["id"] + "/cache"

@@ -114,7 +114,7 @@ class DeepAgentChannelClient:
             return payload
 
     async def resolve_wecom_user(
-        self, account, *, sender_id: str, peer_type: str, peer_id: str, session_id: str,
+        self, account, *, sender_id: str, peer_type: str, peer_id: str, session_id: str | None,
     ) -> dict[str, Any]:
         """The API owns token/query tasks; losing this request never cancels them."""
         await self.start()

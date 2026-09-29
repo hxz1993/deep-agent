@@ -175,7 +175,7 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["items"][0]["session_count"], 1001)
         self.assertEqual(result["items"][0]["unattributed_question_count"], 1001)
 
-    async def test_wecom_app_account_details_use_application_reference_without_names(self):
+    async def test_wecom_app_account_details_enable_shared_application_profiles(self):
         async with self.factory() as db:
             account = await db.get(ChannelAccount, "b")
             account.channel_type = "wecom_app"
@@ -184,7 +184,7 @@ class DiagnosticChannelTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         row = next(item for item in (await self.queries.accounts())["items"] if item["id"] == "b")
         self.assertEqual(row["application"]["id"], "app")
-        self.assertFalse(row["user_details_enabled"])
+        self.assertTrue(row["user_details_enabled"])
 
     async def test_console_followup_counts_once_without_a_sender_for_all_channels(self):
         for channel in ("wecom", "feishu", "dingtalk", "wecom_app"):

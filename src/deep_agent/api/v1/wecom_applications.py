@@ -225,7 +225,7 @@ async def refresh_status(application_id: str, task_id: str, ctx: AppContextDep):
 async def resolve_user(body: ResolveUser, ctx: AppContextDep, account: ChannelAccountDep):
     if account is None:
         raise HTTPException(401, "Missing channel internal token")
-    if account.channel_type != "wecom":
+    if account.channel_type not in {"wecom", "wecom_app"}:
         raise HTTPException(422, "当前渠道不是企微渠道")
     if body.session_id and await ctx.stores.channel.get_channel_session(account.id, body.session_id) is None:
         raise HTTPException(403, "会话不属于当前渠道")

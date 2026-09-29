@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
+import { createMemberQuery } from '../../../console/configuration/wecom-members.js';
 const source = readFileSync(new URL('../../../console/configuration/wecom-applications.js', import.meta.url), 'utf8');
 const channelSource = readFileSync(new URL('../../../console/configuration/channels.js', import.meta.url), 'utf8');
 const template = readFileSync(new URL('../../../console/configuration-template.html', import.meta.url), 'utf8');
@@ -19,7 +20,7 @@ function harness(custom) {
     return nodes.get(id);
   };
   const context = vm.createContext({
-    window: { addEventListener() {}, loadWecomMemberTable: async () => ({ createWecomMemberTable: () => ({ load: async () => {}, dispose() {} }) }) },
+    window: { addEventListener() {}, loadWecomMemberTable: async () => ({ createWecomMemberTable: () => ({ load: async () => true, dispose() {} }) }) },
     document: { getElementById: get, querySelectorAll() { return []; }, addEventListener(type, cb) { if (type === 'DOMContentLoaded') ready.push(cb); } },
     AbortController, Map, Set, Number, Object, Array, String, Promise,
     setTimeout(fn, ms) { timers.set(++timerId, { fn, ms }); return timerId; }, clearTimeout(id) { timers.delete(id); },
@@ -261,8 +262,83 @@ test('成员模块尚未加载时重置缓存，仍会恢复成员列表读取',
   const refresh = h.admin.refresh();
   while (!requested) await new Promise(setImmediate);
   const invalidate = h.admin.invalidate();
-  resolveModule({ createWecomMemberTable: () => ({ load: async () => { reads++; }, dispose() {} }) });
+  resolveModule({ createWecomMemberTable: () => ({ load: async () => { reads++; return true; }, dispose() {} }) });
   await Promise.all([refresh, invalidate]);
   assert.equal(reads, 1);
   assert.match(h.get('wecomCacheStatus').textContent, /已标记为过期/);
+});
+
+function useMemberQuery(h) {
+  const views = [];
+  h.context.window.loadWecomMemberTable = async () => ({ createWecomMemberTable: ({ applicationId, request }) => {
+    const query = createMemberQuery({ applicationId, request, onChange: state => views.push({ ...state }) });
+    return { load: query.load, dispose: query.dispose };
+  } });
+  return views;
+}
+
+test('重置后统计请求未返回，成员表仍立即重读并展示待更新', async () => {
+  let reset = false, releaseStats;
+  const h = harness(request => {
+    if (request.path.endsWith('/cache/invalidate')) { reset = true; return { total: 1, pending: 1 }; }
+    if (reset && request.path.endsWith('/cache')) return new Promise(resolve => { releaseStats = resolve; });
+    if (request.path.includes('/cache/members?')) return { items: [{ id: 'member', name: '测试成员', status: reset ? 'stale' : 'valid' }], total: 1 };
+  });
+  const views = useMemberQuery(h);
+  await select(h);
+  assert.equal(views.at(-1).items[0].status, 'valid');
+  const resetting = h.admin.invalidate();
+  await new Promise(setImmediate);
+  try {
+    assert.equal(views.at(-1).items[0].status, 'stale');
+  } finally {
+    releaseStats({ total: 1, pending: 1 });
+    await resetting;
+  }
+  assert.match(h.get('wecomCacheStatus').textContent, /已标记为过期/);
+});
+
+test('重置成功但成员回读失败，清空旧行并明确区分刷新失败', async () => {
+  let reset = false;
+  const h = harness(request => {
+    if (request.path.endsWith('/cache/invalidate')) { reset = true; return { total: 1, pending: 1 }; }
+    if (request.path.includes('/cache/members?')) {
+      if (reset) return Promise.reject(new Error('成员接口暂时不可用'));
+      return { items: [{ id: 'member', status: 'valid' }], total: 1 };
+    }
+  });
+  const views = useMemberQuery(h);
+  await select(h); await h.admin.invalidate();
+  assert.equal(views.at(-1).items.length, 0);
+  assert.equal(views.at(-1).error, '成员接口暂时不可用');
+  assert.match(h.get('wecomCacheStatus').textContent, /缓存已重置，但页面数据读取失败/);
+});
+
+test('重置后迟到的旧成员请求不能恢复有效状态，保留查询条件', async () => {
+  let reset = false, delayed = false, releaseOld;
+  const h = harness(request => {
+    if (request.path.endsWith('/cache/invalidate')) { reset = true; return { total: 1, pending: 1 }; }
+    if (request.path.includes('/cache/members?')) {
+      if (delayed && !reset) return new Promise(resolve => { releaseOld = resolve; });
+      return { items: [{ id: 'member', status: reset ? 'stale' : 'valid' }], total: 1 };
+    }
+  });
+  let query;
+  const views = [];
+  h.context.window.loadWecomMemberTable = async () => ({ createWecomMemberTable: ({ applicationId, request }) => {
+    query = createMemberQuery({ applicationId, request, onChange: state => views.push({ ...state }) });
+    return { load: query.load, dispose: query.dispose };
+  } });
+  await select(h);
+  delayed = true;
+  const old = query.update({ q: '测试', status: 'all', sort: 'asc' });
+  const oldRequest = h.requests.at(-1);
+  await h.admin.invalidate();
+  releaseOld({ items: [{ id: 'member', status: 'valid' }], total: 1 });
+  await old;
+  assert.equal(oldRequest.signal.aborted, true);
+  assert.equal(views.at(-1).items[0].status, 'stale');
+  const params = new URL('http://local' + h.requests.findLast(request => request.path.includes('/cache/members?')).path).searchParams;
+  assert.equal(params.get('q'), '测试');
+  assert.equal(params.get('sort'), 'asc');
 });

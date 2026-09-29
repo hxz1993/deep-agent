@@ -23,6 +23,7 @@ class PreparedComponent:
     filename: str = ""
     mime: str = "application/octet-stream"
     requested_kind: str = ""
+    payload: dict | None = None
 
 
 @dataclass(frozen=True)

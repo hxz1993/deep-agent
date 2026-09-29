@@ -145,6 +145,7 @@ class WebhookApiTests(unittest.IsolatedAsyncioTestCase):
             external_message_id='123456789',external_request_id='request',sender_id='sender1',session_id=resolved.session.session_id,
             payload_hash=facts['payload_hash'],source_metadata=facts['source_metadata'])
         client = SimpleNamespace(send_message=AsyncMock(return_value={'part_count':1,'message_id':'reply','status':'sent'}),
+                                 send_component=AsyncMock(return_value={'part_count':1,'message_id':'component','status':'sent'}),
                                  media=AsyncMock(return_value=(b'{}','../data.json','application/json')))
         url = '/api/v1/internal/channels/wecom-app/'
         with patch.dict('os.environ', {'DEEP_AGENT_CHANNEL_INTERNAL_TOKEN':'fixture-token'}), patch.object(self.ctx,'get_wecom_profiles',return_value=SimpleNamespace(client=client)):
@@ -160,7 +161,23 @@ class WebhookApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code,200,response.text)
             self.assertEqual(response.content,b'{}')
             self.assertNotIn('../',response.headers['content-disposition'])
+            card = {'channel_run_id':claimed.run.id, 'kind':'textcard',
+                    'payload': {'title':'结果', 'description':'完成', 'url':'https://example.com/report'}}
+            response = await self.client.post(url+'send-component', headers=headers, json=card)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(client.send_component.await_args.args[1:3], ('sender1', 'textcard'))
+            for invalid in ({**card, 'recipient':'other'}, {**card, 'data_base64':'YWJj'},
+                            {**card, 'payload':{**card['payload'], 'url':'javascript:bad'}},
+                            {'channel_run_id':claimed.run.id, 'kind':'image', 'data_base64':'bm90LWltYWdl', 'filename':'x.png'},
+                            {'channel_run_id':claimed.run.id, 'kind':'file', 'data_base64':'!!!', 'filename':'x.txt'}):
+                response = await self.client.post(url+'send-component', headers=headers, json=invalid)
+                self.assertEqual(response.status_code, 422, response.text)
+            self.assertEqual(client.send_component.await_count, 1)
             await self.stores.wecom.update_application(self.app_record.id,app_secret='rotated-fixture')
+            response = await self.client.post(url+'send-component', headers=headers, json=card)
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(client.send_component.await_count, 1)
+
             response = await self.client.post(url+'send-message',headers=headers,json={'channel_run_id':claimed.run.id,'message_type':'markdown','text':'not sent'})
             self.assertEqual(response.status_code,409)
             self.assertEqual(client.send_message.await_count,1)

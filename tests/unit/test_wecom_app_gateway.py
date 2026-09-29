@@ -259,8 +259,8 @@ class WecomAppGatewayTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ChannelGatewayUnavailableError):
                 await client.statuses()
 
-    def test_capabilities_do_not_claim_outbound_media(self):
+    def test_capabilities_cover_application_media_and_cards(self):
         caps = WecomAppAdapter.message_capabilities()
-        self.assertEqual(caps.kinds, ('text',))
+        self.assertEqual(caps.kinds, ('text', 'image', 'file', 'audio', 'video', 'textcard', 'news'))
         self.assertFalse(caps.supports_reply)
-        self.assertFalse(caps.media_fallback_to_file)
+        self.assertTrue(caps.media_fallback_to_file)

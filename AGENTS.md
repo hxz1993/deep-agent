@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.6`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.7`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -391,4 +391,4 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 
 渠道应用关联：企微机器人、企微应用、飞书、钉钉统一在保存入口调用平台 `checkApiKey` 解析 Key 所属用户，与 `session_user_id` 比较；开启关联必须填写 Key。校验使用合并后的有效配置，保留旧 Key、更换关联用户也须校验，不复用浏览器凭据，不要求 Key 用户具备企业管理员身份。无效、不匹配或上游不可用均禁止保存，不新增环境变量或表结构。
 
-企微应用回复使用 Markdown 子集整理与 2048 UTF-8 字节安全分段；处理超过3秒仅发一次纯文本等待提示，终态及渠道关闭清理任务。内部发送仅使用 send-message 和显式 text/markdown 类型，无旧 send-text 兼容入口，不改其他渠道回复和运行时身份校验。
+企微应用回复使用 Markdown 子集整理与 2048 UTF-8 字节安全分段；处理超过3秒仅发一次纯文本等待提示，终态及渠道关闭清理任务。内部正文使用 send-message，媒体与结构化卡片使用 send-component；图片、文件、AMR语音、MP4视频及文字/图文卡片通过同一应用发送，收件人只来自当前渠道 Run。工具必须先校验渠道能力再读取文件，禁止把不支持类型误报为文件损坏。真实应用格式验收与受控 HTTP 测试分别报告；不改其他渠道回复和运行时身份校验。

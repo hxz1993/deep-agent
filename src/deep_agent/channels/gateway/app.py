@@ -150,7 +150,7 @@ def create_gateway_app() -> FastAPI:
                 total = 0
                 for index, component in enumerate(command.components):
                     data = None
-                    if component.kind != "text":
+                    if component.kind in {"image", "file", "audio", "video"}:
                         uploaded = form.get(f"media_{index}")
                         if not isinstance(uploaded, UploadFile):
                             raise ValueError("Missing media")

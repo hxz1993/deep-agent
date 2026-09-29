@@ -154,3 +154,62 @@ class MessageToolTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ModelRetry):
                 await function(ctx, [MessageComponent(type="text", text="x")])
         gateway.send_message.assert_not_awaited()
+
+    async def test_cards_validate_and_do_not_download(self):
+        card = MessageComponent(type="textcard", payload={"title": "结果", "description": "查看详情", "url": "https://example.test/report"})
+        deps = context().deps
+        deps.file_store = SimpleNamespace(download_bounded=AsyncMock())
+        prepared = await prepare_components(deps, [card], replace(caps(), kinds=("textcard",)))
+        self.assertEqual(prepared[0].payload["title"], "结果")
+        deps.file_store.download_bounded.assert_not_awaited()
+        with self.assertRaises(DeliveryError) as caught:
+            await prepare_components(deps, [card], caps())
+        self.assertEqual(caught.exception.code, "unsupported_content")
+
+    async def test_card_invalid_payloads_rejected(self):
+        base = {"title": "结果", "description": "详情", "url": "https://example.test"}
+        for patch_value in ({"url": "javascript:alert(1)"}, {"url": "https://u:p@example.test"}, {"user": "other"}, {"title": "中" * 43}):
+            with self.assertRaises(ValidationError):
+                MessageComponent(type="textcard", payload={**base, **patch_value})
+        for articles in ([], [{"title": "A", "url": "https://example.test"}] * 9):
+            with self.assertRaises(ValidationError):
+                MessageComponent(type="news", payload={"articles": articles})
+        with self.assertRaises(ValidationError):
+            MessageComponent(type="file", file_id="a", payload=base)
+
+    async def test_unsupported_media_is_rejected_before_lookup_or_download(self):
+        deps = context().deps
+        deps.file_store = SimpleNamespace(download_bounded=AsyncMock())
+        with self.assertRaises(DeliveryError) as caught:
+            await prepare_components(deps, [MessageComponent(type="image", file_id="unknown")],
+                                     replace(caps(), kinds=("text",), file_limit=0))
+        self.assertEqual(caught.exception.code, "unsupported_content")
+        deps.file_store.download_bounded.assert_not_awaited()
+
+    async def test_native_media_download_limit_can_exceed_file_limit(self):
+        deps = context().deps
+        deps.attachment_by_id = {"a": AttachmentRef(id="a", name="sound.opus")}
+        data = b"OggSOpusHead" + b"x" * 500
+        deps.file_store = SimpleNamespace(download_bounded=AsyncMock(return_value=data))
+        configured = replace(caps(), kinds=("audio",), file_limit=0, audio_limit=1000)
+        prepared = await prepare_components(deps, [MessageComponent(type="audio", file_id="a")], configured)
+        self.assertEqual(prepared[0].kind, "audio")
+        self.assertEqual(deps.file_store.download_bounded.call_args.kwargs["max_bytes"], 1000)
+
+    async def test_media_missing_native_support_can_fallback_to_file(self):
+        deps = context().deps
+        deps.attachment_by_id = {"a": AttachmentRef(id="a", name="sound.opus")}
+        deps.file_store = SimpleNamespace(download_bounded=AsyncMock(return_value=b"OggSOpusHead"))
+        prepared = await prepare_components(deps, [MessageComponent(type="audio", file_id="a")], replace(caps(), kinds=("file",)))
+        self.assertEqual(prepared[0].kind, "file")
+
+    async def test_wire_card_roundtrip_and_revalidation(self):
+        from dataclasses import asdict
+        from deep_agent.channels.operations import WireComponent
+        payload = {"articles": [{"title": "结果", "url": "https://example.test", "picurl": "https://example.test/p.png"}]}
+        item = PreparedComponent("news", payload=payload, requested_kind="news")
+        wire = WireComponent.model_validate({k: v for k, v in asdict(item).items() if k != "data"})
+        copied = PreparedComponent(**wire.model_dump())
+        self.assertEqual(copied.payload["articles"][0]["picurl"], payload["articles"][0]["picurl"])
+        with self.assertRaises(ValidationError):
+            WireComponent(kind="news", requested_kind="news", payload={"articles": []})

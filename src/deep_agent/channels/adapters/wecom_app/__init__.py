@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -52,9 +52,12 @@ class WecomAppAdapter:
 
     @staticmethod
     def message_capabilities():
-        return MessageCapabilities(kinds=('text',), supports_reply=False, text_limit=2048,
-                                   file_limit=0, image_limit=0, audio_limit=0, video_limit=0,
-                                   media_fallback_to_file=False)
+        return MessageCapabilities(kinds=('text', 'image', 'file', 'audio', 'video', 'textcard', 'news'),
+                                   supports_reply=False, text_limit=2048,
+                                   file_limit=20 * 1024 * 1024, image_limit=10 * 1024 * 1024,
+                                   audio_limit=2 * 1024 * 1024, video_limit=10 * 1024 * 1024,
+                                   audio_formats=('amr',), image_formats=('png', 'jpeg'),
+                                   video_formats=('mp4',), media_fallback_to_file=True)
 
     async def start(self, on_message):
         self._active = True
@@ -183,10 +186,26 @@ class WecomAppAdapter:
         return result
 
     async def send_component(self, target, component, *, reply_to_current=False):
-        if component.kind != 'text' or reply_to_current:
-            raise DeliveryError('unsupported_kind', '企微应用当前仅支持文本发送')
-        result = await self._send(target.message_id, component.text)
-        return ComponentReceipt('text', message_id=result.get('message_id'))
+        if reply_to_current or component.kind not in self.message_capabilities().kinds:
+            raise DeliveryError('unsupported_kind', '企微应用不支持此消息类型或引用回复')
+        if component.kind == 'text':
+            result = await self._send(target.message_id, component.text)
+        else:
+            if component.kind in {'image', 'audio', 'video'}:
+                from deep_agent.services.wecom_client import validate_outbound_media, WecomError
+                try:
+                    validate_outbound_media(component.kind, component.data or b'')
+                except WecomError:
+                    component = replace(component, kind='file')
+            if component.kind == 'file':
+                from deep_agent.services.wecom_client import validate_outbound_media, WecomError
+                try:
+                    validate_outbound_media('file', component.data or b'')
+                except WecomError:
+                    raise DeliveryError('invalid_content', '企微应用文件需大于5字节且不超过20MB') from None
+            run_id = self._run(target.message_id)
+            result = await self.client.wecom_app_send_component(self.account, run_id, component)
+        return ComponentReceipt(component.kind, message_id=result.get('message_id'))
 
 
 async def _amr_to_wav(data: bytes) -> bytes:

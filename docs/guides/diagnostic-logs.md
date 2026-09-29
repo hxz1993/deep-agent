@@ -43,6 +43,8 @@ Agent 可复用管理员身份调用同一只读接口：
 - `GET /api/v1/diagnostics/logs/status`
 - `GET /api/v1/diagnostics/logs?session_id=...&run_id=...`
 
+API Key 调用应经过平台网关，携带 `X-Deepfos-Key`、`app`、`space`；`user` 由可信网关注入，不能把客户端任意填写的用户视为可信身份。后端调用平台 `checkApiKey`，校验返回用户与网关身份一致，再校验企业管理员。不要同时携带登录 Token/Cookie。缺失上下文、无效 Key、身份不匹配或混用凭证返回 401；有效非管理员返回 403；平台服务不可用或返回格式异常返回 503。登录 Token 的既有链路保持不变。直接访问后端且没有可信 `user` 仍返回 401，本地开发身份适配不能作为真实 Key 验收证据。
+
 查询参数为 `start` / `end`（UTC ISO 时间）、`source`（`api` / `gateway`）、`level`、`session_id`、`run_id`、普通文本 `q`、`limit`、`cursor`。
 默认最近 24 小时、每页 200 条，最多 500 条。结果按时间倒序，含 `items`、`next_cursor`、`partial`、`scanned_bytes`、`range`、`instance_id`。
 `partial=true` 不能解读为完整结果；有游标时继续查询，无游标时缩小来源或检查目录状态。

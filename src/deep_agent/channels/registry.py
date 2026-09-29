@@ -43,8 +43,11 @@ def default_registry() -> AdapterRegistry:
     from .adapters.feishu import FeishuAdapter
     from .adapters.dingtalk import DingTalkAdapter
 
+    from .adapters.wecom_app import WecomAppAdapter
+
     registry = AdapterRegistry()
     registry.register("wecom", WecomAdapter, WecomAdapter.connection_fingerprint)
     registry.register("feishu", FeishuAdapter, FeishuAdapter.connection_fingerprint)
     registry.register("dingtalk", DingTalkAdapter, DingTalkAdapter.connection_fingerprint)
+    registry.register("wecom_app", WecomAppAdapter, WecomAppAdapter.connection_fingerprint)
     return registry

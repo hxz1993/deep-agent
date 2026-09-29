@@ -430,8 +430,10 @@ class ChannelAccount(Base):
     transport: Mapped[str] = mapped_column(
         String(32), nullable=False, default="websocket", server_default="websocket"
     )
-    bot_id: Mapped[str] = mapped_column(KeyText, nullable=False)
-    secret: Mapped[str] = mapped_column(Text, nullable=False)
+    bot_id: Mapped[str | None] = mapped_column(KeyText, nullable=True)
+    secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    webhook_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    webhook_aes_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_id: Mapped[str] = mapped_column(
         String(AGENT_ID_LENGTH),
         nullable=False,

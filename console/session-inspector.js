@@ -194,7 +194,7 @@ export function renderSessionInspector({
     </div></section>` : `<section class="inspector-section">
       <p class="inspector-channel-note">${state.sessionId ? "当前会话不是由渠道发起的。" : "尚未选择渠道会话。"}</p>
       <header><strong>Agent 关联渠道</strong></header>
-      <div class="inspector-facts compact">${agentChannels.map((account) => inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(account.name)}<span class="inspector-channel-badge">${escapeHtml(account.channel_type === "wecom" ? "企微" : account.channel_type === "feishu" ? "飞书" : account.channel_type === "dingtalk" ? "钉钉" : account.channel_type)}</span></span>`)).join("")}</div>
+      <div class="inspector-facts compact">${agentChannels.map((account) => inspectorFactHtml("渠道名称", `<span class="inspector-channel-name">${escapeHtml(account.name)}<span class="inspector-channel-badge">${escapeHtml(account.channel_type === "wecom_app" ? "企微应用" : account.channel_type === "wecom" ? "企微" : account.channel_type === "feishu" ? "飞书" : account.channel_type === "dingtalk" ? "钉钉" : account.channel_type)}</span></span>`)).join("")}</div>
     </section>`;
   const sessionContent = `<section class="inspector-section inspector-session-group">
     <div class="inspector-facts">

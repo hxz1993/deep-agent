@@ -8,7 +8,7 @@ from deep_agent.services.resource_deletion import DeleteConfirmation, delete_res
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.deps import get_channel_store
 from deep_agent.db.ids import normalize_agent_id
-from deep_agent.db.stores.channel import ChannelStore
+from deep_agent.db.stores.channel import ChannelStore, account_configuration_snapshot
 from deep_agent.schemas.channel import (
     ChannelAccountCreate,
     ChannelAccountResponse,
@@ -18,7 +18,14 @@ from deep_agent.schemas.channel import (
     ChannelRuntimeResponse,
 )
 from deep_agent.schemas.llm_provider import mask_api_key
-from deep_agent.channels.app_context import public_channel_settings, validate_channel_settings
+from deep_agent.channels.app_context import (
+    public_channel_settings, validate_channel_settings, merge_channel_settings,
+    channel_deepfos_app, channel_deepfos_key,
+)
+from deep_agent.agent.request_context import derive_space_from_app
+from deep_agent.security.console_admin import (
+    PlatformEnterpriseAdminChecker, PlatformApiKeyRejectedError, ConsoleAdminAuthenticationError, ConsoleAdminUnavailableError,
+)
 from deep_agent.services.channel_gateway_client import (
     ChannelGatewayClient,
     ChannelGatewayUnavailableError,
@@ -32,7 +39,8 @@ router = APIRouter()
 async def channel_types():
     return [{"type": "wecom", "name": "企业微信", "transport": "websocket"},
             {"type": "feishu", "name": "飞书", "transport": "websocket"},
-            {"type": "dingtalk", "name": "钉钉", "transport": "websocket"}]
+            {"type": "dingtalk", "name": "钉钉", "transport": "websocket"},
+            {"type": "wecom_app", "name": "企微应用", "transport": "webhook"}]
 
 
 
@@ -53,6 +61,31 @@ async def _ensure_agent(ctx: AppContextDep, agent_id: str) -> str:
     return normalized
 
 
+async def _ensure_key_owner(settings: dict, session_user_id: str) -> None:
+    app_id = channel_deepfos_app(settings)
+    if not app_id:
+        return
+    key = channel_deepfos_key(settings)
+    if not key:
+        raise HTTPException(422, "开启应用关联后，请填写会话关联用户的 API Key")
+    try:
+        owner = await PlatformEnterpriseAdminChecker().resolve_api_key_user(
+            key, app_id, derive_space_from_app(app_id),
+        )
+    except PlatformApiKeyRejectedError as exc:
+        raise HTTPException(422, exc.public_message) from None
+    except ConsoleAdminAuthenticationError:
+        raise HTTPException(422, "API Key 请求被拒绝，请检查 Key 格式及凭据是否有效") from None
+    except ConsoleAdminUnavailableError:
+        raise HTTPException(503, "暂时无法校验 API Key 所属用户，请稍后重试") from None
+    if owner != session_user_id:
+        raise HTTPException(422, "API Key 所属用户与会话关联用户不一致，请使用同一用户的 API Key")
+
+
+def webhook_url(account_id: str) -> str:
+    return f"/api/v1/webhooks/channels/{account_id}"
+
+
 async def _response(row, ctx: AppContextDep) -> ChannelAccountResponse:
     agent = await ctx.stores.agent.get_by_id(row.agent_id)
     return ChannelAccountResponse(
@@ -61,6 +94,11 @@ async def _response(row, ctx: AppContextDep) -> ChannelAccountResponse:
         channel_type=row.channel_type,
         transport=row.transport,
         bot_id=row.bot_id,
+        webhook_token_set=bool(row.webhook_token),
+        webhook_token_masked=mask_api_key(row.webhook_token),
+        webhook_aes_key_set=bool(row.webhook_aes_key),
+        webhook_aes_key_masked=mask_api_key(row.webhook_aes_key),
+        webhook_url=webhook_url(row.id) if row.transport == "webhook" else None,
         secret_set=bool(row.secret),
         secret_masked=mask_api_key(row.secret),
         agent_id=row.agent_id,
@@ -103,6 +141,7 @@ async def create_channel_account(
 ) -> ChannelAccountResponse:
     agent_id = await _ensure_agent(ctx, body.agent_id)
     body = body.model_copy(update={"agent_id": agent_id})
+    await _ensure_key_owner(merge_channel_settings(body.settings), body.session_user_id)
     try:
         if body.registration_id:
             from deep_agent.services.channel_registration import RegistrationError
@@ -157,13 +196,17 @@ async def update_channel_account(
     current = await store.get_account(account_id)
     if current is None:
         raise HTTPException(status_code=404, detail="Channel account not found")
+    expected_configuration = account_configuration_snapshot(current)
     updates = body.model_dump(exclude_unset=True)
     if body.agent_id is not None:
         updates["agent_id"] = await _ensure_agent(ctx, body.agent_id)
     body = ChannelAccountUpdate.model_validate(updates)
     try:
         validate_channel_settings(current.channel_type, body.settings if body.settings is not None else current.settings or {})
-        row = await store.update_account(account_id, body)
+        effective_settings = (merge_channel_settings(body.settings, current.settings)
+                              if body.settings is not None else current.settings or {})
+        await _ensure_key_owner(effective_settings, body.session_user_id or current.session_user_id)
+        row = await store.update_account(account_id, body, expected_configuration=expected_configuration)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if row is None:

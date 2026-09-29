@@ -40,7 +40,7 @@ class MessageJob:
 def _log_job(event: str, job: MessageJob, **fields: Any) -> None:
     log_event(event, account_id=job.account.id, channel_run_id=job.run_id,
               run_id=job.agent_run_id, session_id=job.session_id,
-              agent_id=job.agent_id, **fields)
+              agent_id=job.agent_id, request_id=job.message.request_id, **fields)
 
 
 @dataclass
@@ -69,15 +69,18 @@ class ChannelService:
     def open_account(self, account_id: str) -> None:
         self._closed.discard(account_id)
 
-    async def receive(self, account, adapter: ChannelAdapter, message: InboundMessage) -> None:
+    async def receive(self, account, adapter: ChannelAdapter, message: InboundMessage, *, strict=False) -> dict | None:
         key = (account.id, message.peer_type, message.peer_id)
         if account.id in self._closed:
+            if strict:
+                raise RuntimeError("Channel account is closed")
             return
         peer = self.peers.setdefault(key, PeerQueue())
         peer.order += 1
         order = peer.order
         command = parse_command(message)
         control = command in {"/stop", "/new"}
+        command_delegated = False
         if control:
             # Gate dispatch before the first database await. Control messages
             # never wait behind the ordinary Agent worker.
@@ -86,14 +89,23 @@ class ChannelService:
         if task:
             self._receivers[task] = account.id
         try:
-            log_event("channel_received", account_id=account.id)
+            log_event("channel_received", account_id=account.id, request_id=message.request_id)
             async with peer.ingress:
                 account = await self.store.get_account(account.id)
                 if account is None or not account.enabled or account.id in self._closed:
+                    if strict:
+                        raise RuntimeError("Channel account is unavailable")
                     return
+                if strict:
+                    from deep_agent.services.wecom_webhook import account_fingerprint
+                    if account_fingerprint(account) != message.source_metadata.get("wecom_app_fingerprint"):
+                        raise ValueError("Webhook account changed after verification")
                 previous = await self.store.get_message(account.id, message.message_id)
-                if previous is not None and not self.store.can_retry(previous):
-                    return
+                if previous is not None:
+                    if previous.payload_hash != message.payload_hash:
+                        raise ValueError("Channel message payload conflict")
+                    if not self.store.can_retry(previous):
+                        return {"status": "duplicate", "channel_run_id": previous.id}
                 binding = await self.store.ensure_binding(
                     account_id=account.id, peer_type=message.peer_type,
                     peer_id=message.peer_id, peer_metadata=message.peer_metadata,
@@ -108,29 +120,73 @@ class ChannelService:
                     session_id=None, payload_hash=message.payload_hash, stream_id=reply_id,
                 )
                 if not claimed.claimed:
-                    return
+                    return {"status": "duplicate", "channel_run_id": claimed.run.id}
+                if hasattr(adapter, "bind_run"):
+                    adapter.bind_run(message, claimed.run.id)
                 job = MessageJob(account, adapter, message, claimed.run.id, reply_id, order)
                 if command is None:
                     await self.store.update_run(job.run_id, processing_status="queued")
                     peer.pending.append(job)
                     _log_job("channel_queued", job, queue_depth=len(peer.pending))
                     self._kick(peer)
-                    return
+                    return {"status": "accepted", "channel_run_id": job.run_id}
+            if strict:
+                command_task = asyncio.create_task(
+                    self._webhook_command(peer, job, command, control), name="channel-webhook-command")
+                self._receivers[command_task] = account.id
+                command_task.add_done_callback(self._webhook_command_done)
+                command_delegated = True
+                return {"status": "accepted", "channel_run_id": job.run_id}
+            if control:
+                async with peer.control:
+                    await self._control(peer, job, command)
+            else:
+                await self._read_command(peer, job, command)
+            if hasattr(adapter, "release_run"):
+                adapter.release_run(message)
+            return {"status": "accepted", "channel_run_id": job.run_id}
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_event("channel_ingress_failed", account_id=getattr(account, "id", None), error_type=type(exc).__name__, request_id=message.request_id)
+            if strict:
+                raise
+        finally:
+            if control and not command_delegated:
+                peer.controls -= 1
+                self._kick(peer)
+            if task:
+                self._receivers.pop(task, None)
+
+    def _webhook_command_done(self, task):
+        self._receivers.pop(task, None)
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                log_event("channel_ingress_failed", error_type=type(error).__name__)
+
+    async def _webhook_command(self, peer, job, command, control):
+        try:
             if control:
                 async with peer.control:
                     await self._control(peer, job, command)
             else:
                 await self._read_command(peer, job, command)
         except asyncio.CancelledError:
+            await self.store.update_run(job.run_id, processing_status="interrupted",
+                                        delivery_status="failed", error_code="gateway_cancelled")
             raise
         except Exception as exc:
-            log_event("channel_ingress_failed", account_id=account.id, error_type=type(exc).__name__)
+            _log_job("channel_ingress_failed", job, error_type=type(exc).__name__)
+            await self.store.update_run(job.run_id, processing_status="failed",
+                                        delivery_status="failed", error_code="command_failed")
         finally:
+            if hasattr(job.adapter, "release_run"):
+                job.adapter.release_run(job.message)
             if control:
                 peer.controls -= 1
                 self._kick(peer)
-            if task:
-                self._receivers.pop(task, None)
+            self._receivers.pop(asyncio.current_task(), None)
 
     def _kick(self, peer: PeerQueue) -> None:
         if peer.controls or peer.blocked or not peer.pending:
@@ -150,6 +206,8 @@ class ChannelService:
                     if not job.stopped:
                         raise
                 finally:
+                    if hasattr(job.adapter, "release_run"):
+                        job.adapter.release_run(job.message)
                     peer.active = None
         finally:
             peer.worker = None
@@ -179,18 +237,14 @@ class ChannelService:
                 job.stopped = True
                 raise asyncio.CancelledError
             job.account = account
-            resolved = await self.store.resolve_binding(
-                account_id=account.id, peer_type=job.message.peer_type,
-                peer_id=job.message.peer_id, peer_metadata=job.message.peer_metadata,
-            )
-            # Session creation and its routing identity share one DB snapshot.
-            # A concurrent account edit must not pair a new Session with the
-            # previously loaded Agent/user configuration.
-            account = resolved.account or account
-            job.account = account
-            job.session_id = resolved.session.session_id
-            job.agent_id = resolved.session.agent_id
-            await self.store.update_run(job.run_id, session_id=job.session_id)
+            if account.channel_type == "wecom_app":
+                from deep_agent.services.wecom_webhook import account_fingerprint
+                if account_fingerprint(account) != job.message.source_metadata.get("wecom_app_fingerprint"):
+                    raise ValueError("Webhook account configuration changed")
+                if job.message.source_metadata.get("wecom_app_unsupported"):
+                    await self.store.update_run(job.run_id, processing_status="completed")
+                    await self._deliver(job, job.message.text or "暂不支持此类型的消息，请发送文字、图片、语音或文件。")
+                    return
             # Start native feedback before media/model I/O, and reuse this reply
             # ID for text and terminal replies so there is only one bubble.
             loading_started = True
@@ -206,7 +260,7 @@ class ChannelService:
                         identity = await self.deep_agent.resolve_wecom_user(
                             account, sender_id=job.message.sender_id,
                             peer_type=job.message.peer_type, peer_id=job.message.peer_id,
-                            session_id=job.session_id,
+                            session_id=None,
                         )
                 except Exception as exc:
                     _log_job("channel_identity_unavailable", job, error_type=type(exc).__name__,
@@ -214,6 +268,22 @@ class ChannelService:
                     # Identity is optional; auth/network/permission failures
                     # must not turn an otherwise valid chat into a failed Run.
                     identity = None
+            # Resolve and persist member data before the initial title snapshot.
+            resolved = await self.store.resolve_binding(
+                account_id=account.id, peer_type=job.message.peer_type,
+                peer_id=job.message.peer_id, peer_metadata=job.message.peer_metadata,
+            )
+            # Session creation and its routing identity share one DB snapshot.
+            # A concurrent account edit must not pair a new Session with the
+            # previously loaded Agent/user configuration.
+            account = resolved.account or account
+            job.account = account
+            if account.channel_type == "wecom_app":
+                if account_fingerprint(account) != job.message.source_metadata.get("wecom_app_fingerprint"):
+                    raise ValueError("Webhook account configuration changed")
+            job.session_id = resolved.session.session_id
+            job.agent_id = resolved.session.agent_id
+            await self.store.update_run(job.run_id, session_id=job.session_id)
             attachments = []
             for media in job.message.media:
                 data, filename = await job.adapter.download_media(media)
@@ -221,6 +291,8 @@ class ChannelService:
                 if media.input_mode == "reference":
                     uploaded["input_mode"] = "reference"
                 attachments.append(uploaded)
+                if account.channel_type == "wecom_app":
+                    _log_job("webhook_media_upload_completed", job)
             input_options = {}
             if job.message.quote is not None:
                 quote = job.message.quote
@@ -290,6 +362,16 @@ class ChannelService:
                     "schema_version": "1.0", "label": f"发送者 · {job.message.sender_id}",
                     "payload": source,
                 })
+            if account.channel_type == "wecom_app":
+                fresh = await self.store.get_account(account.id)
+                if (fresh is None or not fresh.enabled
+                        or account_fingerprint(fresh) != job.message.source_metadata.get("wecom_app_fingerprint")):
+                    raise ValueError("Webhook account configuration changed before dispatch")
+                app_info = await self.deep_agent.wecom_app_info(account)
+                metadata = job.message.source_metadata
+                if (app_info.get("application_id") != metadata.get("wecom_app_application_id")
+                        or app_info.get("revision") != metadata.get("wecom_app_revision")):
+                    raise ValueError("Webhook application changed before dispatch")
             # Durable dispatch boundary: absence of an SSE run ID is not proof
             # that the API did not execute the request.
             await self.store.update_run(job.run_id, processing_status="running", delivery_status="streaming")
@@ -393,13 +475,15 @@ class ChannelService:
         except Exception as exc:
             await self._cancel_outbound(job)
             _log_job("channel_processing_failed", job, error_type=type(exc).__name__)
+            from .adapters.wecom_app import WecomVoiceError
+            voice_error = isinstance(exc, WecomVoiceError)
             missing_model = isinstance(exc, AgentModelNotConfiguredError)
             await self.store.update_run(
                 job.run_id, processing_status="failed", delivery_status="failed",
                 error_code="model_not_configured" if missing_model else ("agent_failed" if job.dispatched else "preflight_failed"),
                 error_message="Agent 尚未配置模型" if missing_model else "Channel message processing failed",
             )
-            await self._deliver(job, "Agent 尚未配置模型，请在 DeepAgent 控制台配置模型。" if missing_model else "消息处理失败，请稍后重试或在 DeepAgent 控制台查看状态。")
+            await self._deliver(job, str(exc) if voice_error else "Agent 尚未配置模型，请在 DeepAgent 控制台配置模型。" if missing_model else "消息处理失败，请稍后重试或在 DeepAgent 控制台查看状态。")
         finally:
             await self._cancel_outbound(job)
             if stream is not None:
@@ -475,6 +559,8 @@ class ChannelService:
             discarded = [item for item in peer.pending if item.order < job.order]
             peer.pending = deque(item for item in peer.pending if item.order >= job.order)
             for item in discarded:
+                if hasattr(item.adapter, "release_run"):
+                    item.adapter.release_run(item.message)
                 await self.store.update_run(item.run_id, processing_status="interrupted", delivery_status="failed", error_code="user_stopped", error_message="Queued message cancelled by channel command")
             binding = await self.store.get_binding(job.account.id, job.message.peer_type, job.message.peer_id)
             active = peer.active

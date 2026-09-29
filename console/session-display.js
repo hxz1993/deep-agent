@@ -5,11 +5,11 @@ export function formatSessionIdSubtitle(sessionId) {
 
 /** Read-only presentation of the Session's persisted channel origin snapshot. */
 export function channelOriginPresentation(session) {
-  const kind = String(session?.source_type || "internal").match(/^channel:(wecom|feishu|dingtalk)$/)?.[1];
+  const kind = String(session?.source_type || "internal").match(/^channel:(wecom_app|wecom|feishu|dingtalk)$/)?.[1];
   if (!kind) return null;
   const channel = { ...(session.channel || {}), channel_type: kind };
 
-  const platform = channel.channel_type === "wecom" ? "企微" : channel.channel_type === "feishu" ? "飞书" : channel.channel_type === "dingtalk" ? "钉钉" : String(channel.channel_type);
+  const platform = channel.channel_type === "wecom_app" ? "企微应用" : channel.channel_type === "wecom" ? "企微" : channel.channel_type === "feishu" ? "飞书" : channel.channel_type === "dingtalk" ? "钉钉" : String(channel.channel_type);
   const peerKey = channel.peer_type === "group" ? "Chat ID" : "User ID";
   const metadata = channel.peer_metadata && typeof channel.peer_metadata === "object" ? channel.peer_metadata : {};
   const displayName = String(metadata.display_name || "");
@@ -20,7 +20,7 @@ export function channelOriginPresentation(session) {
     platform,
     kind,
     sourceId: String(session.source_id || "未记录"),
-    logo: `./assets/channel-logos/${kind === "wecom" ? "wecom.png" : kind === "feishu" ? "feishu.ico" : "dingtalk.svg"}`,
+    logo: `./assets/channel-logos/${kind === "wecom_app" ? "wecom-app.svg" : kind === "wecom" ? "wecom.png" : kind === "feishu" ? "feishu.ico" : "dingtalk.svg"}`,
     peerKey,
     peerName,
     displayName,

@@ -96,8 +96,9 @@ async def _response(ctx, row):
     channels = [
         {"id": account.id, "name": account.name}
         for account in await ctx.stores.channel.list_accounts()
-        if isinstance((account.settings or {}).get("wecom"), dict)
-        and account.settings["wecom"].get("application_id") == row.id
+        if any(isinstance((account.settings or {}).get(key), dict)
+               and account.settings[key].get("application_id") == row.id
+               for key in ("wecom", "wecom_app"))
     ]
     return {
         "id": row.id, "name": row.name, "corp_id": row.corp_id,
@@ -224,7 +225,7 @@ async def refresh_status(application_id: str, task_id: str, ctx: AppContextDep):
 async def resolve_user(body: ResolveUser, ctx: AppContextDep, account: ChannelAccountDep):
     if account is None:
         raise HTTPException(401, "Missing channel internal token")
-    if account.channel_type != "wecom":
+    if account.channel_type not in {"wecom", "wecom_app"}:
         raise HTTPException(422, "当前渠道不是企微渠道")
     if body.session_id and await ctx.stores.channel.get_channel_session(account.id, body.session_id) is None:
         raise HTTPException(403, "会话不属于当前渠道")

@@ -7,6 +7,11 @@ from typing import Any, Mapping
 def wecom_application_id(account: Any) -> str | None:
     """Only an explicit opt-in enables identity enrichment on a channel."""
     settings = getattr(account, "settings", None)
+    channel_type = getattr(account, "channel_type", None)
+    if channel_type == "wecom_app":
+        config = settings.get("wecom_app") if isinstance(settings, dict) else None
+        value = config.get("application_id") if isinstance(config, dict) else None
+        return value if isinstance(value, str) and value else None
     wecom = settings.get("wecom") if isinstance(settings, dict) else None
     if getattr(account, "channel_type", None) != "wecom" or not isinstance(wecom, dict):
         return None
@@ -36,7 +41,7 @@ def normalize_peer_metadata(
 
 
 def channel_session_title(peer_type: str, peer_id: str, metadata: Mapping[str, Any] | None, *, channel_type: str | None = None) -> str:
-    prefix = f"{channel_type}｜" if channel_type in {"wecom", "feishu", "dingtalk"} else ""
+    prefix = f"{channel_type}｜" if channel_type in {"wecom", "wecom_app", "feishu", "dingtalk"} else ""
     if peer_type in {"group", "chatid"}:
         return f"{prefix}Group｜{peer_id}"
     name = normalize_peer_metadata(peer_type, peer_id, metadata).get("display_name")

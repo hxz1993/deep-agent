@@ -2,7 +2,7 @@
 from sqlalchemy import or_
 from deep_agent.db.models import ChatSession
 
-CHANNEL_TYPES = frozenset({"wecom", "feishu", "dingtalk"})
+from deep_agent.schemas.session_source import CHANNEL_TYPES
 
 def channel_source_type(channel_type: str) -> str:
     if channel_type not in CHANNEL_TYPES:

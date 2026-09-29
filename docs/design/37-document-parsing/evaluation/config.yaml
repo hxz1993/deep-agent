@@ -1,0 +1,5 @@
+model:
+  small_backend: onnx
+  vlm:
+    engine: llama-cpp
+    max_concurrency: 1

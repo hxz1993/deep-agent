@@ -1,0 +1,18 @@
+{
+  "command": [
+    "mineru-kit",
+    "parse",
+    "complex-numbers-two-pages.pdf",
+    "-o",
+    "<unique-output.zip>",
+    "--format",
+    "zip",
+    "--tier",
+    "standard"
+  ],
+  "tier": "standard",
+  "seconds": 21.9,
+  "exit_code": -6,
+  "status": "completed",
+  "fixture_sha256": "14e40703d91c233d2ac36948615ad70080eadccc3e275d88e8cc0676134e4747"
+}

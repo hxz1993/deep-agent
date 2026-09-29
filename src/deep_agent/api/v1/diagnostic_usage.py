@@ -15,6 +15,7 @@ from fastapi.responses import Response
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.diagnostic_routes import NoStoreRoute
 from deep_agent.api.v1.request_identity import RequestUserDep
+from deep_agent.schemas.session_source import SessionSourceType
 from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, SessionFilters, query_budget
 from deep_agent.diagnostics.usage import UsageQueries
@@ -39,7 +40,7 @@ Sort = Literal["total_tokens", "input_tokens", "output_tokens", "requests"]
 def filters(start: UtcDatetime | None = None, end: UtcDatetime | None = None,
             timezone: str = Query(default="UTC", max_length=64),
             agent_id: str | None = Query(default=None, max_length=256),
-            source_type: Literal["internal", "channel:wecom", "channel:feishu", "channel:dingtalk"] | None = Query(default=None),
+            source_type: SessionSourceType | None = Query(default=None),
             source_id: str | None = Query(default=None, min_length=1, max_length=255)):
     actual_end = end or datetime.now(UTC)
     try:

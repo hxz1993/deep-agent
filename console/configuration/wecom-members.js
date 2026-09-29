@@ -23,9 +23,11 @@ export function createMemberQuery({ applicationId, request, onChange, schedule =
         return load();
       }
       state.items = result.items; state.total = result.total; state.loading = false; onChange(state);
+      return true;
     } catch (error) {
       if (disposed || revision !== ticket) return;
       state.loading = false; state.items = []; state.error = error.message || '成员列表读取失败'; onChange(state);
+      return false;
     }
   }
   return {

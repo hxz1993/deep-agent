@@ -99,7 +99,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def _target_engine(
         self,
         *,
-        revision: str = "010",
+        revision: str = "011",
         baseline: bool = False,
     ) -> AsyncEngine:
         target = self.root / f"target-{revision}-{baseline}.db"
@@ -131,10 +131,10 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         include_skill: bool = False,
-        revision: str = "010",
+        revision: str = "011",
     ) -> tuple[Path, Path | None, bytes | None]:
         source = self.root / f"source-{include_skill}-{revision}.db"
-        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="010")
+        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="011")
         raw_skill: bytes | None = None
         if include_skill:
             raw_skill = skill_zip(name="uploaded-skill")
@@ -174,7 +174,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             exported_at=datetime(2026, 9, 1, 8, 0, tzinfo=timezone.utc),
             git_commit="test-commit",
         )
-        if revision != "010":
+        if revision != "011":
             with sqlite3.connect(result.path) as connection:
                 connection.execute(
                     "UPDATE alembic_version SET version_num = ?",
@@ -243,9 +243,28 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
+    async def test_webhook_import_restores_secret_columns_and_rejects_missing_application(self):
+        backup_path, _, _ = await self._backup()
+        with sqlite3.connect(backup_path) as db:
+            db.execute("INSERT INTO wecom_applications (id,name,corp_id,wecom_agent_id,app_secret,settings,revision) VALUES ('app','fixture','corp','100','fixture-secret','{}',1)")
+            db.execute("UPDATE channel_accounts SET channel_type='wecom_app',transport='webhook',bot_id=NULL,secret=NULL,webhook_token='Token123',webhook_aes_key=?,settings=?", ("A" * 43, json.dumps({"wecom_app": {"application_id": "missing"}})))
+        engine = await self._target_engine()
+        try:
+            with self.assertRaisesRegex(ValueError, "wecom_app.application_id"):
+                await build_configuration_import_plan(backup_path, target_engine=engine)
+            with sqlite3.connect(backup_path) as db:
+                db.execute("UPDATE channel_accounts SET settings=?", (json.dumps({"wecom_app": {"application_id": "app"}}),))
+            plan = await build_configuration_import_plan(backup_path, target_engine=engine)
+            await apply_configuration_import(plan, target_engine=engine, file_store=_MemoryFileStore(), request_headers={})
+            async with engine.connect() as db:
+                row = (await db.execute(text("SELECT bot_id,secret,webhook_token,webhook_aes_key FROM channel_accounts"))).one()
+                self.assertEqual(tuple(row), (None, None, "Token123", "A" * 43))
+        finally:
+            await engine.dispose()
+
     async def test_same_dynamic_revision_import_preserves_ids_and_revision(self) -> None:
-        backup_path, _, _ = await self._backup(revision="010")
-        engine = await self._target_engine(revision="010", baseline=True)
+        backup_path, _, _ = await self._backup(revision="011")
+        engine = await self._target_engine(revision="011", baseline=True)
         try:
             plan = await build_configuration_import_plan(
                 backup_path,
@@ -279,7 +298,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 tuple(provider),
                 ("0123456789abcdef0123456789abcdef", "plain-api-key"),
             )
-            self.assertEqual(revision, "010")
+            self.assertEqual(revision, "011")
             self.assertEqual(sessions, 0)
             self.assertEqual(integrations[0]["code"], "deeptable-assistant")
             self.assertEqual(integrations[0]["settings"], {"enabled": True, "options": [1, None, "中文"]})
@@ -316,7 +335,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             await engine.dispose()
 
     async def test_different_revision_is_rejected(self) -> None:
-        backup_path, _, _ = await self._backup(revision="010")
+        backup_path, _, _ = await self._backup(revision="011")
         engine = await self._target_engine(revision="001")
         try:
             with self.assertRaisesRegex(

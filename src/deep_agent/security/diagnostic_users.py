@@ -30,6 +30,7 @@ from deep_agent.local_security import (
     LOCAL_CURRENT_USERNAME_SCOPE_KEY,
 )
 from deep_agent.security.console_admin import (
+    ConsoleAdminAuthenticationError,
     forwarded_platform_auth_headers,
     platform_credential_digest,
 )
@@ -309,7 +310,10 @@ class DiagnosticUserProfileResolver:
         if not caller:
             raise DiagnosticUserAuthenticationError()
         result = {user_id: _fallback(user_id) for user_id in ids}
-        headers = forwarded_platform_auth_headers(request, caller)
+        try:
+            headers = forwarded_platform_auth_headers(request, caller)
+        except ConsoleAdminAuthenticationError:
+            raise DiagnosticUserAuthenticationError() from None
         has_platform_login = any(headers.get(name, "").strip() for name in (
             "authorization", "cookie", "token", "x-user-token",
         ))

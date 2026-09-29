@@ -7,6 +7,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from alembic import command
 from alembic.config import Config
@@ -73,6 +74,7 @@ class RemovedOutboundReceiptMigrationTests(unittest.TestCase):
                 db.execute("INSERT INTO channel_message_operations (id,account_id,channel_run_id,agent_run_id,tool_call_id,session_id,request_hash,results) VALUES ('op','a','r','ar','call','s','hash','[]')")
                 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 preserved = tables - {"channel_message_operations", "alembic_version"}
+                columns = {name: [row[1] for row in db.execute(f'PRAGMA table_info("{name}")')] for name in preserved}
                 before = {name: db.execute(f'SELECT * FROM "{name}"').fetchall() for name in preserved}
                 schema = {name: db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() for name in preserved}
             command.upgrade(config, "010")
@@ -81,21 +83,38 @@ class RemovedOutboundReceiptMigrationTests(unittest.TestCase):
                 self.assertEqual(after_tables, tables - {"channel_message_operations"})
                 self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("010",))
                 for name in preserved:
-                    self.assertEqual(db.execute(f'SELECT * FROM "{name}"').fetchall(), before[name], name)
-                    self.assertEqual(db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone(), schema[name], name)
-            command.upgrade(config, "head")
+                    projection = ",".join(f'"{column}"' for column in columns[name])
+                    self.assertEqual(db.execute(f'SELECT {projection} FROM "{name}"').fetchall(), before[name], name)
+                    if name != "chat_sessions":
+                        self.assertEqual(db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone(), schema[name], name)
+                source_columns = {row[1]: row for row in db.execute("PRAGMA table_info(chat_sessions)")}
+                self.assertEqual(set(source_columns) - set(columns["chat_sessions"]), {"source_type", "source_id"})
+                for column, length in (("source_type", 64), ("source_id", 255)):
+                    self.assertEqual(source_columns[column][2].upper(), f"VARCHAR({length})")
+                    self.assertEqual(source_columns[column][3], 0)
+                    self.assertIsNone(source_columns[column][4])
+                self.assertEqual(db.execute("SELECT source_type,source_id FROM chat_sessions").fetchall(), [(None, None)])
+            command.upgrade(config, "010")
             with self.assertRaisesRegex(RuntimeError, "010 cannot be downgraded"):
                 command.downgrade(config, "009")
             with sqlite3.connect(path) as db:
                 self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("010",))
 
-    def test_010_ddl_only_drops_receipt_table_for_supported_dialects(self):
+    def test_010_ddl_adds_source_columns_and_drops_receipt_table(self):
         spec = importlib.util.spec_from_file_location("receipt_removal", REPO_ROOT / "migrations/versions/010_remove_channel_message_operations.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         for dialect in ("sqlite", "mysql", "postgresql"):
             output = io.StringIO()
             context = MigrationContext.configure(dialect_name=dialect, opts={"as_sql": True, "output_buffer": output})
-            with Operations.context(context):
+            # Physical column inspection needs a real database; the online
+            # SQLite case above verifies it. Compile the known 009 shape here.
+            inspector = Mock()
+            inspector.get_columns.return_value = []
+            with Operations.context(context), patch("deep_agent.db.session_source_schema.sa.inspect", return_value=inspector):
                 module.upgrade()
-            self.assertEqual(output.getvalue().strip(), "DROP TABLE channel_message_operations;")
+            ddl = output.getvalue().strip()
+            self.assertIn("ALTER TABLE chat_sessions ADD COLUMN source_type VARCHAR(64)", ddl)
+            self.assertIn("ALTER TABLE chat_sessions ADD COLUMN source_id VARCHAR(255)", ddl)
+            self.assertIn("DROP TABLE channel_message_operations;", ddl)
+            self.assertEqual(ddl.count(";"), 3)

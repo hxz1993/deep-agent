@@ -20,6 +20,7 @@ from deepfos_platform.options import OPTION as PLATFORM_OPTION
 from deep_agent.local_security import LOCAL_CURRENT_USERNAME_SCOPE_KEY
 from deep_agent.security.diagnostic_users import safe_avatar_url
 from deep_agent.security.console_admin import (
+    ConsoleAdminAuthenticationError,
     forwarded_platform_auth_headers,
     platform_credential_digest,
 )
@@ -232,7 +233,10 @@ class CurrentUserProfileResolver:
                 resolution="local",
             )
 
-        headers = forwarded_platform_auth_headers(request, normalized_user)
+        try:
+            headers = forwarded_platform_auth_headers(request, normalized_user)
+        except ConsoleAdminAuthenticationError:
+            raise CurrentUserAuthenticationError() from None
         key = (normalized_user, platform_credential_digest(headers))
         now = self._clock()
         cached = self._cache.get(key)

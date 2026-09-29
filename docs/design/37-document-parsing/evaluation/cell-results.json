@@ -1,0 +1,167 @@
+{
+  "mineru-free-pipeline.md": {
+    "markdown_sha256": "3cfcd0256c78ed919ef30d229a3097ea215d87dae1507aabb128381e2b0836b3",
+    "pages": [
+      {
+        "page": 1,
+        "exact_data_cells": 16,
+        "total_data_cells": 20,
+        "mismatches": [
+          {
+            "row_name": "坏账率",
+            "value_column": 2,
+            "expected": "3.00‰",
+            "actual": "3.00%"
+          },
+          {
+            "row_name": "坏账率",
+            "value_column": 4,
+            "expected": "2.50‰",
+            "actual": "2.50%"
+          },
+          {
+            "row_name": "跨行金额",
+            "value_column": 4,
+            "expected": "0.25‰",
+            "actual": "0.25%"
+          },
+          {
+            "row_name": "缺失和零",
+            "value_column": 1,
+            "expected": "—",
+            "actual": "一"
+          }
+        ]
+      },
+      {
+        "page": 2,
+        "exact_data_cells": 14,
+        "total_data_cells": 20,
+        "mismatches": [
+          {
+            "row_name": "坏账率",
+            "value_column": 2,
+            "expected": "3.00‰",
+            "actual": "3.00%"
+          },
+          {
+            "row_name": "坏账率",
+            "value_column": 4,
+            "expected": "2.50‰",
+            "actual": "2.50%"
+          },
+          {
+            "row_name": "跨行金额",
+            "value_column": 1,
+            "expected": "1,234,567.89",
+            "actual": "1,234，567.89"
+          },
+          {
+            "row_name": "跨行金额",
+            "value_column": 3,
+            "expected": "9,876.54",
+            "actual": "9.876.54"
+          },
+          {
+            "row_name": "跨行金额",
+            "value_column": 4,
+            "expected": "0.25‰",
+            "actual": "0.25%"
+          },
+          {
+            "row_name": "缺失和零",
+            "value_column": 1,
+            "expected": "—",
+            "actual": "一"
+          }
+        ]
+      }
+    ]
+  },
+  "mineru-local-basic/markdown.md": {
+    "markdown_sha256": "1fe94683b21787902b6cd555bb3c679a64cecf33a4983249de16b58fc48c1165",
+    "pages": [
+      {
+        "page": 1,
+        "exact_data_cells": 19,
+        "total_data_cells": 20,
+        "mismatches": [
+          {
+            "row_name": "缺失和零",
+            "value_column": 1,
+            "expected": "—",
+            "actual": "-"
+          }
+        ]
+      },
+      {
+        "page": 2,
+        "exact_data_cells": 16,
+        "total_data_cells": 20,
+        "mismatches": [
+          {
+            "row_name": "坏账率",
+            "value_column": 2,
+            "expected": "3.00‰",
+            "actual": "3.00%"
+          },
+          {
+            "row_name": "坏账率",
+            "value_column": 4,
+            "expected": "2.50‰",
+            "actual": "2.50%"
+          },
+          {
+            "row_name": "跨行金额",
+            "value_column": 4,
+            "expected": "0.25‰",
+            "actual": "0.25%"
+          },
+          {
+            "row_name": "缺失和零",
+            "value_column": 1,
+            "expected": "—",
+            "actual": ""
+          }
+        ]
+      }
+    ]
+  },
+  "mineru-local-standard/markdown.md": {
+    "markdown_sha256": "a64106f9a6967b6191470db3fdedece50b8e0e16072fe9dfaa10be44d80bddf5",
+    "pages": [
+      {
+        "page": 1,
+        "exact_data_cells": 19,
+        "total_data_cells": 20,
+        "mismatches": [
+          {
+            "row_name": "缺失和零",
+            "value_column": 1,
+            "expected": "—",
+            "actual": "-"
+          }
+        ]
+      },
+      {
+        "page": 2,
+        "exact_data_cells": 20,
+        "total_data_cells": 20,
+        "mismatches": []
+      }
+    ]
+  },
+  "paddle16-demo.md": {
+    "markdown_sha256": "f05feeed517cdef6e7547695ffbaf341e5c00e7f609b37e0770de27bd6406c0e",
+    "pages": [
+      {
+        "page": 1,
+        "exact_data_cells": 20,
+        "total_data_cells": 20,
+        "mismatches": []
+      }
+    ],
+    "chart_exact_values": 4,
+    "input_note": "Single raster image corresponding to PDF physical page 2"
+  }
+}

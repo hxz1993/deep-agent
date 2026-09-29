@@ -24,8 +24,22 @@ def is_configured() -> bool:
     return any(isinstance(handler, InterceptHandler) for handler in logging.root.handlers)
 
 
+class WebhookAccessLogFilter(logging.Filter):
+    """Uvicorn keeps its original scope even when an ASGI wrapper copies it."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5:
+            target = args[2]
+            if isinstance(target, str) and "/api/v1/webhooks/" in target.split("?", 1)[0]:
+                record.args = (*args[:2], target.split("?", 1)[0], *args[3:])
+        return True
+
+
 def configure_logging(level: str | int | None = None) -> None:
     global _CONFIGURED
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(item, WebhookAccessLogFilter) for item in access_logger.filters):
+        access_logger.addFilter(WebhookAccessLogFilter())
     if is_configured():
         _CONFIGURED = True
         return

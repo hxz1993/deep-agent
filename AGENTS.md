@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.3`，数据库Head为`010`（删除独立渠道发送回执表并增加会话来源两列） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.5`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -49,7 +49,7 @@ Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包�
 
 身份服务位于 `services/wecom_client.py`、`services/wecom_profiles.py`，由 API 进程统一持有 HTTP／Token／任务；Gateway 使用内部鉴权解析接口，不能自行选择应用。密文转换及明文回退以官方结果确认，同应用合并到一份 User ID 资料；原始 `sender_id/peer_id` 不变。资料有效期一周，缓存失效保留姓名与映射，迟到结果受应用 revision 和渠道配置保护。开启后私聊标题为 `User｜姓名(原始 ID)`，来源上下文仅额外增加 `userid/name`；群标题为 `Group｜chat_id`，平台归属／权限不变，私聊首轮、群聊每轮规则不变。
 
-`wecom_applications` 是配置备份的一部分（含敏感凭据），`wecom_user_profiles` 是缓存，仅导出空结构；Token、任务和负缓存不备份，Agent 整包也不包含这些数据。表分类与逻辑顺序由 `db/configuration_transfer.py` 显式维护。`006` 降级遇到应用、成员或渠道企微设置时拒绝，不自动删除。2026-09-14 已核验本地超管机器人“先胜小D”：明文入口与普通机器人共用一条成员映射，真实标题及首轮来源上下文正确；另外只读验证了无缓存时的官方明文回退。无需超管配置，按映射或接口明确结果解析，不按前缀猜测。
+`wecom_applications` 是配置备份的一部分（含敏感凭据），`wecom_user_profiles` 是缓存，仅导出空结构；Token 和进行中的任务不备份，Agent 整包也不包含这些数据。表分类与逻辑顺序由 `db/configuration_transfer.py` 显式维护。`006` 降级遇到应用、成员或渠道企微设置时拒绝，不自动删除。2026-09-14 已核验本地超管机器人“先胜小D”：明文入口与普通机器人共用一条成员映射，真实标题及首轮来源上下文正确；另外只读验证了无缓存时的官方明文回退。无需超管配置，按映射或接口明确结果解析，不按前缀猜测。
 
 
 ### 本地 Test 联调固定启动命令
@@ -373,3 +373,20 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 `chat_sessions.source_type/source_id` 在创建时确定，查询只允许 NULL 视为 internal，不从标题、历史事件、Runs、Binding 或 Agent 当前配置推断来源。渠道会话 Console 续问仍归该渠道；Events 决定提问与用量，Runs 仅关联真实发送者；无发送者单列，不冒充群成员。来源不授予发送权限。
 
 用户明确批准两可空来源列合并未发布010，不新增011；旧010仅在迁移入口补结构，不自动回填数据。本地/Test历史来源修复只用项目外一次性TMP_to_delete脚本，Test发布后另行安排，不纳入产品维护工具、启动或查询。任何其他DDL仍需单独确认。详见 docs/guides/session-sources.md。
+
+
+### 企微应用 Webhook 渠道（011）
+
+- 入口与配置见 [企微应用渠道](docs/guides/wecom-app-channel.md)。`wecom_app/webhook` 独立于 `wecom/websocket`，两者复用关联应用的持久化成员资料，应用回调按明文 User ID 查询。
+- `webhook_token`、`webhook_aes_key` 是渠道账户独立可空列；仅企微应用允许 `bot_id/secret` 为空。应用引用为 `settings.wecom_app.application_id`，允许重复关联但必须校验存在并保护删除。
+- 已发布 010 不再改写。011 只新增上述两列、改变 Bot 两列可空性，无新表、索引、外键及 Runs 字段。迁移和远端执行仍遵守本文件顶部单独确认规则。
+- 回调地址复用 Console 组件根路径，加 `api/v1/webhooks/channels/{id}`，无需环境变量。新建保存后生成 ID，普通 API 只返回密钥状态/掩码。
+- 会话来源是 `channel:wecom_app`；Events 决定提问和用量，Runs 关联发送者，不按当前 Agent 渠道关联推断来源。应用渠道复用关联应用的持久化成员资料服务。
+- 沿用内存队列，不扩充重启恢复。联调阶段日志记录入口及各阶段关联 ID/结果，禁止密钥、完整 Query、原始 XML、正文和文件内容。
+
+## 环境变量变更约定
+新增环境变量与修改数据库表结构同样需要事先向用户明确说明用途、必要性、默认行为、部署申请及兼容影响，并获得确认后再实施。不得擅自增加部署配置要求。渠道回调地址复用 Console `serviceUrl()`，使用组件根路径 + `api/v1/webhooks/channels/{id}`，保留部署网关前缀；不再生成短路由，不增加基址环境变量。
+
+企微机器人与企微应用统一使用 `wecom_user_profiles` 持久化姓名与 ID 映射。新会话标题从当前关联应用的有效资料生成，不读取 binding 旧姓名字段；已有历史标题不回写。成员解析不保留进程内失败负缓存，已知成员的重试时间使用持久化 `next_retry_at`，未确认身份失败允许下一条消息重试；进程内仅合并正在进行的查询。
+
+渠道应用关联：企微机器人、企微应用、飞书、钉钉统一在保存入口调用平台 `checkApiKey` 解析 Key 所属用户，与 `session_user_id` 比较；开启关联必须填写 Key。校验使用合并后的有效配置，保留旧 Key、更换关联用户也须校验，不复用浏览器凭据，不要求 Key 用户具备企业管理员身份。无效、不匹配或上游不可用均禁止保存，不新增环境变量或表结构。

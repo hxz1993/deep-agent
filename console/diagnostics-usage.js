@@ -149,13 +149,13 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
         return `<img class="usage-identity-logo" data-provider-type="${e(providerType)}" src="./assets/provider-logos/${brands[providerType] || "openai-compatible.svg"}" alt="" />`;
       }
       if (state.dimension === "user") return icon("user-round");
-      return (row.channel_types || []).length ? row.channel_types.map(kind => kind === "wecom" ? '<img class="usage-identity-logo" src="./assets/channel-logos/wecom.png" alt="企业微信渠道" title="企业微信渠道" />' : kind === "feishu" ? '<img class="usage-identity-logo" src="./assets/channel-logos/feishu.ico" alt="飞书渠道" title="飞书渠道" />' : kind === "dingtalk" ? '<img class="usage-identity-logo" src="./assets/channel-logos/dingtalk.svg" alt="钉钉渠道" title="钉钉渠道" />' : `<span title="${title(kind)} 渠道">${icon("rss")}</span>`).join("") : icon("bot");
+      return (row.channel_types || []).length ? row.channel_types.map(kind => kind === "wecom_app" ? '<img class="usage-identity-logo" src="./assets/channel-logos/wecom-app.svg" alt="企微应用渠道" title="企微应用渠道" />' : kind === "wecom" ? '<img class="usage-identity-logo" src="./assets/channel-logos/wecom.png" alt="企业微信渠道" title="企业微信渠道" />' : kind === "feishu" ? '<img class="usage-identity-logo" src="./assets/channel-logos/feishu.ico" alt="飞书渠道" title="飞书渠道" />' : kind === "dingtalk" ? '<img class="usage-identity-logo" src="./assets/channel-logos/dingtalk.svg" alt="钉钉渠道" title="钉钉渠道" />' : `<span title="${title(kind)} 渠道">${icon("rss")}</span>`).join("") : icon("bot");
     };
 
   function contributionIcon(row) {
     const kinds = [...new Set(row.channel_types || [])];
     if (state.dimension !== "agent" || kinds.length < 2) return `<span class="usage-object-icon">${rowIcon(row)}</span>`;
-    return `<button type="button" class="usage-object-icon usage-icon-stack" data-usage-icon-cycle aria-label="切换渠道图标" title="点击切换渠道图标">${kinds.map((kind, index) => `<span class="usage-icon-layer" data-depth="${index}" title="${title(kind === "wecom" ? "企业微信" : kind === "feishu" ? "飞书" : kind)}">${rowIcon({channel_types:[kind]})}</span>`).join("")}</button>`;
+    return `<button type="button" class="usage-object-icon usage-icon-stack" data-usage-icon-cycle aria-label="切换渠道图标" title="点击切换渠道图标">${kinds.map((kind, index) => `<span class="usage-icon-layer" data-depth="${index}" title="${title(kind === "wecom_app" ? "企微应用" : kind === "wecom" ? "企业微信" : kind === "feishu" ? "飞书" : kind)}">${rowIcon({channel_types:[kind]})}</span>`).join("")}</button>`;
   }
 
   function renderDetailRows() {

@@ -11,7 +11,7 @@ from deep_agent.services.channel_gateway_client import ChannelGatewayClient
 def user_details_enabled(account) -> bool:
     if not account or not account.enabled:
         return False
-    if account.channel_type == "wecom":
+    if account.channel_type in {"wecom", "wecom_app"}:
         return bool(wecom_application_id(account))
     if account.channel_type == "dingtalk":
         # No directory lookup: the live gateway owns nicknames received in messages.
@@ -42,7 +42,7 @@ class ChannelProfileService:
             deadline = asyncio.get_running_loop().time() + budget
             try:
                 async with asyncio.timeout(budget):
-                    if account.channel_type == "wecom":
+                    if account.channel_type in {"wecom", "wecom_app"}:
                         profiles = self.ctx.get_wecom_profiles()
                         iterator = iter(ids)
                         async def worker():

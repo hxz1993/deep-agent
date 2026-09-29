@@ -28,6 +28,11 @@ def describe(record: dict) -> str:
                            ("resolved_count", "解析人数")):
             if key in record:
                 details.append(f"{label} {record[key]}")
+    if event.startswith("webhook_"):
+        for key, label in (("http_method", "方法"), ("http_status", "HTTP"),
+                           ("message_type", "类型"), ("external_message_id", "消息ID")):
+            if key in record:
+                details.append(f"{label} {record[key]}")
     tool, model, agent = (record.get(key) for key in ("tool", "model_name", "agent_name"))
     if event.startswith("agent_tool_"):
         state = "仍在等待" if event.endswith("_still_waiting") else state

@@ -60,3 +60,32 @@ class SessionSourceApiTests(unittest.TestCase):
         row=self.client.get('/api/v1/sessions/source-stable').json()
         self.assertEqual((row['source_type'],row['source_id'],row['title']),
                          ('channel:feishu','original-account','original title'))
+
+    def test_wecom_app_source_filter_across_public_apis(self):
+        from tests.helpers.admin_auth import allow_console_admin
+        from unittest.mock import AsyncMock, patch
+        allow_console_admin(self.app)
+        async def seed():
+            for sid in ('app-session', 'internal-session'):
+                await get_context().store.append(sid, [ModelRequest(parts=[UserPromptPart(content='question')])],
+                    agent_id=self.agent_a, user_id=self.user_id, turn_id=sid, run_id=sid)
+            async with self.session_factory() as db:
+                await db.execute(update(ChatSession).where(ChatSession.session_id == 'app-session').values(
+                    source_type='channel:wecom_app', source_id='deleted-app-channel'))
+                await db.commit()
+        asyncio.run(seed())
+        params = {'source_type': 'channel:wecom_app', 'source_id': 'deleted-app-channel'}
+        with patch('deep_agent.security.diagnostic_users.resolve_diagnostic_users', AsyncMock(return_value={})), \
+             patch('deep_agent.api.v1.diagnostic_usage.resolve_diagnostic_users', AsyncMock(return_value={})):
+            for path in ('/api/v1/sessions', '/api/v1/diagnostics/sessions'):
+                response = self.client.get(path, params=params)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual([row['session_id'] for row in response.json()['items']], ['app-session'])
+                self.assertEqual(response.json()['items'][0]['source_type'], 'channel:wecom_app')
+            response = self.client.get('/api/v1/diagnostics/usage', params=params)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(self.client.get('/api/v1/diagnostics/usage', params={'source_type':'channel:unknown'}).status_code, 422)
+        paths = self.app.openapi()['paths']
+        for path in ('/api/v1/sessions', '/api/v1/diagnostics/sessions', '/api/v1/diagnostics/usage'):
+            parameter = next(row for row in paths[path]['get']['parameters'] if row['name'] == 'source_type')
+            self.assertIn('channel:wecom_app', str(parameter['schema']))

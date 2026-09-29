@@ -60,16 +60,22 @@ def logical_reference_violations(connection, tables: Iterable[str] | None = None
     if "channel_accounts" in existing and (selected is None or "channel_accounts" in selected):
         app_ids = set(connection.execute(sa.text("SELECT id FROM wecom_applications")).scalars()) if "wecom_applications" in existing else set()
         invalid = 0
+        invalid_app = 0
         from deep_agent.db.stores.wecom import wecom_settings
         for raw in connection.execute(sa.text("SELECT settings FROM channel_accounts")).scalars():
             try:
                 settings = json.loads(raw) if isinstance(raw, str) else raw
                 _, app_id = wecom_settings(settings)
                 invalid += int(bool(app_id) and app_id not in app_ids)
+                app_config = (settings or {}).get("wecom_app")
+                if app_config is not None:
+                    invalid_app += int(not isinstance(app_config, dict) or app_config.get("application_id") not in app_ids)
             except (ValueError, TypeError):
                 invalid += 1
         if invalid:
             violations.append({"table": "channel_accounts", "column": "settings.wecom.application_id", "parent_table": "wecom_applications", "parent_column": "id", "count": invalid})
+        if invalid_app:
+            violations.append({"table": "channel_accounts", "column": "settings.wecom_app.application_id", "parent_table": "wecom_applications", "parent_column": "id", "count": invalid_app})
     return violations
 
 

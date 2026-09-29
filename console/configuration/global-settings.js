@@ -341,7 +341,7 @@ function resetWebSearchApiKey(provider) {
     ? String(current.api_key_masked || "") : "";
   input.dataset.maskedValue = masked;
   input.value = masked;
-  input.type = masked ? "text" : "password";
+
   input.placeholder = "输入 API Key";
 }
 
@@ -585,8 +585,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (input.value === input.dataset.maskedValue) input.select();
   });
   document.getElementById("webSearchApiKey")?.addEventListener("input", (event) => {
-    const input = event.currentTarget;
-    input.type = input.value && input.value === input.dataset.maskedValue ? "text" : "password";
     setWebSearchTestFeedback();
   });
   document.addEventListener("click", (event) => {

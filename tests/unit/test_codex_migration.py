@@ -6,9 +6,8 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from deep_agent.db.migrate import _repair_existing_007
+from deep_agent.db.migrate import _repair_unpublished_schema
 
 
 class CodexMigrationTests(unittest.IsolatedAsyncioTestCase):
@@ -25,9 +24,8 @@ class CodexMigrationTests(unittest.IsolatedAsyncioTestCase):
                     INSERT INTO llm_models VALUES ('model-1', 'provider-1');
                 """)
             url = f"sqlite+aiosqlite:///{path}"
-            with patch("deep_agent.db.migrate.get_database_url", return_value=url):
-                await _repair_existing_007()
-                await _repair_existing_007()
+            await _repair_unpublished_schema(url)
+            await _repair_unpublished_schema(url)
             with sqlite3.connect(path) as db:
                 provider_columns = {row[1] for row in db.execute("PRAGMA table_info(llm_providers)")}
                 model_columns = {row[1] for row in db.execute("PRAGMA table_info(llm_models)")}

@@ -1,0 +1,12 @@
+{
+  "host": "https://paddlepaddle-paddleocr-vl-1-6-online-demo.hf.space",
+  "space": "PaddlePaddle/PaddleOCR-VL-1.6_Online_Demo",
+  "fixture": "fixture-page.png",
+  "chart": true,
+  "unwarp": false,
+  "orientation": false,
+  "elapsed_s": 10.943,
+  "source_revision": "78b275c880a6bf69cbc48f5484e0ee37da57c717",
+  "source": "https://huggingface.co/spaces/PaddlePaddle/PaddleOCR-VL-1.6_Online_Demo",
+  "note": "One image, chart enabled. Official hosted Demo, not paid Baidu API."
+}

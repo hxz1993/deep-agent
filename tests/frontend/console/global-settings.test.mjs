@@ -407,7 +407,7 @@ test("重新打开回显同供应商脱敏值，切换供应商不串用密钥",
   vm.runInContext(source, context);
   vm.runInContext('globalSettingsAdmin.webSearch = {value: {mode: "provider", provider: "tavily", api_key_masked: "tvly-abc********xyz"}}; resetWebSearchApiKey("tavily")', context);
   assert.equal(input.value, "tvly-abc********xyz");
-  assert.equal(input.type, "text");
+  assert.equal(input.type, "password");
   vm.runInContext('resetWebSearchApiKey("exa")', context);
   assert.equal(input.value, "");
   assert.equal(input.dataset.maskedValue, "");

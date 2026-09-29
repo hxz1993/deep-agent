@@ -1,0 +1,87 @@
+[
+  {
+    "command": [
+      "mineru-kit",
+      "parse",
+      "complex-numbers-two-pages.pdf",
+      "-o",
+      "output-basic.zip",
+      "--format",
+      "zip",
+      "--tier",
+      "basic"
+    ],
+    "tier": "basic",
+    "seconds": 14.93,
+    "exit_code": 0,
+    "status": "success",
+    "run_id": "basic",
+    "artifact": "TMP_to_delete-document-parsing-eval/local/output-basic.zip",
+    "artifact_sha256": "13d4e41611b726f7b461500248899751237786178b8af89aba54ea068c5c87c3",
+    "artifact_produced_by_this_run": true
+  },
+  {
+    "command": [
+      "mineru-kit",
+      "parse",
+      "complex-numbers-two-pages.pdf",
+      "-o",
+      "output-standard.zip",
+      "--format",
+      "zip",
+      "--tier",
+      "standard"
+    ],
+    "tier": "standard",
+    "seconds": 21.9,
+    "exit_code": -6,
+    "status": "process_failed",
+    "run_id": "standard-first",
+    "artifact": "TMP_to_delete-document-parsing-eval/local/output-standard.zip",
+    "artifact_sha256": "14d026adf7e93f0f81163f31aefeb89235dfa4b0b398e67411d7558d75fecb94",
+    "artifact_produced_by_this_run": true
+  },
+  {
+    "command": [
+      "mineru-kit",
+      "parse",
+      "complex-numbers-two-pages.pdf",
+      "-o",
+      "output-standard.zip",
+      "--format",
+      "zip",
+      "--tier",
+      "standard"
+    ],
+    "tier": "standard",
+    "seconds": 0.49,
+    "exit_code": 1,
+    "status": "process_failed",
+    "run_id": "standard",
+    "artifact": "TMP_to_delete-document-parsing-eval/local/output-standard.zip",
+    "artifact_sha256": "14d026adf7e93f0f81163f31aefeb89235dfa4b0b398e67411d7558d75fecb94",
+    "artifact_produced_by_this_run": false,
+    "note": "Failed because output exists; artifact belongs to standard-first, not this run"
+  },
+  {
+    "command": [
+      "mineru-kit",
+      "parse",
+      "complex-numbers-two-pages.pdf",
+      "-o",
+      "output-standard-repeat.zip",
+      "--format",
+      "zip",
+      "--tier",
+      "standard"
+    ],
+    "tier": "standard",
+    "seconds": 13.76,
+    "exit_code": 0,
+    "status": "success",
+    "run_id": "standard-repeat",
+    "artifact": "TMP_to_delete-document-parsing-eval/local/output-standard-repeat.zip",
+    "artifact_sha256": "7cbc88ccd3a6d12ae496696d6ce95d4a69641e6812ac5a355e95786c43c4ccc0",
+    "artifact_produced_by_this_run": true
+  }
+]

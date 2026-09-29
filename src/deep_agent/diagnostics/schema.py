@@ -64,15 +64,39 @@ for prefix, label in (("model_request", "模型请求"), ("agent_tool", "工具�
     }.items():
         EVENTS[f"{prefix}_{suffix}"] = label + detail
 
+# Public ingress and private processing stages intentionally log facts only.
+EVENTS.update({
+    "webhook_received": "Webhook 请求已到达",
+    "webhook_checked": "Webhook 请求检查完成",
+    "webhook_verified": "Webhook 验签解密通过",
+    "webhook_accepted": "Webhook 消息已确认接收",
+    "webhook_rejected": "Webhook 请求已拒绝",
+    "webhook_completed": "Webhook 请求结束",
+    "webhook_failed": "Webhook 请求处理失败",
+    "webhook_log_limited": "Webhook 入口日志已限量",
+    "webhook_gateway_received": "网关已接收 Webhook 消息",
+    "webhook_gateway_duplicate": "网关已去重 Webhook 消息",
+    "webhook_media_download_started": "企微媒体下载开始",
+    "webhook_media_download_completed": "企微媒体下载完成",
+    "webhook_audio_conversion_started": "企微语音转码开始",
+    "webhook_audio_conversion_completed": "企微语音转码完成",
+    "webhook_audio_conversion_failed": "企微语音转码失败",
+    "webhook_media_upload_completed": "企微媒体已进入附件管线",
+    "webhook_reply_started": "企微应用回复开始",
+    "webhook_reply_completed": "企微应用回复完成",
+    "webhook_bridge_completed": "企微应用接口调用完成",
+    "webhook_bridge_failed": "企微应用接口调用失败",
+})
+
 IDENTIFIER_FIELDS = frozenset({
     "mcp_server", "app_id", "space_id", "language",
     "request_id", "session_id", "run_id", "agent_id", "conversation_id", "channel_run_id", "account_id", "wecom_application_id",
     "tool_call_id", "tool", "model_id", "model_name", "provider_name", "phase", "status",
-    "profile_service", "discovery_type", "discovery_namespace", "auth_context",
+    "message_type", "external_message_id", "profile_service", "discovery_type", "discovery_namespace", "auth_context",
     "error_type", "error_code", "result_status", "command", "mode", "finish_reason", "compaction", "reason",
 })
 NUMBER_FIELDS = frozenset({
-    "requested_count", "resolved_count",
+    "requested_count", "resolved_count", "count",
     "duration_ms", "request_index", "attempt", "queue_depth", "input_tokens", "output_tokens",
     "total_tokens", "requests", "tool_calls", "tool_search_calls", "cache_read_tokens",
     "cache_write_tokens", "spill_count", "spill_failures", "byte_size", "spilled_bytes",

@@ -161,7 +161,7 @@ function setProviderApiKeyEditor({ maskedValue = "", clearRequested = false } = 
   input.dataset.maskedValue = masked;
   input.dataset.clearRequested = clearRequested ? "true" : "false";
   input.value = clearRequested ? "" : masked;
-  input.type = masked && !clearRequested ? "text" : "password";
+
   input.placeholder = clearRequested ? "保存后清除当前 API Key" : "";
   button.classList.toggle("hidden", !masked);
   button.textContent = clearRequested ? "撤销清除" : "清除";
@@ -643,7 +643,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("llmProviderApiKey")?.addEventListener("input", (event) => {
     const input = event.currentTarget;
-    if (input.value !== input.dataset.maskedValue) input.type = "password";
+
     input.dataset.clearRequested = "false";
     const button = document.getElementById("llmProviderClearApiKey");
     if (button) {

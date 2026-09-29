@@ -5,6 +5,7 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
+from datetime import datetime, timezone
 
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -211,7 +212,8 @@ async def _current_channel_context(ctx, body, account):
         payload.pop("name", None)
         if app_id:
             profile = await ctx.stores.wecom.find_profile(app_id, str(payload.get("sender_id", "")))
-            payload.update(userid=profile.userid if profile else None, name=profile.name if profile else None)
+            fresh = profile and profile.expires_at and profile.expires_at > datetime.now(timezone.utc)
+            payload.update(userid=profile.userid if profile else None, name=profile.name if fresh else None)
 
 
 async def _resolve_message_source(request, ctx, account, session_id, agent_id, user):

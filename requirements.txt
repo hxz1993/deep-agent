@@ -30,6 +30,9 @@ sse-starlette>=2.1
 # Official enterprise WeCom intelligent-bot WebSocket SDK used only by the
 # optional Channel Gateway process.
 wecom-aibot-python-sdk==1.0.2
+# Community enterprise-message crypto; protocol fixtures cover its boundary.
+wechatpy==1.8.18
+defusedxml==0.7.1
 lark-channel-sdk==1.4.0
 lark-oapi==1.7.3
 dingtalk-stream==0.24.3

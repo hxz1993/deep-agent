@@ -107,7 +107,8 @@ class WecomStore(SessionBoundMixin):
     @staticmethod
     async def _references(db, application_id: str):
         rows = (await db.execute(select(ChannelAccount.id, ChannelAccount.settings))).all()
-        return [row.id for row in rows if wecom_settings(row.settings)[1] == application_id]
+        return [row.id for row in rows if wecom_settings(row.settings)[1] == application_id
+                or (row.settings or {}).get("wecom_app", {}).get("application_id") == application_id]
 
     async def application_channel_count(self, application_id: str) -> int:
         async with self._read() as db:

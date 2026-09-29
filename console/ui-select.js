@@ -85,7 +85,13 @@ export function enhanceSelect(select) {
     if (!trigger.getClientRects().length || !select.isConnected || select.closest("dialog:not([open])")) { close(); return; }
     const rect = trigger.getBoundingClientRect();
     const viewport = { width: view.innerWidth, height: view.innerHeight };
-    const bounds = selectMenuPosition(rect, viewport, Math.min(280, menu.scrollHeight || 280));
+    // Measure at the final width. scrollHeight includes padding, but excludes borders.
+    const initial = selectMenuPosition(rect, viewport);
+    menu.style.width = `${initial.width}px`;
+    menu.style.maxHeight = "none";
+    const style = view.getComputedStyle(menu);
+    const naturalHeight = Math.ceil(menu.scrollHeight + parseFloat(style.borderTopWidth || 0) + parseFloat(style.borderBottomWidth || 0));
+    const bounds = selectMenuPosition(rect, viewport, Math.min(280, naturalHeight || 280));
     Object.assign(menu.style, { left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px`, maxHeight: `${bounds.maxHeight}px` });
   };
   function close({ focus = false } = {}) {
@@ -126,6 +132,13 @@ export function enhanceSelect(select) {
       row.setAttribute("aria-selected", String(option.selected));
       row.setAttribute("aria-disabled", String(option.disabled || !!group?.disabled));
       row.textContent = option.label;
+      if (option.dataset.badge) {
+        row.textContent = "";
+        const name = document.createElement("span"); name.textContent = option.label;
+        const badge = document.createElement("span"); badge.className = "da-select-badge"; badge.textContent = option.dataset.badge;
+        row.append(name, badge);
+        row.classList.add("has-badge");
+      }
       row.title = option.title || option.label;
       menu.append(row);
     });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -18,19 +19,26 @@ from deep_agent.db.models import (
     ChatSessionEvent,
     LlmModel,
     WecomApplication,
+    WecomUserProfile,
 )
 from deep_agent.db.reference_integrity import (
     ReferenceConflict, is_unique_conflict, lock_optional, lock_reference,
 )
 from deep_agent.db.session_source import channel_source_type
+from deep_agent.schemas.session_source import CHANNEL_SOURCE_TYPES
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
-from deep_agent.db.stores.wecom import validate_channel_wecom_settings
+from deep_agent.db.stores.wecom import userid_key, validate_channel_wecom_settings
 from deep_agent.db.stores.event.base import SessionEventStore
 from deep_agent.channels.metadata import channel_session_title, normalize_channel_origin, normalize_peer_metadata, wecom_application_id
 from deep_agent.channels.app_context import channel_deepfos_app, merge_channel_settings, validate_channel_settings
 from deep_agent.agent.request_context import derive_space_from_app
-from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
+from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate, validate_webhook_credentials
+
+
+def account_configuration_snapshot(account: ChannelAccount) -> dict[str, Any]:
+    """Capture editable values; timestamp precision varies by database."""
+    return deepcopy({name: getattr(account, name) for name in ChannelAccountUpdate.model_fields})
 
 
 @dataclass(frozen=True)
@@ -73,7 +81,7 @@ class ChannelStore(SessionBoundMixin):
     async def create_account(
         self, data: ChannelAccountCreate
     ) -> ChannelAccount:
-        if data.registration_id or not data.bot_id or not data.secret:
+        if data.registration_id or (data.channel_type != "wecom_app" and (not data.bot_id or not data.secret)):
             raise ValueError("请先完成渠道凭据配置")
         try:
             async with self._write(exclusive=True) as db:
@@ -81,6 +89,10 @@ class ChannelStore(SessionBoundMixin):
                 validate_channel_settings(data.channel_type, data.settings)
                 if data.channel_type == "wecom":
                     await validate_channel_wecom_settings(db, data.settings)
+                if data.channel_type == "wecom_app":
+                    validate_webhook_credentials(data.webhook_token, data.webhook_aes_key)
+                    await lock_reference(db, WecomApplication, WecomApplication.id,
+                                         data.settings["wecom_app"]["application_id"], "企微应用")
                 row = ChannelAccount(
                     id=uuid4().hex,
                     **{**data.model_dump(), "settings": merge_channel_settings(data.settings)},
@@ -98,6 +110,8 @@ class ChannelStore(SessionBoundMixin):
         self,
         account_id: str,
         data: ChannelAccountUpdate,
+        *,
+        expected_configuration: dict[str, Any] | None = None,
     ) -> ChannelAccount | None:
         try:
             async with self._write(exclusive=True) as db:
@@ -106,9 +120,23 @@ class ChannelStore(SessionBoundMixin):
                 )
                 if row is None:
                     return None
+                if expected_configuration is not None and account_configuration_snapshot(row) != expected_configuration:
+                    raise ValueError("渠道配置已被修改，请刷新后重试")
                 validate_channel_settings(row.channel_type, data.settings if "settings" in data.model_fields_set else row.settings)
                 if row.channel_type == "wecom":
                     await validate_channel_wecom_settings(db, data.settings if "settings" in data.model_fields_set else row.settings)
+                if row.channel_type == "wecom_app":
+                    if "bot_id" in data.model_fields_set or "secret" in data.model_fields_set:
+                        raise ValueError("企微应用不使用机器人凭据")
+                    config = data.settings if "settings" in data.model_fields_set else row.settings
+                    await lock_reference(db, WecomApplication, WecomApplication.id,
+                                         config["wecom_app"]["application_id"], "企微应用")
+                    validate_webhook_credentials(
+                        data.webhook_token if "webhook_token" in data.model_fields_set else row.webhook_token,
+                        data.webhook_aes_key if "webhook_aes_key" in data.model_fields_set else row.webhook_aes_key,
+                    )
+                elif {"webhook_token", "webhook_aes_key"} & data.model_fields_set:
+                    raise ValueError("当前渠道不支持 Webhook 凭据")
                 for field, value in data.model_dump(exclude_unset=True).items():
                     if field == "settings":
                         value = merge_channel_settings(value, row.settings)
@@ -272,13 +300,29 @@ class ChannelStore(SessionBoundMixin):
         }
 
     @staticmethod
-    def session_title(account: ChannelAccount, binding: ChannelSessionBinding) -> str:
+    def session_title(
+        account: ChannelAccount, binding: ChannelSessionBinding, *, name: str | None = None,
+    ) -> str:
+        metadata = {"display_name": name} if account.channel_type in {"wecom", "wecom_app"} else binding.peer_metadata
+        return channel_session_title(binding.peer_type, binding.peer_id, metadata, channel_type=account.channel_type)
+
+    async def _persisted_peer_name(
+        self, db: AsyncSession, account: ChannelAccount, binding: ChannelSessionBinding,
+        now: datetime,
+    ) -> str | None:
         application_id = wecom_application_id(account)
-        if application_id and binding.peer_type in {"single", "userid"}:
-            metadata = binding.peer_metadata or {}
-            name = metadata.get("wecom_name") if metadata.get("wecom_application_id") == application_id else None
-            return channel_session_title(binding.peer_type, binding.peer_id, {"display_name": name}, channel_type=account.channel_type)
-        return channel_session_title(binding.peer_type, binding.peer_id, binding.peer_metadata, channel_type=account.channel_type)
+        if not application_id or binding.peer_type not in {"single", "userid"}:
+            return None
+        if await db.get(WecomApplication, application_id) is None:
+            return None
+        profiles = select(WecomUserProfile).where(WecomUserProfile.wecom_application_id == application_id)
+        # Opaque IDs are case-sensitive and take precedence over plaintext User IDs.
+        profile = await db.scalar(profiles.where(WecomUserProfile.open_userid == binding.peer_id))
+        if profile is None:
+            profile = await db.scalar(profiles.where(WecomUserProfile.userid_key == userid_key(binding.peer_id)))
+        if profile is None or not profile.profile_synced_at or not profile.expires_at or profile.expires_at <= now:
+            return None
+        return profile.name
 
     async def _create_session(
         self, db: AsyncSession, account: ChannelAccount,
@@ -296,8 +340,9 @@ class ChannelStore(SessionBoundMixin):
         )
         db.add(session)
         await db.flush()
+        name = await self._persisted_peer_name(db, account, binding, now)
         await self._events._append_title(
-            db, session, title=self.session_title(account, binding), source="channel",
+            db, session, title=self.session_title(account, binding, name=name), source="channel",
             source_event_id=None, turn_id=None, run_id=None,
             details={"channel": self.session_origin(account, binding)}, now=now,
         )
@@ -446,7 +491,7 @@ class ChannelStore(SessionBoundMixin):
             ChatSession.source_id, ChannelAccount.name).outerjoin(ChannelAccount,
             ChatSession.source_id == ChannelAccount.id).where(
             ChatSession.session_id.in_(session_ids),
-            ChatSession.source_type.in_([channel_source_type(t) for t in ("wecom", "feishu", "dingtalk")]),
+            ChatSession.source_type.in_(CHANNEL_SOURCE_TYPES),
         ))).all()
         result = {row.session_id: {
             "account_id": row.source_id,
@@ -539,6 +584,8 @@ class ChannelStore(SessionBoundMixin):
                 # A different unique key (for example a run ID collision) must
                 # not be mistaken for delivery of the same external message.
                 raise duplicate_error
+            if row.payload_hash != payload_hash:
+                raise ValueError("Channel message payload conflict")
             retryable = self.can_retry(row)
             if retryable:
                 row.processing_status = "received"

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai.messages import ModelMessage
 from sse_starlette.sse import EventSourceResponse
 
+from deep_agent.schemas.session_source import SessionSourceType
 from deep_agent.core.context import AppContextDep
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.api.v1.channel_auth import ChannelControlAccountDep
@@ -140,7 +141,7 @@ async def list_sessions(
     ctx: AppContextDep,
     user_id: RequestUserDep,
     agent_id: str | None = Query(default=None, description="Filter by agent id."),
-    source_type: Literal["internal", "channel:wecom", "channel:feishu", "channel:dingtalk"] | None = Query(default=None),
+    source_type: SessionSourceType | None = Query(default=None),
     source_id: str | None = Query(default=None, min_length=1, max_length=255),
     limit: int = Query(default=50, ge=1, le=MAX_LIST_LIMIT, description="Page size."),
     offset: int = Query(default=0, ge=0, description="Page offset."),

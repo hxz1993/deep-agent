@@ -90,7 +90,7 @@ class WebhookPersistenceTests(unittest.IsolatedAsyncioTestCase):
         gateway_url=await self._http_server(gateway)
         env=patch.dict(os.environ,{'DEEP_AGENT_CHANNEL_GATEWAY_URL':gateway_url}); env.start();self.addCleanup(env.stop)
         deliveries=[]
-        async def delivered(app,recipient,text, *, before_send=None):
+        async def delivered(app,recipient,text, *, message_type, before_send=None):
             if before_send: await before_send()
             run=await self._run_record(account.id,'900001')
             history=await self._history(run.session_id)
@@ -100,7 +100,7 @@ class WebhookPersistenceTests(unittest.IsolatedAsyncioTestCase):
             return {'part_count':1,'message_id':'fixture-out'}
         client=self.ctx.get_wecom_profiles().client
         token=patch.object(client,'token',AsyncMock(return_value='fixture-token')); token.start();self.addCleanup(token.stop)
-        sender=patch.object(client,'send_text',AsyncMock(side_effect=delivered)); sender.start();self.addCleanup(sender.stop)
+        sender=patch.object(client,'send_message',AsyncMock(side_effect=delivered)); sender.start();self.addCleanup(sender.stop)
         model_calls=[]
         async def answer(messages,info):
             model_calls.append(messages)

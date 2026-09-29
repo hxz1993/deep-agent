@@ -84,6 +84,7 @@ EVENTS.update({
     "webhook_media_upload_completed": "企微媒体已进入附件管线",
     "webhook_reply_started": "企微应用回复开始",
     "webhook_reply_completed": "企微应用回复完成",
+    "webhook_loading_failed": "企微应用等待提示发送失败",
     "webhook_bridge_completed": "企微应用接口调用完成",
     "webhook_bridge_failed": "企微应用接口调用失败",
 })

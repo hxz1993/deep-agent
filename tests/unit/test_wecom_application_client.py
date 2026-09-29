@@ -52,7 +52,7 @@ class WecomApplicationClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_send_splits_utf8_without_losing_characters(self):
         text = '中' * 682 + '😀' + 'a' * 2048 + '尾'
         self.client.call = AsyncMock(side_effect=[{'msgid': str(i)} for i in range(3)])
-        result = await self.client.send_text(self.app, 'member', text)
+        result = await self.client.send_message(self.app, 'member', text, message_type='text')
         calls = self.client.call.await_args_list
         chunks = [call.kwargs['body']['text']['content'] for call in calls]
         self.assertEqual(''.join(chunks), text)
@@ -63,10 +63,38 @@ class WecomApplicationClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call.kwargs['body']['touser'], 'member')
             self.assertEqual(call.kwargs['body']['agentid'], 100)
 
+    async def test_real_http_message_types_and_recipient(self):
+        from aiohttp import web
+        received = []
+        async def handler(request):
+            received.append(await request.json())
+            return web.json_response({'errcode': 0, 'msgid': str(len(received))})
+        server = web.Application()
+        server.router.add_post('/message/send', handler)
+        runner = web.AppRunner(server, access_log=None)
+        await runner.setup()
+        try:
+            site = web.TCPSite(runner, '127.0.0.1', 0)
+            await site.start()
+            port = site._server.sockets[0].getsockname()[1]
+            self.client.BASE_URL = f'http://127.0.0.1:{port}'
+            self.client.token = AsyncMock(return_value='fixture-token')
+            await self.client.send_message(self.app, 'member', '已收到，正在处理，请稍候。', message_type='text')
+            await self.client.send_message(self.app, 'member', '# 结果\n\n**金额**：[查看](https://example.com)', message_type='markdown')
+            self.assertEqual([body['msgtype'] for body in received], ['text', 'markdown'])
+            self.assertIn('**结果**', received[1]['markdown']['content'])
+            self.assertIn('[查看](https://example.com)', received[1]['markdown']['content'])
+            for body in received:
+                self.assertEqual(body['touser'], 'member')
+                self.assertEqual(body['agentid'], 100)
+                self.assertLessEqual(len(body[body['msgtype']]['content'].encode()), 2048)
+        finally:
+            await runner.cleanup()
+
     async def test_send_stops_at_first_failed_part(self):
         self.client.call = AsyncMock(side_effect=[{'msgid': 'first'}, WecomError('send', 60020)])
         with self.assertRaises(WecomError) as error:
-            await self.client.send_text(self.app, 'member', 'a' * 6144)
+            await self.client.send_message(self.app, 'member', 'a' * 6144, message_type='text')
         self.assertEqual(error.exception.code, '60020')
         self.assertEqual(self.client.call.await_count, 2)
 
@@ -74,7 +102,7 @@ class WecomApplicationClientTests(unittest.IsolatedAsyncioTestCase):
         for field in ('invaliduser', 'unlicenseduser'):
             self.client.call = AsyncMock(return_value={field: 'member', 'errcode': 0})
             with self.assertRaises(WecomError) as error:
-                await self.client.send_text(self.app, 'member', 'a' * 4096)
+                await self.client.send_message(self.app, 'member', 'a' * 4096, message_type='text')
             self.assertEqual(error.exception.code, 'recipient_unavailable')
             self.assertEqual(self.client.call.await_count, 1)
 
@@ -148,7 +176,7 @@ class WecomApplicationClientTests(unittest.IsolatedAsyncioTestCase):
         self.client.token = AsyncMock(side_effect=token)
         self.client._request = AsyncMock(side_effect=send)
         with self.assertRaises(WecomError) as error:
-            await self.client.send_text(self.app, 'member', 'a' * 6144, before_send=guard)
+            await self.client.send_message(self.app, 'member', 'a' * 6144, message_type='text', before_send=guard)
         self.assertEqual(error.exception.code, 'configuration_changed')
         self.assertEqual(self.client._request.await_count, 1)
         self.assertEqual(order, ['token', 'guard', 'send', 'token', 'guard'])
@@ -158,7 +186,7 @@ class WecomApplicationClientTests(unittest.IsolatedAsyncioTestCase):
         self.client._request = AsyncMock(return_value={'errcode': 42001})
         guard = AsyncMock(side_effect=[None, WecomError('send', 'configuration_changed')])
         with self.assertRaises(WecomError) as error:
-            await self.client.send_text(self.app, 'member', 'hello', before_send=guard)
+            await self.client.send_message(self.app, 'member', 'hello', message_type='text', before_send=guard)
         self.assertEqual(error.exception.code, 'configuration_changed')
         self.assertEqual(self.client._request.await_count, 1)
         self.assertEqual(guard.await_count, 2)

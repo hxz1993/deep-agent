@@ -217,28 +217,24 @@ class WecomClient:
                 raise WecomError('media', 'network_error') from None
         raise WecomError('media', 'invalid_response')
 
-    async def send_text(self, app, recipient: str, text: str, *, before_send=None) -> dict:
-        # Official text limit is UTF-8 bytes, not Python character count.
+    async def send_message(self, app, recipient: str, text: str, *, message_type: str, before_send=None) -> dict:
+        # Application text and Markdown limits are UTF-8 bytes, not character counts.
         if not text.strip():
             raise WecomError('send', 'empty_text')
         agent_id = str(app.wecom_agent_id)
         if not agent_id.isascii() or not agent_id.isdecimal() or len(agent_id) > 12:
             raise WecomError('send', 'invalid_agent_id')
-        chunks, current, size = [], [], 0
-        for char in text:
-            length = len(char.encode('utf-8'))
-            if size + length > 2048:
-                chunks.append(''.join(current))
-                current, size = [], 0
-            current.append(char)
-            size += length
-        if current:
-            chunks.append(''.join(current))
+        if message_type not in {'text', 'markdown'}:
+            raise WecomError('send', 'unsupported_message_type')
+        from deep_agent.services.wecom_app_format import format_markdown, split_text
+        chunks = format_markdown(text) if message_type == 'markdown' else split_text(text)
+        if not chunks or not any(chunk.strip() for chunk in chunks):
+            raise WecomError('send', 'empty_text')
         ids = []
         for chunk in chunks:
             result = await self.call(app, 'POST', '/message/send', stage='send', body={
-                'touser': recipient, 'msgtype': 'text', 'agentid': int(app.wecom_agent_id),
-                'text': {'content': chunk}, 'safe': 0,
+                'touser': recipient, 'msgtype': message_type, 'agentid': int(app.wecom_agent_id),
+                message_type: {'content': chunk},
             }, **({'before_request': before_send} if before_send is not None else {}))
             if result.get('invaliduser') or result.get('unlicenseduser'):
                 raise WecomError('send', 'recipient_unavailable')

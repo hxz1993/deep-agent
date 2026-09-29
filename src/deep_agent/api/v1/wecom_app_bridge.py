@@ -1,5 +1,6 @@
 """Private Gateway bridge. Account/run facts select the app and recipient."""
 from pathlib import PurePosixPath
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
@@ -26,6 +27,7 @@ class MediaRequest(RunRequest):
 
 
 class SendRequest(RunRequest):
+    message_type: Literal['text', 'markdown']
     text: str = Field(min_length=1, max_length=65536)
 
 
@@ -94,11 +96,11 @@ async def media(body: MediaRequest, ctx: AppContextDep, account: ChannelAccountD
         raise
 
 
-@router.post('/send-text')
-async def send_text(body: SendRequest, ctx: AppContextDep, account: ChannelAccountDep):
+@router.post('/send-message')
+async def send_message(body: SendRequest, ctx: AppContextDep, account: ChannelAccountDep):
     app, run = await _run(ctx, account, body.channel_run_id)
     fields = dict(account_id=account.id, channel_run_id=run.id,
-                  request_id=(run.source_metadata or {}).get('wecom_app_request_id'), phase='send')
+                  request_id=(run.source_metadata or {}).get('wecom_app_request_id'), phase='send', message_type=body.message_type)
     try:
         async def before_send():
             current = await ctx.stores.channel.get_account(account.id)
@@ -106,8 +108,8 @@ async def send_text(body: SendRequest, ctx: AppContextDep, account: ChannelAccou
                 raise HTTPException(409, 'Channel configuration changed')
             await _run(ctx, current, run.id)
 
-        result = await ctx.get_wecom_profiles().client.send_text(
-            app, run.sender_id, body.text, before_send=before_send)
+        result = await ctx.get_wecom_profiles().client.send_message(
+            app, run.sender_id, body.text, message_type=body.message_type, before_send=before_send)
         log_event('webhook_bridge_completed', **fields, count=result['part_count'])
         return result
     except Exception as exc:

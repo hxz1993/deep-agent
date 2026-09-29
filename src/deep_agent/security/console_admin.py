@@ -40,6 +40,21 @@ class ConsoleAdminAuthenticationError(RuntimeError):
     """The platform rejected the forwarded login state."""
 
 
+class PlatformApiKeyRejectedError(ConsoleAdminAuthenticationError):
+    """A known platform rejection, mapped to a safe user-facing explanation."""
+
+    def __init__(self, reason: object):
+        messages = {
+            "密钥不存在": "API Key 不存在，请检查是否填写正确",
+            "密钥与空间不匹配": "API Key 所属空间与关联应用的空间不一致，请使用该应用所在空间的 Key",
+            "密钥授权过期": "API Key 已停用或过期，请在平台检查状态或重新创建",
+            "密钥未授权该应用": "API Key 未授权当前关联应用，请为该 Key 授权此 App 或更换 Key",
+        }
+        fallback = "API Key 校验未通过，平台未返回可识别的原因，请检查 Key 状态及应用授权"
+        self.public_message = messages.get(reason, fallback) if isinstance(reason, str) else fallback
+        super().__init__(self.public_message)
+
+
 class ConsoleAdminUnavailableError(RuntimeError):
     """The platform could not complete an enterprise-admin check."""
 
@@ -152,6 +167,68 @@ class PlatformEnterpriseAdminChecker:
             on_failure,
         )
 
+    @staticmethod
+    async def _verification_json(session, target: str, params: dict[str, str], headers: Mapping[str, str]):
+        async with session.get(
+            target, params=params, headers=dict(headers),
+            allow_redirects=False,
+        ) as response:
+            if response.status == 401:
+                raise ConsoleAdminAuthenticationError("platform credentials rejected")
+            if not 200 <= response.status < 300:
+                raise ConsoleAdminUnavailableError("platform verification unavailable")
+            body = bytearray()
+            async for chunk in response.content.iter_chunked(8192):
+                body.extend(chunk)
+                if len(body) > 65536:
+                    raise ConsoleAdminUnavailableError("platform verification response too large")
+            value = json.loads(body, object_pairs_hook=_unique_object)
+            if isinstance(value, dict) and "data" in value:
+                if value.get("status") is not True:
+                    raise ConsoleAdminUnavailableError("invalid platform verification envelope")
+                value = value["data"]
+            return value
+
+
+    async def _key_identity(self, session, url: str, headers: Mapping[str, str]) -> str:
+        identity = await self._verification_json(session, url.rsplit("/", 1)[0] + "/checkApiKey", {
+            "apiKey": headers["x-deepfos-key"],
+            "app": headers["app"], "space": headers["space"],
+        }, headers)
+        if not isinstance(identity, dict) or not isinstance(identity.get("valid"), bool):
+            raise ConsoleAdminUnavailableError("invalid API Key verification response")
+        if identity["valid"] is not True:
+            raise PlatformApiKeyRejectedError(identity.get("errorMsg"))
+        returned_user = identity.get("userId")
+        if not isinstance(returned_user, str) or not _API_SCOPE_ID.fullmatch(returned_user):
+            raise ConsoleAdminUnavailableError("invalid API Key identity")
+        return returned_user
+
+    async def resolve_api_key_user(self, api_key: str, app_id: str, space_id: str) -> str:
+        """Resolve key ownership and scope without requiring administrator privileges."""
+        if not all(_API_SCOPE_ID.fullmatch(value) for value in (app_id, space_id)) or not api_key or any(
+            char.isspace() or not char.isascii() or ord(char) < 32 or ord(char) == 127 for char in api_key
+        ):
+            raise ConsoleAdminAuthenticationError("invalid API Key credentials")
+        headers = {"x-deepfos-key": api_key, "app": app_id, "space": space_id}
+        on_failure = None
+        try:
+            async with asyncio.timeout(self._timeout.total):
+                url, on_success, on_failure = await self._resolve_url()
+                async with aiohttp.ClientSession(
+                    timeout=self._timeout, cookie_jar=aiohttp.DummyCookieJar(), trust_env=False,
+                ) as session:
+                    user_id = await self._key_identity(session, url, headers)
+                if on_success is not None:
+                    on_success()
+                return user_id
+        except ConsoleAdminAuthenticationError:
+            raise
+        except Exception:
+            if on_failure is not None:
+                on_failure()
+            raise ConsoleAdminUnavailableError("API Key identity verification unavailable") from None
+
     async def _api_key_access(self, user_id: str, headers: Mapping[str, str]) -> bool:
         # API keys are validated against their app/space scope, never treated as
         # login tokens. A separate cookie-free session prevents credential mixing.
@@ -163,41 +240,10 @@ class PlatformEnterpriseAdminChecker:
                     timeout=self._timeout, cookie_jar=aiohttp.DummyCookieJar(),
                     trust_env=False,
                 ) as session:
-                    async def get_json(target: str, params: dict[str, str]):
-                        async with session.get(
-                            target, params=params, headers=dict(headers),
-                            allow_redirects=False,
-                        ) as response:
-                            if response.status == 401:
-                                raise ConsoleAdminAuthenticationError("platform credentials rejected")
-                            if not 200 <= response.status < 300:
-                                raise ConsoleAdminUnavailableError("platform verification unavailable")
-                            body = bytearray()
-                            async for chunk in response.content.iter_chunked(8192):
-                                body.extend(chunk)
-                                if len(body) > 65536:
-                                    raise ConsoleAdminUnavailableError("platform verification response too large")
-                            value = json.loads(body, object_pairs_hook=_unique_object)
-                            if isinstance(value, dict) and "data" in value:
-                                if value.get("status") is not True:
-                                    raise ConsoleAdminUnavailableError("invalid platform verification envelope")
-                                value = value["data"]
-                            return value
-
-                    identity = await get_json(url.rsplit("/", 1)[0] + "/checkApiKey", {
-                        "apiKey": headers["x-deepfos-key"],
-                        "app": headers["app"], "space": headers["space"],
-                    })
-                    if not isinstance(identity, dict) or not isinstance(identity.get("valid"), bool):
-                        raise ConsoleAdminUnavailableError("invalid API Key verification response")
-                    if identity["valid"] is not True:
-                        raise ConsoleAdminAuthenticationError("API Key rejected")
-                    returned_user = identity.get("userId")
-                    if not isinstance(returned_user, str) or not _API_SCOPE_ID.fullmatch(returned_user):
-                        raise ConsoleAdminUnavailableError("invalid API Key identity")
+                    returned_user = await self._key_identity(session, url, headers)
                     if returned_user != user_id:
                         raise ConsoleAdminAuthenticationError("API Key identity does not match gateway user")
-                    decision = await get_json(url, {"userId": returned_user})
+                    decision = await self._verification_json(session, url, {"userId": returned_user}, headers)
                     if not isinstance(decision, bool):
                         raise ConsoleAdminUnavailableError("invalid enterprise-admin decision")
                     if on_success is not None:

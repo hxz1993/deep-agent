@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -33,6 +34,11 @@ from deep_agent.channels.metadata import channel_session_title, normalize_channe
 from deep_agent.channels.app_context import channel_deepfos_app, merge_channel_settings, validate_channel_settings
 from deep_agent.agent.request_context import derive_space_from_app
 from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate, validate_webhook_credentials
+
+
+def account_configuration_snapshot(account: ChannelAccount) -> dict[str, Any]:
+    """Capture editable values; timestamp precision varies by database."""
+    return deepcopy({name: getattr(account, name) for name in ChannelAccountUpdate.model_fields})
 
 
 @dataclass(frozen=True)
@@ -104,6 +110,8 @@ class ChannelStore(SessionBoundMixin):
         self,
         account_id: str,
         data: ChannelAccountUpdate,
+        *,
+        expected_configuration: dict[str, Any] | None = None,
     ) -> ChannelAccount | None:
         try:
             async with self._write(exclusive=True) as db:
@@ -112,6 +120,8 @@ class ChannelStore(SessionBoundMixin):
                 )
                 if row is None:
                     return None
+                if expected_configuration is not None and account_configuration_snapshot(row) != expected_configuration:
+                    raise ValueError("渠道配置已被修改，请刷新后重试")
                 validate_channel_settings(row.channel_type, data.settings if "settings" in data.model_fields_set else row.settings)
                 if row.channel_type == "wecom":
                     await validate_channel_wecom_settings(db, data.settings if "settings" in data.model_fields_set else row.settings)

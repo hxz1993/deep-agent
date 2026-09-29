@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.4`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.5`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -377,14 +377,16 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 
 ### 企微应用 Webhook 渠道（011）
 
-- 入口与配置见 [企微应用渠道](docs/guides/wecom-app-channel.md)。`wecom_app/webhook` 独立于 `wecom/websocket`，不要将机器人身份映射或姓名查询套到应用回调。
+- 入口与配置见 [企微应用渠道](docs/guides/wecom-app-channel.md)。`wecom_app/webhook` 独立于 `wecom/websocket`，两者复用关联应用的持久化成员资料，应用回调按明文 User ID 查询。
 - `webhook_token`、`webhook_aes_key` 是渠道账户独立可空列；仅企微应用允许 `bot_id/secret` 为空。应用引用为 `settings.wecom_app.application_id`，允许重复关联但必须校验存在并保护删除。
 - 已发布 010 不再改写。011 只新增上述两列、改变 Bot 两列可空性，无新表、索引、外键及 Runs 字段。迁移和远端执行仍遵守本文件顶部单独确认规则。
-- 回调地址用部署配置 `DEEP_AGENT_WEBHOOK_PUBLIC_BASE_URL` 完整公网前缀加 `/channels/{id}`，不从 Host 猜测。新建保存后生成 ID，普通 API 只返回密钥状态/掩码。
-- 会话来源是 `channel:wecom_app`；Events 决定提问和用量，Runs 关联发送者，不按当前 Agent 渠道关联推断来源。应用渠道不调用姓名服务。
+- 回调地址复用 Console 组件根路径，加 `api/v1/webhooks/channels/{id}`，无需环境变量。新建保存后生成 ID，普通 API 只返回密钥状态/掩码。
+- 会话来源是 `channel:wecom_app`；Events 决定提问和用量，Runs 关联发送者，不按当前 Agent 渠道关联推断来源。应用渠道复用关联应用的持久化成员资料服务。
 - 沿用内存队列，不扩充重启恢复。联调阶段日志记录入口及各阶段关联 ID/结果，禁止密钥、完整 Query、原始 XML、正文和文件内容。
 
 ## 环境变量变更约定
-新增环境变量与修改数据库表结构同样需要事先向用户明确说明用途、必要性、默认行为、部署申请及兼容影响，并获得确认后再实施。不得擅自增加部署配置要求。渠道公网回调地址使用当前页面 origin + `/webhooks/agent/channel/{id}`，不增加基址环境变量。
+新增环境变量与修改数据库表结构同样需要事先向用户明确说明用途、必要性、默认行为、部署申请及兼容影响，并获得确认后再实施。不得擅自增加部署配置要求。渠道回调地址复用 Console `serviceUrl()`，使用组件根路径 + `api/v1/webhooks/channels/{id}`，保留部署网关前缀；不再生成短路由，不增加基址环境变量。
 
 企微机器人与企微应用统一使用 `wecom_user_profiles` 持久化姓名与 ID 映射。新会话标题从当前关联应用的有效资料生成，不读取 binding 旧姓名字段；已有历史标题不回写。成员解析不保留进程内失败负缓存，已知成员的重试时间使用持久化 `next_retry_at`，未确认身份失败允许下一条消息重试；进程内仅合并正在进行的查询。
+
+渠道应用关联：企微机器人、企微应用、飞书、钉钉统一在保存入口调用平台 `checkApiKey` 解析 Key 所属用户，与 `session_user_id` 比较；开启关联必须填写 Key。校验使用合并后的有效配置，保留旧 Key、更换关联用户也须校验，不复用浏览器凭据，不要求 Key 用户具备企业管理员身份。无效、不匹配或上游不可用均禁止保存，不新增环境变量或表结构。

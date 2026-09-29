@@ -808,7 +808,7 @@
               </div>
               <aside class="channel-connection-help"><strong>配置企业微信接收消息</strong><p>先在本平台「企微应用」中创建应用，再在左侧关联。</p><p>进入<a class="channel-platform-link" href="https://work.weixin.qq.com/" target="_blank" rel="noopener noreferrer">企微后台</a>「应用管理 → 自建应用 → 接收消息」，将 <strong>Token</strong>、<strong>EncodingAESKey</strong> 填入左侧，完成配置后<strong>保存渠道</strong>，详细步骤参见<a class="channel-platform-link" href="https://developer.work.weixin.qq.com/document/path/90238" target="_blank" rel="noopener noreferrer">官方接入说明</a>。</p></aside>
             </div>
-            <div class="field channel-webhook-url-field"><label class="field-label-row" for="channelWebhookUrl"><span>回调地址（URL）</span><small class="field-subtitle">保存后配置企业微信回调</small></label><div class="channel-webhook-url"><div class="channel-webhook-address"><input id="channelWebhookUrl" readonly aria-label="回调地址" /><p id="channelWebhookUrlPlaceholder">先<strong>保存渠道</strong>以生成地址，再复制至企业微信后台<strong>「接收消息 → URL」</strong>完成验证。</p></div><button id="copyChannelWebhookUrl" class="icon-btn" type="button" aria-label="复制回调地址"><i data-lucide="copy"></i></button></div></div>
+            <div class="field channel-webhook-url-field"><label class="field-label-row" for="channelWebhookUrl"><span>回调地址（URL）</span><small class="field-subtitle">请确保回调地址公网可达</small></label><div class="channel-webhook-url"><div class="channel-webhook-address"><input id="channelWebhookUrl" readonly aria-label="回调地址" /><p id="channelWebhookUrlPlaceholder">先<strong>保存渠道</strong>以生成地址，再复制至企业微信后台<strong>「接收消息 → URL」</strong>完成验证。</p></div><button id="copyChannelWebhookUrl" class="icon-btn" type="button" aria-label="复制回调地址"><i data-lucide="copy"></i></button></div></div>
           </div>
           <div id="channelCredentialHome" class="channel-credential-home">
           <div id="channelCredentialLayout" class="channel-credential-layout">
@@ -867,7 +867,7 @@
                 <input type="text" id="channelDeepfosAppId" maxlength="191" pattern="[^\s]+[0-9]{3}" placeholder="请输入" autocomplete="off" title="填写 Space 编码加三位数字组成的 App ID" />
               </label>
               <div class="field">
-                <div class="field-label-actions"><span class="field-label-row"><label for="channelDeepfosApiKey">X-Deepfos-Key</label><span class="field-help" tabindex="0" aria-label="如何获取 X-Deepfos-Key" aria-describedby="channelDeepfosKeyHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="channelDeepfosKeyHelp" role="tooltip">前往「配置管理 → 目标空间 → API 密钥 → 新建」。必须使用当前 App 所属空间的 API Key，并授权访问该 App。</span></span></span><button type="button" class="field-text-action" id="clearChannelDeepfosApiKeyBtn">清空</button></div>
+                <div class="field-label-actions"><span class="field-label-row"><label for="channelDeepfosApiKey">X-Deepfos-Key</label><span class="field-help" tabindex="0" aria-label="如何获取 X-Deepfos-Key" aria-describedby="channelDeepfosKeyHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="channelDeepfosKeyHelp" role="tooltip">前往「配置管理 → 目标空间 → API 密钥 → 新建」。必须使用「会话关联用户」本人的 API Key，且属于当前 App 所在空间，并授权访问该 App。</span></span></span><button type="button" class="field-text-action" id="clearChannelDeepfosApiKeyBtn">清空</button></div>
                 <input type="password" id="channelDeepfosApiKey" placeholder="请输入" autocomplete="new-password" />
               </div>
               </div>

@@ -2816,11 +2816,11 @@ dialog.console-detail-dialog.modal.channel-help-modal {
 
 .channel-account-form-body .field { margin-bottom: 0; }
 
-.channel-account-modal.registration-channel-modal { height: min(764px, calc(100dvh - 48px)); }
+.channel-account-modal.registration-channel-modal { height: min(820px, calc(100dvh - 48px)); max-height: calc(100dvh - 48px); }
 .registration-channel-modal > form { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.registration-channel-modal .channel-account-form-body { flex: 1; min-height: 0; overflow: hidden; grid-template-rows: auto auto minmax(0, 1fr); }
+.registration-channel-modal .channel-account-form-body { flex: 1; min-height: 0; max-height: none; overflow-y: auto; grid-template-rows: auto minmax(min-content, 1fr) auto; align-content: start; }
 .registration-channel-modal .channel-extension-settings { display: flex; flex-direction: column; min-height: 0; }
-.registration-channel-modal .channel-extension-layout { flex: 1; height: auto; min-height: 0; }
+.registration-channel-modal .channel-extension-layout { flex: none; height: auto; min-height: 220px; }
 .registration-channel-modal :is(.modal-header, .modal-footer) { flex-shrink: 0; }
 .channel-connection-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 32px; margin-bottom: 12px; }
 .channel-connection-heading h4::after { content: ""; flex: 1; height: 1px; background: var(--border); }
@@ -3529,7 +3529,7 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 .channel-extension-status.on { color: var(--success, #55a080); }
 .channel-extension-status.on .extension-on { display: block; }
 .channel-extension-status.on .extension-off { display: none; }
-.channel-extension-panel { min-width: 0; min-height: 0; padding: 8px 0; overflow: hidden; }
+.channel-extension-panel { min-width: 0; min-height: 0; padding: 8px 0; }
 .channel-extension-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-bottom: 18px; }
 .channel-extension-panel-head > .field-subtitle { margin: 0; font-size: 12px; color: var(--text-muted); }
 .channel-extension-fields { display: grid; gap: 14px; }
@@ -3610,9 +3610,6 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 #channelWebhookUrlPlaceholder { margin: 0; padding: 9px 12px; font-size: 12px; line-height: 1.6; color: var(--text-dim); }
 #channelWebhookUrl[hidden], #channelWebhookUrlPlaceholder[hidden] { display: none; }
 
-.webhook-channel-modal .channel-account-form-body { overflow-y: auto; grid-template-rows: auto minmax(min-content, 1fr) auto; align-content: start; }
-.webhook-channel-modal .channel-extension-layout { flex: none; height: 196px; min-height: 196px; }
-.webhook-channel-modal .channel-extension-panel { overflow-y: auto; }
 .webhook-channel-modal .channel-credentials { gap: 14px; }
 .webhook-channel-modal .field-hint:empty { display: none; }
 

@@ -56,6 +56,48 @@ class ApiKeyAdminTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.runner.cleanup()
 
+    async def test_key_owner_does_not_require_admin_or_forward_user(self):
+        self.decision = False
+        owner = await self.checker.resolve_api_key_user("fixture-key", "app1", "space1")
+        self.assertEqual(owner, "u1")
+        self.assertEqual([c[0] for c in self.calls], ["/oauth/checkApiKey"])
+        self.assertNotIn("user", {k.lower(): v for k, v in self.calls[0][2].items()})
+        self.assertNotIn("Cookie", self.calls[0][2])
+
+    async def test_owner_lookup_rejects_invalid_malformed_and_upstream_errors(self):
+        for identity, expected in (({"valid": False}, ConsoleAdminAuthenticationError),
+                                   ({"valid": True}, ConsoleAdminUnavailableError),
+                                   ({"valid": True, "userId": "bad\nuser"}, ConsoleAdminUnavailableError)):
+            self.identity = identity
+            with self.assertRaises(expected) as raised:
+                await self.checker.resolve_api_key_user("fixture-key", "app1", "space1")
+            self.assertNotIn("fixture-key", str(raised.exception))
+        self.status = 503
+        with self.assertRaises(ConsoleAdminUnavailableError):
+            await self.checker.resolve_api_key_user("fixture-key", "app1", "space1")
+        self.redirect = True
+        with self.assertRaises(ConsoleAdminUnavailableError):
+            await self.checker.resolve_api_key_user("fixture-key", "app1", "space1")
+        self.assertTrue(all(c[0] == "/oauth/checkApiKey" for c in self.calls))
+
+    async def test_owner_rejection_reasons_are_distinct_and_sanitized(self):
+        from deep_agent.security.console_admin import PlatformApiKeyRejectedError
+        for reason, message in (
+            ("密钥不存在", "不存在"),
+            ("密钥与空间不匹配", "所属空间"),
+            ("密钥授权过期", "已停用或过期"),
+            ("密钥未授权该应用", "未授权当前关联应用"),
+            ("upstream-secret-fixture", "未返回可识别的原因"),
+            ({"unexpected": "data"}, "未返回可识别的原因"),
+        ):
+            with self.subTest(reason=reason):
+                self.identity = {"valid": False, "errorMsg": reason}
+                with self.assertRaises(PlatformApiKeyRejectedError) as raised:
+                    await self.checker.resolve_api_key_user("fixture-key", "app1", "space1")
+                self.assertIn(message, raised.exception.public_message)
+                self.assertNotIn("upstream-secret-fixture", str(raised.exception))
+                self.assertNotIn("fixture-key", str(raised.exception))
+
     async def test_scoped_key_then_admin_check(self):
         self.assertTrue(await self.checker('u1', self.headers))
         self.assertEqual([c[0] for c in self.calls], ['/oauth/checkApiKey', '/oauth/checkEnterpriseAdmin'])

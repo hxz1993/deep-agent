@@ -178,7 +178,7 @@ function secretEditorHarness() {
     return elements.get(id);
   };
   const context = vm.createContext({
-    window: { location: {origin:"http://127.0.0.1:8000"}, createChannelRegistration: () => ({ reset() {}, start() {} }) },
+    window: { serviceUrl: path => new URL(path, "http://127.0.0.1:8000/").href, location: {origin:"http://127.0.0.1:8000"}, createChannelRegistration: () => ({ reset() {}, start() {} }) },
     document: {
       addEventListener(type, listener) { if (type === "DOMContentLoaded") ready.push(listener); },
       getElementById: getElement,

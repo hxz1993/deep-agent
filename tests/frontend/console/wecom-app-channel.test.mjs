@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../../../console/configuration/channels.js', import.meta.url), 'utf8');
-function harness() {
+function harness(baseURI = "https://alpha.deepfos.com/deepfos-server/deep-agent-server1-0/console/") {
   const elements = new Map();
   const ready = [];
   const listeners = new Map();
@@ -12,7 +12,7 @@ function harness() {
     return elements.get(id);
   };
   const requests = [];
-  const context = vm.createContext({window:{location:{origin:"https://alpha.deepfos.com"}}, navigator:{clipboard:{writeText:async()=>{}}}, document:{addEventListener(type, fn){ if(type==='DOMContentLoaded') ready.push(fn); }, getElementById:element, querySelectorAll:()=>[]}, escapeHtml:String,
+  const context = vm.createContext({window:{serviceUrl:path => new URL(path, new URL("../", baseURI)).href}, navigator:{clipboard:{writeText:async()=>{}}}, document:{addEventListener(type, fn){ if(type==='DOMContentLoaded') ready.push(fn); }, getElementById:element, querySelectorAll:()=>[]}, escapeHtml:String,
     apiFetch:async (path, options)=> { requests.push({path,payload:JSON.parse(options.body)}); return {id:'saved-id'}; },
     AdminFormFeedback:{show(){throw Error('unexpected validation failure')}}, showToast(){},
     refreshAfterSuccessfulMutation:async (_, cb)=>cb(),
@@ -21,7 +21,7 @@ function harness() {
   vm.runInContext('channelAdminState.channelType="wecom_app"; channelsAdmin.refresh=async()=>{}; channelsAdmin.openEdit=id=>{window.opened=id};',context);
   return {context,element,requests,ready,listeners};
 }
-test('Webhook editor preserves masked credentials and builds current-origin URL only after saving',()=>{
+test('Webhook editor preserves masked credentials and builds component-root URL only after saving',()=>{
   const h=harness();
   vm.runInContext('prepareChannelWebhookEditor()',h.context);
   assert.equal(h.element('channelWebhookToken').required,true);
@@ -31,7 +31,7 @@ test('Webhook editor preserves masked credentials and builds current-origin URL 
   assert.equal(h.element('channelWebhookToken').required,false);
   assert.equal(h.element('channelWebhookToken').value,'***');
   assert.equal(h.element('channelFullIdValue').textContent,'abc');
-  assert.equal(h.element('channelWebhookUrl').value,'https://alpha.deepfos.com/webhooks/agent/channel/abc');
+  assert.equal(h.element('channelWebhookUrl').value,'https://alpha.deepfos.com/deepfos-server/deep-agent-server1-0/api/v1/webhooks/channels/abc');
 });
 test('Webhook save sends independent credentials without Bot fields, closes editor and opens creation result',async()=>{
   const h=harness();
@@ -64,7 +64,7 @@ test('Editing omits existing masked and empty Webhook secrets',async()=>{
 test('Creation result uses current origin instead of a stale server URL',()=>{
   const h=harness();
   vm.runInContext('showChannelCreated({id:"abc",webhook_url:"https://hooks.example/channels/abc"})',h.context);
-  assert.equal(h.element('channelCreatedUrl').value,'https://alpha.deepfos.com/webhooks/agent/channel/abc');
+  assert.equal(h.element('channelCreatedUrl').value,'https://alpha.deepfos.com/deepfos-server/deep-agent-server1-0/api/v1/webhooks/channels/abc');
   assert.equal(h.element('channelCreatedAddress').hidden,false);
 });
 
@@ -77,6 +77,12 @@ test('Copy-and-close retains creation dialog on failure and closes only after su
   assert.equal(h.element('channelCreatedModal').closed, undefined);
   let copied; h.context.navigator.clipboard.writeText=async value=>{copied=value};
   await finish();
-  assert.equal(copied,'https://alpha.deepfos.com/webhooks/agent/channel/copy-fixture');
+  assert.equal(copied,'https://alpha.deepfos.com/deepfos-server/deep-agent-server1-0/api/v1/webhooks/channels/copy-fixture');
   assert.equal(h.element('channelCreatedModal').closed,true);
+});
+
+test('Webhook URL uses local component root and encodes channel ID',()=>{
+  const h=harness('http://127.0.0.1:8000/console/');
+  assert.equal(vm.runInContext('channelWebhookAddress({id:"channel/a"})',h.context),
+    'http://127.0.0.1:8000/api/v1/webhooks/channels/channel%2Fa');
 });

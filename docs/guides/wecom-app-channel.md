@@ -10,13 +10,13 @@
 4. 保存成功后弹框保留，显示完整 Channel ID 和回调地址；首次保存之前不预分配 ID。再次编辑保持同一地址。
 5. 将回调地址复制到企微后台「接收消息」配置。GET 验证成功后再启用业务消息处理。
 
-已关联其他渠道的应用会显示提示，仍允许重复关联。删除应用前必须解除渠道引用。应用关联只确定发送身份，不启用成员姓名查询；本渠道按原始 `FromUserName` 显示与统计。
+已关联其他渠道的应用会显示提示，仍允许重复关联。删除应用前必须解除渠道引用。应用关联同时确定发送身份与持久化成员资料来源；复用该应用的成员缓存，按明文 `FromUserName` 查询资料，显示和统计共用这一来源。
 
 ## 地址与网关转发
 
-Console 使用当前页面 origin 拼接 `/webhooks/agent/channel/{channel_id}`，无需环境变量。本机展示本机域名，Alpha 展示 Alpha 域名。
+Console 复用 `serviceUrl()`，从当前 Console 的组件根路径拼接 `api/v1/webhooks/channels/{channel_id}`，保留网关组件前缀，无需环境变量。
 
-公网网关将 `/webhooks/agent/channel/{channel_id}` 转发至服务内部 `/api/v1/webhooks/channels/{channel_id}`，保留方法、Query 和请求体。公网转发入口由网关部署；本地展示 URL 不代表本机已经部署该转发。
+Alpha 展示 `https://alpha.deepfos.com/deepfos-server/deep-agent-server1-0/api/v1/webhooks/channels/{channel_id}`；本地展示 `http://127.0.0.1:8000/api/v1/webhooks/channels/{channel_id}`。直接使用组件回调入口，不依赖额外短路由映射。
 
 GET 成功返回解密后的 `echostr` 原文。POST 正常接收入队后返回 `success`；这只表示接收成功，不表示模型或应用回复已经完成。其他渠道类型不使用这个入口，返回 `webhook_not_supported`。渠道不存在、签名失败、入队失败分别返回明确错误，不能为了联调统一返回 200。
 

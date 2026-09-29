@@ -293,7 +293,7 @@ function channelApplicationAssociation(applicationId) {
   return names.join("、");
 }
 function channelWebhookAddress(account) {
-  return account.id ? `${window.location.origin}/webhooks/agent/channel/${encodeURIComponent(account.id)}` : "";
+  return account.id ? window.serviceUrl(`api/v1/webhooks/channels/${encodeURIComponent(account.id)}`) : "";
 }
 function prepareChannelWebhookEditor(account = {}) {
   const url = channelWebhookAddress(account);
@@ -309,7 +309,7 @@ function prepareChannelWebhookEditor(account = {}) {
     input.placeholder = account[`${key}_set`] ? "留空保持不变" : "请输入";
   }
   document.getElementById("channelWebhookApplicationId").required = webhook;
-  document.getElementById("channelWebhookUrl").value = channelWebhookAddress(account);
+  document.getElementById("channelWebhookUrl").value = url;
   document.getElementById("channelWebhookUrl").hidden = !url;
   document.getElementById("channelWebhookUrlPlaceholder").hidden = Boolean(url);
   document.getElementById("channelWebhookUrlPlaceholder").innerHTML = account.id

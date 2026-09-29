@@ -38,7 +38,7 @@
 
 ## Alpha 联调验收
 
-1. 从正式公网域名打开 Console，核对生成的 `/webhooks/agent/channel/{id}` 地址，以及网关原样转发 GET/POST、Query 与 Body；不需要新增基址环境变量。
+1. 从正式公网域名打开 Console，核对生成的组件根路径 + `api/v1/webhooks/channels/{id}` 地址，以及网关原样转发 GET/POST、Query 与 Body；不需要新增基址环境变量。
 2. 创建企微应用渠道，保存后复制完整 URL；在企微后台验证 GET echostr。
 3. 发一条文本，按关联 ID 核对入口、Run、Events、模型用量及实际应用回复。
 4. 分别发送图片、语音；文件需确认企微应用是否实际投递该类型。人工构造的文件回调通过不代表平台一定提供入口。

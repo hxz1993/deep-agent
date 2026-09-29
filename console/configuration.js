@@ -7,7 +7,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20260929-wecom-profile-fix";
+const CONFIGURATION_ASSET_VERSION = "20260929-component-webhook";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -83,7 +83,7 @@ function loadClassicScript(src) {
 }
 
 async function loadAdminScripts() {
-  window.loadWecomMemberTable = () => import("./configuration/wecom-members.js?v=20260929-wecom-profile-fix");
+  window.loadWecomMemberTable = () => import("./configuration/wecom-members.js?v=20260929-component-webhook");
   const scripts = [
     "./configuration/core.js",
     "./configuration/form-feedback.js",

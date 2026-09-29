@@ -1,16 +1,16 @@
-import { initSecretInputs } from "./ui-secret-input.js?v=20260929-wecom-profile-fix";
+import { initSecretInputs } from "./ui-secret-input.js?v=20260929-component-webhook";
 import "./assets/deepagent-pet/sprite-pet.js?v=20260922-pet-1";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
-import { initConsoleSelects } from "./ui-select.js?v=20260929-wecom-profile-fix";
+import { initConsoleSelects } from "./ui-select.js?v=20260929-component-webhook";
 import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20260929-wecom-profile-fix";
+} from "./configuration.js?v=20260929-component-webhook";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260929-wecom-profile-fix";
-import { initWorkspace } from "./workspace.js?v=20260929-wecom-profile-fix";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20260929-component-webhook";
+import { initWorkspace } from "./workspace.js?v=20260929-component-webhook";
 import "./time.js?v=20260913-49";
 
 initUserIdentityControls();

@@ -70,8 +70,8 @@ Token、Cookie、Bot Secret 不得写入源码、日志、文档或测试夹具�
 中保存 App ID 和该 App 对应空间的 API Key（字段显示为 `X-Deepfos-Key`）。Key 应在平台
 对应空间的 API Key 设置中创建，并授权当前 App。服务端推导 Space 并带上 Language；调用
 继承上下文的 MCP 时使用 `X-Deepfos-Key`，移除 Cookie、Authorization、Token 和 user 等登录头。
-平台按 Key 绑定的用户校验业务权限；DeepAgent 内部 Session 归属仍使用配置的会话用户。
-未配置 Key 的旧渠道仍兼容上述私有运行凭据，但不会自动保存管理员浏览器登录态。
+平台按 Key 绑定的用户校验业务权限；DeepAgent 内部 Session 归属使用配置的会话用户。
+四种渠道开启应用关联后，保存时必须提供 Key，并通过平台 `checkApiKey` 校验有效性、应用范围和所属 `userId`；所属用户必须与 `session_user_id` 一致。编辑保留原 Key 时同样校验，不要求 Key 所属用户是企业管理员。校验失败或平台不可用时不保存；关闭应用关联时不执行此校验。
 
 本地 `local_dev` 会注入私有 Profile 的登录态，因此仅从本地聊天成功不能证明线上 Gateway
 已配置凭据。排查时对照 `mcp_request_context_resolved` 日志的 App、Space、Language 和
@@ -271,3 +271,5 @@ PYTHONPATH=src python3.12 -m maintenance.channel_origins --sqlite data/deep-agen
 页面姓名仅来自资料服务。资料不可用或查询关闭时显示 ID，不以 Runs.sender_name、历史上下文或旧标题中的姓名兜底；这些历史内容仅保留当时快照。企微成功解析后，在当轮既有 Run 写入 sender_name、可信关联应用的 tenant_id，以及带 wecom_ 前缀的 source_metadata，不新增表或列，不回填旧 Run。
 
 姓名搜索覆盖当前渠道、选定时间及筛选条件内的会话用户，按资料姓名匹配后分页，同时支持原始及映射 ID。资料未完整取得时提示结果可能不完整；不是企业通讯录搜索。普通页补查预算 3 秒，姓名搜索 10 秒，不扫描历史消息正文。
+
+保存校验按平台 `checkApiKey.errorMsg` 分别提示 Key 不存在、空间不匹配、停用或过期、应用未授权；通过后再比较会话用户。平台当前不能区分停用与过期，也不返回失败时的所属用户；按首次失败提示，不声称同时验证全部条件。未知上游原因只给安全通用提示，不透传原文。

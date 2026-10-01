@@ -15,6 +15,7 @@ from pydantic_ai import ModelRetry, RunContext, ToolFailed
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.attachments import AttachmentDownloadError
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.files import build_file_toolset
@@ -62,24 +63,85 @@ def _resolved_skill(root: Path, entries: list[dict]) -> ResolvedSkill:
     )
 
 
-async def _tool(resources: dict[str, ResolvedSkill] | None = None, ctx=None):
+async def _tool(resources: dict[str, ResolvedSkill] | None = None, ctx=None, **budget_args):
     context = ctx or _context()
-    tools = await build_file_toolset(resources).get_tools(context)
+    tools = await build_file_toolset(resources, **budget_args).get_tools(context)
     return tools.get("read_file")
 
 
 class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
-    async def test_text_page_defaults_and_caps_are_doubled(self) -> None:
+    def assert_budget(self, result, ceiling=24_000) -> None:
+        self.assertLessEqual(TokenEstimator.conservative().text(result.model_dump(mode="json")), ceiling)
+        self.assertIsInstance(result.limit, int)
+        self.assertGreater(result.limit, 0)
+
+    async def collect_pages(self, tool, context, resource, **extra):
+        args = {"resource": resource, **extra}
+        pages = []
+        seen = set()
+        for _ in range(100):
+            result = await tool.call_func(args, context)
+            self.assert_budget(result)
+            pages.append(result)
+            if not result.has_more:
+                return pages
+            cursor = (result.next_offset, result.next_char_offset)
+            self.assertNotIn(cursor, seen)
+            seen.add(cursor)
+            self.assertTrue(result.content, "A continuing page must make progress")
+            args.update(offset=result.next_offset, char_offset=result.next_char_offset)
+        self.fail("read_file did not reach EOF")
+
+    async def test_default_reads_all_short_lines_and_explicit_limit_has_no_artificial_cap(self) -> None:
         ref = AttachmentRef(id="text", name="note.txt", mime="text/plain")
         context = _context(ref)
         tool = await _tool(ctx=context)
+        original = "\n".join("x" for _ in range(4_100))
         with patch("deep_agent.files.toolset._download_file", new_callable=AsyncMock,
-                   return_value=("x\n" * 4_100).encode()):
+                   return_value=original.encode()):
             default = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id}}, context)
             maximum = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id}, "limit": 9_000}, context)
-        self.assertEqual((default.limit, default.returned_count), (1_000, 1_000))
-        self.assertEqual((maximum.limit, maximum.returned_count), (4_000, 4_000))
-        self.assertEqual((default.next_offset, default.next_char_offset), (1_001, 0))
+        self.assertEqual(default.content, original)
+        self.assertEqual(default.returned_count, 4_100)
+        self.assertFalse(default.has_more)
+        self.assertEqual((maximum.limit, maximum.returned_count), (9_000, 4_100))
+        self.assert_budget(default)
+        self.assert_budget(maximum)
+
+    async def test_explicit_offset_limit_keeps_original_range_and_order(self) -> None:
+        lines = [f"row-{index}" for index in range(5000)]
+        ref = AttachmentRef(id="text", name="range.txt", mime="text/plain")
+        context = _context(ref)
+        tool = await _tool(ctx=context)
+        with patch("deep_agent.files.toolset._download_file", new_callable=AsyncMock,
+                   return_value="\n".join(lines).encode()):
+            page = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id},
+                                         "offset": 17, "limit": 4500}, context)
+        self.assertEqual(page.content, "\n".join(lines[16:4516]))
+        self.assertEqual((page.offset, page.limit, page.returned_count), (17, 4500, 4500))
+        self.assertEqual((page.next_offset, page.next_char_offset), (4517, 0))
+        self.assertEqual(page.truncated_by, "limit")
+        self.assert_budget(page)
+
+    async def test_model_window_selects_fixed_budget_and_counts_envelope(self) -> None:
+        original = "正文" * 20_000
+        for window, ceiling in ((128_000, 24_000), (255_999, 24_000), (256_000, 48_000),
+                                (1_000_000, 48_000), (None, 24_000)):
+            with self.subTest(window=window):
+                ref = AttachmentRef(id="text", name="note.txt", mime="text/plain")
+                context = _context(ref)
+                tool = await _tool(ctx=context, context_window_tokens=window,
+                                   estimator=TokenEstimator.conservative())
+                with patch("deep_agent.files.toolset._download_file", new_callable=AsyncMock,
+                           return_value=original.encode()):
+                    result = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id}}, context)
+                self.assert_budget(result, ceiling)
+                self.assertEqual(result.has_more, ceiling == 24_000)
+                if ceiling == 48_000:
+                    self.assertEqual(result.content, original)
+                else:
+                    self.assertGreater(TokenEstimator.conservative().text(result.model_dump(mode="json")), 20_000)
+                    self.assertLess(len(result.content), len(original))
 
     async def test_text_long_line_resumes_without_suffix_loss_or_repeat_download(self) -> None:
         original = "文🙂" * 55_001
@@ -87,23 +149,13 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
         context = _context(ref)
         tool = await _tool(ctx=context)
         parser = Mock(wraps=file_tools.text_document)
-        pages = []
-        args = {"resource": {"type": "attachment", "file_id": ref.id}}
         with patch("deep_agent.files.toolset._download_file", new_callable=AsyncMock,
                    return_value=original.encode()) as download, patch("deep_agent.files.toolset.text_document", parser):
-            for _ in range(4):
-                result = await tool.call_func(args, context)
-                pages.append(result.content)
-                self.assertLessEqual(len(result.content), 50_000)
-                if not result.has_more:
-                    break
-                self.assertEqual(result.next_offset, 1)
-                args.update(offset=result.next_offset, char_offset=result.next_char_offset)
-            else:
-                self.fail("read_file did not reach EOF")
-        self.assertEqual("".join(pages), original)
-        self.assertEqual(result.char_offset, 100_000)
-        self.assertIsNone(result.next_char_offset)
+            pages = await self.collect_pages(tool, context, {"type": "attachment", "file_id": ref.id})
+        self.assertGreater(len(pages), 1)
+        self.assertTrue(all(page.next_offset == 1 for page in pages[:-1]))
+        self.assertEqual("".join(page.content for page in pages), original)
+        self.assertIsNone(pages[-1].next_char_offset)
         download.assert_awaited_once()
         parser.assert_called_once()
 
@@ -116,7 +168,7 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(cursor=cursor), self.assertRaises(ModelRetry):
                     await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id}, "char_offset": cursor}, context)
 
-    async def test_office_page_defaults_and_caps_are_doubled(self) -> None:
+    async def test_office_defaults_read_all_short_items_and_keep_explicit_limit(self) -> None:
         document = Document()
         for _ in range(1_050):
             document.add_paragraph("x")
@@ -136,8 +188,12 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
                 with patch("deep_agent.files.toolset._download_file", new_callable=AsyncMock, return_value=raw):
                     default = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id}}, context)
                     maximum = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id}, "limit": 9_000}, context)
-                self.assertEqual((default.limit, default.returned_count), (200, 200))
-                self.assertEqual((maximum.limit, maximum.returned_count), (1_000, 1_000))
+                self.assertEqual(default.returned_count, 1_050)
+                self.assertFalse(default.has_more)
+                self.assertEqual((maximum.limit, maximum.returned_count), (9_000, 1_050))
+                self.assertEqual(default.content, maximum.content)
+                self.assert_budget(default)
+                self.assert_budget(maximum)
 
     async def test_docx_long_paragraph_resumes_without_losing_suffix(self) -> None:
         original = "正文" * 25_001
@@ -149,19 +205,16 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
         context = _context(ref)
         tool = await _tool(ctx=context)
         with patch("deep_agent.files.toolset._download_file", new_callable=AsyncMock, return_value=raw.getvalue()):
-            first = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id}}, context)
-            last = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id},
-                                         "offset": first.next_offset, "char_offset": first.next_char_offset}, context)
-        self.assertEqual(first.next_offset, 1)
-        self.assertEqual(first.next_char_offset, 50_000)
-        self.assertEqual(first.content + last.content, original)
-        self.assertFalse(last.has_more)
+            pages = await self.collect_pages(tool, context, {"type": "attachment", "file_id": ref.id})
+        self.assertGreater(len(pages), 1)
+        self.assertEqual("".join(page.content for page in pages), original)
+        self.assertFalse(pages[-1].has_more)
 
     async def test_xlsx_long_row_resumes_without_losing_suffix(self) -> None:
         workbook = Workbook()
         randomizer = random.Random(0)
         workbook.active.append([
-            "".join(randomizer.choices("abcdefghijklmnopqrstuvwxyz", k=3_000))
+            "".join(randomizer.choices("abcdefghijklmnopqrstuvwxyz", k=6_000))
             for _ in range(20)
         ])
         raw = io.BytesIO()
@@ -171,13 +224,11 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
         context = _context(ref)
         tool = await _tool(ctx=context)
         with patch("deep_agent.files.toolset._download_file", new_callable=AsyncMock, return_value=raw.getvalue()):
-            first = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id}}, context)
-            last = await tool.call_func({"resource": {"type": "attachment", "file_id": ref.id},
-                                         "offset": first.next_offset, "char_offset": first.next_char_offset}, context)
-        self.assertEqual((first.next_offset, first.next_char_offset), (1, 50_000))
-        self.assertEqual(first.content + last.content, expected)
-        self.assertFalse(last.has_more)
-        for page in (first, last):
+            pages = await self.collect_pages(tool, context, {"type": "attachment", "file_id": ref.id})
+        self.assertGreater(len(pages), 1)
+        self.assertEqual("".join(page.content for page in pages), expected)
+        self.assertFalse(pages[-1].has_more)
+        for page in pages:
             self.assertLessEqual(len(json.dumps(page.metadata, ensure_ascii=False)), 8_000)
             self.assertTrue(page.metadata["sheets"][0]["headers_truncated"])
             self.assertTrue(all(len(value) <= 128 for value in page.metadata["sheets"][0]["headers"]))
@@ -196,10 +247,10 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
         chunks = []
         with patch("deep_agent.files.toolset._download_file", new_callable=AsyncMock,
                    return_value=raw.getvalue()) as download:
-            for _ in range(3):
+            for _ in range(100):
                 page = await tool.call_func(args, context)
                 chunks.append(page.content)
-                self.assertLessEqual(len(page.content), 50_000)
+                self.assert_budget(page)
                 self.assertLessEqual(len(json.dumps(page.metadata, ensure_ascii=False)), 8_000)
                 self.assertTrue(page.metadata["sheets"][0]["headers_truncated"])
                 if not page.has_more:
@@ -244,11 +295,9 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
             context = _context()
             tool = await _tool({"demo": item}, ctx=context)
             resource = {"type": "skill", "skill_code": "demo", "path": "references/guide.md"}
-            first = await tool.call_func({"resource": resource}, context)
-            last = await tool.call_func({"resource": resource, "offset": first.next_offset,
-                                         "char_offset": first.next_char_offset}, context)
-            self.assertEqual(first.content + last.content, original)
-            self.assertFalse(last.has_more)
+            pages = await self.collect_pages(tool, context, resource)
+            self.assertEqual("".join(page.content for page in pages), original)
+            self.assertFalse(pages[-1].has_more)
 
     async def test_hidden_without_readable_source_and_visible_for_attachment(self) -> None:
         self.assertIsNone(await _tool())

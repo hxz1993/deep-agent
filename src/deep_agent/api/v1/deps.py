@@ -206,7 +206,6 @@ async def _build_runner_from_spec(
         resolved_skills,
     )
     skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
-    file_toolset = build_file_toolset(resolved_skills.resources)
     file_export_toolset = build_file_export_toolset()
     skill_script_toolset = (
         build_skill_script_toolset(
@@ -240,6 +239,11 @@ async def _build_runner_from_spec(
         provider_type=(
             spec.provider_config.provider_type if spec.provider_config else None
         ),
+    )
+    file_toolset = build_file_toolset(
+        resolved_skills.resources,
+        context_window_tokens=spec.context_window_tokens,
+        estimator=estimator,
     )
     context_compaction = build_context_compaction(
         context_window_tokens=spec.context_window_tokens,

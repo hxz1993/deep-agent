@@ -573,7 +573,11 @@ channel_message_operations 及其中回执，保留已发布迁移；不改变�
 Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引。字节和解析结果只缓存到
 本次用户消息对应的完整 Run终态，不跨Run、进程或数据库保存。
 
-文件分页文本默认/最大1000/4000行，Office为200/1000项，正文上限仍50,000字符。
+两个读取工具共用`files/reading_budget.py`：模型配置窗口小于256000或未知时，
+完整返回（正文与包装）最多24000估算Token；窗口至少256000时最多48000。
+直接使用窗口大小分档，不扣最大输出、不取20%；使用当前模型的`TokenEstimator`。
+默认不限制源项数，在Token预算内尽量读取；显式`limit`仍表示最多多少行/块/行，
+没有额外4000/1000项上限。原50,000字符返回限制取消，解析安全限制保留。
 `has_more`时必须同时将`next_offset/next_char_offset`作为`offset/char_offset`续读；后者是项内
 Unicode字符位置，部分项不向后跳号、不加省略标记。不能用returned_count推导游标。
 
@@ -607,7 +611,8 @@ XLSX单元格不按4K字符截断；全工作簿解析正文最多8,000,000字�
 未达到Spill阈值的结果继续保持原对象。
 
 回读通过DeepAgent的公开`get_toolset()`覆盖同名`read_tool_result`，不patch安装包。
-默认/最大400/2000行，正文50,000字符；原handle授权、字面pattern和from_end保留。
+默认`limit=None`，在上述24K/48K估算Token预算内尽量返回；返回`limit`仍为整数。
+显式`limit`保留源行数含义，无额外2000行上限；原handle授权、字面pattern和from_end保留。
 结构化结果的`next_read`给出完整续读参数（0-based行offset、char_offset、end_offset），
 尾窗截断先正向续读该窗口，随后用首次返回的`previous_read`选择更早窗口。文件压缩去重键
 必须包含char_offset，工具结果还要包含end_offset，不能把不同片段误当重复读取。

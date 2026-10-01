@@ -15,6 +15,9 @@
 - 图片严格不经过 `read_file`：当前轮图片直接送入Provider；历史图片和Skill图片不读取。
 - 工具首次调用通常只传附件 `file_id`或 Skill精确路径；返回 `has_more`和 `next_offset`后再读取
   下一页。
+- 2026-10-01读取量调整：默认在模型窗口对应的24K/48K估算Token预算内尽量返回全文，
+  正文与包装一起计入；显式`limit`保持源项数含义，超长项沿`next_char_offset`无损续读。
+  授权、解析安全、格式及缓存不变，详见[共用预算](attachment-parsing-design.md#35-共用返回预算与续读)。
 - 新上传不再预抽文本，也不再使用 `DEEP_AGENT_UPLOAD_EXTRACT_TEXT_MAX_CHARS`。
 - `chat_session_events`保存原始附件引用和完整工具Event；Compaction只生成摘要锚点和来源索引。
 - v0.6.2 当 Agent 显式关联 `builtin:code-mode` 时，`load_file_data` 可把当前会话

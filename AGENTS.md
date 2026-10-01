@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.7`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.8`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -109,6 +109,8 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 ```
 
 该命令先启动`local_dev`，健康后再启动回环地址8010网关；不要再并行启动独立Gateway。
+重启时须等待旧监督进程完全退出后再启动新版，不能只等待8000/8010释放；
+旧进程的最终清理仍会删除运行令牌文件，过早启动会使新版网关健康检查找不到令牌。
 
 - 这套主数据库以共享 Test 的**配置数据**为基础，保留 Provider、Model、Agent、MCP 和 Skill 等真实
   配置；不复制 Test 会话历史。日常开发应继续沿用其中的本地会话、附件和验收数据，不得因为开始新
@@ -296,6 +298,12 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
   `has_more/next_offset`渐进读取 TXT、LOG、DOCX、XLSX。合法 `file_id`
   必须来自当前会话的原始Event或Artifact，不能从摘要Evidence推断授权。详见
   [`docs/design/06-attachment-parsing/`](docs/design/06-attachment-parsing)。
+- 2026-10-01本轮只调整`read_file/read_tool_result`返回量，见
+  [`读取量调整`](docs/design/05-tool-optimization/file-and-tool-result-reading-redesign.md)。
+  当前模型窗口小于256000或未知用24000估算Token，至少256000用48000；完整返回包装一并计入。
+  默认不限制源项数，显式`limit`保持最大源项数含义；授权、过滤、原续读参数和解析安全不变。
+  普通工具的外置阈值及2000字符预览不改；不引入cursor、历史去重、搜索或专业解析工具。
+  用户要求减少普通全文重复续读，不以逐个微调数字代替完整性和调用次数验收。
 
 ### 框架能力说明方式
 

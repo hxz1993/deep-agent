@@ -14,19 +14,20 @@ from pydantic_ai.toolsets import PreparedToolset
 from deep_agent.agent.attachment_extractors import (
     AttachmentParseError,
     DocxDocument,
+    DocumentPage,
     XlsxWorkbook,
     docx_document,
-    normalize_range,
-    paginate_items,
     select_xlsx_sheet,
     text_document,
     xlsx_workbook,
     xlsx_sheet_metadata,
 )
 from deep_agent.agent.attachments import AttachmentDownloadError, _download_file
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import is_log_text_attachment, max_upload_bytes
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
+from deep_agent.files.reading_budget import ReadingBudget, paginate_items
 from deep_agent.files.schema import (
     AttachmentFileRef,
     FileReadResult,
@@ -54,11 +55,6 @@ _TEXT_MIMES = frozenset(
 )
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
-_TEXT_DEFAULT_LIMIT = 1_000
-_TEXT_MAX_LIMIT = 4_000
-_OFFICE_DEFAULT_LIMIT = 200
-_OFFICE_MAX_LIMIT = 1_000
 
 T = TypeVar("T")
 _RESOURCE_ADAPTER = TypeAdapter(FileResourceRef)
@@ -123,24 +119,6 @@ def _has_readable_attachment(ctx: RunContext[AgentDeps]) -> bool:
         _attachment_format(ref) is not None
         for ref in ctx.deps.attachment_by_id.values()
     )
-
-
-def _normalized_range(
-    *,
-    offset: int | None,
-    limit: int | None,
-    default_limit: int,
-    max_limit: int,
-) -> tuple[int, int]:
-    try:
-        return normalize_range(
-            offset=offset,
-            limit=limit,
-            default_limit=default_limit,
-            max_limit=max_limit,
-        )
-    except AttachmentParseError as exc:
-        raise ModelRetry(str(exc)) from exc
 
 
 async def _load_cached(
@@ -355,130 +333,63 @@ async def _read_paged(
     sheet: str | None,
     content_hash: str,
     char_offset: int,
+    budget: ReadingBudget,
 ) -> FileReadResult:
+    start = 1 if offset is None else offset
+    if start < 1 or (limit is not None and limit < 1):
+        raise AttachmentParseError("offset、limit 必须是正整数（offset 从 1 开始）")
+    if sheet is not None and resolved.format != "xlsx":
+        raise ModelRetry("sheet 仅适用于 XLSX 文件")
     if resolved.format == "text":
-        if sheet is not None:
-            raise ModelRetry("sheet 仅适用于 XLSX 文件")
-        start, page_limit = _normalized_range(
-            offset=offset,
-            limit=limit,
-            default_limit=_TEXT_DEFAULT_LIMIT,
-            max_limit=_TEXT_MAX_LIMIT,
-        )
-        lines, metadata = await _parse_cached(
-            ctx,
-            key=f"{resolved.cache_key}:text",
+        items, metadata = await _parse_cached(
+            ctx, key=f"{resolved.cache_key}:text",
             parser=lambda: text_document(data, name=resolved.name, mime=resolved.mime),
             failure_label=resolved.name,
         )
-        page = paginate_items(
-            lines[start - 1 : start - 1 + page_limit],
-            total_count=len(lines),
-            offset=start,
-            limit=page_limit,
-            char_offset=char_offset,
-        )
-        return _result(
-            resolved,
-            unit="line",
-            content=page.content,
-            metadata=metadata,
-            offset=start,
-            limit=page_limit,
-            returned_count=page.returned_count,
-            total_count=len(lines),
-            next_offset=page.next_offset,
-            has_more=page.has_more,
-            truncated_by=page.truncated_by,
-            content_hash=content_hash,
-            char_offset=char_offset,
-            next_char_offset=page.next_char_offset,
-        )
-
-    if resolved.format == "docx":
-        if sheet is not None:
-            raise ModelRetry("sheet 仅适用于 XLSX 文件")
-        start, page_limit = _normalized_range(
-            offset=offset,
-            limit=limit,
-            default_limit=_OFFICE_DEFAULT_LIMIT,
-            max_limit=_OFFICE_MAX_LIMIT,
-        )
+        unit = "line"
+    elif resolved.format == "docx":
         document: DocxDocument = await _parse_cached(
-            ctx,
-            key=f"{resolved.cache_key}:docx",
-            parser=lambda: docx_document(data),
+            ctx, key=f"{resolved.cache_key}:docx", parser=lambda: docx_document(data),
             failure_label=resolved.name,
         )
-        page = paginate_items(
-            document.blocks[start - 1 : start - 1 + page_limit],
-            total_count=len(document.blocks),
-            offset=start,
-            limit=page_limit,
-            char_offset=char_offset,
+        items, metadata, unit = document.blocks, document.metadata, "block"
+    else:
+        workbook: XlsxWorkbook = await _parse_cached(
+            ctx, key=f"{resolved.cache_key}:xlsx", parser=lambda: xlsx_workbook(data),
+            failure_label=resolved.name,
         )
-        result = _result(
-            resolved,
-            unit="block",
-            content=page.content,
-            metadata=document.metadata,
-            offset=start,
-            limit=page_limit,
-            returned_count=page.returned_count,
-            total_count=len(document.blocks),
-            next_offset=page.next_offset,
-            has_more=page.has_more,
-            truncated_by=page.truncated_by,
-            content_hash=content_hash,
-            char_offset=char_offset,
+        selected = select_xlsx_sheet(workbook, sheet)
+        items, metadata, unit = selected.rows, xlsx_sheet_metadata(workbook, selected), "row"
+    # An omitted limit is a source-sized range, not an arbitrary item cap. Keep
+    # the established integer result field, including empty and EOF reads.
+    page_limit = limit if limit is not None else max(1, len(items) - start + 1)
+
+    def result(page: DocumentPage) -> FileReadResult:
+        return _result(
+            resolved, unit=unit, content=page.content, metadata=metadata,
+            offset=start, limit=page_limit, returned_count=page.returned_count,
+            total_count=len(items), next_offset=page.next_offset,
+            has_more=page.has_more, truncated_by=page.truncated_by,
+            content_hash=content_hash, char_offset=char_offset,
             next_char_offset=page.next_char_offset,
         )
-        return result
 
-    start, page_limit = _normalized_range(
-        offset=offset,
-        limit=limit,
-        default_limit=_OFFICE_DEFAULT_LIMIT,
-        max_limit=_OFFICE_MAX_LIMIT,
+    page = await asyncio.to_thread(
+        paginate_items,
+        items[start - 1 : start - 1 + page_limit], total_count=len(items),
+        offset=start, limit=page_limit, char_offset=char_offset, budget=budget,
+        envelope=lambda page: result(page).model_dump(mode="json"),
     )
-    workbook: XlsxWorkbook = await _parse_cached(
-        ctx,
-        key=f"{resolved.cache_key}:xlsx",
-        parser=lambda: xlsx_workbook(data),
-        failure_label=resolved.name,
-    )
-    try:
-        selected = select_xlsx_sheet(workbook, sheet)
-    except AttachmentParseError as exc:
-        raise ModelRetry(str(exc)) from exc
-    page = paginate_items(
-        selected.rows[start - 1 : start - 1 + page_limit],
-        total_count=len(selected.rows),
-        offset=start,
-        limit=page_limit,
-        char_offset=char_offset,
-    )
-    return _result(
-        resolved,
-        unit="row",
-        content=page.content,
-        metadata=xlsx_sheet_metadata(workbook, selected),
-        offset=start,
-        limit=page_limit,
-        returned_count=page.returned_count,
-        total_count=len(selected.rows),
-        next_offset=page.next_offset,
-        has_more=page.has_more,
-        truncated_by=page.truncated_by,
-        content_hash=content_hash,
-        char_offset=char_offset,
-        next_char_offset=page.next_char_offset,
-    )
+    return result(page)
 
 
 def build_file_toolset(
     resources: dict[str, ResolvedSkill] | None = None,
+    *,
+    context_window_tokens: int | None = None,
+    estimator: TokenEstimator | None = None,
 ) -> PreparedToolset[AgentDeps]:
+    budget = ReadingBudget(estimator or TokenEstimator.conservative(), context_window_tokens)
     authorized = dict(resources or {})
     toolset = FunctionToolset[AgentDeps](
         id="file-resources",
@@ -504,7 +415,7 @@ def build_file_toolset(
         Args:
             resource: 当前会话附件或已授权 Skill 文件引用。
             offset: 起始行、段或行号，从 1 开始。
-            limit: 文本默认 1000、最多 4000 行；Office 默认 200、最多 1000 项。
+            limit: 最多读取的源项数；省略时按 Token 预算尽量返回全文（含包装 24000/48000 Token）。
             sheet: XLSX 工作表名，省略时读取第一个可见工作表。
             char_offset: 当前 offset 项内部的字符偏移，从 0 开始；续读时使用 next_char_offset。
         """
@@ -528,6 +439,7 @@ def build_file_toolset(
                 sheet=sheet,
                 content_hash=content_hash,
                 char_offset=char_offset,
+                budget=budget,
             )
         except AttachmentParseError as exc:
             raise ModelRetry(str(exc)) from exc

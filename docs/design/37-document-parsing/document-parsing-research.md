@@ -1,5 +1,7 @@
 # 复杂 PDF 文档解析：选型、成本与 DeepAgent 工具接入
 
+> 2026-10-02 实施说明：本文保留研究阶段候选与后续设想。当前实际版本只有显式 `builtin:document` 分组下的 `read_document`，无独立 parse 工具、table_id、cursor 或语义搜索；以[产品使用指南](../../guides/document-parsing.md)和本轮回归报告为准。
+
 核验日期：2026-09-29。本文是研究与隔离试验，不是已上线功能说明。产品基线 `test / baf3dd2 / v0.12.3`，数据库不变。
 
 ## 1. 当前建议

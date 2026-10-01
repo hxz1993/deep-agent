@@ -10,6 +10,15 @@ from urllib.parse import urlsplit
 from .messages import describe
 
 EVENTS = {
+    "document_configuration_updated": "文档解析配置已更新",
+    "document_parse_started": "文档解析开始",
+    "document_parse_phase": "文档解析阶段更新",
+    "document_parse_completed": "文档解析完成",
+    "document_parse_failed": "文档解析失败",
+    "document_parse_cancelled": "文档解析取消",
+    "document_http_request": "文档解析HTTP请求开始",
+    "document_http_response": "文档解析HTTP响应已收到",
+    "document_read_completed": "文档分页读取完成",
     "mcp_request_context_resolved": "MCP 请求上下文已组装",
     "history_tool_result_matched": "历史工具已匹配后续结果",
     "history_tool_result_synthesized": "历史缺失工具结果已补齐",
@@ -97,6 +106,7 @@ IDENTIFIER_FIELDS = frozenset({
     "error_type", "error_code", "result_status", "command", "mode", "finish_reason", "compaction", "reason",
 })
 NUMBER_FIELDS = frozenset({
+    "elapsed_ms", "token_count", "returned_pages", "offset", "char_offset",
     "requested_count", "resolved_count", "count",
     "duration_ms", "request_index", "attempt", "queue_depth", "input_tokens", "output_tokens",
     "total_tokens", "requests", "tool_calls", "tool_search_calls", "cache_read_tokens",
@@ -104,6 +114,7 @@ NUMBER_FIELDS = frozenset({
     "tool_count", "unique_tool_count",
     "stream_chunks", "stream_bytes", "first_byte_ms", "last_byte_age_ms",
 })
+BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_table_enabled", "parse_formula_enabled", "parse_merge_tables", "parse_relevel_titles"})
 TOKEN = re.compile(r"[A-Za-z0-9_.:/-]{1,180}\Z")
 ISSUE_CODES = frozenset({
     "directory_unavailable", "write_failed", "queue_full", "capacity_exceeded", "shutdown_incomplete",
@@ -180,6 +191,21 @@ def _model_api_fields(fields: dict, result: dict) -> None:
 
 def safe_fields(fields: dict) -> dict:
     result = {}
+    for name in BOOLEAN_FIELDS:
+        if type(fields.get(name)) is bool:
+            result[name] = fields[name]
+    if fields.get("parse_language") in ("ch", "auto"):
+        result["parse_language"] = fields["parse_language"]
+    for name, pattern in (("source_hash", r"[a-f0-9]{64}"), ("file_type", r"[a-z0-9]{1,8}"),
+                          ("document_task_id", r"[A-Za-z0-9_.-]{1,100}")):
+        value = fields.get(name)
+        if type(value) is str and re.fullmatch(pattern, value):
+            result[name] = value
+    if fields.get("document_api_path") in {
+        "/api/v4/file-urls/batch", "/api/v4/extract-results/batch/{task}",
+        "/api/v2/ocr/jobs", "/api/v2/ocr/jobs/{task}", "/api/paas/v4/layout_parsing", "/signed-artifact",
+    }:
+        result["document_api_path"] = fields["document_api_path"]
     for name in IDENTIFIER_FIELDS:
         value = fields.get(name)
         # No coercion/repr: even exception __str__ and custom number objects may

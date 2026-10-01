@@ -54,10 +54,10 @@ class ProcessedUpload:
     extracted_text: str | None = None
 
 
-def allowed_mimes() -> frozenset[str]:
+def allowed_mimes(additional_mimes: frozenset[str] = frozenset()) -> frozenset[str]:
     raw = OPTION.agent.upload_allowed_mimes
     if not raw:
-        return _DEFAULT_ALLOWED_MIMES
+        return _DEFAULT_ALLOWED_MIMES | additional_mimes
     return frozenset(part.strip().lower() for part in str(raw).split(",") if part.strip())
 
 
@@ -77,17 +77,18 @@ def _normalized_upload_mime(*, mime: str, filename: str) -> str:
     return normalized
 
 
-def validate_upload(*, data: bytes, mime: str, filename: str) -> None:
+def validate_upload(*, data: bytes, mime: str, filename: str, additional_mimes: frozenset[str] = frozenset()) -> None:
     if not data:
         raise MediaPipelineError("Empty file.")
     if len(data) > max_upload_bytes():
         raise MediaPipelineError(f"File exceeds {OPTION.agent.upload_max_size_mb}MB limit.")
     normalized = _normalized_upload_mime(mime=mime, filename=filename)
-    if normalized not in allowed_mimes():
-        raise MediaPipelineError(f"Unsupported MIME type: {mime}")
+    if normalized not in allowed_mimes(additional_mimes):
+        raise MediaPipelineError(f"Unsupported MIME type: {mime}；当前上传策略不允许此文件类型。")
     if normalized in {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }:
         try:
             validate_office_archive(data)
@@ -95,8 +96,8 @@ def validate_upload(*, data: bytes, mime: str, filename: str) -> None:
             raise MediaPipelineError(str(exc)) from exc
 
 
-def process_upload(*, data: bytes, mime: str, filename: str) -> ProcessedUpload:
-    validate_upload(data=data, mime=mime, filename=filename)
+def process_upload(*, data: bytes, mime: str, filename: str, additional_mimes: frozenset[str] = frozenset()) -> ProcessedUpload:
+    validate_upload(data=data, mime=mime, filename=filename, additional_mimes=additional_mimes)
     normalized = _normalized_upload_mime(mime=mime, filename=filename)
     if normalized.startswith("image/"):
         try:

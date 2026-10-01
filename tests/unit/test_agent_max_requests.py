@@ -143,7 +143,7 @@ class AgentRunnerGlobalRequestLimitTests(unittest.IsolatedAsyncioTestCase):
     async def test_runner_uses_only_global_request_limit(self) -> None:
         spec = AgentSpec(name="test", model="test", instructions="helpful")
         ctx = SimpleNamespace(
-            stores=MagicMock(),
+            stores=MagicMock(global_setting=SimpleNamespace(get=AsyncMock(return_value=None))),
             registry=MagicMock(),
             store=MagicMock(),
             skill_runtime=MagicMock(),

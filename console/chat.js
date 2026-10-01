@@ -656,6 +656,7 @@ function init() {
   checkHealth();
   loadCapabilities();
   loadUploadCapabilities();
+  window.addEventListener("document-parsing-settings-changed", () => { void loadUploadCapabilities(); });
   loadAgents().then(async () => {
     await loadLlmModels();
     loadUiTools(state.agentId);
@@ -2038,7 +2039,17 @@ function setComposerModelMenuOpen(open) {
 function uploadCapabilityText() {
   const kinds = Array.isArray(state.uploadCapabilities?.kinds) ? state.uploadCapabilities.kinds : [];
   const labels = state.uploadCapabilities?.labels || {};
-  if (!kinds.length) return "添加附件（上传类型尚未加载）";
+  const blocked = Array.isArray(state.uploadCapabilities?.blocked_document_mimes) ? state.uploadCapabilities.blocked_document_mimes : [];
+  const documentMimeLabels = {
+    "application/pdf": "PDF", "application/msword": "DOC",
+    "application/vnd.ms-excel": "XLS", "application/vnd.ms-powerpoint": "PPT",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOCX",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLSX",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PPTX",
+    "image/png": "PNG", "image/jpeg": "JPEG",
+  };
+  const blockedReason = blocked.length ? `解析服务支持，但上传白名单不允许：${blocked.map(mime => documentMimeLabels[mime] || mime).join("、")}` : "";
+  if (!kinds.length) return blockedReason || "添加附件（上传类型尚未加载）";
   const ordered = UPLOAD_KIND_ORDER.filter((key) => kinds.includes(key)).concat(
     kinds.filter((key) => !UPLOAD_KIND_ORDER.includes(key)),
   );
@@ -2046,24 +2057,32 @@ function uploadCapabilityText() {
     "附件",
     `支持：${ordered.map((key) => labels[key] || key).join("、")}`,
     `支持点击、拖拽或粘贴 · 最多 ${Number(state.uploadCapabilities?.max_count) || 10} 个 · 单个 ${Number(state.uploadCapabilities?.max_size_mb) || 20}MB`,
-  ].join("\n");
+    blockedReason,
+  ].filter(Boolean).join("\n");
 }
 
+let uploadCapabilitiesRequestId = 0;
+
 async function loadUploadCapabilities() {
+  const requestId = ++uploadCapabilitiesRequestId;
   try {
     const r = await daFetch(serviceUrl("api/v1/uploads/capabilities"));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    state.uploadCapabilities = await r.json();
+    const capabilities = await r.json();
+    if (requestId !== uploadCapabilitiesRequestId) return;
+    state.uploadCapabilities = capabilities;
     const allowed = Array.isArray(state.uploadCapabilities?.allowed_mimes)
       ? state.uploadCapabilities.allowed_mimes
       : [];
-    if (el.fileInput && allowed.length) {
+    if (el.fileInput) {
       const accept = [...allowed];
       if (allowed.includes("text/plain")) accept.push(".log");
       el.fileInput.accept = accept.join(",");
     }
   } catch (e) {
+    if (requestId !== uploadCapabilitiesRequestId) return;
     state.uploadCapabilities = { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 };
+    if (el.fileInput) el.fileInput.accept = "";
     console.warn("[deep-agent] 加载上传能力失败", e);
   }
   updateComposerModelInfo();

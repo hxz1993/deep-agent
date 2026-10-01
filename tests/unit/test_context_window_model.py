@@ -47,7 +47,8 @@ class ContextWindowModelTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_runtime_assembly_applies_configured_capacity(self):
         spec = AgentSpec(name='test', model='test', instructions='helpful', context_window_tokens=32_000)
-        ctx = SimpleNamespace(stores=MagicMock(), registry=MagicMock(), store=MagicMock(), skill_runtime=MagicMock())
+        ctx = SimpleNamespace(stores=MagicMock(global_setting=SimpleNamespace(get=AsyncMock(return_value=None))),
+                              registry=MagicMock(), store=MagicMock(), skill_runtime=MagicMock())
         agent = Agent(TestModel(call_tools=[], custom_output_text='done'))
         with (
             patch('deep_agent.api.v1.deps.load_mcp_rows', new=AsyncMock(return_value=[])),

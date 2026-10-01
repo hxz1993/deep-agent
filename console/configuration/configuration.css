@@ -599,6 +599,24 @@ dialog.web-search-settings-dialog.console-detail-dialog.modal {
   height: min(460px, calc(100vh - 28px));
   overflow: visible;
 }
+/* Document parsing reuses the Web Search editor controls; only its content layout differs. */
+dialog#documentParsingSettingsDialog {
+  height: min(540px, calc(100vh - 28px));
+  overflow: hidden;
+}
+#documentParsingSettingsDialog .modal-body { overflow-y: auto; }
+#documentParsingSettingsDialog .web-search-secret-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--ui-control-height);
+  gap: var(--ui-group-content-gap);
+}
+#documentParsingSettingsDialog .web-search-secret-row .icon-btn {
+  width: var(--ui-control-height);
+  min-width: var(--ui-control-height);
+  height: var(--ui-control-height);
+}
+#documentParsingSettingsDialog .field-hint { margin: 0; }
+
 .global-settings-runtime-toolbar {
   margin-bottom: 14px;
 }

@@ -24,7 +24,7 @@
           <section class="global-settings-page" id="settings-general" aria-label="常规">
             <div class="global-settings-group-heading"><h2 class="global-settings-detail-title settings-group-title"><i data-lucide="hammer"></i>工具设置</h2></div>
             <div class="global-settings-stack">
-              <section class="global-settings-section" id="globalSettingsWebSearch">
+              <section class="global-settings-section global-settings-tool-card" id="globalSettingsWebSearch">
                 <div class="global-settings-section-heading">
                   <div class="global-settings-section-title">
                     <h3>网络搜索</h3>
@@ -33,6 +33,18 @@
                   <div class="global-settings-section-actions">
                     <span class="global-settings-summary-value" id="webSearchSummaryValue">未配置</span>
                     <button class="btn" id="openWebSearchSettingsBtn" type="button"><i data-lucide="pencil"></i>编辑</button>
+                  </div>
+                </div>
+              </section>
+              <section class="global-settings-section global-settings-tool-card" id="globalSettingsDocumentParsing">
+                <div class="global-settings-section-heading">
+                  <div class="global-settings-section-title">
+                    <h3>文档解析</h3>
+                    <span class="global-settings-section-copy">配置扫描件、合同和复杂表格的解析供应商。</span>
+                  </div>
+                  <div class="global-settings-section-actions">
+                    <span class="global-settings-summary-value" id="documentParsingSummaryValue">未配置</span>
+                    <button class="btn" id="openDocumentParsingSettingsBtn" type="button"><i data-lucide="pencil"></i>编辑</button>
                   </div>
                 </div>
               </section>
@@ -414,6 +426,38 @@
         <button class="btn" id="cancelWebSearchBtn" type="button">取消</button>
         <button class="btn primary" id="saveWebSearchBtn" type="submit" disabled>保存</button>
       </footer>
+    </form>
+  </dialog>
+
+  <dialog class="modal console-detail-dialog web-search-settings-dialog" id="documentParsingSettingsDialog" aria-labelledby="documentParsingTitle">
+    <form class="web-search-settings-form" id="documentParsingSettingsForm" novalidate autocomplete="off">
+      <div class="modal-header">
+        <h3 id="documentParsingTitle">编辑文档解析</h3>
+        <button class="icon-action" id="closeDocumentParsingSettingsBtn" type="button" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body web-search-settings-body">
+        <fieldset class="web-search-mode-fieldset">
+          <legend>解析服务</legend>
+          <label class="web-search-unconfigured-option"><input type="radio" name="documentParsingProvider" value="unconfigured" /><span>暂不配置</span></label>
+          <div class="web-search-mode-grid" id="documentParsingProviderOptions"></div>
+        </fieldset>
+        <p class="web-search-unconfigured hidden" id="documentParsingUnconfigured">保存后清空已有文档解析配置。已关联的文档解析工具将提示未配置。</p>
+        <div class="web-search-provider-fields" id="documentParsingProviderFields">
+          <div class="field"><span>解析模型</span><span id="documentParsingModel">—</span></div>
+          <div class="field"><span>API Key</span>
+            <div class="web-search-secret-row">
+              <input id="documentParsingApiKey" name="documentParsingApiKey" type="password" autocomplete="off" aria-label="文档解析 API Key" placeholder="输入 API Key" />
+              <button class="btn icon-btn" id="testDocumentParsingBtn" type="button" title="测试连接（消耗一页解析额度）" aria-label="测试连接（消耗一页解析额度）"><i data-lucide="plug-zap"></i></button>
+            </div>
+          </div>
+          <p class="field-hint" id="documentParsingCapabilities"></p>
+          <p class="field-hint">测试连接会解析一页内置样例，消耗供应商额度；关闭仅停止本地等待。</p>
+        </div>
+        <div class="web-search-test-feedback hidden" id="documentParsingTestFeedback" role="status" aria-live="polite">
+          <span class="web-search-test-feedback-dot" aria-hidden="true"></span><span id="documentParsingTestFeedbackText"></span>
+        </div>
+      </div>
+      <footer class="modal-footer"><button class="btn" id="cancelDocumentParsingBtn" type="button">取消</button><button class="btn primary" id="saveDocumentParsingBtn" type="submit">保存</button></footer>
     </form>
   </dialog>
 

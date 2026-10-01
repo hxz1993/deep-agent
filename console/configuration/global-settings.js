@@ -417,6 +417,185 @@ function closeWebSearchSettings() {
   if (dialog?.open) dialog.close();
 }
 
+let documentParsingOperation = null;
+let documentParsingDrafts = new Map();
+let documentParsingSelectedProvider = "";
+let documentParsingTestRunId = 0;
+
+function documentParsingProviderMetadata(settings, provider) {
+  return (settings?.providers || []).find(item => item.provider === provider);
+}
+
+function documentParsingSummaryLabel(settings) {
+  const value = settings?.value || {};
+  if (value.mode !== "provider") return "未配置";
+  if (value.configuration_error) return "配置不可用";
+  return documentParsingProviderMetadata(settings, value.provider)?.label || value.provider || "未配置";
+}
+
+function documentParsingCapabilitiesLabel(metadata) {
+  if (!metadata) return "未能读取供应商支持格式，请重新加载配置。";
+  return `支持格式：${(metadata.formats || []).join("、") || "未声明"}。${metadata.limits || ""}`;
+}
+
+function buildDocumentParsingPayload({ provider, apiKey, maskedApiKey, apiKeySet = false }) {
+  if (provider === "unconfigured") return { version: 1, value: { mode: "unconfigured" } };
+  if (!["mineru", "paddle", "glm"].includes(provider)) throw new Error("请选择文档解析供应商");
+  const value = { mode: "provider", provider };
+  const key = String(apiKey || "").trim();
+  if (key && key !== maskedApiKey) value.api_key = key;
+  else if (!apiKeySet) throw new Error("请输入当前供应商的 API Key");
+  return { version: 1, value };
+}
+
+function renderDocumentParsingSummary(settings) {
+  const target = document.getElementById("documentParsingSummaryValue");
+  if (!target) return;
+  target.textContent = documentParsingSummaryLabel(settings);
+  target.classList.toggle("unconfigured", settings?.value?.mode !== "provider");
+  target.classList.toggle("invalid", Boolean(settings?.value?.configuration_error));
+  target.title = settings?.value?.configuration_error || "";
+}
+
+function setDocumentParsingFeedback(status = "", message = "") {
+  const presentation = webSearchTestFeedbackPresentation(status, message);
+  const target = document.getElementById("documentParsingTestFeedback");
+  if (!target) return;
+  target.classList.toggle("hidden", !presentation.visible);
+  target.dataset.status = presentation.status;
+  target.title = presentation.message;
+  const text = document.getElementById("documentParsingTestFeedbackText");
+  if (text) text.textContent = presentation.message;
+}
+
+function documentParsingCurrentKeyDraft() {
+  const input = document.getElementById("documentParsingApiKey");
+  if (!input || !documentParsingSelectedProvider || documentParsingSelectedProvider === "unconfigured") return;
+  documentParsingDrafts.set(documentParsingSelectedProvider, {
+    apiKey: input.value,
+    maskedApiKey: input.dataset.maskedValue || "",
+    apiKeySet: input.dataset.apiKeySet === "true",
+  });
+}
+
+function selectDocumentParsingProvider(provider) {
+  documentParsingCurrentKeyDraft();
+  documentParsingSelectedProvider = provider;
+  const current = globalSettingsAdmin.documentParsing?.value || {};
+  const metadata = documentParsingProviderMetadata(globalSettingsAdmin.documentParsing, provider);
+  const configured = provider !== "unconfigured";
+  document.querySelectorAll('input[name="documentParsingProvider"]').forEach(input => { input.checked = input.value === provider; });
+  document.getElementById("documentParsingProviderFields")?.classList.toggle("hidden", !configured);
+  document.getElementById("documentParsingUnconfigured")?.classList.toggle("hidden", configured);
+  const model = document.getElementById("documentParsingModel");
+  if (model) model.textContent = metadata?.model || "—";
+  const capabilities = document.getElementById("documentParsingCapabilities");
+  if (capabilities) capabilities.textContent = documentParsingCapabilitiesLabel(metadata);
+  const input = document.getElementById("documentParsingApiKey");
+  if (input) {
+    const stored = current.mode === "provider" && current.provider === provider;
+    const draft = documentParsingDrafts.get(provider) || {
+      apiKey: stored ? current.api_key_masked || "" : "",
+      maskedApiKey: stored ? current.api_key_masked || "" : "",
+      apiKeySet: stored && Boolean(current.api_key_set),
+    };
+    input.value = draft.apiKey;
+    input.dataset.maskedValue = draft.maskedApiKey;
+    input.dataset.apiKeySet = String(draft.apiKeySet);
+    const toggle = input.closest(".secret-input-control")?.querySelector('.secret-input-toggle[aria-pressed="true"]');
+    toggle?.click();
+  }
+  setDocumentParsingFeedback();
+  setDocumentParsingBusy(Boolean(documentParsingOperation));
+}
+
+function currentDocumentParsingDraft() {
+  documentParsingCurrentKeyDraft();
+  return buildDocumentParsingPayload({ provider: documentParsingSelectedProvider, ...documentParsingDrafts.get(documentParsingSelectedProvider) });
+}
+
+function setDocumentParsingBusy(busy) {
+  document.querySelectorAll("#documentParsingSettingsForm input, #documentParsingSettingsForm button").forEach(control => { control.disabled = Boolean(busy); });
+  const cancelAllowed = documentParsingOperation?.kind !== "save";
+  ["closeDocumentParsingSettingsBtn", "cancelDocumentParsingBtn"].forEach(id => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = busy && !cancelAllowed;
+  });
+  const test = document.getElementById("testDocumentParsingBtn");
+  if (test) test.disabled = busy || documentParsingSelectedProvider === "unconfigured";
+  const save = document.getElementById("saveDocumentParsingBtn");
+  if (save) save.disabled = busy || !documentParsingSelectedProvider;
+}
+
+function clearDocumentParsingDrafts() {
+  documentParsingDrafts.clear();
+  documentParsingSelectedProvider = "";
+  documentParsingTestRunId += 1;
+  const input = document.getElementById("documentParsingApiKey");
+  if (input) { input.value = ""; input.dataset.maskedValue = ""; input.dataset.apiKeySet = "false"; }
+  setDocumentParsingFeedback();
+}
+
+function openDocumentParsingSettings() {
+  clearDocumentParsingDrafts();
+  const settings = globalSettingsAdmin.documentParsing;
+  const options = document.getElementById("documentParsingProviderOptions");
+  if (options) options.innerHTML = (settings?.providers || []).map(metadata => `<label class="web-search-mode-option"><input type="radio" name="documentParsingProvider" value="${escapeHtml(metadata.provider)}" /><span>${escapeHtml(metadata.label)}</span></label>`).join("");
+  const selected = settings?.value?.mode === "provider" ? settings.value.provider : "mineru";
+  selectDocumentParsingProvider(selected);
+  if (settings?.value?.configuration_error) setDocumentParsingFeedback("error", settings.value.configuration_error);
+  const dialog = document.getElementById("documentParsingSettingsDialog");
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
+function closeDocumentParsingSettings() {
+  if (documentParsingOperation?.kind === "save") return;
+  documentParsingOperation?.controller.abort();
+  documentParsingOperation = null;
+  document.getElementById("documentParsingSettingsDialog")?.close();
+  clearDocumentParsingDrafts();
+  setDocumentParsingBusy(false);
+}
+
+async function runDocumentParsingOperation(kind) {
+  if (documentParsingOperation) return;
+  let payload;
+  try { payload = currentDocumentParsingDraft(); }
+  catch (error) { setDocumentParsingFeedback("error", error.message); return; }
+  const operation = { kind, controller: new AbortController() };
+  documentParsingOperation = operation;
+  const requestId = ++documentParsingTestRunId;
+  setDocumentParsingBusy(true);
+  setDocumentParsingFeedback(kind === "test" ? "testing" : "", kind === "test" ? "正在解析一页测试样例…" : "");
+  try {
+    const saved = await apiFetch(`/api/v1/global-settings/document-parsing${kind === "test" ? "/test" : ""}`, {
+      method: kind === "test" ? "POST" : "PUT",
+      signal: operation.controller.signal,
+      body: JSON.stringify(payload),
+    });
+    if (documentParsingOperation !== operation || requestId !== documentParsingTestRunId) return;
+    if (kind === "test") {
+      setDocumentParsingFeedback(saved?.ok ? "success" : "error", saved?.message || (saved?.ok ? "连接成功" : "连接失败"));
+    } else {
+      globalSettingsAdmin.documentParsing = saved;
+      renderDocumentParsingSummary(saved);
+      window.dispatchEvent?.(new Event("document-parsing-settings-changed"));
+      document.getElementById("documentParsingSettingsDialog")?.close();
+      clearDocumentParsingDrafts();
+      try {
+        globalSettingsAdmin.documentParsing = await apiFetch("/api/v1/global-settings/document-parsing");
+        renderDocumentParsingSummary(globalSettingsAdmin.documentParsing);
+        showToast("文档解析配置已保存");
+      } catch (error) { showToast(`文档解析配置已保存，刷新失败：${error.message}`, true); }
+    }
+  } catch (error) {
+    if (documentParsingOperation !== operation || requestId !== documentParsingTestRunId) return;
+    setDocumentParsingFeedback("error", error?.message || "文档解析操作失败");
+  } finally {
+    if (documentParsingOperation === operation) { documentParsingOperation = null; setDocumentParsingBusy(false); }
+  }
+}
+
 const globalSettingsAdmin = {
   page: "general",
   selectPage(page, { refresh = true } = {}) {
@@ -437,22 +616,32 @@ const globalSettingsAdmin = {
   query: "",
   selectedGroup: "",
   webSearch: null,
+  documentParsing: null,
   async refresh() {
     if (this.page === "models") return window.modelCatalogAdmin?.refresh();
     void window.databaseConnectionAdmin?.refresh();
     const runtimeTarget = document.getElementById("globalSettingsGroups");
     if (runtimeTarget) runtimeTarget.innerHTML = `<div class="global-settings-state">正在加载运行设置…</div>`;
     try {
-      const [runtime, webSearch] = await Promise.all([
+      const [runtime, webSearch, documentParsing] = await Promise.all([
         apiFetch("/api/v1/global-settings"),
         apiFetch("/api/v1/global-settings/web-search").catch((error) => {
           if (error.status !== 409) throw error;
           return { invalid: true };
         }),
+        apiFetch("/api/v1/global-settings/document-parsing").catch(error => ({ value: { configuration_error: error.message }, providers: [], invalid: true })),
         loadLlmProviders(),
       ]);
       this.groups = Array.isArray(runtime?.groups) ? runtime.groups : [];
       this.webSearch = webSearch?.invalid ? null : webSearch;
+      this.documentParsing = documentParsing;
+      renderDocumentParsingSummary(documentParsing);
+      const documentEdit = document.getElementById("openDocumentParsingSettingsBtn");
+      if (documentEdit) documentEdit.disabled = Boolean(documentParsing?.invalid);
+      if (documentParsing?.invalid) {
+        const summary = document.getElementById("documentParsingSummaryValue");
+        if (summary) summary.textContent = "配置加载失败，请重新加载";
+      }
       this.selectedGroup = renderGlobalSettings(this.groups, this.query, this.selectedGroup);
       renderWebSearchSettings(this.webSearch);
       if (webSearch?.invalid) {
@@ -535,9 +724,29 @@ window.__GlobalSettingsUI = {
   matches: globalSettingMatches,
   webSearchSummaryLabel,
   webSearchTestFeedbackPresentation,
+  documentParsingSummaryLabel,
+  documentParsingCapabilitiesLabel,
+  buildDocumentParsingPayload,
+  openDocumentParsingSettings,
+  closeDocumentParsingSettings,
+  selectDocumentParsingProvider,
+  currentDocumentParsingDraft,
+  runDocumentParsingOperation,
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("openDocumentParsingSettingsBtn")?.addEventListener("click", openDocumentParsingSettings);
+  ["closeDocumentParsingSettingsBtn", "cancelDocumentParsingBtn"].forEach(id => document.getElementById(id)?.addEventListener("click", closeDocumentParsingSettings));
+  document.getElementById("documentParsingSettingsForm")?.addEventListener("change", event => {
+    if (event.target.name === "documentParsingProvider") selectDocumentParsingProvider(event.target.value);
+  });
+  document.getElementById("documentParsingSettingsForm")?.addEventListener("submit", event => { event.preventDefault(); void runDocumentParsingOperation("save"); });
+  document.getElementById("testDocumentParsingBtn")?.addEventListener("click", () => { void runDocumentParsingOperation("test"); });
+  document.getElementById("documentParsingApiKey")?.addEventListener("focus", event => { if (event.currentTarget.value === event.currentTarget.dataset.maskedValue) event.currentTarget.select(); });
+  document.getElementById("documentParsingApiKey")?.addEventListener("input", () => setDocumentParsingFeedback());
+  document.getElementById("documentParsingSettingsDialog")?.addEventListener("cancel", event => { event.preventDefault(); closeDocumentParsingSettings(); });
+  document.getElementById("documentParsingSettingsDialog")?.addEventListener("close", clearDocumentParsingDrafts);
+
   document.querySelectorAll("[data-settings-page]").forEach(button => {
     button.addEventListener("click", () => globalSettingsAdmin.selectPage(button.dataset.settingsPage));
   });

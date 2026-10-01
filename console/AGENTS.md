@@ -80,7 +80,7 @@ History 中运行工具一律只读，不能因工具目录补齐 widget 自动�
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心展示`builtin:general`、`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示 |
+| 内置工具目录 | 配置中心展示`builtin:general`、`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`、`builtin:document`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
 | 渠道配置 | 配置中心维护企微Account、Agent、Bot凭证和启停；顶部展示渠道网关部署/运行状态，列表展示机器人连接状态；快捷命令弹框从公共只读目录获取，与渠道 `/help` 共用定义 |
 | 任务计划 | 只识别`write_plan`完整快照；仅当前Run直播展示，任何Run终态后隐藏，重新打开History不恢复；同Turn Deferred由后端恢复PlanStore |
@@ -152,6 +152,12 @@ Skill 与工具包分区保存；是否参与运行只看 Agent 的显式关联�
 不自动覆盖已有编码，不自动重试不确定请求。详情“上传”仍单包替换。上传期间阻止重复提交和关闭弹窗。
 单包前端等待上限120秒，超时标记待确认并停止后续包，不声称后端已取消；HTTP 5xx/408也不视为确定未安装。
 安装收尾后立即解锁弹窗，后台列表刷新不能延长安装锁。
+
+全局配置“常规 → 工具设置”中的文档解析，复用网络搜索的编辑器视觉。供应商、模型、支持格式和限制来自
+`GET /global-settings/document-parsing` 的 `providers` 元数据；前端不自行扩大格式能力。
+弹框中切换 MinerU / PaddleOCR / GLM-OCR 保留各自 Key 草稿，但保存只提交当前供应商；原脱敏值或当前供应商留空不提交密钥替换，关闭清除所有明文草稿。
+连接测试实际解析一页固定样例，说明会消耗额度；关闭仅中止本地等待，迟到结果不得污染重新打开的弹框。
+保存成功后回读，刷新失败必须明确说明“已保存，刷新失败”。工具目录的 `read_document` 展示当前供应商、格式及配置跳转，不作为系统自动注入工具。
 
 Provider 删除须确认同时删除其模型配置，允许删除最后一个；真实 Agent 或 Web Search 引用须先解除，失败不得部分删除。空列表仍可新建 Provider。渠道 Secret 复用 API Key 掩码样式，不提供清除；原掩码或留空均保持现有 Secret，只提交新输入。
 

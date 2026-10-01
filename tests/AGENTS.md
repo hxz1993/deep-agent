@@ -88,6 +88,7 @@ tests/
 | `test_context_test_scenarios.py` | 管理员测试会话场景、实时预算、消息往返序列化、常驻接口与用户归属 |
 | `test_attachment_extractors.py` | 文本编码、DOCX/XLSX 结构读取、分页与 Office 安全 |
 | `test_file_tools.py` | 附件与 Skill统一文件工具的来源参数、权限、Run缓存、single-flight、分页和多模态返回 |
+| `test_document_providers.py`、`test_document_tools.py`、`test_document_uploads.py` | 专业文档配置、三家受控HTTP、授权复核、Run内单飞/恢复/清理、原生正文和24K/48K分页、显式上传策略 |
 | `test_tool_package_registry.py` | ToolPackage Registry 的显式整包选择和空列表语义 |
 | `test_sqlite_bootstrap.py` | 生产基线001、Channel增量002及逻辑引用003的空库创建、默认数据、完整结构及升降往返 |
 | `test_baseline_migration_dialects.py` | 历史001→002离线DDL编译，以及003必须在线迁移 |
@@ -126,6 +127,7 @@ tests/
 | `test_llm_model_catalog.py` | 目录 DB 查询、两种视图、全量刷新及失败保留旧目录 |
 | `test_session_model_override.py` | Agent 流式对话 `model_id` 覆盖、默认回退、轮次切换 |
 | `test_chat_attachment_tools.py` | 附件引用 → 模型调用工具 → SSE/历史持久化 → 同会话续读 |
+| `test_document_runner.py` | 真实装配的供应商快照、下一Run配置、SDK流与失败/取消清理、已有压缩和不二次外置 |
 | `test_configuration_import_api.py` | 企业管理员multipart预检/确认执行及配置DB不进入File Store |
 
 公共fixture：`integration/fixtures/header_echo_server.py`、`pid_echo_server.py`；真实Builtin进程测试使用

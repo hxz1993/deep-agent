@@ -14,6 +14,9 @@ from typing import Any
 from deep_agent.agent.media_pipeline import allowed_mimes
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.options import OPTION
+from deep_agent.documents.models import ProviderCapability
+from deep_agent.documents.providers import PROVIDERS
+from deep_agent.documents.settings import DocumentParsingRuntimeConfig
 
 # MIME → user-facing upload kind (platform text-extraction or image bytes).
 _MIME_UPLOAD_KIND: dict[str, str] = {
@@ -21,6 +24,13 @@ _MIME_UPLOAD_KIND: dict[str, str] = {
     "image/png": "image",
     "image/webp": "image",
     "image/gif": "image",
+    "image/bmp": "image",
+    "image/jp2": "image",
+    "application/pdf": "pdf",
+    "application/msword": "doc",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.ms-powerpoint": "ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
     "text/plain": "text_file",
     "text/csv": "text_file",
     "text/markdown": "text_file",
@@ -40,17 +50,33 @@ _MIME_UPLOAD_KIND: dict[str, str] = {
 _UPLOAD_KIND_LABELS: dict[str, str] = {
     "image": "图片",
     "text_file": "TXT / LOG / CSV / JSON / MD / HTML / XML",
+    "pdf": "PDF",
+    "doc": "DOC",
+    "xls": "XLS",
+    "ppt": "PPT",
+    "pptx": "PPTX",
     "docx": "DOCX",
     "xlsx": "XLSX",
     "audio": "音频（MP3 / WAV / AMR）",
     "video": "视频（MP4）",
 }
 
-def upload_capability_kinds() -> list[str]:
+def document_upload_provider(config: DocumentParsingRuntimeConfig | None) -> ProviderCapability | None:
+    if config is None or config.mode != "provider" or config.configuration_error or not config.api_key:
+        return None
+    return PROVIDERS.get(config.provider)
+
+
+def document_upload_mimes(config: DocumentParsingRuntimeConfig | None) -> frozenset[str]:
+    provider = document_upload_provider(config)
+    return provider.mime_types if provider is not None else frozenset()
+
+
+def upload_capability_kinds(additional_mimes: frozenset[str] = frozenset()) -> list[str]:
     """Upload kinds enabled by the current ``allowed_mimes()`` configuration."""
     kinds: list[str] = []
     seen: set[str] = set()
-    for mime in sorted(allowed_mimes()):
+    for mime in sorted(allowed_mimes(additional_mimes)):
         kind = _MIME_UPLOAD_KIND.get(mime)
         if kind and kind not in seen:
             seen.add(kind)
@@ -58,20 +84,25 @@ def upload_capability_kinds() -> list[str]:
     return kinds
 
 
-def upload_capabilities_payload() -> dict[str, Any]:
-    kinds = upload_capability_kinds()
+def upload_capabilities_payload(document_config: DocumentParsingRuntimeConfig | None = None) -> dict[str, Any]:
+    extra = document_upload_mimes(document_config)
+    provider = document_upload_provider(document_config)
+    effective = allowed_mimes(extra)
+    kinds = upload_capability_kinds(extra)
     return {
         "kinds": kinds,
         "labels": {k: _UPLOAD_KIND_LABELS.get(k, k) for k in kinds},
-        "allowed_mimes": sorted(allowed_mimes()),
+        "allowed_mimes": sorted(effective),
+        "document_parsing": provider.describe() if provider else None,
+        "blocked_document_mimes": sorted(extra - effective),
         "max_size_mb": int(OPTION.agent.upload_max_size_mb),
         "max_count": int(OPTION.agent.upload_max_count),
     }
 
 
-def build_capability_instruction_block(spec: AgentSpec) -> str:
+def build_capability_instruction_block(spec: AgentSpec, *, document_config: DocumentParsingRuntimeConfig | None = None, document_available: bool = False) -> str:
     """Instructions appended to the agent system prompt for this turn."""
-    upload_kinds = upload_capability_kinds()
+    upload_kinds = upload_capability_kinds(document_upload_mimes(document_config))
     upload_labels = [_UPLOAD_KIND_LABELS.get(k, k) for k in upload_kinds]
     lines = [
         "## Session input capabilities (platform-enforced)",
@@ -93,16 +124,23 @@ def build_capability_instruction_block(spec: AgentSpec) -> str:
         lines.append(
             "When a current or historical session attachment is readable, the read_file system tool "
             "is injected automatically. Use resource={type: attachment, file_id: ...}; follow "
-            "next_offset while has_more is true."
+            "next_offset and next_char_offset while has_more is true. read_file is a fast direct reader for text, DOCX and XLSX."
         )
     else:
         lines.append("Platform file upload pipeline: disabled or no MIME types configured.")
 
+    if document_available:
+        provider = document_upload_provider(document_config)
+        if provider is not None:
+            lines.append(f"The read_document tool is enabled for this Run: {provider.label}; supported formats: "
+                         + ", ".join(provider.describe()["formats"]) + ". Use it for OCR, complex layout and tables. "
+                         "It may take longer and recognition may be inaccurate; continue with next_read when has_more is true.")
+        else:
+            lines.append("read_document is enabled but its global provider credentials are not configured; parsing is unavailable until configured.")
     lines.extend(
         [
             "",
-            "PDF, PPT/PPTX, legacy DOC, and formats outside the upload list are not available; "
-            "PDF and presentation parsing require dedicated tools if introduced later.",
+            "Formats outside the upload list are blocked by the upload policy. Professional document parsing is available only when its tool is explicitly enabled; do not claim unlisted parsing capabilities.",
             "",
             "When the user asks which input types you support, answer ONLY from the lists above. "
             "Do not infer capabilities from your training persona or generic assistant defaults.",
@@ -111,10 +149,10 @@ def build_capability_instruction_block(spec: AgentSpec) -> str:
     return "\n".join(lines)
 
 
-def augment_instructions_with_capabilities(spec: AgentSpec) -> str:
+def augment_instructions_with_capabilities(spec: AgentSpec, *, document_config: DocumentParsingRuntimeConfig | None = None, document_available: bool = False) -> str:
     """Append the capability block to agent instructions."""
     base = (spec.instructions or "").strip()
-    block = build_capability_instruction_block(spec).strip()
+    block = build_capability_instruction_block(spec, document_config=document_config, document_available=document_available).strip()
     if not base:
         return block
     if block in base:

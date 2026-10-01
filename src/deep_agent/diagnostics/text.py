@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from .schema import MAX_RECORD_BYTES, NUMBER_FIELDS, TOOL_LIST_FIELDS, sanitize_record
+from .schema import MAX_RECORD_BYTES, NUMBER_FIELDS, BOOLEAN_FIELDS, TOOL_LIST_FIELDS, sanitize_record
 
 
 def escape(value: str) -> str:
@@ -92,6 +92,10 @@ def parse_record(line: str) -> dict | None:
                 return None
             if key in NUMBER_FIELDS or key in ("http_status", "tools_omitted"):
                 value = float(value) if "." in value or "e" in value.lower() else int(value)
+            elif key in BOOLEAN_FIELDS:
+                if value not in ("True", "False"):
+                    return None
+                value = value == "True"
             elif key in TOOL_LIST_FIELDS:
                 if not value.startswith("[") or not value.endswith("]"):
                     return None

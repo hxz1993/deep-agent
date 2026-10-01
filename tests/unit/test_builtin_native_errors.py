@@ -12,7 +12,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.files.toolset import _load_cached, _parse_cached
+from deep_agent.files.toolset import load_file_bytes, _parse_cached
 from deep_agent.files.tool_result_reader import read_stored_tool_result
 from deep_agent.ptc.file_payload import _load_authorized_file, _load_public_url
 from deep_agent.schemas.attachment import AttachmentRef
@@ -40,7 +40,7 @@ class BuiltinNativeErrorTests(unittest.IsolatedAsyncioTestCase):
         rows = []
         with patch("deep_agent.agent.tool_errors.log_event", side_effect=lambda name, **fields: rows.append((name, fields))):
             with self.assertRaises(ToolFailed) as raised:
-                await _load_cached(ctx, key="fixture", loader=loader, failure_label="附件")
+                await load_file_bytes(ctx, key="fixture", loader=loader, failure_label="附件")
         self.assertIn("file access denied", str(raised.exception))
         self.assertIn("PermissionError", str(raised.exception))
         self.assertNotIn("fixture-secret", str(raised.exception))
@@ -62,7 +62,7 @@ class BuiltinNativeErrorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_file_cancellation_remains_cancellation(self):
         with self.assertRaises(asyncio.CancelledError):
-            await _load_cached(self.context(), key="cancel", loader=AsyncMock(side_effect=asyncio.CancelledError()), failure_label="附件")
+            await load_file_bytes(self.context(), key="cancel", loader=AsyncMock(side_effect=asyncio.CancelledError()), failure_label="附件")
 
     async def test_overflow_failure_preserves_error_shape_without_replay_advice(self):
         result = await read_stored_tool_result(SimpleNamespace(read=AsyncMock(side_effect=OSError("storage volume unavailable"))), "handle")

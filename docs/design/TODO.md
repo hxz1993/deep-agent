@@ -102,7 +102,7 @@ C02 已在 v0.10.18 完成，缓存统计展示已在 v0.10.19 完成。C04 与 
 | `MEMORY-001` | 跨会话长期记忆 | History Search不是可编辑长期记忆；namespace也不是授权 | 产品明确查看、编辑、删除、审计和User/Agent/App/Space边界 |
 | `PLAN-GLOBAL-001` | 跨Turn可编辑全局计划 | 当前Plan是给用户看的Turn内完整快照，不是执行调度事实源 | 产品需要跨消息人工编辑、继续或共享计划 |
 | `TOOL-APPROVAL-001` | 写入/删除/外发工具审批 | 需要业务权限、操作人、TTL、审计和幂等共同设计 | 出现明确高风险工具与审批责任方 |
-| `DOCUMENT-001` | [文档解析：复杂 PDF 选型与工具化](37-document-parsing/README.md) | 2026-09-29 开始 MPDocBench-Parse 研究与隔离验证，重点表格数字对位、跨页、图表、自部署／线上成本；不塞入普通文本 `read_file`，未实施产品解析器 | 取得候选服务测试 Key 和业务代表样本，完成同样本质量／延迟／费用对照后确定供应商及工具契约；PPT/PPTX 是后续独立扩展 |
+| `DOCUMENT-001` | [文档解析：复杂 PDF 选型与工具化](37-document-parsing/README.md) | v0.12.9 已实施 MinerU精准VLM、PaddleOCR-VL-1.6和GLM-OCR；独立 `read_document`、全局配置、24K/48K分页和Run缓存，原生正文不加工，无新增DDL或环境变量 | 本轮质量、速度、页覆盖与服务失败见产品回归报告；长期缓存、语义搜索、新cursor和业务金额纠错未实施 |
 | `WECOM-HA-001` | 企微Channel多副本、主动消息与用户级身份映射 | v0.7.0只承诺单Gateway副本、被动回复和管理员配置的会话用户，不预埋Lease/Outbox/Identity表 | 出现多副本、可靠主动通知或企微用户差异权限的真实需求 |
 
 ## D 组明确不做的决策记录（2026-09-25）

@@ -43,6 +43,7 @@ _EXCLUDED_TOOLS = frozenset(
     {
         "load_capability",
         "read_file",
+        "read_document",
         "read_tool_result",
         "search_tools",
         "tool_search",

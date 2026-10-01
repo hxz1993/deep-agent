@@ -128,12 +128,14 @@ def install_proxy_compatibility() -> None:
 
 
 @asynccontextmanager
-async def proxy_compatible_web_fetch() -> AsyncIterator[None]:
+async def proxy_compatible_web_fetch(*, server_hostname: str | None = None) -> AsyncIterator[None]:
     """Scope the upstream Pydantic AI fetcher to explicit HTTP proxies."""
 
     install_proxy_compatibility()
     token = _PROXY_FETCH_ACTIVE.set(_http_tunnel_proxy_configured())
+    tls_token = _PROXY_TLS_SERVER_NAME.set(server_hostname)
     try:
         yield
     finally:
+        _PROXY_TLS_SERVER_NAME.reset(tls_token)
         _PROXY_FETCH_ACTIVE.reset(token)

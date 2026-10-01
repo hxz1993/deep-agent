@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.8`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.9`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -125,6 +125,8 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
   重建或切换基线，否则一律保留。
 
 ---
+
+文档解析见[使用指南](docs/guides/document-parsing.md)：在全局工具配置选择 MinerU、PaddleOCR 或 GLM-OCR，再显式给 Agent 关联 `builtin:document`。`read_document` 复用24K/48K Token分页、当前Run缓存和来源授权；保存不暗中收费测试，不新增环境变量或数据库结构。
 
 ## 子文档索引
 

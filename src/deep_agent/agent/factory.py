@@ -194,6 +194,7 @@ def _toolsets_for_spec(
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
     web_toolset: Any | None = None,
+    document_toolset: Any | None = None,
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
     toolsets: list[Any] = []
@@ -204,11 +205,13 @@ def _toolsets_for_spec(
         toolsets.append(package.toolset)
 
     for package in registry.selected(spec.capabilities):
-        if package.code == "builtin:web":
+        if package.code in {"builtin:web", "builtin:document"}:
             continue
         add_package(package)
     if web_toolset is not None:
         toolsets.append(web_toolset)
+    if document_toolset is not None and "builtin:document" in spec.capabilities:
+        toolsets.append(document_toolset)
     if mcp_toolsets:
         effective_mcp_toolsets = mcp_toolsets
         if is_ptc_selected(spec.capabilities):
@@ -267,6 +270,8 @@ def build_agent(
     mcp_server_names: list[str] | None = None,
     estimator: TokenEstimator | None = None,
     web_toolset: Any | None = None,
+    document_toolset: Any | None = None,
+    document_lifecycle: AbstractCapability[AgentDeps] | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
@@ -295,8 +300,11 @@ def build_agent(
         mcp_server_names=mcp_server_names,
         estimator=estimator,
         web_toolset=web_toolset,
+        document_toolset=document_toolset,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = [RuntimeDiagnostics()]
+    if document_lifecycle is not None and "builtin:document" in spec.capabilities:
+        capabilities.append(document_lifecycle)
     if context_compaction is not None:
         capabilities.append(context_compaction)
     if skill_capability is not None:

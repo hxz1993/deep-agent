@@ -39,6 +39,8 @@ dingtalk-stream==0.24.3
 Pillow>=10.0
 python-docx>=1.2,<2
 openpyxl>=3.1
+# Source PDF page coverage only; document OCR/body stays with configured providers.
+pypdf>=6.14,<7
 
 # Database
 sqlalchemy[asyncio]==2.0.51

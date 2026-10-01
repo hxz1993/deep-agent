@@ -799,3 +799,14 @@ MCP 工具合计不超过 10 个时全部直接披露，超过 10 个时预选�
 - D01 压缩落库前必须核对摘要实际使用的模型历史与 Event Store 投影；不能只比较保存前重新采样的 raw history，否则可能把摘要期间新追加的事件错误地纳入来源。完成事件需在下一次推理前提交，Console 按 event_id 即时确认，后续业务失败不回滚已完成压缩。
 
 钉钉扫码实测状态包含 `WAITING / SCANNED / SELECTING / CREATING / SUCCESS`；选择已有机器人和新建机器人必须分别验证，未知中间状态只作有界等待，不能直接当成功或立即终止。钉钉默认 AI 流式卡片，固定使用官方 OpenClaw 连接器当前同款模板，不提供流式开关或模板配置扩展；卡片失败不得回退普通正文，普通消息仅用于独立消息工具路径。用户详情独立开关 user_details_enabled 默认关闭，开启才使用回调昵称及网关内存缓存，无通讯录查询和新表。API 成功不能替代客户端正文可见验收。
+
+
+### 专业文档解析（0.12.9）
+
+- `documents/` 的三家官方 HTTP 适配器服务于显式内置分组 `builtin:document` / `read_document`，不要混入聊天模型 Provider，也不要自动给现有 Agent 启用。
+- 配置只复用 `global_setting.document_parsing`：保存当前供应商及 Key，不新增环境变量、数据库结构或格式切换配置。管理员 GET/PUT/test 路由见 `api/v1/document_parsing.py`；保存不能隐式执行收费解析。
+- `ProviderCapability` 是格式说明、文件校验、上传、目录与运行时说明的唯一来源。默认白名单可扩充当前已配置供应商格式；显式上传白名单及平台大小限制始终优先。
+- 两个普通读取工具与文档工具共用 `ReadingBudget` 和 Token 分页；`read_document` 跳过通用大结果二次外置。只归一化页码、顺序和引用，不改写原生正文或 OCR 数字。
+- Run 配置快照与 `DocumentCacheLifecycle.wrap_run` 管理缓存。续读也检查原来源授权；Run 结束、失败、取消或返回 Deferred 后清理任务与私有临时目录。已经提交的任务不得自动再次提交，取消不得宣称已停止远端计费。
+- pypdf只用于源PDF页数和加密/损坏检查，不提取正文；正文来自已配置的供应商。未知页边界必须标未知，不能用块数或文本长度冒充物理页数。
+- 接入与使用见 [`../../docs/guides/document-parsing.md`](../../docs/guides/document-parsing.md)。真实样本和原生响应保持忽略，不提交 Key、合同或签名URL；协议回归与业务金额质量分开报告。

@@ -14,6 +14,8 @@ from deep_agent.capabilities.ui.builtin import build_builtin_ui_tool_package
 from deep_agent.capabilities.ui.external import build_args_validator
 from deep_agent.capabilities.ui.types import UIToolRecord
 from deep_agent.core.context import AppContextDep
+from deep_agent.documents.providers import PROVIDERS
+from deep_agent.documents.settings import DOCUMENT_PACKAGE_CODE, load_document_parsing_config
 from deep_agent.core.paths import MCP_SERVERS_ROOT
 from deep_agent.schemas.chat import ToolPackageDescription
 from deep_agent.schemas.mcp import McpInspection
@@ -34,6 +36,16 @@ def _ui_tool_payload(record: UIToolRecord) -> dict:
 async def list_tool_packages(ctx: AppContextDep) -> list[ToolPackageDescription]:
     """Return the product tool-package directory used by Agent configuration."""
     payloads = list(ctx.registry.describe())
+    config = await load_document_parsing_config(getattr(ctx.stores, "global_setting", None))
+    provider = PROVIDERS.get(config.provider)
+    for payload in payloads:
+        if payload["code"] == DOCUMENT_PACKAGE_CODE:
+            if provider is None or config.configuration_error:
+                payload["description"] += " 当前供应商未配置，请前往全局配置设置。"
+            else:
+                formats = "、".join(provider.describe()["formats"])
+                payload["description"] += f" 当前供应商：{provider.label}；支持格式：{formats}。"
+                payload["tools"][0]["description"] += f" 当前支持：{formats}。"
 
     mcp_rows = await ctx.stores.mcp.list_all()
     db_names = {row.name for row in mcp_rows}

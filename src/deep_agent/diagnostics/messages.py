@@ -16,6 +16,17 @@ def describe(record: dict) -> str:
     state = _STATE.get(suffix, "")
     message = record["summary"]
     details = []
+    if event.startswith("document_"):
+        for key, label in (("provider_name", "供应商"), ("model_name", "模型"),
+                           ("document_api_path", "接口"), ("document_task_id", "任务"),
+                           ("target_origin", "服务"),
+                           ("returned_pages", "返回页"), ("token_count", "Token"), ("cache_hit", "缓存命中"),
+                           ("has_more", "需要续读"), ("elapsed_ms", "耗时ms"),
+                           ("parse_language", "语言"), ("parse_table_enabled", "表格识别"),
+                           ("parse_formula_enabled", "公式识别"), ("parse_merge_tables", "表格合并"),
+                           ("parse_relevel_titles", "标题层级")):
+            if key in record:
+                details.append(f"{label} {record[key]}")
     if event == "mcp_request_context_resolved":
         for key, label in (("mcp_server", "MCP"), ("app_id", "App"), ("space_id", "Space"),
                            ("language", "Language"), ("auth_context", "鉴权载体")):

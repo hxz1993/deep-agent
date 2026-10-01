@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -70,6 +70,7 @@ class _ResolvedFile:
     cache_key: str
     content_hash: str | None
     load: Callable[[], Awaitable[bytes]]
+    resource_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def _normalized_mime(value: str | None) -> str:
@@ -121,7 +122,7 @@ def _has_readable_attachment(ctx: RunContext[AgentDeps]) -> bool:
     )
 
 
-async def _load_cached(
+async def load_file_bytes(
     ctx: RunContext[AgentDeps],
     *,
     key: str,
@@ -129,6 +130,7 @@ async def _load_cached(
     failure_label: str,
     max_bytes: int | None = None,
     expected_hash: str | None = None,
+    tool_name: str = "read_file",
 ) -> bytes:
     cached = ctx.deps.file_bytes.get(key)
     if cached is not None:
@@ -136,7 +138,7 @@ async def _load_cached(
     task = ctx.deps.file_load_tasks.get(key)
     if task is None:
         async def observed_load() -> bytes:
-            async with observe_tool_operation(ctx, "file_read", tool="read_file"):
+            async with observe_tool_operation(ctx, "file_read", tool=tool_name):
                 return await loader()
 
         task = asyncio.create_task(observed_load(), name=f"file-load:{key}")
@@ -196,6 +198,7 @@ async def _parse_cached(
 def _safe_skill_file(
     resources: dict[str, ResolvedSkill],
     ref: SkillFileRef,
+    *, tool_name: str = "read_file",
 ) -> tuple[ResolvedSkill, dict[str, Any], Path]:
     item = resources.get(ref.skill_code)
     if item is None:
@@ -210,7 +213,7 @@ def _safe_skill_file(
     if entry is None:
         raise ModelRetry(f"Skill {ref.skill_code!r} 中不存在资源 {ref.path!r}")
     if entry.get("category") == "script":
-        raise ModelRetry("Skill脚本不能通过 read_file 读取；需要时使用 execute_skill_script")
+        raise ModelRetry(f"Skill脚本不能通过 {tool_name} 读取；需要时使用 execute_skill_script")
     target = (item.package_root / ref.path).resolve()
     root = item.package_root.resolve()
     if target != root and root not in target.parents:
@@ -220,11 +223,13 @@ def _safe_skill_file(
     return item, entry, target
 
 
-async def _resolve_file(
+async def resolve_file_source(
     ctx: RunContext[AgentDeps],
     resource: FileResourceRef | dict[str, Any],
     resources: dict[str, ResolvedSkill],
+    *, tool_name: str = "read_file",
 ) -> _ResolvedFile:
+    """Authorize the original source on every call, independently of parsers/caches."""
     try:
         resource = _RESOURCE_ADAPTER.validate_python(resource)
     except ValidationError as exc:
@@ -238,50 +243,51 @@ async def _resolve_file(
             raise ModelRetry(
                 "file_id 不属于当前会话附件；请只使用本轮提示或当前原始会话历史中的 file_id"
             )
-        kind = _attachment_format(ref)
-        if kind is None:
-            raise ModelRetry(
-                f"read_file 不支持 MIME 为 {ref.mime or 'unknown'} 的附件；"
-                "图片、音频和视频只在当前轮作为模型原生附件提交，PDF和PPT/PPTX需要专用解析工具"
-            )
 
         async def load_attachment() -> bytes:
             return await _download_file(
-                ref.id,
-                ctx.deps.request_headers,
-                file_store=ctx.deps.file_store,
+                ref.id, ctx.deps.request_headers, file_store=ctx.deps.file_store,
             )
 
         return _ResolvedFile(
-            source="attachment",
-            resource=resource,
-            name=ref.name or ref.id,
-            mime=ref.mime,
-            format=kind,
-            cache_key=f"attachment:{ref.id}",
-            content_hash=None,
-            load=load_attachment,
+            source="attachment", resource=resource, name=ref.name or ref.id,
+            mime=ref.mime, format="", cache_key=f"attachment:{ref.id}",
+            content_hash=None, load=load_attachment,
         )
 
-    _item, entry, target = _safe_skill_file(resources, resource)
-    kind = _skill_format(entry)
-    if kind is None:
-        raise ModelRetry(f"read_file 暂不支持 Skill资源 {resource.path!r} 的文件类型")
+    _item, entry, target = _safe_skill_file(resources, resource, tool_name=tool_name)
 
     async def load_skill_file() -> bytes:
         return await asyncio.to_thread(target.read_bytes)
 
     content_hash = str(entry.get("content_hash") or "") or None
     return _ResolvedFile(
-        source="skill",
-        resource=resource,
-        name=Path(resource.path).name,
-        mime=str(entry.get("mime") or "") or None,
-        format=kind,
+        source="skill", resource=resource, name=Path(resource.path).name,
+        mime=str(entry.get("mime") or "") or None, format="",
         cache_key=f"skill:{resource.skill_code}:{resource.path}:{content_hash or ''}",
-        content_hash=content_hash,
-        load=load_skill_file,
+        content_hash=content_hash, load=load_skill_file, resource_metadata=entry,
     )
+
+
+async def _resolve_file(
+    ctx: RunContext[AgentDeps],
+    resource: FileResourceRef | dict[str, Any],
+    resources: dict[str, ResolvedSkill],
+) -> _ResolvedFile:
+    resolved = await resolve_file_source(ctx, resource, resources)
+    if isinstance(resolved.resource, AttachmentFileRef):
+        ref = ctx.deps.attachment_by_id[resolved.resource.file_id]
+        kind = _attachment_format(ref)
+        if kind is None:
+            raise ModelRetry(
+                f"read_file 不支持 MIME 为 {ref.mime or 'unknown'} 的附件；"
+                "图片、音频和视频只在当前轮作为模型原生附件提交，PDF和PPT/PPTX需要专用解析工具"
+            )
+    else:
+        kind = _skill_format(resolved.resource_metadata)
+        if kind is None:
+            raise ModelRetry(f"read_file 暂不支持 Skill资源 {resolved.resource.path!r} 的文件类型")
+    return replace(resolved, format=kind)
 
 
 def _result(
@@ -388,6 +394,7 @@ def build_file_toolset(
     *,
     context_window_tokens: int | None = None,
     estimator: TokenEstimator | None = None,
+    document_available: bool = False,
 ) -> PreparedToolset[AgentDeps]:
     budget = ReadingBudget(estimator or TokenEstimator.conservative(), context_window_tokens)
     authorized = dict(resources or {})
@@ -398,6 +405,8 @@ def build_file_toolset(
             "或先调用list_skill_resources取得Skill路径。首次通常只传resource；若has_more=true，"
             "把next_offset和next_char_offset分别作为offset和char_offset继续读取；"
             "长行/段落可能分多页，必须同时传两个续读值。不要猜测file_id、Skill编码或路径，脚本不能作为文件正文读取。"
+            "read_file适合快速直接读取已有文本、DOCX段落和XLSX表格。"
+            + ("需要OCR或版面结构时，可使用本轮已提供的read_document。" if document_available else "")
         ),
     )
 
@@ -420,7 +429,7 @@ def build_file_toolset(
             char_offset: 当前 offset 项内部的字符偏移，从 0 开始；续读时使用 next_char_offset。
         """
         resolved = await _resolve_file(ctx, resource, authorized)
-        data = await _load_cached(
+        data = await load_file_bytes(
             ctx,
             key=resolved.cache_key,
             loader=resolved.load,

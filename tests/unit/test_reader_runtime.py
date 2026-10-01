@@ -64,7 +64,8 @@ class ReaderRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
                 spec = AgentSpec(name="reader-runtime", model="test", instructions="Read both files.",
                                  context_window_tokens=window, max_output_tokens=10_000)
-                ctx = SimpleNamespace(stores=MagicMock(), registry=build_registry(), store=MagicMock(),
+                ctx = SimpleNamespace(stores=MagicMock(global_setting=SimpleNamespace(get=AsyncMock(return_value=None))),
+                                      registry=build_registry(), store=MagicMock(),
                                       skill_runtime=MagicMock(), sandbox_backend=None)
                 with (
                     patch("deep_agent.api.v1.deps.load_mcp_rows", AsyncMock(return_value=[])),

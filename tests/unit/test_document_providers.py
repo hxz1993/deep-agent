@@ -15,7 +15,7 @@ import httpx2
 from pydantic_ai._ssrf import ResolvedUrl
 
 from deep_agent.documents.models import DocumentSource, DocumentParsingError
-from deep_agent.documents.providers import PROVIDERS, parse_document, _unpack, _glm_pages, _result, _cpu, _data
+from deep_agent.documents.providers import PROVIDERS, parse_document, _unpack, _glm_pages, _paddle_pages, _result, _cpu, _data
 from deep_agent.documents.settings import DocumentParsingRuntimeConfig, resolve_document_parsing_config, read_document_parsing_config
 from deep_agent.api.v1.document_parsing import connection_sample, _response, _resolve, test_document_parsing_settings
 from deep_agent.schemas.document_parsing import DocumentParsingSettingsWrite
@@ -67,7 +67,7 @@ class DocumentSettingsTests(unittest.TestCase):
         response = _response(None, config).model_dump()
         self.assertNotIn("secret-real-key-1234", json.dumps(response))
         self.assertTrue(response["value"]["api_key_set"])
-        self.assertEqual([item["provider"] for item in response["providers"]], ["mineru", "paddle", "glm"])
+        self.assertEqual([item["provider"] for item in response["providers"]], ["paddle", "glm", "mineru"])
         broken = read_document_parsing_config(SimpleNamespace(version=2, value={}))
         self.assertIsNotNone(broken.configuration_error)
         broken = read_document_parsing_config(SimpleNamespace(version=1, value={"mode": "provider", "provider": "glm"}))
@@ -85,6 +85,8 @@ class DocumentSettingsTests(unittest.TestCase):
         pdf = PdfReader(io.BytesIO(sample.data))
         self.assertEqual(len(pdf.pages), 1)
         self.assertIn("123.45", pdf.pages[0].extract_text())
+        self.assertEqual(len(pdf.pages[0].images), 1)
+        self.assertGreater(pdf.pages[0].images[0].image.width, 1000)
 
     def test_diagnostics_whitelist_omits_raw_credentials_and_url(self):
         record = safe_fields({"provider_name": "mineru", "source_hash": "a" * 64, "cache_hit": True,
@@ -95,6 +97,21 @@ class DocumentSettingsTests(unittest.TestCase):
         self.assertFalse(record["has_more"])
         self.assertNotIn("api_key", record)
         self.assertNotIn("document_api_path", record)
+
+    def test_adaptation_diagnostics_allow_only_counts_and_safe_identifiers(self):
+        record = safe_fields({"adaptation_version": "document-adaptation-v1", "source_characters": 5000,
+            "adapted_characters": 1000, "native_token_count": 3000, "adapted_token_count": 500,
+            "table_count": 2, "markdown_table_count": 1, "compact_html_table_count": 1,
+            "adaptation_fallback_count": 0, "image_placeholder_count": 0,
+            "raw_html": "private contract", "api_key": "secret", "content": "contract body"},
+            event="document_adaptation_completed")
+        self.assertEqual(record["adaptation_version"], "document-adaptation-v1")
+        self.assertEqual(record["native_token_count"], 3000)
+        self.assertEqual(record["adapted_token_count"], 500)
+        self.assertEqual(record["table_count"], 2)
+        self.assertNotIn("raw_html", record)
+        self.assertNotIn("content", record)
+        self.assertNotIn("api_key", record)
 
     def test_archive_rejects_escape_and_symlink(self):
         for path, mode in (("../escape", None), ("link", 0o120777)):
@@ -108,6 +125,31 @@ class DocumentSettingsTests(unittest.TestCase):
                 with self.assertRaises(DocumentParsingError) as cm:
                     _unpack(raw.getvalue(), Path(folder))
                 self.assertEqual(cm.exception.code, "unsafe_archive")
+
+    def test_archive_checks_expanded_size_before_writing(self):
+        raw = io.BytesIO()
+        with zipfile.ZipFile(raw, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("content.txt", "a" * 5000)
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "artifacts"
+            with patch("deep_agent.documents.providers._MAX_RESULT_BYTES", 1000):
+                with self.assertRaises(DocumentParsingError) as cm:
+                    _unpack(raw.getvalue(), destination)
+            self.assertEqual(cm.exception.code, "result_too_large")
+            self.assertFalse(destination.exists())
+
+    def test_paddle_invalid_native_shapes_are_safe_errors(self):
+        for result in ([], {"layoutParsingResults": None}, {"layoutParsingResults": [None]},
+                       {"layoutParsingResults": [{"markdown": None}]}):
+            with self.subTest(result=result), self.assertRaises(DocumentParsingError) as cm:
+                _paddle_pages(json.dumps({"result": result}).encode())
+            self.assertEqual(cm.exception.code, "invalid_result")
+
+    def test_paddle_nullable_metadata_keeps_native_markdown(self):
+        body = {"result": {"layoutParsingResults": [{"prunedResult": None, "markdown": {"text": "**native** 123.45"}}]}}
+        pages = _paddle_pages(json.dumps(body).encode())
+        self.assertEqual(pages[0].page, 1)
+        self.assertEqual(pages[0].content, "**native** 123.45")
 
     def test_unknown_page_boundaries_do_not_fake_complete_coverage(self):
         result = _result("glm", source(), _glm_pages({"md_results": "whole document"}), {})
@@ -171,6 +213,49 @@ class DocumentProtocolTests(unittest.IsolatedAsyncioTestCase):
         await self.run_provider("mineru", handler)
         self.assertEqual(len([r for r in requests if r.method == "POST"]), 1)
         self.assertEqual((self.root / "result.zip").stat().st_mode & 0o777, 0o600)
+
+    async def test_mineru_empty_success_shapes_are_safe_errors_without_resubmission(self):
+        for malformed in ("file_urls", "extract_result"):
+            with self.subTest(field=malformed), tempfile.TemporaryDirectory() as folder:
+                self.root = Path(folder)
+                requests = []
+                def handler(request):
+                    requests.append(request)
+                    if request.method == "POST":
+                        urls = [] if malformed == "file_urls" else ["https://cdn.example/upload"]
+                        return httpx2.Response(200, json={"data": {"batch_id": "task-id-1234", "file_urls": urls}})
+                    if request.method == "PUT":
+                        return httpx2.Response(200)
+                    return httpx2.Response(200, json={"data": {"extract_result": []}})
+                for _ in range(2):
+                    with self.assertRaises(DocumentParsingError) as cm:
+                        await self.run_provider("mineru", handler)
+                    self.assertIn(cm.exception.code, {"invalid_result", "submission_unknown"})
+                self.assertEqual(sum(request.method == "POST" for request in requests), 1)
+
+    async def test_signed_result_private_redirect_is_rejected_without_forwarding_key(self):
+        requests = []
+        public_url = ResolvedUrl(resolved_ip="8.8.8.8", hostname="cdn.example", port=443, is_https=True, path="/blob")
+        async def resolve(url, **kwargs):
+            if "127.0.0.1" in url:
+                raise ValueError("private address")
+            return public_url
+        def handler(request):
+            requests.append(request)
+            if request.method == "POST":
+                return httpx2.Response(200, json={"data": {"batch_id": "task-id-1234", "file_urls": ["https://cdn.example/upload"]}})
+            if request.method == "PUT":
+                return httpx2.Response(200)
+            if request.url.host == "mineru.net":
+                return httpx2.Response(200, json={"data": {"extract_result": [{"state": "done", "full_zip_url": "https://cdn.example/result"}]}})
+            self.assertNotIn("authorization", request.headers)
+            return httpx2.Response(302, headers={"Location": "https://127.0.0.1/internal"})
+        with patch("deep_agent.documents.providers.validate_and_resolve_url", side_effect=resolve):
+            with self.assertRaises(DocumentParsingError) as cm:
+                await self.run_provider("mineru", handler)
+        self.assertEqual(cm.exception.code, "unsafe_url")
+        self.assertFalse(any(request.url.host == "127.0.0.1" for request in requests))
+        self.assertFalse((self.root / "result.zip").exists())
 
     async def test_stage_timings_include_full_download_and_stay_safe(self):
         records = []
@@ -246,6 +331,32 @@ class DocumentProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([p.content for p in parsed.pages], ["123.45", "<table>7%</table>"])
         self.assertEqual(parsed.native["md_results"], "native combined")
         await self.run_provider("glm", handler)
+        self.assertEqual(len(requests), 1)
+
+    async def test_glm_official_file_limits_reject_before_submission(self):
+        requests = []
+        self.assertEqual(PROVIDERS["glm"].max_bytes, 50_000_000)
+        self.assertEqual(PROVIDERS["glm"].max_pages, 100)
+        cases = (
+            (DocumentSource("large.pdf", "application/pdf", b"x" * 50_000_001, 1), "file_too_large"),
+            (DocumentSource("large.png", "image/png; charset=binary", b"x" * 10_000_001, 1), "file_too_large"),
+            (DocumentSource("long.pdf", "application/pdf", b"%PDF", 101), "too_many_pages"),
+        )
+        for input_source, code in cases:
+            with self.subTest(code=code, mime=input_source.mime_type):
+                with self.assertRaises(DocumentParsingError) as cm:
+                    await self.run_provider("glm", lambda request: requests.append(request), source_value=input_source)
+                self.assertEqual(cm.exception.code, code)
+        self.assertEqual(requests, [])
+
+    async def test_glm_pdf_uses_pdf_limit_instead_of_image_limit(self):
+        input_source = DocumentSource("document.pdf", "application/pdf", b"x" * 10_000_001, 1)
+        requests = []
+        def handler(request):
+            requests.append(request)
+            return httpx2.Response(200, json={"md_results": ["native PDF content"]})
+        result = await self.run_provider("glm", handler, source_value=input_source)
+        self.assertEqual(result.pages[0].content, "native PDF content")
         self.assertEqual(len(requests), 1)
 
     async def test_http_error_categories_are_distinct_and_safe(self):
@@ -360,6 +471,28 @@ class DocumentProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "complete")
         self.assertEqual(len([r for r in calls if r.method == "POST"]), 1)
         self.assertEqual(len([r for r in calls if r.method == "PUT"]), 2)
+
+    async def test_mineru_uncertain_upload_converting_resumes_without_reupload(self):
+        calls = []
+        polls = 0
+        def handler(request):
+            nonlocal polls
+            calls.append(request)
+            if request.method == "POST":
+                return httpx2.Response(200, json={"data": {"batch_id": "same-task-1234", "file_urls": ["https://cdn.example/upload"]}})
+            if request.method == "PUT":
+                raise httpx2.ReadTimeout("response lost after upload", request=request)
+            if request.url.host == "mineru.net":
+                polls += 1
+                state = "converting" if polls == 1 else "done"
+                return httpx2.Response(200, json={"data": {"extract_result": [{"state": state, "full_zip_url": "https://cdn.example/result"}]}})
+            return httpx2.Response(200, content=zip_result())
+        with self.assertRaises(DocumentParsingError):
+            await self.run_provider("mineru", handler)
+        result = await self.run_provider("mineru", handler)
+        self.assertEqual(result.status, "complete")
+        self.assertEqual(len([r for r in calls if r.method == "POST"]), 1)
+        self.assertEqual(len([r for r in calls if r.method == "PUT"]), 1)
 
 
 class DocumentSettingsApiTests(unittest.TestCase):

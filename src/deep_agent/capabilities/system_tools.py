@@ -88,7 +88,7 @@ _SYSTEM_TOOL_DOMAINS = (
                 display_name="读取文件",
                 source="DeepAgent",
                 injection_condition="当前会话存在可读附件，或 Agent 已配置含可读资源的 Skill",
-                description="快速直接读取文本、DOCX 和 XLSX；默认在当前模型的24K/48K Token预算内尽量返回全文，超限按原位置续读。OCR和复杂版面需显式启用文档解析分组。",
+                description="只直接读取文本、DOCX 和 XLSX，不支持PDF、PPT/PPTX或图片OCR；默认在当前模型的24K/48K Token预算内尽量返回全文，超限按原位置续读。PDF和复杂版面需显式启用文档解析分组。",
             ),
             SystemToolDescription(
                 name="export_file_to_download_center",

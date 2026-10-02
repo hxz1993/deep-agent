@@ -5,6 +5,8 @@ import hashlib
 import io
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -24,6 +26,7 @@ from deep_agent.agent.factory import build_agent
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.agent.tool_output_limits import build_tool_output_limits
 from deep_agent.capabilities import build_registry
+from deep_agent.documents.adaptation import adapt_document
 from deep_agent.documents.cache import CachedDocument, DocumentRunCache
 from deep_agent.documents.models import DocumentPage, DocumentParsingError, ParsedDocument
 from deep_agent.documents.providers import can_resume_document, parse_document
@@ -55,15 +58,20 @@ def parsed(contents, numbers=None, source_pages=None, status="complete"):
 
 
 def record(contents, **kwargs):
+    original = parsed(contents, **kwargs)
     return CachedDocument("doc_fixture", AttachmentFileRef(type="attachment", file_id=RESOURCE["file_id"]),
-                          "attachment:authorized-pdf", "hash", parsed(contents, **kwargs))
+                          "attachment:authorized-pdf", "hash", original,
+                          adapt_document(original, TokenEstimator.conservative()))
 
 
 class DocumentPaginationTests(unittest.TestCase):
-    def test_small_multi_page_preserves_native_body_and_blank_pages(self):
+    def test_small_multi_page_reads_fixed_projection_and_preserves_native_and_blank_pages(self):
         contents = ["**原生** [链接](https://example.com)\n<table><tr><td>1.20万元</td></tr></table>", "", "代码\n```py\na = 1\n```"]
-        result = read_cached_document(record(contents), budget=ReadingBudget())
-        self.assertEqual([page.content for page in result.pages], contents)
+        cached = record(contents)
+        result = read_cached_document(cached, budget=ReadingBudget())
+        self.assertEqual([page.content for page in result.pages], [p.content for p in cached.readable.pages])
+        self.assertEqual([p.content for p in cached.parsed.pages], contents)
+        self.assertNotIn("<table>", result.pages[0].content)
         self.assertEqual([page.page_number for page in result.pages], [1, 2, 3])
         self.assertFalse(result.has_more)
         self.assertEqual(result.summary.coverage, "complete")
@@ -82,7 +90,7 @@ class DocumentPaginationTests(unittest.TestCase):
                     result = read_cached_document(cached, budget=budget, **args)
                     value = result.model_dump(mode="json")
                     self.assertTrue(budget.fits(value))
-                    self.assertLessEqual(budget.estimator.text(ToolReturnPart("read_document", result).model_response_str()), ceiling)
+                    self.assertLessEqual(budget.estimator.text(ToolReturnPart("parse_document", result).model_response_str()), ceiling)
                     self.assertGreater(result.returned_count, 0)
                     for page in result.pages:
                         self.assertEqual(page.char_offset, len(reconstructed[page.page_number]))
@@ -97,7 +105,7 @@ class DocumentPaginationTests(unittest.TestCase):
                     seen.add(position)
                 else:
                     self.fail("document continuation failed to reach EOF")
-                self.assertEqual(list(reconstructed.values()), contents)
+                self.assertEqual(list(reconstructed.values()), [p.content for p in cached.readable.pages])
 
     def test_page_range_limit_order_and_continuation_are_explicit(self):
         contents = [f"page{i}" for i in range(1, 9)]
@@ -142,7 +150,7 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
         self.download = AsyncMock(return_value=pdf())
         self.parse = AsyncMock(return_value=parsed(["第一页", "第二页"]))
         self.download_patch = patch("deep_agent.files.toolset._download_file", self.download)
-        self.parse_patch = patch("deep_agent.documents.toolset.parse_document", self.parse)
+        self.parse_patch = patch("deep_agent.documents.toolset.parse_with_provider", self.parse)
         self.download_patch.start()
         self.parse_patch.start()
 
@@ -161,7 +169,7 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
         return ctx
 
     async def tool(self, ctx, config=CONFIG, resources=None):
-        return (await build_document_toolset(config, resources).get_tools(ctx))["read_document"]
+        return (await build_document_toolset(config, resources).get_tools(ctx))["parse_document"]
 
     async def test_repeat_file_reference_and_document_reference_single_flight(self):
         ctx = self.context()
@@ -178,6 +186,56 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([page.content for page in beginning.pages], ["第一页", "第二页"])
         self.parse.assert_awaited_once()
         self.assertEqual(self.parse.call_args.args[1].source_pages, 2)
+
+    async def test_adaptation_is_single_flight_and_cached_body_precedes_budgeting(self):
+        native = "<table><tr><td style=\"text-align:center;word-wrap:break-word;\">12.50万元</td></tr></table>"
+        self.parse.return_value = parsed([native * 800])
+        ctx = self.context()
+        tool = await self.tool(ctx)
+        with patch("deep_agent.documents.cache.adapt_document", wraps=adapt_document) as adapter:
+            first, second = await asyncio.gather(tool.call_func({"resource": RESOURCE}, ctx),
+                                                tool.call_func({"resource": RESOURCE}, ctx))
+            again = await tool.call_func({"resource": first.document.model_dump()}, ctx)
+        adapter.assert_called_once()
+        self.parse.assert_awaited_once()
+        self.assertFalse(first.has_more)
+        self.assertNotIn("style=", first.pages[0].content)
+        self.assertEqual(first.pages, second.pages)
+        self.assertEqual(first.pages, again.pages)
+        cached = ctx.deps.document_cache.records[first.document.document_id]
+        self.assertEqual(cached.parsed.pages[0].content, native * 800)
+        self.assertLess(cached.readable.stats.adapted_token_count, cached.readable.stats.native_token_count)
+
+    async def test_run_cleanup_joins_cancelled_adaptation_worker_before_removing_artifacts(self):
+        cache = DocumentRunCache()
+        ready, stopped = threading.Event(), threading.Event()
+        original = parsed(["原生内容"])
+        artifact_root = cache.directory
+
+        async def native(directory):
+            (directory / "native.json").write_text("private fixture")
+            return original
+
+        def adapting(value, estimator, *, cancel_event):
+            ready.set()
+            while not cancel_event.wait(0.002):
+                pass
+            time.sleep(0.01)
+            self.assertTrue(artifact_root.exists())
+            stopped.set()
+            from deep_agent.documents.adaptation import DocumentAdaptationCancelled
+            raise DocumentAdaptationCancelled("controlled cancelled worker")
+
+        with patch("deep_agent.documents.cache.adapt_document", side_effect=adapting):
+            task = asyncio.create_task(cache.get_or_parse(source_key="a", source_hash="h", provider="mineru", model="vlm",
+                resource=AttachmentFileRef(type="attachment", file_id="a"), parse=native))
+            self.assertTrue(await asyncio.to_thread(ready.wait, 5))
+            directory = cache.directory
+            await cache.aclose()
+            await asyncio.gather(task, return_exceptions=True)
+        self.assertTrue(stopped.is_set())
+        self.assertFalse(directory.exists())
+        self.assertEqual(cache.records, {})
 
     async def test_source_authorization_is_rechecked_on_result_reference_and_cache_hit(self):
         ctx = self.context()
@@ -205,6 +263,58 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(2):
             with self.assertRaisesRegex(ToolFailed, "submission_unknown"):
                 await tool.call_func({"resource": RESOURCE}, ctx)
+        self.parse.assert_awaited_once()
+
+    async def test_recovery_uses_remaining_deadline_and_timeout_is_terminal_in_run(self):
+        calls = []
+        real_timeout = asyncio.timeout
+        remaining = []
+
+        def tracked_timeout(seconds):
+            remaining.append(seconds)
+            return real_timeout(seconds)
+
+        async def native(config, source, directory, **kwargs):
+            calls.append(directory)
+            (directory / "task.json").write_text(json.dumps({
+                "provider": "mineru", "task_id": "original-task", "uploaded": True,
+            }))
+            if len(calls) == 1:
+                await asyncio.sleep(0.03)
+                raise DocumentParsingError("service_error", "服务暂时不可用")
+            await asyncio.Event().wait()
+
+        self.parse.side_effect = native
+        ctx = self.context()
+        tool = await self.tool(ctx)
+        with (patch("deep_agent.documents.cache.PARSE_TIMEOUT_SECONDS", 0.15),
+              patch("deep_agent.documents.cache.asyncio.timeout", side_effect=tracked_timeout)):
+            with self.assertRaisesRegex(ToolFailed, "service_error"):
+                await tool.call_func({"resource": RESOURCE}, ctx)
+            with self.assertRaisesRegex(ToolFailed, "累计解析等待"):
+                await tool.call_func({"resource": RESOURCE}, ctx)
+            for _ in range(2):
+                with self.assertRaisesRegex(ToolFailed, "累计解析等待"):
+                    await tool.call_func({"resource": RESOURCE}, ctx)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], calls[1])
+        self.assertLess(remaining[1], remaining[0] - 0.02)
+        self.download.assert_awaited_once()
+
+    async def test_waiting_parse_timeout_does_not_resume_even_with_uploaded_task(self):
+        async def native(config, source, directory, **kwargs):
+            (directory / "task.json").write_text(json.dumps({
+                "provider": "mineru", "task_id": "original-task", "uploaded": True,
+            }))
+            await asyncio.Event().wait()
+
+        self.parse.side_effect = native
+        ctx = self.context()
+        tool = await self.tool(ctx)
+        with patch("deep_agent.documents.cache.PARSE_TIMEOUT_SECONDS", 0.02):
+            for _ in range(3):
+                with self.assertRaisesRegex(ToolFailed, "timeout"):
+                    await tool.call_func({"resource": RESOURCE}, ctx)
         self.parse.assert_awaited_once()
 
     async def test_uploaded_task_recovers_query_single_flight_without_reposting(self):
@@ -335,12 +445,12 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
             seen.append(messages)
             returned = [part for message in messages for part in message.parts if isinstance(part, ToolReturnPart)]
             if not returned:
-                return ModelResponse(parts=[ToolCallPart("read_document", {"resource": RESOURCE}, tool_call_id="doc-call")])
+                return ModelResponse(parts=[ToolCallPart("parse_document", {"resource": RESOURCE}, tool_call_id="doc-call")])
             value = returned[-1].content
             self.assertEqual(value.status, "partial")
             self.assertNotIn("overflow_handle", returned[-1].metadata or {})
             if value.has_more:
-                return ModelResponse(parts=[ToolCallPart("read_document", value.next_read, tool_call_id=f"doc-{len(returned)}")])
+                return ModelResponse(parts=[ToolCallPart("parse_document", value.next_read, tool_call_id=f"doc-{len(returned)}")])
             self.assertEqual("".join(part.content.pages[0].content for part in returned), text)
             return ModelResponse(parts=[TextPart("complete")])
 
@@ -377,8 +487,11 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
 
         with disabled.override(model=FunctionModel(model)):
             await disabled.run("x", deps=deps)
-        self.assertNotIn("read_document", observed)
-        tool = (await runtime.toolset.get_tools(self.context()))["read_document"]
+        self.assertNotIn("parse_document", observed)
+        tools = await runtime.toolset.get_tools(self.context())
+        self.assertNotIn("read_document", tools)
+        tool = tools["parse_document"]
         self.assertIn("GLM-OCR", tool.tool_def.description)
         self.assertIn("PDF", tool.tool_def.description)
+        self.assertIn("不要先调用read_file试读", tool.tool_def.description)
         self.assertNotIn("DOCX", tool.tool_def.description)

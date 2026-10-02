@@ -262,7 +262,7 @@ test("Web Search 摘要只回显当前生效的一个供应商选择", () => {
   );
   assert.equal(ui.webSearchSummaryLabel({ value: { mode: "provider", provider: "kimi", configuration_error: "供应商已删除" } }), "配置不可用");
   assert.match(templateHtml, /id="webSearchSummaryValue">未配置/);
-  const webSearchSection = templateHtml.match(/<section class="global-settings-section global-settings-tool-card" id="globalSettingsWebSearch">[\s\S]*?<\/section>/)?.[0] || "";
+  const webSearchSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsWebSearch">[\s\S]*?<\/section>/)?.[0] || "";
   assert.match(webSearchSection, /网络搜索[\s\S]*?配置 Web Search 工具使用的搜索供应商。[\s\S]*?id="webSearchSummaryValue"[\s\S]*?openWebSearchSettingsBtn/);
   assert.doesNotMatch(webSearchSection, /global-settings-summary-row|<p|当前支持|Kimi/);
   const runtimeSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsRuntime">[\s\S]*?<\/section>/)?.[0] || "";

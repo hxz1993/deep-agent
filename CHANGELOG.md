@@ -3,6 +3,15 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.12.10（测试分支）
+
+- 专业解析工具更名为 `parse_document`（解析文档），与 `read_file`（读取文件）区分；明确 PDF 直接使用解析工具，清理旧工具入口。
+- 三供应商结果先适配、再计算24K/48K Token分页：普通表格使用Markdown，复杂表格保留精简HTML；原始产物保留在私有缓存，续读位置基于固定的适配内容。
+- 修复累计解析等待、供应商结果校验及配置并发更新，改善工具过程展示并移除普通对话附件的下载按钮；保留轨迹下载。
+- 供应商顺序为PaddleOCR、GLM-OCR、MinerU；MinerU在线任务仍不稳定，本版本Console置灰禁选，保留已有配置，不静默替换。
+- 完整Python回归2680项、失败0、跳过53；Console回归778项通过。Paddle六份合同工具返回Token约减少47%，46页合同在48K预算下读取6次降为2次；真实模型金额映射仍需复核，历史MinerU产物不算在线通过。
+- 无新增环境变量或数据库迁移，Alembic head 保持 `011`。
+
 ## v0.12.9（测试分支）
 
 - 新增显式关联的“文档解析”工具组 `builtin:document`，`read_document` 接入 MinerU 精准 VLM、PaddleOCR-VL-1.6 AI Studio 和智谱 GLM-OCR；全局工具配置选择供应商及 Key，不自动给既有 Agent 启用。

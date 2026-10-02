@@ -100,8 +100,21 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         ) as mock_download:
             parts = await resolve_user_prompt("", [ref], {})
             self.assertIn("file_id: doc-1", parts[0].content)
-            self.assertIn("read_file 系统工具", parts[0].content)
+            self.assertIn("按本轮工具支持的格式", parts[0].content)
+            self.assertNotIn("read_file", parts[0].content)
             mock_download.assert_not_called()
+
+    @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
+    async def test_pdf_placeholder_does_not_direct_model_to_read_file(self, download):
+        ref = AttachmentRef(id="pdf-file", name="contract.pdf", mime="application/pdf")
+        current = await resolve_user_prompt("", [ref], {})
+        self.assertIn("mime: application/pdf", current[0].content)
+        self.assertNotIn("read_file", current[0].content)
+        self.assertNotIn("parse_document", current[0].content)
+        raw = ModelRequest(parts=[UserPromptPart(content=refs_from_attachments("read", [ref]))])
+        history = await resolve_history_for_llm([raw], current_user_index=0, request_headers={})
+        self.assertNotIn("read_file", str(history[0].parts[0].content))
+        download.assert_not_awaited()
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
     async def test_history_stub_for_prior_attachment(self, mock_download: AsyncMock) -> None:

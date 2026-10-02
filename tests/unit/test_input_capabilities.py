@@ -39,7 +39,7 @@ class TestInputCapabilities(unittest.TestCase):
         self.assertIn("Platform upload pipeline", block)
         self.assertNotIn("LLM native input modalities", block)
         self.assertIn("Formats outside the upload list are blocked", block)
-        self.assertNotIn("read_document", block)
+        self.assertNotIn("parse_document", block)
         self.assertIn("Do not infer capabilities", block)
         self.assertNotIn("supports PDF/Office/audio/video native", block)
 
@@ -123,8 +123,10 @@ class TestInputCapabilities(unittest.TestCase):
             input_modalities=["text", "image"],
         )
         block = build_capability_instruction_block(spec)
-        self.assertNotIn("PDF", block)
-        self.assertNotIn("read_document", block)
+        upload_line = next(line for line in block.splitlines() if line.startswith("Platform upload pipeline accepts"))
+        self.assertNotIn("PDF", upload_line)
+        self.assertIn("it does not support PDF", block)
+        self.assertNotIn("parse_document", block)
         self.assertIn("Professional document parsing is available only when its tool is explicitly enabled", block)
 
 

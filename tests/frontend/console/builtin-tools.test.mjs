@@ -156,11 +156,11 @@ test("web_search 仅显示配置摘要和前往常规设置入口", () => {
   assert.doesNotMatch(html, /<input|<select/);
 });
 
-test("read_document 作为可关联工具展示且提供文档解析设置入口", () => {
+test("parse_document 作为可关联工具展示且提供文档解析设置入口", () => {
   const ui = loadBuiltinToolsUi();
-  const html = ui.toolCatalogDetails({ code: "builtin:document", label: "文档解析", description: "扫描件和复杂表格解析。", tools: [{ name: "read_document", description: "读取文档，可从当前 Run 缓存续读。" }] });
+  const html = ui.toolCatalogDetails({ code: "builtin:document", label: "文档解析", description: "扫描件和复杂表格解析。", tools: [{ name: "parse_document", description: "解析文档，可从当前 Run 缓存续读。" }] });
   assert.match(html, /<h3>文档解析<\/h3>/);
   assert.equal((html.match(/data-document-parsing-settings/g) || []).length, 1);
-  assert.match(html, /read_document[\s\S]*data-document-parsing-settings[\s\S]*data-lucide="pencil"/);
+  assert.match(html, /parse_document[\s\S]*data-document-parsing-settings[\s\S]*data-lucide="pencil"/);
   assert.doesNotMatch(html, /自动注入条件|<input|<select|保存/);
 });

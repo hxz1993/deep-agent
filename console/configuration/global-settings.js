@@ -478,7 +478,8 @@ function documentParsingCurrentKeyDraft() {
   });
 }
 
-function selectDocumentParsingProvider(provider) {
+function selectDocumentParsingProvider(provider, { showStored = false } = {}) {
+  if (provider === "mineru" && !showStored) return;
   documentParsingCurrentKeyDraft();
   documentParsingSelectedProvider = provider;
   const current = globalSettingsAdmin.documentParsing?.value || {};
@@ -510,21 +511,22 @@ function selectDocumentParsingProvider(provider) {
 }
 
 function currentDocumentParsingDraft() {
+  if (documentParsingSelectedProvider === "mineru") throw new Error("MinerU 暂不可用，请选择 PaddleOCR 或 GLM-OCR");
   documentParsingCurrentKeyDraft();
   return buildDocumentParsingPayload({ provider: documentParsingSelectedProvider, ...documentParsingDrafts.get(documentParsingSelectedProvider) });
 }
 
 function setDocumentParsingBusy(busy) {
-  document.querySelectorAll("#documentParsingSettingsForm input, #documentParsingSettingsForm button").forEach(control => { control.disabled = Boolean(busy); });
+  document.querySelectorAll("#documentParsingSettingsForm input, #documentParsingSettingsForm button").forEach(control => { control.disabled = Boolean(busy) || (control.name === "documentParsingProvider" && control.value === "mineru"); });
   const cancelAllowed = documentParsingOperation?.kind !== "save";
   ["closeDocumentParsingSettingsBtn", "cancelDocumentParsingBtn"].forEach(id => {
     const button = document.getElementById(id);
     if (button) button.disabled = busy && !cancelAllowed;
   });
   const test = document.getElementById("testDocumentParsingBtn");
-  if (test) test.disabled = busy || documentParsingSelectedProvider === "unconfigured";
+  if (test) test.disabled = busy || documentParsingSelectedProvider === "unconfigured" || documentParsingSelectedProvider === "mineru";
   const save = document.getElementById("saveDocumentParsingBtn");
-  if (save) save.disabled = busy || !documentParsingSelectedProvider;
+  if (save) save.disabled = busy || !documentParsingSelectedProvider || documentParsingSelectedProvider === "mineru";
 }
 
 function clearDocumentParsingDrafts() {
@@ -540,9 +542,12 @@ function openDocumentParsingSettings() {
   clearDocumentParsingDrafts();
   const settings = globalSettingsAdmin.documentParsing;
   const options = document.getElementById("documentParsingProviderOptions");
-  if (options) options.innerHTML = (settings?.providers || []).map(metadata => `<label class="web-search-mode-option"><input type="radio" name="documentParsingProvider" value="${escapeHtml(metadata.provider)}" /><span>${escapeHtml(metadata.label)}</span></label>`).join("");
-  const selected = settings?.value?.mode === "provider" ? settings.value.provider : "mineru";
-  selectDocumentParsingProvider(selected);
+  if (options) options.innerHTML = (settings?.providers || []).map(metadata => `<label class="web-search-mode-option"${metadata.provider === "mineru" ? ' title="MinerU 服务暂不稳定，暂停选择"' : ""}><input type="radio" name="documentParsingProvider" value="${escapeHtml(metadata.provider)}"${metadata.provider === "mineru" ? " disabled" : ""} /><span>${escapeHtml(metadata.label)}</span></label>`).join("");
+  const selected = settings?.value?.mode === "provider"
+    ? settings.value.provider
+    : settings?.providers?.find(item => item.provider !== "mineru")?.provider || "unconfigured";
+  selectDocumentParsingProvider(selected, { showStored: true });
+  if (selected === "mineru") setDocumentParsingFeedback("error", "MinerU 暂不可用，请选择 PaddleOCR 或 GLM-OCR；保存后生效。");
   if (settings?.value?.configuration_error) setDocumentParsingFeedback("error", settings.value.configuration_error);
   const dialog = document.getElementById("documentParsingSettingsDialog");
   if (dialog && !dialog.open) dialog.showModal();

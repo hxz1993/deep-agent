@@ -401,12 +401,12 @@ def build_file_toolset(
     toolset = FunctionToolset[AgentDeps](
         id="file-resources",
         instructions=(
-            "read_file统一读取当前会话附件和已授权Skill文件。先使用来源提供的精确file_id，"
+            "read_file只直接读取文本、DOCX段落和XLSX表格，不支持PDF、PPT/PPTX或图片OCR。不要用本工具试读PDF。"
+            "来源限当前会话附件和已授权Skill文件。先使用来源提供的精确file_id，"
             "或先调用list_skill_resources取得Skill路径。首次通常只传resource；若has_more=true，"
             "把next_offset和next_char_offset分别作为offset和char_offset继续读取；"
             "长行/段落可能分多页，必须同时传两个续读值。不要猜测file_id、Skill编码或路径，脚本不能作为文件正文读取。"
-            "read_file适合快速直接读取已有文本、DOCX段落和XLSX表格。"
-            + ("需要OCR或版面结构时，可使用本轮已提供的read_document。" if document_available else "")
+            + ("PDF请直接使用本轮已提供的parse_document；扫描件和复杂版面也使用该工具，以当前供应商支持格式为准。" if document_available else "")
         ),
     )
 
@@ -419,7 +419,9 @@ def build_file_toolset(
         sheet: str | None = None,
         char_offset: int = 0,
     ) -> FileReadResult:
-        """按需读取附件或 Skill 文件；有下一页时同时使用 next_offset/next_char_offset 续读。
+        """直接读取文本、DOCX段落或XLSX表格。不支持PDF、PPT/PPTX或图片OCR，不要试读这些格式。
+
+        有下一页时同时使用 next_offset/next_char_offset 续读。
 
         Args:
             resource: 当前会话附件或已授权 Skill 文件引用。

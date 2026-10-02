@@ -50,7 +50,7 @@ class DocumentRunnerTests(unittest.IsolatedAsyncioTestCase):
     def response(self, messages, info):
         if any(isinstance(part, ToolReturnPart) for message in messages for part in message.parts):
             return ModelResponse(parts=[TextPart("read complete")])
-        return ModelResponse(parts=[ToolCallPart("read_document", {"resource": RESOURCE}, "read-doc")])
+        return ModelResponse(parts=[ToolCallPart("parse_document", {"resource": RESOURCE}, "read-doc")])
 
     async def test_configuration_snapshot_next_assembly_and_model_failure_cleanup(self):
         providers, directories = [], []
@@ -61,7 +61,7 @@ class DocumentRunnerTests(unittest.IsolatedAsyncioTestCase):
             return ParsedDocument(config.provider, config.model, [DocumentPage(1, "123.45")], 1)
         runner = await self.assemble(FunctionModel(self.response))
         self.store.get.return_value.value = {"mode": "provider", "provider": "paddle", "api_key": "new-key"}
-        with patch("deep_agent.documents.toolset.parse_document", side_effect=native), patch("deep_agent.files.toolset._download_file", AsyncMock(return_value=connection_sample().data)):
+        with patch("deep_agent.documents.toolset.parse_with_provider", side_effect=native), patch("deep_agent.files.toolset._download_file", AsyncMock(return_value=connection_sample().data)):
             deps = self.dependencies()
             self.assertEqual((await runner.agent.run("read", deps=deps)).output, "read complete")
             self.assertIsNone(deps.document_cache)
@@ -100,13 +100,13 @@ class DocumentRunnerTests(unittest.IsolatedAsyncioTestCase):
             if any(isinstance(part, ToolReturnPart) for message in messages for part in message.parts):
                 yield "stream complete"
             else:
-                yield {0: DeltaToolCall(name="read_document", json_args=json.dumps({"resource": RESOURCE}), tool_call_id="stream-doc")}
+                yield {0: DeltaToolCall(name="parse_document", json_args=json.dumps({"resource": RESOURCE}), tool_call_id="stream-doc")}
         runner = await self.assemble(FunctionModel(stream_function=stream))
         async def execute(deps):
             async with runner.agent.run_stream_events("read", deps=deps) as events:
                 async for _ in events:
                     pass
-        with patch("deep_agent.documents.toolset.parse_document", side_effect=native), patch("deep_agent.files.toolset._download_file", AsyncMock(return_value=connection_sample().data)):
+        with patch("deep_agent.documents.toolset.parse_with_provider", side_effect=native), patch("deep_agent.files.toolset._download_file", AsyncMock(return_value=connection_sample().data)):
             deps = self.dependencies()
             await execute(deps)
             self.assertIsNone(deps.document_cache)
@@ -131,12 +131,12 @@ class DocumentRunnerTests(unittest.IsolatedAsyncioTestCase):
             calls.append(len(calls))
             if len(calls) > 5:
                 return ModelResponse(parts=[TextPart("complete")], usage=RequestUsage(input_tokens=runner._estimator.messages(messages), output_tokens=16))
-            return ModelResponse(parts=[ToolCallPart("read_document", {"resource": RESOURCE}, f"read-{len(calls)}")],
+            return ModelResponse(parts=[ToolCallPart("parse_document", {"resource": RESOURCE}, f"read-{len(calls)}")],
                                  usage=RequestUsage(input_tokens=runner._estimator.messages(messages), output_tokens=128))
         runner = await self.assemble(FunctionModel(respond))
         summary = AsyncMock(return_value="已读取文档，继续执行后续读取验证。")
         original = ParsedDocument("mineru", "vlm", [DocumentPage(1, "中文" * 22000)], 1)
-        with (patch("deep_agent.documents.toolset.parse_document", AsyncMock(return_value=original)) as parser,
+        with (patch("deep_agent.documents.toolset.parse_with_provider", AsyncMock(return_value=original)) as parser,
              patch("deep_agent.files.toolset._download_file", AsyncMock(return_value=connection_sample().data)),
              patch.object(DeepAgentContextCompaction, "_single_summary", summary)):
             output = await runner.agent.run("Read the authorized document.", deps=deps)

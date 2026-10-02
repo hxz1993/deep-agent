@@ -3645,3 +3645,6 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 .channel-user-label { justify-content: space-between; }
 .channel-user-label-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 #fillChannelCurrentUser { border: 0; padding: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; width: auto; }
+
+#documentParsingProviderOptions .web-search-mode-option:has(input:disabled) { cursor: not-allowed; }
+#documentParsingProviderOptions .web-search-mode-option:has(input:disabled) > span { color: var(--text-faint); background: transparent; }

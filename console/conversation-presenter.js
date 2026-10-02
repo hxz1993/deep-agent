@@ -2,7 +2,7 @@ import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
-import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20260912-21";
+import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20261002-console-audit";
 
 // No controller imports or initialization: each host owns its DOM and capabilities.
 export function createConversationPresenter({
@@ -144,7 +144,7 @@ function renderMessageAttachments(container, attachments) {
   for (const att of attachments) {
     const href = attachmentUrl(att);
     const previewUrl = isImageAttachment(att) ? href : null;
-    const chip = document.createElement(previewUrl ? "button" : href ? "a" : "div");
+    const chip = document.createElement(previewUrl ? "button" : "div");
     chip.className = `attachment-chip${previewUrl ? " attachment-image-trigger" : ""}`;
     if (previewUrl) {
       chip.type = "button";
@@ -152,18 +152,8 @@ function renderMessageAttachments(container, attachments) {
       chip.dataset.attachmentImageName = att.name || "图片附件";
       chip.setAttribute("aria-label", `预览图片 ${att.name || "图片附件"}`);
     }
-    if (!previewUrl && href) { chip.href = href; chip.download = ""; }
     chip.innerHTML = `${lucideIcon(previewUrl ? "image" : "paperclip")}<span class="attachment-name">${escapeHtml(att.name || att.id || "附件")}</span>`;
     wrap.appendChild(chip);
-    if (previewUrl && href) {
-      const download = document.createElement("a");
-      download.className = "attachment-chip attachment-download";
-      download.href = href; download.download = "";
-      download.setAttribute("aria-label", `下载 ${att.name || "图片附件"}`);
-      download.title = "下载图片";
-      download.innerHTML = lucideIcon("download");
-      wrap.appendChild(download);
-    }
   }
   container.appendChild(wrap);
   refreshLucideIcons();

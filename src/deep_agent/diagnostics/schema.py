@@ -19,6 +19,8 @@ EVENTS = {
     "document_http_request": "文档解析HTTP请求开始",
     "document_http_response": "文档解析HTTP响应已收到",
     "document_read_completed": "文档分页读取完成",
+    "document_read_failed": "文档读取失败",
+    "document_adaptation_completed": "文档可读格式适配完成",
     "mcp_request_context_resolved": "MCP 请求上下文已组装",
     "history_tool_result_matched": "历史工具已匹配后续结果",
     "history_tool_result_synthesized": "历史缺失工具结果已补齐",
@@ -114,6 +116,14 @@ NUMBER_FIELDS = frozenset({
     "tool_count", "unique_tool_count",
     "stream_chunks", "stream_bytes", "first_byte_ms", "last_byte_age_ms",
 })
+ADAPTATION_NUMBER_FIELDS = frozenset({
+    "source_characters", "adapted_characters", "native_token_count", "adapted_token_count",
+    "table_count", "markdown_table_count", "compact_html_table_count", "adaptation_fallback_count", "image_placeholder_count",
+})
+ADAPTATION_FIELDS = ADAPTATION_NUMBER_FIELDS | frozenset({
+    "adaptation_version", "request_id", "session_id", "run_id", "tool_call_id",
+    "provider_name", "model_name", "tool", "phase", "elapsed_ms", "duration_ms", "source_hash", "file_type",
+})
 BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_table_enabled", "parse_formula_enabled", "parse_merge_tables", "parse_relevel_titles"})
 TOKEN = re.compile(r"[A-Za-z0-9_.:/-]{1,180}\Z")
 ISSUE_CODES = frozenset({
@@ -189,7 +199,13 @@ def _model_api_fields(fields: dict, result: dict) -> None:
         result["tools_omitted"] = omitted
 
 
-def safe_fields(fields: dict) -> dict:
+def safe_fields(fields: dict, *, event: str | None = None) -> dict:
+    # Adaptation statistics belong to this event, not every model/lifecycle
+    # record. An event-local allowlist also bounds its scalar wire size without
+    # sacrificing correlation IDs or raising the existing record limit.
+    adapting = event == "document_adaptation_completed"
+    if adapting:
+        fields = {key: value for key, value in fields.items() if key in ADAPTATION_FIELDS}
     result = {}
     for name in BOOLEAN_FIELDS:
         if type(fields.get(name)) is bool:
@@ -206,13 +222,13 @@ def safe_fields(fields: dict) -> dict:
         "/api/v2/ocr/jobs", "/api/v2/ocr/jobs/{task}", "/api/paas/v4/layout_parsing", "/signed-artifact",
     }:
         result["document_api_path"] = fields["document_api_path"]
-    for name in IDENTIFIER_FIELDS:
+    for name in IDENTIFIER_FIELDS | ({"adaptation_version"} if adapting else set()):
         value = fields.get(name)
         # No coercion/repr: even exception __str__ and custom number objects may
         # execute code. Values with URLs, whitespace or credentials are omitted.
         if type(value) is str and TOKEN.fullmatch(value) and "://" not in value:
             result[name] = value
-    for name in NUMBER_FIELDS:
+    for name in NUMBER_FIELDS | (ADAPTATION_NUMBER_FIELDS if adapting else set()):
         value = fields.get(name)
         if type(value) in (int, float) and 0 <= value <= 10**15 and math.isfinite(value):
             result[name] = value
@@ -257,7 +273,7 @@ def sanitize_record(payload: dict) -> dict | None:
         "event": payload["event"], "summary": EVENTS[payload["event"]],
         "level": payload["level"], "source": payload["source"], "process_id": pid,
         **{key: payload[key] for key in ("record_id", "boot_id", "instance_id")},
-        **safe_fields(payload),
+        **safe_fields(payload, event=payload["event"]),
     }
 
     record["summary"] = describe(record)

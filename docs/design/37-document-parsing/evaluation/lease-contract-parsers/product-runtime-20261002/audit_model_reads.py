@@ -7,6 +7,9 @@ from collections import defaultdict
 import json
 from pathlib import Path
 from deep_agent.documents.cache import CachedDocument
+from dataclasses import replace
+from deep_agent.documents.adaptation import adapt_document
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.documents.models import DocumentPage, ParsedDocument
 from deep_agent.files.schema import AttachmentFileRef
 from run_adapters import ROOT, save
@@ -15,7 +18,11 @@ from run_adapters import ROOT, save
 def load_record(path:Path,document_id:str):
     body=json.loads(path.read_text());body['pages']=[DocumentPage(**p) for p in body['pages']]
     file_id='supplement_file' if document_id=='doc_supplement' else 'test_file'
-    return CachedDocument(document_id,AttachmentFileRef(type='attachment',file_id=file_id),'attachment:'+file_id,'protected_source',ParsedDocument(**body))
+    parsed=ParsedDocument(**body)
+    # These recorded trajectories predate adaptation; audit their native text
+    # coordinates without rewriting historical tool results.
+    readable=replace(adapt_document(parsed,TokenEstimator.conservative()),pages=parsed.pages)
+    return CachedDocument(document_id,AttachmentFileRef(type='attachment',file_id=file_id),'attachment:'+file_id,'protected_source',parsed,readable)
 
 
 def main():

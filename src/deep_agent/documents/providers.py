@@ -28,12 +28,12 @@ _OFFICE = frozenset({"application/msword", "application/vnd.openxmlformats-offic
                     "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})
 PROVIDERS = {
-    "mineru": ProviderCapability("mineru", "MinerU", "vlm", (".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"),
-                                  _PDF_IMAGES | _OFFICE, "精准 VLM；单文件不超过200 MB、200页；服务额度以账号为准", 200_000_000, 200),
     "paddle": ProviderCapability("paddle", "PaddleOCR", "PaddleOCR-VL-1.6", (".pdf", ".png", ".jpg", ".jpeg"),
                                   _PDF_IMAGES, "AI Studio VL-1.6；PDF及PNG/JPEG；文件限制和额度由服务端确认", 200_000_000),
     "glm": ProviderCapability("glm", "GLM-OCR", "glm-ocr", (".pdf", ".png", ".jpg", ".jpeg"),
-                               _PDF_IMAGES, "官方 layout_parsing；PDF及PNG/JPEG；文件限制和额度由服务端确认", 200_000_000),
+                               _PDF_IMAGES, "官方 layout_parsing；PDF不超过50 MB、100页；PNG/JPEG图片不超过10 MB；额度以账号为准", 50_000_000, 100),
+    "mineru": ProviderCapability("mineru", "MinerU", "vlm", (".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"),
+                                  _PDF_IMAGES | _OFFICE, "精准 VLM；单文件不超过200 MB、200页；服务额度以账号为准", 200_000_000, 200),
 }
 _MINERU = "https://mineru.net/api/v4"
 _PADDLE = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
@@ -253,6 +253,16 @@ def _task_id(value: Any) -> str:
     return value
 
 
+def _mineru_state(data: dict) -> dict:
+    results = data.get("extract_result")
+    if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict):
+        raise DocumentParsingError("invalid_result", "MinerU未返回当前文件的任务状态")
+    state = results[0]
+    if not isinstance(state.get("state"), str) or not state["state"]:
+        raise DocumentParsingError("invalid_result", "MinerU返回的任务状态无效")
+    return state
+
+
 def _unpack(blob: bytes, dest: Path) -> None:
     try:
         with zipfile.ZipFile(io.BytesIO(blob)) as archive:
@@ -330,11 +340,18 @@ def _paddle_pages(blob: bytes) -> list[DocumentPage]:
             continue
         body = _data(_body(line.encode()))
         result = body.get("result", body)
-        for item in result["layoutParsingResults"]:
+        items = result.get("layoutParsingResults") if isinstance(result, dict) else None
+        if not isinstance(items, list):
+            raise DocumentParsingError("invalid_result", "PaddleOCR分页内容索引无效")
+        for item in items:
+            if not isinstance(item, dict):
+                raise DocumentParsingError("invalid_result", "PaddleOCR页面结构无效")
             # AI Studio JSONL layoutParsingResults are ordered input pages.
-            index = item.get("prunedResult", {}).get("page_index")
+            pruned = item.get("prunedResult")
+            index = pruned.get("page_index") if isinstance(pruned, dict) else None
             number = index + 1 if type(index) is int and index >= 0 else len(pages) + 1
-            text = item.get("markdown", {}).get("text")
+            markdown = item.get("markdown")
+            text = markdown.get("text") if isinstance(markdown, dict) else None
             if not isinstance(text, str):
                 raise DocumentParsingError("invalid_result", "PaddleOCR页面缺少原生Markdown")
             pages.append(DocumentPage(number, text, native=item))
@@ -417,7 +434,10 @@ async def _parse(config, source, cache_dir, client, context):
         if provider == "mineru":
             data = await submit(_MINERU + "/file-urls/batch", json={"files": [{"name": source.name, "data_id": signature[:24]}],
                               "model_version": "vlm", "enable_table": True, "enable_formula": True, "language": "ch"})
-            task.update(task_id=_task_id(data["batch_id"]), upload_url=data["file_urls"][0], submission_unknown=False)
+            urls = data.get("file_urls")
+            if not isinstance(urls, list) or len(urls) != 1 or not isinstance(urls[0], str) or not urls[0]:
+                raise DocumentParsingError("invalid_result", "MinerU未返回当前文件的上传地址")
+            task.update(task_id=_task_id(data["batch_id"]), upload_url=urls[0], submission_unknown=False)
         else:
             data = await submit(_PADDLE, data={"model": "PaddleOCR-VL-1.6", "optionalPayload": json.dumps({"mergeTables": True, "relevelTitles": True})},
                                 files={"file": (source.name, source.data, source.mime_type)})
@@ -429,8 +449,8 @@ async def _parse(config, source, cache_dir, client, context):
         # Recover the original task rather than creating a second paid task.
         blob = await request("GET", _MINERU + f"/extract-results/batch/{task_id}")
         await _cpu(_save, cache_dir / "status.json", blob)
-        state = _data(_body(blob))["extract_result"][0]["state"]
-        if state in {"pending", "running", "done"}:
+        state = _mineru_state(_data(_body(blob)))["state"]
+        if state in {"pending", "running", "converting", "done"}:
             task.update(uploaded=True, upload_unknown=False)
             task.pop("upload_url", None)
         elif state == "waiting-file":
@@ -457,7 +477,7 @@ async def _parse(config, source, cache_dir, client, context):
             blob = await request("GET", url)
             await _cpu(_save, cache_dir / "status.json", blob)
             data = _data(_body(blob))
-            state = data["extract_result"][0] if provider == "mineru" else data
+            state = _mineru_state(data) if provider == "mineru" else data
             _log(context, "document_parse_phase", provider_name=provider, model_name=PROVIDERS[provider].model,
                  phase="poll", status=state.get("state", "unknown"), document_task_id=task_id)
             if state["state"] == "failed":
@@ -490,7 +510,9 @@ async def parse_document(config: DocumentParsingRuntimeConfig, source: DocumentS
     capability = PROVIDERS[config.provider]
     if not capability.supports(source.name, source.mime_type):
         raise DocumentParsingError("unsupported_format", "当前文档解析供应商不支持此文件格式")
-    if len(source.data) > capability.max_bytes:
+    mime_type = source.mime_type.split(";", 1)[0].strip().lower()
+    max_bytes = 10_000_000 if config.provider == "glm" and mime_type.startswith("image/") else capability.max_bytes
+    if len(source.data) > max_bytes:
         raise DocumentParsingError("file_too_large", "文件超过供应商大小限制")
     if capability.max_pages and source.source_pages and source.source_pages > capability.max_pages:
         raise DocumentParsingError("too_many_pages", "文件超过供应商页数限制")

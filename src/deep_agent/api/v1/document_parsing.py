@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import io
 import tempfile
 import time
 
@@ -50,22 +51,41 @@ def _resolve(body, existing):
 
 def connection_sample() -> DocumentSource:
     """One deterministic PDF page, no business files or external fixture URL."""
-    stream = b"BT /F1 20 Tf 72 720 Td (DeepAgent Document Test) Tj 0 -40 Td (Invoice amount: 123.45) Tj ET"
-    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-               b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"]
-    data = bytearray(b"%PDF-1.4\n")
-    positions = [0]
-    for number, obj in enumerate(objects, 1):
-        positions.append(len(data))
-        data.extend(str(number).encode() + b" 0 obj\n" + obj + b"\nendobj\n")
-    start = len(data)
-    data.extend(b"xref\n0 6\n0000000000 65535 f \n")
-    for position in positions[1:]:
-        data.extend(f"{position:010d} 00000 n \n".encode())
-    data.extend(f"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n".encode())
-    return DocumentSource("document-connection-test.pdf", "application/pdf", bytes(data), 1)
+    # The previous 635-byte hand-written PDF was rejected by GLM-OCR even
+    # though normal PDFs worked. Use a normal rendered page plus a text layer,
+    # generated with existing dependencies, for a representative OCR probe.
+    from PIL import Image, ImageDraw, ImageFont
+    from pypdf import PdfWriter
+    from pypdf.generic import DictionaryObject, NameObject, NumberObject, DecodedStreamObject, EncodedStreamObject
+
+    image = Image.new("RGB", (1224, 1584), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=40)
+    draw.text((144, 105), "DeepAgent Document Test", fill="black", font=font)
+    draw.text((144, 185), "Invoice amount: 123.45", fill="black", font=font)
+    pixels = io.BytesIO()
+    image.save(pixels, format="JPEG", quality=95)
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    raster = EncodedStreamObject()
+    raster._data = pixels.getvalue()
+    raster.update({NameObject("/Type"): NameObject("/XObject"), NameObject("/Subtype"): NameObject("/Image"),
+                   NameObject("/Width"): NumberObject(1224), NameObject("/Height"): NumberObject(1584),
+                   NameObject("/ColorSpace"): NameObject("/DeviceRGB"), NameObject("/BitsPerComponent"): NumberObject(8),
+                   NameObject("/Filter"): NameObject("/DCTDecode")})
+    text_font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"),
+                                  NameObject("/BaseFont"): NameObject("/Helvetica")})
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/XObject"): DictionaryObject({NameObject("/Sample"): writer._add_object(raster)}),
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(text_font)}),
+    })
+    content = DecodedStreamObject()
+    content.set_data(b"q 612 0 0 792 0 0 cm /Sample Do Q\n"
+                     b"BT /F1 20 Tf 3 Tr 72 720 Td (DeepAgent Document Test) Tj 0 -40 Td (Invoice amount: 123.45) Tj ET")
+    page[NameObject("/Contents")] = writer._add_object(content)
+    output = io.BytesIO()
+    writer.write(output)
+    return DocumentSource("document-connection-test.pdf", "application/pdf", output.getvalue(), 1)
 
 
 @router.get("/global-settings/document-parsing", response_model=DocumentParsingSettingsResponse)
@@ -76,9 +96,15 @@ async def get_document_parsing_settings(ctx: AppContextDep):
 
 @router.put("/global-settings/document-parsing", response_model=DocumentParsingSettingsResponse)
 async def put_document_parsing_settings(body: DocumentParsingSettingsWrite, ctx: AppContextDep):
-    _, existing = await _current(ctx)
-    config = _resolve(body, existing)
-    row = await ctx.stores.global_setting.upsert(DOCUMENT_PARSING_SETTING_KEY, value=config.to_stored_value(), version=DOCUMENT_PARSING_SCHEMA_VERSION)
+    store = ctx.stores.global_setting
+    if store is None:
+        raise HTTPException(503, "Global settings store is unavailable")
+    row = await store.update_atomic(
+        DOCUMENT_PARSING_SETTING_KEY,
+        transform=lambda current: _resolve(body, read_document_parsing_config(current)).to_stored_value(),
+        version=DOCUMENT_PARSING_SCHEMA_VERSION,
+    )
+    config = read_document_parsing_config(row)
     emit("document_configuration_updated", provider_name=config.provider or "unconfigured", mode=config.mode)
     return _response(row, config)
 

@@ -123,9 +123,11 @@ class DocumentUploadTests(unittest.TestCase):
     def test_runtime_instruction_mentions_document_only_when_loaded(self):
         spec = AgentSpec(name="test", model="test", instructions="", capabilities=[])
         unavailable = build_capability_instruction_block(spec, document_config=self.config(), document_available=False)
-        self.assertNotIn("read_document", unavailable)
+        self.assertNotIn("parse_document", unavailable)
         enabled = build_capability_instruction_block(spec, document_config=self.config("glm"), document_available=True)
-        self.assertIn("read_document tool is enabled", enabled)
+        self.assertIn("parse_document tool is enabled", enabled)
+        self.assertIn("call parse_document directly instead of first trying read_file", enabled)
+        self.assertIn("it does not support PDF", enabled)
         self.assertIn("GLM-OCR", enabled)
         self.assertIn("next_read", enabled)
         unconfigured = build_capability_instruction_block(spec, document_available=True)

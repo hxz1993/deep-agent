@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.9`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.10`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -126,7 +126,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 ---
 
-文档解析见[使用指南](docs/guides/document-parsing.md)：在全局工具配置选择 MinerU、PaddleOCR 或 GLM-OCR，再显式给 Agent 关联 `builtin:document`。`read_document` 复用24K/48K Token分页、当前Run缓存和来源授权；保存不暗中收费测试，不新增环境变量或数据库结构。
+文档解析见[使用指南](docs/guides/document-parsing.md)：在全局工具配置选择 MinerU、PaddleOCR 或 GLM-OCR，再显式给 Agent 关联 `builtin:document`。`parse_document` 整页适配为模型可读内容后再复用24K/48K Token分页、当前Run缓存和来源授权；原始产物保留，不纠正OCR或合同数据。保存不暗中收费测试，不新增环境变量或数据库结构。
 
 ## 子文档索引
 
@@ -402,3 +402,9 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 渠道应用关联：企微机器人、企微应用、飞书、钉钉统一在保存入口调用平台 `checkApiKey` 解析 Key 所属用户，与 `session_user_id` 比较；开启关联必须填写 Key。校验使用合并后的有效配置，保留旧 Key、更换关联用户也须校验，不复用浏览器凭据，不要求 Key 用户具备企业管理员身份。无效、不匹配或上游不可用均禁止保存，不新增环境变量或表结构。
 
 企微应用回复使用 Markdown 子集整理与 2048 UTF-8 字节安全分段；处理超过3秒仅发一次纯文本等待提示，终态及渠道关闭清理任务。内部正文使用 send-message，媒体与结构化卡片使用 send-component；图片、文件、AMR语音、MP4视频及文字/图文卡片通过同一应用发送，收件人只来自当前渠道 Run。工具必须先校验渠道能力再读取文件，禁止把不支持类型误报为文件损坏。真实应用格式验收与受控 HTTP 测试分别报告；不改其他渠道回复和运行时身份校验。
+
+### 文档解析验收与续读（2026-10-02）
+
+同一Run、同文件与解析配置共用首次提交的900秒截止时间；恢复查询只用剩余时间，不因模型再次调用延长等待或重新收费提交。供应商任务接口200、`pending`及Agent最终`completed`均不能代替正文解析成功。验收需通过真实Agent读取至`has_more=false`，分页拼接与供应商原生正文一致，再单独核对金额等业务字段；页覆盖完整不表示识别完整。当前供应商顺序Paddle、GLM、MinerU，未配置草稿选首项，已有选择不自动改变。文档Key保留逻辑须在配置写事务中读取并合并，避免并发覆盖新Key。详见[2026-10-02审计](docs/design/37-document-parsing/evaluation/lease-contract-parsers/product-runtime-20261002/release-audit-20261002.md)。
+
+文档专业解析工具采用`parse_document`，中文“解析文档”，与`read_file`“读取文件”区分；不保留旧`read_document`运行时别名。`read_file`只直接读取文本、DOCX、XLSX，不支持PDF、PPT/PPTX或图片OCR。PDF包括带文字层的PDF应直接选择已加载的`parse_document`。附件引用不能无差别提示模型使用`read_file`；历史事实不改名，读取投影时按当前工具能力选择。

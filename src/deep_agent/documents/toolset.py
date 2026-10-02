@@ -21,7 +21,7 @@ from deep_agent.skills.runtime import ResolvedSkill
 
 from .cache import CachedDocument, DocumentRunCache
 from .models import DocumentParsingError, DocumentSource
-from .providers import PROVIDERS, parse_document
+from .providers import PROVIDERS, parse_document as parse_with_provider
 from .schema import DocumentReadResult, DocumentRef, DocumentResource, DocumentSummary, PageFragment
 from .settings import DocumentParsingRuntimeConfig
 
@@ -81,7 +81,7 @@ def read_cached_document(
 ) -> DocumentReadResult:
     _validate_range(page_start=page_start, page_end=page_end, limit=limit, offset=offset, char_offset=char_offset)
     summary, warnings, status = _summary(record)
-    selected = record.parsed.pages
+    selected = record.readable.pages
     if page_start is not None or page_end is not None:
         if not summary.page_numbers_known:
             raise ModelRetry("该供应商结果没有可靠原始页码，请省略 page_start/page_end 并按 next_read 续读")
@@ -107,9 +107,14 @@ def read_cached_document(
             for name, value in (("page_start", page_start), ("page_end", page_end), ("limit", limit)):
                 if value is not None:
                     next_read[name] = value
+        read_warnings = list(warnings)
+        if page.has_more:
+            read_warnings.append("当前仅返回部分正文，尚未读完；需要全文审查或提取时必须按 next_read 继续，不能声称已读完整文件。")
+        if len(selected) != len(record.parsed.pages):
+            read_warnings.append("本次只读取指定原始页范围；该范围读完不表示已读完整文件。")
         return DocumentReadResult(
             document=DocumentRef(document_id=record.document_id), provider=record.parsed.provider,
-            model=record.parsed.model, status=status, summary=summary, pages=fragments, warnings=warnings,
+            model=record.parsed.model, status=status, summary=summary, pages=fragments, warnings=read_warnings,
             offset=offset, char_offset=char_offset, limit=page_limit, returned_count=page.returned_count,
             has_more=page.has_more, next_read=next_read,
         )
@@ -133,12 +138,19 @@ def build_document_toolset(
     formats = ", ".join(capability.describe()["formats"]) if capability else "未配置"
     description = (
         f"专业文档解析，当前供应商 {capability.label if capability else '未配置'}，支持 {formats}。"
-        "适合扫描件、版面和复杂表格；耗时通常较长，识别仍可能出错。"
+        "PDF（包括带文字层的PDF）直接使用本工具，不要先调用read_file试读；"
+        "若本轮同时提供read_file，常规文件读取使用它支持的读取能力；需要OCR、版面或复杂表格时使用本工具。"
+        "仅支持当前供应商列出的格式；耗时通常较长，识别仍可能出错。"
         "首次解析完整文件并缓存当前 Run，页范围只控制展示；小结果一次返回所有页面，"
         "大结果返回原始页码、正文与 next_read，原样调用本工具续读。"
         "pages[].complete=false表示该页尚未读完，必须完整复制next_read（含char_offset）继续同一页；"
         "不能自行将offset加1，否则会跳过该页剩余正文。"
-        "摘要是页面覆盖概览，不是内容摘要；供应商原生正文和表格未作纠错。"
+        "status/summary.coverage=complete只代表供应商解析页覆盖，不代表你已读完正文；"
+        "需要全文审查或提取时，has_more=true必须按next_read继续，直到读完所需范围再回答。"
+        "同一文档累计等待最多900秒，超时后本Run再次调用不会延长等待或重新提交；不要反复重试。"
+        "摘要是页面覆盖概览，不是内容摘要；正文已整理为模型可读格式，普通表格为Markdown，"
+        "复杂表格保留精简HTML及合并关系，未作OCR或金额纠错。"
+        "char_offset/char_end指向适配后固定正文，不是供应商原始HTML。"
     )
     toolset = FunctionToolset[AgentDeps](id="document-parsing", instructions=(
         description + "不要猜测 file_id 或 document_id。缓存仅本 Run 有效；重复原文件引用命中缓存但默认从头读，"
@@ -146,11 +158,11 @@ def build_document_toolset(
     ))
 
     @toolset.tool(description=description)
-    async def read_document(
+    async def parse_document(
         ctx: RunContext[AgentDeps], resource: DocumentResource, page_start: int | None = None,
         page_end: int | None = None, limit: int | None = None, offset: int = 1, char_offset: int = 0,
     ) -> DocumentReadResult:
-        """解析授权文档，或从当前 Run 的原生结果缓存按 Token 预算读取。
+        """解析授权文档，或从当前 Run 的固定可读内容缓存按 Token 预算读取。
 
         Args:
             resource: 会话附件、已授权 Skill 文件或本工具返回的 document 引用。
@@ -178,13 +190,13 @@ def build_document_toolset(
             if record is None:
                 raise ModelRetry("document_id 不属于当前 Run；请使用本工具返回的引用，或重新提供已授权原文件引用")
             reference = record.resource
-        resolved = await resolve_file_source(ctx, reference, authorized, tool_name="read_document")
+        resolved = await resolve_file_source(ctx, reference, authorized, tool_name="parse_document")
         mime = (resolved.mime or "").split(";", 1)[0].strip().lower()
         if not capability.supports(resolved.name, mime):
             raise ModelRetry(f"{capability.label} 的当前接入服务不支持此文件格式；支持：{formats}")
         data = await load_file_bytes(ctx, key=resolved.cache_key, loader=resolved.load, failure_label=resolved.name,
                                      max_bytes=min(capability.max_bytes, max_upload_bytes()) if resolved.source == "attachment" else capability.max_bytes,
-                                     expected_hash=resolved.content_hash, tool_name="read_document")
+                                     expected_hash=resolved.content_hash, tool_name="parse_document")
         source_hash = hashlib.sha256(data).hexdigest()
         if len(data) > capability.max_bytes or (resolved.source == "attachment" and len(data) > max_upload_bytes()):
             raise ModelRetry("文件超过当前上传或供应商大小限制")
@@ -204,10 +216,25 @@ def build_document_toolset(
             try:
                 record, hit = await cache.get_or_parse(
                     source_key=resolved.cache_key, source_hash=source_hash, provider=config.provider, model=config.model,
-                    resource=resolved.resource, parse=lambda directory: parse_document(config, source, directory, context=context),
+                    resource=resolved.resource, parse=lambda directory: parse_with_provider(config, source, directory, context=context),
+                    estimator=budget.estimator,
                 )
             except DocumentParsingError as exc:
+                emit("document_read_failed", provider_name=config.provider, error_code=exc.code,
+                     elapsed_ms=round((time.monotonic() - started) * 1000), session_id=ctx.deps.session_id,
+                     run_id=ctx.deps.run_id or ctx.run_id, tool_call_id=ctx.tool_call_id)
                 raise ToolFailed(f"文档解析失败（{exc.code}）：{exc}") from exc
+            if not hit:
+                stats = record.readable.stats
+                emit("document_adaptation_completed", provider_name=config.provider, model_name=config.model,
+                     phase="adapt", adaptation_version=stats.version,
+                     source_characters=stats.source_characters, adapted_characters=stats.adapted_characters,
+                     native_token_count=stats.native_token_count, adapted_token_count=stats.adapted_token_count,
+                     table_count=stats.table_count, markdown_table_count=stats.markdown_table_count,
+                     compact_html_table_count=stats.compact_html_table_count,
+                     adaptation_fallback_count=stats.fallback_count,
+                     image_placeholder_count=stats.image_placeholder_count,
+                     elapsed_ms=stats.elapsed_ms, **context)
         result = await asyncio.to_thread(read_cached_document, record, budget=budget, page_start=page_start,
                                          page_end=page_end, limit=limit, offset=offset, char_offset=char_offset)
         emit("document_read_completed", provider_name=result.provider, model_name=result.model, phase="page",

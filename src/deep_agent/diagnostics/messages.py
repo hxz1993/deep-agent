@@ -22,6 +22,9 @@ def describe(record: dict) -> str:
                            ("target_origin", "服务"),
                            ("returned_pages", "返回页"), ("token_count", "Token"), ("cache_hit", "缓存命中"),
                            ("has_more", "需要续读"), ("elapsed_ms", "耗时ms"),
+                           ("adaptation_version", "适配版本"), ("native_token_count", "原生正文Token"),
+                           ("adapted_token_count", "可读正文Token"), ("table_count", "表格数"),
+                           ("adaptation_fallback_count", "原样保留数"),
                            ("parse_language", "语言"), ("parse_table_enabled", "表格识别"),
                            ("parse_formula_enabled", "公式识别"), ("parse_merge_tables", "表格合并"),
                            ("parse_relevel_titles", "标题层级")):

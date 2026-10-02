@@ -8,9 +8,9 @@ const template = await readFile(new URL("../../../console/configuration-template
 const css = await readFile(new URL("../../../console/configuration/configuration.css", import.meta.url), "utf8");
 const consoleCss = await readFile(new URL("../../../console/console.css", import.meta.url), "utf8");
 const providers = [
-  { provider: "mineru", label: "MinerU", model: "vlm", formats: ["PDF", "DOCX"], limits: "单文件最多 200 页" },
   { provider: "paddle", label: "PaddleOCR", model: "PaddleOCR-VL-1.6", formats: ["PDF", "PNG"], limits: "服务额度以账号为准" },
   { provider: "glm", label: "GLM-OCR", model: "glm-ocr", formats: ["PDF", "PNG", "JPEG"], limits: "单文件最多 100 页" },
+  { provider: "mineru", label: "MinerU", model: "vlm", formats: ["PDF", "DOCX"], limits: "单文件最多 200 页" },
 ];
 const escapeHtml = value => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -30,7 +30,8 @@ function harness(value = { mode: "unconfigured" }) {
     document: {
       addEventListener() {}, getElementById: node,
       querySelectorAll(selector) {
-        return selector.includes("Form") ? ["documentParsingApiKey", "providerRadio", "saveDocumentParsingBtn", "cancelDocumentParsingBtn", "testDocumentParsingBtn"].map(node) : [];
+        const radios = providers.map(provider => Object.assign(node(`radio-${provider.provider}`), { name: "documentParsingProvider", value: provider.provider }));
+        return selector.includes("Form") ? [...radios, ...["documentParsingApiKey", "saveDocumentParsingBtn", "cancelDocumentParsingBtn", "testDocumentParsingBtn"].map(node)] : radios;
       },
     },
     apiFetch: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })),
@@ -55,38 +56,68 @@ test("文档编辑器独立布局不拆开全局设置标题栏的公共选择�
   assert.match(css, /#documentParsingSettingsDialog \.modal-body\s*\{ overflow-y: auto; \}/);
 });
 
-test("文档解析与网络搜索共享同一配置卡片、两行文字和右侧操作样式", () => {
+test("文档解析与网络搜索位于同一工具设置卡片的两行", () => {
+  assert.match(template, /<div class="global-settings-tool-card">\s*<section class="global-settings-section" id="globalSettingsWebSearch">[\s\S]*?<section class="global-settings-section" id="globalSettingsDocumentParsing">/);
   for (const id of ["globalSettingsWebSearch", "globalSettingsDocumentParsing"]) {
-    assert.match(template, new RegExp(`class="global-settings-section global-settings-tool-card" id="${id}"`));
+    assert.match(template, new RegExp(`class="global-settings-section" id="${id}"`));
   }
+  assert.equal((template.match(/class="global-settings-tool-card"/g) || []).length, 1);
   assert.match(consoleCss, /#configurationHost \.global-settings-tool-card \{[^}]*border: 1px solid var\(--console-card-border\);[^}]*border-radius: 8px;/);
+  assert.doesNotMatch(consoleCss, /\.global-settings-tool-card > \.global-settings-section \+ \.global-settings-section \{[^}]*border-top:/);
   assert.match(consoleCss, /#configurationHost \.global-settings-tool-card \.global-settings-section-title \{[^}]*flex-direction: column;[^}]*align-items: flex-start;/);
   assert.match(consoleCss, /#configurationHost \.global-settings-tool-card \.global-settings-section-actions \{ flex-shrink: 0;/);
   assert.doesNotMatch(consoleCss, /#globalSettingsWebSearch/);
 });
 
-test("摘要和支持格式取后端元数据，默认草稿 MinerU", () => {
+test("摘要和支持格式取后端元数据，默认草稿使用目录首项", () => {
   const h = harness();
   h.ui.openDocumentParsingSettings();
   assert.equal(h.node("documentParsingSettingsDialog").open, true);
-  assert.equal(h.node("documentParsingModel").textContent, "vlm");
-  assert.equal(h.node("documentParsingCapabilities").textContent, "支持格式：PDF、DOCX。单文件最多 200 页");
+  assert.equal(h.node("documentParsingModel").textContent, "PaddleOCR-VL-1.6");
+  assert.equal(h.node("documentParsingCapabilities").textContent, "支持格式：PDF、PNG。服务额度以账号为准");
   assert.equal(h.ui.documentParsingSummaryLabel({ value: { mode: "provider", provider: "paddle" }, providers }), "PaddleOCR");
   h.ui.selectDocumentParsingProvider("glm");
   assert.equal(h.node("documentParsingModel").textContent, "glm-ocr");
   assert.match(h.node("documentParsingCapabilities").textContent, /100 页/);
 });
 
+test("供应商按后端稳定性顺序显示，首项为新草稿默认且不覆盖已保存选择", () => {
+  const ranked = [providers[1], providers[2], providers[0]];
+  const h = harness();
+  h.context.window.globalSettingsAdmin.documentParsing.providers = ranked;
+  h.ui.openDocumentParsingSettings();
+  const options = h.node("documentParsingProviderOptions").innerHTML;
+  assert.ok(options.indexOf('value="glm"') < options.indexOf('value="mineru"'));
+  assert.ok(options.indexOf('value="mineru"') < options.indexOf('value="paddle"'));
+  assert.equal(h.node("documentParsingModel").textContent, "glm-ocr");
+  h.node("documentParsingApiKey").value = "new-ranked-key";
+  assert.equal(h.ui.currentDocumentParsingDraft().value.provider, "glm");
+
+  const saved = harness({ mode: "provider", provider: "paddle", api_key_set: true });
+  saved.context.window.globalSettingsAdmin.documentParsing.providers = ranked;
+  saved.ui.openDocumentParsingSettings();
+  assert.equal(saved.node("documentParsingModel").textContent, "PaddleOCR-VL-1.6");
+  assert.equal(saved.ui.currentDocumentParsingDraft().value.provider, "paddle");
+});
+
+test("供应商目录为空时不虚构默认供应商", () => {
+  const h = harness();
+  h.context.window.globalSettingsAdmin.documentParsing.providers = [];
+  h.ui.openDocumentParsingSettings();
+  assert.equal(h.node("testDocumentParsingBtn").disabled, true);
+  assert.deepEqual(plain(h.ui.currentDocumentParsingDraft()), { version: 1, value: { mode: "unconfigured" } });
+});
+
 test("切供应商保留各自草稿；保存只发送当前一家，关闭清除所有明文草稿", () => {
   const h = harness();
   h.ui.openDocumentParsingSettings();
-  h.node("documentParsingApiKey").value = "mineru-new";
-  h.ui.selectDocumentParsingProvider("paddle");
-  assert.equal(h.node("documentParsingApiKey").value, "");
   h.node("documentParsingApiKey").value = "paddle-new";
-  h.ui.selectDocumentParsingProvider("mineru");
-  assert.equal(h.node("documentParsingApiKey").value, "mineru-new");
-  assert.deepEqual(plain(h.ui.currentDocumentParsingDraft()), { version: 1, value: { mode: "provider", provider: "mineru", api_key: "mineru-new" } });
+  h.ui.selectDocumentParsingProvider("glm");
+  assert.equal(h.node("documentParsingApiKey").value, "");
+  h.node("documentParsingApiKey").value = "glm-new";
+  h.ui.selectDocumentParsingProvider("paddle");
+  assert.equal(h.node("documentParsingApiKey").value, "paddle-new");
+  assert.deepEqual(plain(h.ui.currentDocumentParsingDraft()), { version: 1, value: { mode: "provider", provider: "paddle", api_key: "paddle-new" } });
   h.ui.selectDocumentParsingProvider("unconfigured");
   assert.deepEqual(plain(h.ui.currentDocumentParsingDraft()), { version: 1, value: { mode: "unconfigured" } });
   h.ui.closeDocumentParsingSettings();
@@ -97,13 +128,13 @@ test("切供应商保留各自草稿；保存只发送当前一家，关闭清�
 });
 
 test("原密钥脱敏值或留空仅同一家可保留，不发送占位值", () => {
-  const h = harness({ mode: "provider", provider: "mineru", api_key_set: true, api_key_masked: "test-****-mask" });
+  const h = harness({ mode: "provider", provider: "paddle", api_key_set: true, api_key_masked: "test-****-mask" });
   h.ui.openDocumentParsingSettings();
   assert.equal(h.node("documentParsingApiKey").value, "test-****-mask");
-  assert.deepEqual(plain(h.ui.currentDocumentParsingDraft()), { version: 1, value: { mode: "provider", provider: "mineru" } });
+  assert.deepEqual(plain(h.ui.currentDocumentParsingDraft()), { version: 1, value: { mode: "provider", provider: "paddle" } });
   h.node("documentParsingApiKey").value = "";
   assert.equal(Object.hasOwn(h.ui.currentDocumentParsingDraft().value, "api_key"), false);
-  h.ui.selectDocumentParsingProvider("paddle");
+  h.ui.selectDocumentParsingProvider("glm");
   assert.throws(() => h.ui.currentDocumentParsingDraft(), /请输入当前供应商/);
 });
 
@@ -137,7 +168,7 @@ test("保存锁定关闭及重复操作，成功回读，刷新失败不会声�
   await h.ui.runDocumentParsingOperation("save");
   assert.equal(h.requests.length, 1);
   assert.equal(h.node("documentParsingSettingsDialog").open, true);
-  h.requests[0].resolve({ value: { mode: "provider", provider: "mineru", api_key_set: true }, providers });
+  h.requests[0].resolve({ value: { mode: "provider", provider: "paddle", api_key_set: true }, providers });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.node("documentParsingSettingsDialog").open, false);
   assert.equal(h.requests[1].path, "/api/v1/global-settings/document-parsing");
@@ -171,4 +202,29 @@ test("供应商显示名转义，服务格式说明使用纯文本", () => {
   assert.doesNotMatch(h.node("documentParsingProviderOptions").innerHTML, /<img|<script/);
   assert.match(h.node("documentParsingProviderOptions").innerHTML, /&lt;img/);
   assert.match(h.node("documentParsingCapabilities").textContent, /<script>/);
+});
+
+ test("MinerU 禁选，测试结束解锁后仍禁选；旧配置不被静默替换", async () => {
+  const h = harness();
+  h.ui.openDocumentParsingSettings();
+  assert.match(h.node("documentParsingProviderOptions").innerHTML, /value="mineru" disabled/);
+  assert.equal(h.node("radio-mineru").disabled, true);
+  h.ui.selectDocumentParsingProvider("mineru");
+  assert.equal(h.node("documentParsingModel").textContent, "PaddleOCR-VL-1.6");
+  h.node("documentParsingApiKey").value = "fake-test-key";
+  const pending = h.ui.runDocumentParsingOperation("test");
+  h.requests[0].resolve({ ok: true, message: "连接成功" });
+  await pending;
+  assert.equal(h.node("radio-mineru").disabled, true);
+  assert.equal(h.node("radio-paddle").disabled, false);
+  const stored = harness({ mode: "provider", provider: "mineru", api_key_set: true });
+  stored.ui.openDocumentParsingSettings();
+  assert.equal(stored.node("radio-mineru").checked, true);
+  assert.equal(stored.node("saveDocumentParsingBtn").disabled, true);
+  assert.equal(stored.node("testDocumentParsingBtn").disabled, true);
+  await stored.ui.runDocumentParsingOperation("save");
+  assert.equal(stored.requests.length, 0);
+  assert.match(stored.node("documentParsingTestFeedbackText").textContent, /暂不可用/);
+  stored.ui.selectDocumentParsingProvider("glm");
+  assert.equal(stored.node("saveDocumentParsingBtn").disabled, false);
 });

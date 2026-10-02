@@ -84,7 +84,7 @@ export function assistantActionsFromHistoryItems(items = []) {
       continue;
     }
 
-    if (item?.kind !== "tool") continue;
+    if (item?.kind !== "tool" || item.status === "removed") continue;
     const call = toolCallFromConversationItem(item);
     actions.push({ type: ASSISTANT_PRESENTATION_ACTIONS.TOOL_CALL, call });
     if (!["pending", "awaiting_input"].includes(item.status)) {

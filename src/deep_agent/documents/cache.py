@@ -3,15 +3,19 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import threading
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.files.schema import FileResourceRef
 
-from .models import ParsedDocument
-from .providers import can_resume_document
+from .adaptation import AdaptedDocument, DocumentAdaptationCancelled, adapt_document
+from .models import DocumentParsingError, ParsedDocument
+from .providers import PARSE_TIMEOUT_SECONDS, can_resume_document
 
 
 @dataclass(frozen=True)
@@ -21,12 +25,14 @@ class CachedDocument:
     source_key: str
     source_hash: str
     parsed: ParsedDocument
+    readable: AdaptedDocument
 
 
 class DocumentRunCache:
     def __init__(self) -> None:
         self.records: dict[str, CachedDocument] = {}
         self.tasks: dict[tuple[str, str, str, str], asyncio.Task[CachedDocument]] = {}
+        self._deadlines: dict[tuple[str, str, str, str], float] = {}
         self._directory: tempfile.TemporaryDirectory | None = None
         self.closed = False
 
@@ -41,6 +47,7 @@ class DocumentRunCache:
     async def get_or_parse(
         self, *, source_key: str, source_hash: str, provider: str, model: str,
         resource: FileResourceRef, parse: Callable[[Path], Awaitable[ParsedDocument]],
+        estimator: TokenEstimator | None = None,
     ) -> tuple[CachedDocument, bool]:
         if self.closed:
             raise RuntimeError("Document cache is closed")
@@ -55,18 +62,43 @@ class DocumentRunCache:
                 # call may resume only an explicitly confirmed uploaded task;
                 # it cannot silently create another paid submission.
                 resume_id = task.get_name().removeprefix("document-parse:")
-                if not can_resume_document(self.directory / resume_id, error):
+                if (time.monotonic() >= self._deadlines[key]
+                        or not can_resume_document(self.directory / resume_id, error)):
                     resume_id = None
                 else:
                     task = None
         if task is None:
+            # Recovery shares the first submission's deadline. Repeated tool
+            # calls must not turn one 15-minute wait into an unbounded Run.
+            deadline = self._deadlines.setdefault(key, time.monotonic() + PARSE_TIMEOUT_SECONDS)
             document_id = resume_id or "doc_" + uuid.uuid4().hex
             directory = self.directory / document_id
             directory.mkdir(mode=0o700, exist_ok=bool(resume_id))
 
             async def run() -> CachedDocument:
-                parsed = await parse(directory)
-                record = CachedDocument(document_id, resource, source_key, source_hash, parsed)
+                try:
+                    async with asyncio.timeout(max(0, deadline - time.monotonic())):
+                        parsed = await parse(directory)
+                except TimeoutError as exc:
+                    raise DocumentParsingError(
+                        "timeout", "同一文档累计解析等待已超过900秒；本轮不再等待或重新提交，远端任务可能仍在运行"
+                    ) from exc
+                # Adapt complete pages once, before any character slicing. All
+                # continuations address the same immutable model-facing text.
+                cancelled = threading.Event()
+                worker = asyncio.create_task(asyncio.to_thread(
+                    adapt_document, parsed, estimator or TokenEstimator.conservative(), cancel_event=cancelled,
+                ))
+                try:
+                    readable = await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    try:
+                        await worker
+                    except DocumentAdaptationCancelled:
+                        pass
+                    raise
+                record = CachedDocument(document_id, resource, source_key, source_hash, parsed, readable)
                 self.records[document_id] = record
                 return record
 
@@ -87,6 +119,7 @@ class DocumentRunCache:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self.tasks.clear()
+        self._deadlines.clear()
         self.records.clear()
         if self._directory is not None:
             await asyncio.to_thread(self._directory.cleanup)

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 from deep_agent.documents.cache import CachedDocument
+from deep_agent.documents.adaptation import adapt_document
 from deep_agent.documents.models import ParsedDocument, DocumentPage
 from deep_agent.documents.toolset import read_cached_document
 from deep_agent.files.schema import AttachmentFileRef
@@ -19,7 +20,8 @@ def reconstruct(path:Path,window:int)->dict:
     raw=json.loads(path.read_text())
     raw['pages']=[DocumentPage(**p) for p in raw['pages']]
     parsed=ParsedDocument(**raw)
-    record=CachedDocument('doc_test',AttachmentFileRef(type='attachment',file_id='authorized_test'), 'attachment:authorized_test','test_hash',parsed)
+    readable=adapt_document(parsed,TokenEstimator.conservative())
+    record=CachedDocument('doc_test',AttachmentFileRef(type='attachment',file_id='authorized_test'), 'attachment:authorized_test','test_hash',parsed,readable)
     budget=ReadingBudget(TokenEstimator.conservative(),window)
     params={}; fragments={i:[] for i in range(len(parsed.pages))}; stats=[]; seen=set()
     while True:
@@ -28,26 +30,27 @@ def reconstruct(path:Path,window:int)->dict:
         assert budget.fits(wire),'Tool envelope exceeds token budget'
         current=result.offset-1
         for j,p in enumerate(result.pages):
-            expected=parsed.pages[current+j]
-            assert p.content==expected.content[p.char_offset:p.char_end], 'Fragment altered source body'
+            expected=readable.pages[current+j]
+            assert p.content==expected.content[p.char_offset:p.char_end], 'Fragment altered model-readable body'
             fragments[current+j].append((p.char_offset,p.char_end,p.content))
         stats.append({'returned_pages':result.returned_count,'token_count':budget.estimator.text(wire),
-                      'wire_tokens':budget.estimator.text(ToolReturnPart('read_document',wire).model_response_str()),
+                      'wire_tokens':budget.estimator.text(ToolReturnPart('parse_document',wire).model_response_str()),
                       'offset':result.offset,'char_offset':result.char_offset,'has_more':result.has_more})
         if not result.has_more:break
         args=dict(result.next_read);args.pop('resource')
         position=(args['offset'],args['char_offset'])
         assert position not in seen,'Continuation loop'
         seen.add(position);params=args
-    for i,p in enumerate(parsed.pages):
+    for i,p in enumerate(readable.pages):
         pieces=fragments[i];cursor=0
         for start,end,_ in pieces:
             assert start==cursor,'Missing/duplicate character range'
             cursor=end
         assert cursor==len(p.content)
-        assert ''.join(x[2] for x in pieces)==p.content,'Native body was lost or rewritten'
+        assert ''.join(x[2] for x in pieces)==p.content,'Model-readable body was lost or rewritten'
     return {'provider':parsed.provider,'window':window,'budget':budget.tokens,'calls':len(stats),
-            'pages':len(parsed.pages),'content_characters':sum(len(p.content) for p in parsed.pages),
+            'pages':len(parsed.pages),'native_characters':sum(len(p.content) for p in parsed.pages),
+            'content_characters':sum(len(p.content) for p in readable.pages),
             'content_preserved':True,'max_tokens':max(x['token_count'] for x in stats),'batches':stats}
 
 

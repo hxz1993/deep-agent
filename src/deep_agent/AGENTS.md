@@ -803,10 +803,10 @@ MCP 工具合计不超过 10 个时全部直接披露，超过 10 个时预选�
 
 ### 专业文档解析（0.12.9）
 
-- `documents/` 的三家官方 HTTP 适配器服务于显式内置分组 `builtin:document` / `read_document`，不要混入聊天模型 Provider，也不要自动给现有 Agent 启用。
+- `documents/` 的三家官方 HTTP 适配器服务于显式内置分组 `builtin:document` / `parse_document`，不要混入聊天模型 Provider，也不要自动给现有 Agent 启用。
 - 配置只复用 `global_setting.document_parsing`：保存当前供应商及 Key，不新增环境变量、数据库结构或格式切换配置。管理员 GET/PUT/test 路由见 `api/v1/document_parsing.py`；保存不能隐式执行收费解析。
 - `ProviderCapability` 是格式说明、文件校验、上传、目录与运行时说明的唯一来源。默认白名单可扩充当前已配置供应商格式；显式上传白名单及平台大小限制始终优先。
-- 两个普通读取工具与文档工具共用 `ReadingBudget` 和 Token 分页；`read_document` 跳过通用大结果二次外置。只归一化页码、顺序和引用，不改写原生正文或 OCR 数字。
+- 两个普通读取工具与文档工具共用 `ReadingBudget` 和 Token 分页；`parse_document` 跳过通用大结果二次外置。原生页面与响应保留，`adaptation.py` 在首次解析后以工作线程生成一次固定可读投影：普通表格 Markdown、复杂表格精简 HTML，删除展示属性且保留单元格角色与合并关系，不纠正 OCR 数字。缓存的 `readable.pages` 是 Token 计量与 Unicode 游标唯一来源，不能切片后适配。验收分别证明原生→投影语义完整和投影→分页逐字符完整，不能用最后 `has_more=false` 代替完整轨迹核对。
 - Run 配置快照与 `DocumentCacheLifecycle.wrap_run` 管理缓存。续读也检查原来源授权；Run 结束、失败、取消或返回 Deferred 后清理任务与私有临时目录。已经提交的任务不得自动再次提交，取消不得宣称已停止远端计费。
 - pypdf只用于源PDF页数和加密/损坏检查，不提取正文；正文来自已配置的供应商。未知页边界必须标未知，不能用块数或文本长度冒充物理页数。
 - 接入与使用见 [`../../docs/guides/document-parsing.md`](../../docs/guides/document-parsing.md)。真实样本和原生响应保持忽略，不提交 Key、合同或签名URL；协议回归与业务金额质量分开报告。

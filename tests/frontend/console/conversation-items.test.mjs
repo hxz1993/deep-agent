@@ -146,6 +146,27 @@ test("Deferred 由 ConversationItem 恢复而历史 Plan 不投影到输入区",
   assert.equal(latestPendingDeferredTool(items)?.item_id, "tool:confirm");
 });
 
+test("ModelRetry 撤回的 read_file 不在普通正文复活，parse_document 保留真实等待状态", () => {
+  const removed = base("tool:file", "tool", 2, {
+    call_id: "file-call", tool_name: "read_file", status: "removed", output: "不支持 PDF",
+  });
+  const items = [
+    base("message:u", "user_message", 1, { text: "解析合同" }),
+    removed,
+    base("tool:document", "tool", 3, {
+      call_id: "document-call", tool_name: "parse_document", status: "pending",
+    }),
+  ];
+  const nodes = projectConversationItems(items);
+  assert.equal(nodes.length, 2);
+  const actions = nodes[1].actions;
+  assert.deepEqual(actions.filter(action => action.type === "tool_call").map(action => action.call.tool_call_id), ["document-call"]);
+  assert.equal(actions.filter(action => action.type === "tool_result").length, 0);
+  assert.equal(items[1], removed, "展示过滤不得改写历史事实");
+  assert.equal(removed.status, "removed");
+  assert.deepEqual(projectConversationItems([removed]), [], "仅有撤回工具时不生成空回答");
+});
+
 test("History 投影保留用户附件和上下文，并排除 Plan、Compaction 与 Title", () => {
   const attachments = [{ id: "file-1", name: "预算.xlsx", mime: "application/vnd.ms-excel" }];
   const contextRefs = [{ type: "range", label: "预算区域" }];

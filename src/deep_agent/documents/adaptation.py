@@ -17,8 +17,9 @@ import time
 from deep_agent.agent.context.estimator import TokenEstimator
 
 from .models import DocumentPage, ParsedDocument
+from .native_content import supplement_native_blocks
 
-ADAPTATION_VERSION = "document-adaptation-v1"
+ADAPTATION_VERSION = "document-adaptation-v2"
 
 
 class DocumentAdaptationCancelled(RuntimeError):
@@ -35,6 +36,7 @@ class AdaptationStats:
     compact_html_table_count: int
     fallback_count: int
     image_placeholder_count: int
+    supplemented_block_count: int
     native_token_count: int
     adapted_token_count: int
     elapsed_ms: int
@@ -53,6 +55,7 @@ class _Counts:
     compact_html_table_count: int = 0
     fallback_count: int = 0
     image_placeholder_count: int = 0
+    supplemented_block_count: int = 0
 
 
 @dataclass
@@ -407,7 +410,8 @@ class _Renderer:
                         return markdown
             self.counts.compact_html_table_count += 1
             compact = True  # Nested tables stay structurally nested in HTML.
-        attrs = [(name, value) for name, value in node.attrs if name not in _PRESENTATION]
+        attrs = [(name, value) for name, value in node.attrs if name not in _PRESENTATION
+                 or (name == "class" and node.tag in {"pre", "code"})]
         if node.tag == "img" and (dict(attrs).get("src") or "").lstrip().lower().startswith("data:"):
             self.counts.image_placeholder_count += 1
             return self._placeholder(dict(attrs).get("alt") or "")
@@ -561,6 +565,11 @@ def adapt_document(
     native_tokens = adapted_tokens = 0
     for page in parsed.pages:
         _check_cancel(cancel_event)
+        native_tokens += estimator.text(page.content)
+        projected, supplemented = supplement_native_blocks(page, parsed.provider, cancel_event=cancel_event)
+        _check_cancel(cancel_event)
+        counts.supplemented_block_count += supplemented
+        page = replace(page, content=projected)
         spans = _code_spans(page.content, cancel_event)
         parser = _PageParser(page.content, cancel_event)
         masked = _mask_code(page.content, spans)
@@ -575,7 +584,6 @@ def adapt_document(
         renderer = _Renderer(parser, spans, estimator, counts, cancel_event)
         content = "".join(renderer.render(child) for child in parser.root.children)
         pages.append(replace(page, content=content, format="markdown"))
-        native_tokens += estimator.text(page.content)
         _check_cancel(cancel_event)
         adapted_tokens += estimator.text(content)
     _check_cancel(cancel_event)

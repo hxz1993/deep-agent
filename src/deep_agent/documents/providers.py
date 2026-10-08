@@ -293,14 +293,20 @@ def _block_text(item: dict) -> str:
         value = item.get(key)
         if isinstance(value, list):
             output.extend(str(x) for x in value)
-    for key in ("text", "table_body", "html", "latex", "image_body", "chart_body"):
+        elif isinstance(value, str):
+            output.append(value)
+    for key in ("text", "table_body", "html", "latex", "image_body", "chart_body", "content"):
         value = item.get(key)
         if isinstance(value, str):
             output.append(value)
+        elif key == "content" and isinstance(value, (list, dict)) and value:
+            output.append(json.dumps(value, ensure_ascii=False))
     for key in ("table_footnote", "image_footnote", "chart_footnote"):
         value = item.get(key)
         if isinstance(value, list):
             output.extend(str(x) for x in value)
+        elif isinstance(value, str):
+            output.append(value)
     if item.get("img_path"):
         output.append(f"![]({item['img_path']})")
     if not output:
@@ -360,9 +366,23 @@ def _paddle_pages(blob: bytes) -> list[DocumentPage]:
 
 def _glm_pages(body: dict) -> list[DocumentPage]:
     markdown = body.get("md_results")
-    if isinstance(markdown, list) and all(isinstance(p, str) for p in markdown):
-        return [DocumentPage(i + 1, value) for i, value in enumerate(markdown)]
     layout = body.get("layout_details")
+    if isinstance(markdown, list) and all(isinstance(p, str) for p in markdown):
+        pages = [DocumentPage(i + 1, value, native={"blocks": layout[i]} if isinstance(layout, list)
+                             and i < len(layout) and isinstance(layout[i], list) else {})
+                 for i, value in enumerate(markdown)]
+        # A filtered/short Markdown projection must not hide additional physical
+        # pages that the supplier did return in its per-page layout sequence.
+        if isinstance(layout, list):
+            for index in range(len(markdown), len(layout)):
+                blocks = layout[index]
+                if not isinstance(blocks, list) or not all(isinstance(b, dict) and
+                        (b.get("content") is None or isinstance(b.get("content"), str)) for b in blocks):
+                    raise DocumentParsingError("invalid_result", "GLM-OCR页面布局内容无效")
+                pages.append(DocumentPage(index + 1, "\n\n".join(b["content"] for b in blocks
+                                         if isinstance(b.get("content"), str)),
+                                         native={"blocks": blocks, "markdown_missing": True}))
+        return pages
     if isinstance(layout, list) and all(isinstance(p, list) for p in layout) and layout:
         pages = []
         for number, blocks in enumerate(layout, 1):
@@ -382,6 +402,8 @@ def _result(provider: str, source: DocumentSource, pages: list[DocumentPage], na
     known = {p.page for p in pages if p.page is not None}
     expected = source.source_pages
     warnings: list[str] = []
+    if any(p.native.get("markdown_missing") for p in pages):
+        warnings.append("供应商分页Markdown未覆盖全部布局页；已保留额外原始布局页的内容，仍须核对原件。")
     status = "complete"
     unknown_boundaries = any(p.page is None for p in pages)
     if expected is not None and unknown_boundaries:

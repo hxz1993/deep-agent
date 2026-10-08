@@ -473,6 +473,68 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(deps.document_cache)
         self.assertFalse(directory.exists())
 
+    async def test_actual_agent_receives_restored_native_header_after_http_parse_and_pagination(self):
+        config = DocumentParsingRuntimeConfig("provider", "paddle", "fixture-key")
+        deps = self.context().deps
+        runtime = build_document_runtime(config, {}, context_window_tokens=128000)
+        spill, _ = build_tool_output_limits(request_headers={}, context_window_tokens=10000,
+                    max_output_tokens=2000, estimator=TokenEstimator.conservative())
+        supplement = "脚注金额：12.50元 中文🙂\n" * 5000
+        requests, directory, reconstructed = [], None, {}
+
+        def server(request):
+            requests.append(request.method)
+            if request.method == "POST":
+                return httpx2.Response(200, json={"data": {"jobId": "native-evidence-job"}})
+            if request.url.host == "paddleocr.aistudio-app.com":
+                return httpx2.Response(200, json={"data": {"state": "done", "resultUrl": {"jsonUrl": "https://cdn.example/result"}}})
+            return httpx2.Response(200, content=json.dumps({"result": {"layoutParsingResults": [
+                {"prunedResult": {"page_index": 0, "parsing_res_list": [
+                    {"block_label": "header", "block_content": "合同编号：TEST-01I5S"},
+                    {"block_label": "text", "block_content": "合同正文"}]}, "markdown": {"text": "合同正文"}},
+                {"prunedResult": {"page_index": 1, "parsing_res_list": [
+                    {"block_label": "footnote", "block_content": supplement}]}, "markdown": {"text": "第二页"}},
+            ]}}, ensure_ascii=False).encode())
+
+        def model(messages, info):
+            definition = next(tool for tool in info.function_tools if tool.name == "parse_document")
+            self.assertIn("未识别到不等于原件无内容", definition.description)
+            returns = [part for message in messages for part in message.parts if isinstance(part, ToolReturnPart)]
+            if not returns:
+                return ModelResponse(parts=[ToolCallPart("parse_document", {"resource": RESOURCE}, tool_call_id="initial")])
+            current = returns[-1].content
+            self.assertNotIn("overflow_handle", returns[-1].metadata or {})
+            self.assertLessEqual(TokenEstimator.conservative().text(current.model_dump(mode="json")), 24000)
+            for page in current.pages:
+                self.assertEqual(page.char_offset, len(reconstructed.get(page.page_number, "")))
+                reconstructed[page.page_number] = reconstructed.get(page.page_number, "") + page.content
+            if current.has_more:
+                return ModelResponse(parts=[ToolCallPart("parse_document", current.next_read, tool_call_id=f"read-{len(returns)}")])
+            self.assertIn("合同编号：TEST-01I5S", reconstructed[1])
+            self.assertIn(supplement, reconstructed[2])
+            self.assertTrue(any("未识别到不等于" in w for w in current.warnings))
+            return ModelResponse(parts=[TextPart("编号识别仍须人工确认；不代填保存")])
+
+        spec = AgentSpec(name="document-evidence-test", instructions="fixture", model="test", capabilities=["builtin:document"])
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(model)):
+            agent = build_agent(spec, build_registry(), document_toolset=runtime.toolset,
+                                document_lifecycle=runtime.lifecycle, tool_output_limits=spill)
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(server)) as client:
+            async def native(config, source, cache_dir, **kwargs):
+                nonlocal directory
+                directory = cache_dir.parent
+                return await parse_document(config, source, cache_dir, client=client, **kwargs)
+            self.parse.side_effect = native
+            with patch("deep_agent.documents.providers.POLL_SECONDS", 0), patch(
+                "deep_agent.documents.providers.validate_and_resolve_url", new=AsyncMock(return_value=
+                    ResolvedUrl(resolved_ip="8.8.8.8", hostname="cdn.example", port=443, is_https=True, path="/result"))):
+                output = await agent.run("解析附件，不能以其他单据编号代填", deps=deps)
+        self.assertIn("不代填保存", output.output)
+        self.assertEqual(requests.count("POST"), 1)
+        self.parse.assert_awaited_once()
+        self.assertIsNone(deps.document_cache)
+        self.assertFalse(directory.exists())
+
     async def test_agent_opt_in_and_runtime_description_only_active_provider_formats(self):
         deps = self.context().deps
         runtime = build_document_runtime(DocumentParsingRuntimeConfig("provider", "glm", "key"), {})

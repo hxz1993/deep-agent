@@ -118,7 +118,7 @@ NUMBER_FIELDS = frozenset({
 })
 ADAPTATION_NUMBER_FIELDS = frozenset({
     "source_characters", "adapted_characters", "native_token_count", "adapted_token_count",
-    "table_count", "markdown_table_count", "compact_html_table_count", "adaptation_fallback_count", "image_placeholder_count",
+    "table_count", "markdown_table_count", "compact_html_table_count", "adaptation_fallback_count", "image_placeholder_count", "supplemented_block_count",
 })
 ADAPTATION_FIELDS = ADAPTATION_NUMBER_FIELDS | frozenset({
     "adaptation_version", "request_id", "session_id", "run_id", "tool_call_id",

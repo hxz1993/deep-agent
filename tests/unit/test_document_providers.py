@@ -103,12 +103,14 @@ class DocumentSettingsTests(unittest.TestCase):
             "adapted_characters": 1000, "native_token_count": 3000, "adapted_token_count": 500,
             "table_count": 2, "markdown_table_count": 1, "compact_html_table_count": 1,
             "adaptation_fallback_count": 0, "image_placeholder_count": 0,
+            "supplemented_block_count": 3,
             "raw_html": "private contract", "api_key": "secret", "content": "contract body"},
             event="document_adaptation_completed")
         self.assertEqual(record["adaptation_version"], "document-adaptation-v1")
         self.assertEqual(record["native_token_count"], 3000)
         self.assertEqual(record["adapted_token_count"], 500)
         self.assertEqual(record["table_count"], 2)
+        self.assertEqual(record["supplemented_block_count"], 3)
         self.assertNotIn("raw_html", record)
         self.assertNotIn("content", record)
         self.assertNotIn("api_key", record)

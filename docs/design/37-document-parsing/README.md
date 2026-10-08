@@ -1,6 +1,6 @@
 # 37 · 文档解析：复杂 PDF 选型与工具化
 
-> 首次研究：2026-09-29。状态：v0.12.10 完成可读格式适配与回归；v0.12.9 已完成工具接入；Paddle/GLM 完成真实合同测试，MinerU 本轮云端任务尚未返回，业务效果限制单独记录。数据库结构保持不变。
+> 首次研究：2026-09-29。状态：v0.12.11 保留供应商原始布局信息并补回Markdown遗漏；v0.12.10 完成可读格式适配与回归；v0.12.9 已完成工具接入；Paddle/GLM 完成真实合同测试，MinerU 云端可用性限制单独记录。数据库结构保持不变。
 
 本课题重点评估扫描 PDF、复杂表格、多级表头、跨页内容、数字与单位对应、图表和图片提取。以 MPDocBench-Parse 为主参考，区分公开榜单、公开反馈、本机实测和待取得 Key 的在线验证。
 
@@ -10,6 +10,7 @@
 - [提交前审计与真实Agent复测](evaluation/lease-contract-parsers/product-runtime-20261002/release-audit-20261002.md)：900秒累计等待修复、三家协议回归、供应商顺序及尚未满足的MinerU发布门槛。
 - [PDF工具选择与命名修复](evaluation/lease-contract-parsers/product-runtime-20261002/pdf-tool-routing-20261002.md)：当前工作区采用`parse_document`／解析文档，消除PDF附件误导到`read_file`的提示，真实Agent直接解析验收。
 - [三供应商可读格式适配与回归](evaluation/lease-contract-parsers/product-runtime-20261002/model-readable-adapter-20261003.md)：先适配再计算Token，普通Markdown/复杂精简HTML，原生对比、分页次数和最终Agent金额风险；MinerU在线未通过，按用户决定在v0.12.10置灰禁选后发布。
+- [原始布局保留与补漏回归](../../reports/document-layout-retention-20261008.md)：修复供应商Markdown过滤已识别页眉等内容后的投影遗漏，保留三家原始有效信息；区分页覆盖与字段识别，记录162块恢复、Token代价及无损续读验收。
 - [选型调研与接入建议](document-parsing-research.md)
 - [Logics V3、榜单与专业模型路线核验](logics-v3-and-benchmark-review.md)：区分厂商公开成绩、接口价格与真实合同实测。
 - [国内四家版本、开通与适配方案](provider-versions-and-adapters.md)：四家横向格式/价格对比、MinerU轻量/精准协议、Paddle两套托管入口；第一版建议独立精细解析工具，不公开双档。

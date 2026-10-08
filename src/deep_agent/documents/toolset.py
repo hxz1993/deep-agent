@@ -62,6 +62,9 @@ def _summary(record: CachedDocument) -> tuple[DocumentSummary, list[str], str]:
     missing = []
     coverage = "unknown"
     warnings = list(parsed.warnings)
+    warnings.append("complete仅表示页覆盖或片段读取完成，不保证每个字段识别完整；未识别到不等于原件无内容，关键字段须核对原图，不能以其他单据编号代替原件编号。")
+    if record.readable.stats.supplemented_block_count:
+        warnings.append("已补回供应商正文未呈现的原始布局内容；补充块按供应商原始块顺序标注，不代表新增识别或人工确认。")
     status = parsed.status
     if known and parsed.source_pages is not None:
         missing = sorted(set(range(1, parsed.source_pages + 1)) - set(numbers))
@@ -145,7 +148,9 @@ def build_document_toolset(
         "大结果返回原始页码、正文与 next_read，原样调用本工具续读。"
         "pages[].complete=false表示该页尚未读完，必须完整复制next_read（含char_offset）继续同一页；"
         "不能自行将offset加1，否则会跳过该页剩余正文。"
-        "status/summary.coverage=complete只代表供应商解析页覆盖，不代表你已读完正文；"
+        "status/summary.coverage=complete只代表供应商解析页覆盖，不代表你已读完正文或每个字段均已识别；"
+        "未识别到不等于原件无内容；关键字段缺失或手写字符不确定时应核对原图或请用户确认，"
+        "不能把其他单据编号当成原件正式编号。原始布局补充是供应商已识别但正文未呈现的内容，并非纠错或人工确认。"
         "需要全文审查或提取时，has_more=true必须按next_read继续，直到读完所需范围再回答。"
         "同一文档累计等待最多900秒，超时后本Run再次调用不会延长等待或重新提交；不要反复重试。"
         "摘要是页面覆盖概览，不是内容摘要；正文已整理为模型可读格式，普通表格为Markdown，"
@@ -234,6 +239,7 @@ def build_document_toolset(
                      compact_html_table_count=stats.compact_html_table_count,
                      adaptation_fallback_count=stats.fallback_count,
                      image_placeholder_count=stats.image_placeholder_count,
+                     supplemented_block_count=stats.supplemented_block_count,
                      elapsed_ms=stats.elapsed_ms, **context)
         result = await asyncio.to_thread(read_cached_document, record, budget=budget, page_start=page_start,
                                          page_end=page_end, limit=limit, offset=offset, char_offset=char_offset)

@@ -11,11 +11,96 @@ from typing import Any
 from deep_agent.agent.attachment_extractors import AttachmentParseError
 
 
+def _validate_text_streams(reader: Any, single_limit: int, total_limit: int) -> None:
+    """Bound streams consumed by text extraction, including invoked Forms/fonts.
+
+    Image payloads are not decoded. Shared streams count once, while an active
+    Form invocation cycle is rejected before the converter can recurse into it.
+    """
+    from pypdf.generic import ArrayObject, ContentStream, DictionaryObject, StreamObject
+
+    seen_streams: set[int] = set()
+    seen_fonts: set[int] = set()
+    expanded = 0
+
+    def resolve(value: Any) -> Any:
+        return value.get_object() if value is not None else None
+
+    def check_stream(value: Any) -> Any:
+        nonlocal expanded
+        value = resolve(value)
+        if isinstance(value, StreamObject) and id(value) not in seen_streams:
+            size = len(value.get_data())
+            expanded += size
+            if size > single_limit or expanded > total_limit:
+                raise AttachmentParseError("PDF 内容流超过解析安全上限")
+            seen_streams.add(id(value))
+        return value
+
+    def check_fonts(resources: Any) -> None:
+        fonts = resolve(resources.get("/Font")) or {}
+        pending = list(fonts.values())
+        while pending:
+            font = resolve(pending.pop())
+            if not isinstance(font, DictionaryObject) or id(font) in seen_fonts:
+                continue
+            seen_fonts.add(id(font))
+            for name in ("/ToUnicode", "/Encoding"):
+                check_stream(font.get(name))
+            descriptor = resolve(font.get("/FontDescriptor")) or {}
+            for name in ("/FontFile", "/FontFile2", "/FontFile3"):
+                check_stream(descriptor.get(name))
+            descendants = resolve(font.get("/DescendantFonts")) or []
+            pending.extend(descendants)
+
+    # Explicit traversal avoids Python recursion for deeply nested resources.
+    visited_forms: set[tuple[int, int]] = set()
+    active_forms: set[int] = set()
+    for page in reader.pages:
+        pending = [(page.get("/Contents"), resolve(page.get("/Resources")) or {}, None)]
+        while pending:
+            contents, resources, exit_form = pending.pop()
+            if exit_form is not None:
+                active_forms.discard(exit_form)
+                continue
+            check_fonts(resources)
+            contents = resolve(contents)
+            if contents is None:
+                continue
+            if isinstance(contents, StreamObject) and contents.get("/Subtype") == "/Form":
+                key = (id(contents), id(resources))
+                if key in visited_forms:
+                    continue
+                visited_forms.add(key)
+                active_forms.add(id(contents))
+            for stream in contents if isinstance(contents, ArrayObject) else [contents]:
+                check_stream(stream)
+            xobjects = resolve(resources.get("/XObject")) or {}
+            children = []
+            for operands, operator in ContentStream(contents, reader).operations:
+                if operator != b"Do" or not operands:
+                    continue
+                form = resolve(xobjects.get(operands[0]))
+                if not isinstance(form, StreamObject) or form.get("/Subtype") != "/Form":
+                    continue
+                if id(form) in active_forms:
+                    raise AttachmentParseError("PDF 包含循环引用的 Form 内容流")
+                form_resources = resolve(form.get("/Resources")) or resources
+                key = (id(form), id(form_resources))
+                if key in visited_forms:
+                    continue
+                children.append((form, form_resources, id(form)))
+            # Finish one child before traversing siblings, preserving an actual
+            # invocation stack rather than treating shared resources as cycles.
+            for form, form_resources, form_id in reversed(children):
+                pending.append((form, form_resources, form_id))
+                pending.append((form, form_resources, None))
+
+
 def pdf_document(data: bytes) -> tuple[tuple[str, ...], dict[str, Any]]:
     from markitdown import StreamInfo
     from markitdown.converters import PdfConverter
     from pypdf import PdfReader, PdfWriter
-    from pypdf.generic import ArrayObject
     from deep_agent.agent.attachment_extractors import (
         MAX_OFFICE_EXPANDED_BYTES, MAX_OFFICE_MEMBER_BYTES,
     )
@@ -23,28 +108,15 @@ def pdf_document(data: bytes) -> tuple[tuple[str, ...], dict[str, Any]]:
     pages: list[str] = []
     empty_pages: list[int] = []
     total_chars = 0
-    expanded = 0
     try:
         with PdfReader(io.BytesIO(data), strict=True) as reader:
             if reader.is_encrypted:
                 raise AttachmentParseError("加密 PDF 不受支持；请提供已解密的原件")
             if not len(reader.pages):
                 raise AttachmentParseError("PDF 没有可读取页面")
+            _validate_text_streams(reader, MAX_OFFICE_MEMBER_BYTES, MAX_OFFICE_EXPANDED_BYTES)
             converter = PdfConverter()
             for number, source_page in enumerate(reader.pages, 1):
-                # Validate only content streams consumed by the text converter;
-                # image streams are not decoded or rendered. pypdf also has its
-                # own bounded Flate decompressor for adversarial compressed data.
-                contents = source_page.get("/Contents")
-                contents = contents.get_object() if contents is not None else None
-                streams = contents if isinstance(contents, ArrayObject) else [contents]
-                for stream in streams:
-                    if stream is None:
-                        continue
-                    size = len(stream.get_object().get_data())
-                    expanded += size
-                    if size > MAX_OFFICE_MEMBER_BYTES or expanded > MAX_OFFICE_EXPANDED_BYTES:
-                        raise AttachmentParseError("PDF 内容流超过解析安全上限")
                 # The public converter has no per-page API. A one-page PDF
                 # ensures its form/plain-text heuristics cannot discard source
                 # page boundaries, including blank or image-only pages.

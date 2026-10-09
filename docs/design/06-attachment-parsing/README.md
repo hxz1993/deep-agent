@@ -36,3 +36,4 @@
 - [文件读取引擎比较](read-file-engine-comparison.md)：DOCX、XLSX、PPTX的同源比较与已知限制。
 - [文件读取与核验指南](../../guides/file-reading.md)：文本、Office、PDF文本层读取和24K/48K Token续读规则。
 - [PDF与业务回归验收](file-reading-business-regression.md)：本轮格式、分页及租赁/BOM验收，接口成功与业务正确性分开报告。
+- [v0.12.12重新发布审计](file-reading-release-audit.md)：从v0.12.11复查全部改动，修复读取与辅助元数据边界并重新验证。

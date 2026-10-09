@@ -50,6 +50,36 @@ def with_cached_values(raw: bytes) -> bytes:
 
 
 class XlsxReadingTests(unittest.TestCase):
+    def test_optional_row_and_cell_coordinates_follow_source_order(self) -> None:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet["A1"] = "first"
+        sheet["B1"].font = Font(bold=True)
+        sheet["C1"] = "after-styled-blank"
+        sheet["C4"] = "explicit-column"
+        sheet["D4"] = "implicit-column"
+        sheet["A5"] = "implicit-row"
+        output = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(save(workbook))) as source, zipfile.ZipFile(output, "w") as target:
+            for entry in source.infolist():
+                data = source.read(entry)
+                if entry.filename == "xl/worksheets/sheet1.xml":
+                    root = ET.fromstring(data)
+                    for row in root.iter(NS + "row"):
+                        if row.get("r") in {"1", "5"}:
+                            row.attrib.pop("r")
+                        for cell in row:
+                            if cell.get("r") != "C4":
+                                cell.attrib.pop("r", None)
+                    data = ET.tostring(root)
+                target.writestr(entry, data)
+        result = xlsx_workbook(output.getvalue()).sheets[0]
+        self.assertEqual(result.rows, (
+            "first,,after-styled-blank", "", "",
+            ",,explicit-column,implicit-column", "implicit-row",
+        ))
+        self.assertEqual(result.columns, 4)
+
     def test_style_inflated_dimension_and_sparse_row_positions(self) -> None:
         workbook = Workbook()
         sheet = workbook.active

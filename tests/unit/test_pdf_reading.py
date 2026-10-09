@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from pypdf import PdfWriter
-from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
+from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject, ArrayObject, NumberObject
 from pydantic_ai import ModelRetry
 
 from deep_agent.agent.attachment_extractors import AttachmentParseError
@@ -38,6 +38,66 @@ def pdf_bytes(texts: tuple[str, ...] = ("PAGE-ONE 9500.25", "", "PAGE-THREE 0001
 
 
 class PdfConversionTests(unittest.TestCase):
+    @staticmethod
+    def form_pdf(*, text="FORM-TEXT", nested=False, cycle=False, font_mapping=None):
+        """Real PDF fixture with reused Forms, without any external resources."""
+        n = NameObject
+        with PdfWriter() as writer:
+            font = DictionaryObject({n("/Type"): n("/Font"), n("/Subtype"): n("/Type1"), n("/BaseFont"): n("/Helvetica")})
+            if font_mapping is not None:
+                mapping = DecodedStreamObject()
+                mapping.set_data(font_mapping)
+                font[n("/ToUnicode")] = writer._add_object(mapping)
+            fonts = DictionaryObject({n("/Font"): DictionaryObject({n("/F1"): writer._add_object(font)})})
+            inner = DecodedStreamObject()
+            inner.set_data(f"BT /F1 12 Tf 50 700 Td ({text}) Tj ET".encode("ascii"))
+            inner[n("/Type")] = n("/XObject")
+            inner[n("/Subtype")] = n("/Form")
+            inner[n("/BBox")] = ArrayObject([NumberObject(x) for x in (0, 0, 600, 800)])
+            inner[n("/Resources")] = fonts
+            inner_ref = writer._add_object(inner)
+            if cycle:
+                inner.set_data(b"/Inner Do")
+                fonts[n("/XObject")] = DictionaryObject({n("/Inner"): inner_ref})
+            form_ref = inner_ref
+            if nested:
+                outer = DecodedStreamObject()
+                outer.set_data(b"/Inner Do")
+                outer[n("/Type")] = n("/XObject")
+                outer[n("/Subtype")] = n("/Form")
+                outer[n("/BBox")] = inner[n("/BBox")]
+                outer[n("/Resources")] = DictionaryObject({n("/XObject"): DictionaryObject({n("/Inner"): inner_ref})})
+                form_ref = writer._add_object(outer)
+            for _ in range(2):
+                page = writer.add_blank_page(width=600, height=800)
+                page[n("/Resources")] = DictionaryObject({n("/XObject"): DictionaryObject({n("/Form"): form_ref})})
+                content = DecodedStreamObject()
+                content.set_data(b"/Form Do")
+                page[n("/Contents")] = writer._add_object(content)
+            output = io.BytesIO()
+            writer.write(output)
+        return output.getvalue()
+
+    def test_shared_nested_forms_preserve_text_and_count_expansion_once(self):
+        with patch("deep_agent.agent.attachment_extractors.MAX_OFFICE_EXPANDED_BYTES", 90):
+            pages, metadata = pdf_document(self.form_pdf(nested=True))
+        self.assertEqual(len(pages), 2)
+        self.assertTrue(all("FORM-TEXT" in page for page in pages))
+        self.assertEqual(metadata["pages_without_text"], [])
+
+    def test_nested_form_and_font_mapping_streams_obey_existing_limit(self):
+        for data in (self.form_pdf(text="A" * 200, nested=True), self.form_pdf(font_mapping=b" " * 200)):
+            with self.subTest(), patch("deep_agent.agent.attachment_extractors.MAX_OFFICE_MEMBER_BYTES", 100), self.assertRaisesRegex(AttachmentParseError, "安全上限"):
+                pdf_document(data)
+
+    def test_total_expansion_limit_includes_nested_forms(self):
+        with patch("deep_agent.agent.attachment_extractors.MAX_OFFICE_EXPANDED_BYTES", 40), self.assertRaisesRegex(AttachmentParseError, "安全上限"):
+            pdf_document(self.form_pdf(nested=True))
+
+    def test_invoked_form_cycle_rejected_before_conversion(self):
+        with self.assertRaisesRegex(AttachmentParseError, "循环引用"):
+            pdf_document(self.form_pdf(cycle=True))
+
     def test_real_text_and_empty_pages_keep_physical_numbers_without_network(self):
         with patch("socket.socket.connect", side_effect=AssertionError("network forbidden")):
             pages, metadata = pdf_document(pdf_bytes())

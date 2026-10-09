@@ -5,6 +5,7 @@ import io
 import json
 import random
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
@@ -450,6 +451,40 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(context.deps.file_bytes)
         self.assertFalse(context.deps.file_load_tasks)
         self.assertFalse(context.deps.file_parse_tasks)
+
+    async def test_cancelled_conversion_drains_worker_before_releasing_cache(self) -> None:
+        context = _context()
+        started, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+        def blocked_parser():
+            started.set()
+            release.wait(timeout=5)
+            finished.set()
+            return "converted"
+
+        call = asyncio.create_task(file_tools._parse_cached(
+            context, key="pdf", parser=blocked_parser, failure_label="sample.pdf",
+        ))
+        try:
+            self.assertTrue(await asyncio.to_thread(started.wait, 2))
+            call.cancel()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            self.assertFalse(call.done())
+            self.assertIn("pdf", context.deps.file_parse_tasks)
+            self.assertFalse(finished.is_set())
+        finally:
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await call
+        self.assertTrue(finished.is_set())
+        self.assertFalse(context.deps.file_parse_tasks)
+        self.assertFalse(context.deps.file_parsed)
+        parser = Mock(return_value="retried")
+        self.assertEqual(await file_tools._parse_cached(
+            context, key="pdf", parser=parser, failure_label="sample.pdf",
+        ), "retried")
+        parser.assert_called_once()
 
     async def test_docx_returns_text_blocks_only(self) -> None:
         document = Document()

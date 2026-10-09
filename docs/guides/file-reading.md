@@ -25,9 +25,11 @@ XLSX可指定`sheet`，省略时读取第一个可见工作表。一次调用读
 
 PDF首次只传文件引用即可，后续将`next_offset/next_char_offset`作为`offset/char_offset`继续读取；`limit`表示最多读取多少原始页。没有提取到文本的页保留提示，不能解释为原件空白；无需重复本地读取，可按当前已加载工具的能力使用专业OCR。
 
-XLSX正文是经过引用转义的CSV，单元格换行不代表新的源行。`metadata.merged_ranges`列出与当前返回物理行相交的原始合并范围。`unsupported_number_formats`是未知显示格式字典，正文以`[F1]`等引用；不能将该标记当作源文字。`missing_formula_cache_count`说明未缓存的公式结果，不能把留空当作公式结果为零。常见显示舍入时附原值，保留计算精度。
+XLSX正文是经过引用转义的CSV，单元格换行不代表新的源行。`metadata.merged_ranges`预览与当前返回物理行相交的原始合并范围，最多128项；`merged_ranges_in_batch_count`保留本批匹配总数，`merged_ranges_truncated`明确预览是否省略，不能将预览当成完整结构。`unsupported_number_formats`只包含本批正文引用的未知显示格式，正文以`[F1]`等引用；不能将该标记当作源文字。这些辅助信息和正文一起计算Token，不重复返回整表格式字典。`missing_formula_cache_count`说明未缓存的公式结果，不能把留空当作公式结果为零。常见显示舍入时附原值，保留计算精度。
 
 ## 核验Skill
+
+异常长的单个数字格式只预览前1024字符，`unsupported_number_formats_truncated`与`unsupported_number_format_lengths`说明省略及原长度；单元格原值不受影响，不能据截断定义推测完整显示语义。
 
 内置“文件读取与核验”（`file-reading-verification`）需Agent显式关联；不自动启用工具，也不授予文件或脚本权限。它指导按任务读取、续读并核验关键编号、金额、百分比、日期及表格关系。
 

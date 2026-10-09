@@ -63,18 +63,42 @@ def workbook_facts(data: bytes, *, max_cells: int) -> dict[str, SheetFacts]:
             widths: dict[int, int] = {}
             merges: list[str] = []
             formulas = missing = content = 0
+            row_number = column_number = 0
             with archive.open(path) as source:
-                for _, element in iterparse(source, events=("end",)):
+                for event, element in iterparse(source, events=("start", "end")):
+                    if event == "start":
+                        if element.tag == _NS + "row":
+                            row_attribute = element.get("r")
+                            if row_attribute is None:
+                                row_number += 1
+                            else:
+                                numeric_row = float(row_attribute)
+                                if not numeric_row.is_integer():
+                                    raise ValueError("XLSX 行坐标必须是整数")
+                                row_number = int(numeric_row)
+                            if not 1 <= row_number <= 1_048_576:
+                                raise ValueError("XLSX 行坐标超出格式范围")
+                            column_number = 0
+                        continue
                     if element.tag == _NS + "c":
+                        # Both row and cell coordinates are optional OOXML
+                        # attributes. Match openpyxl's sequential inference,
+                        # including blank styled cells that advance the column.
+                        coordinate = element.get("r")
+                        if coordinate:
+                            row, column = coordinate_to_tuple(coordinate)
+                            column_number = column
+                        else:
+                            column_number += 1
+                            row, column = row_number, column_number
+                        if not (1 <= row <= 1_048_576 and 1 <= column <= 16_384):
+                            raise ValueError("XLSX 单元格坐标超出格式范围")
                         formula = element.find(_NS + "f")
                         value = element.find(_NS + "v")
                         inline = element.find(_NS + "is")
                         # Blank styled cells have no source content. Formula
                         # cells count even when their cached value is absent.
                         if formula is not None or value is not None or inline is not None:
-                            row, column = coordinate_to_tuple(element.attrib["r"])
-                            if not (1 <= row <= 1_048_576 and 1 <= column <= 16_384):
-                                raise ValueError("XLSX 单元格坐标超出格式范围")
                             widths[row] = max(widths.get(row, 0), column)
                             content += 1
                             content_count += 1

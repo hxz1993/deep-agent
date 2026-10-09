@@ -10,7 +10,8 @@
 - 各格式统一在转换后按24K/48K完整包装Token预算分页，保留来源授权与无损字符续读；增加预制文件核验Skill，由Agent显式关联，未知关键字段保持阻断。
 - 移除MinerU选项及实现，只保留PaddleOCR和GLM-OCR；两家真实在线样例、文件格式、实际Runner及业务对照分别验收，模型行列定位与OCR错识不当成读取器正确率。
 - 回归结果及同源比较见`docs/design/06-attachment-parsing/file-reading-business-regression.md`；不提交真实合同、模型响应或凭据。
-- 完整Python回归2723项、零失败、53项跳过，Console778项通过；本地统一API/Gateway、PDF实际上传读取、工具定义和Skill目录核验通过。保留既有资源警告，不宣称零警告。
+- 重新发布审计修复合法XLSX省略坐标、整表格式字典及合并范围撑爆包装预算、PDF嵌套文本流限制遗漏和取消后CPU转换仍运行的问题；正文与续读位置不改，详见`file-reading-release-audit.md`。
+- 重新发布后完整Python回归2734项、零失败、53项跳过，Console778项通过；本地统一API/Gateway、PDF实际上传读取、工具定义和Skill目录核验通过。保留既有资源警告，不宣称零警告。
 - 无新增环境变量、配置入口、数据库迁移或业务保存，Alembic head保持`011`。
 
 ## v0.12.11（测试分支）

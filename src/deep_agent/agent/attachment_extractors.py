@@ -450,7 +450,9 @@ def select_xlsx_sheet(workbook: XlsxWorkbook, requested: str | None) -> XlsxShee
     raise AttachmentParseError("XLSX 不包含工作表")
 
 
-def xlsx_sheet_metadata(workbook: XlsxWorkbook, selected: XlsxSheet) -> dict[str, Any]:
+def xlsx_sheet_metadata(
+    workbook: XlsxWorkbook, selected: XlsxSheet, *, include_number_formats: bool = True,
+) -> dict[str, Any]:
     """Keep the sheet directory and header previews bounded, never the row data."""
     metadata: dict[str, Any] = {
         "selected_sheet": selected.name[:128],
@@ -464,8 +466,10 @@ def xlsx_sheet_metadata(workbook: XlsxWorkbook, selected: XlsxSheet) -> dict[str
         "embedded_image_count": selected.embedded_image_count,
         "merged_range_count": len(selected.merged_ranges),
         "merged_ranges": [],
+        "merged_ranges_in_batch_count": 0,
+        "merged_ranges_truncated": False,
         "unsupported_number_format_count": selected.unsupported_number_format_count,
-        "unsupported_number_formats": dict(selected.unsupported_number_formats),
+        "unsupported_number_formats": dict(selected.unsupported_number_formats) if include_number_formats else {},
         "row_format": "csv",
         "number_format_mode": "common_display_formats_otherwise_raw_with_format",
         "reading_note": "CSV保留逗号、引号及单元格内换行；offset/limit按工作表物理行计。常见数字格式显示值，未知格式保留原值并以[F编号]引用unsupported_number_formats；显示舍入附原值。公式只读缓存，不重算，缺失缓存留空。图片仅计数量，不读取图片正文。",
@@ -474,6 +478,15 @@ def xlsx_sheet_metadata(workbook: XlsxWorkbook, selected: XlsxSheet) -> dict[str
 
     def fits() -> bool:
         return len(json.dumps(metadata, ensure_ascii=False)) <= MAX_XLSX_METADATA_CHARS
+
+    # The tool supplies the formats actually referenced by its current body.
+    # Standalone metadata callers retain a bounded preview rather than an
+    # arbitrarily large dictionary that also crowds out the sheet directory.
+    formats_need_preview = include_number_formats and not fits()
+    if formats_need_preview:
+        metadata["unsupported_number_formats"] = {}
+        metadata["unsupported_number_formats_truncated"] = True
+        metadata["unsupported_number_format_definition_count"] = len(selected.unsupported_number_formats)
 
     for sheet in workbook.sheets[:MAX_XLSX_PREVIEW_SHEETS]:
         entry: dict[str, Any] = {
@@ -499,6 +512,12 @@ def xlsx_sheet_metadata(workbook: XlsxWorkbook, selected: XlsxSheet) -> dict[str
                 entry["headers_truncated"] = True
                 break
     metadata["sheets_truncated"] = len(metadata["sheets"]) < len(workbook.sheets)
+    if formats_need_preview:
+        for key, code in selected.unsupported_number_formats:
+            metadata["unsupported_number_formats"][key] = code
+            if not fits():
+                del metadata["unsupported_number_formats"][key]
+                break
     return metadata
 
 

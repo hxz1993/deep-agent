@@ -188,7 +188,18 @@ async def _parse_cached(
     if task is None:
         async def observed_parse() -> T:
             async with observe_tool_operation(ctx, "file_parse", tool="read_file"):
-                return await asyncio.to_thread(parser)
+                # Cancelling to_thread cannot stop its CPU worker. Keep the
+                # single-flight entry until the worker has actually released
+                # its resources, rather than starting a duplicate conversion.
+                worker = asyncio.create_task(asyncio.to_thread(parser))
+                try:
+                    return await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    try:
+                        await worker
+                    except Exception:
+                        pass
+                    raise
 
         task = asyncio.create_task(observed_parse(), name=f"file-parse:{key}")
         ctx.deps.file_parse_tasks[key] = task
@@ -388,7 +399,21 @@ async def _read_paged(
             failure_label=resolved.name,
         )
         selected = select_xlsx_sheet(workbook, sheet)
-        items, metadata, unit = selected.rows, xlsx_sheet_metadata(workbook, selected), "row"
+        items, metadata, unit = selected.rows, xlsx_sheet_metadata(
+            workbook, selected, include_number_formats=False,
+        ), "row"
+        import re
+        from openpyxl.utils.cell import range_boundaries
+
+        number_formats = dict(selected.unsupported_number_formats)
+        merged_intervals = []
+        for bounds in selected.merged_ranges:
+            _, first_row, _, last_row = range_boundaries(bounds)
+            merged_intervals.append((bounds, first_row, last_row))
+        first_format_markers = tuple(
+            (match.group(1), match.start(), match.end())
+            for match in re.finditer(r"\[(F\d+)\]", items[start - 1])
+        ) if start <= len(items) else ()
     # An omitted limit is a source-sized range, not an arbitrary item cap. Keep
     # the established integer result field, including empty and EOF reads.
     page_limit = limit if limit is not None else max(1, len(items) - start + 1)
@@ -406,17 +431,39 @@ async def _read_paged(
                 "pages_without_text_count": len(metadata.get("pages_without_text", [])),
             }
         if resolved.format == "xlsx":
-            from openpyxl.utils.cell import range_boundaries
-
             end = start + page.returned_count - 1
+            merged_in_batch = [
+                bounds for bounds, first_row, last_row in merged_intervals
+                if first_row <= end and last_row >= start
+            ]
+            referenced_formats = set(re.findall(r"\[(F\d+)\]", page.content))
+            # A long CSV row may split inside a format marker. Include the
+            # definition on both intersecting fragments without changing the
+            # stable source text or its character continuation positions.
+            if page.returned_count:
+                first_end = char_offset + len(page.content) if page.returned_count == 1 else len(items[start - 1])
+                referenced_formats.update(
+                    key for key, marker_start, marker_end in first_format_markers
+                    if marker_start < first_end and marker_end > char_offset
+                )
+            batch_formats = {
+                key: code[:1024] for key, code in number_formats.items() if key in referenced_formats
+            }
             batch_metadata = {
                 **metadata,
-                "merged_ranges": [
-                    bounds for bounds in selected.merged_ranges
-                    if range_boundaries(bounds)[1] <= end
-                    and range_boundaries(bounds)[3] >= start
-                ],
+                "unsupported_number_formats": batch_formats,
+                "merged_ranges": merged_in_batch[:128],
+                "merged_ranges_in_batch_count": len(merged_in_batch),
+                "merged_ranges_truncated": len(merged_in_batch) > 128,
             }
+            long_formats = {
+                key: len(number_formats[key]) for key in batch_formats if len(number_formats[key]) > 1024
+            }
+            if long_formats:
+                # Abnormally long format definitions are auxiliary previews,
+                # never a reason to make their stored cell values unreadable.
+                batch_metadata["unsupported_number_formats_truncated"] = True
+                batch_metadata["unsupported_number_format_lengths"] = long_formats
         return _result(
             resolved, unit=unit, content=page.content, metadata=batch_metadata,
             offset=start, limit=page_limit, returned_count=page.returned_count,

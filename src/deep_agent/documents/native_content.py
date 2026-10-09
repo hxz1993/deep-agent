@@ -84,7 +84,6 @@ def supplement_native_blocks(
         blocks = page.native.get("blocks")
         content_key, label_key = "content", "label"
     else:
-        # MinerU already builds its text from the complete content block list.
         return page.content, 0
     if not isinstance(blocks, list):
         return page.content, 0

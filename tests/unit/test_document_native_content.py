@@ -2,8 +2,6 @@
 from copy import deepcopy
 import io
 import json
-from pathlib import Path
-import tempfile
 import unittest
 
 from deep_agent.agent.context.estimator import TokenEstimator
@@ -11,7 +9,7 @@ from deep_agent.documents.adaptation import adapt_document
 from deep_agent.documents.cache import CachedDocument
 from deep_agent.documents.models import DocumentPage, ParsedDocument
 from deep_agent.documents.native_content import supplement_native_blocks
-from deep_agent.documents.providers import _block_text, _glm_pages, _paddle_pages, _mineru_pages, _result
+from deep_agent.documents.providers import _glm_pages, _paddle_pages, _result
 from deep_agent.documents.models import DocumentSource
 from deep_agent.documents.toolset import read_cached_document, build_document_toolset
 from deep_agent.documents.settings import DocumentParsingRuntimeConfig
@@ -114,16 +112,6 @@ class DocumentNativeContentTests(unittest.TestCase):
             self.assertEqual(parsed.status, "complete")
             self.assertTrue(any("额外原始布局页" in w for w in parsed.warnings))
 
-    def test_mineru_scalar_captions_notes_and_image_content_survive(self):
-        native = {"type": "image", "page_idx": 0, "image_caption": "标题", "img_path": "images/a.jpg",
-                  "content": "图内金额：199.00", "image_footnote": "单位：元"}
-        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_native_") as directory:
-            Path(directory, "fixture_content_list.json").write_text(json.dumps([native]))
-            page = _mineru_pages(Path(directory))[0]
-            for value in ("标题", "图内金额：199.00", "单位：元", "images/a.jpg"):
-                self.assertIn(value, page.content)
-        structured = {"type": "chart", "content": {"original": "42.00"}, "img_path": "chart.png"}
-        self.assertIn('"original": "42.00"', _block_text(structured))
 
     def test_restored_markup_uses_existing_conservative_adapter(self):
         text = '<table style="x"><tr><td rowspan="2">12.00</td><td>🙂</td></tr><tr><td>21.00</td></tr></table>\n`<header>literal</header>`'

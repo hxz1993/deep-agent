@@ -17,6 +17,12 @@ Console 配置中心的“Skill”页面提供：
 Builtin Skill 随代码发布，只读且不能替换或删除。上传包保存在平台文件服务，数据库
 `skill_packages` 只保存平台 File ID、Hash、Manifest 和资源索引。
 
+内置“文件读取与核验”（`file-reading-verification`）提供文本、Word、Excel、PDF和PPTX的
+工具选择、续读与关键字段核验方法，附一份按需读取的表格核验参考。管理员需要在Agent编辑页
+显式关联后才能使用；不会给现有Agent自动启用，也不会自动授予文档解析或Python沙箱能力。
+Skill按本次Run实际工具描述判断格式支持，不假定有图片查看或附件脚本访问能力。它不含可执行
+脚本，不修改文件、业务数据或解析供应商配置。
+
 上传包在每个 Pod 只生成 `runtime-skills/<code>/` 一份当前运行副本。服务启动、安装、替换
 和手工“重新加载”负责同步；普通 Run 只读本地目录，不访问平台文件服务。运行副本丢失或同步
 失败时，该 Skill 暂时跳过，其他 Skill、工具和普通回答继续工作。
@@ -52,14 +58,14 @@ deepagent-skills-export-*.zip
 skill.zip
 ├── SKILL.md              必需，Frontmatter 含 name 和 description
 ├── manifest.yaml         可选，声明 code/version/schema_version/label
-├── references/           可按需读取的文本、DOCX或XLSX资料
+├── references/           可按需读取的文本、DOCX、XLSX、PPTX或PDF资料
 ├── assets/               文本、图片或模板资产
 └── scripts/ 或 tools/    允许保存和列出，不能当资源正文读取
 ```
 
 ZIP 最大 10 MiB，解压后最大 50 MiB、最多 256 个文件、目录深度最多 8 层。安装器拒绝路径穿越、
 绝对路径、符号链接、加密 ZIP、重复路径和压缩炸弹。模型可分页读取索引内的文本、DOCX逻辑块
-和XLSX物理行。`read_file` 不解析图片、PDF或演示文稿。Agent 显式关联“文档解析”后，
+、PPTX逻辑块、XLSX物理行及PDF物理页文本层。`read_file` 不解析图片OCR或旧DOC/XLS/PPT文件。Agent 显式关联“文档解析”后，
 `parse_document` 可读取已授权且当前供应商支持的这些资源，保留原生正文与页码；
 供应商和格式边界见[文档解析指南](document-parsing.md)。脚本可以列出路径，但不能
 通过文件工具读取源码。

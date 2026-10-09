@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-DocumentProvider = Literal["mineru", "paddle", "glm"]
+DocumentProvider = Literal["paddle", "glm"]
 
 
 @dataclass(frozen=True)

@@ -180,7 +180,7 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(listed.status_code, 200)
             self.assertEqual(
                 {item["code"] for item in listed.json()},
-                {"deepagent-diagnostics", "deepfos-readonly-analysis", "example-skill"},
+                {"deepagent-diagnostics", "deepfos-readonly-analysis", "file-reading-verification", "example-skill"},
             )
             self.assertTrue(
                 all("script_execution_status" not in item for item in listed.json())

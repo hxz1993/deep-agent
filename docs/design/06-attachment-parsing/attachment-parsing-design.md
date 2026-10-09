@@ -1,6 +1,6 @@
 # DeepAgent 统一文件解析与按需读取设计
 
-> 状态：v0.3.23 已统一附件与 Skill 文件入口
+> 状态：v0.3.23 已统一附件与 Skill 文件入口；2026-10-10补充本地Office引擎与PDF文本层
 >
 > 数据库：沿用 v0.3.0 Alembic `001` 完整基线，不新增附件表
 
@@ -115,7 +115,7 @@ read_file(resource, offset=None, limit=None)
 - 默认：不限制块数，在同一读取Token预算内尽量返回。
 - 显式`limit`：最多读取的逻辑块数，无额外1,000块上限；同时受Token预算约束。
 - 顺序：页眉 → 正文段落/表格 → 页脚 → 批注附录。
-- 表格转成可读行，正文段落与表格保持文档内出现顺序。
+- 正文由MarkItDown转成Markdown，原生读取补页眉、页脚与批注，正文段落与表格保持出现顺序。
 - DOCX内嵌图片不进入 `read_file`返回；本工具只返回可分页的文本与表格结构。
 
 第一版不承诺：
@@ -145,7 +145,13 @@ read_file(resource, sheet=None, offset=None, limit=None)
 - 返回工作表列表、行列数、表头等元数据。
 - 公式只读取文件中已有的缓存值，不在服务端计算。
 
-### 3.5 共用返回预算与续读
+### 3.5 PPTX与PDF
+
+PPTX使用MarkItDown本地读取文本、表格、支持的图表数据及备注，位置单位仍为固定逻辑块，正文保留幻灯片编号。
+PDF按物理页生成固定读取内容，`format=pdf`、`unit=page`；`offset/limit`对应原始页，`char_offset`为该页转换后正文的Unicode位置。
+没有提取到文本的页保留页码与提示，不推断原件空白，不自动OCR。带文本的页也可能漏图片、手写和版面；专业OCR仍由显式启用的`parse_document`处理。
+
+### 3.6 共用返回预算与续读
 
 `read_file`和`read_tool_result`使用当前模型配置的窗口直接分档，
 正文和完整返回包装一起用既有`TokenEstimator`估算：
@@ -159,7 +165,7 @@ read_file(resource, sheet=None, offset=None, limit=None)
 两工具不再受50,000字符返回上限控制。普通工具结果的外置阈值和2000字符预览不变，
 两个读取工具仍跳过二次外置；整轮请求继续由现有上下文检查与压缩兜底。
 
-优先返回完整行、段落块或表格行；仅当单项无法放入空页时按Unicode字符边界拆分。
+先转换再计Token，优先返回完整行、段落块、表格行或PDF物理页；仅当单项无法放入空页时按Unicode字符边界拆分。
 `has_more=true`时按原来的`next_offset/next_char_offset`续读，不能根据`returned_count`
 推导下一位置。返回`limit`仍为整数，省略请求`limit`不会恢复旧默认项数上限。
 解析安全、下载、授权及Run内缓存均不随返回量调整改变。
@@ -221,7 +227,7 @@ Office 文件在解析前检查：
   说明，实际协议兼容性由Provider决定。
 - 所选模型不支持相应内容时，Provider可以返回拒绝说明或接口错误，沿现有模型错误链路结束Run。
 - 历史媒体和Skill媒体不重新下载或读取。
-- PDF与PPT/PPTX既不冒充模型原生模态，也不进入普通 `read_file`；未来有明确需求时，作为独立
+- PDF与PPTX不冒充模型原生模态；本地文本由`read_file`读取，OCR使用显式启用的`parse_document`。旧PPT不支持。历史方案中的独立
   文档解析工具设计，允许针对页面、版面、图片与结构建立专用结果协议。
 
 OpenAI Compatible 视频模型增加 `video_url` 请求适配。是否启用只依据模型配置的
@@ -340,7 +346,7 @@ chat_session_events
 
 ## 13. 后续方向
 
-后续方向包括PDF/PPTX专用解析、复杂Office、异步解析、资源隔离、结构
+PDF文本层与PPTX本地读取已接入；后续方向包括复杂Office、资源隔离、结构
 索引、跨 Run 缓存和长结果外置。PDF/PPTX的行业方案、Anthropic Skills目录、许可证边界和
 DeepAgent建议链路已独立记录在
 [`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing)。优先级和状态统一维护在

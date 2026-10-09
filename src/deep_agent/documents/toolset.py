@@ -141,7 +141,7 @@ def build_document_toolset(
     formats = ", ".join(capability.describe()["formats"]) if capability else "未配置"
     description = (
         f"专业文档解析，当前供应商 {capability.label if capability else '未配置'}，支持 {formats}。"
-        "PDF（包括带文字层的PDF）直接使用本工具，不要先调用read_file试读；"
+        "适合扫描PDF、图片和需要OCR或复杂版面识别的内容；带文字层的PDF可先用已提供的read_file直接读取。"
         "若本轮同时提供read_file，常规文件读取使用它支持的读取能力；需要OCR、版面或复杂表格时使用本工具。"
         "仅支持当前供应商列出的格式；耗时通常较长，识别仍可能出错。"
         "首次解析完整文件并缓存当前 Run，页范围只控制展示；小结果一次返回所有页面，"

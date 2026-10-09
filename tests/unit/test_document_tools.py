@@ -38,7 +38,7 @@ from deep_agent.files.schema import AttachmentFileRef
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.skills.runtime import ResolvedSkill
 
-CONFIG = DocumentParsingRuntimeConfig("provider", "mineru", "fixture-key")
+CONFIG = DocumentParsingRuntimeConfig("provider", "paddle", "fixture-key")
 RESOURCE = {"type": "attachment", "file_id": "authorized-pdf"}
 
 
@@ -52,7 +52,7 @@ def pdf(count=2):
 
 
 def parsed(contents, numbers=None, source_pages=None, status="complete"):
-    return ParsedDocument("mineru", "vlm", [DocumentPage(number, content) for number, content in
+    return ParsedDocument("paddle", "PaddleOCR-VL-1.6", [DocumentPage(number, content) for number, content in
                          zip(numbers or range(1, len(contents) + 1), contents)],
                           source_pages if source_pages is not None else len(contents), status)
 
@@ -227,7 +227,7 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
             raise DocumentAdaptationCancelled("controlled cancelled worker")
 
         with patch("deep_agent.documents.cache.adapt_document", side_effect=adapting):
-            task = asyncio.create_task(cache.get_or_parse(source_key="a", source_hash="h", provider="mineru", model="vlm",
+            task = asyncio.create_task(cache.get_or_parse(source_key="a", source_hash="h", provider="paddle", model="PaddleOCR-VL-1.6",
                 resource=AttachmentFileRef(type="attachment", file_id="a"), parse=native))
             self.assertTrue(await asyncio.to_thread(ready.wait, 5))
             directory = cache.directory
@@ -277,7 +277,7 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
         async def native(config, source, directory, **kwargs):
             calls.append(directory)
             (directory / "task.json").write_text(json.dumps({
-                "provider": "mineru", "task_id": "original-task", "uploaded": True,
+                "provider": "paddle", "task_id": "original-task", "uploaded": True,
             }))
             if len(calls) == 1:
                 await asyncio.sleep(0.03)
@@ -304,7 +304,7 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_waiting_parse_timeout_does_not_resume_even_with_uploaded_task(self):
         async def native(config, source, directory, **kwargs):
             (directory / "task.json").write_text(json.dumps({
-                "provider": "mineru", "task_id": "original-task", "uploaded": True,
+                "provider": "paddle", "task_id": "original-task", "uploaded": True,
             }))
             await asyncio.Event().wait()
 
@@ -366,11 +366,11 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_recovery_requires_confirmed_remote_task_and_safe_error(self):
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete_document_recovery_") as folder:
             directory = Path(folder)
-            good = {"provider": "mineru", "task_id": "original-task", "uploaded": True,
-                    "submission_unknown": False, "upload_unknown": False}
+            good = {"provider": "paddle", "task_id": "original-task", "uploaded": True,
+                    "submission_unknown": False}
             for changes, code in (({}, "timeout"), ({"provider": "paddle"}, "network_error"),
                                   ({"provider": "glm"}, "timeout"), ({"uploaded": False}, "timeout"),
-                                  ({"submission_unknown": True}, "timeout"), ({"upload_unknown": True}, "timeout"),
+                                  ({"submission_unknown": True}, "timeout"),
                                   ({"task_id": "../other"}, "timeout"), ({}, "submission_unknown"), ({}, "invalid_result")):
                 with self.subTest(changes=changes, code=code):
                     (directory / "task.json").write_text(json.dumps(good | changes))
@@ -423,7 +423,7 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 cancelled.set()
 
-        task = asyncio.create_task(cache.get_or_parse(source_key="a", source_hash="h", provider="mineru", model="vlm",
+        task = asyncio.create_task(cache.get_or_parse(source_key="a", source_hash="h", provider="paddle", model="PaddleOCR-VL-1.6",
                                                      resource=AttachmentFileRef(type="attachment", file_id="a"), parse=long_parse))
         await started.wait()
         directory = cache.directory
@@ -555,5 +555,6 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
         tool = tools["parse_document"]
         self.assertIn("GLM-OCR", tool.tool_def.description)
         self.assertIn("PDF", tool.tool_def.description)
-        self.assertIn("不要先调用read_file试读", tool.tool_def.description)
+        self.assertIn("带文字层的PDF可先用已提供的read_file", tool.tool_def.description)
+        self.assertNotIn("不要先调用read_file试读", tool.tool_def.description)
         self.assertNotIn("DOCX", tool.tool_def.description)

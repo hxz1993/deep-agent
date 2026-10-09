@@ -3,6 +3,16 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.12.12（测试分支）
+
+- `read_file`新增PDF文本层本地读取，按物理页固定转换与缓存；保留空文本页和未知提示，扫描件仍由显式关联的`parse_document`处理，不自动收费OCR。
+- DOCX正文、PPTX使用固定版本MarkItDown，Word补页眉、页脚及批注；XLSX修复样式空格误计上限、CSV引用和常见显示格式，保留公式缓存、合并及隐藏状态限制。
+- 各格式统一在转换后按24K/48K完整包装Token预算分页，保留来源授权与无损字符续读；增加预制文件核验Skill，由Agent显式关联，未知关键字段保持阻断。
+- 移除MinerU选项及实现，只保留PaddleOCR和GLM-OCR；两家真实在线样例、文件格式、实际Runner及业务对照分别验收，模型行列定位与OCR错识不当成读取器正确率。
+- 回归结果及同源比较见`docs/design/06-attachment-parsing/file-reading-business-regression.md`；不提交真实合同、模型响应或凭据。
+- 完整Python回归2723项、零失败、53项跳过，Console778项通过；本地统一API/Gateway、PDF实际上传读取、工具定义和Skill目录核验通过。保留既有资源警告，不宣称零警告。
+- 无新增环境变量、配置入口、数据库迁移或业务保存，Alembic head保持`011`。
+
 ## v0.12.11（测试分支）
 
 - 三家解析结果保留原始有效内容：Paddle/GLM补回Markdown未呈现的原始布局块，GLM保留额外布局页，MinerU保留图表内容及字符串标题/脚注；代码语言信息不再作为展示属性删除。

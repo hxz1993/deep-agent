@@ -11,12 +11,14 @@ from deep_agent.options import OPTION
 
 _DEFAULT_ALLOWED_MIMES = frozenset(
     {
+        "application/pdf",
         "image/jpeg",
         "image/png",
         "image/webp",
         "image/gif",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "text/plain",
         "text/csv",
         "text/markdown",

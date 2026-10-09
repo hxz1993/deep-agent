@@ -183,6 +183,52 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ["deepagent-diagnostics"],
         )
 
+    async def test_file_verification_skill_is_explicit_and_grants_no_scripts(self) -> None:
+        unselected = await resolve_skills_for_run(
+            self.stores, [], runtime=self.runtime, request_headers={}
+        )
+        self.assertEqual(unselected.available_codes, [])
+        self.assertIsNone(unselected.capability)
+        selected = await resolve_skills_for_run(
+            self.stores, ["file-reading-verification"],
+            runtime=self.runtime, request_headers={},
+        )
+        self.assertEqual(selected.available_codes, ["file-reading-verification"])
+        self.assertEqual(selected.scripts, {})
+        self.assertEqual(selected.as_context()["loaded"], [])
+        resources = selected.resources["file-reading-verification"].resource_index
+        reference = next(
+            item for item in resources
+            if item["path"] == "references/spreadsheet-verification.md"
+        )
+        self.assertTrue(reference["readable"])
+
+    async def test_selected_file_verification_reference_is_readable(self) -> None:
+        selected = await resolve_skills_for_run(
+            self.stores, ["file-reading-verification"],
+            runtime=self.runtime, request_headers={},
+        )
+        calls = 0
+        def respond(_messages, _info: AgentInfo) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return ModelResponse(parts=[ToolCallPart(
+                    "read_file",
+                    {"resource": {"type": "skill", "skill_code": "file-reading-verification",
+                                  "path": "references/spreadsheet-verification.md"}},
+                    "read-reference",
+                )])
+            return ModelResponse(parts=[TextPart(content="done")])
+        agent = Agent(FunctionModel(respond), deps_type=AgentDeps,
+                      toolsets=[build_file_toolset(selected.resources)])
+        result = await agent.run("Read the reference", deps=AgentDeps(session_id="reference-session"))
+        returned = next(part for message in result.all_messages() for part in message.parts
+                        if isinstance(part, ToolReturnPart))
+        self.assertEqual(returned.tool_name, "read_file")
+        self.assertFalse(returned.content.has_more)
+        self.assertEqual(returned.content.resource.skill_code, "file-reading-verification")
+
     async def test_unavailable_skill_diagnostic_does_not_block_plain_answer(self) -> None:
         def respond(_messages, _info: AgentInfo) -> ModelResponse:
             return ModelResponse(parts=[TextPart(content="plain answer")])

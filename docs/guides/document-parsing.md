@@ -2,13 +2,12 @@
 
 在「全局配置 → 常规 → 工具设置 → 文档解析」选择供应商并填写其 Key，再在 Agent 的内置工具中关联「文档解析」（`builtin:document`）。现有 Agent 不会自动启用。
 
-供应商按本轮实测可用性排序为 PaddleOCR → GLM-OCR → MinerU，未配置时默认编辑选项是 PaddleOCR；已保存的选择不自动改变。MinerU目前服务不稳定，Console中置灰禁选；已有MinerU配置不会被自动替换，需主动选择PaddleOCR或GLM-OCR并保存。后端适配保留，历史产物重放不代表当前在线可用。未填写 Key 时不能解析。配置使用现有 `global_setting` 的 `document_parsing` 记录，只有当前选中的供应商和 Key 会保存。切换供应商时弹窗保留各自草稿，关闭后清除；编辑已配置的供应商而未改 Key 时保留原 Key。读取配置只返回设置状态和掩码。
+当前只提供 PaddleOCR → GLM-OCR，未配置时默认编辑选项是 PaddleOCR。MinerU 的选项、请求适配和恢复代码已移除；旧配置读取为「未配置」并提示供应商无效，不自动改写存储或切换其他供应商。管理员须主动选择现有供应商并填写其 Key 后保存。未填写 Key 时不能解析。配置使用现有 `global_setting` 的 `document_parsing` 记录，只有当前选中的供应商和 Key 会保存。切换供应商时弹窗保留各自草稿，关闭后清除；编辑已配置的供应商而未改 Key 时保留原 Key。读取配置只返回设置状态和掩码。
 
 | 供应商 | 实际入口与请求模型 | 当前声明支持的格式 |
 | --- | --- | --- |
 | PaddleOCR | AI Studio OCR jobs，`PaddleOCR-VL-1.6` | PDF、PNG、JPEG |
 | GLM-OCR | 官方 `layout_parsing`，`glm-ocr` | PDF、PNG、JPEG |
-| MinerU | 官方精准 API，`model_version=vlm` | PDF、PNG、JPEG、DOC、DOCX、PPT、PPTX、XLS、XLSX |
 
 没有快速／精准切换、供应商自动回退或额外环境变量。服务名称、限制和格式由同一能力表提供给配置界面、上传入口、工具目录和模型说明；不混用另一托管入口的能力。保存仅检查结构和必填项；「测试连接」会实际解析一页内置样例并核对已知文字和金额，会消耗供应商额度。
 
@@ -16,7 +15,7 @@
 
 ## 工具调用
 
-`read_file`（读取文件）只直接读取文本、DOCX 和 XLSX，不支持PDF、PPT/PPTX或图片OCR。PDF（包括带文字层的PDF）直接调用`parse_document`（解析文档），不要先用`read_file`试读。`parse_document`是专业OCR、版面及复杂表格解析工具，必须显式启用，格式以当前供应商为准；通常耗时更长，识别结果仍可能出错。常规文本及Office内容优先使用`read_file`。
+`read_file`（读取文件）直接读取文本、DOCX、XLSX、PPTX及PDF文本层，不支持旧DOC/XLS/PPT或图片OCR。带文字层的PDF可先直接读取；扫描件、图片、乱码或不足以判断的版面关系使用已提供的`parse_document`（解析文档）。`parse_document`是专业OCR、版面及复杂表格解析工具，必须显式启用，格式以当前供应商为准；通常耗时更长，识别结果仍可能出错。常规文本及Office内容优先使用`read_file`。
 
 原`read_document`在本轮改名为`parse_document`，参数、供应商和缓存续读不变，运行时不保留旧别名；已有历史工具调用按原存储事实展示。
 
@@ -46,7 +45,7 @@
 
 整页适配只执行一次，之后才计算 Token 和分页。`pages[].content` 是适配后的固定内容，`char_offset/char_end/next_read` 都基于该内容计算；不是原生 HTML 的字符位置。原始页码、缺页与解析覆盖仍取供应商事实。工具不纠正 OCR 数字、删除重复正文或猜测供应商未识别的内容；内嵌图片不返回 Base64，只保留明确说明，原始数据仍留在缓存。
 
-Paddle 的原生 Markdown 可能默认忽略页眉、页脚、脚注和边注。工具同时检查供应商已经识别的原始布局块，保留原 Markdown，将未呈现的内容附在该页「原始布局补充」中，标出原始块序号和类型；补充块保持供应商给定顺序，不冒充原页版面顺序。GLM 的分页 Markdown 同样与布局块核对，并保留额外布局页；MinerU 保留内容块中的图表内容、标题与脚注。补回只恢复已识别信息，不重新 OCR、不改编号或金额；无法可靠证明相同的表达保守保留，可能增加重复内容及 Token。代码的语言 class 与未知结构保留，不当成展示样式删除。
+Paddle 的原生 Markdown 可能默认忽略页眉、页脚、脚注和边注。工具同时检查供应商已经识别的原始布局块，保留原 Markdown，将未呈现的内容附在该页「原始布局补充」中，标出原始块序号和类型；补充块保持供应商给定顺序，不冒充原页版面顺序。GLM 的分页 Markdown 同样与布局块核对，并保留额外布局页。补回只恢复已识别信息，不重新 OCR、不改编号或金额；无法可靠证明相同的表达保守保留，可能增加重复内容及 Token。代码的语言 class 与未知结构保留，不当成展示样式删除。
 
 与 `read_file`、`read_tool_result` 共用预算：模型窗口小于 256000 Token 或未知时为 **24000 估算 Token**，达到 256000 时为 **48000**。正文、页面信息、概览和续读参数一起计入预算；不再额外设页数、行数或字符返回上限，也不二次进入大工具结果外置。整体模型请求仍执行现有上下文检查与压缩。
 
@@ -55,7 +54,7 @@ Paddle 的原生 Markdown 可能默认忽略页眉、页脚、脚注和边注。
 ```json
 {
   "document":{"type":"document","document_id":"doc_example"},
-  "provider":"mineru","model":"vlm","status":"complete",
+  "provider":"paddle","model":"PaddleOCR-VL-1.6","status":"complete",
   "summary":{"source_pages":2,"parsed_pages":2,"page_numbers_known":true,"missing_pages":[],"coverage":"complete"},
   "pages":[
     {"page_number":1,"format":"markdown","content":"可读第一页正文","char_offset":0,"char_end":7,"complete":true},
@@ -84,8 +83,8 @@ Paddle 的原生 Markdown 可能默认忽略页眉、页脚、脚注和边注。
 
 ## 等待、错误与诊断
 
-三家通过异步 HTTP 调用，默认 5 秒轮询，同一 Run、同一文件与配置累计等待上限 900 秒；恢复查询只使用剩余等待时间，超时后同一 Run 再次调用不会延长等待或重新提交。成功提交后只查询或下载原任务；提交结果不明确时报告未知状态，避免自动再次计费。取消停止本地等待，Run 结束、失败、等待人工操作或取消后清理临时缓存、任务和 HTTP 资源，不承诺远端任务已停止或停止计费。
+两家通过异步 HTTP 调用，Paddle 默认 5 秒轮询，GLM 等待同步响应，同一 Run、同一文件与配置累计等待上限 900 秒；恢复查询只使用剩余等待时间，超时后同一 Run 再次调用不会延长等待或重新提交。成功提交后只查询或下载原任务；提交结果不明确时报告未知状态，避免自动再次计费。取消停止本地等待，Run 结束、失败、等待人工操作或取消后清理临时缓存、任务和 HTTP 资源，不承诺远端任务已停止或停止计费。
 
 错误分别说明凭据无效、权限不足、额度／限流、文件格式或大小、远端任务失败、下载失败和结果无效。诊断日志关联会话、Run 和工具调用，记录供应商、接口方法／路径、安全参数、Hash、字节数、阶段耗时、HTTP 状态、页覆盖、缓存命中及返回 Token。格式适配日志另记版本、表格、局部原样保留与布局补回数量、前后字符及正文估算 Token；正文估算不等于实际账单，分页日志仍计完整包装。不记录合同正文、原生响应、Base64、Key 或签名 URL。完整原生响应只保存在当前 Run 的私有临时目录。
 
-实现与三家真实合同回归见 [文档解析课题](../design/37-document-parsing/README.md)。接口成功、页数完整和业务金额填报正确分别验证；供应商原生错误不会在工具里加入租赁专用修正规则。
+实现与历史供应商实测记录见 [文档解析课题](../design/37-document-parsing/README.md)。接口成功、页数完整和业务金额填报正确分别验证；供应商原生错误不会在工具里加入租赁专用修正规则。

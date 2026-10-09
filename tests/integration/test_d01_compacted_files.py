@@ -14,6 +14,7 @@ import unittest
 
 from docx import Document
 from openpyxl import Workbook
+from pptx import Presentation
 from PIL import Image
 from pydantic_ai import Agent, FunctionToolset, ModelRetry, RunContext
 from pydantic_ai.messages import BinaryContent, ModelRequest, ModelResponse, TextPart, ToolReturnPart, UserPromptPart
@@ -32,6 +33,7 @@ from deep_agent.schemas.attachment import AttachmentRef
 from tests.helpers.request_identity import TEST_USER_ID
 from tests.integration import test_incremental_message_persistence as persistence_fixture
 from tests.integration.test_incremental_message_persistence import _call
+from tests.unit.test_pdf_reading import pdf_bytes
 
 
 class D01CompactedFileIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -114,7 +116,7 @@ class D01CompactedFileIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     values.append(value.model_dump() if hasattr(value, "model_dump") else value)
         return values
 
-    async def test_real_txt_docx_xlsx_reads_survive_compaction_and_reopen(self):
+    async def test_real_txt_docx_xlsx_pptx_pdf_reads_survive_compaction_and_reopen(self):
         doc = Document()
         doc.add_paragraph("预算说明")
         doc.add_paragraph("2026年收入为360万元。")
@@ -127,12 +129,21 @@ class D01CompactedFileIntegrationTests(unittest.IsolatedAsyncioTestCase):
         xlsx = io.BytesIO()
         workbook.save(xlsx)
         workbook.close()
+        presentation = Presentation()
+        slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+        slide.shapes.title.text = "预算说明"
+        slide.notes_slide.notes_text_frame.text = "2026年收入为360万元。"
+        pptx = io.BytesIO()
+        presentation.save(pptx)
         fixtures = (
+            ("pdf", "application/pdf", pdf_bytes(("BUDGET 2026 REVENUE 360",)), "[PDF第1页]\nBUDGET 2026 REVENUE 360"),
             ("txt", "text/plain", "预算说明\n2026年收入为360万元。".encode(), "预算说明\n2026年收入为360万元。"),
             ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
              docx.getvalue(), "预算说明\n2026年收入为360万元。"),
             ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
              xlsx.getvalue(), "period,revenue,unit\n2026,360,万元"),
+            ("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+             pptx.getvalue(), "[幻灯片 1]\n# 预算说明\n### Notes:\n2026年收入为360万元。"),
         )
         for suffix, mime, data, expected in fixtures:
             with self.subTest(format=suffix):

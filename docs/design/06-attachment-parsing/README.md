@@ -1,12 +1,12 @@
 # 06 · 附件解析
 
 > 首次研究：2026-07-30
-> 当前状态：v0.3.24 已收口文件读取与原生多模态边界
+> 当前状态：v0.12.12 补齐PDF文本层、PPTX读取与文件核验Skill；扫描OCR由专业解析工具承担
 
 本课题记录 DeepAgent 附件从“上传时截断抽取文本”改造成“会话内按需工具读取”的设计、
 实现边界和后续演进。
 
-第一版结论：
+第一版历史结论（现行规则见末节的读取指南与验收报告）：
 
 - 当前轮图片、音频和视频直接作为模型原生内容交给Provider；DeepAgent不根据模型目录预先拒绝，
   所选模型不支持时由Provider正常报错。
@@ -30,3 +30,9 @@
 [`attachment-parsing-design.md`](attachment-parsing-design.md)。PDF/PPTX的专项调研见
 [`../16-pdf-and-presentation-parsing/`](../16-pdf-and-presentation-parsing)，排期状态统一登记在
 [`../TODO.md`](../TODO.md)。
+
+## 当前读取引擎与验收
+
+- [文件读取引擎比较](read-file-engine-comparison.md)：DOCX、XLSX、PPTX的同源比较与已知限制。
+- [文件读取与核验指南](../../guides/file-reading.md)：文本、Office、PDF文本层读取和24K/48K Token续读规则。
+- [PDF与业务回归验收](file-reading-business-regression.md)：本轮格式、分页及租赁/BOM验收，接口成功与业务正确性分开报告。

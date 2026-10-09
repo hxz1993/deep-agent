@@ -124,7 +124,7 @@ ADAPTATION_FIELDS = ADAPTATION_NUMBER_FIELDS | frozenset({
     "adaptation_version", "request_id", "session_id", "run_id", "tool_call_id",
     "provider_name", "model_name", "tool", "phase", "elapsed_ms", "duration_ms", "source_hash", "file_type",
 })
-BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_table_enabled", "parse_formula_enabled", "parse_merge_tables", "parse_relevel_titles"})
+BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_merge_tables", "parse_relevel_titles"})
 TOKEN = re.compile(r"[A-Za-z0-9_.:/-]{1,180}\Z")
 ISSUE_CODES = frozenset({
     "directory_unavailable", "write_failed", "queue_full", "capacity_exceeded", "shutdown_incomplete",
@@ -210,8 +210,6 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     for name in BOOLEAN_FIELDS:
         if type(fields.get(name)) is bool:
             result[name] = fields[name]
-    if fields.get("parse_language") in ("ch", "auto"):
-        result["parse_language"] = fields["parse_language"]
     for name, pattern in (("source_hash", r"[a-f0-9]{64}"), ("file_type", r"[a-z0-9]{1,8}"),
                           ("document_task_id", r"[A-Za-z0-9_.-]{1,100}")):
         value = fields.get(name)

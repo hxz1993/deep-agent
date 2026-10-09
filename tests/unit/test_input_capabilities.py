@@ -15,7 +15,7 @@ class TestInputCapabilities(unittest.TestCase):
     def test_upload_capability_kinds_includes_defaults(self) -> None:
         kinds = upload_capability_kinds()
         self.assertIn("image", kinds)
-        self.assertNotIn("pdf", kinds)
+        self.assertIn("pdf", kinds)
         self.assertIn("text_file", kinds)
         self.assertIn("docx", kinds)
 
@@ -115,7 +115,7 @@ class TestInputCapabilities(unittest.TestCase):
         self.assertEqual(once.count("Session input capabilities"), 1)
         self.assertEqual(twice.count("Session input capabilities"), 1)
 
-    def test_pdf_is_not_an_available_upload_or_native_modality(self) -> None:
+    def test_pdf_upload_uses_local_text_reader_without_claiming_native_model_support(self) -> None:
         spec = AgentSpec(
             name="test",
             model="test",
@@ -124,8 +124,8 @@ class TestInputCapabilities(unittest.TestCase):
         )
         block = build_capability_instruction_block(spec)
         upload_line = next(line for line in block.splitlines() if line.startswith("Platform upload pipeline accepts"))
-        self.assertNotIn("PDF", upload_line)
-        self.assertIn("it does not support PDF", block)
+        self.assertIn("PDF", upload_line)
+        self.assertIn("PDF offsets are physical pages", block)
         self.assertNotIn("parse_document", block)
         self.assertIn("Professional document parsing is available only when its tool is explicitly enabled", block)
 

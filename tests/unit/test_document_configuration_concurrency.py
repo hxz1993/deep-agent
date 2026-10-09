@@ -24,7 +24,7 @@ from deep_agent.security import ConsoleAdminAuthorizer
 SETTING_KEY = "document_parsing"
 
 
-def write_body(key: str | None = None, *, provider: str = "mineru"):
+def write_body(key: str | None = None, *, provider: str = "paddle"):
     value = {"mode": "provider", "provider": provider}
     if key is not None:
         value["api_key"] = key
@@ -125,7 +125,7 @@ class DocumentConfigurationConcurrencyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_provider_change_rolls_back_and_upsert_remains_replacement(self):
         await self.store.upsert(SETTING_KEY, value={
-            "mode": "provider", "provider": "mineru", "api_key": "saved-fixture-key",
+            "mode": "provider", "provider": "paddle", "api_key": "saved-fixture-key",
         }, version=1)
         with self.assertRaises(HTTPException) as failure:
             await put_document_parsing_settings(write_body(provider="glm"), self.context(self.other_store))

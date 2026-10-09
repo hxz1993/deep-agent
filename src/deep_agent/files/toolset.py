@@ -27,6 +27,8 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import is_log_text_attachment, max_upload_bytes
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
+from deep_agent.files.office_markdown import pptx_body
+from deep_agent.files.pdf_reading import pdf_document
 from deep_agent.files.reading_budget import ReadingBudget, paginate_items
 from deep_agent.files.schema import (
     AttachmentFileRef,
@@ -55,6 +57,7 @@ _TEXT_MIMES = frozenset(
 )
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 T = TypeVar("T")
 _RESOURCE_ADAPTER = TypeAdapter(FileResourceRef)
@@ -83,10 +86,14 @@ def _attachment_format(ref: AttachmentRef) -> str | None:
         return "text"
     if mime in _TEXT_MIMES:
         return "text"
+    if mime == "application/pdf":
+        return "pdf"
     if mime == _DOCX_MIME:
         return "docx"
     if mime == _XLSX_MIME:
         return "xlsx"
+    if mime == _PPTX_MIME:
+        return "pptx"
     return None
 
 
@@ -96,10 +103,14 @@ def _skill_format(entry: dict[str, Any]) -> str | None:
     path = Path(str(entry.get("path") or ""))
     suffix = path.suffix.lower()
     mime = _normalized_mime(str(entry.get("mime") or ""))
+    if suffix == ".pdf" or mime == "application/pdf":
+        return "pdf"
     if suffix == ".docx" or mime == _DOCX_MIME:
         return "docx"
     if suffix == ".xlsx" or mime == _XLSX_MIME:
         return "xlsx"
+    if suffix == ".pptx" or mime == _PPTX_MIME:
+        return "pptx"
     if bool(entry.get("readable")) or suffix in READABLE_SUFFIXES or mime in _TEXT_MIMES:
         return "text"
     return None
@@ -281,7 +292,7 @@ async def _resolve_file(
         if kind is None:
             raise ModelRetry(
                 f"read_file 不支持 MIME 为 {ref.mime or 'unknown'} 的附件；"
-                "图片、音频和视频只在当前轮作为模型原生附件提交，PDF和PPT/PPTX需要专用解析工具"
+                "图片、音频和视频只在当前轮作为模型原生附件提交，本工具不执行OCR；旧二进制DOC/XLS/PPT不支持"
             )
     else:
         kind = _skill_format(resolved.resource_metadata)
@@ -359,6 +370,18 @@ async def _read_paged(
             failure_label=resolved.name,
         )
         items, metadata, unit = document.blocks, document.metadata, "block"
+    elif resolved.format == "pdf":
+        items, metadata = await _parse_cached(
+            ctx, key=f"{resolved.cache_key}:pdf", parser=lambda: pdf_document(data),
+            failure_label=resolved.name,
+        )
+        unit = "page"
+    elif resolved.format == "pptx":
+        items, metadata = await _parse_cached(
+            ctx, key=f"{resolved.cache_key}:pptx", parser=lambda: pptx_body(data),
+            failure_label=resolved.name,
+        )
+        unit = "block"
     else:
         workbook: XlsxWorkbook = await _parse_cached(
             ctx, key=f"{resolved.cache_key}:xlsx", parser=lambda: xlsx_workbook(data),
@@ -371,8 +394,31 @@ async def _read_paged(
     page_limit = limit if limit is not None else max(1, len(items) - start + 1)
 
     def result(page: DocumentPage) -> FileReadResult:
+        batch_metadata = metadata
+        if resolved.format == "pdf":
+            end = start + page.returned_count - 1
+            batch_metadata = {
+                **metadata,
+                "pages_without_text": [
+                    number for number in metadata.get("pages_without_text", [])
+                    if start <= number <= end
+                ],
+                "pages_without_text_count": len(metadata.get("pages_without_text", [])),
+            }
+        if resolved.format == "xlsx":
+            from openpyxl.utils.cell import range_boundaries
+
+            end = start + page.returned_count - 1
+            batch_metadata = {
+                **metadata,
+                "merged_ranges": [
+                    bounds for bounds in selected.merged_ranges
+                    if range_boundaries(bounds)[1] <= end
+                    and range_boundaries(bounds)[3] >= start
+                ],
+            }
         return _result(
-            resolved, unit=unit, content=page.content, metadata=metadata,
+            resolved, unit=unit, content=page.content, metadata=batch_metadata,
             offset=start, limit=page_limit, returned_count=page.returned_count,
             total_count=len(items), next_offset=page.next_offset,
             has_more=page.has_more, truncated_by=page.truncated_by,
@@ -401,12 +447,12 @@ def build_file_toolset(
     toolset = FunctionToolset[AgentDeps](
         id="file-resources",
         instructions=(
-            "read_file只直接读取文本、DOCX段落和XLSX表格，不支持PDF、PPT/PPTX或图片OCR。不要用本工具试读PDF。"
+            "read_file直接读取文本、DOCX正文和补充元信息、XLSX表格、PPTX文本/表格/备注及PDF文本层。PDF保留物理页，未提取到文本不等于原件无内容。本工具不支持旧DOC/XLS/PPT，不执行图片或扫描件OCR。"
             "来源限当前会话附件和已授权Skill文件。先使用来源提供的精确file_id，"
             "或先调用list_skill_resources取得Skill路径。首次通常只传resource；若has_more=true，"
             "把next_offset和next_char_offset分别作为offset和char_offset继续读取；"
             "长行/段落可能分多页，必须同时传两个续读值。不要猜测file_id、Skill编码或路径，脚本不能作为文件正文读取。"
-            + ("PDF请直接使用本轮已提供的parse_document；扫描件和复杂版面也使用该工具，以当前供应商支持格式为准。" if document_available else "")
+            + ("扫描PDF、图片或需要OCR/复杂版面时，可使用本轮已提供的parse_document，以当前供应商支持格式为准。" if document_available else "")
         ),
     )
 
@@ -419,13 +465,13 @@ def build_file_toolset(
         sheet: str | None = None,
         char_offset: int = 0,
     ) -> FileReadResult:
-        """直接读取文本、DOCX段落或XLSX表格。不支持PDF、PPT/PPTX或图片OCR，不要试读这些格式。
+        """直接读取文本、DOCX正文和元信息、XLSX表格、PPTX文本/表格/备注及PDF文本层。PDF按物理页读取，不执行OCR；不支持旧DOC/XLS/PPT。
 
         有下一页时同时使用 next_offset/next_char_offset 续读。
 
         Args:
             resource: 当前会话附件或已授权 Skill 文件引用。
-            offset: 起始行、段或行号，从 1 开始。
+            offset: 起始文本行、DOCX/PPTX逻辑块、XLSX物理行或PDF物理页，从 1 开始。
             limit: 最多读取的源项数；省略时按 Token 预算尽量返回全文（含包装 24000/48000 Token）。
             sheet: XLSX 工作表名，省略时读取第一个可见工作表。
             char_offset: 当前 offset 项内部的字符偏移，从 0 开始；续读时使用 next_char_offset。

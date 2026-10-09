@@ -26,8 +26,7 @@ def describe(record: dict) -> str:
                            ("adapted_token_count", "可读正文Token"), ("table_count", "表格数"),
                            ("adaptation_fallback_count", "原样保留数"),
                            ("supplemented_block_count", "布局补回数"),
-                           ("parse_language", "语言"), ("parse_table_enabled", "表格识别"),
-                           ("parse_formula_enabled", "公式识别"), ("parse_merge_tables", "表格合并"),
+                           ("parse_merge_tables", "表格合并"),
                            ("parse_relevel_titles", "标题层级")):
             if key in record:
                 details.append(f"{label} {record[key]}")

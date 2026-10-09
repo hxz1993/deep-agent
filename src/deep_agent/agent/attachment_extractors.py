@@ -53,6 +53,12 @@ class XlsxSheet:
     rows: tuple[str, ...]
     columns: int
     headers: tuple[str, ...]
+    merged_ranges: tuple[str, ...] = ()
+    formula_count: int = 0
+    missing_formula_cache_count: int = 0
+    embedded_image_count: int = 0
+    unsupported_number_format_count: int = 0
+    unsupported_number_formats: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -232,8 +238,6 @@ def validate_office_archive(data: bytes) -> None:
 
 def docx_document(data: bytes) -> DocxDocument:
     from docx import Document
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
 
     validate_office_archive(data)
     try:
@@ -258,19 +262,15 @@ def docx_document(data: bytes) -> DocxDocument:
                 seen=header_seen,
             )
 
-    body_paragraphs = 0
-    body_tables = 0
-    for item in document.iter_inner_content():
-        if isinstance(item, Paragraph):
-            text = item.text.strip()
-            if text:
-                body_paragraphs += 1
-                blocks.append(text)
-        elif isinstance(item, Table):
-            table_blocks = _table_blocks(item, label=f"[正文表格 {body_tables + 1}]")
-            if table_blocks:
-                body_tables += 1
-                blocks.extend(table_blocks)
+    from deep_agent.files.office_markdown import docx_body
+
+    try:
+        body_blocks, engine_metadata = docx_body(data)
+    except Exception as exc:
+        raise AttachmentParseError(f"DOCX 正文转换失败: {exc}") from exc
+    blocks.extend(body_blocks)
+    body_paragraphs = len(document.paragraphs)
+    body_tables = len(document.tables)
 
     for section_index, section in enumerate(document.sections, start=1):
         for label, container in (
@@ -308,6 +308,11 @@ def docx_document(data: bytes) -> DocxDocument:
             "body_paragraphs": body_paragraphs,
             "body_tables": body_tables,
             "comments": comment_count,
+            **engine_metadata,
+            "warnings": [
+                "页眉、页脚和批注已补充；图片内文字、文本框及原始布局未保证完整读取。",
+                "表格合并关系或版面可能简化，关键字段需结合原文件核验。",
+            ],
         },
     )
 
@@ -357,9 +362,11 @@ def _table_blocks(table: Any, *, label: str) -> list[str]:
 
 def xlsx_workbook(data: bytes) -> XlsxWorkbook:
     from openpyxl import load_workbook
+    from deep_agent.agent.xlsx_reading import cell_display, csv_row, workbook_facts
 
     validate_office_archive(data)
     try:
+        facts = workbook_facts(data, max_cells=MAX_XLSX_CELLS)
         workbook = load_workbook(
             io.BytesIO(data),
             read_only=True,
@@ -369,37 +376,42 @@ def xlsx_workbook(data: bytes) -> XlsxWorkbook:
         raise AttachmentParseError(f"XLSX 解析失败: {exc}") from exc
 
     sheets: list[XlsxSheet] = []
-    cell_count = 0
     text_chars = 0
     try:
         for name in workbook.sheetnames:
             worksheet = workbook[name]
+            sheet_facts = facts[name]
             reset_dimensions = getattr(worksheet, "reset_dimensions", None)
             if callable(reset_dimensions):
                 reset_dimensions()
             rows: list[str] = []
             headers: tuple[str, ...] = ()
-            columns = 0
-            for row_index, row in enumerate(worksheet.iter_rows(values_only=True)):
-                cell_count += len(row)
-                if cell_count > MAX_XLSX_CELLS:
-                    raise AttachmentParseError("XLSX 单次解析的单元格数量过多")
+            columns = max(sheet_facts.row_widths.values(), default=0)
+            unsupported_formats = 0
+            format_codes: dict[str, str] = {}
+            last_row = max(sheet_facts.row_widths, default=0)
+            # Keep dynamically sized source rows. A global max_col would inflate
+            # every sparse row when one real cell is far to the right. Trim
+            # style-only cells from the rendered row using the scanned width.
+            source_rows = worksheet.iter_rows(max_row=last_row) if last_row else ()
+            for row_index, row in enumerate(source_rows, start=1):
                 values_list: list[str] = []
-                text_chars += 1 if rows else 0
-                for value in row:
-                    text = _cell_text(value)
-                    text_chars += len(text) + (1 if values_list else 0)
-                    if text_chars > MAX_XLSX_TEXT_CHARS:
-                        raise AttachmentParseError(
-                            f"XLSX 解析正文超过 {MAX_XLSX_TEXT_CHARS} 字符安全上限；"
-                            "请拆分工作簿后读取，未返回截断内容"
-                        )
+                width = sheet_facts.row_widths.get(row_index, 0)
+                for cell in row[:width]:
+                    text, unsupported = cell_display(cell, _cell_text(cell.value), format_codes)
+                    unsupported_formats += int(unsupported)
                     values_list.append(text)
                 values = tuple(values_list)
-                columns = max(columns, len(values))
-                if row_index == 0:
+                if row_index == 1:
                     headers = values
-                rows.append(",".join(value.replace("\n", " ") for value in values))
+                rendered = csv_row(values_list)
+                text_chars += len(rendered) + (1 if rows else 0)
+                if text_chars > MAX_XLSX_TEXT_CHARS:
+                    raise AttachmentParseError(
+                        f"XLSX 解析正文超过 {MAX_XLSX_TEXT_CHARS} 字符安全上限；"
+                        "请拆分工作簿后读取，未返回截断内容"
+                    )
+                rows.append(rendered)
             sheets.append(
                 XlsxSheet(
                     name=name,
@@ -407,6 +419,12 @@ def xlsx_workbook(data: bytes) -> XlsxWorkbook:
                     rows=tuple(rows),
                     columns=columns,
                     headers=headers,
+                    merged_ranges=sheet_facts.merged_ranges,
+                    formula_count=sheet_facts.formula_count,
+                    missing_formula_cache_count=sheet_facts.missing_formula_cache_count,
+                    embedded_image_count=sheet_facts.embedded_image_count,
+                    unsupported_number_format_count=unsupported_formats,
+                    unsupported_number_formats=tuple((key, code) for code, key in format_codes.items()),
                 )
             )
     finally:
@@ -441,7 +459,17 @@ def xlsx_sheet_metadata(workbook: XlsxWorkbook, selected: XlsxSheet) -> dict[str
         "sheet_count": len(workbook.sheets),
         "sheets_truncated": False,
         "formula_mode": "cached_values_only",
-        "headers_note": "表头仅为预览；完整首行使用 offset=1 并按 next_offset/next_char_offset 续读。目录省略不影响按已知工作表名读取。",
+        "formula_count": selected.formula_count,
+        "missing_formula_cache_count": selected.missing_formula_cache_count,
+        "embedded_image_count": selected.embedded_image_count,
+        "merged_range_count": len(selected.merged_ranges),
+        "merged_ranges": [],
+        "unsupported_number_format_count": selected.unsupported_number_format_count,
+        "unsupported_number_formats": dict(selected.unsupported_number_formats),
+        "row_format": "csv",
+        "number_format_mode": "common_display_formats_otherwise_raw_with_format",
+        "reading_note": "CSV保留逗号、引号及单元格内换行；offset/limit按工作表物理行计。常见数字格式显示值，未知格式保留原值并以[F编号]引用unsupported_number_formats；显示舍入附原值。公式只读缓存，不重算，缺失缓存留空。图片仅计数量，不读取图片正文。",
+        "headers_note": "headers仅为第1物理行的显示值预览，不猜测表头；完整首行使用 offset=1 并按 next_offset/next_char_offset 续读。目录省略不影响按已知工作表名读取。",
     }
 
     def fits() -> bool:

@@ -4,15 +4,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import io
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
-import stat
 import time
 from typing import Any
 from urllib.parse import urljoin, urlsplit
-import zipfile
 from contextlib import asynccontextmanager
 
 import httpx2
@@ -24,18 +21,12 @@ from .models import DocumentPage, DocumentSource, ParsedDocument, ProviderCapabi
 from .settings import DocumentParsingRuntimeConfig
 
 _PDF_IMAGES = frozenset({"application/pdf", "image/png", "image/jpeg"})
-_OFFICE = frozenset({"application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})
 PROVIDERS = {
     "paddle": ProviderCapability("paddle", "PaddleOCR", "PaddleOCR-VL-1.6", (".pdf", ".png", ".jpg", ".jpeg"),
                                   _PDF_IMAGES, "AI Studio VL-1.6；PDF及PNG/JPEG；文件限制和额度由服务端确认", 200_000_000),
     "glm": ProviderCapability("glm", "GLM-OCR", "glm-ocr", (".pdf", ".png", ".jpg", ".jpeg"),
                                _PDF_IMAGES, "官方 layout_parsing；PDF不超过50 MB、100页；PNG/JPEG图片不超过10 MB；额度以账号为准", 50_000_000, 100),
-    "mineru": ProviderCapability("mineru", "MinerU", "vlm", (".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"),
-                                  _PDF_IMAGES | _OFFICE, "精准 VLM；单文件不超过200 MB、200页；服务额度以账号为准", 200_000_000, 200),
 }
-_MINERU = "https://mineru.net/api/v4"
 _PADDLE = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
 _GLM = "https://open.bigmodel.cn/api/paas/v4/layout_parsing"
 POLL_SECONDS = 5.0
@@ -61,10 +52,10 @@ def can_resume_document(cache_dir: Path, error: BaseException) -> bool:
         return False
     task_id = value.get("task_id")
     return (
-        value.get("provider") in ("mineru", "paddle")
+        value.get("provider") == "paddle"
         and type(task_id) is str and bool(_IDENTIFIER.fullmatch(task_id))
         and value.get("uploaded") is True
-        and not value.get("submission_unknown") and not value.get("upload_unknown")
+        and not value.get("submission_unknown")
     )
 
 
@@ -225,20 +216,6 @@ def _body(blob: bytes) -> dict:
 def _data(body: dict) -> dict:
     code = body.get("code", body.get("errorCode", 0))
     if code not in (0, "0", None):
-        # MinerU's documented codes; never infer auth from generic parsing errors.
-        categories = {
-            "A0202": ("invalid_key", "API Key 无效"), "A0211": ("invalid_key", "API Key 已过期"),
-            "-60001": ("service_error", "供应商无法生成上传地址"),
-            "-60002": ("unsupported_format", "供应商未识别到支持的文件格式"),
-            "-60003": ("invalid_file", "供应商无法读取文件，请检查文件是否损坏"),
-            "-60004": ("invalid_file", "供应商检测到空文件"),
-            "-60005": ("file_too_large", "文件超过供应商大小限制"),
-            "-60006": ("too_many_pages", "文件超过供应商页数限制"),
-            "-10001": ("service_error", "文档解析供应商服务异常"),
-            "-10002": ("invalid_request", "供应商拒绝请求参数"),
-        }
-        if str(code) in categories:
-            raise DocumentParsingError(*categories[str(code)])
         safe_code = str(code) if type(code) in (int, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,24}", str(code)) else "unknown"
         raise DocumentParsingError("provider_rejected", f"供应商拒绝解析请求（错误代码 {safe_code}）")
     data = body.get("data", body)
@@ -251,92 +228,6 @@ def _task_id(value: Any) -> str:
     if type(value) is not str or not _IDENTIFIER.fullmatch(value):
         raise DocumentParsingError("invalid_result", "供应商返回的任务标识无效")
     return value
-
-
-def _mineru_state(data: dict) -> dict:
-    results = data.get("extract_result")
-    if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict):
-        raise DocumentParsingError("invalid_result", "MinerU未返回当前文件的任务状态")
-    state = results[0]
-    if not isinstance(state.get("state"), str) or not state["state"]:
-        raise DocumentParsingError("invalid_result", "MinerU返回的任务状态无效")
-    return state
-
-
-def _unpack(blob: bytes, dest: Path) -> None:
-    try:
-        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
-            entries = archive.infolist()
-            if len(entries) > 20_000 or sum(e.file_size for e in entries) > _MAX_RESULT_BYTES:
-                raise DocumentParsingError("result_too_large", "解析压缩包超过安全解包限制")
-            root = dest.resolve()
-            for entry in entries:
-                relative = PurePosixPath(entry.filename)
-                mode = entry.external_attr >> 16
-                if (relative.is_absolute() or ".." in relative.parts or "\\" in entry.filename or stat.S_ISLNK(mode)
-                        or not (root / entry.filename).resolve().is_relative_to(root)):
-                    raise DocumentParsingError("unsafe_archive", "解析压缩包包含不安全路径")
-            for entry in entries:
-                target = root / entry.filename
-                if entry.is_dir():
-                    target.mkdir(parents=True, exist_ok=True, mode=0o700)
-                else:
-                    _save(target, archive.read(entry))
-    except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
-        raise DocumentParsingError("invalid_result", "供应商解析压缩包损坏") from exc
-
-
-def _block_text(item: dict) -> str:
-    # Copy native field values only. No title rewriting or OCR correction.
-    output: list[str] = []
-    for key in ("table_caption", "image_caption", "chart_caption", "list_items"):
-        value = item.get(key)
-        if isinstance(value, list):
-            output.extend(str(x) for x in value)
-        elif isinstance(value, str):
-            output.append(value)
-    for key in ("text", "table_body", "html", "latex", "image_body", "chart_body", "content"):
-        value = item.get(key)
-        if isinstance(value, str):
-            output.append(value)
-        elif key == "content" and isinstance(value, (list, dict)) and value:
-            output.append(json.dumps(value, ensure_ascii=False))
-    for key in ("table_footnote", "image_footnote", "chart_footnote"):
-        value = item.get(key)
-        if isinstance(value, list):
-            output.extend(str(x) for x in value)
-        elif isinstance(value, str):
-            output.append(value)
-    if item.get("img_path"):
-        output.append(f"![]({item['img_path']})")
-    if not output:
-        output.append(json.dumps(item, ensure_ascii=False))
-    return "\n\n".join(output)
-
-
-def _mineru_pages(dest: Path) -> list[DocumentPage]:
-    candidates = sorted(dest.rglob("*_content_list.json"))
-    if not candidates:
-        raise DocumentParsingError("invalid_result", "MinerU产物缺少分页内容索引")
-    blocks = json.loads(candidates[0].read_bytes())
-    if not isinstance(blocks, list):
-        raise DocumentParsingError("invalid_result", "MinerU分页内容索引无效")
-    by_page: dict[int | None, list[dict]] = {}
-    for block in blocks:
-        if not isinstance(block, dict):
-            raise DocumentParsingError("invalid_result", "MinerU内容块无效")
-        idx = block.get("page_idx")
-        page = idx + 1 if type(idx) is int and idx >= 0 else None
-        by_page.setdefault(page, []).append(block)
-    # v2 outer sequence supplies blank physical pages absent in flat content_list.
-    v2 = sorted(dest.rglob("*_content_list_v2.json"))
-    if v2:
-        outer = json.loads(v2[0].read_bytes())
-        if isinstance(outer, list) and all(isinstance(p, list) for p in outer):
-            for number in range(1, len(outer) + 1):
-                by_page.setdefault(number, [])
-    return [DocumentPage(number, "\n\n".join(_block_text(b) for b in items), native={"blocks": items})
-            for number, items in sorted(by_page.items(), key=lambda item: (item[0] is None, item[0] or 0))]
 
 
 def _paddle_pages(blob: bytes) -> list[DocumentPage]:
@@ -453,53 +344,20 @@ async def _parse(config, source, cache_dir, client, context):
             return _result(provider, source, await _cpu(_glm_pages, body), body)
 
     if not task.get("task_id"):
-        if provider == "mineru":
-            data = await submit(_MINERU + "/file-urls/batch", json={"files": [{"name": source.name, "data_id": signature[:24]}],
-                              "model_version": "vlm", "enable_table": True, "enable_formula": True, "language": "ch"})
-            urls = data.get("file_urls")
-            if not isinstance(urls, list) or len(urls) != 1 or not isinstance(urls[0], str) or not urls[0]:
-                raise DocumentParsingError("invalid_result", "MinerU未返回当前文件的上传地址")
-            task.update(task_id=_task_id(data["batch_id"]), upload_url=urls[0], submission_unknown=False)
-        else:
-            data = await submit(_PADDLE, data={"model": "PaddleOCR-VL-1.6", "optionalPayload": json.dumps({"mergeTables": True, "relevelTitles": True})},
-                                files={"file": (source.name, source.data, source.mime_type)})
-            task.update(task_id=_task_id(data["jobId"]), submission_unknown=False, uploaded=True)
+        data = await submit(_PADDLE, data={"model": "PaddleOCR-VL-1.6", "optionalPayload": json.dumps({"mergeTables": True, "relevelTitles": True})},
+                            files={"file": (source.name, source.data, source.mime_type)})
+        task.update(task_id=_task_id(data["jobId"]), submission_unknown=False, uploaded=True)
         await _cpu(_save, task_path, task)
     task_id = _task_id(task["task_id"])
     _log(context, "document_parse_phase", provider_name=provider, model_name=PROVIDERS[provider].model, phase="submitted", document_task_id=task_id)
-    if provider == "mineru" and task.get("upload_unknown"):
-        # Recover the original task rather than creating a second paid task.
-        blob = await request("GET", _MINERU + f"/extract-results/batch/{task_id}")
-        await _cpu(_save, cache_dir / "status.json", blob)
-        state = _mineru_state(_data(_body(blob)))["state"]
-        if state in {"pending", "running", "converting", "done"}:
-            task.update(uploaded=True, upload_unknown=False)
-            task.pop("upload_url", None)
-        elif state == "waiting-file":
-            # The original signed-object PUT is idempotent and remote state
-            # confirms that no complete file was received. Keep the same URL/ID.
-            task["upload_unknown"] = False
-        elif state == "failed":
-            raise DocumentParsingError("remote_task_failed", "供应商原任务已失败，未重新提交")
-        else:
-            raise DocumentParsingError("submission_unknown", "原任务上传状态仍不明确，未自动重传")
-        await _cpu(_save, task_path, task)
-    if provider == "mineru" and not task.get("uploaded"):
-        async with _timed_stage(provider, "upload", context, task_id):
-            task["upload_unknown"] = True
-            await _cpu(_save, task_path, task)
-            await request("PUT", task["upload_url"], signed=True, content=source.data)
-            task.update(uploaded=True, upload_unknown=False)
-            task.pop("upload_url", None)
-            await _cpu(_save, task_path, task)
-    output = cache_dir / ("result.zip" if provider == "mineru" else "result.jsonl")
+    output = cache_dir / "result.jsonl"
     while not output.exists():
         async with _timed_stage(provider, "wait", context, task_id):
-            url = _MINERU + f"/extract-results/batch/{task_id}" if provider == "mineru" else _PADDLE + f"/{task_id}"
+            url = _PADDLE + f"/{task_id}"
             blob = await request("GET", url)
             await _cpu(_save, cache_dir / "status.json", blob)
             data = _data(_body(blob))
-            state = _mineru_state(data) if provider == "mineru" else data
+            state = data
             _log(context, "document_parse_phase", provider_name=provider, model_name=PROVIDERS[provider].model,
                  phase="poll", status=state.get("state", "unknown"), document_task_id=task_id)
             if state["state"] == "failed":
@@ -508,20 +366,14 @@ async def _parse(config, source, cache_dir, client, context):
                 await asyncio.sleep(POLL_SECONDS)
         if state["state"] == "done":
             async with _timed_stage(provider, "download", context, task_id):
-                url = state["full_zip_url"] if provider == "mineru" else state["resultUrl"]["jsonUrl"]
+                url = state["resultUrl"]["jsonUrl"]
                 raw = await request("GET", url, signed=True, max_bytes=_MAX_RESULT_BYTES)
                 await _cpu(_save, output, raw)
             break
     async with _timed_stage(provider, "parse", context, task_id):
         raw = await _cpu(output.read_bytes)
-        if provider == "mineru":
-            dest = cache_dir / "artifacts"
-            await _cpu(_unpack, raw, dest)
-            pages = await _cpu(_mineru_pages, dest)
-            native = {"task_id": task_id, "artifact_directory": "artifacts"}
-        else:
-            pages = await _cpu(_paddle_pages, raw)
-            native = {"task_id": task_id, "artifact_file": "result.jsonl"}
+        pages = await _cpu(_paddle_pages, raw)
+        native = {"task_id": task_id, "artifact_file": "result.jsonl"}
         return _result(provider, source, pages, native)
 
 
@@ -544,9 +396,7 @@ async def parse_document(config: DocumentParsingRuntimeConfig, source: DocumentS
     _log(context, "document_parse_started", provider_name=config.provider, model_name=config.model,
          byte_size=len(source.data), source_hash=hashlib.sha256(source.data).hexdigest(),
          file_type=Path(source.name).suffix.lower()[1:], phase="start")
-    parameters = ({"parse_language": "ch", "parse_table_enabled": True, "parse_formula_enabled": True}
-                  if config.provider == "mineru" else {"parse_merge_tables": True, "parse_relevel_titles": True}
-                  if config.provider == "paddle" else {})
+    parameters = {"parse_merge_tables": True, "parse_relevel_titles": True} if config.provider == "paddle" else {}
     _log(context, "document_parse_phase", provider_name=config.provider, model_name=config.model, phase="parameters", **parameters)
     try:
         async with asyncio.timeout(PARSE_TIMEOUT_SECONDS):

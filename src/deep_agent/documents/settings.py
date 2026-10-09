@@ -41,7 +41,7 @@ def resolve_document_parsing_config(value: Mapping[str, Any] | None, *, existing
         if raw.get("provider") or raw.get("api_key"):
             raise DocumentParsingConfigurationError("清空配置时不能携带供应商或凭据")
         return DocumentParsingRuntimeConfig("unconfigured")
-    if raw.get("mode") != "provider" or raw.get("provider") not in {"mineru", "paddle", "glm"}:
+    if raw.get("mode") != "provider" or raw.get("provider") not in {"paddle", "glm"}:
         raise DocumentParsingConfigurationError("请选择有效的文档解析供应商")
     provider = raw["provider"]
     key = str(raw.get("api_key") or "").strip()

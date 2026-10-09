@@ -124,8 +124,8 @@ def build_capability_instruction_block(spec: AgentSpec, *, document_config: Docu
         lines.append(
             "When a current or historical session attachment is readable, the read_file system tool "
             "is injected automatically. Use resource={type: attachment, file_id: ...}; follow "
-            "next_offset and next_char_offset while has_more is true. read_file only reads text, DOCX and XLSX; "
-            "it does not support PDF, PPT/PPTX or image OCR. Do not use read_file to try reading a PDF."
+            "next_offset and next_char_offset while has_more is true. read_file reads text, DOCX, XLSX, PPTX and PDF text layers; "
+            "PDF offsets are physical pages. It does not perform image or scanned-page OCR. No extracted text does not mean the source page has no content."
         )
     else:
         lines.append("Platform file upload pipeline: disabled or no MIME types configured.")
@@ -134,9 +134,8 @@ def build_capability_instruction_block(spec: AgentSpec, *, document_config: Docu
         provider = document_upload_provider(document_config)
         if provider is not None:
             lines.append(f"The parse_document tool is enabled for this Run: {provider.label}; supported formats: "
-                         + ", ".join(provider.describe()["formats"]) + ". For PDF, including PDFs with a text layer, "
-                         "call parse_document directly instead of first trying read_file. "
-                         "When read_file is also available, use it for ordinary text, DOCX and XLSX content; use parse_document for OCR, complex layout and tables within its supported formats. "
+                         + ", ".join(provider.describe()["formats"]) + ". When read_file is also available, "
+                         "use it for ordinary text, DOCX, XLSX, PPTX and PDF text layers; use parse_document for OCR, scanned pages, complex layout and tables within its supported formats. "
                          "It may take longer and recognition may be inaccurate; continue with next_read when has_more is true.")
         else:
             lines.append("parse_document is enabled but its global provider credentials are not configured; parsing is unavailable until configured.")

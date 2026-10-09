@@ -58,7 +58,7 @@ test("文档解析热切换刷新上传能力，空白名单清除旧 accept", a
   const definition = chatSource.match(/async function loadUploadCapabilities\(\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(definition);
   assert.match(chatSource, /window\.addEventListener\("document-parsing-settings-changed", \(\) => \{ void loadUploadCapabilities\(\); \}\)/);
-  let payload = { kinds: ["pdf"], allowed_mimes: ["application/pdf", "text/plain"], document_parsing: { provider: "mineru" } };
+  let payload = { kinds: ["pdf"], allowed_mimes: ["application/pdf", "text/plain"], document_parsing: { provider: "paddle" } };
   const input = { accept: ".old" };
   const context = vm.createContext({
     state: {}, el: { fileInput: input }, console, uploadCapabilitiesRequestId: 0, updateComposerModelInfo() {}, serviceUrl: value => value,
@@ -67,7 +67,7 @@ test("文档解析热切换刷新上传能力，空白名单清除旧 accept", a
   vm.runInContext(definition, context);
   await context.loadUploadCapabilities();
   assert.equal(input.accept, "application/pdf,text/plain,.log");
-  assert.equal(context.state.uploadCapabilities.document_parsing.provider, "mineru");
+  assert.equal(context.state.uploadCapabilities.document_parsing.provider, "paddle");
   payload = { kinds: ["text_file"], allowed_mimes: ["text/plain"], document_parsing: null };
   await context.loadUploadCapabilities();
   assert.equal(input.accept, "text/plain,.log");

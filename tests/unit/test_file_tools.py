@@ -605,16 +605,15 @@ class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
         ref = AttachmentRef(id="image", name="a.png", mime="image/png")
         self.assertIsNone(await _tool(ctx=_context(ref)))
 
-    async def test_pdf_is_not_readable_even_when_text_or_skill_keeps_tool_available(self) -> None:
+    async def test_pdf_makes_read_file_available_without_ocr_tool(self) -> None:
         pdf = AttachmentRef(id="pdf", name="contract.pdf", mime="application/pdf")
-        self.assertIsNone(await _tool(ctx=_context(pdf)))
-        context = _context(pdf, AttachmentRef(id="text", name="notes.txt", mime="text/plain"))
-        tool = await _tool(ctx=context, document_available=True)
-        self.assertIn("不支持PDF", tool.tool_def.description)
-        with patch("deep_agent.files.toolset._download_file", AsyncMock()) as download:
-            with self.assertRaisesRegex(ModelRetry, "PDF"):
-                await tool.call_func({"resource": {"type": "attachment", "file_id": "pdf"}}, context)
-            download.assert_not_awaited()
+        tool = await _tool(ctx=_context(pdf))
+        self.assertIsNotNone(tool)
+        self.assertIn("PDF文本层", tool.tool_def.description)
+        with patch("deep_agent.files.toolset._download_file", AsyncMock(return_value=b"bad PDF")):
+            with self.assertRaisesRegex(ToolFailed, "PDF"):
+                await tool.call_func({"resource": {"type": "attachment", "file_id": "pdf"}}, _context(pdf))
+
 
 
 if __name__ == "__main__":

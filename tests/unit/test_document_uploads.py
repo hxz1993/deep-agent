@@ -43,24 +43,24 @@ class DocumentUploadTests(unittest.TestCase):
             self.addCleanup(target.stop)
 
     @staticmethod
-    def config(provider="mineru"):
+    def config(provider="paddle"):
         return DocumentParsingRuntimeConfig("provider", provider, "fake-unit-key")
 
     def test_active_provider_expands_defaults_without_changing_existing_uploads(self):
         payload = upload_capabilities_payload(self.config())
-        self.assertEqual(payload["document_parsing"]["provider"], "mineru")
-        for kind in ("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "text_file", "image"):
+        self.assertEqual(payload["document_parsing"]["provider"], "paddle")
+        for kind in ("pdf", "docx", "xlsx", "text_file", "image"):
             self.assertIn(kind, payload["kinds"])
         self.assertEqual(payload["blocked_document_mimes"], [])
         self.assertEqual(payload["max_size_mb"], 20)
         self.assertEqual(payload["max_count"], 10)
 
     def test_unconfigured_invalid_or_missing_key_does_not_expand_defaults(self):
-        for config in (None, DocumentParsingRuntimeConfig("unconfigured"), DocumentParsingRuntimeConfig("provider", "mineru"), DocumentParsingRuntimeConfig("provider", "mineru", "fake", "invalid")):
+        for config in (None, DocumentParsingRuntimeConfig("unconfigured"), DocumentParsingRuntimeConfig("provider", "paddle"), DocumentParsingRuntimeConfig("provider", "paddle", "fake", "invalid")):
             with self.subTest(config=config):
                 payload = upload_capabilities_payload(config)
-                self.assertNotIn("pdf", payload["kinds"])
-                self.assertNotIn("pptx", payload["kinds"])
+                self.assertIn("pdf", payload["kinds"])
+                self.assertIn("pptx", payload["kinds"])
                 self.assertIn("docx", payload["kinds"])
                 self.assertIsNone(payload["document_parsing"])
 
@@ -69,18 +69,19 @@ class DocumentUploadTests(unittest.TestCase):
             with self.subTest(provider=provider):
                 payload = upload_capabilities_payload(self.config(provider))
                 self.assertIn("pdf", payload["kinds"])
-                self.assertNotIn("pptx", payload["kinds"])
+                self.assertIn("pptx", payload["kinds"])
                 self.assertNotIn("doc", payload["kinds"])
                 self.assertIn("docx", payload["kinds"])
                 self.assertNotIn("DOCX", payload["document_parsing"]["formats"])
-                with self.assertRaises(MediaPipelineError):
-                    process_upload(data=office_bytes(), mime=PPTX, filename="slides.pptx", additional_mimes=document_upload_mimes(self.config(provider)))
+                self.assertNotIn("PPTX", payload["document_parsing"]["formats"])
+                processed = process_upload(data=office_bytes(), mime=PPTX, filename="slides.pptx", additional_mimes=document_upload_mimes(self.config(provider)))
+                self.assertEqual(processed.mime, PPTX)
 
     def test_explicit_upload_policy_remains_authoritative(self):
         self.options.agent.upload_allowed_mimes = "text/plain, application/pdf"
         payload = upload_capabilities_payload(self.config())
         self.assertEqual(set(payload["allowed_mimes"]), {"text/plain", PDF})
-        self.assertIn(PPTX, payload["blocked_document_mimes"])
+        self.assertIn("image/png", payload["blocked_document_mimes"])
         self.assertNotIn(PDF, payload["blocked_document_mimes"])
         with self.assertRaisesRegex(MediaPipelineError, "上传策略"):
             process_upload(data=office_bytes(), mime=DOCX, filename="contract.docx", additional_mimes=document_upload_mimes(self.config()))
@@ -89,12 +90,8 @@ class DocumentUploadTests(unittest.TestCase):
         extra = document_upload_mimes(self.config())
         for name, mime, data in (
             ("contract.pdf", PDF, b"%PDF-1.7\n123.45"),
-            ("legacy.doc", "application/msword", b"legacy-office"),
-            ("legacy.xls", "application/vnd.ms-excel", b"legacy-office"),
-            ("legacy.ppt", "application/vnd.ms-powerpoint", b"legacy-office"),
             ("doc.docx", DOCX, office_bytes("word/document.xml")),
             ("sheet.xlsx", XLSX, office_bytes("xl/worksheets/sheet1.xml")),
-            ("slides.pptx", PPTX, office_bytes()),
         ):
             with self.subTest(name=name):
                 result = process_upload(data=data, mime=mime, filename=name, additional_mimes=extra)
@@ -102,18 +99,18 @@ class DocumentUploadTests(unittest.TestCase):
                 self.assertEqual(result.filename, name)
                 self.assertIsNone(result.extracted_text)
 
-    def test_pptx_archive_safety_is_the_existing_office_guard(self):
+    def test_docx_archive_safety_is_the_existing_office_guard(self):
         extra = document_upload_mimes(self.config())
         for data in (b"not-a-zip", office_bytes("../outside.xml"), office_bytes("/root.xml"), office_bytes("C:/bad.xml")):
             with self.subTest(data=data[:12]):
                 with self.assertRaises(MediaPipelineError):
-                    process_upload(data=data, mime=PPTX, filename="unsafe.pptx", additional_mimes=extra)
+                    process_upload(data=data, mime=DOCX, filename="unsafe.docx", additional_mimes=extra)
         compressed = office_bytes(content=b"A" * 40_000, compression=zipfile.ZIP_DEFLATED)
         with self.assertRaisesRegex(MediaPipelineError, "压缩比"):
-            process_upload(data=compressed, mime=PPTX, filename="bomb.pptx", additional_mimes=extra)
+            process_upload(data=compressed, mime=DOCX, filename="bomb.docx", additional_mimes=extra)
         with patch("deep_agent.agent.attachment_extractors.MAX_OFFICE_MEMBER_BYTES", 10):
             with self.assertRaisesRegex(MediaPipelineError, "成员过大"):
-                process_upload(data=office_bytes(), mime=PPTX, filename="large.pptx", additional_mimes=extra)
+                process_upload(data=office_bytes(), mime=DOCX, filename="large.docx", additional_mimes=extra)
 
     def test_global_upload_size_limit_is_not_raised_by_provider_200mb_limit(self):
         self.options.agent.upload_max_size_mb = 1
@@ -126,14 +123,14 @@ class DocumentUploadTests(unittest.TestCase):
         self.assertNotIn("parse_document", unavailable)
         enabled = build_capability_instruction_block(spec, document_config=self.config("glm"), document_available=True)
         self.assertIn("parse_document tool is enabled", enabled)
-        self.assertIn("call parse_document directly instead of first trying read_file", enabled)
-        self.assertIn("it does not support PDF", enabled)
+        self.assertIn("parse_document for OCR, scanned pages", enabled)
+        self.assertIn("PDF offsets are physical pages", enabled)
         self.assertIn("GLM-OCR", enabled)
         self.assertIn("next_read", enabled)
         unconfigured = build_capability_instruction_block(spec, document_available=True)
         self.assertIn("credentials are not configured", unconfigured)
 
-    def api_client(self, provider="mineru"):
+    def api_client(self, provider="paddle"):
         row = SimpleNamespace(version=1, value={"mode": "provider", "provider": provider, "api_key": "fake-unit-key"})
         self.settings = SimpleNamespace(get=AsyncMock(return_value=row))
         self.upload = AsyncMock(side_effect=lambda **kwargs: StoredFile("file-unit", kwargs["file_name"], len(kwargs["data"]), kwargs["file_type"], kwargs["mime"]))
@@ -150,8 +147,8 @@ class DocumentUploadTests(unittest.TestCase):
         client = self.api_client()
         capabilities = client.get("/api/v1/uploads/capabilities")
         self.assertEqual(capabilities.status_code, 200, capabilities.text)
-        self.assertEqual(capabilities.json()["document_parsing"]["provider"], "mineru")
-        for filename, mime, data in (("contract.pdf", PDF, b"%PDF-1.7"), ("slides.pptx", PPTX, office_bytes())):
+        self.assertEqual(capabilities.json()["document_parsing"]["provider"], "paddle")
+        for filename, mime, data in (("contract.pdf", PDF, b"%PDF-1.7"), ("document.docx", DOCX, office_bytes("word/document.xml"))):
             result = client.post("/api/v1/uploads", files={"file": (filename, data, mime)})
             self.assertEqual(result.status_code, 200, result.text)
             self.assertEqual(result.json()["mime"], mime)
@@ -162,7 +159,7 @@ class DocumentUploadTests(unittest.TestCase):
 
     def test_api_unsupported_provider_format_never_reaches_storage(self):
         client = self.api_client("paddle")
-        result = client.post("/api/v1/uploads", files={"file": ("slides.pptx", office_bytes(), PPTX)})
+        result = client.post("/api/v1/uploads", files={"file": ("legacy.ppt", b"legacy binary", "application/vnd.ms-powerpoint")})
         self.assertEqual(result.status_code, 422, result.text)
         self.assertIn("上传策略", result.json()["detail"])
         self.upload.assert_not_called()
@@ -171,8 +168,10 @@ class DocumentUploadTests(unittest.TestCase):
         client = self.api_client()
         self.settings.get.return_value = None
         result = client.post("/api/v1/uploads", files={"file": ("contract.pdf", b"%PDF-1.7", PDF)})
-        self.assertEqual(result.status_code, 422)
-        self.settings.get.return_value = SimpleNamespace(version=1, value={"mode": "provider", "provider": "mineru", "api_key": "fake-unit-key"})
+        self.assertEqual(result.status_code, 200)
+        self.upload.assert_awaited_once()
+        self.upload.reset_mock()
+        self.settings.get.return_value = SimpleNamespace(version=1, value={"mode": "provider", "provider": "paddle", "api_key": "fake-unit-key"})
         self.options.agent.upload_allowed_mimes = "text/plain"
         result = client.post("/api/v1/uploads", files={"file": ("contract.pdf", b"%PDF-1.7", PDF)})
         self.assertEqual(result.status_code, 422)

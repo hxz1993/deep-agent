@@ -25,7 +25,7 @@ RESOURCE = {"type": "attachment", "file_id": "pdf"}
 
 
 class DocumentRunnerTests(unittest.IsolatedAsyncioTestCase):
-    async def assemble(self, model, provider="mineru", window=128000):
+    async def assemble(self, model, provider="glm", window=128000):
         self.store = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(version=1,
             value={"mode": "provider", "provider": provider, "api_key": "controlled-key"})))
         ctx = SimpleNamespace(stores=MagicMock(global_setting=self.store), registry=build_registry(), store=MagicMock(),
@@ -68,7 +68,7 @@ class DocumentRunnerTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(directories[-1].exists())
             next_runner = await self.assemble(FunctionModel(self.response), provider="paddle")
             await next_runner.agent.run("read", deps=self.dependencies())
-            self.assertEqual(providers, ["mineru", "paddle"])
+            self.assertEqual(providers, ["glm", "paddle"])
             def broken(messages, info):
                 response = self.response(messages, info)
                 if isinstance(response.parts[0], TextPart):
@@ -135,7 +135,7 @@ class DocumentRunnerTests(unittest.IsolatedAsyncioTestCase):
                                  usage=RequestUsage(input_tokens=runner._estimator.messages(messages), output_tokens=128))
         runner = await self.assemble(FunctionModel(respond))
         summary = AsyncMock(return_value="已读取文档，继续执行后续读取验证。")
-        original = ParsedDocument("mineru", "vlm", [DocumentPage(1, "中文" * 22000)], 1)
+        original = ParsedDocument("paddle", "PaddleOCR-VL-1.6", [DocumentPage(1, "中文" * 22000)], 1)
         with (patch("deep_agent.documents.toolset.parse_with_provider", AsyncMock(return_value=original)) as parser,
              patch("deep_agent.files.toolset._download_file", AsyncMock(return_value=connection_sample().data)),
              patch.object(DeepAgentContextCompaction, "_single_summary", summary)):

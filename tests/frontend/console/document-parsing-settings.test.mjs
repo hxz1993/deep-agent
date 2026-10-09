@@ -10,7 +10,6 @@ const consoleCss = await readFile(new URL("../../../console/console.css", import
 const providers = [
   { provider: "paddle", label: "PaddleOCR", model: "PaddleOCR-VL-1.6", formats: ["PDF", "PNG"], limits: "服务额度以账号为准" },
   { provider: "glm", label: "GLM-OCR", model: "glm-ocr", formats: ["PDF", "PNG", "JPEG"], limits: "单文件最多 100 页" },
-  { provider: "mineru", label: "MinerU", model: "vlm", formats: ["PDF", "DOCX"], limits: "单文件最多 200 页" },
 ];
 const escapeHtml = value => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -82,13 +81,12 @@ test("摘要和支持格式取后端元数据，默认草稿使用目录首项",
 });
 
 test("供应商按后端稳定性顺序显示，首项为新草稿默认且不覆盖已保存选择", () => {
-  const ranked = [providers[1], providers[2], providers[0]];
+  const ranked = [providers[1], providers[0]];
   const h = harness();
   h.context.window.globalSettingsAdmin.documentParsing.providers = ranked;
   h.ui.openDocumentParsingSettings();
   const options = h.node("documentParsingProviderOptions").innerHTML;
-  assert.ok(options.indexOf('value="glm"') < options.indexOf('value="mineru"'));
-  assert.ok(options.indexOf('value="mineru"') < options.indexOf('value="paddle"'));
+  assert.ok(options.indexOf('value="glm"') < options.indexOf('value="paddle"'));
   assert.equal(h.node("documentParsingModel").textContent, "glm-ocr");
   h.node("documentParsingApiKey").value = "new-ranked-key";
   assert.equal(h.ui.currentDocumentParsingDraft().value.provider, "glm");
@@ -204,27 +202,17 @@ test("供应商显示名转义，服务格式说明使用纯文本", () => {
   assert.match(h.node("documentParsingCapabilities").textContent, /<script>/);
 });
 
- test("MinerU 禁选，测试结束解锁后仍禁选；旧配置不被静默替换", async () => {
-  const h = harness();
+test("已移除的供应商不提供选项，无效配置明确未配置且不能保留旧Key", async () => {
+  const h = harness({ mode: "unconfigured", provider: null, api_key_set: false, configuration_error: "请选择有效的文档解析供应商" });
   h.ui.openDocumentParsingSettings();
-  assert.match(h.node("documentParsingProviderOptions").innerHTML, /value="mineru" disabled/);
-  assert.equal(h.node("radio-mineru").disabled, true);
+  assert.doesNotMatch(h.node("documentParsingProviderOptions").innerHTML, /mineru/i);
+  assert.equal(h.ui.currentDocumentParsingDraft().value.mode, "unconfigured");
+  assert.equal(h.node("testDocumentParsingBtn").disabled, true);
+  assert.match(h.node("documentParsingTestFeedbackText").textContent, /有效/);
   h.ui.selectDocumentParsingProvider("mineru");
-  assert.equal(h.node("documentParsingModel").textContent, "PaddleOCR-VL-1.6");
-  h.node("documentParsingApiKey").value = "fake-test-key";
-  const pending = h.ui.runDocumentParsingOperation("test");
-  h.requests[0].resolve({ ok: true, message: "连接成功" });
-  await pending;
-  assert.equal(h.node("radio-mineru").disabled, true);
-  assert.equal(h.node("radio-paddle").disabled, false);
-  const stored = harness({ mode: "provider", provider: "mineru", api_key_set: true });
-  stored.ui.openDocumentParsingSettings();
-  assert.equal(stored.node("radio-mineru").checked, true);
-  assert.equal(stored.node("saveDocumentParsingBtn").disabled, true);
-  assert.equal(stored.node("testDocumentParsingBtn").disabled, true);
-  await stored.ui.runDocumentParsingOperation("save");
-  assert.equal(stored.requests.length, 0);
-  assert.match(stored.node("documentParsingTestFeedbackText").textContent, /暂不可用/);
-  stored.ui.selectDocumentParsingProvider("glm");
-  assert.equal(stored.node("saveDocumentParsingBtn").disabled, false);
+  assert.equal(h.ui.currentDocumentParsingDraft().value.mode, "unconfigured");
+  h.ui.selectDocumentParsingProvider("glm");
+  assert.throws(() => h.ui.currentDocumentParsingDraft(), /API Key/);
+  h.node("documentParsingApiKey").value = "new-key";
+  assert.equal(h.ui.currentDocumentParsingDraft().value.provider, "glm");
 });

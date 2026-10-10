@@ -8,7 +8,8 @@ from aiohttp import ClientError
 
 from ..errors.classes import APIResponseParseError, APIStatusNotTrue, APIStatusCodeError
 from .httpcli import AioHttpCli
-from .utils import concat_url, retry
+from .utils import concat_url
+from .nacos_auth import PasswordAuthProvider, create_auth_provider
 from .cache import RankedCache
 
 
@@ -39,10 +40,7 @@ class JsonResponse(ResponseChecker):
         try:
             return json.loads(response)
         except (TypeError, ValueError):
-            logger.exception(
-                f'Call api: {endpoint} failed. '
-                f'Response << {response} >> cannot be decoded as json.'
-            )
+            logger.exception(f'Call Nacos api {endpoint} returned invalid JSON.')
             raise APIResponseParseError(endpoint) from None
 
 
@@ -56,57 +54,57 @@ class Route:
         response_checker: Type[ResponseChecker] = None,
     ):
         def execute(func):
-            request = getattr(AioHttpCli, self.method)
             method = self.method.upper()
-            is_get = method == 'GET'
+            is_auth = endpoint.lstrip('/').startswith('auth/')
 
             @functools.wraps(func)
             async def call(ins: "NacosAPI", *args, **kwargs):
-                body = func(ins, *args, **kwargs)
-                req_args = {
-                    'headers': ins.header,
-                    'params' if is_get else 'data': body
-                }
+                request = getattr(AioHttpCli, self.method)
                 url_cache = ins.base_urls
-                for i, base_url in zip(reversed(range(len(url_cache))), url_cache.sort()):
-                    is_last_url = i == 0
+                bases = url_cache.sort()
+                for index, base_url in enumerate(bases):
+                    is_last_url = index == len(bases) - 1
                     try:
                         url = concat_url(base_url, endpoint)
-                        ins.log(
-                            f"Sending request: {method} {url} "
-                            f"body: {repr(body)}"
-                        )
-                        response = await request(url, **req_args)
-                        if (
-                            response.status == 403
-                            and func.__qualname__ != 'NacosAPI.login'
-                        ):
-                            # retry if token expired
-                            if await ins.maybe_login(schedule_renewal=False):
-                                body.update(func(ins, *args, **kwargs))
-                                response = await request(url, **req_args)
-
-                        if not (200 <= response.status < 300):
+                        # Rebuild the business payload after refresh; never reuse old auth fields.
+                        for attempt in range(2):
+                            body = func(ins, *args, **kwargs)
+                            if not is_auth:
+                                await ins.auth_provider.prepare_request()
+                                body = ins.auth_provider.enrich(endpoint, body)
+                            ins.log(f'[nacos] method={method} route={func.__name__}')
+                            response = await request(
+                                url, headers=ins.header,
+                                **{'params' if method == 'GET' else 'data': body},
+                            )
+                            if response.status == 403 and not is_auth and attempt == 0:
+                                response.release()
+                                if await ins.auth_provider.refresh(schedule_renewal=False):
+                                    continue
+                                raise APIStatusCodeError(base_url, response.status)
+                            break
+                        if not 200 <= response.status < 300:
+                            response.release()
                             raise APIStatusCodeError(base_url, response.status)
+                        try:
+                            text = await response.text()
+                        finally:
+                            response.release()
                         url_cache.reward(base_url)
                         break
-                    except ClientError as e:
+                    except ClientError:
                         url_cache.punish(base_url)
                         if is_last_url:
-                            logger.warning(f"Request of all urls failed.")
+                            logger.warning('Request of all Nacos urls failed.')
                             raise
-                        else:
-                            logger.warning(f"Request failed with {e}, try next url...")
+                        logger.warning(f'Nacos connection failed, trying next url.')
 
-                text = await response.text()  # noqa
                 if response_checker is not None:
                     ok, result = response_checker.validate(text, endpoint)
                     if not ok:
                         raise APIStatusNotTrue(endpoint, text)
-                    else:
-                        return result
-                else:
-                    return text
+                    return result
+                return text
 
             return call
 
@@ -119,37 +117,30 @@ put = Route(method='put')
 delete = Route(method='delete')
 
 
-def auth(func):
-    @functools.wraps(func)
-    def wrapper(self, *args, **kwargs):
-        resp = func(self, *args, **kwargs)
-        if token := getattr(self, '_token', None):
-            resp['accessToken'] = token
-        return resp
-
-    return wrapper
-
-
 class NacosAPI:
-    def __init__(
-        self,
-        nacos_server: str,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
-    ):  # noqa
-        self._base_urls = self._resolve_base_urls(nacos_server)
+    def __init__(self, options=None):
+        if options is None:
+            # Options also imports this client through the config source.
+            from ..options import OPTION
+            options = OPTION.nacos
         self.log = logger.debug
         self.header = {"Content-Type": "application/x-www-form-urlencoded"}
         self._token = None
-        self._user = user
-        self._password = password
+        self._base_urls = self._resolve_base_urls(options.server)
+        self.auth_provider = create_auth_provider(
+            options.auth_mode, user=options.user, password=options.password,
+            access_key=options.access_key, secret_key=options.secret_key,
+            ram_role_name=options.ram_role_name,
+        )
+        self.auth_provider.bind(self)
 
     @staticmethod
     def _resolve_base_urls(url: str) -> RankedCache:
         urls = RankedCache()
         for nacos_server in url.split(','):
-            if nacos_server.rstrip('/').endswith('nacos'):
-                base_url = nacos_server
+            nacos_server = nacos_server.rstrip('/')
+            if nacos_server.lower().endswith('nacos'):
+                base_url = nacos_server[:-5] + 'nacos'
             else:
                 base_url = concat_url(nacos_server, 'nacos')
             urls.add(concat_url(base_url, 'v1'))
@@ -164,21 +155,15 @@ class NacosAPI:
         schedule_renewal: bool = True,
         delay: Optional[float] = None,
     ) -> bool:
-        if self._user is not None and self._password is not None:
-            if delay:
-                await asyncio.sleep(delay)
+        if delay:
+            await asyncio.sleep(delay)
+        if isinstance(self.auth_provider, PasswordAuthProvider):
+            return await self.auth_provider.refresh(schedule_renewal=schedule_renewal)
+        await self.auth_provider.initialize()
+        return True
 
-            resp = await retry(self.login, wait=1)(self._user, self._password)
-            self._token = resp['accessToken']
-
-            ttl = resp['tokenTtl']
-            if schedule_renewal:
-                asyncio.create_task(self.maybe_login(
-                    schedule_renewal=True,
-                    delay=min((ttl * 2 / 3), ttl - 5)
-                ))
-            return True
-        return False
+    async def close(self):
+        await self.auth_provider.close()
 
     @post('auth/login', JsonResponse)
     def login(self, user: str, password: str):
@@ -188,7 +173,6 @@ class NacosAPI:
         }
 
     @put('/ns/instance/beat')
-    @auth
     def send_heartbeat(
         self,
         server_name: str,
@@ -216,7 +200,6 @@ class NacosAPI:
         }
 
     @delete('ns/instance', TextResponse)
-    @auth
     def unregister_instance(
         self,
         server_name: str,
@@ -236,7 +219,6 @@ class NacosAPI:
         }
 
     @post('ns/instance', TextResponse)
-    @auth
     def register_instance(
         self,
         server_name: str,
@@ -259,7 +241,6 @@ class NacosAPI:
         }
 
     @put('ns/instance', TextResponse)
-    @auth
     def modify_instance(
         self,
         server_name: str,
@@ -276,7 +257,6 @@ class NacosAPI:
         }
 
     @get('ns/service/list', JsonResponse)
-    @auth
     def list_service(
         self,
         group: str = 'DEFAULT_GROUP',
@@ -290,7 +270,6 @@ class NacosAPI:
         }
 
     @get('ns/instance/list', JsonResponse)
-    @auth
     def list_instance(
         self,
         service_name: str,
@@ -306,7 +285,6 @@ class NacosAPI:
         }
 
     @get('cs/configs')
-    @auth
     def get_configs(
         self,
         data_id: str,
@@ -318,4 +296,3 @@ class NacosAPI:
             'group': group,
             'tenant': namespace,
         }
-

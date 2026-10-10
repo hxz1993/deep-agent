@@ -5,8 +5,9 @@ Delegates to ``deepcube.mcp.server.main``. Runtime options are owned by
 ``deepcube.mcp.config``). This launcher only:
 
 1) applies stdio-friendly defaults for builtin usage;
-2) bridges discovery settings from ``deepfos_platform.options.OPTION`` when
-   ``DEEPCUBE_MCP_DISCOVERY`` is not explicitly configured.
+2) bridges discovery settings from ``deepfos_platform.options.OPTION`` into
+   ``DEEPCUBE_MCP_*`` JSON when ``DEEPCUBE_MCP_DISCOVERY`` is not explicitly
+   configured; SDK option application belongs to ``deepcube-mcp``.
 """
 
 from __future__ import annotations
@@ -60,9 +61,7 @@ def sync_env() -> None:
         os.environ[ENV_DISCOVERY] = json.dumps(discovery, ensure_ascii=False)
         return
 
-    discovery: dict = {}
-
-    discovery["enabled"] = discovery_enabled
+    discovery: dict = {"enabled": discovery_enabled}
     if impl is not None:
         discovery["implementation"] = impl
         if impl == "eureka":
@@ -70,18 +69,22 @@ def sync_env() -> None:
             if eureka:
                 discovery["eureka"] = eureka
         elif impl == "nacos":
-            discovery["nacos"] = nacos = {}
-            for value, key in (
-                (OPTION.nacos.server, "server"),
-                (OPTION.nacos.cluster, "cluster"),
-                (OPTION.nacos.namespace, "namespace"),
-                (OPTION.nacos.group, "group"),
-                (OPTION.nacos.user, "user"),
-                (OPTION.nacos.password, "password"),
-            ):
-                val = _optional_value(value)
-                if val is not None:
-                    nacos[key] = val
+            json_fields = (
+                "server", "cluster", "namespace", "group", "user", "password",
+                "access_key", "secret_key", "ram_role_name", "auth_mode",
+            )
+            discovery["nacos"] = {}
+            for key in json_fields:
+                value = getattr(OPTION.nacos, key)
+                # Credentials are opaque; preserve their contents exactly.
+                if key not in ("password", "access_key", "secret_key"):
+                    value = _optional_value(value)
+                if value is not None:
+                    discovery["nacos"][key] = value
+        elif impl == "dns":
+            from deepfos_platform.discovery.dns import get_dns_records
+
+            discovery["dns"] = {"records": get_dns_records()}
         elif impl == "k8s":
             k8s_ns = _optional_value(OPTION.k8s.namespace)
             if k8s_ns:
@@ -93,10 +96,7 @@ def sync_env() -> None:
 
     # deepcube-mcp currently reads take_over only from DEEPCUBE_MCP_DISCOVERY JSON.
     discovery["take_over"] = True
-
-    if discovery:
-        os.environ[ENV_DISCOVERY] = json.dumps(discovery, ensure_ascii=False)
-
+    os.environ[ENV_DISCOVERY] = json.dumps(discovery, ensure_ascii=False)
 
 
 if __name__ == "__main__":

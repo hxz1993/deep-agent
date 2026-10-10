@@ -345,7 +345,7 @@ class APIMeta(type):
                 sd_ins = ServiceDiscovery.instantiate()
                 if sd_ins.closed:
                     await sd_ins.start()
-                if type(self).__name__ not in _PUBLIC_MODULE:
+                if OPTION.srvdis.implementation != 'dns' and type(self).__name__ not in _PUBLIC_MODULE:
                     server_name = f"{OPTION.general.system_env}{self.server_name}"
                 else:
                     server_name = self.server_name

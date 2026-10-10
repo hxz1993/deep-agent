@@ -38,11 +38,7 @@ class Nacos(ServiceDiscovery):
         super().__init__(cache_class, interval)
         self._instance_lock: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._server_lock = asyncio.Lock()
-        self._api = NacosAPI(
-            nacos_server=OPTION.nacos.server,
-            user=OPTION.nacos.user,
-            password=OPTION.nacos.password,
-        )
+        self._api = NacosAPI()
         self._debug = debug
         self._cares = set()
         self._strategy = strategy
@@ -54,6 +50,7 @@ class Nacos(ServiceDiscovery):
         self._cares.clear()
         self.server_cache.clear()
         self._instance_lock.clear()
+        await self._api.close()
 
     async def on_startup(self):
         await self._api.maybe_login()

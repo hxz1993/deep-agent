@@ -30,13 +30,23 @@ def _ensure_discovery_server_is_set(value):
     if not value:
         return
     impl = OPTION.srvdis.implementation
-    server_opt = {
-        "eureka": OPTION.eureka.server,
-        "nacos": OPTION.nacos.server,
-        "k8s": OPTION.k8s.namespace,
+    if impl in ('dns', 'local'):
+        return
+    category, name = {
+        'eureka': ('eureka', 'server'),
+        'nacos': ('nacos', 'server'),
+        'k8s': ('k8s', 'namespace'),
     }[impl]
-    if server_opt is None:
-        raise RuntimeError(f"Missing server configure for {impl}")
+    server = getattr(OPTION, category)._get_option(name)
+    if server is ... or not server or not server.strip():
+        raise RuntimeError(f'Missing server configure for {impl}')
+
+
+def _ensure_nacos_auth_is_set(value):
+    if value == 'aksk' and not (OPTION.nacos.access_key and OPTION.nacos.secret_key):
+        raise ValueError('Nacos aksk mode requires NACOS_ACCESS_KEY and NACOS_SECRET_KEY')
+    if value == 'ram' and not (OPTION.nacos.ram_role_name and OPTION.nacos.ram_role_name.strip()):
+        raise ValueError('Nacos ram mode requires EXPORT_NACOS_RAM_ROLE_NAME')
 
 
 def _resolve_instance_host() -> str:
@@ -50,13 +60,13 @@ def _resolve_instance_host() -> str:
 class Server(Category):
     _ENV_PREFIX = "EXPORT_"
 
-    base = Option(..., val_type=str, bind_env=["WEB_GATEWAY_SERVER", "GATEWAY_SERVER"], reload_opt=True)
-    app = Option("app-server", val_type=str, bind_env="APP_SERVER_NAME", reload_opt=True)
-    system = Option("system-server", val_type=str, bind_env="SYSTEM_SERVER_NAME", reload_opt=True)
-    space = Option("space-server", val_type=str, bind_env="SPACE_SERVER_NAME", reload_opt=True)
-    platform_file = Option("platform-file-server", val_type=str, bind_env="PLATFORM_FILE_SERVER_NAME", reload_opt=True)
-    os_space_tenant = Option("os-space-tenant", val_type=str, bind_env="OS_SPACE_TENANT_SERVER_NAME", reload_opt=True)
-    account = Option("seepln-account", val_type=str, bind_env="SERVER_NAME_USER", reload_opt=True)
+    base = Option(..., val_type=str, bind_env=["WEB_GATEWAY_SERVER", "GATEWAY_SERVER", "DNS_WEB_GATEWAY"], reload_opt=True)
+    app = Option("app-server", val_type=str, bind_env=["APP_SERVER_NAME", "DNS_APP"], reload_opt=True)
+    system = Option("system-server", val_type=str, bind_env=["SYSTEM_SERVER_NAME", "DNS_SYSTEM"], reload_opt=True)
+    space = Option("space-server", val_type=str, bind_env=["SPACE_SERVER_NAME", "DNS_SPACE"], reload_opt=True)
+    platform_file = Option("platform-file-server", val_type=str, bind_env=["PLATFORM_FILE_SERVER_NAME", "DNS_PLATFORM_FILE"], reload_opt=True)
+    os_space_tenant = Option("os-space-tenant", val_type=str, bind_env=["OS_SPACE_TENANT_SERVER_NAME", "DNS_OS_SPACE_TENANT"], reload_opt=True)
+    account = Option("seepln-account", val_type=str, bind_env=["SERVER_NAME_USER", "DNS_ACCOUNT"], reload_opt=True)
 
     if typing.TYPE_CHECKING:
         def __get__(self, instance, owner) -> "Server": ...
@@ -151,11 +161,11 @@ class Gunicorn(Category):
 class ServiceDiscovery(Category):
     _ENV_PREFIX = "EXPORT_SERVICE_DISCOVERY_"
 
-    enabled = Option(True, val_type=bool, bind_env="ENABLED", extra_check=_ensure_discovery_server_is_set)
     implementation = Option(
         "eureka", val_type=str,
-        val_choices=("eureka", "nacos", "k8s", "local"), bind_env="IMPLEMENTATION"
+        val_choices=("eureka", "nacos", "k8s", "local", "dns"), bind_env="IMPLEMENTATION"
     )
+    enabled = Option(True, val_type=bool, bind_env="ENABLED", extra_check=_ensure_discovery_server_is_set)
     cache_strategy = Option(
         "ranked", val_type=str,
         val_choices=("ranked", "roundrobin", "random"), bind_env="CACHE_STRATEGY"
@@ -184,7 +194,16 @@ class Nacos(Category):
     namespace = Option("public", val_type=str, bind_env="NAMESPACE")
     group = Option("DEFAULT_GROUP", val_type=str, bind_env="GROUP")
     user = Option(None, val_type=str, bind_env="USER_NAME")
-    password = Option(None, val_type=str, bind_env="PASSWORD")
+    password = Option(None, val_type=str, bind_env="PASSWORD", protected=True)
+    access_key = Option(None, val_type=str, bind_env='NACOS_ACCESS_KEY',
+                        respect_env_prefix=False, protected=True)
+    secret_key = Option(None, val_type=str, bind_env='NACOS_SECRET_KEY',
+                        respect_env_prefix=False, protected=True)
+    ram_role_name = Option(None, val_type=str, bind_env='RAM_ROLE_NAME')
+    auth_mode = Option(
+        'password', val_type=str, val_choices=('password', 'aksk', 'ram'), bind_env='AUTH_MODE',
+        extra_check=_ensure_nacos_auth_is_set
+    )
 
     if typing.TYPE_CHECKING:
         def __get__(self, instance, owner) -> "Nacos": ...

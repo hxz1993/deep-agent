@@ -49,6 +49,7 @@ class ServiceDiscovery(ABC):
     __impl__: Dict[str, Type['ServiceDiscovery']] = {}
     __ins__: 'ServiceDiscovery' = None
     has_instance_cache = True
+    do_refresh = True
 
     def __init__(
         self,
@@ -171,6 +172,8 @@ class ServiceDiscovery(ABC):
             from .k8s import K8s  # noqa
         elif mod == 'local':
             from .local import Local  # noqa
+        elif mod == 'dns':
+            from .dns import DNS  # noqa
 
     @classmethod
     def instantiate(cls):
@@ -185,15 +188,14 @@ class ServiceDiscovery(ABC):
 
     @classmethod
     async def start(cls):
-        asyncio.create_task(cls.instantiate().init())
+        instance = cls.instantiate()
+        if instance.do_refresh and instance.closed:
+            asyncio.create_task(instance.init())
         await asyncio.sleep(0)
 
     @classmethod
     async def stop(cls):
-        if (
-            cls.__ins__ is None
-            or cls.__ins__.closed
-        ):
+        if cls.__ins__ is None:
             return
         await cls.__ins__.close()
         cls.__ins__ = None

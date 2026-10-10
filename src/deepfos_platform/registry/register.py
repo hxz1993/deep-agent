@@ -34,7 +34,7 @@ def register_service(server_name: str):
             duration_in_secs=30,
             renewal_interval_in_secs=10
         )
-    else:
+    elif OPTION.srvdis.implementation == 'nacos':
         run_sync(nacoscli.register_once(
             server_name=full_server_name,
             instance_host=OPTION.gunicorn.inst_host,

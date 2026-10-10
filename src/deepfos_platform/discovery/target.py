@@ -16,4 +16,12 @@ def normalize_service_target(target: str) -> str:
     """
     target = target.strip()
     match = _SERVICE_URL.fullmatch(target)
-    return match.group(1) if match else target
+    if match:
+        return match.group(1)
+    from ..options import OPTION
+    if OPTION.srvdis.implementation == 'dns':
+        from .dns import DNS_ENV_BY_SERVER
+        match = re.fullmatch(r'https?://([A-Za-z0-9-]+)', target, re.IGNORECASE)
+        if match and match.group(1).upper() in DNS_ENV_BY_SERVER:
+            return match.group(1)
+    return target

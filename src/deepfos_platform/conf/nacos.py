@@ -37,28 +37,36 @@ class NacosConfig(EnvironSource):
 
     @retry(retries=5, wait=Wait(base=2, algo='exp_backoff', maximum=30), reraise=True)
     async def get_environ(self):
-        api = NacosAPI(
-            nacos_server=self.url,
-            user=os.getenv("EXPORT_NACOS_CONFIG_USERNAME"),
-            password=os.getenv("EXPORT_NACOS_CONFIG_PASSWORD"),
-        )
-        namespace = os.getenv("EXPORT_NACOS_CONFIG_NAMESPACE", "public")
-        group = os.getenv("EXPORT_NACOS_CONFIG_GROUP", "DEFAULT_GROUP")
-        await api.maybe_login(schedule_renewal=False)
+        from ..options import PlatformOptions
+
+        options = PlatformOptions().nacos
+        options.server = self.url
+        options.user = os.getenv('EXPORT_NACOS_CONFIG_USERNAME', '')
+        options.password = os.getenv('EXPORT_NACOS_CONFIG_PASSWORD', '')
+        options.access_key = os.getenv('NACOS_ACCESS_KEY', '')
+        options.secret_key = os.getenv('NACOS_SECRET_KEY', '')
+        options.ram_role_name = os.getenv('EXPORT_NACOS_RAM_ROLE_NAME', '')
+        options.auth_mode = os.getenv('EXPORT_NACOS_AUTH_MODE', 'password')
+        api = NacosAPI(options)
+        namespace = os.getenv('EXPORT_NACOS_CONFIG_NAMESPACE', 'public')
+        group = os.getenv('EXPORT_NACOS_CONFIG_GROUP', 'DEFAULT_GROUP')
 
         async def get_configs(data_id: str) -> Dict[str, str]:
             raw = await api.get_configs(data_id, namespace=namespace, group=group)
             conf = {}
             for line in raw.splitlines():
-                left, sep, right = line.strip().partition("=")
-                if not sep:
-                    continue
-                conf[left.strip()] = maybe_unwrap_quote(right.strip())
+                left, sep, right = line.strip().partition('=')
+                if sep:
+                    conf[left.strip()] = maybe_unwrap_quote(right.strip())
             return conf
 
-        environ = {}
-        if shared_conf_id := os.getenv("EXPORT_NACOS_CONFIG_SHARED_CONFIG"):
-            environ.update(await get_configs(shared_conf_id))
-        if exclusive_conf_id := os.getenv("EXPORT_NACOS_CONFIG_EXT_CONFIG"):
-            environ.update(await get_configs(exclusive_conf_id))
-        return environ
+        try:
+            await api.maybe_login(schedule_renewal=False)
+            environ = {}
+            if shared_conf_id := os.getenv('EXPORT_NACOS_CONFIG_SHARED_CONFIG'):
+                environ.update(await get_configs(shared_conf_id))
+            if exclusive_conf_id := os.getenv('EXPORT_NACOS_CONFIG_EXT_CONFIG'):
+                environ.update(await get_configs(exclusive_conf_id))
+            return environ
+        finally:
+            await api.close()

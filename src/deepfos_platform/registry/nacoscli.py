@@ -8,7 +8,6 @@ from loguru import logger
 from ..lib.utils import retry, Wait
 from ..lib.nacos import NacosAPI
 from ..discovery.discovery import poll_event
-from ..options import OPTION
 
 _NacosIns: Optional['NacosInstance'] = None
 
@@ -119,11 +118,7 @@ def _build_instance(
         server_name,
         ip=instance_host,
         port=instance_port,
-        api=NacosAPI(
-            nacos_server=OPTION.nacos.server,
-            user=OPTION.nacos.user,
-            password=OPTION.nacos.password,
-        ),
+        api=NacosAPI(),
         heartbeat_interval=heartbeat_interval,
         group=group,
         namespace=namespace,
@@ -149,11 +144,14 @@ async def register_once(
         server_name, instance_host, instance_port,
         heartbeat_interval, group, namespace, cluster,
     )
-    await _NacosIns.initialize()
+    ins = _NacosIns
     try:
-        await _NacosIns.register_once()
-    except Exception:
-        logger.error(
+        await ins.initialize()
+        await ins.register_once()
+    except BaseException:
+        _NacosIns = None
+        await ins.api.close()
+        logger.exception(
             f"Nacos register_once failed for {server_name} "
             f"{instance_host}:{instance_port}"
         )
@@ -197,7 +195,9 @@ async def stop():
     try:
         await ins.unregister()
     except Exception:
-        logger.exception("Nacos unregister failed")
+        logger.exception('Nacos unregister failed')
+    finally:
+        await ins.api.close()
 
 
 @atexit.register

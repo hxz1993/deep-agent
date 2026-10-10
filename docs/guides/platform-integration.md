@@ -27,7 +27,55 @@
 `EXPORT_EUREKA_DEFAULTZONE` / `EXPORT_EUREKA_SERVER_ADDR` 获取注册实例；本地 Profile
 可以使用 `local`，通过 `EXPORT_WEB_GATEWAY_SERVER` / `EXPORT_GATEWAY_SERVER` 拼接网关地址。
 因此本机通过网关成功，不等于部署容器的 Eureka 或实例网络已验收。
-`BaseAPI` 原有的公共服务/`SYSTEM_ENV` 前缀规则保持不变，不在身份适配器中自行猜测前缀。
+`BaseAPI` 原有的公共服务/`SYSTEM_ENV` 前缀规则在注册中心模式下保持不变，不在身份适配器中自行猜测前缀。
+
+## DNS 环境地址发现
+
+设置 `EXPORT_SERVICE_DISCOVERY_IMPLEMENTATION=dns` 后，不需要 Eureka/Nacos/K8s 地址。
+该模式根据固定的 50 项服务映射读取 `EXPORT_DNS_*`，不查询注册中心、不缓存实例，也不创建刷新任务。
+例如 `app-server` 读取 `EXPORT_DNS_APP`，`seepln-account` 读取 `EXPORT_DNS_ACCOUNT`。
+服务名忽略大小写；每次调用重新读取环境变量，未知服务或缺失/空白地址会明确报错。
+DNS 模式不加 `SYSTEM_ENV` 前缀。除历史 `*server` 简写外，已知映射中的纯逻辑 URL
+（例如 `http://SEEPLN-ACCOUNT`）也会规范化；真实域名、端口、路径仍保留原有直连语义。
+
+以下服务选项新增 DNS 别名。旧键优先，按第一个存在的键取值，不因值为空而回退。
+
+| 选项 | 环境键，按优先级排序 |
+| --- | --- |
+| 网关 | `EXPORT_WEB_GATEWAY_SERVER`、`EXPORT_GATEWAY_SERVER`、`EXPORT_DNS_WEB_GATEWAY` |
+| App | `EXPORT_APP_SERVER_NAME`、`EXPORT_DNS_APP` |
+| System | `EXPORT_SYSTEM_SERVER_NAME`、`EXPORT_DNS_SYSTEM` |
+| Space | `EXPORT_SPACE_SERVER_NAME`、`EXPORT_DNS_SPACE` |
+| 文件 | `EXPORT_PLATFORM_FILE_SERVER_NAME`、`EXPORT_DNS_PLATFORM_FILE` |
+| Account | `EXPORT_SERVER_NAME_USER`、`EXPORT_DNS_ACCOUNT` |
+| 租户 | `EXPORT_OS_SPACE_TENANT_SERVER_NAME`、`EXPORT_DNS_OS_SPACE_TENANT` |
+
+## Nacos 鉴权
+
+`EXPORT_NACOS_AUTH_MODE` 支持三种模式，默认 `password`。仅配置 AK/SK 不会自动切换模式。
+
+| 模式 | 凭据 |
+| --- | --- |
+| `password` | `EXPORT_NACOS_USER_NAME`、`EXPORT_NACOS_PASSWORD`；未配置时允许匿名请求 |
+| `aksk` | `NACOS_ACCESS_KEY`、`NACOS_SECRET_KEY`，注意没有 `EXPORT_` 前缀 |
+| `ram` | `EXPORT_NACOS_RAM_ROLE_NAME`；在 ECS/ACK 环境获取临时 AK/SK 和安全 Token |
+
+`NacosAPI()` 默认读取 `OPTION.nacos`，发现/注册无需展开地址和鉴权参数。
+仅配置中心等独立配置场景使用 `NacosAPI(options)`，复用现有 Nacos 配置对象，不修改全局配置。
+
+Naming/Config 使用来源协议的 HMAC-SHA1/Base64 签名。静态 AK/SK 在构造时固定；
+RAM 请求前检查到期时间并在到期前 900 秒刷新，使用 IMDSv2，取不到元数据 Token 时回退 IMDSv1。
+密码和 RAM 在业务响应 403 后最多刷新并重试一次；静态 AK/SK 的 403 直接失败。
+仍支持逗号分隔的多个 Nacos 地址及连接失败时的排名故障切换。
+
+配置中心使用独立的 `EXPORT_NACOS_CONFIG_SERVER_ADDR`、`EXPORT_NACOS_CONFIG_USERNAME`、
+`EXPORT_NACOS_CONFIG_PASSWORD`、`EXPORT_NACOS_CONFIG_NAMESPACE`、`EXPORT_NACOS_CONFIG_GROUP`，
+与发现/注册共享上述鉴权模式及 AK/SK、RAM 角色设置。专属配置继续覆盖共享配置。
+发现器、注册器、配置读取结束时关闭所属鉴权资源，HTTP 连接池仍由平台运行时统一管理。
+
+新增回归覆盖 DNS HTTP 请求、三种鉴权协议、配置覆盖、发现/注册参数传递与关闭路径。
+`tests/integration/test_platform_nacos_environment.py` 是可选的真实环境只读检查；未配置相应环境变量时
+明确跳过，HTTP 401/403 仅证明可达，不证明鉴权成功。来源的 Celery/SDK 任务上下文用例不适用于本项目运行时。
 
 ## 三条账号链路
 

@@ -69,6 +69,10 @@ PYTHONPATH=src:. python3.12 mcp_servers/<name>/server.py
 
 薄启动器，委托 `deepcube.mcp.server:main`。**所有运行时参数由 `deepcube-mcp` 从 `DEEPCUBE_MCP_*` 环境变量读取**（见包内 `deepcube.mcp.config`）；launcher 仅设置 stdio 默认值，并在未配置时把 `deepfos_platform` 的 `EXPORT_SERVICE_DISCOVERY_*` / `EXPORT_EUREKA_*` / `EXPORT_NACOS_*` / `EXPORT_K8S_DISCOVERY_NAMESPACE` 桥接为 `DEEPCUBE_MCP_*`。
 
+未显式设置 `DEEPCUBE_MCP_DISCOVERY` 且启用 Nacos 时，launcher 将全部十个 Nacos 字段写入 discovery JSON 的 `nacos` 对象：`server`、`cluster`、`namespace`、`group`、`user`、`password`、`access_key`、`secret_key`、`ram_role_name`、`auth_mode`。未设置的值省略；密码和 AK/SK 原样传递，其他字段沿用空值清理规则。launcher 只负责发送配置，不直接修改 SDK OPTION、不处理 SDK 字段兼容性，也不输出凭据日志。新鉴权字段的接收、SDK 配置应用和每请求上下文重建由 DeepCube 负责，需要使用支持这些字段的接收端和 DeepFOS SDK。
+
+启用 DNS 时，launcher 调用平台 `get_dns_records()`，将已有 `EXPORT_DNS_*` 的全部 50 个服务地址写入 discovery JSON 的 `dns.records`，服务名和 URL 原样传递；沿用平台缺少或空地址即报错的语义。DeepCube 接收 `implementation="dns"`，在启动及每请求上下文中先通过 `safe_set` 设置 `dns.records`，再选择后端和启用发现。实际 DNS 发现仍要求 SDK 支持相应选项。
+
 DeepCube由发布流水线先注入内部Wheel，公开PyPI不提供该包，因此`requirements.txt`不锁定公开版本号。
 DeepAgent在外层统一增加`deepcube_`协议前缀，包内原始工具必须使用
 `list_cubes`、`resolve_members`等短名，不能再次携带`deepcube_`。模型最终看到的稳定名称仍为
@@ -81,7 +85,7 @@ stdio 模式**不**读 per-request `_meta.headers`，须在环境变量或 DB `c
 | `DEEPCUBE_MCP_TRANSPORT` | launcher 默认 `stdio`（包内默认 `http`） |
 | `DEEPCUBE_MCP_ENV_URL` | `https://test.deepfos.com/deepfos-server/` |
 | `DEEPCUBE_MCP_HEADERS` | JSON，如 `{"app":"demo","space":"demo","token":"..."}` |
-| `DEEPCUBE_MCP_DISCOVERY` | JSON，含 `enabled` / `implementation` / `take_over` / `eureka` / `nacos` / `k8s` |
+| `DEEPCUBE_MCP_DISCOVERY` | JSON，含 `enabled` / `implementation` / `take_over` / `eureka` / `nacos` / `k8s` / `dns` |
 | `DEEPCUBE_MCP_DISCOVERY_ENABLED` | `true` / `false` |
 | `DEEPCUBE_MCP_EUREKA` | Eureka 地址 |
 | `DEEPCUBE_MCP_CACHE_*` | 元数据缓存 TTL / 开关 / 上限 |

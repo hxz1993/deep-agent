@@ -32,11 +32,14 @@ Harness ToolOutputLimits.after_tool_execute
   → Store确认handle存在于当前Session原始History
   → 同Run缓存命中则直接读取
   → 否则平台下载一次并缓存
-  → Harness按行/尾部/字面关键词返回受限切片
+  → DeepAgent读取工具按行/尾部/字面关键词返回Token预算内切片
 ```
 
-`read_tool_result`保留Harness原生实现。DeepAgent只实现 `OverflowStore.write/read`适配器，因此不复制
-分页、关键词、单次行数和字符上限逻辑。
+Spill和Store继续复用Harness的保存协议。`read_tool_result`通过公开`get_toolset()`扩展点提供，
+与`read_file`共用24K/48K估算Token分页，正文与包装一起计入；不修改Harness安装包。
+模型窗口小于256000或未知用24K，至少256000用48K。默认不限制源行数，
+显式`limit`和原来的授权、字面匹配、尾读、`next_read/previous_read`续读语义保留。
+普通大结果外置阈值及2000字符预览不随回读量调整改变。
 
 ## 3. 权限与压缩
 

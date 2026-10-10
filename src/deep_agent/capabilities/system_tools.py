@@ -88,7 +88,7 @@ _SYSTEM_TOOL_DOMAINS = (
                 display_name="读取文件",
                 source="DeepAgent",
                 injection_condition="当前会话存在可读附件，或 Agent 已配置含可读资源的 Skill",
-                description="统一分页读取文本、Word 和 Excel 文件。",
+                description="直接读取文本、DOCX、XLSX、PPTX及PDF文本层，不支持旧DOC/XLS/PPT或图片OCR；默认在当前模型的24K/48K Token预算内尽量返回全文，超限按原位置续读。PDF保留物理页，扫描件与复杂版面OCR需显式启用文档解析分组。",
             ),
             SystemToolDescription(
                 name="export_file_to_download_center",
@@ -109,7 +109,7 @@ _SYSTEM_TOOL_DOMAINS = (
                 display_name="读取完整工具结果",
                 source="Pydantic AI Harness",
                 injection_condition="Agent Run启用大工具结果治理",
-                description="按行分页或关键词读取本会话已外置的完整工具结果。",
+                description="读取本会话已外置的完整工具结果；默认按24K/48K Token预算返回，保留行范围、字面关键词和尾窗读取。",
             ),
         ),
     ),

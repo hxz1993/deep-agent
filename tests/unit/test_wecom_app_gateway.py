@@ -31,19 +31,118 @@ class WecomAppGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_final_reply_sends_and_requires_bound_run(self):
         row = account()
         adapter = WecomAppAdapter(row)
-        adapter.client = N(wecom_app_send_text=AsyncMock(return_value={'message_id': 'sent'}))
+        adapter.client = N(wecom_app_send_message=AsyncMock(return_value={'message_id': 'sent'}))
         await adapter.start(None)
         message = envelope(row).message()
         adapter.bind_run(message, 'run')
         await adapter.reply_loading(message, 'reply')
         await adapter.reply(message, 'reply', 'partial', False)
-        adapter.client.wecom_app_send_text.assert_not_awaited()
+        adapter.client.wecom_app_send_message.assert_not_awaited()
         await adapter.reply(message, 'reply', 'complete', True)
-        adapter.client.wecom_app_send_text.assert_awaited_once_with(row, 'run', 'complete')
+        adapter.client.wecom_app_send_message.assert_awaited_once_with(row, 'run', 'complete', message_type='markdown')
         adapter.release_run(message)
         with self.assertRaises(Exception):
             await adapter.reply(message, 'reply', 'late', True)
         await adapter.stop()
+
+    async def _loading_adapter(self):
+        row = account()
+        adapter = WecomAppAdapter(row)
+        adapter.client = N(wecom_app_send_message=AsyncMock(return_value={'message_id': 'sent'}))
+        await adapter.start(None)
+        self.addAsyncCleanup(adapter.stop)
+        message = envelope(row).message()
+        adapter.bind_run(message, 'run')
+        return adapter, message
+
+    async def test_slow_processing_sends_one_notice_even_across_tool_waits(self):
+        adapter, message = await self._loading_adapter()
+        with patch('deep_agent.channels.adapters.wecom_app.LOADING_DELAY_SECONDS', 0):
+            await adapter.reply_loading(message, 'reply')
+            task = adapter._loading[message.message_id]
+            await task
+            await adapter.reply_loading(message, 'reply', 'tool waiting')
+            await adapter.reply(message, 'reply', 'partial', False)
+            self.assertEqual(adapter.client.wecom_app_send_message.await_count, 1)
+            await adapter.reply(message, 'reply', '**answer**', True)
+            await adapter.reply_loading(message, 'reply', 'late')
+        calls = adapter.client.wecom_app_send_message.await_args_list
+        self.assertEqual([c.kwargs['message_type'] for c in calls], ['text', 'markdown'])
+        self.assertEqual(calls[0].args[2], '已收到，正在处理，请稍候。')
+
+    async def test_final_at_timer_boundary_prevents_notice(self):
+        adapter, message = await self._loading_adapter()
+        with patch('deep_agent.channels.adapters.wecom_app.LOADING_DELAY_SECONDS', 0):
+            await adapter.reply_loading(message, 'reply')
+            await asyncio.sleep(0)  # Timer entered sleep; final wins the next turn.
+            await adapter.reply(message, 'reply', 'answer', True)
+            await adapter.reply_loading(message, 'reply')
+        self.assertEqual(adapter.client.wecom_app_send_message.await_count, 1)
+        self.assertEqual(adapter.client.wecom_app_send_message.await_args.kwargs['message_type'], 'markdown')
+
+    async def test_inflight_notice_completes_before_final_reply(self):
+        adapter, message = await self._loading_adapter()
+        entered, release = asyncio.Event(), asyncio.Event()
+        sent = []
+        async def send(*args, message_type):
+            if message_type == 'text':
+                entered.set()
+                await release.wait()
+            sent.append(message_type)
+            return {}
+        adapter.client.wecom_app_send_message.side_effect = send
+        with patch('deep_agent.channels.adapters.wecom_app.LOADING_DELAY_SECONDS', 0):
+            await adapter.reply_loading(message, 'reply')
+            await entered.wait()
+            final = asyncio.create_task(adapter.reply(message, 'reply', 'answer', True))
+            try:
+                await asyncio.sleep(0)
+                self.assertFalse(final.done())
+                await adapter.reply_loading(message, 'reply')
+                release.set()
+                await final
+            finally:
+                release.set()
+                await asyncio.gather(final, return_exceptions=True)
+        self.assertEqual(sent, ['text', 'markdown'])
+
+    async def test_notice_failure_does_not_retry_or_block_final(self):
+        adapter, message = await self._loading_adapter()
+        adapter.client.wecom_app_send_message.side_effect = [RuntimeError('fixture'), {}]
+        with patch('deep_agent.channels.adapters.wecom_app.LOADING_DELAY_SECONDS', 0):
+            await adapter.reply_loading(message, 'reply')
+            await adapter._loading[message.message_id]
+            await adapter.reply_loading(message, 'reply')
+            await adapter.reply(message, 'reply', 'answer', True)
+        self.assertEqual(adapter.client.wecom_app_send_message.await_count, 2)
+
+    async def test_release_and_stop_clean_pending_timers(self):
+        adapter, message = await self._loading_adapter()
+        await adapter.reply_loading(message, 'reply')
+        task = adapter._loading[message.message_id]
+        adapter.release_run(message)
+        self.assertIn(task, adapter._loading_tasks)
+        await adapter.stop()
+        self.assertTrue(task.done())
+        self.assertFalse(adapter._loading_tasks)
+        adapter.client.wecom_app_send_message.assert_not_awaited()
+
+    async def test_stop_cancels_inflight_notice(self):
+        adapter, message = await self._loading_adapter()
+        entered, cancelled = asyncio.Event(), asyncio.Event()
+        async def send(*args, **kwargs):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+        adapter.client.wecom_app_send_message.side_effect = send
+        with patch('deep_agent.channels.adapters.wecom_app.LOADING_DELAY_SECONDS', 0):
+            await adapter.reply_loading(message, 'reply')
+            await entered.wait()
+            await adapter.stop()
+        self.assertTrue(cancelled.is_set())
+        self.assertFalse(adapter._loading_tasks)
 
     async def test_media_bridge_uses_bound_run_and_normalizes_voice(self):
         row = account()
@@ -160,8 +259,8 @@ class WecomAppGatewayTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ChannelGatewayUnavailableError):
                 await client.statuses()
 
-    def test_capabilities_do_not_claim_outbound_media(self):
+    def test_capabilities_cover_application_media_and_cards(self):
         caps = WecomAppAdapter.message_capabilities()
-        self.assertEqual(caps.kinds, ('text',))
+        self.assertEqual(caps.kinds, ('text', 'image', 'file', 'audio', 'video', 'textcard', 'news'))
         self.assertFalse(caps.supports_reply)
-        self.assertFalse(caps.media_fallback_to_file)
+        self.assertTrue(caps.media_fallback_to_file)

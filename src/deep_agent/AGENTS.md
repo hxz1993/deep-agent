@@ -390,7 +390,7 @@ XML + JSON 投影。业务字段语义仍由具体 Agent Prompt 负责。
 | `../conversation/` | Event → `ConversationItem`纯投影；供`/history`与持久化SSE共用 |
 | `factory.py` | `build_agent()` — model 字符串或 OpenAI 兼容 endpoint |
 | `../models/` | API、配置服务与 Agent 共用的 Provider/模型适配及 models.dev 目录解析 |
-| `attachment_extractors.py` | 文本、DOCX、XLSX 按需解析、分页与文件安全限制 |
+| `attachment_extractors.py` | 文本、DOCX、XLSX、PPTX、PDF文本层按需解析、分页与文件安全限制 |
 | `attachments.py` | 会话附件引用、原生模态校验和平台下载 |
 | `runner.py` | `run()` / `run_stream()` — 会话锁、history、事件映射 |
 | `planning.py` | Harness `Planning`装配、每Run Store和Tool Result计划快照 |
@@ -536,7 +536,7 @@ channel_message_operations 及其中回执，保留已发布迁移；不改变�
   原子更新记录并返回 `repaired`。不得只用请求字节恢复当前 Pod而让后续重启再次失败。
 - Harness 0.26 `Skills` 负责 `load_capability` 渐进披露；DeepAgent通过 `list_skill_resources`
   提供授权目录，通过系统 `read_file`读取正文。
-- 文本、DOCX 和 XLSX 根据索引中的路径、MIME 与后缀按行、逻辑块或物理行分页；图片和其他
+- 文本、DOCX、PPTX、XLSX及PDF根据索引中的路径、MIME与后缀按行、逻辑块、物理行或PDF物理页分页；图片和其他
   二进制只展示元数据，不经文件工具读取。历史安装包不需要为XLSX重新生成索引。
 - `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。Agent选择该Skill并关联
   `builtin:sandbox`时，`execute_skill_script`与 `execute_python`共用当前Python沙箱Backend。
@@ -573,14 +573,17 @@ channel_message_operations 及其中回执，保留已发布迁移；不改变�
 Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引。字节和解析结果只缓存到
 本次用户消息对应的完整 Run终态，不跨Run、进程或数据库保存。
 
-文件分页文本默认/最大1000/4000行，Office为200/1000项，正文上限仍50,000字符。
+两个读取工具共用`files/reading_budget.py`：模型配置窗口小于256000或未知时，
+完整返回（正文与包装）最多24000估算Token；窗口至少256000时最多48000。
+直接使用窗口大小分档，不扣最大输出、不取20%；使用当前模型的`TokenEstimator`。
+默认不限制源项数，在Token预算内尽量读取；显式`limit`仍表示最多多少行/块/工作表行/PDF页，
+没有额外4000/1000项上限。原50,000字符返回限制取消，解析安全限制保留。
 `has_more`时必须同时将`next_offset/next_char_offset`作为`offset/char_offset`续读；后者是项内
 Unicode字符位置，部分项不向后跳号、不加省略标记。不能用returned_count推导游标。
 
 图片、音频和视频不进入 `read_file`。当前轮媒体附件直接作为原生多模态内容交给Provider；
 `llm_models.input_modalities`用于目录和管理员说明，不在DeepAgent本地建立第二层拒绝判断，所选模型
-不接受时由Provider正常返回错误。历史媒体和Skill媒体不读取。PDF和PPT/PPTX若未来需要读取，
-单独建设文档解析工具，不并入普通文件工具。新上传不抽文本，
+不接受时由Provider正常返回错误。历史媒体和Skill媒体不读取。PDF文本层按物理页使用read_file的本地MarkItDown转换，扫描件使用显式启用的文档解析；PPTX使用read_file的本地MarkItDown转换，不调用视觉模型。新上传不抽文本，
 历史 `extracted_text` 仅为回放兼容。完整设计见
 [`../../docs/design/06-attachment-parsing/`](../../docs/design/06-attachment-parsing)。
 
@@ -595,7 +598,7 @@ Unicode字符位置，部分项不向后跳号、不加省略标记。不能用r
 仅nested audit保留4K字符串/32项/4层和32,768字符总预览限制。Web Fetch取消50K字符提前截断，
 保留5MiB下载安全上限，完整正文交给以下Token治理与回读，不创建第二套网页Store。
 XLSX单元格不按4K字符截断；全工作簿解析正文最多8,000,000字符，超出明确失败，
-防止sharedStrings重复展开；文件metadata仅为8K字符内的sheet/header预览，完整首行仍按游标读取。
+防止sharedStrings重复展开；sheet/header目录预览受8K字符限制，完整首行仍按游标读取；当前批次正文引用的格式字典计入完整Token预算，不重复返回整表定义。合并范围保留本批匹配总数，最多预览128项并明确truncated，不能让辅助信息阻断正文读取。
 
 普通Function、MCP、Sandbox和MCP Resource工具的返回在进入模型历史前经过Harness
 `ToolOutputLimits`。阈值为模型配置窗口减去最大输出后的20%，并限制在4K～48K Token；没有有效窗口时使用
@@ -607,7 +610,8 @@ XLSX单元格不按4K字符截断；全工作簿解析正文最多8,000,000字�
 未达到Spill阈值的结果继续保持原对象。
 
 回读通过DeepAgent的公开`get_toolset()`覆盖同名`read_tool_result`，不patch安装包。
-默认/最大400/2000行，正文50,000字符；原handle授权、字面pattern和from_end保留。
+默认`limit=None`，在上述24K/48K估算Token预算内尽量返回；返回`limit`仍为整数。
+显式`limit`保留源行数含义，无额外2000行上限；原handle授权、字面pattern和from_end保留。
 结构化结果的`next_read`给出完整续读参数（0-based行offset、char_offset、end_offset），
 尾窗截断先正向续读该窗口，随后用首次返回的`previous_read`选择更早窗口。文件压缩去重键
 必须包含char_offset，工具结果还要包含end_offset，不能把不同片段误当重复读取。
@@ -794,3 +798,30 @@ MCP 工具合计不超过 10 个时全部直接披露，超过 10 个时预选�
 - D01 压缩落库前必须核对摘要实际使用的模型历史与 Event Store 投影；不能只比较保存前重新采样的 raw history，否则可能把摘要期间新追加的事件错误地纳入来源。完成事件需在下一次推理前提交，Console 按 event_id 即时确认，后续业务失败不回滚已完成压缩。
 
 钉钉扫码实测状态包含 `WAITING / SCANNED / SELECTING / CREATING / SUCCESS`；选择已有机器人和新建机器人必须分别验证，未知中间状态只作有界等待，不能直接当成功或立即终止。钉钉默认 AI 流式卡片，固定使用官方 OpenClaw 连接器当前同款模板，不提供流式开关或模板配置扩展；卡片失败不得回退普通正文，普通消息仅用于独立消息工具路径。用户详情独立开关 user_details_enabled 默认关闭，开启才使用回调昵称及网关内存缓存，无通讯录查询和新表。API 成功不能替代客户端正文可见验收。
+
+
+### 专业文档解析（0.12.9）
+
+- `documents/` 的 Paddle/GLM 官方 HTTP 适配器服务于显式内置分组 `builtin:document` / `parse_document`，不要混入聊天模型 Provider，也不要自动给现有 Agent 启用。
+- 配置只复用 `global_setting.document_parsing`：保存当前供应商及 Key，不新增环境变量、数据库结构或格式切换配置。管理员 GET/PUT/test 路由见 `api/v1/document_parsing.py`；保存不能隐式执行收费解析。
+- `ProviderCapability` 是格式说明、文件校验、上传、目录与运行时说明的唯一来源。默认白名单可扩充当前已配置供应商格式；显式上传白名单及平台大小限制始终优先。
+- 两个普通读取工具与文档工具共用 `ReadingBudget` 和 Token 分页；`parse_document` 跳过通用大结果二次外置。原生页面与响应保留，`adaptation.py` 在首次解析后以工作线程生成一次固定可读投影：普通表格 Markdown、复杂表格精简 HTML，删除展示属性且保留单元格角色与合并关系，不纠正 OCR 数字。缓存的 `readable.pages` 是 Token 计量与 Unicode 游标唯一来源，不能切片后适配。验收分别证明原生→投影语义完整和投影→分页逐字符完整，不能用最后 `has_more=false` 代替完整轨迹核对。
+- 2026-10-08 核验：供应商 Markdown 不是全部已识别信息，Paddle 默认忽略 header/footer 等可能藏有正式编号。`native_content.py` 保留原正文并补回未呈现的原始布局块，GLM 保留额外布局页；补回后才计 Token。重复值按出现次数检查，短编号不能因嵌入其他长值被当成已覆盖；无法证明同一表达时保守保留。`complete` 只表示页覆盖/片段读完，未识别到不能推断原件留空，也不能替换成其他单据编号。通用工具仅提示核图与不确定性，不写合同专用纠错或代填规则。
+- Run 配置快照与 `DocumentCacheLifecycle.wrap_run` 管理缓存。续读也检查原来源授权；Run 结束、失败、取消或返回 Deferred 后清理任务与私有临时目录。已经提交的任务不得自动再次提交，取消不得宣称已停止远端计费。
+- 在`parse_document`中pypdf只用于源PDF页数和加密/损坏检查，OCR正文来自已配置的供应商；`read_file`则用pypdf分离物理页后交给MarkItDown本地转换。未知页边界必须标未知，不能用块数或文本长度冒充物理页数。
+- 接入与使用见 [`../../docs/guides/document-parsing.md`](../../docs/guides/document-parsing.md)。真实样本和原生响应保持忽略，不提交 Key、合同或签名URL；协议回归与业务金额质量分开报告。
+
+
+### 文件读取引擎与核验（2026-10-09）
+
+- PDF文本读取的安全限制须覆盖实际调用的嵌套Form和字体流，不能只检查页面主内容流；共享流只计一次，循环调用提前拒绝，图片不因安全扫描而解码。CPU转换取消后等工作线程退出再释放解析记录，避免同一文件重复转换。
+
+- `read_file`工具名、授权、Run缓存和24K/48K分页协议不变。DOCX正文用固定版本MarkItDown，原生读取补页眉、页脚和署名批注；PPTX用其本地转换器读取文本、表格、图表数据及备注。转换不启用插件、LLM或远端OCR，图片引用不等于识别结果，不保证文本框、合并关系和原始布局完整。
+- XLSX继续使用openpyxl；OOXML扫描有值/公式格，不能把仅样式空格算进2M内容格限制。正文以安全CSV表达，保留物理行、文本编号、错误码与缓存值；常见显示格式可应用，其他格式必须带可回查的来源格式引用。不执行或重算公式，显示舍入不能默默丢掉源精度。
+- 内置Skill `file-reading-verification`仅在Agent显式关联后披露，不自动赋予工具。关键编号/金额/百分比/日期按风险核验；OCR未识别到不能推出原件不存在。
+- 读取引擎比较应以修复后的实现和相同原件为准，区分正文覆盖、显示信息、无损分页和业务判断。21表拼接的离线分页次数不等于每次只读一表的产品调用次数。真实合同和响应仅放本地私有产物，不提交Git。
+
+### PDF读取验收（2026-10-10）
+
+- PDF文本层本地转换按物理页缓存；空文本页保留页码和限制提示，不能将页覆盖或读取结束解释为原件信息完整。统一按转换后的固定内容计Token，完整包装沿用24K/48K预算；所有格式保留显式范围和Unicode续读。
+- 文件读取器与Skill验收分开：同源、同模型、同提示词条件下比较提取内容和业务判断。原图/源单元格为独立答案，未知值保持未知，租赁和BOM测试仅产出隔离草稿，不执行业务保存。

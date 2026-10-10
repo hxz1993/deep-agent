@@ -54,7 +54,7 @@ class WecomClient:
                 task.cancel()
                 self._token_tasks.pop(key, None)
 
-    async def _request(self, method, path, *, stage, params=None, body=None):
+    async def _request(self, method, path, *, stage, params=None, body=None, multipart=None):
         if self._closed:
             raise WecomError(stage, "service_closed")
         if self._session is None:
@@ -68,7 +68,8 @@ class WecomClient:
                 if self._closed:
                     raise WecomError(stage, "service_closed")
                 async with self._session.request(
-                    method, self.BASE_URL + path, params=params, json=body,
+                    method, self.BASE_URL + path, params=params,
+                    **({"data": multipart} if multipart is not None else {"json": body}),
                     allow_redirects=False,
                 ) as response:
                     if response.status != 200:
@@ -217,31 +218,127 @@ class WecomClient:
                 raise WecomError('media', 'network_error') from None
         raise WecomError('media', 'invalid_response')
 
-    async def send_text(self, app, recipient: str, text: str, *, before_send=None) -> dict:
-        # Official text limit is UTF-8 bytes, not Python character count.
+    async def send_message(self, app, recipient: str, text: str, *, message_type: str, before_send=None) -> dict:
+        # Application text and Markdown limits are UTF-8 bytes, not character counts.
         if not text.strip():
             raise WecomError('send', 'empty_text')
         agent_id = str(app.wecom_agent_id)
         if not agent_id.isascii() or not agent_id.isdecimal() or len(agent_id) > 12:
             raise WecomError('send', 'invalid_agent_id')
-        chunks, current, size = [], [], 0
-        for char in text:
-            length = len(char.encode('utf-8'))
-            if size + length > 2048:
-                chunks.append(''.join(current))
-                current, size = [], 0
-            current.append(char)
-            size += length
-        if current:
-            chunks.append(''.join(current))
+        if message_type not in {'text', 'markdown'}:
+            raise WecomError('send', 'unsupported_message_type')
+        from deep_agent.services.wecom_app_format import format_markdown, split_text
+        chunks = format_markdown(text) if message_type == 'markdown' else split_text(text)
+        if not chunks or not any(chunk.strip() for chunk in chunks):
+            raise WecomError('send', 'empty_text')
         ids = []
         for chunk in chunks:
             result = await self.call(app, 'POST', '/message/send', stage='send', body={
-                'touser': recipient, 'msgtype': 'text', 'agentid': int(app.wecom_agent_id),
-                'text': {'content': chunk}, 'safe': 0,
+                'touser': recipient, 'msgtype': message_type, 'agentid': int(app.wecom_agent_id),
+                message_type: {'content': chunk},
             }, **({'before_request': before_send} if before_send is not None else {}))
             if result.get('invaliduser') or result.get('unlicenseduser'):
                 raise WecomError('send', 'recipient_unavailable')
             if result.get('msgid'):
                 ids.append(str(result['msgid']))
         return {'status': 'sent', 'message_id': ids[-1] if ids else None, 'part_count': len(chunks)}
+
+
+    async def upload_media(self, app, kind: str, data: bytes, filename: str, *, before_send=None) -> str:
+        validate_outbound_media(kind, data)
+        from pathlib import PurePosixPath
+        filename = PurePosixPath(filename.replace('\\', '/')).name[:180] or 'attachment'
+        native = 'voice' if kind == 'audio' else kind
+        for attempt in range(2):
+            token = await self.token(app)
+            if before_send is not None:
+                await before_send()
+            form = aiohttp.FormData()
+            form.add_field('media', data, filename=filename, content_type='application/octet-stream')
+            result = await self._request('POST', '/media/upload', stage='upload',
+                params={'access_token': token, 'type': native}, multipart=form)
+            code = result.get('errcode', 0)
+            if type(code) is int and code == 0:
+                media_id = result.get('media_id')
+                if not isinstance(media_id, str) or not media_id:
+                    raise WecomError('upload', 'invalid_response')
+                return media_id
+            if type(code) is int and code in self.TOKEN_ERRORS and attempt == 0:
+                cached = self._tokens.get((app.id, app.revision))
+                if cached and cached.value == token:
+                    self._tokens.pop((app.id, app.revision), None)
+                continue
+            raise WecomError('upload', code if type(code) is int else 'invalid_response')
+        raise WecomError('upload', 'invalid_response')
+
+    async def send_component(self, app, recipient: str, kind: str, *, data=None, filename='', payload=None, before_send=None):
+        agent_id = str(app.wecom_agent_id)
+        if not agent_id.isascii() or not agent_id.isdecimal() or len(agent_id) > 12:
+            raise WecomError('send', 'invalid_agent_id')
+        if kind in MEDIA_LIMITS:
+            media_id = await self.upload_media(app, kind, data or b'', filename, before_send=before_send)
+            native = 'voice' if kind == 'audio' else kind
+            content = {'media_id': media_id}
+        elif kind in {'textcard', 'news'}:
+            native = kind
+            try:
+                content = validate_structured_payload(kind, payload)
+            except ValueError:
+                raise WecomError('send', 'invalid_payload') from None
+        else:
+            raise WecomError('send', 'unsupported_message_type')
+        result = await self.call(app, 'POST', '/message/send', stage='send', body={
+            'touser': recipient, 'msgtype': native, 'agentid': int(agent_id), native: content,
+        }, before_request=before_send)
+        if result.get('invaliduser') or result.get('unlicenseduser'):
+            raise WecomError('send', 'recipient_unavailable')
+        return {'status': 'sent', 'message_id': str(result['msgid']) if result.get('msgid') else None, 'part_count': 1}
+
+
+MEDIA_LIMITS = {'image': 10 * 1024 * 1024, 'file': 20 * 1024 * 1024,
+                'audio': 2 * 1024 * 1024, 'video': 10 * 1024 * 1024}
+
+
+def validate_outbound_media(kind: str, data: bytes):
+    if kind not in MEDIA_LIMITS or len(data) <= 5 or len(data) > MEDIA_LIMITS[kind]:
+        raise WecomError('upload', 'invalid_media_size')
+    valid = kind == 'file'
+    if kind == 'image':
+        import io
+        from PIL import Image
+        try:
+            with Image.open(io.BytesIO(data)) as picture:
+                valid = picture.format in {'PNG', 'JPEG'}
+                picture.verify()
+        except Exception:
+            valid = False
+    elif kind == 'audio':
+        valid = _valid_amr(data)
+    elif kind == 'video':
+        from deep_agent.channels.media_formats import is_mp4_video
+        valid = is_mp4_video(data)
+    if not valid:
+        raise WecomError('upload', 'unsupported_media_format')
+
+
+def validate_structured_payload(kind: str, payload):
+    from deep_agent.channels.message_payloads import validate_message_payload as validate
+    return validate(kind, payload)
+
+
+def _valid_amr(data: bytes) -> bool:
+    # AMR-NB octet-aligned storage: each complete frame represents 20 ms.
+    if not data.startswith(b'#!AMR\n'):
+        return False
+    sizes = (12, 13, 15, 17, 19, 20, 26, 31, 5)
+    offset, frames = 6, 0
+    while offset < len(data):
+        header = data[offset]
+        frame_type = (header >> 3) & 15
+        if header & 0x83 or frame_type not in {*range(9), 15}:
+            return False
+        offset += 1 + (sizes[frame_type] if frame_type < 9 else 0)
+        frames += 1
+        if offset > len(data) or frames > 3000:
+            return False
+    return frames > 0 and offset == len(data)

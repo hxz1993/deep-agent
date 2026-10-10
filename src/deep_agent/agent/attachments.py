@@ -316,7 +316,7 @@ async def _resolve_ref(
     return [
         TextContent(
             f"[附件: {name}] (file_id: {ref.id}, mime: {ref.mime or 'unknown'})"
-            "（如需读取内容，请调用 read_file 系统工具）"
+            "（仅提供文件引用；请按本轮工具支持的格式选择读取或解析工具获取内容）"
         )
     ]
 

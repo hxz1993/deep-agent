@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -25,12 +25,20 @@ class WecomVoiceError(ValueError):
     """Only fixed, safe user-facing media errors."""
 
 
+LOADING_DELAY_SECONDS = 3.0
+LOADING_TEXT = "已收到，正在处理，请稍候。"
+
+
 class WecomAppAdapter:
     def __init__(self, account, infinite_retry=True):
         self.account = account
         self.client = None
         self._active = False
         self._runs: dict[str, str] = {}
+        self._loading: dict[str, asyncio.Task] = {}
+        self._loading_sending: set[str] = set()
+        self._finished: set[str] = set()
+        self._loading_tasks: set[asyncio.Task] = set()
         self._updated_at = datetime.now(timezone.utc)
 
     @staticmethod
@@ -44,9 +52,12 @@ class WecomAppAdapter:
 
     @staticmethod
     def message_capabilities():
-        return MessageCapabilities(kinds=('text',), supports_reply=False, text_limit=2048,
-                                   file_limit=0, image_limit=0, audio_limit=0, video_limit=0,
-                                   media_fallback_to_file=False)
+        return MessageCapabilities(kinds=('text', 'image', 'file', 'audio', 'video', 'textcard', 'news'),
+                                   supports_reply=False, text_limit=2048,
+                                   file_limit=20 * 1024 * 1024, image_limit=10 * 1024 * 1024,
+                                   audio_limit=2 * 1024 * 1024, video_limit=10 * 1024 * 1024,
+                                   audio_formats=('amr',), image_formats=('png', 'jpeg'),
+                                   video_formats=('mp4',), media_fallback_to_file=True)
 
     async def start(self, on_message):
         self._active = True
@@ -55,6 +66,14 @@ class WecomAppAdapter:
     async def stop(self):
         self._active = False
         self._runs.clear()
+        tasks = list(self._loading_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._loading.clear()
+        self._loading_sending.clear()
+        self._finished.clear()
 
     def status(self):
         return {'state': 'connected' if self._active else 'closed',
@@ -68,9 +87,15 @@ class WecomAppAdapter:
 
     def bind_run(self, message, run_id):
         self._runs[message.message_id] = run_id
+        self._finished.discard(message.message_id)
 
     def release_run(self, message):
-        self._runs.pop(message.message_id, None)
+        message_id = message.message_id
+        self._runs.pop(message_id, None)
+        self._finished.discard(message_id)
+        task = self._loading.pop(message_id, None)
+        if task is not None:
+            task.cancel()
 
     def _run(self, message_id):
         run_id = self._runs.get(message_id)
@@ -105,24 +130,82 @@ class WecomAppAdapter:
         return uuid.uuid4().hex
 
     async def reply_loading(self, message, reply_id, content=''):
-        return None
+        message_id = message.message_id
+        self._run(message_id)
+        if message_id in self._loading or message_id in self._finished:
+            return
+        task = asyncio.create_task(self._delayed_loading(message_id), name="wecom-app-loading")
+        self._loading[message_id] = task
+        self._loading_tasks.add(task)
+        task.add_done_callback(self._loading_done)
+
+    def _loading_done(self, task):
+        self._loading_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    async def _delayed_loading(self, message_id):
+        try:
+            await asyncio.sleep(LOADING_DELAY_SECONDS)
+            if message_id in self._finished:
+                return
+            self._loading_sending.add(message_id)
+            await self._send(message_id, LOADING_TEXT, message_type='text')
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # A failed notice never aborts or retries the actual answer.
+            log_event('webhook_loading_failed', account_id=self.account.id,
+                      channel_run_id=self._runs.get(message_id), error_type=type(exc).__name__)
+        finally:
+            self._loading_sending.discard(message_id)
+
+    async def _finish_loading(self, message_id):
+        self._finished.add(message_id)
+        task = self._loading.get(message_id)
+        if task is None:
+            return
+        # Cancel the timer, but serialize an already-started send with the final
+        # answer. Cancelling HTTP I/O cannot retract a notice accepted upstream.
+        if message_id not in self._loading_sending:
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     async def reply(self, message, reply_id, content, finish):
         if finish:
+            await self._finish_loading(message.message_id)
             await self._send(message.message_id, content)
 
-    async def _send(self, message_id, content):
+    async def _send(self, message_id, content, *, message_type="markdown"):
         run_id = self._run(message_id)
-        log_event('webhook_reply_started', account_id=self.account.id, channel_run_id=run_id)
-        result = await self.client.wecom_app_send_text(self.account, run_id, content)
-        log_event('webhook_reply_completed', account_id=self.account.id, channel_run_id=run_id)
+        log_event('webhook_reply_started', account_id=self.account.id, channel_run_id=run_id,
+                  message_type=message_type)
+        result = await self.client.wecom_app_send_message(self.account, run_id, content, message_type=message_type)
+        log_event('webhook_reply_completed', account_id=self.account.id, channel_run_id=run_id,
+                  message_type=message_type)
         return result
 
     async def send_component(self, target, component, *, reply_to_current=False):
-        if component.kind != 'text' or reply_to_current:
-            raise DeliveryError('unsupported_kind', '企微应用当前仅支持文本发送')
-        result = await self._send(target.message_id, component.text)
-        return ComponentReceipt('text', message_id=result.get('message_id'))
+        if reply_to_current or component.kind not in self.message_capabilities().kinds:
+            raise DeliveryError('unsupported_kind', '企微应用不支持此消息类型或引用回复')
+        if component.kind == 'text':
+            result = await self._send(target.message_id, component.text)
+        else:
+            if component.kind in {'image', 'audio', 'video'}:
+                from deep_agent.services.wecom_client import validate_outbound_media, WecomError
+                try:
+                    validate_outbound_media(component.kind, component.data or b'')
+                except WecomError:
+                    component = replace(component, kind='file')
+            if component.kind == 'file':
+                from deep_agent.services.wecom_client import validate_outbound_media, WecomError
+                try:
+                    validate_outbound_media('file', component.data or b'')
+                except WecomError:
+                    raise DeliveryError('invalid_content', '企微应用文件需大于5字节且不超过20MB') from None
+            run_id = self._run(target.message_id)
+            result = await self.client.wecom_app_send_component(self.account, run_id, component)
+        return ComponentReceipt(component.kind, message_id=result.get('message_id'))
 
 
 async def _amr_to_wav(data: bytes) -> bytes:

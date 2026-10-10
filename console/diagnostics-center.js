@@ -1,5 +1,5 @@
 import { initDiagnosticLogs } from "./diagnostics.js?v=20260929-release0124";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20260929-release0124";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20261002-console-audit";
 import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260923-c04-1";
 
 import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20260929-release0124";

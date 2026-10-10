@@ -236,3 +236,47 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
             await api_deps.build_runner_for_agent(ctx, self.agent_id, channel_type="wecom", channel_context=self.source)
             self.assertIn("channel_message", build.call_args.kwargs["channel_toolset"].tools)
         await ctx.event_persister.aclose()
+
+    async def test_gateway_card_metadata_without_media_part(self):
+        from dataclasses import replace
+        self.caps = replace(self.caps, kinds=(*self.caps.kinds, "textcard", "news"))
+        app = create_gateway_app()
+        app.state.gateway = GatewayContext(SimpleNamespace(internal_token="fixture-token"), self.runtime, self.engine, "010")
+        card = PreparedComponent("textcard", requested_kind="textcard", payload={"title": "结果", "description": "详情", "url": "https://example.test/report"})
+        async with AsyncClient(transport=ASGITransport(app), base_url="http://fixture") as http:
+            response = await http.post("/messages/send", files={"metadata": (None, self.command([card]).model_dump_json(), "application/json")}, headers={"Authorization": "Bearer fixture-token"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "completed")
+        self.assertEqual(self.sent[0][1].payload, card.payload)
+        self.assertIsNone(self.sent[0][1].data)
+
+    async def test_application_adapter_ready_without_websocket_authentication(self):
+        from sqlalchemy import update
+        from deep_agent.db.models import ChannelAccount, ChatSession
+        from deep_agent.channels.adapters.wecom_app import WecomAppAdapter
+        async with self.factory() as db:
+            await db.execute(update(ChannelAccount).where(ChannelAccount.id == self.account.id).values(channel_type="wecom_app", transport="webhook"))
+            await db.execute(update(ChatSession).where(ChatSession.session_id == self.session_id).values(source_type="channel:wecom_app"))
+            await db.commit()
+        account = await self.store.get_account(self.account.id)
+        adapter = WecomAppAdapter(account)
+        adapter.client = SimpleNamespace(wecom_app_send_component=AsyncMock(return_value={"message_id": "card-result"}))
+        await adapter.start(None)
+        self.addAsyncCleanup(adapter.stop)
+        adapter.bind_run(SimpleNamespace(message_id="current-message"), self.run.id)
+        self.managed.adapter = adapter
+        self.assertFalse(adapter.status()["authenticated"])
+        item = PreparedComponent("textcard", requested_kind="textcard", payload={"title": "结果", "description": "详情", "url": "https://example.test"})
+        result = await self.operations.send(self.command([item]), [item])
+        self.assertEqual(result["status"], "completed")
+        adapter.client.wecom_app_send_component.assert_awaited_once()
+        await adapter.stop()
+        with self.assertRaises(DeliveryError) as caught:
+            await self.operations.send(self.command([item]), [item])
+        self.assertEqual(caught.exception.code, "channel_offline")
+
+    async def test_websocket_still_requires_authentication_when_connected(self):
+        self.adapter.status = lambda: {"state": "connected", "authenticated": False}
+        with self.assertRaises(DeliveryError) as caught:
+            await self.operations.send(self.command(self.items()), self.items())
+        self.assertEqual(caught.exception.code, "channel_offline")

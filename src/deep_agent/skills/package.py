@@ -149,7 +149,7 @@ def _resource_entry(path: Path, relative: str, *, category: str) -> dict[str, An
     suffix = path.suffix.lower()
     readable = category != "script" and (
         (suffix in READABLE_SUFFIXES and len(data) <= MAX_MODEL_TEXT_BYTES)
-        or suffix in {".docx", ".xlsx"}
+        or suffix in {".docx", ".xlsx", ".pptx", ".pdf"}
     )
     if suffix in READABLE_SUFFIXES and len(data) > MAX_MODEL_TEXT_BYTES:
         raise SkillPackageError(
@@ -212,7 +212,7 @@ def inspect_skill_directory(
             contains_scripts = True
             resources.append(_resource_entry(path, relative, category="script"))
         elif top == "references":
-            if path.suffix.lower() not in READABLE_SUFFIXES | {".docx", ".xlsx"}:
+            if path.suffix.lower() not in READABLE_SUFFIXES | {".docx", ".xlsx", ".pptx", ".pdf"}:
                 raise SkillPackageError(f"Unsupported reference type: {relative}")
             resources.append(_resource_entry(path, relative, category="reference"))
         elif top == "assets":

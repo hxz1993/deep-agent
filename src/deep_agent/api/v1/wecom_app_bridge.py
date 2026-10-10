@@ -1,10 +1,13 @@
 """Private Gateway bridge. Account/run facts select the app and recipient."""
+import base64
+import binascii
 from pathlib import PurePosixPath
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.agent.observability import log_event
@@ -26,7 +29,30 @@ class MediaRequest(RunRequest):
 
 
 class SendRequest(RunRequest):
+    message_type: Literal['text', 'markdown']
     text: str = Field(min_length=1, max_length=65536)
+
+
+class ComponentRequest(RunRequest):
+    kind: Literal['image', 'file', 'audio', 'video', 'textcard', 'news']
+    data_base64: str | None = Field(default=None, max_length=27962028)
+    filename: str = Field(default='', max_length=512)
+    payload: dict | None = None
+
+    @model_validator(mode='after')
+    def validate_component(self):
+        from deep_agent.services.wecom_client import MEDIA_LIMITS
+        from deep_agent.channels.message_payloads import validate_message_payload
+        if self.kind in MEDIA_LIMITS:
+            if self.payload is not None or not self.data_base64 or not self.filename:
+                raise ValueError('Media requires data and filename, without structured payload')
+            if len(self.data_base64) > 4 * ((MEDIA_LIMITS[self.kind] + 2) // 3):
+                raise ValueError('Media exceeds channel limit')
+        else:
+            if self.data_base64 is not None or self.filename:
+                raise ValueError('Structured messages cannot contain media upload fields')
+            self.payload = validate_message_payload(self.kind, self.payload)
+        return self
 
 
 async def _app(ctx, account):
@@ -94,11 +120,11 @@ async def media(body: MediaRequest, ctx: AppContextDep, account: ChannelAccountD
         raise
 
 
-@router.post('/send-text')
-async def send_text(body: SendRequest, ctx: AppContextDep, account: ChannelAccountDep):
+@router.post('/send-message')
+async def send_message(body: SendRequest, ctx: AppContextDep, account: ChannelAccountDep):
     app, run = await _run(ctx, account, body.channel_run_id)
     fields = dict(account_id=account.id, channel_run_id=run.id,
-                  request_id=(run.source_metadata or {}).get('wecom_app_request_id'), phase='send')
+                  request_id=(run.source_metadata or {}).get('wecom_app_request_id'), phase='send', message_type=body.message_type)
     try:
         async def before_send():
             current = await ctx.stores.channel.get_account(account.id)
@@ -106,10 +132,40 @@ async def send_text(body: SendRequest, ctx: AppContextDep, account: ChannelAccou
                 raise HTTPException(409, 'Channel configuration changed')
             await _run(ctx, current, run.id)
 
-        result = await ctx.get_wecom_profiles().client.send_text(
-            app, run.sender_id, body.text, before_send=before_send)
+        result = await ctx.get_wecom_profiles().client.send_message(
+            app, run.sender_id, body.text, message_type=body.message_type, before_send=before_send)
         log_event('webhook_bridge_completed', **fields, count=result['part_count'])
         return result
     except Exception as exc:
         log_event('webhook_bridge_failed', **fields, error_type=type(exc).__name__, error_code=getattr(exc, 'code', None))
+        raise
+
+
+@router.post('/send-component')
+async def send_component(body: ComponentRequest, ctx: AppContextDep, account: ChannelAccountDep):
+    from deep_agent.services.wecom_client import validate_outbound_media, WecomError
+    app, run = await _run(ctx, account, body.channel_run_id)
+    data = None
+    if body.data_base64 is not None:
+        try:
+            data = base64.b64decode(body.data_base64, validate=True)
+            validate_outbound_media(body.kind, data)
+        except (ValueError, binascii.Error, WecomError):
+            raise HTTPException(422, 'Invalid media format or size') from None
+    async def before_send():
+        current = await ctx.stores.channel.get_account(account.id)
+        if current is None or not current.enabled:
+            raise HTTPException(409, 'Channel configuration changed')
+        await _run(ctx, current, run.id)
+    fields = dict(account_id=account.id, channel_run_id=run.id,
+                  phase='send', message_type=body.kind)
+    try:
+        result = await ctx.get_wecom_profiles().client.send_component(
+            app, run.sender_id, body.kind, data=data, filename=body.filename,
+            payload=body.payload, before_send=before_send)
+        log_event('webhook_bridge_completed', **fields, count=1)
+        return result
+    except Exception as exc:
+        log_event('webhook_bridge_failed', **{**fields, 'phase': getattr(exc, 'stage', 'send')}, error_type=type(exc).__name__,
+                  error_code=getattr(exc, 'code', None))
         raise

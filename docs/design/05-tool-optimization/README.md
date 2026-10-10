@@ -9,6 +9,11 @@
 External/Deferred、Provider Native、Output Tool 和 Toolset 的边界，以及 DeepAgent 当前
 实现和推荐演进顺序。
 
+[两个读取工具的返回量调整](file-and-tool-result-reading-redesign.md)（2026-10-01）
+回顾限额变更历史与上游做法；本轮仅实施`read_file/read_tool_result`共用24K/48K估算Token预算，
+取消默认项数与50000字符返回限制，保留原有续读参数。
+普通结果外置及2000字符预览不变；不透明cursor、首批大结果正文和历史去重明确列为未实施方向。
+
 大型 MCP 工具包的检索与渐进披露已落地。Agent 仍按 ToolPackage 授权，检索只能在
 已授权包内工作，不要求管理员逐个选择工具。文件读取采用更直接的条件注入：当前原始会话存在
 合法附件，或 Agent选择了可读 Skill资源时，运行时注入统一系统工具 `read_file`；没有文件来源时

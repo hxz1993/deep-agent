@@ -347,6 +347,17 @@ test("展示动作覆盖多工具、撤回、失败、中断与 Deferred", () =>
   assert.ok(recorder.calls.some(([method]) => method === "markInterrupted"));
 });
 
+test("History 动作不把已撤回工具当作完成结果展示", () => {
+  const actions = assistantActionsFromHistoryItems([
+    { kind: "tool", call_id: "retry-call", tool_name: "read_file", status: "removed", output: "unsupported" },
+    { kind: "tool", call_id: "document-call", tool_name: "parse_document", status: "pending" },
+  ]);
+  const recorder = recordingPresenter();
+  applyAssistantPresentationActions(recorder.presenter, actions);
+  assert.deepEqual(recorder.calls.filter(([method]) => method === "addToolCall").map(([, call]) => call.tool_call_id), ["document-call"]);
+  assert.equal(recorder.calls.filter(([method]) => method === "addToolResult").length, 0);
+});
+
 test("共享动作入口恢复 Deferred 时仍补齐 UI 工具元数据", () => {
   const recorder = recordingPresenter();
   applyAssistantPresentationActions(

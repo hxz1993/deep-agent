@@ -122,8 +122,8 @@ class WebhookApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('bot',response.text)
 
     async def test_private_bridge_requires_auth_and_run_ownership(self):
-        url = '/api/v1/internal/channels/wecom-app/send-text'
-        payload = {'channel_run_id':'missing','text':'response'}
+        url = '/api/v1/internal/channels/wecom-app/send-message'
+        payload = {'channel_run_id':'missing','message_type':'markdown','text':'response'}
         self.assertEqual((await self.client.post(url,json=payload)).status_code,401)
         with patch.dict('os.environ', {'DEEP_AGENT_CHANNEL_INTERNAL_TOKEN':'fixture-token'}):
             headers = {'X-Deep-Agent-Channel-Token':'fixture-token','X-Deep-Agent-Channel-Account':self.account.id}
@@ -144,14 +144,16 @@ class WebhookApiTests(unittest.IsolatedAsyncioTestCase):
         claimed = await self.stores.channel.claim_message(account_id=self.account.id,binding_id=resolved.binding.id,
             external_message_id='123456789',external_request_id='request',sender_id='sender1',session_id=resolved.session.session_id,
             payload_hash=facts['payload_hash'],source_metadata=facts['source_metadata'])
-        client = SimpleNamespace(send_text=AsyncMock(return_value={'part_count':1,'message_id':'reply','status':'sent'}),
+        client = SimpleNamespace(send_message=AsyncMock(return_value={'part_count':1,'message_id':'reply','status':'sent'}),
+                                 send_component=AsyncMock(return_value={'part_count':1,'message_id':'component','status':'sent'}),
                                  media=AsyncMock(return_value=(b'{}','../data.json','application/json')))
         url = '/api/v1/internal/channels/wecom-app/'
         with patch.dict('os.environ', {'DEEP_AGENT_CHANNEL_INTERNAL_TOKEN':'fixture-token'}), patch.object(self.ctx,'get_wecom_profiles',return_value=SimpleNamespace(client=client)):
             headers = {'X-Deep-Agent-Channel-Token':'fixture-token','X-Deep-Agent-Channel-Account':self.account.id}
-            response = await self.client.post(url+'send-text',headers=headers,json={'channel_run_id':claimed.run.id,'text':'safe reply'})
+            response = await self.client.post(url+'send-message',headers=headers,json={'channel_run_id':claimed.run.id,'message_type':'markdown','text':'safe reply'})
             self.assertEqual(response.status_code,200,response.text)
-            self.assertEqual(client.send_text.await_args.args[1:3], ('sender1','safe reply'))
+            self.assertEqual(client.send_message.await_args.args[1:3], ('sender1','safe reply'))
+            self.assertEqual(client.send_message.await_args.kwargs['message_type'], 'markdown')
             response = await self.client.post(url+'media',headers=headers,json={'channel_run_id':claimed.run.id,'media_id':'wrong-id'})
             self.assertEqual(response.status_code,403)
             client.media.assert_not_awaited()
@@ -159,10 +161,26 @@ class WebhookApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code,200,response.text)
             self.assertEqual(response.content,b'{}')
             self.assertNotIn('../',response.headers['content-disposition'])
+            card = {'channel_run_id':claimed.run.id, 'kind':'textcard',
+                    'payload': {'title':'结果', 'description':'完成', 'url':'https://example.com/report'}}
+            response = await self.client.post(url+'send-component', headers=headers, json=card)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(client.send_component.await_args.args[1:3], ('sender1', 'textcard'))
+            for invalid in ({**card, 'recipient':'other'}, {**card, 'data_base64':'YWJj'},
+                            {**card, 'payload':{**card['payload'], 'url':'javascript:bad'}},
+                            {'channel_run_id':claimed.run.id, 'kind':'image', 'data_base64':'bm90LWltYWdl', 'filename':'x.png'},
+                            {'channel_run_id':claimed.run.id, 'kind':'file', 'data_base64':'!!!', 'filename':'x.txt'}):
+                response = await self.client.post(url+'send-component', headers=headers, json=invalid)
+                self.assertEqual(response.status_code, 422, response.text)
+            self.assertEqual(client.send_component.await_count, 1)
             await self.stores.wecom.update_application(self.app_record.id,app_secret='rotated-fixture')
-            response = await self.client.post(url+'send-text',headers=headers,json={'channel_run_id':claimed.run.id,'text':'not sent'})
+            response = await self.client.post(url+'send-component', headers=headers, json=card)
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(client.send_component.await_count, 1)
+
+            response = await self.client.post(url+'send-message',headers=headers,json={'channel_run_id':claimed.run.id,'message_type':'markdown','text':'not sent'})
             self.assertEqual(response.status_code,409)
-            self.assertEqual(client.send_text.await_count,1)
+            self.assertEqual(client.send_message.await_count,1)
 
     async def test_gateway_conflict_and_timeout_never_false_ack(self):
         from deep_agent.services.channel_gateway_client import ChannelWebhookConflictError, ChannelGatewayUnavailableError

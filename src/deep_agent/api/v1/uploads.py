@@ -3,10 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 
 from deep_agent.agent.headers import extract_forward_headers
-from deep_agent.agent.input_capabilities import upload_capabilities_payload
+from deep_agent.agent.input_capabilities import upload_capabilities_payload, document_upload_mimes
 from deep_agent.agent.media_pipeline import MediaPipelineError, process_upload
 from deep_agent.api.v1.channel_auth import ChannelAccountDep
 from deep_agent.core.context import AppContextDep
+from deep_agent.documents.settings import load_document_parsing_config
 from deep_agent.schemas.attachment import UploadResponse
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
@@ -14,9 +15,10 @@ router = APIRouter()
 
 
 @router.get("/uploads/capabilities")
-async def list_upload_capabilities() -> dict:
+async def list_upload_capabilities(ctx: AppContextDep) -> dict:
     """MIME types and upload kinds enabled by the platform upload pipeline."""
-    return upload_capabilities_payload()
+    config = await load_document_parsing_config(getattr(ctx.stores, "global_setting", None))
+    return upload_capabilities_payload(config)
 
 
 @router.post("/uploads", response_model=UploadResponse)
@@ -29,8 +31,9 @@ async def upload_file(
     raw = await file.read()
     filename = file.filename or "upload.bin"
     mime = file.content_type or "application/octet-stream"
+    config = await load_document_parsing_config(getattr(ctx.stores, "global_setting", None))
     try:
-        processed = process_upload(data=raw, mime=mime, filename=filename)
+        processed = process_upload(data=raw, mime=mime, filename=filename, additional_mimes=document_upload_mimes(config))
     except MediaPipelineError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 

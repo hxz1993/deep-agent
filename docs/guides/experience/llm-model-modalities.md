@@ -45,11 +45,12 @@ interleaved
 - 当前轮图片、音频和视频：直接作为原生多模态内容送给Provider。模型目录的
   `input_modalities`用于管理员识别预期能力，不作为DeepAgent本地拒绝开关；所选模型不支持时，
   由Provider返回拒绝说明或接口错误。
-- PDF和PPT/PPTX不是当前模型模态或上传类型，也没有本地解析能力；未来如有需求，使用独立文档
-  解析工具，不并入 `read_file`。
-- DOCX、XLSX、TXT、LOG、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`；合法附件存在时
+- PDF和PPT/PPTX不是 LLM 原生模态。PPTX文本、表格和备注、PDF文本层可用`read_file`读取；扫描PDF使用专业解析。全局配置专业解析供应商后，未指定白名单的上传策略补充
+  该服务支持的类型；Agent 必须显式关联“文档解析”才能使用 `parse_document`，不并入 `read_file`。
+- DOCX、XLSX、PPTX、PDF、TXT、LOG、CSV、JSON、Markdown、HTML、XML：平台只保存 `file_id`；合法附件存在时
   `read_file`自动注入并按需分页读取，不在上传时预抽文本，也不要求Agent额外选择工具包。
-- 图片不通过 `read_file`；当前轮图片直接作为多模态输入，历史图片和Skill图片不读取。
+- 图片不通过 `read_file`；当前轮图片仍可直接作为多模态输入。`parse_document` 显式启用时可专业
+  解析当前供应商支持的会话或已授权Skill图片，说明见[文档解析](../document-parsing.md)。
 - MCP、Skill、UI Tool：属于 Agent 工具能力，不属于模型输入模态。
 
 附件工具和安全边界详见

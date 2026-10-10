@@ -882,7 +882,10 @@ Harness在估算大小达到阈值时转存，未达到则保留原对象；该�
 
 - Store仅适配现有平台文件服务，不使用Harness默认本地文件Store。
 - 回读由DeepAgent通过公开`get_toolset()`扩展点提供同名`read_tool_result`，不改Harness安装包，
-  Spill与Store授权/缓存继续复用原实现。默认400行，最多2,000行，单页正文仍最多50,000字符。
+  Spill与Store授权/缓存继续复用原实现。默认不限制项数，在24K/48K估算Token预算内尽量返回；
+  显式`limit`保留最大源行数含义，没有额外2,000行上限。正文与完整包装共同计入，
+  不再使用50,000字符返回上限。窗口小于256000或未知用24K，至少256000用48K；
+  这只调整两个读取工具，不改变普通工具的20%外置阈值或2000字符预览。
   返回结构化`content/returned_count/has_more/truncated_by/next_read`；`next_read`是下一次调用的
   完整参数，包含0-based行`offset`及该行内Unicode字符`char_offset`。超长行分段时不跳过后缀，
   完整JSONL记录能放到下一页时不切开；分页片段本身不保证是完整JSON，应读齐再解析。

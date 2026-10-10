@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.toolsets import FunctionToolset
 
+from deep_agent.channels.media_formats import is_mp4_video as _is_mp4_video
+from deep_agent.channels.message_payloads import TextCardPayload, NewsPayload, validate_message_payload
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.files.storage import FileStoreError
@@ -22,13 +24,22 @@ from deep_agent.channels.outbound import (
 
 class MessageComponent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    type: Literal["text", "image", "file", "audio", "video"]
+    type: Literal["text", "image", "file", "audio", "video", "textcard", "news"]
     text: str | None = Field(default=None, max_length=20000)
     file_id: str | None = Field(default=None, max_length=256)
     display_name: str | None = Field(default=None, max_length=200)
 
+    payload: TextCardPayload | NewsPayload | None = None
+
     @model_validator(mode="after")
     def valid_content(self):
+        if self.type in {"textcard", "news"}:
+            if self.text is not None or self.file_id is not None or self.display_name is not None:
+                raise ValueError("卡片组件仅填写payload")
+            validate_message_payload(self.type, self.payload)
+            return self
+        if self.payload is not None:
+            raise ValueError("此消息类型不支持payload")
         if self.type == "text":
             if not self.text or not self.text.strip() or self.file_id or self.display_name:
                 raise ValueError("text组件仅填写非空text")
@@ -36,64 +47,6 @@ class MessageComponent(BaseModel):
             raise ValueError("媒体组件填写当前会话file_id，文字使用独立text组件")
         return self
 
-
-def _is_mp4_video(data: bytes) -> bool:
-    """Recognize an MP4 container with a video track, without decoding codecs.
-
-    `ftyp` is shared by QuickTime, AVIF and audio-only M4A. A matching byte
-    sequence alone is not enough to select a native video upload.
-    """
-    remaining_boxes = 4096
-
-    def boxes(start: int, end: int):
-        nonlocal remaining_boxes
-        while start < end:
-            remaining_boxes -= 1
-            if remaining_boxes < 0 or end - start < 8:
-                raise ValueError("Invalid BMFF box")
-            size = int.from_bytes(data[start:start + 4], "big")
-            kind = data[start + 4:start + 8]
-            header = 8
-            if size == 1:
-                if end - start < 16:
-                    raise ValueError("Invalid extended BMFF box")
-                size = int.from_bytes(data[start + 8:start + 16], "big")
-                header = 16
-            elif size == 0:
-                size = end - start
-            if size < header or size > end - start:
-                raise ValueError("Invalid BMFF box bounds")
-            yield kind, start + header, start + size
-            start += size
-
-    mp4_brands = {b"isom", b"iso2", b"iso3", b"iso4", b"iso5", b"iso6", b"iso7",
-                  b"iso8", b"iso9", b"mp41", b"mp42", b"avc1", b"dash", b"M4V "}
-    has_mp4_brand = False
-    has_video_track = False
-    try:
-        for kind, start, end in boxes(0, len(data)):
-            if kind == b"ftyp":
-                if end - start < 8 or (end - start - 8) % 4:
-                    return False
-                major = data[start:start + 4]
-                if major in {b"qt  ", b"avif", b"avis", b"heic", b"heix", b"mif1", b"msf1"}:
-                    return False
-                brands = {major, *(data[i:i + 4] for i in range(start + 8, end, 4))}
-                has_mp4_brand = bool(brands & mp4_brands)
-            elif kind == b"moov":
-                for child, track_start, track_end in boxes(start, end):
-                    if child != b"trak":
-                        continue
-                    for track_child, media_start, media_end in boxes(track_start, track_end):
-                        if track_child != b"mdia":
-                            continue
-                        for media_child, handler_start, handler_end in boxes(media_start, media_end):
-                            if media_child == b"hdlr" and handler_end - handler_start >= 12:
-                                # FullBox flags/version, pre_defined, handler_type.
-                                has_video_track |= data[handler_start + 8:handler_start + 12] == b"vide"
-    except ValueError:
-        return False
-    return has_mp4_brand and has_video_track
 
 
 def _media_format(data: bytes, kind: str) -> str:
@@ -119,6 +72,16 @@ def normalize_media(component: PreparedComponent, caps: MessageCapabilities) -> 
     """Conservative format detection; unsupported native media remains a file."""
     from dataclasses import replace
 
+    _check_capability(component.kind, caps)
+    if component.kind in {"textcard", "news"}:
+        if component.text or component.data is not None or component.filename:
+            raise DeliveryError("invalid_content", "卡片仅允许结构化内容")
+        try:
+            return replace(component, payload=validate_message_payload(component.kind, component.payload))
+        except ValueError:
+            raise DeliveryError("invalid_content", "卡片内容或链接无效") from None
+    if component.payload is not None:
+        raise DeliveryError("invalid_content", "此消息类型不支持结构化内容")
     if component.kind == "text":
         if not component.text.strip() or len(component.text.encode("utf-8")) > caps.text_limit:
             raise DeliveryError("invalid_text", f"文字不能为空或超过{caps.text_limit}字节，请拆分发送")
@@ -131,7 +94,7 @@ def normalize_media(component: PreparedComponent, caps: MessageCapabilities) -> 
         fmt = _media_format(data, kind)
         formats = getattr(caps, f"{kind}_formats", ())
         limit = getattr(caps, f"{kind}_limit", 0)
-        if not fmt or fmt not in formats or len(data) > limit:
+        if kind not in caps.kinds or not fmt or fmt not in formats or len(data) > limit:
             if not caps.media_fallback_to_file:
                 raise DeliveryError("unsupported_media", "当前格式或大小不适合原生媒体发送；如需按文件发送，请显式选择 file")
             kind = "file"
@@ -143,6 +106,13 @@ def normalize_media(component: PreparedComponent, caps: MessageCapabilities) -> 
     return replace(component, kind=kind)
 
 
+def _check_capability(kind: str, caps: MessageCapabilities) -> None:
+    native = kind in caps.kinds and (kind in {"text", "textcard", "news"} or getattr(caps, f"{kind}_limit", 0) > 0)
+    fallback = kind in {"image", "audio", "video"} and caps.media_fallback_to_file and "file" in caps.kinds and caps.file_limit > 0
+    if not native and not fallback:
+        raise DeliveryError("unsupported_content", "当前渠道不支持此消息类型")
+
+
 async def prepare_components(deps: AgentDeps, components: list[MessageComponent],
                              caps: MessageCapabilities) -> list[PreparedComponent]:
     if not 1 <= len(components) <= 10:
@@ -150,7 +120,11 @@ async def prepare_components(deps: AgentDeps, components: list[MessageComponent]
     prepared = []
     total_bytes = 0
     for component in components:
-        if component.type == "text":
+        _check_capability(component.type, caps)
+        if component.type in {"textcard", "news"}:
+            item = PreparedComponent(component.type, requested_kind=component.type,
+                                     payload=validate_message_payload(component.type, component.payload))
+        elif component.type == "text":
             item = PreparedComponent("text", text=component.text or "", requested_kind="text")
         else:
             file_id = component.file_id or ""
@@ -165,9 +139,12 @@ async def prepare_components(deps: AgentDeps, components: list[MessageComponent]
             filename = PurePosixPath(filename.replace("\\", "/")).name
             if not filename or filename in {".", ".."} or any(ord(c) < 32 for c in filename):
                 raise DeliveryError("invalid_filename", "文件名无效")
+            native_limit = getattr(caps, f"{component.type}_limit", 0) if component.type in caps.kinds else 0
+            fallback_limit = caps.file_limit if caps.media_fallback_to_file and "file" in caps.kinds else 0
+            download_limit = max(native_limit, fallback_limit)
             try:
                 data = await deps.file_store.download_bounded(file_id, deps.request_headers,
-                    max_bytes=min(caps.file_limit, max_upload_bytes() - total_bytes))
+                    max_bytes=min(download_limit, max_upload_bytes() - total_bytes))
             except FileStoreError:
                 raise DeliveryError("file_unavailable", "文件无法读取或超过发送大小上限，本次尚未发送") from None
             total_bytes += len(data)
@@ -211,11 +188,11 @@ def build_channel_message_toolset(store, gateway, source: ChannelRunContext, cap
     if caps.supports_reply:
         async def channel_message(ctx: RunContext[AgentDeps], components: list[MessageComponent],
                                   action: Literal["send"] = "send", reply_to: Literal["current"] | None = None) -> dict:
-            """Send ordered text/image/file/audio/video to this conversation only. Media requires an authorized file_id. Use reply_to=current to quote this turn's incoming message. Unsupported native media is sent as a file. Normal answers still stream automatically; do not repeat successfully sent content."""
+            """Send ordered text/image/file/audio/video or supported textcard/news to this conversation only. Cards use payload, not file_id; textcard needs title/description/url and optional btntxt; news needs 1-8 articles with title/url and optional description/picurl. URLs must be http(s) without credentials. Media requires an authorized file_id. Use reply_to=current to quote this turn's incoming message. Unsupported native media is sent as a file. Normal answers are delivered automatically; do not repeat successfully sent content."""
             return await send(ctx, components, reply_to == "current")
     else:
         async def channel_message(ctx: RunContext[AgentDeps], components: list[MessageComponent],
                                   action: Literal["send"] = "send") -> dict:
-            """Send ordered text/image/file/audio/video to this conversation only. Media requires an authorized file_id. Unsupported native media is sent as a file. This channel does not support native message quotes. Normal answers still stream automatically; do not repeat successfully sent content."""
+            """Send ordered text/image/file/audio/video or supported textcard/news to this conversation only. Cards use payload, not file_id; textcard needs title/description/url and optional btntxt; news needs 1-8 articles with title/url and optional description/picurl. URLs must be http(s) without credentials. Media requires an authorized file_id. Unsupported native media is sent as a file. This channel does not support native message quotes. Normal answers are delivered automatically; do not repeat successfully sent content."""
             return await send(ctx, components, False)
     return FunctionToolset([channel_message], id="runtime:channel")

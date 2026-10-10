@@ -25,7 +25,8 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import log_event
 from deep_agent.files.storage import FileStore, PlatformFileStore
-from deep_agent.files.tool_result_reader import TOOL_RESULT_DEFAULT_LINES, read_stored_tool_result
+from deep_agent.files.reading_budget import ReadingBudget
+from deep_agent.files.tool_result_reader import read_stored_tool_result
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 TOOL_OUTPUT_MIN_TOKENS = 4_000
@@ -42,6 +43,7 @@ _EXCLUDED_TOOLS = frozenset(
     {
         "load_capability",
         "read_file",
+        "parse_document",
         "read_tool_result",
         "search_tools",
         "tool_search",
@@ -380,6 +382,10 @@ class PlatformToolResultStore(OverflowStore):
 class DeepAgentToolOutputLimits(ToolOutputLimits[AgentDeps]):
     """Preserve a complete Event-only fallback when platform spill fails."""
 
+    def __init__(self, *, reading_budget: ReadingBudget, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.reading_budget = reading_budget
+
     def get_toolset(self) -> FunctionToolset[AgentDeps]:
         # Use the public capability extension point, not SDK globals/private readers.
         store = self.store
@@ -389,19 +395,19 @@ class DeepAgentToolOutputLimits(ToolOutputLimits[AgentDeps]):
             ctx: RunContext[AgentDeps],
             handle: str,
             offset: int = 0,
-            limit: int = TOOL_RESULT_DEFAULT_LINES,
+            limit: int | None = None,
             from_end: bool = False,
             pattern: str | None = None,
             char_offset: int = 0,
             end_offset: int | None = None,
             context_lines: Annotated[int, Field(ge=0, le=5, strict=True)] = 0,
         ) -> dict[str, Any]:
-            """Read an authorized spilled result, up to 400 lines by default (max 2000).
+            """Read an authorized spilled result within a 24000/48000 Token budget, including its envelope.
 
             Args:
                 handle: Exact overflow handle from the original tool result.
                 offset: Zero-based count of selected lines to skip, not a source line number.
-                limit: Maximum lines; the body is also limited to 50000 characters.
+                limit: Maximum source lines; omit to read as much as the Token budget allows.
                 from_end: Select a tail window, retaining document order.
                 pattern: Literal substring filter, not a regular expression.
                 char_offset: Zero-based character position within the first selected line.
@@ -418,7 +424,7 @@ class DeepAgentToolOutputLimits(ToolOutputLimits[AgentDeps]):
             return await read_stored_tool_result(
                 store, handle, offset=offset, limit=limit, from_end=from_end,
                 pattern=pattern, char_offset=char_offset, end_offset=end_offset,
-                context_lines=context_lines,
+                context_lines=context_lines, budget=self.reading_budget,
             )
 
         return FunctionToolset([read_tool_result])
@@ -566,7 +572,8 @@ def build_tool_output_limits(
         threshold_tokens=threshold,
         file_store=file_store,
     )
-    capability: ToolOutputLimits[AgentDeps] = DeepAgentToolOutputLimits(
+    capability = DeepAgentToolOutputLimits(
+        reading_budget=ReadingBudget(estimator, context_window_tokens),
         bands=[
             Band(
                 over=threshold,

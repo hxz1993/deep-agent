@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from sqlalchemy import select
 
 from deep_agent.db.models import GlobalSetting
@@ -21,11 +23,27 @@ class GlobalSettingStore(SessionBoundMixin):
         value: dict,
         version: int,
     ) -> GlobalSetting:
-        async with self._write() as db:
+        return await self.update_atomic(key, transform=lambda _: value, version=version)
+
+    async def update_atomic(
+        self,
+        key: str,
+        *,
+        transform: Callable[[GlobalSetting | None], dict],
+        version: int,
+    ) -> GlobalSetting:
+        """Resolve a local update against the current row within one write transaction.
+
+        The exclusive configuration barrier serializes workers even when the
+        setting does not exist yet; locking only the setting row cannot protect
+        concurrent first inserts. The callback must not perform external I/O.
+        """
+        async with self._write(exclusive=True) as db:
             result = await db.execute(
-                select(GlobalSetting).where(GlobalSetting.key == key)
+                select(GlobalSetting).where(GlobalSetting.key == key).with_for_update()
             )
             row = result.scalar_one_or_none()
+            value = transform(row)
             if row is None:
                 row = GlobalSetting(key=key, value=value, version=version)
                 db.add(row)

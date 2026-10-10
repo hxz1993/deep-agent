@@ -36,30 +36,94 @@ class ToolResultPagingTests(unittest.IsolatedAsyncioTestCase):
         args.pop("handle")
         return await self.read(**args)
 
-    async def test_default_and_maximum_are_doubled(self) -> None:
-        self.store.read = AsyncMock(return_value="\n".join(map(str, range(3000))).encode())
+    def assert_budget(self, page, ceiling=48_000):
+        self.assertLessEqual(TokenEstimator.conservative().text(page), ceiling)
+        self.assertIsInstance(page["limit"], int)
+        self.assertGreater(page["limit"], 0)
+
+    async def collect_window(self, page):
+        content = ""
+        seen = set()
+        pages = []
+        for _ in range(100):
+            self.assert_budget(page)
+            pages.append(page)
+            content += page["content"]
+            if page["next_read"] is None:
+                return content, pages
+            cursor = (page["next_read"]["offset"], page["next_read"]["char_offset"])
+            self.assertNotIn(cursor, seen)
+            seen.add(cursor)
+            self.assertTrue(page["content"], "A continuing page must make progress")
+            if page["next_read"]["char_offset"] == 0:
+                content += "\n"
+            page = await self.resume(page["next_read"])
+        self.fail("read_tool_result did not reach the window end")
+
+    async def test_default_reads_all_short_lines_and_explicit_limit_has_no_artificial_cap(self) -> None:
+        original = "\n".join(map(str, range(3000)))
+        self.store.read = AsyncMock(return_value=original.encode())
         page = await self.read()
-        self.assertEqual(page["returned_count"], 400)
-        self.assertEqual(page["next_read"]["offset"], 400)
+        self.assertEqual(page["returned_count"], 3000)
+        self.assertEqual(page["content"], original)
+        self.assertIsNone(page["next_read"])
+        self.assert_budget(page)
         page = await self.read(limit=100_000)
-        self.assertEqual(page["returned_count"], 2000)
-        self.assertEqual(page["limit"], 2000)
+        self.assertEqual(page["returned_count"], 3000)
+        self.assertEqual(page["limit"], 100_000)
+        self.assert_budget(page)
+
+    async def test_model_window_selects_fixed_budget_without_output_subtraction(self) -> None:
+        original = "正文" * 20_000
+        for window, ceiling in ((128_000, 24_000), (255_999, 24_000), (256_000, 48_000),
+                                (1_000_000, 48_000), (None, 24_000)):
+            with self.subTest(window=window):
+                self.capability, self.store = build_tool_output_limits(
+                    request_headers={}, context_window_tokens=window,
+                    max_output_tokens=100_000, estimator=TokenEstimator.conservative(),
+                )
+                self.store.bind(self.deps, [])
+                self.store.read = AsyncMock(return_value=original.encode())
+                page = await self.read()
+                self.assert_budget(page, ceiling)
+                self.assertEqual(page["has_more"], ceiling == 24_000)
+                if ceiling == 48_000:
+                    self.assertEqual(page["content"], original)
+                else:
+                    self.assertGreater(TokenEstimator.conservative().text(page), 20_000)
+
+    async def test_explicit_range_is_not_expanded_and_has_no_2000_line_cap(self) -> None:
+        lines = [f"row-{index}" for index in range(6000)]
+        self.store.read = AsyncMock(return_value="\n".join(lines).encode())
+        page = await self.read(offset=13, limit=3500, end_offset=5000)
+        self.assertEqual(page["content"], "\n".join(lines[13:3513]))
+        self.assertEqual((page["offset"], page["limit"], page["returned_count"]), (13, 3500, 3500))
+        self.assertEqual(page["truncated_by"], "limit")
+        self.assertEqual(page["next_read"]["offset"], 3513)
+        self.assert_budget(page)
+        tail = await self.resume(page["next_read"])
+        self.assertEqual(tail["content"], "\n".join(lines[3513:5000]))
+        self.assertIsNone(tail["next_read"])
+
+    async def test_envelope_source_positions_are_included_in_budget(self) -> None:
+        original = "\n".join("x" for _ in range(100_000))
+        self.store.read = AsyncMock(return_value=original.encode())
+        page = await self.read()
+        self.assert_budget(page)
+        self.assertTrue(page["has_more"])
+        self.assertEqual(page["source_line_numbers"], list(range(1, page["returned_count"] + 1)))
+        content, pages = await self.collect_window(page)
+        self.assertEqual(content, original)
+        self.assertGreater(len(pages), 1)
 
     async def test_long_unicode_line_round_trips_without_missing_suffix(self) -> None:
         original = "文😀" * 60_005
         self.store.read = AsyncMock(return_value=original.encode())
-        chunks = []
-        page = await self.read()
-        for _ in range(5):
-            self.assertLessEqual(len(page["content"]), 50_000)
-            chunks.append(page["content"])
-            if page["next_read"] is None:
-                break
-            self.assertEqual(page["next_read"]["offset"], 0)
-            page = await self.resume(page["next_read"])
-        self.assertIsNone(page["next_read"])
-        self.assertEqual("".join(chunks), original)
-        self.assertFalse(page["has_more"])
+        content, pages = await self.collect_window(await self.read())
+        self.assertGreater(len(pages), 1)
+        self.assertTrue(all(page["next_read"]["offset"] == 0 for page in pages[:-1]))
+        self.assertEqual(content, original)
+        self.assertFalse(pages[-1]["has_more"])
 
     async def test_complete_jsonl_records_are_not_split_to_fill_previous_page(self) -> None:
         first, second = '{"text":"' + "甲" * 30_000 + '"}', '{"text":"' + "乙" * 30_000 + '"}'
@@ -71,6 +135,8 @@ class ToolResultPagingTests(unittest.IsolatedAsyncioTestCase):
         tail = await self.resume(page["next_read"])
         self.assertEqual(tail["content"], second)
         self.assertIsNone(tail["next_read"])
+        self.assert_budget(page)
+        self.assert_budget(tail)
 
     async def test_tail_window_resumes_then_exposes_older_window(self) -> None:
         line = "中" * 60_000
@@ -78,12 +144,31 @@ class ToolResultPagingTests(unittest.IsolatedAsyncioTestCase):
         page = await self.read(from_end=True, offset=1, limit=2)
         previous = page["previous_read"]
         self.assertEqual(page["offset"], 1)
-        self.assertEqual(page["content"], line[:50_000])
-        tail = await self.resume(page["next_read"])
-        self.assertEqual(tail["content"], line[50_000:] + "\nlast")
-        self.assertIsNone(tail["next_read"])
+        self.assertTrue(line.startswith(page["content"]))
+        content, _ = await self.collect_window(page)
+        self.assertEqual(content, line + "\nlast")
         older = await self.resume(previous)
         self.assertEqual(older["content"], "older")
+
+    async def test_default_tail_selects_latest_window_and_previous_reads_older_content(self) -> None:
+        lines = [f"{index}:" + "中" * 100 for index in range(1000)]
+        self.store.read = AsyncMock(return_value="\n".join(lines).encode())
+        page = await self.read(from_end=True)
+        self.assertGreater(page["offset"], 0)
+        self.assert_budget(page)
+        self.assertEqual(page["content"], "\n".join(lines[page["offset"]:]))
+        previous = page["previous_read"]
+        self.assertIsNotNone(previous)
+        windows = [page]
+        for _ in range(10):
+            if previous is None:
+                break
+            page = await self.resume(previous)
+            self.assert_budget(page)
+            windows.append(page)
+            previous = page["previous_read"]
+        self.assertIsNone(previous)
+        self.assertEqual("\n".join(page["content"] for page in reversed(windows)), "\n".join(lines))
 
     async def test_literal_filter_and_empty_pages(self) -> None:
         self.store.read = AsyncMock(return_value=b"abc\n[.*] one\nxyz\n[.*] two")
@@ -139,13 +224,12 @@ class ToolResultPagingTests(unittest.IsolatedAsyncioTestCase):
         page = await self.read(pattern="hit", context_lines=1, from_end=True, limit=3)
         previous = page["previous_read"]
         self.assertEqual(page["source_line_numbers"], [4])
-        self.assertEqual(page["content"], long_line[:50_000])
+        self.assertTrue(long_line.startswith(page["content"]))
         self.assertEqual(previous["context_lines"], 1)
         self.assertEqual(page["next_read"]["context_lines"], 1)
-        tail = await self.resume(page["next_read"])
-        self.assertEqual(tail["source_line_numbers"], [4, 5, 6])
-        self.assertEqual(tail["content"], long_line[50_000:] + "\nnew hit\nlast")
-        self.assertIsNone(tail["next_read"])
+        content, pages = await self.collect_window(page)
+        self.assertEqual(content, long_line + "\nnew hit\nlast")
+        self.assertEqual(pages[-1]["source_line_numbers"][-2:], [5, 6])
         older = await self.resume(previous)
         self.assertEqual(older["source_line_numbers"], [1, 2])
         self.assertEqual(older["content"], "older hit\nold context")
@@ -179,7 +263,7 @@ class ToolResultPagingTests(unittest.IsolatedAsyncioTestCase):
 
         def model(messages, info):
             definition = next(t for t in info.function_tools if t.name == "read_tool_result")
-            self.assertEqual(definition.parameters_json_schema["properties"]["limit"]["default"], 400)
+            self.assertIsNone(definition.parameters_json_schema["properties"]["limit"]["default"])
             self.assertIn("char_offset", definition.parameters_json_schema["properties"])
             context_schema = definition.parameters_json_schema["properties"]["context_lines"]
             self.assertEqual(context_schema["default"], 0)

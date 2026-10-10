@@ -15,7 +15,7 @@ class TestInputCapabilities(unittest.TestCase):
     def test_upload_capability_kinds_includes_defaults(self) -> None:
         kinds = upload_capability_kinds()
         self.assertIn("image", kinds)
-        self.assertNotIn("pdf", kinds)
+        self.assertIn("pdf", kinds)
         self.assertIn("text_file", kinds)
         self.assertIn("docx", kinds)
 
@@ -38,7 +38,8 @@ class TestInputCapabilities(unittest.TestCase):
         block = build_capability_instruction_block(spec)
         self.assertIn("Platform upload pipeline", block)
         self.assertNotIn("LLM native input modalities", block)
-        self.assertIn("not available", block)
+        self.assertIn("Formats outside the upload list are blocked", block)
+        self.assertNotIn("parse_document", block)
         self.assertIn("Do not infer capabilities", block)
         self.assertNotIn("supports PDF/Office/audio/video native", block)
 
@@ -114,7 +115,7 @@ class TestInputCapabilities(unittest.TestCase):
         self.assertEqual(once.count("Session input capabilities"), 1)
         self.assertEqual(twice.count("Session input capabilities"), 1)
 
-    def test_pdf_is_not_an_available_upload_or_native_modality(self) -> None:
+    def test_pdf_upload_uses_local_text_reader_without_claiming_native_model_support(self) -> None:
         spec = AgentSpec(
             name="test",
             model="test",
@@ -122,7 +123,11 @@ class TestInputCapabilities(unittest.TestCase):
             input_modalities=["text", "image"],
         )
         block = build_capability_instruction_block(spec)
-        self.assertIn("PDF and presentation parsing require dedicated tools", block)
+        upload_line = next(line for line in block.splitlines() if line.startswith("Platform upload pipeline accepts"))
+        self.assertIn("PDF", upload_line)
+        self.assertIn("PDF offsets are physical pages", block)
+        self.assertNotIn("parse_document", block)
+        self.assertIn("Professional document parsing is available only when its tool is explicitly enabled", block)
 
 
 if __name__ == "__main__":

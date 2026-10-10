@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from deep_agent.agent.tool_output_limits import ToolOutputTelemetry
     from pydantic_ai_harness.planning import InMemoryPlanStore
     from deep_agent.files.storage import FileStore
+    from deep_agent.documents.cache import DocumentRunCache
 
 
 @dataclass
@@ -72,5 +73,6 @@ class AgentDeps:
         default_factory=dict,
         repr=False,
     )
+    document_cache: "DocumentRunCache | None" = field(default=None, repr=False)
     code_mode_file_payloads: dict[str, Any] = field(default_factory=dict, repr=False)
     ptc_diagnostics: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import mimetypes
 from collections.abc import AsyncIterator
@@ -80,9 +81,18 @@ class DeepAgentChannelClient:
         return await self._wecom_app_request(account, "media", {
             "channel_run_id": run_id, "media_id": media_id})
 
-    async def wecom_app_send_text(self, account, run_id, text):
-        return await self._wecom_app_request(account, "send-text", {
-            "channel_run_id": run_id, "text": text})
+    async def wecom_app_send_message(self, account, run_id, text, *, message_type):
+        return await self._wecom_app_request(account, "send-message", {
+            "channel_run_id": run_id, "text": text, "message_type": message_type})
+
+    async def wecom_app_send_component(self, account, run_id, component):
+        body = {'channel_run_id': run_id, 'kind': component.kind}
+        if component.data is not None:
+            body.update(data_base64=base64.b64encode(component.data).decode('ascii'),
+                        filename=component.filename)
+        if component.payload is not None:
+            body['payload'] = component.payload
+        return await self._wecom_app_request(account, 'send-component', body)
 
     async def upload_media(self, account, media: InboundMedia, data: bytes, filename: str) -> dict[str, Any]:
         await self.start()

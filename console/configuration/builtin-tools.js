@@ -1,4 +1,6 @@
 let toolWebSearchSummary = "加载中…";
+let toolDocumentParsingSettings = null;
+let toolDocumentParsingSummary = "加载中…";
 
 function isManagedBuiltinCapability(capability) {
   return capability?.source === "builtin" && capability?.category === "builtin";
@@ -21,6 +23,8 @@ function toolCatalogCard(item, selected) {
 function toolCatalogDetails(item, runtime = false) {
   const tools = item.tools || [];
   const columns = runtime ? 4 : 2;
+  const documentMetadata = (toolDocumentParsingSettings?.providers || []).find(provider => provider.provider === toolDocumentParsingSettings?.value?.provider);
+  const documentFormats = documentMetadata ? window.__GlobalSettingsUI.documentParsingCapabilitiesLabel(documentMetadata) : "";
   return `<header class="tool-catalog-detail-header">
       <div><h3>${escapeHtml(toolCatalogLabel(item))}</h3><code>${escapeHtml(item.code)}</code><span>${tools.length} 个工具</span></div>
       ${item.description ? `<p>${escapeHtml(item.description)}</p>` : ""}
@@ -29,9 +33,9 @@ function toolCatalogDetails(item, runtime = false) {
       <table class="data-table tool-catalog-table${runtime ? " tool-catalog-runtime-table" : ""}">
         <thead><tr><th>工具名称</th>${runtime ? "<th>实现来源</th><th>自动注入条件</th>" : ""}<th>说明</th></tr></thead>
         <tbody>${tools.length ? tools.map((tool) => `<tr>
-          <td><code>${escapeHtml(tool.name || "—")}</code>${item.code === "builtin:web" && tool.name === "web_search" ? `<span class="tool-web-search-setting"><button type="button" data-web-search-settings title="前往网络搜索设置"><i data-lucide="pencil" aria-hidden="true"></i><span>${escapeHtml(toolWebSearchSummary)}</span></button></span>` : ""}</td>
+          <td><code>${escapeHtml(tool.name || "—")}</code>${item.code === "builtin:web" && tool.name === "web_search" ? `<span class="tool-web-search-setting"><button type="button" data-web-search-settings title="前往网络搜索设置"><i data-lucide="pencil" aria-hidden="true"></i><span>${escapeHtml(toolWebSearchSummary)}</span></button></span>` : ""}${item.code === "builtin:document" && tool.name === "parse_document" ? `<span class="tool-web-search-setting"><button type="button" data-document-parsing-settings title="前往文档解析设置"><i data-lucide="pencil" aria-hidden="true"></i><span>${escapeHtml(toolDocumentParsingSummary)}</span></button></span>` : ""}</td>
           ${runtime ? `<td><span class="badge">${escapeHtml(tool.source || "—")}</span></td><td>${escapeHtml(tool.injection_condition || "—")}</td>` : ""}
-          <td>${escapeHtml(tool.description || "—")}</td>
+          <td>${escapeHtml(tool.description || "—")}${item.code === "builtin:document" && documentFormats ? `<p class="field-hint">${escapeHtml(documentFormats)}</p>` : ""}</td>
         </tr>`).join("") : `<tr><td colspan="${columns}" class="empty-cell">暂无工具</td></tr>`}</tbody>
       </table>
     </div>`;
@@ -71,6 +75,10 @@ function renderToolCatalog() {
     window.globalSettingsAdmin?.selectPage("general", { refresh: false });
     document.querySelector('.tab[data-tab="global-settings"]')?.click();
   });
+  host.querySelector("[data-document-parsing-settings]")?.addEventListener("click", () => {
+    window.globalSettingsAdmin?.selectPage("general", { refresh: false });
+    document.querySelector('.tab[data-tab="global-settings"]')?.click();
+  });
   window.lucide?.createIcons();
 }
 
@@ -92,6 +100,13 @@ const builtinToolsAdmin = {
     const host = document.getElementById("builtinToolCatalog");
     if (!host) return;
     renderToolCatalog();
+    const documentSummaryRequest = apiFetch("/api/v1/global-settings/document-parsing")
+      .then(settings => {
+        toolDocumentParsingSettings = settings;
+        toolDocumentParsingSummary = window.__GlobalSettingsUI.documentParsingSummaryLabel(settings);
+      })
+      .catch(() => { toolDocumentParsingSettings = null; toolDocumentParsingSummary = "配置不可用，请重新配置"; })
+      .then(() => renderToolCatalog());
     const summaryRequest = apiFetch("/api/v1/global-settings/web-search")
       .then(settings => { toolWebSearchSummary = window.__GlobalSettingsUI.webSearchSummaryLabel(settings); })
       .catch(() => { toolWebSearchSummary = "配置不可用，请重新配置"; })
@@ -99,7 +114,7 @@ const builtinToolsAdmin = {
     try {
       if (reload || !(state.capabilities || []).length) await loadCapabilities();
       renderBuiltinCapabilities(state.capabilities);
-      await summaryRequest;
+      await Promise.all([summaryRequest, documentSummaryRequest]);
     } catch (error) {
       updateToolCatalogGroup(false, [], error instanceof Error ? error.message : String(error));
     }

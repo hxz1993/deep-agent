@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-from deep_agent.diagnostics.schema import EVENTS, IDENTIFIER_FIELDS, NUMBER_FIELDS, MAX_RECORD_BYTES, safe_fields, sanitize_record
+from deep_agent.diagnostics.schema import EVENTS, IDENTIFIER_FIELDS, NUMBER_FIELDS, ADAPTATION_NUMBER_FIELDS, MAX_RECORD_BYTES, safe_fields, sanitize_record
 from deep_agent.diagnostics.text import escape, unescape, format_record, parse_record
 from deep_agent.diagnostics.runtime import mirror_operational
 
@@ -133,3 +133,22 @@ class DiagnosticsTextTests(unittest.TestCase):
             mirror_operational(line.encode(), "INFO")
         logger.opt.assert_called_once_with(raw=True)
         logger.opt.return_value.log.assert_called_once_with("INFO", line)
+
+    def test_adaptation_facts_are_event_local_and_fit_existing_wire_budget(self):
+        fields = {key: "x" * 180 for key in IDENTIFIER_FIELDS}
+        fields.update({key: 10**15 for key in NUMBER_FIELDS | ADAPTATION_NUMBER_FIELDS})
+        fields.update(adaptation_version="document-adaptation-v1", source_hash="a" * 64,
+                      file_type="pdf", body="PRIVATE_BODY", api_key="PRIVATE_KEY")
+        line = format_record(self.payload("document_adaptation_completed", **fields))
+        record = parse_record(line)
+        self.assertLessEqual(len(line.encode()) + 1, MAX_RECORD_BYTES)
+        self.assertNotIn("PRIVATE", line)
+        for key in ADAPTATION_NUMBER_FIELDS:
+            self.assertEqual(record[key], 10**15)
+        for key in ("request_id", "session_id", "run_id", "tool_call_id", "provider_name", "model_name"):
+            self.assertEqual(record[key], fields[key])
+        self.assertEqual(record["adaptation_version"], fields["adaptation_version"])
+        self.assertNotIn("tool_names", record)
+        model_record = parse_record(format_record(self.payload("model_api_request", **fields)))
+        self.assertNotIn("adapted_token_count", model_record)
+        self.assertNotIn("adaptation_version", model_record)

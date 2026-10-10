@@ -6,18 +6,31 @@ import hashlib
 from dataclasses import asdict
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .message_payloads import validate_message_payload
 from .outbound import DeliveryError, PreparedComponent, resolve_run_context
 
 
 class WireComponent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["text", "image", "file", "audio", "video"]
-    requested_kind: Literal["text", "image", "file", "audio", "video"]
+    kind: Literal["text", "image", "file", "audio", "video", "textcard", "news"]
+    requested_kind: Literal["text", "image", "file", "audio", "video", "textcard", "news"]
     text: str = Field(default="", max_length=20000)
     filename: str = Field(default="", max_length=200)
     mime: str = Field(default="application/octet-stream", max_length=200)
+
+    payload: dict | None = None
+
+    @model_validator(mode="after")
+    def validate_payload(self):
+        if self.kind in {"textcard", "news"}:
+            if self.text or self.filename or self.requested_kind != self.kind:
+                raise ValueError("卡片内容字段无效")
+            self.payload = validate_message_payload(self.kind, self.payload)
+        elif self.payload is not None:
+            raise ValueError("此消息类型不支持payload")
+        return self
 
 
 class MessageOperationRequest(BaseModel):
@@ -59,7 +72,9 @@ class ChannelOperationService:
         account = await self.store.get_account(source.account_id)
         if account is None or self.runtime.registry.fingerprint(account) != managed.fingerprint:
             raise DeliveryError("account_changed", "渠道连接配置已变更")
-        if not managed.adapter.status().get("authenticated"):
+        status = managed.adapter.status()
+        ready = status.get("state") == "connected" if account.channel_type == "wecom_app" else status.get("authenticated")
+        if not ready:
             raise DeliveryError("channel_offline", "渠道暂未连接，请稍后再试")
         return source, managed, job
 
@@ -96,6 +111,8 @@ class ChannelOperationService:
                     except TimeoutError:
                         raise DeliveryError("send_timeout", "发送超时，结果未知，请勿重复发送", unknown=True) from None
                     results[index].update({k: v for k, v in asdict(receipt).items() if v is not None})
+                    if receipt.kind != item.requested_kind:
+                        results[index]["note"] = "此格式或大小不适合原生媒体消息，已改为文件发送"
                     results[index]["state"] = "succeeded"
                     if item.kind == "text":
                         job.sent_text_hashes.add(hashlib.sha256(item.text.strip().encode()).hexdigest())

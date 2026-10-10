@@ -30,6 +30,8 @@ from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
 from deep_agent.skills.script_tool import build_skill_script_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
 from deep_agent.files import build_file_export_toolset, build_file_toolset
+from deep_agent.documents.runtime import build_document_runtime
+from deep_agent.documents.settings import DOCUMENT_PACKAGE_CODE, load_document_parsing_config
 from deep_agent.core.context import AppContext
 from deep_agent.channels.instructions import channel_instructions
 from deep_agent.channels.outbound import ChannelRunContext
@@ -206,7 +208,6 @@ async def _build_runner_from_spec(
         resolved_skills,
     )
     skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
-    file_toolset = build_file_toolset(resolved_skills.resources)
     file_export_toolset = build_file_export_toolset()
     skill_script_toolset = (
         build_skill_script_toolset(
@@ -218,7 +219,11 @@ async def _build_runner_from_spec(
         else None
     )
 
-    spec = replace(spec, instructions=augment_instructions_with_capabilities(spec))
+    document_config = await load_document_parsing_config(getattr(ctx.stores, "global_setting", None))
+    document_selected = DOCUMENT_PACKAGE_CODE in spec.capabilities
+    spec = replace(spec, instructions=augment_instructions_with_capabilities(
+        spec, document_config=document_config, document_available=document_selected,
+    ))
     if resolved_skills.unavailable:
         unavailable = ", ".join(item.code for item in resolved_skills.unavailable)
         spec = replace(
@@ -241,6 +246,16 @@ async def _build_runner_from_spec(
             spec.provider_config.provider_type if spec.provider_config else None
         ),
     )
+    file_toolset = build_file_toolset(
+        resolved_skills.resources,
+        context_window_tokens=spec.context_window_tokens,
+        estimator=estimator,
+        document_available=document_selected,
+    )
+    document_runtime = (build_document_runtime(
+        document_config, resolved_skills.resources,
+        context_window_tokens=spec.context_window_tokens, estimator=estimator,
+    ) if document_selected else None)
     context_compaction = build_context_compaction(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
@@ -262,7 +277,7 @@ async def _build_runner_from_spec(
         account = await ctx.stores.channel.get_account(channel_context.account_id)
         caps = default_registry().message_capabilities(account.channel_type)
         channel_toolset = build_channel_message_toolset(ctx.stores.channel, ChannelGatewayClient(), channel_context, caps)
-        spec = replace(spec, instructions=spec.instructions + "\n本轮已提供channel_message：向当前聊天发图片、文件和已有音视频使用此内置工具，无需MCP；媒体使用会话file_id。普通回答仍自动流式发送。工具已确认发送的内容不要重复贴出；发送结果未知时不得盲目补发。")
+        spec = replace(spec, instructions=spec.instructions + "\n本轮已提供channel_message：向当前聊天发图片、文件和已有音视频使用此内置工具，无需MCP；媒体使用会话file_id。普通回答由渠道自动投递。工具已确认发送的内容不要重复贴出；发送结果未知时不得盲目补发。")
 
     web_runtime = None
     if WEB_PACKAGE_CODE in spec.capabilities:
@@ -311,6 +326,8 @@ async def _build_runner_from_spec(
         ],
         estimator=estimator,
         web_toolset=(web_runtime.toolset if web_runtime is not None else None),
+        document_toolset=(document_runtime.toolset if document_runtime else None),
+        document_lifecycle=(document_runtime.lifecycle if document_runtime else None),
     )
     if spec.context_window_tokens is not None and agent.model is not None:
         agent.model = ContextWindowModel(agent.model, spec.context_window_tokens)

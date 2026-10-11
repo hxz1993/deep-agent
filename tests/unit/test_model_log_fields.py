@@ -120,8 +120,12 @@ class ModelLogFieldsTests(unittest.TestCase):
         restored = parse_record(line)
         self.assertIsNotNone(restored)
         self.assertEqual(restored["tool_count"], 1000)
+        self.assertEqual(restored["unique_tool_count"], 999)
         self.assertEqual(restored["tool_names_hash"], "b" * 64)
+        for key in ("request_id", "session_id", "run_id", "tool_call_id"):
+            self.assertEqual(restored[key], maximal[key])
         self.assertEqual(safe_fields(bounded), bounded)
+        self.assertEqual(format_record(restored), line)
 
 
 if __name__ == "__main__":

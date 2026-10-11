@@ -1,0 +1,547 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:deepagent:document-evidence:v1",
+  "title": "DeepAgent document evidence v1",
+  "description": "Complete backend-produced OCR evidence. This is not the paginated parse_document tool result.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "document-evidence-v1"
+    },
+    "adaptation_version": {
+      "type": "string",
+      "pattern": "^document-adaptation-v[0-9]+$"
+    },
+    "layout_version": {
+      "const": "document-layout-v1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider": {
+      "enum": [
+        "paddle",
+        "glm"
+      ]
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "complete",
+        "partial"
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/page"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "adaptation_version",
+    "layout_version",
+    "document_id",
+    "provider",
+    "model",
+    "status",
+    "source",
+    "summary",
+    "warnings",
+    "pages"
+  ],
+  "$defs": {
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "attachment"
+        },
+        "file_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "type",
+        "file_id"
+      ]
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "skill"
+        },
+        "skill_code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "type",
+        "skill_code",
+        "path"
+      ]
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "char_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "char_end": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "char_start",
+        "char_end"
+      ]
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_pages": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "parsed_pages": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "page_numbers_known": {
+          "type": "boolean"
+        },
+        "missing_pages": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "uniqueItems": true
+        },
+        "coverage": {
+          "enum": [
+            "complete",
+            "partial",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "source_pages",
+        "parsed_pages",
+        "page_numbers_known",
+        "missing_pages",
+        "coverage"
+      ]
+    },
+    "preprocessing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "use_doc_orientation_classify": {
+          "type": "boolean"
+        },
+        "use_doc_unwarping": {
+          "type": "boolean"
+        },
+        "angle": {
+          "type": "number"
+        }
+      },
+      "required": []
+    },
+    "fileReference": {
+      "additionalProperties": false,
+      "properties": {
+        "storage": {
+          "enum": [
+            "local",
+            "platform"
+          ],
+          "title": "Storage",
+          "type": "string"
+        },
+        "file_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,256}$"
+        },
+        "file_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[^/\\\\\\x00-\\x1f]+$"
+        },
+        "byte_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mime": {
+          "const": "application/json",
+          "default": "application/json",
+          "title": "Mime",
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "schema_version": {
+          "const": "document-evidence-v1"
+        }
+      },
+      "required": [
+        "storage",
+        "file_id",
+        "file_name",
+        "byte_size",
+        "mime",
+        "sha256",
+        "schema_version"
+      ],
+      "title": "EvidenceFileReference",
+      "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "storage": {
+                "const": "local"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "file_id": {
+                "pattern": "^local_"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "file_id": {
+                "not": {
+                  "pattern": "^local_"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "block_id": {
+          "type": "string",
+          "pattern": "^p[1-9][0-9]*:b[1-9][0-9]*$",
+          "description": "Unique only within document_id. p refers to page_ordinal, never an inferred physical page."
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "items": false,
+              "minItems": 4,
+              "maxItems": 4
+            }
+          ]
+        },
+        "location_status": {
+          "enum": [
+            "available",
+            "missing_bbox",
+            "invalid_bbox",
+            "unknown_page",
+            "missing_page_size",
+            "outside_page",
+            "empty_bbox"
+          ]
+        },
+        "char_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "char_end": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mapping_status": {
+          "enum": [
+            "exact",
+            "appended",
+            "no_text"
+          ]
+        },
+        "native_content": {
+          "type": "string"
+        },
+        "polygon_points": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "items": false,
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "minItems": 3
+            }
+          ]
+        }
+      },
+      "required": [
+        "block_id",
+        "ordinal",
+        "label",
+        "bbox",
+        "location_status",
+        "char_start",
+        "char_end",
+        "mapping_status",
+        "native_content",
+        "polygon_points"
+      ]
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "page_number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "page_ordinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "format": {
+          "const": "markdown"
+        },
+        "content": {
+          "type": "string",
+          "description": "Fixed layout reading view; character spans count Unicode code points."
+        },
+        "native_content": {
+          "type": "string",
+          "description": "Provider page Markdown before readable adaptation, except unsafe transport references are redacted."
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          ]
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          ]
+        },
+        "coordinate_space": {
+          "enum": [
+            "paddle_processed_page_pixels",
+            "glm_page_pixels",
+            "unknown"
+          ]
+        },
+        "original_page_mapping": {
+          "enum": [
+            "unverified",
+            "unavailable",
+            "unknown_page",
+            "conflicting_page_size"
+          ]
+        },
+        "preprocessing": {
+          "$ref": "#/$defs/preprocessing"
+        },
+        "reported_page_sizes": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "items": false,
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/block"
+          }
+        },
+        "unmapped_spans": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/span"
+          }
+        }
+      },
+      "required": [
+        "page_number",
+        "page_ordinal",
+        "format",
+        "content",
+        "native_content",
+        "width",
+        "height",
+        "coordinate_space",
+        "original_page_mapping",
+        "preprocessing",
+        "blocks",
+        "unmapped_spans"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "storage": {
+          "enum": [
+            "local",
+            "platform",
+            "skill"
+          ]
+        },
+        "resource": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/attachment"
+            },
+            {
+              "$ref": "#/$defs/skill"
+            }
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA256 of original source file bytes, not the exported JSON."
+        }
+      },
+      "required": [
+        "storage",
+        "resource",
+        "sha256"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "storage": {
+                "const": "skill"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resource": {
+                "$ref": "#/$defs/skill"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "resource": {
+                "$ref": "#/$defs/attachment"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,12 +1,15 @@
 # 37 · 文档解析：复杂 PDF 选型与工具化
 
-> 首次研究：2026-09-29。状态：v0.12.11 保留供应商原始布局信息并补回Markdown遗漏；v0.12.10 完成可读格式适配与回归；v0.12.9 已完成工具接入；Paddle/GLM 完成真实合同测试，MinerU 云端可用性限制单独记录。数据库结构保持不变。
+> 首次研究：2026-09-29。状态：v0.13.0 新增可选Block布局与完整证据JSON导出，验收状态见新报告；v0.12.11 保留供应商原始布局信息并补回Markdown遗漏；v0.12.10 完成可读格式适配与回归；v0.12.9 已完成工具接入；Paddle/GLM 完成真实合同测试，MinerU 云端可用性限制单独记录。数据库结构保持不变。
 > 2026-10-09 当前范围：MinerU 产品选项与后端实现已移除，仅保留 PaddleOCR / GLM-OCR。下方三供应商研究、测试及发布审计为历史证据，不表示当前支持范围；历史重放脚本若依赖已删除的产品内部函数须使用其对应历史版本。
 
 
 本课题重点评估扫描 PDF、复杂表格、多级表头、跨页内容、数字与单位对应、图表和图片提取。以 MPDocBench-Parse 为主参考，区分公开榜单、公开反馈、本机实测和待取得 Key 的在线验证。
 
 - [产品接入与使用指南](../../guides/document-parsing.md)：本轮实际工具、参数、24K/48K分页、Run缓存、配置与上传边界。
+- [文档证据引用与PDF／Word原文定位设计](document-evidence-and-preview-design.md)：本轮DeepAgent实现、租赁文件交付与原PDF坐标边界，不修改公共预览服务。
+- [布局与证据文件使用指南](../../guides/document-evidence.md)：两个独立开关、完整Schema、合成样例、下载与引用校验。
+- [v0.13.0布局与导出回归](evaluation/evidence-layout-20261011/validation-report.md)：双供应商、六合同、双预算重复读取、真实Agent及文件闭环，区分通过与外部阻塞。
 - [v0.12.9 实施与验收说明](document-parsing-implementation.md)：配置与运行链路、自动回归、浏览器验收、真实效果及未通过的服务项目。
 - [当前产品三供应商回归报告](evaluation/lease-contract-parsers/product-runtime-20261002/production-regression-report.md)：六份PDF、图片、46组无损分页、模型主动续读及金额风险；区分本轮请求、历史产物重放和独立测速。
 - [提交前审计与真实Agent复测](evaluation/lease-contract-parsers/product-runtime-20261002/release-audit-20261002.md)：900秒累计等待修复、三家协议回归、供应商顺序及尚未满足的MinerU发布门槛。

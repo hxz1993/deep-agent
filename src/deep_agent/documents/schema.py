@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from deep_agent.files.schema import AttachmentFileRef, SkillFileRef
+from .export import ExportResult
 
 
 class DocumentRef(BaseModel):
@@ -25,6 +26,7 @@ class PageFragment(BaseModel):
     char_offset: int
     char_end: int
     complete: bool
+    layout: dict[str, Any] | None = None
 
 
 class DocumentSummary(BaseModel):
@@ -49,3 +51,5 @@ class DocumentReadResult(BaseModel):
     returned_count: int
     has_more: bool
     next_read: dict | None
+    reading_view: Literal["readable", "layout"] = "readable"
+    export: ExportResult = Field(default_factory=ExportResult)

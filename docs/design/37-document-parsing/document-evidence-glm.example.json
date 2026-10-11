@@ -1,0 +1,81 @@
+{
+  "schema_version": "document-evidence-v1",
+  "adaptation_version": "document-adaptation-v2",
+  "layout_version": "document-layout-v1",
+  "document_id": "doc_example_glm",
+  "provider": "glm",
+  "model": "glm-ocr",
+  "status": "complete",
+  "source": {
+    "storage": "local",
+    "resource": {
+      "type": "attachment",
+      "file_id": "example-glm-source"
+    },
+    "sha256": "afc994dba3ef809cbf739d70601ba9f31d17bb3c116c6c220fd26cee66256b0a"
+  },
+  "summary": {
+    "source_pages": 1,
+    "parsed_pages": 1,
+    "page_numbers_known": true,
+    "missing_pages": [],
+    "coverage": "complete"
+  },
+  "warnings": [],
+  "pages": [
+    {
+      "page_number": 1,
+      "page_ordinal": 1,
+      "format": "markdown",
+      "content": "# DeepAgent Document Test\n\nInvoice amount: 123.45",
+      "native_content": "# DeepAgent Document Test\n\nInvoice amount: 123.45",
+      "width": 1224,
+      "height": 1584,
+      "coordinate_space": "glm_page_pixels",
+      "original_page_mapping": "unverified",
+      "preprocessing": {},
+      "blocks": [
+        {
+          "block_id": "p1:b1",
+          "ordinal": 1,
+          "label": "title",
+          "bbox": [
+            144,
+            105,
+            950,
+            160
+          ],
+          "location_status": "available",
+          "char_start": 2,
+          "char_end": 25,
+          "mapping_status": "exact",
+          "native_content": "DeepAgent Document Test",
+          "polygon_points": null
+        },
+        {
+          "block_id": "p1:b2",
+          "ordinal": 2,
+          "label": "text",
+          "bbox": [
+            144,
+            185,
+            900,
+            240
+          ],
+          "location_status": "available",
+          "char_start": 27,
+          "char_end": 49,
+          "mapping_status": "exact",
+          "native_content": "Invoice amount: 123.45",
+          "polygon_points": null
+        }
+      ],
+      "unmapped_spans": [
+        {
+          "char_start": 0,
+          "char_end": 2
+        }
+      ]
+    }
+  ]
+}

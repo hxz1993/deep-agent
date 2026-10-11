@@ -15,6 +15,8 @@ from deep_agent.files.schema import FileResourceRef
 
 from .adaptation import AdaptedDocument, DocumentAdaptationCancelled, adapt_document
 from .models import DocumentParsingError, ParsedDocument
+from .evidence import DocumentEvidence, build_document_evidence
+from .export import DocumentExportManager
 from .providers import PARSE_TIMEOUT_SECONDS, can_resume_document
 
 
@@ -34,6 +36,9 @@ class DocumentRunCache:
         self.tasks: dict[tuple[str, str, str, str], asyncio.Task[CachedDocument]] = {}
         self._deadlines: dict[tuple[str, str, str, str], float] = {}
         self._directory: tempfile.TemporaryDirectory | None = None
+        self.evidence_tasks: dict[str, asyncio.Task[DocumentEvidence]] = {}
+        self.exports = DocumentExportManager()
+        self._close_task: asyncio.Task[None] | None = None
         self.closed = False
 
     @property
@@ -108,17 +113,65 @@ class DocumentRunCache:
         # Replacement happens before the first await, keeping recovery single flight.
         return await asyncio.shield(task), hit
 
-    async def aclose(self) -> None:
+    async def get_evidence(
+        self, record: CachedDocument, estimator: TokenEstimator,
+    ) -> tuple[DocumentEvidence, bool]:
+        """Build one immutable layout view; all offsets and exports share it."""
         if self.closed:
-            return
-        self.closed = True
-        tasks = list(self.tasks.values())
+            raise RuntimeError("Document cache is closed")
+        task = self.evidence_tasks.get(record.document_id)
+        hit = task is not None
+        if task is None:
+            async def build() -> DocumentEvidence:
+                cancelled = threading.Event()
+                worker = asyncio.create_task(asyncio.to_thread(
+                    build_document_evidence, record.parsed, record.readable,
+                    record.document_id, estimator, cancel_event=cancelled,
+                ))
+                try:
+                    return await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    # A worker may still hold the native response. Join before
+                    # clearing the Run cache, including repeated cancellation.
+                    while not worker.done():
+                        try:
+                            await asyncio.shield(worker)
+                        except asyncio.CancelledError:
+                            continue
+                        except Exception:
+                            break
+                    if not worker.cancelled():
+                        worker.exception()
+                    raise
+            task = asyncio.create_task(build(), name="document-layout:" + record.document_id)
+            self.evidence_tasks[record.document_id] = task
+        return await asyncio.shield(task), hit
+
+    async def aclose(self) -> None:
+        if self._close_task is None:
+            self.closed = True
+            self._close_task = asyncio.create_task(self._close(), name="document-cache-close")
+        try:
+            await asyncio.shield(self._close_task)
+        except asyncio.CancelledError:
+            while not self._close_task.done():
+                try:
+                    await asyncio.shield(self._close_task)
+                except asyncio.CancelledError:
+                    continue
+            raise
+
+    async def _close(self) -> None:
+        tasks = [*self.tasks.values(), *self.evidence_tasks.values()]
         for task in tasks:
             if not task.done():
                 task.cancel()
+        await self.exports.aclose()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self.tasks.clear()
+        self.evidence_tasks.clear()
         self._deadlines.clear()
         self.records.clear()
         if self._directory is not None:

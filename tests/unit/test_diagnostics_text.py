@@ -2,7 +2,11 @@
 import unittest
 from unittest.mock import patch
 
-from deep_agent.diagnostics.schema import EVENTS, IDENTIFIER_FIELDS, NUMBER_FIELDS, ADAPTATION_NUMBER_FIELDS, MAX_RECORD_BYTES, safe_fields, sanitize_record
+from deep_agent.diagnostics.schema import (
+    EVENTS, IDENTIFIER_FIELDS, NUMBER_FIELDS, ADAPTATION_NUMBER_FIELDS,
+    LAYOUT_NUMBER_FIELDS, LAYOUT_FIELDS, LAYOUT_EVENTS, MAX_RECORD_BYTES,
+    safe_fields, sanitize_record,
+)
 from deep_agent.diagnostics.text import escape, unescape, format_record, parse_record
 from deep_agent.diagnostics.runtime import mirror_operational
 
@@ -152,3 +156,45 @@ class DiagnosticsTextTests(unittest.TestCase):
         model_record = parse_record(format_record(self.payload("model_api_request", **fields)))
         self.assertNotIn("adapted_token_count", model_record)
         self.assertNotIn("adaptation_version", model_record)
+
+    def test_layout_facts_are_event_local_and_maximal_wire_roundtrip_is_idempotent(self):
+        fields = dict.fromkeys(IDENTIFIER_FIELDS, "x" * 180)
+        fields.update(dict.fromkeys(NUMBER_FIELDS | ADAPTATION_NUMBER_FIELDS | LAYOUT_NUMBER_FIELDS, 10**15))
+        fields.update(layout_version="v" * 180, adaptation_version="a" * 180,
+                      source_hash="a" * 64, file_type="abcdefgh", cache_hit=True,
+                      agent_name="中|\\" * 33, tool_names=["tool_" + "x" * 120] * 256,
+                      model_api="https://" + "a" * 292, target_origin="https://" + "b" * 292,
+                      document_task_id="t" * 100, body="PRIVATE_BODY", api_key="PRIVATE_KEY")
+        for event in LAYOUT_EVENTS:
+            with self.subTest(event=event):
+                # Combine all maximum legal base and dedicated fields, not just
+                # the fields currently emitted by one document call site.
+                payload = self.payload(event, **fields)
+                payload.update(record_id="a" * 80, boot_id="b" * 80, instance_id="c" * 80,
+                               process_id=2**32 - 1, level="CRITICAL", source="gateway")
+                line = format_record(payload)
+                record = parse_record(line)
+                self.assertLessEqual(len(line.encode()) + 1, MAX_RECORD_BYTES)
+                self.assertEqual(record["event"], event)
+                self.assertEqual(record["level"], "CRITICAL")
+                self.assertNotIn("PRIVATE", line)
+                for key in LAYOUT_NUMBER_FIELDS:
+                    self.assertEqual(record[key], fields[key])
+                for key in ("layout_version", "request_id", "session_id", "run_id", "agent_id",
+                            "tool_call_id", "provider_name", "model_name", "cache_hit", "source_hash",
+                            "error_type", "error_code"):
+                    self.assertEqual(record[key], fields[key], key)
+                self.assertEqual(safe_fields(record, event=event),
+                                 {key: record[key] for key in LAYOUT_FIELDS if key in record})
+                self.assertEqual(sanitize_record(record), sanitize_record(payload))
+                self.assertEqual(format_record(record), line)
+                self.assertNotIn("tool_names", record)
+                self.assertNotIn("adaptation_version", record)
+        for event in ("model_api_request", "model_api_response", "agent_run_completed",
+                      "document_export_completed"):
+            with self.subTest(event=event):
+                record = parse_record(format_record(self.payload(event, layout_version="v1",
+                                      block_count=10, matched_blocks=8, appended_blocks=2)))
+                self.assertNotIn("layout_version", record)
+                for key in LAYOUT_NUMBER_FIELDS:
+                    self.assertNotIn(key, record)

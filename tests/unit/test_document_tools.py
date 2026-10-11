@@ -113,7 +113,8 @@ class DocumentPaginationTests(unittest.TestCase):
         first = read_cached_document(cached, budget=ReadingBudget(), page_start=2, page_end=6, offset=2, limit=2)
         self.assertEqual([page.page_number for page in first.pages], [3, 4])
         self.assertEqual(first.next_read, {"resource": {"type": "document", "document_id": "doc_fixture"},
-                                          "offset": 4, "char_offset": 0, "page_start": 2, "page_end": 6, "limit": 2})
+                                          "offset": 4, "char_offset": 0, "page_start": 2, "page_end": 6, "limit": 2,
+                                          "include_layout": False, "export_file": False})
         next_args = dict(first.next_read)
         next_args.pop("resource")
         last = read_cached_document(cached, budget=ReadingBudget(), **next_args)

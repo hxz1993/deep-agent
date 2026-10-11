@@ -174,6 +174,16 @@ def artifacts_from_metadata(metadata: Mapping[str, Any]) -> list[dict[str, Any]]
             item["content_hash"] = content_hash
         artifacts.append(item)
     artifacts.extend(_generated_file_artifacts(metadata))
+    # Evidence is authored by the document tool, not by model JSON. Keep its
+    # authorization in persisted metadata without duplicating it in the body
+    # or granting the read_tool_result overflow protocol to this JSON file.
+    evidence = metadata.get("document_evidence_file")
+    if isinstance(evidence, Mapping):
+        for item in _generated_file_artifacts({"generated_files": [evidence]}):
+            item["kind"] = "document_evidence"
+            if evidence.get("storage") in {"local", "platform"}:
+                item["storage"] = evidence["storage"]
+            artifacts.append(item)
     return artifacts
 
 

@@ -100,9 +100,37 @@ class DiagnosticRuntimeTests(unittest.TestCase):
         self.drain(writer)
         lines = [line for file in self.directory.glob("*.log") for line in file.read_text().splitlines()]
         self.assertEqual(len(lines), 2)
+        self.assertEqual(writer.status()["dropped_records"], 0)
         for line in lines:
             self.assertLessEqual(len(line.encode()) + 1, MAX_RECORD_BYTES)
-            self.assertEqual(parse_record(line)["level"], "INFO")
+            record = parse_record(line)
+            self.assertEqual(record["level"], "INFO")
+            for key in ("tool_count", "unique_tool_count", "input_tokens", "output_tokens"):
+                self.assertEqual(record[key], fields[key])
+            for key in ("session_id", "run_id", "tool_call_id"):
+                self.assertEqual(record[key], fields[key])
+
+    def test_layout_events_keep_dedicated_counts_in_runtime(self):
+        from deep_agent.diagnostics.schema import IDENTIFIER_FIELDS, NUMBER_FIELDS, LAYOUT_NUMBER_FIELDS, MAX_RECORD_BYTES
+        fields = dict.fromkeys(IDENTIFIER_FIELDS, "x" * 180)
+        fields.update(dict.fromkeys(NUMBER_FIELDS | LAYOUT_NUMBER_FIELDS, 10**15))
+        fields.update(layout_version="v" * 180, cache_hit=True, source_hash="a" * 64)
+        writer = self.writer()
+        for event in ("document_layout_completed", "document_layout_failed", "document_export_completed"):
+            writer.emit(event, **fields)
+        self.drain(writer)
+        lines = [line for file in self.directory.glob("*.log") for line in file.read_text().splitlines()]
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(writer.status()["dropped_records"], 0)
+        for line in lines:
+            self.assertLessEqual(len(line.encode()) + 1, MAX_RECORD_BYTES)
+            record = parse_record(line)
+            for key in ("session_id", "run_id", "tool_call_id", "elapsed_ms"):
+                self.assertEqual(record[key], fields[key])
+            if record["event"].startswith("document_layout_"):
+                self.assertEqual(record["layout_version"], fields["layout_version"])
+                for key in LAYOUT_NUMBER_FIELDS:
+                    self.assertEqual(record[key], fields[key])
 
     def test_request_context_is_captured_before_background_write(self):
         from deepfos_platform.lib.context import RequsetId

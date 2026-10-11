@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.12.12`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.13.0`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -127,6 +127,8 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 ---
 
 文档解析见[使用指南](docs/guides/document-parsing.md)：在全局工具配置选择 PaddleOCR 或 GLM-OCR，再显式给 Agent 关联 `builtin:document`。`parse_document` 整页适配为模型可读内容后再复用24K/48K Token分页、当前Run缓存和来源授权；原始产物保留，不纠正OCR或合同数据。保存不暗中收费测试，不新增环境变量或数据库结构。
+
+文档证据使用独立布尔参数`include_layout`与`export_file`，默认均false。布局先生成固定内容再按完整包装分页，引用必须同时带`document_id/block_id`；导出由后端完整序列化，同一Run仅上传一次，失败或未知不自动重试。平台上传使用`upload_once`避免SDK自动重试；文件ID不是下载授权，平台/本地入口不能混用。Paddle展平坐标不属于原PDF，`available`只说明供应商框有效；详见[证据协议](docs/guides/document-evidence.md)。
 
 ## 子文档索引
 

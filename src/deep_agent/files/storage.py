@@ -14,8 +14,11 @@ from typing import Mapping, Protocol, runtime_checkable
 from deep_agent.db.dialect import DbDialect
 from deep_agent.local_security import local_runtime_enabled
 from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE, PlatformAPI, File
-from deepfos_platform.client.base import ContentType
+from deepfos_platform.client.base import ContentType, RequestInfo
+from deepfos_platform.client.models.platform_file import FileUplodRes
+from deepfos_platform.errors.classes import APIStatusNotTrue
 from deepfos_platform.lib.httpcli import AioHttpCli
+from deepfos_platform.lib.utils import concat_url
 from deepfos_platform.client.space import SpaceAPI
 
 
@@ -167,6 +170,44 @@ class _BoundedPlatformFile(File):
             response.close()
 
 
+class _SingleAttemptPlatformFile(File):
+    """Use the SDK multipart contract without its non-idempotent POST retry.
+
+    The ordinary SDK upload decorator retries transport failures, including
+    failures after the server might have accepted the upload. Evidence export
+    must surface an unknown outcome instead. Keep discovery, headers, multipart
+    construction and response validation from the SDK, but send exactly once.
+    """
+
+    def __init__(self, root: PlatformAPI):
+        super().__init__(root)
+        self.log = lambda *_args, **_kwargs: None
+
+    async def post(self, url, body, header=None):
+        # Redirects can replay multipart POSTs as well as expose identity to a
+        # different destination. Service discovery must already select the store.
+        return await AioHttpCli.post(
+            url, data=body, headers=self._merge_header(header), allow_redirects=False,
+        )
+
+    async def upload_once(self, *, file_type: str, file_name: str, data: bytes):
+        request = RequestInfo(method="post")
+        request.update_default(File.upload.__wrapped__(self, file_type, file_name, data))
+        on_success, _on_failure, base_url = await self.get_base_url()
+        request.uri = concat_url(base_url, "upload")
+        response = await self.post(request.url, request.body, request.header)
+        try:
+            success, body = await self.check_response(response, request)
+            if success is not True:
+                raise APIStatusNotTrue("files/upload", "文件服务拒绝上传")
+            uploaded = FileUplodRes.parse_obj(body.get("data"))
+            if on_success is not None:
+                on_success()
+            return uploaded
+        finally:
+            response.close()
+
+
 def _validate_download_limit(max_bytes: int) -> None:
     if type(max_bytes) is not int or max_bytes < 0:
         raise FileStoreError("Invalid download size limit")
@@ -200,6 +241,36 @@ class PlatformFileStore:
             file_name=returned_name if isinstance(returned_name, str) and returned_name else file_name,
             file_size=returned_size if isinstance(returned_size, int) and returned_size >= 0 else len(data),
             file_type=file_type,
+        )
+
+    async def upload_once(
+        self,
+        *,
+        file_type: str,
+        file_name: str,
+        mime: str | None,
+        data: bytes,
+        request_headers: Mapping[str, str],
+    ) -> StoredFile:
+        """Explicit evidence upload; no transport retry or request-body logging."""
+        uploaded = await _SingleAttemptPlatformFile(
+            PlatformAPI(header=dict(request_headers)),
+        ).upload_once(file_type=file_type, file_name=file_name, data=data)
+        file_id = getattr(uploaded, "id", None)
+        if not isinstance(file_id, str) or not file_id:
+            raise FileStoreError("Platform file upload returned no id")
+        returned_name = getattr(uploaded, "fileName", None)
+        returned_size = getattr(uploaded, "fileSize", None)
+        if type(returned_size) is not int or returned_size < 0:
+            # An invalid receipt cannot establish a successful evidence upload.
+            # Do not replace a malformed size with the expected outgoing size.
+            raise FileStoreError("Platform file upload returned an invalid size")
+        return StoredFile(
+            id=file_id,
+            file_name=returned_name if isinstance(returned_name, str) and returned_name else file_name,
+            file_size=returned_size,
+            file_type=file_type,
+            mime=mime,
         )
 
     async def download(

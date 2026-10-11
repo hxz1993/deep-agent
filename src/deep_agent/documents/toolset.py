@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
 import time
 from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
-from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
+from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed, ToolReturn
 from pypdf import PdfReader
 
 from deep_agent.agent.attachment_extractors import AttachmentParseError, DocumentPage as ReadingPage
@@ -16,11 +17,14 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.diagnostics import emit
 from deep_agent.files.reading_budget import ReadingBudget, paginate_items
+from deep_agent.files.storage import LocalFileStore, PlatformFileStore
 from deep_agent.files.toolset import load_file_bytes, resolve_file_source
 from deep_agent.skills.runtime import ResolvedSkill
 
 from .cache import CachedDocument, DocumentRunCache
 from .models import DocumentParsingError, DocumentSource
+from .evidence import DocumentEvidence, SCHEMA_VERSION
+from .export import ExportResult
 from .providers import PROVIDERS, parse_document as parse_with_provider
 from .schema import DocumentReadResult, DocumentRef, DocumentResource, DocumentSummary, PageFragment
 from .settings import DocumentParsingRuntimeConfig
@@ -81,10 +85,14 @@ def _summary(record: CachedDocument) -> tuple[DocumentSummary, list[str], str]:
 def read_cached_document(
     record: CachedDocument, *, budget: ReadingBudget, page_start: int | None = None,
     page_end: int | None = None, limit: int | None = None, offset: int = 1, char_offset: int = 0,
+    include_layout: bool = False, export_file: bool = False,
+    evidence: DocumentEvidence | None = None, export_result: ExportResult | None = None,
 ) -> DocumentReadResult:
     _validate_range(page_start=page_start, page_end=page_end, limit=limit, offset=offset, char_offset=char_offset)
     summary, warnings, status = _summary(record)
-    selected = record.readable.pages
+    if include_layout and evidence is None:
+        raise ValueError("Layout reading requires the fixed evidence projection")
+    selected = evidence.pages if include_layout else record.readable.pages
     if page_start is not None or page_end is not None:
         if not summary.page_numbers_known:
             raise ModelRetry("该供应商结果没有可靠原始页码，请省略 page_start/page_end 并按 next_read 续读")
@@ -102,11 +110,13 @@ def read_cached_document(
             end = start + len(page.content) if page.returned_count == 1 else len(native.content)
             fragments.append(PageFragment(page_number=native.page, format=native.format,
                                           content=native.content[start:end], char_offset=start,
-                                          char_end=end, complete=end == len(native.content)))
+                                          char_end=end, complete=end == len(native.content),
+                                          layout=native.fragment_layout(start, end) if include_layout else None))
         next_read = None
         if page.has_more:
             next_read = {"resource": {"type": "document", "document_id": record.document_id},
-                         "offset": page.next_offset, "char_offset": page.next_char_offset}
+                         "offset": page.next_offset, "char_offset": page.next_char_offset,
+                         "include_layout": include_layout, "export_file": export_file}
             for name, value in (("page_start", page_start), ("page_end", page_end), ("limit", limit)):
                 if value is not None:
                     next_read[name] = value
@@ -120,6 +130,8 @@ def read_cached_document(
             model=record.parsed.model, status=status, summary=summary, pages=fragments, warnings=read_warnings,
             offset=offset, char_offset=char_offset, limit=page_limit, returned_count=page.returned_count,
             has_more=page.has_more, next_read=next_read,
+            reading_view="layout" if include_layout else "readable",
+            export=export_result or ExportResult(),
         )
 
     try:
@@ -156,6 +168,14 @@ def build_document_toolset(
         "摘要是页面覆盖概览，不是内容摘要；正文已整理为模型可读格式，普通表格为Markdown，"
         "复杂表格保留精简HTML及合并关系，未作OCR或金额纠错。"
         "char_offset/char_end指向适配后固定正文，不是供应商原始HTML。"
+        "include_layout=true附加稳定Block ID、正文字符范围和供应商坐标，正文仍保留Markdown/表格；"
+        "坐标空间及original_page_mapping明确是否可定位原件，不能直接把展平图坐标画到原PDF。"
+        "mapping_status=no_text的占位文字由系统生成，不是供应商识别出的原文。"
+        "默认不导出文件；export_file=true由后端保存完整证据JSON到当前File Store，"
+        "不受当前页范围或分页影响，不需要你重写或上传JSON。仅export.status=saved时有可用文件引用。"
+        "续读和重复导出复用同一文件，不要因上传failed/unknown重新OCR或反复请求上传。"
+        "布局与普通正文是两份固定读取视图，切换include_layout后须从offset=1、char_offset=0重新读取，"
+        "不能混用两个视图的字符位置；next_read会保留两个开关。"
     )
     toolset = FunctionToolset[AgentDeps](id="document-parsing", instructions=(
         description + "不要猜测 file_id 或 document_id。缓存仅本 Run 有效；重复原文件引用命中缓存但默认从头读，"
@@ -166,7 +186,8 @@ def build_document_toolset(
     async def parse_document(
         ctx: RunContext[AgentDeps], resource: DocumentResource, page_start: int | None = None,
         page_end: int | None = None, limit: int | None = None, offset: int = 1, char_offset: int = 0,
-    ) -> DocumentReadResult:
+        include_layout: bool = False, export_file: bool = False,
+    ) -> DocumentReadResult | ToolReturn:
         """解析授权文档，或从当前 Run 的固定可读内容缓存按 Token 预算读取。
 
         Args:
@@ -176,9 +197,15 @@ def build_document_toolset(
             limit: 最多返回的页面数；省略时按当前模型 24000/48000 Token 预算尽量返回。
             offset: 所选页面序列中的起点，从 1 开始；续读必须复制 next_read，不能自行加 1。
             char_offset: 超长单页的 Unicode 字符续读位置，从 0 开始；必须复制 next_read 中的值，否则会遗漏或重复内容。
+            include_layout: 附加Block与位置；默认false。切换视图需从头读取，未知坐标不可猜测。
+            export_file: 显式导出全部已取得的证据JSON；默认false。与布局、页范围独立，不登记下载中心。
         """
         started = time.monotonic()
         _validate_range(page_start=page_start, page_end=page_end, limit=limit, offset=offset, char_offset=char_offset)
+        if type(include_layout) is not bool or type(export_file) is not bool:
+            raise ModelRetry("include_layout/export_file 必须是布尔值")
+        context = {"session_id": ctx.deps.session_id, "run_id": ctx.deps.run_id or ctx.run_id,
+                   "tool_call_id": ctx.tool_call_id}
         if config.mode != "provider" or config.configuration_error or not config.api_key or capability is None:
             raise ToolFailed("文档解析尚未正确配置；请在全局配置 → 常规 → 文档解析中设置供应商和 Key")
         try:
@@ -216,8 +243,6 @@ def build_document_toolset(
             if capability.max_pages and source_pages and source_pages > capability.max_pages:
                 raise ModelRetry(f"文件页数超过 {capability.label} 当前服务的 {capability.max_pages} 页限制")
             source = DocumentSource(resolved.name, mime, data, source_pages)
-            context = {"session_id": ctx.deps.session_id, "run_id": ctx.deps.run_id or ctx.run_id,
-                       "tool_call_id": ctx.tool_call_id}
             try:
                 record, hit = await cache.get_or_parse(
                     source_key=resolved.cache_key, source_hash=source_hash, provider=config.provider, model=config.model,
@@ -241,13 +266,83 @@ def build_document_toolset(
                      image_placeholder_count=stats.image_placeholder_count,
                      supplemented_block_count=stats.supplemented_block_count,
                      elapsed_ms=stats.elapsed_ms, **context)
+        evidence = None
+        if include_layout or export_file:
+            layout_started = time.monotonic()
+            try:
+                evidence, layout_hit = await cache.get_evidence(record, budget.estimator)
+            except Exception as exc:
+                emit("document_layout_failed", provider_name=config.provider, phase="layout",
+                     error_type=type(exc).__name__, **context)
+                if include_layout:
+                    raise ToolFailed("文档定位视图生成失败；可关闭 include_layout 继续读取已缓存正文，不需重新OCR。") from None
+            else:
+                emit("document_layout_completed", provider_name=config.provider, phase="layout",
+                     cache_hit=layout_hit, layout_version=evidence.stats["version"],
+                     block_count=evidence.stats["block_count"], matched_blocks=evidence.stats["matched_blocks"],
+                     appended_blocks=evidence.stats["appended_blocks"],
+                     elapsed_ms=round((time.monotonic() - layout_started) * 1000), **context)
+        export_headers = {str(key).lower(): str(value) for key, value in ctx.deps.request_headers.items()}
+        if ctx.deps.user:
+            export_headers.setdefault("user", ctx.deps.user)
+        if export_file:
+            store = ctx.deps.file_store or PlatformFileStore()
+            if ctx.deps.file_store is None:
+                ctx.deps.file_store = store
+            storage = "local" if isinstance(store, LocalFileStore) else "platform"
+            summary, _, _ = _summary(record)
+
+            async def payload() -> bytes:
+                def serialize() -> bytes:
+                    if evidence is None:
+                        raise ValueError("Evidence view unavailable")
+                    value = evidence.export_dict(record.resource.model_dump(mode="json"), record.source_hash,
+                                                 summary.model_dump(mode="json"), source_storage=(
+                                                     "skill" if record.resource.type == "skill" else storage))
+                    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+                # Join serialization before the Run releases native responses.
+                worker = asyncio.create_task(asyncio.to_thread(serialize))
+                try:
+                    return await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    while not worker.done():
+                        try:
+                            await asyncio.shield(worker)
+                        except asyncio.CancelledError:
+                            continue
+                        except Exception:
+                            break
+                    if not worker.cancelled():
+                        worker.exception()
+                    raise
+
+            export_hit = cache.exports.peek(record.document_id).status != "not_requested"
+            export_started = time.monotonic()
+            exported = await cache.exports.ensure(record.document_id, payload, file_store=store,
+                                                   request_headers=export_headers, schema_version=SCHEMA_VERSION)
+            emit("document_export_completed", provider_name=config.provider, phase="export",
+                 status=exported.status, cache_hit=export_hit,
+                 error_code=exported.error.code if exported.error else None,
+                 byte_size=exported.file.byte_size if exported.file else 0,
+                 elapsed_ms=round((time.monotonic() - export_started) * 1000), **context)
+        else:
+            exported = cache.exports.peek_scoped(record.document_id, file_store=ctx.deps.file_store,
+                                                  request_headers=export_headers)
         result = await asyncio.to_thread(read_cached_document, record, budget=budget, page_start=page_start,
-                                         page_end=page_end, limit=limit, offset=offset, char_offset=char_offset)
+                                         page_end=page_end, limit=limit, offset=offset, char_offset=char_offset,
+                                         include_layout=include_layout, export_file=export_file,
+                                         evidence=evidence, export_result=exported)
         emit("document_read_completed", provider_name=result.provider, model_name=result.model, phase="page",
              cache_hit=hit, token_count=budget.estimator.text(result.model_dump(mode="json")),
              returned_pages=result.returned_count, has_more=result.has_more, offset=offset, char_offset=char_offset,
              elapsed_ms=round((time.monotonic() - started) * 1000), session_id=ctx.deps.session_id,
              run_id=ctx.deps.run_id or ctx.run_id, tool_call_id=ctx.tool_call_id)
+        if exported.file is not None:
+            from deep_agent.agent.tool_output_limits import artifacts_from_metadata
+            metadata = {"document_evidence_file": exported.file.model_dump(mode="json")}
+            for artifact in artifacts_from_metadata(metadata):
+                ctx.deps.session_file_artifacts[artifact["artifact_id"]] = artifact
+            return ToolReturn(return_value=result.model_dump(mode="json"), metadata=metadata)
         return result
 
     return toolset

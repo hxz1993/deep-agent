@@ -3,6 +3,16 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.13.0（测试分支）
+
+- `parse_document`增加独立布尔参数`include_layout`和`export_file`，默认均关闭；普通正文、表格整理、来源授权及24K/48K分页保持原义。
+- 布局视图先固定生成再计算完整返回Token；稳定Block引用关联原文，超长块可无损续读，未知或展平坐标不冒充原PDF位置。
+- 后端直接导出完整证据JSON到当前File Store，保留原生页／块正文、表格、坐标空间和原件Hash；单次解析并发上传合并，续读复用文件，上传失败或未知不自动重传，不登记下载中心。
+- 文件引用进入可信工具元数据与History，平台／本地存储分开鉴权；Run清理不删除成功导出的文件。增加正式Schema、双供应商合成样例及使用指南。
+- 合并`origin/main`的Nacos AK/SK及RAM鉴权与DNS发现改动；仓库主线为`main`，不存在`master`。本轮文档功能不新增环境变量、配置入口或数据库迁移，Alembic head仍为`011`。
+- 最终单元回归2286项零失败（8项跳过）、相关集成17项和Console778项通过；六合同96次完整重建及10个真实模型Run通过。真实平台文件闭环受Test VPN连接阻塞，尚未验收；按用户最新指示发布，保留此验证缺口。
+- 验收明细见[布局与证据导出回归](docs/design/37-document-parsing/evaluation/evidence-layout-20261011/validation-report.md)。历史合同重放、在线OCR、真实模型、文件交付分别记录，不将接口成功等同于业务字段正确或原PDF高亮已验收。
+
 ## v0.12.12（测试分支）
 
 - `read_file`新增PDF文本层本地读取，按物理页固定转换与缓存；保留空文本页和未知提示，扫描件仍由显式关联的`parse_document`处理，不自动收费OCR。

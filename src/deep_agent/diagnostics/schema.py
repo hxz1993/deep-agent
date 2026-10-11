@@ -21,6 +21,9 @@ EVENTS = {
     "document_read_completed": "文档分页读取完成",
     "document_read_failed": "文档读取失败",
     "document_adaptation_completed": "文档可读格式适配完成",
+    "document_layout_completed": "文档定位视图生成完成",
+    "document_layout_failed": "文档定位视图生成失败",
+    "document_export_completed": "文档证据导出状态已确认",
     "mcp_request_context_resolved": "MCP 请求上下文已组装",
     "history_tool_result_matched": "历史工具已匹配后续结果",
     "history_tool_result_synthesized": "历史缺失工具结果已补齐",
@@ -124,6 +127,13 @@ ADAPTATION_FIELDS = ADAPTATION_NUMBER_FIELDS | frozenset({
     "adaptation_version", "request_id", "session_id", "run_id", "tool_call_id",
     "provider_name", "model_name", "tool", "phase", "elapsed_ms", "duration_ms", "source_hash", "file_type",
 })
+LAYOUT_NUMBER_FIELDS = frozenset({"block_count", "matched_blocks", "appended_blocks"})
+LAYOUT_FIELDS = LAYOUT_NUMBER_FIELDS | frozenset({
+    "layout_version", "request_id", "session_id", "run_id", "agent_id", "tool_call_id",
+    "provider_name", "model_name", "tool", "phase", "status", "elapsed_ms", "duration_ms",
+    "cache_hit", "source_hash", "file_type", "error_type", "error_code",
+})
+LAYOUT_EVENTS = frozenset({"document_layout_completed", "document_layout_failed"})
 BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_merge_tables", "parse_relevel_titles"})
 TOKEN = re.compile(r"[A-Za-z0-9_.:/-]{1,180}\Z")
 ISSUE_CODES = frozenset({
@@ -200,12 +210,16 @@ def _model_api_fields(fields: dict, result: dict) -> None:
 
 
 def safe_fields(fields: dict, *, event: str | None = None) -> dict:
-    # Adaptation statistics belong to this event, not every model/lifecycle
-    # record. An event-local allowlist also bounds its scalar wire size without
-    # sacrificing correlation IDs or raising the existing record limit.
+    # Document statistics belong to their event, not every model/lifecycle
+    # record. Limit each specialized event's entire scalar set as well: adding
+    # its fields to every base fact can exceed the wire limit before any prose
+    # or tool names are included, and trimming those cannot recover the record.
     adapting = event == "document_adaptation_completed"
+    layout = event in LAYOUT_EVENTS
     if adapting:
         fields = {key: value for key, value in fields.items() if key in ADAPTATION_FIELDS}
+    elif layout:
+        fields = {key: value for key, value in fields.items() if key in LAYOUT_FIELDS}
     result = {}
     for name in BOOLEAN_FIELDS:
         if type(fields.get(name)) is bool:
@@ -220,13 +234,15 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
         "/api/v2/ocr/jobs", "/api/v2/ocr/jobs/{task}", "/api/paas/v4/layout_parsing", "/signed-artifact",
     }:
         result["document_api_path"] = fields["document_api_path"]
-    for name in IDENTIFIER_FIELDS | ({"adaptation_version"} if adapting else set()):
+    event_identifiers = {"adaptation_version"} if adapting else {"layout_version"} if layout else set()
+    for name in IDENTIFIER_FIELDS | event_identifiers:
         value = fields.get(name)
         # No coercion/repr: even exception __str__ and custom number objects may
         # execute code. Values with URLs, whitespace or credentials are omitted.
         if type(value) is str and TOKEN.fullmatch(value) and "://" not in value:
             result[name] = value
-    for name in NUMBER_FIELDS | (ADAPTATION_NUMBER_FIELDS if adapting else set()):
+    event_numbers = ADAPTATION_NUMBER_FIELDS if adapting else LAYOUT_NUMBER_FIELDS if layout else set()
+    for name in NUMBER_FIELDS | event_numbers:
         value = fields.get(name)
         if type(value) in (int, float) and 0 <= value <= 10**15 and math.isfinite(value):
             result[name] = value

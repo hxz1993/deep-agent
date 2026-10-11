@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import io
+import zipfile
 import json
 import logging
 import os
@@ -133,7 +135,8 @@ async def one_case(provider, native_path, source_path, dest, *, minimum_calls):
             assert all(value["export"]["file"] == file for value in values)
             exported = await store.download(file["file_id"], headers)
             assert hashlib.sha256(exported).hexdigest() == file["sha256"]
-            body = json.loads(exported)
+            body = json.loads(zipfile.ZipFile(io.BytesIO(exported)).read("evidence.json"))
+            assert file["mime"] == "application/zip"
             assert body["schema_version"] == SCHEMA_VERSION
             assert body["document_id"] == document_id
             assert len(body["pages"]) == len(parsed.pages)

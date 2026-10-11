@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import zipfile
 import json
 from pathlib import Path
 import tempfile
@@ -102,7 +104,7 @@ class EvidenceHistoryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("block_id", response.text)
         data = await self.files.download_bounded(ref["file_id"], {"user": TEST_USER_ID}, max_bytes=ref["byte_size"])
         self.assertEqual(hashlib.sha256(data).hexdigest(), ref["sha256"])
-        self.assertEqual(json.loads(data)["document_id"], observed[0]["document"]["document_id"])
+        self.assertEqual(json.loads(zipfile.ZipFile(io.BytesIO(data)).read("evidence.json"))["document_id"], observed[0]["document"]["document_id"])
 
         # A later Run cannot reuse the old temporary document cache. The saved
         # file remains downloadable independently via the existing FileStore.

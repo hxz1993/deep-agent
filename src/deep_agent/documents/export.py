@@ -25,6 +25,7 @@ from deepfos_platform.errors.classes import (
     ServerInstanceNotFound,
     ServerNotFound,
 )
+from .models import DocumentParsingError
 
 
 class EvidenceFileReference(BaseModel):
@@ -34,7 +35,7 @@ class EvidenceFileReference(BaseModel):
     file_id: str
     file_name: str
     byte_size: int
-    mime: Literal["application/json"] = "application/json"
+    mime: Literal["application/zip"] = "application/zip"
     sha256: str
     schema_version: str
 
@@ -148,7 +149,7 @@ class DocumentExportManager:
         *,
         file_store: FileStore | None,
         request_headers: Mapping[str, str],
-        schema_version: str = "document-evidence-v1",
+        schema_version: str = "document-evidence-v2",
     ) -> ExportResult:
         if self._closed:
             raise RuntimeError("Document export cache is closed")
@@ -200,14 +201,20 @@ class DocumentExportManager:
                 return finish(_failure("serialization_failed", "证据序列化未生成文件字节，解析正文仍可读取。"))
         except asyncio.CancelledError:
             raise
+        except DocumentParsingError as exc:
+            if exc.code == "bundle_too_large":
+                return finish(_failure("file_too_large", "证据包超过文件上传或解包安全上限；解析正文仍可读取。"))
+            if exc.code == "bundle_page_limit":
+                return finish(_failure("bundle_page_limit", "证据包超过1000页安全条目上限；解析正文仍可读取。"))
+            return finish(_failure("serialization_failed", "证据包生成失败，解析正文仍可读取。"))
         except Exception:
             return finish(_failure("serialization_failed", "证据文件序列化失败，解析正文仍可读取。"))
         if len(data) > max_upload_bytes():
             return finish(_failure("file_too_large", "证据文件超过当前文件上传大小上限，解析正文仍可读取。"))
         upload = file_store.upload_once if isinstance(file_store, PlatformFileStore) else file_store.upload
         upload_task = asyncio.create_task(upload(
-            file_type=FILE_TYPE_ATTACHMENT, file_name=f"{document_id}-evidence.json",
-            mime="application/json", data=data, request_headers=request_headers,
+            file_type=FILE_TYPE_ATTACHMENT, file_name=f"{document_id}-evidence.zip",
+            mime="application/zip", data=data, request_headers=request_headers,
         ))
         try:
             uploaded = await asyncio.shield(upload_task)

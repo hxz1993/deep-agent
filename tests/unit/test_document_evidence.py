@@ -1,5 +1,8 @@
 """Synthetic OCR evidence: exact provenance, privacy and lossless layout slices."""
 from copy import deepcopy
+import asyncio
+import io
+import zipfile
 import hashlib
 from pathlib import Path
 import json
@@ -35,7 +38,7 @@ def build(pages, provider="paddle", native=None, source_pages=None, status="comp
 def export(evidence, **summary):
     summary = {"source_pages": 1, "parsed_pages": 1, "page_numbers_known": True,
                "missing_pages": [], "coverage": "complete", **summary}
-    return evidence.export_dict({"type": "attachment", "file_id": "fixture-input"}, "a" * 64,
+    return evidence.export_dict({"type": "attachment", "file_id": "local_fixture_input"}, "a" * 64,
                                 summary, source_storage="local")
 
 
@@ -322,8 +325,11 @@ class DocumentEvidenceTests(unittest.TestCase):
         schema = json.loads(path.read_text())
         Draft202012Validator.check_schema(schema)
         validator = Draft202012Validator(schema)
-        _, _, evidence = build([paddle("# 合同\n\n金额：12.00🙂", [pb("金额：12.00🙂", [1, 1, 9, 9], block_polygon_points=[[1, 1], [9, 1], [9, 9], [1, 9]])])])
-        payload = export(evidence)
+        parsed, _, evidence = build([paddle("# 合同\n\n金额：12.00🙂", [pb("金额：12.00🙂", [1, 1, 9, 9], block_polygon_points=[[1, 1], [9, 1], [9, 9], [1, 9]])])])
+        from deep_agent.documents.bundle import build_evidence_bundle
+        raw = asyncio.run(build_evidence_bundle(export(evidence), parsed))
+        with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
+            payload = json.loads(bundle.read("evidence.json"))
         validator.validate(payload)
         invalid = deepcopy(payload)
         invalid["native"] = {"Authorization": "not-a-real-secret"}
@@ -349,8 +355,44 @@ class DocumentEvidenceTests(unittest.TestCase):
             raw = (base / item["file_name"]).read_bytes()
             self.assertEqual(len(raw), item["byte_size"])
             self.assertEqual(hashlib.sha256(raw).hexdigest(), item["sha256"])
-            payload = json.loads(raw.decode("utf-8", errors="strict"))
-            validator.validate(payload)
+            self.assertEqual(item["mime"], "application/zip")
+            self.assertEqual(item["schema_version"], "document-evidence-v2")
+            with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
+                names = bundle.namelist()
+                self.assertEqual(len(names), len(set(names)))
+                payload = json.loads(bundle.read("evidence.json").decode("utf-8", errors="strict"))
+                validator.validate(payload)
+                self.assertEqual(payload, json.loads((base / item["readable_json"]).read_text()))
+                expected_names = {"evidence.json"}
+                saved = 0
+                missing = []
+                from PIL import Image
+                for page in payload["pages"]:
+                    image = page["image"]
+                    if image["status"] == "saved":
+                        saved += 1
+                        expected_names.add(image["path"])
+                        image_bytes = bundle.read(image["path"])
+                        self.assertEqual(len(image_bytes), image["byte_size"])
+                        self.assertEqual(hashlib.sha256(image_bytes).hexdigest(), image["sha256"])
+                        with Image.open(io.BytesIO(image_bytes)) as decoded:
+                            decoded.load()
+                            self.assertEqual(decoded.size, (image["width"], image["height"]))
+                        self.assertEqual(image["coordinate_mapping"], "matched")
+                        self.assertEqual((page["width"], page["height"]), (image["width"], image["height"]))
+                    else:
+                        missing.append(page["page_ordinal"])
+                        self.assertEqual(image["status"], "not_provided")
+                        self.assertNotIn("path", image)
+                self.assertEqual(set(names), expected_names)
+                self.assertEqual(payload["images"]["saved"], saved)
+                self.assertEqual(payload["images"]["expected"], len(payload["pages"]))
+                self.assertEqual(payload["images"]["missing_page_ordinals"], missing)
+                self.assertEqual(saved, 1)
+                image_info = payload["pages"][0]["image"]
+                self.assertEqual(image_info["role"], "processed_page" if payload["provider"] == "paddle" else "layout_visualization")
+                self.assertEqual(image_info["annotated"], payload["provider"] == "glm")
+                self.assertEqual(payload["images"]["status"], "complete" if saved else "unavailable")
             self.assertEqual(payload["source"]["sha256"], manifest["source_sha256"])
             ids = []
             for page in payload["pages"]:
@@ -360,6 +402,105 @@ class DocumentEvidenceTests(unittest.TestCase):
                     self.assertLessEqual(block["char_end"], len(page["content"]))
                     self.assertEqual(page["content"][block["char_start"]:block["char_end"]], block["native_content"])
             self.assertEqual(len(ids), len(set(ids)))
+
+    def test_v2_schema_rejects_unsafe_or_incomplete_image_references(self):
+        from jsonschema import Draft202012Validator, ValidationError
+        base = Path(__file__).resolve().parents[2] / "docs/design/37-document-parsing"
+        schema = json.loads((base / "document-evidence.schema.json").read_text())
+        validator = Draft202012Validator(schema)
+        payload = json.loads((base / "document-evidence-paddle.example.json").read_text())
+        for key, value in (("path", "../private.png"), ("path", "/pages/page-0001.png"),
+                           ("path", "pages\\page-0001.png"), ("path", "https://example.invalid/a.png"),
+                           ("mime", "image/svg+xml"), ("status", "available"),
+                           ("sha256", "wrong"), ("coordinate_mapping", "original_pdf_verified"),
+                           ("role", "original_pdf"), ("annotated", True)):
+            with self.subTest(key=key, value=value):
+                invalid = deepcopy(payload)
+                invalid["pages"][0]["image"][key] = value
+                with self.assertRaises(ValidationError):
+                    validator.validate(invalid)
+        invalid = deepcopy(payload)
+        invalid["pages"][0]["image"]["coordinate_mapping"] = "dimension_mismatch"
+        with self.assertRaises(ValidationError):
+            validator.validate(invalid)  # Mismatch must explain its reason.
+        invalid["pages"][0]["image"]["reason_code"] = "dimension_mismatch"
+        validator.validate(invalid)
+        for status, mapping, code in (
+            ("saved", "matched", "dimension_mismatch"),
+            ("saved", "unverified", "arbitrary_code"),
+            ("saved", "unverified", "network_error"),
+            ("saved", "dimension_mismatch", "exif_orientation"),
+            ("failed", "unverified", "arbitrary_code"),
+            ("failed", "unverified", "not_provided"),
+            ("not_provided", "unverified", "network_error"),
+        ):
+            with self.subTest(status=status, mapping=mapping, code=code):
+                invalid = deepcopy(payload)
+                if status == "saved":
+                    invalid["pages"][0]["image"].update(coordinate_mapping=mapping, reason_code=code)
+                else:
+                    invalid["pages"][0]["image"] = {"status": status, "coordinate_mapping": mapping, "reason_code": code}
+                with self.assertRaises(ValidationError):
+                    validator.validate(invalid)
+        for status in ("failed", "not_provided"):
+            invalid = deepcopy(payload)
+            invalid["pages"][0]["image"] = {"status": status, "coordinate_mapping": "unverified"}
+            with self.assertRaises(ValidationError):
+                validator.validate(invalid)
+        for storage, file_id in (("local", "platform_example_source"), ("platform", "local_example_source")):
+            with self.subTest(source_storage=storage, source_file_id=file_id):
+                invalid = deepcopy(payload)
+                invalid["source"]["storage"] = storage
+                invalid["source"]["resource"]["file_id"] = file_id
+                with self.assertRaises(ValidationError):
+                    validator.validate(invalid)
+        valid_skill = deepcopy(payload)
+        valid_skill["source"].update(storage="skill", resource={"type": "skill", "skill_code": "test", "path": "files/source.pdf"})
+        validator.validate(valid_skill)
+        valid_platform = deepcopy(payload)
+        valid_platform["source"].update(storage="platform", resource={"type": "attachment", "file_id": "example_platform_source"})
+        validator.validate(valid_platform)
+        receipt_validator = Draft202012Validator({"$ref": "#/$defs/fileReference", "$defs": schema["$defs"]})
+        manifest = json.loads((base / "document-evidence-examples.manifest.json").read_text())
+        receipt = {key: value for key, value in manifest["examples"][0].items() if key != "readable_json"}
+        receipt.update(storage="local", file_id="local_synthetic")
+        receipt_validator.validate(receipt)
+        receipt["mime"] = "application/json"
+        with self.assertRaises(ValidationError):
+            receipt_validator.validate(receipt)
+
+    def test_glm_legacy_cache_without_visualization_remains_explicit_and_schema_valid(self):
+        from jsonschema import Draft202012Validator
+        from deep_agent.documents.bundle import build_evidence_bundle
+        base = Path(__file__).resolve().parents[2] / "docs/design/37-document-parsing"
+        validator = Draft202012Validator(json.loads((base / "document-evidence.schema.json").read_text()))
+        parsed, _, evidence = build([DocumentPage(1, "历史识别文字", native={"blocks": []})], "glm")
+        raw = asyncio.run(build_evidence_bundle(export(evidence), parsed))
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            self.assertEqual(archive.namelist(), ["evidence.json"])
+            payload = json.loads(archive.read("evidence.json"))
+        validator.validate(payload)
+        self.assertEqual(payload["images"]["status"], "unavailable")
+        self.assertEqual(payload["images"]["missing_page_ordinals"], [1])
+        self.assertEqual(payload["pages"][0]["image"], {
+            "status": "not_provided", "reason_code": "not_provided", "coordinate_mapping": "unverified"})
+        self.assertEqual(payload["pages"][0]["native_content"], "历史识别文字")
+        self.assertEqual(payload["status"], "complete")
+
+    def test_v1_history_examples_remain_valid_without_page_images(self):
+        from jsonschema import Draft202012Validator
+        base = Path(__file__).resolve().parents[2] / "docs/design/37-document-parsing/history/document-evidence-v1"
+        validator = Draft202012Validator(json.loads((base / "document-evidence.schema.json").read_text()))
+        manifest = json.loads((base / "document-evidence-examples.manifest.json").read_text())
+        for item in manifest["examples"]:
+            raw = (base / item["file_name"]).read_bytes()
+            self.assertEqual(len(raw), item["byte_size"])
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), item["sha256"])
+            payload = json.loads(raw)
+            validator.validate(payload)
+            self.assertEqual(payload["schema_version"], "document-evidence-v1")
+            self.assertNotIn("images", payload)
+            self.assertTrue(all("image" not in page for page in payload["pages"]))
 
     def test_cancellation_and_page_mismatch_do_not_mutate_cached_document(self):
         parsed, readable, _ = build([paddle("正文", [pb("正文")])])

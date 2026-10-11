@@ -23,6 +23,8 @@ def describe(record: dict) -> str:
                            ("status", "状态"), ("byte_size", "字节数"),
                            ("layout_version", "布局版本"), ("block_count", "块数"),
                            ("matched_blocks", "对应块数"), ("appended_blocks", "保守补回块数"),
+                           ("saved_images", "已打包页图"), ("missing_images", "缺失页图"),
+                           ("page_ordinal", "输出页序号"), ("reason_code", "原因码"),
                            ("returned_pages", "返回页"), ("token_count", "Token"), ("cache_hit", "缓存命中"),
                            ("has_more", "需要续读"), ("elapsed_ms", "耗时ms"),
                            ("adaptation_version", "适配版本"), ("native_token_count", "原生正文Token"),
@@ -30,6 +32,7 @@ def describe(record: dict) -> str:
                            ("adaptation_fallback_count", "原样保留数"),
                            ("supplemented_block_count", "布局补回数"),
                            ("parse_merge_tables", "表格合并"),
+                           ("parse_layout_visualization", "布局效果图"),
                            ("parse_relevel_titles", "标题层级")):
             if key in record:
                 details.append(f"{label} {record[key]}")

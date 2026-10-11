@@ -91,8 +91,8 @@ def evaluate(path, source, repeats):
     data["pages"] = [DocumentPage(**page) for page in data["pages"]]
     parsed = ParsedDocument(**data)
     readable = adapt_document(parsed, ESTIMATOR)
-    record = CachedDocument("doc_replay_" + source["sha256"][:16], AttachmentFileRef(type="attachment", file_id="isolated-authorized-source"),
-                            "attachment:isolated-authorized-source", source["sha256"], parsed, readable)
+    record = CachedDocument("doc_replay_" + source["sha256"][:16], AttachmentFileRef(type="attachment", file_id="local_isolated_authorized_source"),
+                            "attachment:local_isolated_authorized_source", source["sha256"], parsed, readable)
     evidence = build_document_evidence(parsed, readable, record.document_id, ESTIMATOR)
     whole = read_cached_document(record, budget=ReadingBudget(ESTIMATOR, 256000), evidence=evidence)
     exported = evidence.export_dict(record.resource.model_dump(mode="json"), record.source_hash, whole.summary.model_dump(mode="json"), source_storage="local")

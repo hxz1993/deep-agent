@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
+import zipfile
 import json
 import tempfile
 import unittest
@@ -128,7 +130,7 @@ class LayoutToolTests(unittest.IsolatedAsyncioTestCase):
             data = await self.store.download(ref["file_id"], self.ctx.deps.request_headers)
             self.assertEqual(hashlib.sha256(data).hexdigest(), ref["sha256"])
             self.assertEqual(len(data), ref["byte_size"])
-            evidence = json.loads(data)
+            evidence = json.loads(zipfile.ZipFile(io.BytesIO(data)).read("evidence.json"))
             self.assertEqual(evidence["schema_version"], SCHEMA_VERSION)
             self.assertEqual(len(evidence["pages"]), 2)  # all acquired, independent of limit=1
             self.assertEqual(evidence["status"], "partial")

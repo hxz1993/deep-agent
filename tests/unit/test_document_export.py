@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
+import zipfile
 import json
 import sqlite3
 import tempfile
@@ -20,11 +22,16 @@ from deepfos_platform.lib.httpcli import AioHttpCli
 
 HEADERS = {"user": "fixture-user", "app": "fixture-app", "space": "fixture-space"}
 PAYLOAD = json.dumps({
-    "schema_version": "document-evidence-v1", "document_id": "doc_fixture",
+    "schema_version": "document-evidence-v2", "document_id": "doc_fixture",
     "status": "partial", "pages": [{"page_number": 1, "blocks": [
         {"block_id": "doc_fixture:p1:b1", "content": "样例合同 💡 1,234.50", "bbox": [1, 2, 3, 4]},
     ]}],
 }, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+_payload_zip = io.BytesIO()
+with zipfile.ZipFile(_payload_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr("evidence.json", PAYLOAD)
+PAYLOAD = _payload_zip.getvalue()
 
 
 class ControlledPlatformStore(PlatformFileStore):
@@ -92,8 +99,10 @@ class DocumentExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again.file.file_id, "L_fixture")
         self.assertEqual(again.file.byte_size, len(PAYLOAD))
         self.assertEqual(again.file.sha256, hashlib.sha256(PAYLOAD).hexdigest())
-        self.assertEqual(again.file.schema_version, "document-evidence-v1")
+        self.assertEqual(again.file.schema_version, "document-evidence-v2")
         self.assertEqual(self.store.arguments["data"], PAYLOAD)
+        self.assertEqual(again.file.mime, "application/zip")
+        self.assertEqual(again.file.file_name, "doc_fixture-evidence.zip")
         self.assertEqual(self.store.arguments["request_headers"], HEADERS)
         self.assertEqual(self.manager.peek("doc_fixture"), again)
 
@@ -228,8 +237,8 @@ class DocumentExportTests(unittest.IsolatedAsyncioTestCase):
             downloaded = await store.download(result.file.file_id, HEADERS)
             self.assertEqual(downloaded, PAYLOAD)
             self.assertEqual(hashlib.sha256(downloaded).hexdigest(), result.file.sha256)
-            self.assertEqual(json.loads(downloaded)["schema_version"], result.file.schema_version)
-            self.assertEqual(json.loads(downloaded)["status"], "partial")
+            self.assertEqual(json.loads(zipfile.ZipFile(io.BytesIO(downloaded)).read("evidence.json"))["schema_version"], result.file.schema_version)
+            self.assertEqual(json.loads(zipfile.ZipFile(io.BytesIO(downloaded)).read("evidence.json"))["status"], "partial")
             with self.assertRaises(FileStorePermissionError):
                 await store.download(result.file.file_id, {"user": "different-user"})
             with sqlite3.connect(store.metadata_path) as connection:
@@ -338,7 +347,7 @@ class PlatformEvidenceUploadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.requests[0]["body"], PAYLOAD)
         self.assertEqual(self.requests[0]["query"], {"fileType": "DL"})
-        self.assertEqual(self.requests[0]["file_name"], "doc_http-evidence.json")
+        self.assertEqual(self.requests[0]["file_name"], "doc_http-evidence.zip")
         self.assertEqual(self.requests[0]["headers"]["Authorization"], "Bearer isolated-secret-fixture")
         output = "\n".join(logs)
         self.assertNotIn("isolated-secret-fixture", output)

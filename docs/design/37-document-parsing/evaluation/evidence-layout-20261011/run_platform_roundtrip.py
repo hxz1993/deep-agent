@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import io
+import zipfile
 import json
 import logging
 import os
@@ -40,6 +42,7 @@ async def main():
     from deep_agent.documents.adaptation import adapt_document
     from deep_agent.documents.cache import CachedDocument
     from deep_agent.documents.evidence import build_document_evidence, SCHEMA_VERSION
+    from deep_agent.documents.bundle import build_evidence_bundle
     from deep_agent.documents.export import DocumentExportManager
     from deep_agent.documents.models import DocumentPage, ParsedDocument
     from deep_agent.documents.toolset import read_cached_document
@@ -72,7 +75,7 @@ async def main():
         page = read_cached_document(cache, budget=ReadingBudget(estimator, 256000))
         body = evidence.export_dict(cache.resource.model_dump(mode="json"), cache.source_hash,
                                     page.summary.model_dump(mode="json"), source_storage="platform")
-        payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+        payload = await build_evidence_bundle(body, parsed)
         original_upload = store.upload_once
         async def counted_upload(**kwargs):
             record["evidence_uploads"] += 1
@@ -92,7 +95,7 @@ async def main():
         downloaded = await asyncio.wait_for(store.download_bounded(result.file.file_id, headers, max_bytes=len(payload)), 45)
         assert downloaded == payload
         assert hashlib.sha256(downloaded).hexdigest() == result.file.sha256
-        assert json.loads(downloaded)["schema_version"] == SCHEMA_VERSION
+        assert json.loads(zipfile.ZipFile(io.BytesIO(downloaded)).read("evidence.json"))["schema_version"] == SCHEMA_VERSION
         record.update(status="passed", source_hash_matches=True, export_hash_matches=True, schema_matches=True,
                       concurrent_reuse=True, repeated_reuse=True, evidence_file=result.file.model_dump(mode="json"))
     except Exception as exc:

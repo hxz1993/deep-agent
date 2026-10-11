@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:deepagent:document-evidence:v1",
-  "title": "DeepAgent document evidence v1",
-  "description": "Complete backend-produced OCR evidence. This is not the paginated parse_document tool result.",
+  "$id": "urn:deepagent:document-evidence:v2",
+  "title": "DeepAgent document evidence v2",
+  "description": "Complete backend-produced evidence.json inside an application/zip bundle; page image paths are package-relative. Not a paginated tool result.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": "document-evidence-v1"
+      "const": "document-evidence-v2"
     },
     "adaptation_version": {
       "type": "string",
@@ -52,7 +52,11 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/page"
-      }
+      },
+      "maxItems": 1000
+    },
+    "images": {
+      "$ref": "#/$defs/images"
     }
   },
   "required": [
@@ -66,7 +70,8 @@
     "source",
     "summary",
     "warnings",
-    "pages"
+    "pages",
+    "images"
   ],
   "$defs": {
     "attachment": {
@@ -78,7 +83,8 @@
         },
         "file_id": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.:-]{1,256}$"
         }
       },
       "required": [
@@ -210,8 +216,8 @@
           "minimum": 1
         },
         "mime": {
-          "const": "application/json",
-          "default": "application/json",
+          "const": "application/zip",
+          "default": "application/zip",
           "title": "Mime",
           "type": "string"
         },
@@ -220,7 +226,7 @@
           "pattern": "^[a-f0-9]{64}$"
         },
         "schema_version": {
-          "const": "document-evidence-v1"
+          "const": "document-evidence-v2"
         }
       },
       "required": [
@@ -468,6 +474,9 @@
           "items": {
             "$ref": "#/$defs/span"
           }
+        },
+        "image": {
+          "$ref": "#/$defs/image"
         }
       },
       "required": [
@@ -482,7 +491,8 @@
         "original_page_mapping",
         "preprocessing",
         "blocks",
-        "unmapped_spans"
+        "unmapped_spans",
+        "image"
       ]
     },
     "source": {
@@ -509,7 +519,7 @@
         "sha256": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$",
-          "description": "SHA256 of original source file bytes, not the exported JSON."
+          "description": "SHA256 of original source file bytes, not the ZIP or evidence.json."
         }
       },
       "required": [
@@ -540,8 +550,489 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "storage": {
+                "const": "local"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resource": {
+                "properties": {
+                  "file_id": {
+                    "pattern": "^local_"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "storage": {
+                "const": "platform"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "resource": {
+                "properties": {
+                  "file_id": {
+                    "not": {
+                      "pattern": "^local_"
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       ]
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "expected": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "saved": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "missing_page_ordinals": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "uniqueItems": true,
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "status",
+        "expected",
+        "saved",
+        "missing_page_ordinals"
+      ]
+    },
+    "image": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "const": "saved"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^pages/page-[0-9]{4,}\\.(jpg|png)$"
+            },
+            "mime": {
+              "enum": [
+                "image/jpeg",
+                "image/png"
+              ]
+            },
+            "byte_size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20971520
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "coordinate_mapping": {
+              "enum": [
+                "matched",
+                "unverified",
+                "dimension_mismatch"
+              ]
+            },
+            "reason_code": {
+              "$ref": "#/$defs/imageReasonCode"
+            },
+            "role": {
+              "enum": [
+                "processed_page",
+                "layout_visualization"
+              ]
+            },
+            "annotated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "status",
+            "path",
+            "mime",
+            "byte_size",
+            "sha256",
+            "width",
+            "height",
+            "coordinate_mapping",
+            "role",
+            "annotated"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "coordinate_mapping": {
+                    "enum": [
+                      "unverified",
+                      "dimension_mismatch"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "reason_code"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "role": {
+                    "const": "processed_page"
+                  }
+                },
+                "required": [
+                  "role"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "annotated": {
+                    "const": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "role": {
+                    "const": "layout_visualization"
+                  }
+                },
+                "required": [
+                  "role"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "annotated": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "coordinate_mapping": {
+                    "const": "matched"
+                  }
+                }
+              },
+              "then": {
+                "not": {
+                  "required": [
+                    "reason_code"
+                  ]
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "coordinate_mapping": {
+                    "const": "dimension_mismatch"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason_code": {
+                    "const": "dimension_mismatch"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "coordinate_mapping": {
+                    "const": "unverified"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason_code": {
+                    "enum": [
+                      "exif_orientation",
+                      "coordinate_space_unverified",
+                      "page_dimensions_unknown"
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "dependentRequired": {
+            "role": [
+              "annotated"
+            ],
+            "annotated": [
+              "role"
+            ]
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "enum": [
+                "not_provided",
+                "failed"
+              ]
+            },
+            "coordinate_mapping": {
+              "const": "unverified"
+            },
+            "reason_code": {
+              "$ref": "#/$defs/imageReasonCode"
+            },
+            "role": {
+              "enum": [
+                "processed_page",
+                "layout_visualization"
+              ]
+            },
+            "annotated": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "status",
+            "coordinate_mapping",
+            "reason_code"
+          ],
+          "dependentRequired": {
+            "role": [
+              "annotated"
+            ],
+            "annotated": [
+              "role"
+            ]
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "role": {
+                    "const": "processed_page"
+                  }
+                },
+                "required": [
+                  "role"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "annotated": {
+                    "const": false
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "role": {
+                    "const": "layout_visualization"
+                  }
+                },
+                "required": [
+                  "role"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "annotated": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "not_provided"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason_code": {
+                    "const": "not_provided"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "failed"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "reason_code": {
+                    "enum": [
+                      "unsupported_image_source",
+                      "download_timeout",
+                      "download_budget_exceeded",
+                      "unsafe_url",
+                      "artifact_access_denied",
+                      "result_too_large",
+                      "rate_limited",
+                      "network_error",
+                      "service_error",
+                      "permission_denied",
+                      "invalid_image",
+                      "image_pixels_exceeded",
+                      "unsupported_image_format",
+                      "animated_image",
+                      "image_download_failed"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "imageReasonCode": {
+      "enum": [
+        "not_provided",
+        "unsupported_image_source",
+        "download_timeout",
+        "download_budget_exceeded",
+        "unsafe_url",
+        "artifact_access_denied",
+        "result_too_large",
+        "rate_limited",
+        "network_error",
+        "service_error",
+        "permission_denied",
+        "invalid_image",
+        "image_pixels_exceeded",
+        "unsupported_image_format",
+        "animated_image",
+        "image_download_failed",
+        "exif_orientation",
+        "coordinate_space_unverified",
+        "dimension_mismatch",
+        "page_dimensions_unknown"
+      ],
+      "description": "Closed operational taxonomy. Never upstream exception text, credentials, body or URL."
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "const": "paddle"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "pages": {
+            "items": {
+              "properties": {
+                "image": {
+                  "properties": {
+                    "role": {
+                      "const": "processed_page"
+                    },
+                    "annotated": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "const": "glm"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "pages": {
+            "items": {
+              "properties": {
+                "image": {
+                  "properties": {
+                    "role": {
+                      "const": "layout_visualization"
+                    },
+                    "annotated": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

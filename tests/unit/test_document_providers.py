@@ -32,6 +32,30 @@ def source():
 
 
 class DocumentSettingsTests(unittest.TestCase):
+    def test_glm_visualization_only_binds_complete_known_page_sequence(self):
+        body = {"md_results": ["one", "two"], "layout_visualization": ["https://cdn.example/one", "https://cdn.example/two"]}
+        pages = _glm_pages(body)
+        self.assertEqual([p.native["processed_image_url"] for p in pages], body["layout_visualization"])
+        self.assertEqual(pages[0].native["processed_image_source"], "glm_layout_visualization")
+        self.assertNotIn("processed_image_url", _glm_pages({**body, "layout_visualization": ["https://cdn.example/one"]})[0].native)
+        self.assertNotIn("processed_image_url", _glm_pages({"md_results": "unknown page", "layout_visualization": ["https://cdn.example/one"]})[0].native)
+        self.assertEqual([p.content for p in pages], ["one", "two"])
+
+    def test_paddle_processed_images_bound_within_each_batch_without_shift(self):
+        def batch(images, indices):
+            return {"result": {"preprocessedImages": images, "layoutParsingResults": [
+                {"prunedResult": {"page_index": i}, "markdown": {"text": f"page {i}"}}
+                for i in indices]}}
+        rows = [batch(["https://cdn.example/one", None, "https://cdn.example/three"], [0, 1, 2]),
+                batch(["https://cdn.example/wrong-length"], [3, 4]),
+                batch(["https://cdn.example/six"], [5])]
+        pages = _paddle_pages("\n".join(json.dumps(row) for row in rows).encode())
+        self.assertEqual([p.page for p in pages], [1, 2, 3, 4, 5, 6])
+        self.assertEqual([p.native.get("processed_image_url") for p in pages], [
+            "https://cdn.example/one", None, "https://cdn.example/three", None, None, "https://cdn.example/six"])
+        self.assertEqual(pages[0].native["processed_image_source"], "paddle_preprocessed_images")
+        self.assertNotIn("processed_image_url", rows[0]["result"]["layoutParsingResults"][0])
+
     def test_same_provider_preserves_key_only(self):
         existing = DocumentParsingRuntimeConfig("provider", "paddle", "real-key")
         self.assertEqual(resolve_document_parsing_config({"mode": "provider", "provider": "paddle"}, existing=existing).api_key, "real-key")
@@ -262,6 +286,7 @@ class DocumentProtocolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(request.url.path, "/api/paas/v4/layout_parsing")
             body = json.loads(request.content)
             self.assertEqual(body["model"], "glm-ocr")
+            self.assertIs(body["need_layout_visualization"], True)
             self.assertTrue(body["file"].startswith("data:application/pdf;base64,"))
             return httpx2.Response(200, json={"md_results": "native combined", "layout_details": [[{"content": "123.45"}], [{"content": "<table>7%</table>"}]], "usage": {"total_tokens": 3}})
         parsed = await self.run_provider("glm", handler)

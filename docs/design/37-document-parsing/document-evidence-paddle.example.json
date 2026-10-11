@@ -1,5 +1,5 @@
 {
-  "schema_version": "document-evidence-v1",
+  "schema_version": "document-evidence-v2",
   "adaptation_version": "document-adaptation-v2",
   "layout_version": "document-layout-v1",
   "document_id": "doc_example_paddle",
@@ -10,7 +10,7 @@
     "storage": "local",
     "resource": {
       "type": "attachment",
-      "file_id": "example-paddle-source"
+      "file_id": "local_example_paddle_source"
     },
     "sha256": "afc994dba3ef809cbf739d70601ba9f31d17bb3c116c6c220fd26cee66256b0a"
   },
@@ -96,7 +96,25 @@
           "char_start": 0,
           "char_end": 2
         }
-      ]
+      ],
+      "image": {
+        "role": "processed_page",
+        "annotated": false,
+        "status": "saved",
+        "path": "pages/page-0001.png",
+        "mime": "image/png",
+        "byte_size": 19695,
+        "sha256": "1b63d6b11e324bdeaab752ef341add929ffffb8ae9983170560b663df5c4979b",
+        "width": 1224,
+        "height": 1584,
+        "coordinate_mapping": "matched"
+      }
     }
-  ]
+  ],
+  "images": {
+    "status": "complete",
+    "expected": 1,
+    "saved": 1,
+    "missing_page_ordinals": []
+  }
 }

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
-import json
 import time
 from typing import Any
 
@@ -25,6 +24,7 @@ from .cache import CachedDocument, DocumentRunCache
 from .models import DocumentParsingError, DocumentSource
 from .evidence import DocumentEvidence, SCHEMA_VERSION
 from .export import ExportResult
+from .bundle import build_evidence_bundle
 from .providers import PROVIDERS, parse_document as parse_with_provider
 from .schema import DocumentReadResult, DocumentRef, DocumentResource, DocumentSummary, PageFragment
 from .settings import DocumentParsingRuntimeConfig
@@ -171,7 +171,10 @@ def build_document_toolset(
         "include_layout=true附加稳定Block ID、正文字符范围和供应商坐标，正文仍保留Markdown/表格；"
         "坐标空间及original_page_mapping明确是否可定位原件，不能直接把展平图坐标画到原PDF。"
         "mapping_status=no_text的占位文字由系统生成，不是供应商识别出的原文。"
-        "默认不导出文件；export_file=true由后端保存完整证据JSON到当前File Store，"
+        "默认不导出文件；export_file=true由后端保存完整证据ZIP（JSON及供应商提供的页图）到当前File Store，"
+        "两家使用同一文件格式：Paddle图片role=processed_page、annotated=false；"
+        "GLM图片role=layout_visualization、annotated=true，图上已有检测框，不是干净底图。"
+        "图片缺失或下载失败会在包内images/pages[].image明确报告，保存文件成功不表示所有图片齐全或原PDF可精确定位。"
         "不受当前页范围或分页影响，不需要你重写或上传JSON。仅export.status=saved时有可用文件引用。"
         "续读和重复导出复用同一文件，不要因上传failed/unknown重新OCR或反复请求上传。"
         "布局与普通正文是两份固定读取视图，切换include_layout后须从offset=1、char_offset=0重新读取，"
@@ -198,7 +201,7 @@ def build_document_toolset(
             offset: 所选页面序列中的起点，从 1 开始；续读必须复制 next_read，不能自行加 1。
             char_offset: 超长单页的 Unicode 字符续读位置，从 0 开始；必须复制 next_read 中的值，否则会遗漏或重复内容。
             include_layout: 附加Block与位置；默认false。切换视图需从头读取，未知坐标不可猜测。
-            export_file: 显式导出全部已取得的证据JSON；默认false。与布局、页范围独立，不登记下载中心。
+            export_file: 显式导出完整证据ZIP（JSON及可取得的供应商页图）；默认false。与布局、页范围独立，不登记下载中心。
         """
         started = time.monotonic()
         _validate_range(page_start=page_start, page_end=page_end, limit=limit, offset=offset, char_offset=char_offset)
@@ -293,17 +296,17 @@ def build_document_toolset(
             summary, _, _ = _summary(record)
 
             async def payload() -> bytes:
-                def serialize() -> bytes:
+                def serialize() -> dict:
                     if evidence is None:
                         raise ValueError("Evidence view unavailable")
                     value = evidence.export_dict(record.resource.model_dump(mode="json"), record.source_hash,
                                                  summary.model_dump(mode="json"), source_storage=(
                                                      "skill" if record.resource.type == "skill" else storage))
-                    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+                    return value
                 # Join serialization before the Run releases native responses.
                 worker = asyncio.create_task(asyncio.to_thread(serialize))
                 try:
-                    return await asyncio.shield(worker)
+                    value = await asyncio.shield(worker)
                 except asyncio.CancelledError:
                     while not worker.done():
                         try:
@@ -315,6 +318,7 @@ def build_document_toolset(
                     if not worker.cancelled():
                         worker.exception()
                     raise
+                return await build_evidence_bundle(value, record.parsed, context=context)
 
             export_hit = cache.exports.peek(record.document_id).status != "not_requested"
             export_started = time.monotonic()

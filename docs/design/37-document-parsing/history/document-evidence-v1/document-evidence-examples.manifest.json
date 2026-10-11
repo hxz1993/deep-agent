@@ -1,0 +1,20 @@
+{
+  "purpose": "Synthetic protocol examples generated through the actual evidence builder. Not vendor online results or uploaded files. File IDs are illustrative and cannot be downloaded. No real contract or credentials.",
+  "source_fixture": "deep_agent.api.v1.document_parsing.connection_sample()",
+  "source_byte_size": 50916,
+  "source_sha256": "afc994dba3ef809cbf739d70601ba9f31d17bb3c116c6c220fd26cee66256b0a",
+  "examples": [
+    {
+      "file_name": "document-evidence-paddle.example.json",
+      "byte_size": 2436,
+      "sha256": "645060cc77ff8cc4726b099ffdee00c20b98ae899ee3c20151d535e23f1532d8",
+      "schema_version": "document-evidence-v1"
+    },
+    {
+      "file_name": "document-evidence-glm.example.json",
+      "byte_size": 2021,
+      "sha256": "04ee37a0636bd76b8cf14eb5aea6bc625f0219181815b31cfa09a6aa685f9d62",
+      "schema_version": "document-evidence-v1"
+    }
+  ]
+}

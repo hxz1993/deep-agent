@@ -13,7 +13,7 @@
 
 默认继续现有精简 Markdown、普通／合并表格结构及布局正文补漏。普通表格可靠转换成 Markdown，复杂表格保留精简 HTML。信息完整性用正文、数字、标点、顺序、空单元格、合并关系与补漏回归保证，不能等同于保留所有 style/class。
 
-新增实现入口：`documents/evidence.py`、`documents/export.py`；集成在 `documents/cache.py` 和 `documents/toolset.py`。正式协议以[使用指南](../../guides/document-evidence.md)、[JSON Schema](document-evidence.schema.json)及两家合成样例为准。
+新增实现入口：`documents/evidence.py`、`documents/export.py`；集成在 `documents/cache.py` 和 `documents/toolset.py`。当前正式协议（0.13.1 起为 ZIP/v2）以[使用指南](../../guides/document-evidence.md)、[JSON Schema](document-evidence.schema.json)及两家合成样例为准。
 
 ## 固定布局视图与分页
 
@@ -85,3 +85,21 @@ Word 转 PDF 用于固定版面，不代表必须重新 OCR；转换仍可能改
 本轮修改工具、缓存、文件上传、可信 History 元数据、诊断、测试和文档；不修改租赁前端、提示词、公共预览服务、数据库、环境变量或配置入口。已合并仓库实际主线 `origin/main`（仓库无 master），发布目标经用户确认由 0.12.x 升为 0.13.0。
 
 验收分开记录：受控协议及单元回归、六份合同历史重放、两家在线小样、真实模型续读、本地／平台文件闭环、坐标样本。任何一项受外部网络阻塞都不能写成已通过；最终状态和发布提交见回归报告。
+
+
+## 0.13.1 增量：处理页图证据包
+
+本节覆盖本文件前文 0.13.0 中“只导出 JSON、未导出处理页图”的历史范围；前文实现与验收数值保留为当时记录。当前详细字段及限额见[证据指南](../../guides/document-evidence.md)。
+
+本轮只改 DeepAgent：`export_file=true` 生成一个 ZIP，包含根 `evidence.json` 和已确认与解析页对应的供应商处理图；外层回执与内部 Schema 均为 `document-evidence-v2`，MIME 为 `application/zip`。两个参数仍是独立布尔值，默认不下载、不上传。GLM 请求仅增加原生版面可视化选项；正文适配、布局视图、Block ID、字符位置、24K／48K 分页均不改变。
+
+1. 解析时只保存 Paddle `result.preprocessedImages` 的私有下载引用，按响应页面关联，不把 `layout_det_res` 或原 PDF 页图当作处理图。
+2. 只有显式导出时，以受控无凭据下载取得图片，核验静态 PNG／JPEG、尺寸、字节及像素；图片与未压缩 JSON 和最终 ZIP 均受现有文件限制。
+3. 同一次导出上传包含页图和 JSON。单图失败或缺失保留正文，包内标记 `failed/not_provided`；包超限导致导出失败，正文读取不受影响。
+4. GLM 请求增加 `need_layout_visualization=true`，取得原生 `layout_visualization` 带框整页图，统一放进同一 ZIP 结构；`role=layout_visualization, annotated=true`，明确区别于 Paddle 的 `processed_page, annotated=false`。旧缓存或供应商未提供页图时保留 `not_provided`，不伪造，也不额外做 OCR。
+5. `matched` 仅证明可在对应供应商处理图上按原始像素绘框；原 PDF 仍按旧的 `original_page_mapping` 状态处理。本轮不加入 SIFT／RANSAC／非线性配准，不把早期 Demo 的近似框升级成精确原件坐标。
+6. 同 Run 单飞、防重复上传、授权校验与取消清理延续；导出所有已获得页面，不由模型重写文件，也不通过 SSE 抓取组装。
+
+消费与发布顺序已与租赁任务对齐：旧 JSON/v1 与新 ZIP/v2 按 MIME＋Schema 明确分流。先由消费侧支持 ZIP，再部署新后端，不能把 ZIP 冒充旧 v1 JSON。后端补丁代码和 Tag 可先交付，Alpha 部署与租赁线上联调必须另核验。历史协议及样例保留在 `history/document-evidence-v1/`；产品后端不增加旧导出兼容参数。
+
+验收要求：受控两家包结构、缺图／图片损坏／尺寸错配／签名地址脱敏、单飞上传与取消、24K／48K 与布局正文不变、历史合同重放、两家在线样例、本地和平台上传下载 Hash 闭环分别报告。历史重放不能作为在线成功，合成 ZIP 不能作为真实供应商页图证据。任何业务主任务、线上配置与保存均不在本轮范围。

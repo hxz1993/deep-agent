@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.13.0`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.13.1`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -410,3 +410,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 同一Run、同文件与解析配置共用首次提交的900秒截止时间；恢复查询只用剩余时间，不因模型再次调用延长等待或重新收费提交。供应商任务接口200、`pending`及Agent最终`completed`均不能代替正文解析成功。验收需通过真实Agent读取至`has_more=false`，分页拼接与供应商原生正文一致，再单独核对金额等业务字段；页覆盖完整不表示识别完整。当前供应商顺序Paddle、GLM，未配置草稿选首项，已有有效选择不自动改变。MinerU选项和适配器已移除，旧供应商配置由通用校验标为未配置，不改写存储、不自动回退。文档Key保留逻辑须在配置写事务中读取并合并，避免并发覆盖新Key。详见[2026-10-02审计](docs/design/37-document-parsing/evaluation/lease-contract-parsers/product-runtime-20261002/release-audit-20261002.md)。
 
 文档专业解析工具采用`parse_document`，中文“解析文档”，与`read_file`“读取文件”区分；不保留旧`read_document`运行时别名。`read_file`直接读取文本、DOCX、XLSX、PPTX及PDF文本层；旧DOC/XLS/PPT和图片OCR不支持。PDF按物理页分页，没有文本的页也保留位置，不代表原页空白。扫描件或文字/版面不足时选择已加载的`parse_document`。附件引用不能无差别提示模型使用`read_file`；历史事实不改名，读取投影时按当前工具能力选择。
+
+### 文档证据ZIP（v0.13.1）
+
+`export_file=true`导出`document-evidence-v2` ZIP，含完整安全JSON与可取得的供应商坐标平面图片。Paddle为干净处理图，GLM为带检测框的可视化图，两家共用协议并用`role/annotated`区分。图片缺失、下载失败或上传大小预算不足时，保留完整JSON并明确图片状态；`saved`不等于图片齐全，`matched`只表示图片与供应商坐标平面一致，不代表已配准原PDF。默认仍不导出，24K/48K正文与布局分页保持不变。新ZIP兼容前端须先支持v1 JSON与v2 ZIP，再部署后端；不得将代码推送当作Alpha已部署。

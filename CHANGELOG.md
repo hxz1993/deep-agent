@@ -3,6 +3,15 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.13.1（测试分支）
+
+- 文档证据由单一JSON升级为`document-evidence-v2` ZIP，保留完整证据并收集供应商可取得的坐标平面页图；Paddle干净处理图与GLM带检测框可视化图使用同一结构，以`role/annotated`明确区分。
+- GLM首次解析请求开启原生布局可视化，后续导出复用响应，不重新收费OCR；两家正文适配、布局、24K/48K分页和默认不导出行为保持不变。
+- 页图使用独立无凭据下载、URL与图片安全检查、整体时间及现有上传大小预算；下载失败或预算不足仍保留完整JSON并报告缺图。`matched`仅指供应商图与坐标平面一致，不代表原PDF配准。
+- 同一Run并发、分页和重复导出复用一个ZIP，沿用可信文件引用、授权、取消清理及上传失败／未知保护；无新增数据库、环境变量或配置入口。
+- 更新v2 Schema、双供应商合成ZIP及回归报告，保留v1历史协议资料。完整单元2310项零失败（8项跳过）、Console778项通过；12份历史合同文件闭环、4次真实模型运行和真实Test平台上传下载Hash/Schema通过。
+- 55页Paddle合同受现有20MiB上限，仅保存34张图片，完整55页正文和741 Block保留；GLM历史未请求的图片如实标记缺失。详见[ZIP真实验证](docs/design/37-document-parsing/evaluation/evidence-bundle-20261012/README.md)。租赁前端须先兼容v1 JSON/v2 ZIP，再部署后端；代码推送不表示Alpha已部署。
+
 ## v0.13.0（测试分支）
 
 - `parse_document`增加独立布尔参数`include_layout`和`export_file`，默认均关闭；普通正文、表格整理、来源授权及24K/48K分页保持原义。

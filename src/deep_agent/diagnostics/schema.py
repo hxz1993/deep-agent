@@ -24,6 +24,8 @@ EVENTS = {
     "document_layout_completed": "文档定位视图生成完成",
     "document_layout_failed": "文档定位视图生成失败",
     "document_export_completed": "文档证据导出状态已确认",
+    "document_bundle_completed": "文档证据包生成结束",
+    "document_image_download": "文档处理页图获取结束",
     "mcp_request_context_resolved": "MCP 请求上下文已组装",
     "history_tool_result_matched": "历史工具已匹配后续结果",
     "history_tool_result_synthesized": "历史缺失工具结果已补齐",
@@ -134,7 +136,13 @@ LAYOUT_FIELDS = LAYOUT_NUMBER_FIELDS | frozenset({
     "cache_hit", "source_hash", "file_type", "error_type", "error_code",
 })
 LAYOUT_EVENTS = frozenset({"document_layout_completed", "document_layout_failed"})
-BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_merge_tables", "parse_relevel_titles"})
+BUNDLE_EVENTS = frozenset({"document_bundle_completed", "document_image_download"})
+BUNDLE_NUMBER_FIELDS = frozenset({"saved_images", "missing_images", "page_ordinal"})
+BUNDLE_FIELDS = BUNDLE_NUMBER_FIELDS | frozenset({
+    "request_id", "session_id", "run_id", "agent_id", "tool_call_id", "provider_name",
+    "model_name", "tool", "phase", "status", "elapsed_ms", "byte_size", "reason_code",
+})
+BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_merge_tables", "parse_relevel_titles", "parse_layout_visualization"})
 TOKEN = re.compile(r"[A-Za-z0-9_.:/-]{1,180}\Z")
 ISSUE_CODES = frozenset({
     "directory_unavailable", "write_failed", "queue_full", "capacity_exceeded", "shutdown_incomplete",
@@ -216,10 +224,13 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     # or tool names are included, and trimming those cannot recover the record.
     adapting = event == "document_adaptation_completed"
     layout = event in LAYOUT_EVENTS
+    bundle = event in BUNDLE_EVENTS
     if adapting:
         fields = {key: value for key, value in fields.items() if key in ADAPTATION_FIELDS}
     elif layout:
         fields = {key: value for key, value in fields.items() if key in LAYOUT_FIELDS}
+    elif bundle:
+        fields = {key: value for key, value in fields.items() if key in BUNDLE_FIELDS}
     result = {}
     for name in BOOLEAN_FIELDS:
         if type(fields.get(name)) is bool:
@@ -234,14 +245,14 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
         "/api/v2/ocr/jobs", "/api/v2/ocr/jobs/{task}", "/api/paas/v4/layout_parsing", "/signed-artifact",
     }:
         result["document_api_path"] = fields["document_api_path"]
-    event_identifiers = {"adaptation_version"} if adapting else {"layout_version"} if layout else set()
+    event_identifiers = {"adaptation_version"} if adapting else {"layout_version"} if layout else {"reason_code"} if bundle else set()
     for name in IDENTIFIER_FIELDS | event_identifiers:
         value = fields.get(name)
         # No coercion/repr: even exception __str__ and custom number objects may
         # execute code. Values with URLs, whitespace or credentials are omitted.
         if type(value) is str and TOKEN.fullmatch(value) and "://" not in value:
             result[name] = value
-    event_numbers = ADAPTATION_NUMBER_FIELDS if adapting else LAYOUT_NUMBER_FIELDS if layout else set()
+    event_numbers = ADAPTATION_NUMBER_FIELDS if adapting else LAYOUT_NUMBER_FIELDS if layout else BUNDLE_NUMBER_FIELDS if bundle else set()
     for name in NUMBER_FIELDS | event_numbers:
         value = fields.get(name)
         if type(value) in (int, float) and 0 <= value <= 10**15 and math.isfinite(value):

@@ -21,7 +21,7 @@ from .adaptation import ADAPTATION_VERSION, AdaptedDocument, DocumentAdaptationC
 from .models import DocumentPage, ParsedDocument
 from .native_content import _identifier_character
 
-SCHEMA_VERSION = "document-evidence-v1"
+SCHEMA_VERSION = "document-evidence-v2"
 LAYOUT_VERSION = "document-layout-v1"
 
 _URL = re.compile(r"(?:https?://|file://|data:)[^\s<>\"')\]]+", re.IGNORECASE)

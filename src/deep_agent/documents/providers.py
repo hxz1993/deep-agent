@@ -240,7 +240,12 @@ def _paddle_pages(blob: bytes) -> list[DocumentPage]:
         items = result.get("layoutParsingResults") if isinstance(result, dict) else None
         if not isinstance(items, list):
             raise DocumentParsingError("invalid_result", "PaddleOCR分页内容索引无效")
-        for item in items:
+        # AI Studio batches page results and their processed images in parallel
+        # arrays. Bind only a complete batch; a missing entry must never shift
+        # the following pages onto the wrong image. Transport URLs stay private.
+        images = result.get("preprocessedImages")
+        images_aligned = isinstance(images, list) and len(images) == len(items)
+        for ordinal, item in enumerate(items):
             if not isinstance(item, dict):
                 raise DocumentParsingError("invalid_result", "PaddleOCR页面结构无效")
             # AI Studio JSONL layoutParsingResults are ordered input pages.
@@ -251,11 +256,29 @@ def _paddle_pages(blob: bytes) -> list[DocumentPage]:
             text = markdown.get("text") if isinstance(markdown, dict) else None
             if not isinstance(text, str):
                 raise DocumentParsingError("invalid_result", "PaddleOCR页面缺少原生Markdown")
-            pages.append(DocumentPage(number, text, native=item))
+            native = dict(item)
+            if images_aligned and isinstance(images[ordinal], str) and images[ordinal]:
+                native["processed_image_url"] = images[ordinal]
+                native["processed_image_source"] = "paddle_preprocessed_images"
+            pages.append(DocumentPage(number, text, native=native))
     return pages
 
 
 def _glm_pages(body: dict) -> list[DocumentPage]:
+    pages = _glm_content_pages(body)
+    images = body.get("layout_visualization")
+    # Official visualization order matches the page layout sequence. Unknown
+    # page boundaries or incomplete image arrays cannot establish a pairing.
+    if isinstance(images, list) and len(images) == len(pages):
+        pages = [DocumentPage(page.page, page.content, page.format, {
+            **page.native, "processed_image_url": images[index],
+            "processed_image_source": "glm_layout_visualization",
+        }) if page.page == index + 1 and isinstance(images[index], str) and images[index]
+           else page for index, page in enumerate(pages)]
+    return pages
+
+
+def _glm_content_pages(body: dict) -> list[DocumentPage]:
     markdown = body.get("md_results")
     layout = body.get("layout_details")
     if isinstance(markdown, list) and all(isinstance(p, str) for p in markdown):
@@ -335,7 +358,10 @@ async def _parse(config, source, cache_dir, client, context):
         if not output.exists():
             if task.get("submitted"):
                 raise DocumentParsingError("submission_unknown", "GLM-OCR响应未完整保存，未重新提交解析任务")
-            data = await submit(_GLM, json={"model": "glm-ocr", "file": f"data:{source.mime_type};base64," + base64.b64encode(source.data).decode("ascii")})
+            # Ask once at parse time so a later export can reuse the response
+            # without another paid OCR request. Download happens only on export.
+            data = await submit(_GLM, json={"model": "glm-ocr", "need_layout_visualization": True,
+                                           "file": f"data:{source.mime_type};base64," + base64.b64encode(source.data).decode("ascii")})
             await _cpu(_save, output, data)
             task.update(submission_unknown=False, submitted=True)
             await _cpu(_save, task_path, task)
@@ -396,7 +422,8 @@ async def parse_document(config: DocumentParsingRuntimeConfig, source: DocumentS
     _log(context, "document_parse_started", provider_name=config.provider, model_name=config.model,
          byte_size=len(source.data), source_hash=hashlib.sha256(source.data).hexdigest(),
          file_type=Path(source.name).suffix.lower()[1:], phase="start")
-    parameters = {"parse_merge_tables": True, "parse_relevel_titles": True} if config.provider == "paddle" else {}
+    parameters = ({"parse_merge_tables": True, "parse_relevel_titles": True} if config.provider == "paddle"
+                  else {"parse_layout_visualization": True})
     _log(context, "document_parse_phase", provider_name=config.provider, model_name=config.model, phase="parameters", **parameters)
     try:
         async with asyncio.timeout(PARSE_TIMEOUT_SECONDS):

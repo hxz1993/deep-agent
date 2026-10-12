@@ -149,7 +149,7 @@ class Agent(Category):
 
     app_name = Option("deep-agent", val_type=str, bind_env="APP_NAME")
     max_requests = Option(
-        40,
+        80,
         val_type=int,
         bind_env="MAX_REQUESTS",
         extra_check=_ensure_positive_int,

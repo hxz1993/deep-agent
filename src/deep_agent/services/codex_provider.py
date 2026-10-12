@@ -37,7 +37,7 @@ def codex_enabled() -> bool:
     # The generic switch takes precedence, including when explicitly set to false.
     raw = os.getenv(SUBSCRIPTION_PROVIDER_ENV)
     if raw is None:
-        raw = os.getenv(LEGACY_CODEX_PROVIDER_ENV, "")
+        raw = os.getenv(LEGACY_CODEX_PROVIDER_ENV, "true")
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 

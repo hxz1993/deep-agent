@@ -3,6 +3,16 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.13.2（测试分支）
+
+- 修复普通工具与UI工具同批结束时，增量结果和终态SystemPrompt拼接导致同一ToolReturn重复落库的问题；保留已写入的请求序号和Part位置，新增内容追加，不放宽不可变事件校验。
+- 已有重复结果仅在模型输入的相邻Request中局部归并；工具名、ID和结果须一致，冲突及跨用户消息／模型响应的ID重用保留。原始Events与Console History不回写，恢复UI工具仍沿用既有协议。
+- 修复失败续跑后，预算恢复将`execution/error.message`诊断文字当作SDK消息读取导致的AttributeError。
+- `DEEP_AGENT_MAX_REQUESTS`默认40→80，计数仍为同一用户轮次的模型请求，Deferred续跑共用额度；最后一次关闭工具只输出阶段性总结。验证第79次UI回传后第80次正常结束。
+- `DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER`默认开启，仍需管理员完成账号授权；显式关闭、新旧变量优先规则及既有模型选择保持不变，同步配置说明和示例。
+- 完整单元回归2319项零失败（8项跳过）、相关持久化／UI／供应商回归117项通过；真实故障历史在离线受控SDK中复现并恢复成功，不等同于Alpha已经部署或原会话已续跑。
+- 无新增环境变量、配置入口或数据库迁移；Alembic head仍为`011`。现有显式环境配置继续优先。
+
 ## v0.13.1（测试分支）
 
 - 文档证据由单一JSON升级为`document-evidence-v2` ZIP，保留完整证据并收集供应商可取得的坐标平面页图；Paddle干净处理图与GLM带检测框可视化图使用同一结构，以`role/annotated`明确区分。

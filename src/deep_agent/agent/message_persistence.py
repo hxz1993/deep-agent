@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import AsyncIterable
 from contextvars import ContextVar
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 
 from pydantic_ai import AgentStreamEvent, ModelRequestNode, RunContext, ToolDenied
@@ -16,7 +17,7 @@ from pydantic_ai.messages import (
 )
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.history import is_user_only_request
+from deep_agent.agent.history import is_user_only_request, same_tool_return
 from deep_agent.agent.observability import log_event
 from deep_agent.agent.planning import (
     attach_plan_snapshot, current_plan_snapshot, is_planning_tool, plan_snapshot_from_part,
@@ -99,13 +100,65 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         runner applies its usual terminal normalization and prompt filtering.
         """
         merged = list(self._ledger)
+        # Settled parallel results may already be persisted while the SDK has
+        # not entered the next model node (notably a deferred/UI boundary).
+        # Reserve their existing ordinal and part positions before merging
+        # terminal requests containing queued system/discovery notices.
+        if self._results:
+            tail = []
+            for previous in reversed(merged):
+                if not isinstance(previous, ModelRequest) or is_user_only_request(previous):
+                    break
+                tail.extend(previous.parts)
+            remaining = [part for part in self._results.values()
+                         if not isinstance(part, ToolReturnPart) or not any(
+                             isinstance(existing, ToolReturnPart) and same_tool_return(existing, part)
+                             for existing in tail)]
+            if remaining:
+                merged.append(ModelRequest(parts=deepcopy(remaining)))
+        response_index: int | None = None
         for message in official:
             match = next((index for index, previous in enumerate(merged)
                           if self._same_message(previous, message)), None)
+            if isinstance(message, ModelRequest) and not is_user_only_request(message):
+                start = response_index + 1 if response_index is not None else 0
+                candidates = []
+                for index in range(start, len(merged)):
+                    previous = merged[index]
+                    if isinstance(previous, ModelResponse) or is_user_only_request(previous):
+                        break
+                    if isinstance(previous, ModelRequest):
+                        candidates.append(index)
+                if match is None:
+                    # The SDK adds request headers at terminal assembly; the
+                    # locally settled results identify this response's request.
+                    match = next((index for index in candidates if any(
+                        isinstance(left, ToolReturnPart) and isinstance(right, ToolReturnPart)
+                        and same_tool_return(left, right)
+                        for left in merged[index].parts for right in message.parts
+                    )), None)
+                    if match is None and response_index is not None and candidates:
+                        match = candidates[0]
+                if match is not None:
+                    previous = merged[match]
+                    parts = list(previous.parts)
+                    for part in message.parts:
+                        if any((same_tool_return(existing, part)
+                                if isinstance(existing, ToolReturnPart) and isinstance(part, ToolReturnPart)
+                                else existing == part) for existing in parts):
+                            continue
+                        parts.append(part)
+                    # Keep committed parts first. Prepending a new system part
+                    # would collide with an immutable result's part_index=0.
+                    merged[match] = replace(message, parts=parts)
+                    continue
             if match is None:
                 merged.append(message)
+                match = len(merged) - 1
             else:
                 merged[match] = message
+            if isinstance(message, ModelResponse):
+                response_index = match
         return self._with_ordinals(merged)
 
     def _accept(self, ctx: RunContext[AgentDeps], call: ToolCallPart, *, allow_nested: bool = False) -> bool:

@@ -93,7 +93,7 @@ _SETTING_GROUPS = (
         _SettingDefinition("max_requests", "最大模型请求次数", "DEEP_AGENT_MAX_REQUESTS", "agent", "max_requests", "单轮回复的模型请求上限，工具回传续跑共用额度。", "次/轮"),
         _SettingDefinition("max_total_tokens", "最大 Token 数", "DEEP_AGENT_MAX_TOTAL_TOKENS", "agent", "max_total_tokens", "单轮对话累计 Token 上限。", "Token/轮", "未限制"),
         _SettingDefinition("request_retries", "模型请求重试次数", "DEEP_AGENT_REQUEST_RETRIES", "agent", "request_retries", "模型请求失败后允许的重试次数。", "次"),
-        _SettingDefinition("subscription_provider_enabled", "订阅 Provider 接入", SUBSCRIPTION_PROVIDER_ENV, "", "", "允许创建、授权和调用订阅供应商；目前仅支持 ChatGPT，默认关闭。"),
+        _SettingDefinition("subscription_provider_enabled", "订阅 Provider 接入", SUBSCRIPTION_PROVIDER_ENV, "", "", "允许创建、授权和调用订阅供应商；目前仅支持 ChatGPT，默认开启，仍需完成账号授权。"),
     )),
     _SettingGroupDefinition("context_compaction", "上下文压缩", (
         _SettingDefinition("context_compaction_trigger_ratio", "压缩触发比例", "DEEP_AGENT_CONTEXT_COMPACTION_TRIGGER_RATIO", "agent", "context_compaction_trigger_ratio", "完整请求的预计输入达到可用输入预算的该比例后触发压缩。"),

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from datetime import datetime
 from pydantic_ai import ToolDenied
 from pydantic_ai.messages import (
@@ -23,6 +23,45 @@ from deep_agent.agent.context_references import (
     context_references_from_content,
 )
 from deep_agent.time import ensure_utc
+
+
+def same_tool_return(left: ToolReturnPart, right: ToolReturnPart) -> bool:
+    """Compare a settled result, excluding only SDK assembly timestamps."""
+    return type(left) is type(right) and all(
+        getattr(left, field.name) == getattr(right, field.name)
+        for field in fields(left) if field.name != "timestamp"
+    )
+
+
+def deduplicate_adjacent_tool_returns(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Project legacy repeated results without rewriting stored message facts.
+
+    A provider response or user prompt starts a new local scope: IDs can be
+    reused there. Conflicting results remain visible and retain SDK rejection.
+    """
+    result: list[ModelMessage] = []
+    seen: list[ToolReturnPart] = []
+    changed = False
+    for message in messages:
+        if not isinstance(message, ModelRequest):
+            seen.clear()
+            result.append(message)
+            continue
+        parts = []
+        for part in message.parts:
+            if isinstance(part, UserPromptPart):
+                seen.clear()
+            if isinstance(part, ToolReturnPart):
+                if any(same_tool_return(previous, part) for previous in seen):
+                    changed = True
+                    continue
+                seen.append(part)
+            parts.append(part)
+        if len(parts) == len(message.parts):
+            result.append(message)
+        elif parts or message.instructions:
+            result.append(replace(message, parts=parts))
+    return result if changed else messages
 
 
 def _user_prompt_text(part: UserPromptPart) -> str:

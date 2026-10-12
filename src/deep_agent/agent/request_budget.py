@@ -11,7 +11,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.db.event_codec import group_message_events
+from deep_agent.db.event_codec import MESSAGE_EVENT_TYPES, group_message_events
 
 BUDGET_METADATA = "deepagent_request_budget"
 
@@ -31,7 +31,9 @@ def restored_request_count(events: list[Any]) -> int:
         get = event.get if isinstance(event, dict) else lambda key, default=None: getattr(event, key, default)
         run_id = get("run_id") or "legacy"
         payload = get("payload") or {}
-        message = payload.get("message") or {}
+        # execution/error.message is diagnostic text, not an SDK message.
+        # Failed resumes remain in the same turn's facts but spend no requests.
+        message = (payload.get("message") or {}) if get("event_type") in MESSAGE_EVENT_TYPES else {}
         if message.get("kind") == "response":
             responses[run_id] += 1
             checkpoint = (message.get("metadata") or {}).get(BUDGET_METADATA) or {}

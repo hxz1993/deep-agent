@@ -88,6 +88,7 @@ from deep_agent.agent.planning import (
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.agent.tool_output_limits import PlatformToolResultStore
 from deep_agent.agent.history import (
+    deduplicate_adjacent_tool_returns,
     incremental_append_messages,
     mark_cancelled_response_interrupted,
     repair_unprocessed_tool_calls,
@@ -1319,6 +1320,7 @@ class AgentRunner:
             request_headers=deps.request_headers,
             file_store=deps.file_store,
         )
+        llm_history = deduplicate_adjacent_tool_returns(llm_history)
         if pre_persisted_user:
             return llm_history, None
         if has_user_turn(message, attachments, context_refs):

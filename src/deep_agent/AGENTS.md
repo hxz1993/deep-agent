@@ -184,10 +184,14 @@ JSON列转换和自动标题修正，再使用ORM维护入口。该脚本仅接�
 
 ### 对话请求流（`POST /api/v1/chat/stream`）
 
-请求预算在 `agent/request_budget.py`：默认 40 次模型请求，同一 `turn_id` 的 Deferred 续跑
+请求预算在 `agent/request_budget.py`：默认 80 次模型请求，同一 `turn_id` 的 Deferred 续跑
 从原始事件恢复用量；每次 Run 的 Token/usage 仍独立统计。模型响应首次保存前写入
 `metadata.deepagent_request_budget.run_requests`，按来源消息归组计数，不能按 Part 事件条数计数。
 最后一次请求在压缩与工具发现之后移除全部工具并要求正常总结，保持原有 SSE/History 协议。
+`execution/error.message`是诊断文字，不是SDK消息，恢复预算只能读取消息事件。
+普通工具与UI并发结束时，终态加入SystemPrompt不能让已落库的ToolReturn换ordinal重复落库。
+已有重复结果仅在模型输入的相邻ModelRequest局部归并，工具名、ID和结果须一致，
+遇模型响应或用户消息重置；冲突结果保留，原始Events与Console History不得回写。
 `MessagePersistenceCapability` 显式包住同为 outermost 的 `ToolSearch`，保证搜索反馈补全后再保存，
 不能放宽不可变内容校验来兼容中间结果。回归见 `test_turn_request_budget.py`。
 
@@ -698,7 +702,7 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 | `MODEL` | `openai:gpt-4o` | `<provider>:<model>` |
 | `MODEL_BASE_URL` / `MODEL_API_KEY` | — | OpenAI 兼容 API |
 | `SYSTEM_PROMPT` | 内置 | 系统指令 |
-| `MAX_REQUESTS` | `30` | 所有 Agent 共用的单轮模型请求上限 |
+| `MAX_REQUESTS` | `80` | 所有 Agent 共用的单轮模型请求上限 |
 | `MAX_TOTAL_TOKENS` | 无限制 | Token 上限 |
 | `SKILLS_DIR` | `skills` | 相对仓库根 |
 | `MCP_FORWARD_REQUEST_HEADERS` | `authorization,x-tenant-id,x-user-token` | 转发到 MCP |

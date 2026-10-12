@@ -18,6 +18,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.request_budget import BUDGET_METADATA, TurnRequestBudget, restored_request_count
+from deep_agent.options import Agent as AgentOptions
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_discovery import DeepAgentToolSearch, search_deferred_tools
 from deep_agent.capabilities.ui.builtin import build_ui_toolset
@@ -151,7 +152,7 @@ class TurnRequestBudgetTests(unittest.IsolatedAsyncioTestCase):
                                for r in rows if r.event_type == "assistant/message"]
                 self.assertEqual(max(checkpoints), 2)
 
-    async def test_default_forty_warns_after_thirty_two_and_finishes_on_forty(self):
+    async def test_default_eighty_warns_after_sixty_four_and_finishes_on_eighty(self):
         requests, calls = [], []
 
         async def inspect_item():
@@ -165,18 +166,18 @@ class TurnRequestBudgetTests(unittest.IsolatedAsyncioTestCase):
             return ModelResponse(parts=[TextPart("已完成部分检查，本轮到限，可回复继续。")])
 
         result, events, deps = await self.execute(
-            self.runner(respond, limit=40, tools=[inspect_item]), "forty", streaming=True,
+            self.runner(respond, limit=AgentOptions.max_requests.default, tools=[inspect_item]), "eighty", streaming=True,
         )
         self.assert_final(result, events)
-        self.assertEqual(len(requests), 40)
-        self.assertEqual(len(calls), 39)
-        self.assertNotIn("剩余调用额度较少", requests[31].instructions or "")
-        self.assertIn("剩余调用额度较少", requests[32].instructions)
-        self.assertTrue(requests[38].function_tools)
-        self.assertFalse(requests[39].function_tools)
-        self.assertEqual(restored_request_count(await self.facts("forty", deps.turn_id)), 40)
+        self.assertEqual(len(requests), 80)
+        self.assertEqual(len(calls), 79)
+        self.assertNotIn("剩余调用额度较少", requests[63].instructions or "")
+        self.assertIn("剩余调用额度较少", requests[64].instructions)
+        self.assertTrue(requests[78].function_tools)
+        self.assertFalse(requests[79].function_tools)
+        self.assertEqual(restored_request_count(await self.facts("eighty", deps.turn_id)), 80)
 
-    async def test_ui_resume_preserves_budget_and_next_user_continue_resets_it(self):
+    async def test_ui_resume_after_errors_preserves_budget_and_next_user_continue_resets_it(self):
         for streaming in (False, True):
             with self.subTest(streaming=streaming):
                 requests = []
@@ -193,6 +194,13 @@ class TurnRequestBudgetTests(unittest.IsolatedAsyncioTestCase):
                 session = f"resume-{streaming}"
                 first, _, first_deps = await self.execute(runner, session, streaming=streaming)
                 self.assertEqual(first["status"], "pending")
+                for index, error_type in enumerate(("UserError", "AttributeError")):
+                    await self.stores.coordinator.append_execution_error(
+                        session, status="failed", agent_id=self.agent_id, user_id=first_deps.user,
+                        turn_id=first_deps.turn_id, run_id=f"failed-resume-{index}",
+                        payload={"code": "agent_run_failed", "phase": "history",
+                                 "message": f"执行发生 {error_type}，本轮已停止。"},
+                    )
                 second, _, second_deps = await self.execute(
                     runner, session, streaming=streaming, message="",
                     deferred=DeferredToolResults(calls={"confirm-1": {"confirmed": True}}),
@@ -213,6 +221,36 @@ class TurnRequestBudgetTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotEqual(again_deps.turn_id, first_deps.turn_id)
                 self.assertEqual(again_deps.request_budget.previous_requests, 0)
                 self.assertTrue(requests[-1].function_tools)
+
+    async def test_ui_on_request_79_resumes_as_text_only_request_80(self):
+        requests = []
+
+        async def inspect_item():
+            return "evidence"
+
+        def respond(messages, info):
+            requests.append(info)
+            if len(requests) == 79:
+                return ModelResponse(parts=[ToolCallPart(
+                    "builtin__confirm", {"message": "确认已有结果"}, "boundary-confirm",
+                )])
+            if info.function_tools:
+                return ModelResponse(parts=[ToolCallPart("inspect_item", {}, f"boundary-{len(requests)}")])
+            return ModelResponse(parts=[TextPart("已确认并给出阶段性结果，可以回复继续。")])
+
+        runner = self.runner(respond, limit=AgentOptions.max_requests.default, tools=[inspect_item], ui=True)
+        first, _, deps = await self.execute(runner, "ui-boundary-80", streaming=True)
+        self.assertEqual(first["status"], "pending")
+        self.assertEqual(len(requests), 79)
+        final, events, resumed = await self.execute(
+            runner, "ui-boundary-80", streaming=True, message="",
+            deferred=DeferredToolResults(calls={"boundary-confirm": {"confirmed": True}}),
+        )
+        self.assert_final(final, events)
+        self.assertEqual(resumed.request_budget.previous_requests, 79)
+        self.assertEqual(len(requests), 80)
+        self.assertFalse(requests[-1].function_tools)
+        self.assertEqual(restored_request_count(await self.facts("ui-boundary-80", deps.turn_id)), 80)
 
     async def test_compaction_spend_is_seen_by_final_gate_and_persisted_checkpoint(self):
         for streaming in (False, True):
@@ -263,6 +301,21 @@ class TurnRequestBudgetTests(unittest.IsolatedAsyncioTestCase):
                             await self.execute(runner, session, streaming=False)
                 self.assertEqual(len(requests), 2)
                 self.assertTrue([row for row in await self.facts(session) if row.event_type == "execution/error"])
+
+    async def test_failed_resume_diagnostic_message_does_not_break_budget_restore(self):
+        rows = [
+            SimpleNamespace(sequence=1, event_type="assistant/message", run_id="original",
+                            payload={"message": {"kind": "response", "parts": [],
+                                     "metadata": {BUDGET_METADATA: {"run_requests": 10}}}}),
+            SimpleNamespace(sequence=2, event_type="execution/error", run_id="resume-1",
+                            payload={"message": "执行发生 UserError，本轮已停止。", "phase": "agent"}),
+            SimpleNamespace(sequence=3, event_type="execution/error", run_id="resume-2",
+                            payload={"message": "执行发生 AttributeError，本轮已停止。", "phase": "history"}),
+        ]
+        self.assertEqual(restored_request_count(rows), 10)
+        self.assertEqual(restored_request_count([vars(row) for row in rows]), 10)
+        # An execution failure alone did not send any model request.
+        self.assertEqual(restored_request_count(rows[1:]), 0)
 
     async def test_legacy_compaction_telemetry_is_not_counted_per_event(self):
         rows = [SimpleNamespace(run_id="legacy-run", event_type="compaction", sequence=index,

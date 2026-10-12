@@ -39,8 +39,8 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
             AgentOptions.max_requests.set_by = previous_source
 
         item = _find_item(settings, "max_requests")
-        self.assertEqual(item.value, 40)
-        self.assertEqual(item.display_value, "40")
+        self.assertEqual(item.value, 80)
+        self.assertEqual(item.display_value, "80")
         self.assertEqual(item.source, "default")
         self.assertEqual(item.env_name, "DEEP_AGENT_MAX_REQUESTS")
 
@@ -106,6 +106,22 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
             os.environ["DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER"] = "false"
             disabled = _find_item(build_global_settings(), "subscription_provider_enabled")
             self.assertEqual(disabled.display_value, "关闭")
+
+    def test_subscription_enabled_by_default_and_explicit_disable_is_preserved(self) -> None:
+        from deep_agent.services.codex_provider import codex_enabled
+
+        for env, expected, source in (
+            ({}, True, "default"),
+            ({"DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "false"}, False, "environment"),
+            ({"DEEP_AGENT_ENABLE_CODEX_PROVIDER": "false"}, False, "environment"),
+            ({"DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "true",
+              "DEEP_AGENT_ENABLE_CODEX_PROVIDER": "false"}, True, "environment"),
+        ):
+            with self.subTest(env=env), patch.dict(os.environ, env, clear=True):
+                self.assertEqual(codex_enabled(), expected)
+                item = _find_item(build_global_settings(), "subscription_provider_enabled")
+                self.assertEqual(item.value, expected)
+                self.assertEqual(item.source, source)
 
     def test_sandbox_memory_budget_displays_megabytes(self) -> None:
         settings = build_global_settings()

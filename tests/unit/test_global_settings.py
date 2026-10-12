@@ -107,12 +107,13 @@ class GlobalSettingsBuilderTests(unittest.TestCase):
             disabled = _find_item(build_global_settings(), "subscription_provider_enabled")
             self.assertEqual(disabled.display_value, "关闭")
 
-    def test_subscription_enabled_by_default_and_explicit_disable_is_preserved(self) -> None:
+    def test_subscription_disabled_by_default_and_explicit_overrides_are_preserved(self) -> None:
         from deep_agent.services.codex_provider import codex_enabled
 
         for env, expected, source in (
-            ({}, True, "default"),
+            ({}, False, "default"),
             ({"DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "false"}, False, "environment"),
+            ({"DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "true"}, True, "environment"),
             ({"DEEP_AGENT_ENABLE_CODEX_PROVIDER": "false"}, False, "environment"),
             ({"DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "true",
               "DEEP_AGENT_ENABLE_CODEX_PROVIDER": "false"}, True, "environment"),

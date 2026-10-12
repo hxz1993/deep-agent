@@ -1,6 +1,6 @@
 # GPT 订阅 Provider：本机实验版
 
-> 课题 `C10-CODEX`；2026-09-25 实施。订阅 Provider 总开关 `DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER` 当前默认开启（2026-10-12调整；初版默认关闭），目前仅接入 ChatGPT；旧变量 `DEEP_AGENT_ENABLE_CODEX_PROVIDER` 仍兼容，新变量优先。本机账号已由使用者完成授权；远程部署和自然到期刷新仍需另行验收。
+> 课题 `C10-CODEX`；2026-09-25 实施。订阅 Provider 总开关 `DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER` 默认关闭（2026-10-12恢复；Alpha订阅连接未通过），目前仅接入 ChatGPT；旧变量 `DEEP_AGENT_ENABLE_CODEX_PROVIDER` 仍兼容，新变量优先。本机账号已由使用者完成授权；远程部署和自然到期刷新仍需另行验收。
 
 ## 产品边界
 

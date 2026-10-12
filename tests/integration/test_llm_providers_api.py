@@ -45,8 +45,8 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         items = response.json()["items"]
         self.assertEqual(items[0]["code"], "deepseek")
-        self.assertEqual(items[-2]["code"], "openai_compatible")
-        self.assertEqual(items[-1]["code"], "openai_codex")
+        self.assertEqual(items[-1]["code"], "openai_compatible")
+        self.assertNotIn("openai_codex", [item["code"] for item in items])
         self.assertEqual(
             set(items[0]),
             {
@@ -59,8 +59,8 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
                 "model_protocol",
             },
         )
-        self.assertFalse(items[-2]["supports_default_base_url"])
-        self.assertIsNone(items[-2]["default_base_url"])
+        self.assertFalse(items[-1]["supports_default_base_url"])
+        self.assertIsNone(items[-1]["default_base_url"])
 
     async def test_provider_key_is_masked_preserved_and_explicitly_cleared(self) -> None:
         created = await self._client.post(

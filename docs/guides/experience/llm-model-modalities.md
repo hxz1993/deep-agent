@@ -17,6 +17,27 @@ llm_models
 两张表没有外键。刷新目录不会自动修改模型配置，Agent 运行时也不会查询目录或 models.dev。
 客户私有模型可不经过目录，直接手工创建 `llm_models`。
 
+### 供应商与通用接入
+
+品牌供应商按实际调用协议分组：OpenAI 兼容协议、Anthropic 兼容协议、其他协议；
+两个通用类型集中在列表底部的“自定义接入”，依次为 OpenAI Compatible、Anthropic Compatible。
+MiniMax 使用 Anthropic Messages API，默认地址为 `https://api.minimax.cn/anthropic`；
+StepFun（阶跃星辰）使用 OpenAI Chat Completions API，默认地址为 `https://api.stepfun.com/v1`。
+两者允许自定义地址。Pydantic AI 保持 2.46.0，协议收发复用其现有实现。
+
+`OpenAI Compatible` 与 `Anthropic Compatible` 都必须填写服务商提供的 Base URL 和 Key。
+两者的“从目录添加”先选择目录供应商，再搜索、勾选模型；可选范围是本地模型目录中的全部
+供应商，目录数据仅作为模型配置模板，不代表该私有接入地址实际支持对应模型。
+创建后的模型仍属于当前通用供应商，使用当前供应商的协议、URL 和 Key。
+
+通用接入每次都执行新建，不回显或禁用已配置的目录项；同一供应商内的模型名称重复时，
+由现有保存接口报错，不覆盖旧配置。客户网关使用不同模型编码时，通过模型编辑入口修改。
+批量添加显示具体失败原因，部分成功后仅保留失败项，避免重试时重复创建已成功项。
+品牌供应商仍仅选择自己的目录模型，并禁用已经添加的模型编码。
+
+目录包含 MiniMax 国内 `minimax-cn`、国际 `minimax` 和阶跃 `stepfun` 来源；MiniMax 专用
+供应商默认使用国内目录，国内与国际来源共用同一 MiniMax 模型 Lab。刷新目录不会修改运行配置。
+
 ## 2. 模态与能力标签
 
 `llm_models.input_modalities` 只描述 LLM 原生输入：

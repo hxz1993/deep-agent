@@ -222,7 +222,7 @@ test("Agent 使用自定义下拉并在切换后进入新对话", () => {
   assert.match(chatSource, /async function selectAgent\(agentId\)/);
   assert.match(chatSource, /newChat\(agentId\);[\s\S]*await syncSessionsFromBackend\(\)/);
   assert.doesNotMatch(chatSource, /const latest = state\.sessions\.find/);
-  assert.match(chatSource, /el\.agentSelect\.disabled = state\.streaming/);
+  assert.match(chatSource, /el\.agentSelect\.disabled = !state\.agents\.length/);
   assert.doesNotMatch(chatSource, /el\.agentSelect\.disabled = state\.streaming \|\| !!state\.sessionId/);
   assert.match(workspaceSource, /function refreshWorkspaceAgents\(button\)/);
   assert.match(workspaceSource, /refreshAgentWorkspace\(\)/);

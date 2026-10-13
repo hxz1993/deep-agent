@@ -144,7 +144,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
 
     const rowIcon = row => {
       if (state.dimension === "model") {
-        const brands = {deepseek:"deepseek.ico",moonshotai:"kimi.ico",alibaba:"qwen.png",zai:"zai.svg",openrouter:"openrouter.png",openai:"openai.svg?v=20260926-centered-2",openai_codex:"openai.svg?v=20260926-centered-2",anthropic:"anthropic.png",google:"google-gemini.png"};
+        const brands = {deepseek:"deepseek.ico",moonshotai:"kimi.ico",alibaba:"qwen.png",zai:"zai.svg",openrouter:"openrouter.png",openai:"openai.svg?v=20260926-centered-2",openai_codex:"openai.svg?v=20260926-centered-2",anthropic:"anthropic.png",anthropic_compatible:"anthropic.png",minimax:"minimax.ico",stepfun:"stepfun.svg",google:"google-gemini.png"};
         const providerType = row.model?.provider_type || row.model?.provider_name?.toLowerCase() || "openai_compatible";
         return `<img class="usage-identity-logo" data-provider-type="${e(providerType)}" src="./assets/provider-logos/${brands[providerType] || "openai-compatible.svg"}" alt="" />`;
       }

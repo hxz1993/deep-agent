@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.13.2`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.13.3`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -285,6 +285,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
   轨迹保留真实触发位置和脱敏详情。
 - v0.5.4收敛Console轨迹详情展示与前端实现：Assistant的Thinking归入Preview首段并默认折叠，短正文按内容自适应、长正文超过上限后滚动；Tool、Planning和Deferred复用同一套Payload/Result摘要渲染。REST、SSE、History、数据库和轨迹投影语义均不变化。
 - v0.5.5增加独立`llm_providers`配置层、九类Pydantic AI适配与Provider分栏Console，运行时开始按显式Provider类型构造原生Provider/Model，不再按模型前缀或URL猜协议。
+- 供应商扩展约定（2026-10-13）：MiniMax使用Anthropic协议和`/anthropic` Base URL，阶跃使用OpenAI Chat协议；SDK暂保持2.46.0，厂商Profile集中于`models/compatible_providers.py`。仅`openai_compatible`和`anthropic_compatible`从全部已保存目录新建模型，目录不决定实际协议/地址/Key；品牌供应商即使自定义URL仍限定自身目录。通用目录选项不按已有配置禁用，重名由后端拒绝，部分成功只重试失败项。新增供应商须验证流式工具续跑和序列化历史，不能仅凭连接测试声称可用。
 - v0.5.7压缩Provider详情接入信息：Base URL改为单行图标事实，地址模式、Key和启停状态改为紧凑胶囊，运行协议并入Provider副标题；仅调整Console展示，不改变Provider、Model、迁移或外部接口。
 - v0.5.8完善纯本地SQLite调试：`local_dev`可通过仓库外Profile显式开启仅限回环进程内部ASGI scope的管理鉴权旁路，无需平台Token、App或Space即可维护Provider、Model、Agent并执行基础对话；Profile值覆盖同名环境变量，部署入口、外部Header和平台文件/MCP上下文均不放行。数据库Head仍为`007`。
 - v0.5.6完成Provider + Model两层归一化：Provider独占Base URL和密钥，`llm_models.provider_id`建立`RESTRICT`外键，模型名只在Provider内唯一；Provider和Model启停共同形成有效门禁，API以`selectable/unavailable_reason`披露状态。Agent、Chat、Session覆盖、标题与上下文估算统一通过`model_id`解析Provider，外部REST、SSE与History核心协议不变。

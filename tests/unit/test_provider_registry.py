@@ -17,6 +17,7 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.providers.zai import ZaiProvider
 
 from deep_agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.models.compatible_providers import MiniMaxProvider, StepFunProvider
 from deep_agent.models.provider_registry import (
     PROVIDER_TYPES,
     ProviderConfigurationError,
@@ -74,10 +75,13 @@ class ProviderDefinitionTests(unittest.TestCase):
                 "google",
                 "openai_compatible",
                 "openai_codex",
+                "minimax",
+                "stepfun",
+                "anthropic_compatible",
             ],
         )
         self.assertEqual(
-            [item.order for item in PROVIDER_TYPES], list(range(1, 11))
+            [item.order for item in PROVIDER_TYPES], list(range(1, 14))
         )
         self.assertEqual(
             {item.code: item.default_base_url for item in PROVIDER_TYPES},
@@ -92,6 +96,9 @@ class ProviderDefinitionTests(unittest.TestCase):
                 "google": "https://generativelanguage.googleapis.com/",
                 "openai_compatible": None,
                 "openai_codex": "https://chatgpt.com/backend-api/codex",
+                "minimax": "https://api.minimax.cn/anthropic",
+                "stepfun": "https://api.stepfun.com/v1",
+                "anthropic_compatible": None,
             },
         )
         self.assertFalse(
@@ -128,10 +135,12 @@ class ProviderValidationTests(unittest.TestCase):
             validate_provider_config(_config("deepseek", api_key=""))
 
     def test_openai_compatible_cannot_use_a_default_url(self) -> None:
-        with self.assertRaisesRegex(
-            ProviderConfigurationError, "has no default base URL"
-        ):
-            validate_provider_config(_config("openai_compatible"))
+        for provider_type in ("openai_compatible", "anthropic_compatible"):
+            with self.subTest(provider_type=provider_type):
+                with self.assertRaisesRegex(
+                    ProviderConfigurationError, "has no default base URL"
+                ):
+                    validate_provider_config(_config(provider_type))
 
     def test_custom_url_is_required_and_must_be_http(self) -> None:
         with self.assertRaisesRegex(ProviderConfigurationError, "required"):
@@ -209,6 +218,38 @@ class ProviderLookupTests(unittest.IsolatedAsyncioTestCase):
             await load_provider_for_model(model, store)
 
 class ProviderModelAssemblyTests(unittest.TestCase):
+    def test_compatible_vendor_profiles_survive_custom_endpoints(self) -> None:
+        for code, name, model_class, provider_class in (
+            ("minimax", "MiniMax-M2.7", AnthropicModel, MiniMaxProvider),
+            ("stepfun", "step-3.5-flash", OpenAIChatModel, StepFunProvider),
+        ):
+            for use_default in (True, False):
+                with self.subTest(code=code, use_default=use_default):
+                    config = _config(code, use_default_base_url=use_default)
+                    model = resolve_provider_model(model_name=name, provider=config)
+                    self.assertIsInstance(model, model_class)
+                    self.assertIsInstance(model._provider, provider_class)
+                    self.assertEqual(model._provider.name, code)
+                    self.assertEqual(model.deepagent_provider_type, code)
+                    self.assertEqual(model._provider.base_url.rstrip("/"), effective_base_url(config))
+                    if code == "stepfun":
+                        self.assertFalse(model.profile["openai_chat_supports_max_completion_tokens"])
+                        self.assertFalse(model.profile["openai_supports_strict_tool_definition"])
+                        self.assertEqual(model.profile["openai_chat_send_back_thinking_parts"], "field")
+                    else:
+                        self.assertFalse(model.profile["supports_json_schema_output"])
+                        self.assertFalse(model.profile["supported_native_tools"])
+
+    def test_anthropic_compatible_preserves_explicit_protocol_for_foreign_model_name(self) -> None:
+        model = resolve_provider_model(
+            model_name="deepseek-v4-flash",
+            provider=_config("anthropic_compatible", use_default_base_url=False),
+        )
+        self.assertIsInstance(model, AnthropicModel)
+        self.assertIs(type(model._provider), AnthropicProvider)
+        self.assertEqual(model.deepagent_provider_type, "anthropic_compatible")
+        self.assertEqual(model._provider.base_url.rstrip("/"), "https://gateway.example.com/v1")
+
     def test_default_openai_style_types_use_native_providers(self) -> None:
         cases = (
             ("deepseek", "deepseek-chat", DeepSeekProvider),

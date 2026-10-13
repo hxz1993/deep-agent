@@ -1083,6 +1083,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let activeAssistantLoop = null;
   let assistantLoopSequence = 0;
   let selectedId = null;
+  let selectionPinned = false;
   let detailTab = "summary";
   let ptcVisible = 20;
   let ptcExpanded = null;
@@ -1179,13 +1180,16 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   }
 
   function setHistory(nextHistory, { preserveView = false } = {}) {
+    const sessionChanged = nextHistory?.session_id && history.session_id
+      && nextHistory.session_id !== history.session_id;
     history = nextHistory || { items: [] };
     historyEvents = buildTrajectory(history);
     liveEvents = [];
     currentRunId = null;
     activeAssistantLoop = null;
-    if (!preserveView || !historyEvents.some((event) => event.id === selectedId)) {
+    if (!preserveView || sessionChanged || !historyEvents.some((event) => event.id === selectedId)) {
       selectedId = historyEvents.at(-1)?.id || null;
+      selectionPinned = false;
       detailTab = "summary";
       ptcVisible = 20; ptcExpanded = null; ptcDetailTab = "result";
     }
@@ -1290,7 +1294,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       const projectedMessage = historyEvents.find((item) => item.native?.event_ids?.includes(stored.event_id));
       const projectedTool = historyEvents.find((item) => TOOL_KINDS.has(item.kind)
         && [item.native?.call_event_id, item.native?.result_event_id].includes(stored.event_id));
-      selectedId = projectedTool?.id || projectedMessage?.id || stored.event_id;
+      // Checkpoints keep arriving while a user inspects an earlier event.
+      // Follow new facts only until the user explicitly chooses a row.
+      if (!selectionPinned || !allEvents().some((item) => item.id === selectedId)) {
+        selectedId = projectedTool?.id || projectedMessage?.id || stored.event_id;
+      }
       scheduleRender();
       return;
     }
@@ -1454,6 +1462,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         const row = event.target.closest("[data-trajectory-id]");
     if (!row) return;
     selectedId = row.dataset.trajectoryId;
+    selectionPinned = true;
     detailTab = "summary";
     ptcVisible = 20; ptcExpanded = null; ptcDetailTab = "result";
     scheduleRender();
@@ -1498,6 +1507,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     const eventTarget = event.target.closest("[data-trajectory-event-target]");
     if (eventTarget) {
       selectedId = eventTarget.dataset.trajectoryEventTarget;
+      selectionPinned = true;
       detailTab = "summary";
       ptcVisible = 20; ptcExpanded = null; ptcDetailTab = "result";
       scheduleRender();
@@ -1522,6 +1532,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       : runId && event.run_id === runId);
     if (!target) return false;
     selectedId = target.id; detailTab = "summary"; ptcVisible = 20; ptcExpanded = null; ptcDetailTab = "result";
+    selectionPinned = true;
     mode = "sequence"; if (search) search.value = "";
     queryAll("[data-trajectory-mode]").forEach((button) => button.classList.toggle("active", button.dataset.trajectoryMode === mode));
     selectView("trajectory", { notify: false }); render();
@@ -1529,10 +1540,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     return true;
   }
   function snapshot() {
-    return { selectedId, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, mode, view: activeView, query: search?.value || "", listScrollTop: list.scrollTop, detailScrollTop: detail.scrollTop };
+    return { selectedId, selectionPinned, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, mode, view: activeView, query: search?.value || "", listScrollTop: list.scrollTop, detailScrollTop: detail.scrollTop };
   }
   function restore(value = {}) {
-    if (value.selectedId && allEvents().some((event) => event.id === value.selectedId)) selectedId = value.selectedId;
+    if (value.selectedId && allEvents().some((event) => event.id === value.selectedId)) {
+      selectedId = value.selectedId;
+      selectionPinned = value.selectionPinned !== false;
+    }
     detailTab = value.detailTab || "summary"; mode = value.mode === "calls" ? "calls" : "sequence";
     ptcVisible = Math.max(20, Number(value.ptcVisible) || 20);
     ptcExpanded = Number.isInteger(value.ptcExpanded) ? value.ptcExpanded : null;

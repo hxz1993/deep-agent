@@ -53,5 +53,5 @@ test("点击展开与等待操作自动展开同步 aria-expanded", () => {
   assert.equal(isOpen, false);
   assert.equal(attrs.get("aria-expanded"), "false");
   assert.match(chatSource, /setToolBlockExpanded\(block, !block\.classList\.contains\("open"\)\)/);
-  assert.match(chatSource, /querySelectorAll\("\.tool-block\.hitl-pending"\)[\s\S]*?setToolBlockExpanded\(block, true\)/);
+  assert.match(chatSource, /function syncPendingToolPresentation\([\s\S]*?wrap\.insertBefore\(block, finalContent \|\| finalActions \|\| null\);\s*setToolBlockExpanded\(block, true\)/);
 });

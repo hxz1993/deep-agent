@@ -43,7 +43,8 @@ function withController(check) {
     if (!elements.has(id)) elements.set(id, {
       innerHTML: "", value: "", scrollTop: 0,
       classList: { toggle() {}, contains: () => true },
-      addEventListener() {}, setAttribute() {},
+      listeners: new Map(),
+      addEventListener(type, callback) { this.listeners.set(type, callback); }, setAttribute() {},
     });
     return elements.get(id);
   };
@@ -52,6 +53,56 @@ function withController(check) {
   try { check(createTrajectoryController({ state: {} }), elements); }
   finally { globalThis.document = oldDocument; globalThis.window = oldWindow; }
 }
+
+test("manual history selection survives appended facts, checkpoints and history refresh", () => {
+  withController((controller, elements) => {
+    const first = fact("first", 1, 0, 0, { part_kind: "text", content: "旧内容" });
+    const latest = fact("latest", 2, 1, 0, { part_kind: "text", content: "最新内容" });
+    controller.setHistory({ session_id: "a", items: [first, latest] });
+    assert.equal(controller.snapshot().selectedId, "latest", "new history opens at latest event");
+    const click = elements.get("trajectoryList").listeners.get("click");
+    click({ target: { closest: () => ({ dataset: { trajectoryId: "first" } }) } });
+    assert.equal(controller.snapshot().selectedId, "first");
+
+    const next = fact("next", 3, 2, 0, { part_kind: "text", content: "下一条" });
+    controller.ingest({ event: "session_event_appended", data: { event: next } });
+    controller.ingest({ event: "session_event_updated", data: { event: { ...latest, status: "interrupted" } } });
+    assert.equal(controller.snapshot().selectedId, "first");
+    assert.match(elements.get("inspectorContent").innerHTML, /旧内容/);
+    controller.setHistory({ session_id: "a", items: [first, latest, next] }, { preserveView: true });
+    assert.equal(controller.snapshot().selectedId, "first");
+    assert.equal(controller.snapshot().selectionPinned, true);
+
+    // Even if event IDs happen to overlap, another session must not inherit selection.
+    controller.setHistory({ session_id: "b", items: [first, next] }, { preserveView: true });
+    assert.equal(controller.snapshot().selectedId, "next");
+    assert.equal(controller.snapshot().selectionPinned, false);
+    controller.ingest({ event: "session_event_appended", data: { event: latest } });
+    assert.equal(controller.snapshot().selectedId, "latest");
+  });
+});
+
+test("reset and snapshot restore keep manual selection scoped to its loaded view", () => {
+  withController((controller, elements) => {
+    const first = fact("first", 1, 0, 0, { part_kind: "text", content: "first" });
+    const latest = fact("latest", 2, 1, 0, { part_kind: "text", content: "latest" });
+    controller.setHistory({ session_id: "a", items: [first, latest] });
+    const automatic = controller.snapshot();
+    elements.get("trajectoryList").listeners.get("click")({
+      target: { closest: () => ({ dataset: { trajectoryId: "first" } }) },
+    });
+    const selected = controller.snapshot();
+    controller.reset();
+    assert.equal(controller.snapshot().selectionPinned, false);
+    controller.setHistory({ session_id: "a", items: [first, latest] });
+    controller.restore(selected);
+    controller.ingest({ event: "session_event_updated", data: { event: latest } });
+    assert.equal(controller.snapshot().selectedId, "first");
+    controller.restore(automatic);
+    controller.ingest({ event: "session_event_updated", data: { event: first } });
+    assert.equal(controller.snapshot().selectedId, "first", "automatic snapshots keep following facts");
+  });
+});
 
 test("execution errors show an escaped reason, code and phase once despite terminal SSE", () => {
   withController((controller, elements) => {

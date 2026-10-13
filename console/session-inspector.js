@@ -1,6 +1,6 @@
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
-import { composerProviderIcon } from "./provider-icons.js?v=20260929-model-provider";
+import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
 // Pure shared inspector markup. Hosts supply identity, historical data and tab state.
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 

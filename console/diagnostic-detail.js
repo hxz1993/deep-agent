@@ -1,11 +1,11 @@
 import { sessionLoadingHtml, prepareSessionRender, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
 import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20260923-usage-tab-2";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20261002-console-audit";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20261013-console-ui-4";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20261002-console-audit";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261002-console-audit";
-import { createTrajectoryController } from "./trajectory.js?v=20260924-ptc-execution-6";
+import { createTrajectoryController } from "./trajectory.js?v=20261013-session-navigation";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20260929-release0124";
+import { renderSessionInspector } from "./session-inspector.js?v=20261013-providers";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
@@ -196,7 +196,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   function snapshot() {
     return { sessionId: state.sessionId, messagesScrollTop: messages.scrollTop, inspectorScrollTop: role("inspectorContent").scrollTop, inspectorTab, selectedRunId, selectedReference, lastFocusKey, inspectorVisible: !find(".diagnostic-detail-grid").classList.contains("inspector-hidden"), inspectorWidth: find(".diagnostic-detail-grid").style.getPropertyValue("--diagnostic-inspector-width"), trajectory: trajectory.snapshot(), view: currentView,
       focusedItemId: renderedRows.find(({ row }) => row.classList.contains("diagnostic-message-focus"))?.node.itemId || null,
-      disclosures: renderedRows.map(({ node, row }) => ({ itemId: node.itemId, blocks: [...row.querySelectorAll(".assistant-process, .assistant-thinking, .tool-block")].map((block) => ({ open: block.classList.contains("open"), touched: Boolean(block.dataset.disclosureTouched) })) })),
+      disclosures: renderedRows.map(({ node, row }) => ({ itemId: node.itemId, blocks: [...row.querySelectorAll(".assistant-process, .assistant-thinking, .tool-block")].map((block) => ({ open: block.classList.contains("open"), touched: Boolean(block.dataset.disclosureTouched), toolCallId: block.dataset.toolCallId || null, pending: block.classList.contains("hitl-pending") })) })),
     };
   }
 
@@ -214,7 +214,10 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     for (const disclosure of value.disclosures || []) {
       const row = renderedRows.find((entry) => entry.node.itemId === disclosure.itemId)?.row;
       row?.querySelectorAll(".assistant-process, .assistant-thinking, .tool-block").forEach((block, index) => {
-        const prior = disclosure.blocks[index]; if (!prior) return;
+        const prior = block.dataset.toolCallId
+          ? disclosure.blocks.find((item) => item.toolCallId === block.dataset.toolCallId)
+          : disclosure.blocks[index];
+        if (!prior?.touched || prior.toolCallId !== (block.dataset.toolCallId || null) || Boolean(prior.pending) !== block.classList.contains("hitl-pending")) return;
         block.classList.toggle("open", prior.open); block.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", String(prior.open));
         if (prior.touched) block.dataset.disclosureTouched = "1";
       });

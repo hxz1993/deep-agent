@@ -45,7 +45,15 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         items = response.json()["items"]
         self.assertEqual(items[0]["code"], "deepseek")
-        self.assertEqual(items[-1]["code"], "openai_compatible")
+        self.assertEqual(items[-1]["code"], "anthropic_compatible")
+        self.assertEqual(
+            [item["code"] for item in items[-3:]],
+            ["minimax", "stepfun", "anthropic_compatible"],
+        )
+        self.assertEqual(
+            {item["code"]: item["model_protocol"] for item in items[-3:]},
+            {"minimax": "anthropic", "stepfun": "openai_chat", "anthropic_compatible": "anthropic"},
+        )
         self.assertNotIn("openai_codex", [item["code"] for item in items])
         self.assertEqual(
             set(items[0]),
@@ -61,6 +69,52 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(items[-1]["supports_default_base_url"])
         self.assertIsNone(items[-1]["default_base_url"])
+
+    async def test_new_provider_types_persist_and_generic_models_keep_customer_endpoint(self) -> None:
+        for code, use_default, endpoint in (
+            ("minimax", True, "https://api.minimax.cn/anthropic"),
+            ("stepfun", True, "https://api.stepfun.com/v1"),
+            ("anthropic_compatible", False, "https://customer.example/anthropic"),
+        ):
+            with self.subTest(provider_type=code):
+                response = await self._client.post("/api/v1/llm-providers", json={
+                    "name": f"New {code}", "provider_type": code,
+                    "use_default_base_url": use_default,
+                    "base_url": endpoint, "api_key": "fixture-secret-only",
+                })
+                self.assertEqual(response.status_code, 201, response.text)
+                provider = response.json()
+                self.assertEqual(provider["base_url"], endpoint)
+                self.assertEqual(provider["provider_type"], code)
+                self.assertTrue(provider["api_key_set"])
+                self.assertNotIn("fixture-secret-only", response.text)
+                created = await self._client.post("/api/v1/llm-models", json={
+                    "provider_id": provider["id"], "name": "deepseek-v4-flash",
+                    "model": "deepseek-v4-flash", "input_modalities": ["text"],
+                    "context_window_tokens": 256_000, "max_output_tokens": 8_192,
+                })
+                self.assertEqual(created.status_code, 201, created.text)
+                self.assertEqual(created.json()["provider_id"], provider["id"])
+                self.assertTrue(created.json()["selectable"])
+                duplicate = await self._client.post("/api/v1/llm-models", json={
+                    "provider_id": provider["id"], "name": "deepseek-v4-flash",
+                    "model": "customer-alias", "input_modalities": ["text"],
+                    "context_window_tokens": 256_000, "max_output_tokens": 8_192,
+                })
+                self.assertEqual(duplicate.status_code, 409, duplicate.text)
+                reread = await self._client.get(f"/api/v1/llm-providers/{provider['id']}")
+                self.assertEqual(reread.json()["base_url"], endpoint)
+
+    async def test_anthropic_compatible_requires_explicit_custom_url(self) -> None:
+        for fields in (
+            {"use_default_base_url": True},
+            {"use_default_base_url": False, "base_url": ""},
+        ):
+            with self.subTest(fields=fields):
+                response = await self._client.post("/api/v1/llm-providers", json={
+                    "name": "Invalid compatible", "provider_type": "anthropic_compatible", **fields,
+                })
+                self.assertEqual(response.status_code, 422, response.text)
 
     async def test_provider_key_is_masked_preserved_and_explicitly_cleared(self) -> None:
         created = await self._client.post(

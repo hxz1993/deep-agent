@@ -213,6 +213,28 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   let thinkingBuffer = "";
   let interruptedStatus = null;
   const toolBlocks = new Map(); // tool_call_id -> element
+  const pendingToolPositions = new Map(); // block -> original process position
+
+  function syncPendingToolPresentation() {
+    for (const block of toolBlocks.values()) {
+      const pending = block.classList.contains("hitl-pending") && !block.dataset.done;
+      const position = pendingToolPositions.get(block);
+      if (pending && !position) {
+        const marker = document.createComment("pending tool position");
+        processBody.insertBefore(marker, block);
+        pendingToolPositions.set(block, marker);
+        wrap.insertBefore(block, finalContent || finalActions || null);
+        setToolBlockExpanded(block, true);
+        delete block.dataset.disclosureTouched;
+      } else if (!pending && position) {
+        processBody.insertBefore(block, position);
+        position.remove();
+        pendingToolPositions.delete(block);
+        setToolBlockExpanded(block, false);
+        delete block.dataset.disclosureTouched;
+      }
+    }
+  }
 
   function updateProcessTimer() {
     processElapsedSeconds = Math.max(0, Math.floor((Date.now() - processStartedAt) / 1000));
@@ -243,11 +265,15 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   function updateProcessDisclosure() {
+    syncPendingToolPresentation();
     const hasProcess = processBody.children.length > 0;
-    const pending = Boolean(processBody.querySelector(".tool-block.hitl-pending"));
+    const pending = pendingToolPositions.size > 0;
     processBlock.classList.toggle("hidden", !hasProcess);
     processBlock.classList.toggle("running", isLive && !processFinished && hasProcess);
-    if (isLive && !processFinished && hasProcess && !processBlock.dataset.disclosureTouched) {
+    if (!processBlock.dataset.disclosureTouched && pending) {
+      processBlock.classList.remove("open");
+      processSummary.setAttribute("aria-expanded", "false");
+    } else if (isLive && !processFinished && hasProcess && !processBlock.dataset.disclosureTouched) {
       processBlock.classList.add("open");
       processSummary.setAttribute("aria-expanded", "true");
     }
@@ -257,7 +283,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       elapsedSeconds: processElapsedSeconds,
     });
     processSummary.title = pending
-      ? (readOnly ? "查看等待中的操作（只读）" : "展开并完成等待中的操作")
+      ? "等待操作，展开查看前面的处理过程"
       : processBlock.classList.contains("open") ? "收起处理过程" : "展开处理过程";
   }
 
@@ -266,11 +292,6 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
     const open = !processBlock.classList.contains("open");
     processBlock.classList.toggle("open", open);
     processSummary.setAttribute("aria-expanded", String(open));
-    if (open) {
-      processBody.querySelectorAll(".tool-block.hitl-pending").forEach((block) => {
-        setToolBlockExpanded(block, true);
-      });
-    }
     updateProcessDisclosure();
   });
   if (isLive) startProcess();
@@ -334,6 +355,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const block = thinkingBlock;
       const thinkingHead = block.querySelector(".assistant-thinking-head");
       thinkingHead.addEventListener("click", () => {
+        block.dataset.disclosureTouched = "1";
         const open = !block.classList.contains("open");
         block.classList.toggle("open", open);
         thinkingHead.setAttribute("aria-expanded", String(open));
@@ -484,6 +506,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
           ${argsHtml}
         </div>`;
       block.querySelector(".tool-head").addEventListener("click", () => {
+        block.dataset.disclosureTouched = "1";
         setToolBlockExpanded(block, !block.classList.contains("open"));
       });
       processBody.appendChild(block);
@@ -526,6 +549,8 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       if (isPlanningToolEvent(data)) return;
       const block = toolBlocks.get(key);
       if (!block) return;
+      pendingToolPositions.get(block)?.remove();
+      pendingToolPositions.delete(block);
       block.remove();
       toolBlocks.delete(key);
       updateProcessDisclosure();

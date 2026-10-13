@@ -27,6 +27,7 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.providers.zai import ZaiProvider
 
 from deep_agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.models.compatible_providers import MiniMaxProvider, StepFunProvider
 from deep_agent.core.exceptions import DeepAgentError
 from deep_agent.options import OPTION
 
@@ -109,6 +110,15 @@ PROVIDER_TYPES: tuple[ProviderTypeDefinition, ...] = (
     ProviderTypeDefinition(
         "openai_codex", "ChatGPT", 10,
         "https://chatgpt.com/backend-api/codex", True, False, "openai_codex",
+    ),
+    ProviderTypeDefinition(
+        "minimax", "MiniMax", 11, "https://api.minimax.cn/anthropic", True, True, "anthropic"
+    ),
+    ProviderTypeDefinition(
+        "stepfun", "StepFun", 12, "https://api.stepfun.com/v1", True, True, "openai_chat"
+    ),
+    ProviderTypeDefinition(
+        "anthropic_compatible", "Anthropic Compatible", 13, None, False, True, "anthropic"
     ),
 )
 _PROVIDER_TYPES_BY_CODE = {item.code: item for item in PROVIDER_TYPES}
@@ -293,6 +303,8 @@ def _custom_openai_provider(config: ProviderRuntimeConfig) -> OpenAIProvider:
 
 def _openai_style_provider(config: ProviderRuntimeConfig):
     use_default = config.use_default_base_url
+    if config.provider_type == "stepfun":
+        return StepFunProvider(api_key=config.api_key, base_url=effective_base_url(config))
     if config.provider_type == "deepseek":
         return (
             DeepSeekProvider(api_key=config.api_key)
@@ -383,15 +395,14 @@ def resolve_provider_model(
         assert provider.id is not None
         return codex_model(model_name, provider.id, provider.auth_revision)
     if definition.model_protocol == "anthropic":
-        runtime_provider = AnthropicProvider(
+        provider_class = MiniMaxProvider if provider.provider_type == "minimax" else AnthropicProvider
+        runtime_provider = provider_class(
             api_key=provider.api_key,
-            **(
-                {}
-                if provider.use_default_base_url
-                else {"base_url": effective_base_url(provider)}
-            ),
+            base_url=effective_base_url(provider),
         )
-        return AnthropicModel(model_name, provider=runtime_provider)
+        model = AnthropicModel(model_name, provider=runtime_provider)
+        model.deepagent_provider_type = provider.provider_type
+        return model
     if definition.model_protocol == "google":
         proxy = OPTION.agent.gemini_proxy or None
         runtime_provider = GoogleProvider(

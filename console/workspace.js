@@ -1,11 +1,11 @@
 import { sessionLoadingHtml, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
 import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentation } from "./session-presentation.js?v=20260923-usage-tab-2";
-import { renderSessionInspector } from "./session-inspector.js?v=20260929-release0124";
+import { renderSessionInspector } from "./session-inspector.js?v=20261013-providers";
 import { channelOriginPresentation } from "./session-display.js?v=20260929-release0124";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20261010-file-reading";
+const WORKSPACE_ASSET_VERSION = "20261013-console-ui-4";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -163,7 +163,7 @@ function renderAgentSwitcher(state = window.DeepAgentConsoleChat?.state) {
   const label = state.agents.length ? currentAgentName(state) : "无可用 Agent";
   field.title = `切换测试 Agent：${label}`;
   labelNode.innerHTML = `${escapeHtml(label)}${workspaceAgentChannelBadge(state.agentId)}`;
-  trigger.disabled = (!!state.streaming && !state.observingRun) || !state.agents.length;
+  trigger.disabled = !state.agents.length;
   menu.innerHTML = state.agents.map((agent) => {
     const selected = agent.id === state.agentId;
     return `<button type="button" class="agent-select-option${selected ? " selected" : ""}" role="option" aria-selected="${selected}" data-switch-agent-id="${escapeHtml(agent.id)}">

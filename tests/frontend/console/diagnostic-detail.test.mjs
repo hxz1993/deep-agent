@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 import { findConversationFocus } from "../../../console/diagnostic-detail.js";
 import { savedRunPresentation, savedRunFacts } from "../../../console/session-presentation.js";
 import { createConversationPresenter } from "../../../console/conversation-presenter.js";
-import { applyAssistantPresentationActions, assistantActionsFromHistoryItems } from "../../../console/assistant-presentation.js";
+import { applyAssistantPresentationActions, assistantActionsFromHistoryItems, assistantActionsFromSse, assistantActionsFromDeferred } from "../../../console/assistant-presentation.js";
 import { renderSessionInspector } from "../../../console/session-inspector.js";
+import { validateUiToolCall, normalizeOption, buildChoiceResult, normalizeStructuredFields } from "../../../console/hitl.js";
+
+const chatSource = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
 
 // The imports above run without window/document and catch both accidental
 // browser initialization and ESM parse failures (not a regex-only check).
@@ -92,21 +96,22 @@ test("lazy trace does not erase saved per-run facts or borrow another run's mode
 // Tiny structural DOM for the actual presenter (not a mocked presenter).
 // Selectors here are deliberately restricted to the subset used in these tests.
 class Element {
-  constructor(tag = "div") { this.tagName = tag.toUpperCase(); this.children = []; this.parentNode = null; this.attributes = {}; this.dataset = {}; this.listeners = new Map(); this._text = ""; }
+  constructor(tag = "div") { this.tagName = tag.toUpperCase(); this.nodeType = tag === "#comment" ? 8 : 1; this.childNodes = []; this.parentNode = null; this.attributes = {}; this.dataset = {}; this.listeners = new Map(); this._text = ""; }
+  get children() { return this.childNodes.filter(child => child.nodeType === 1); }
   get className() { return this.attributes.class || ""; }
   set className(value) { this.attributes.class = value; }
   get classList() { const el = this; return { contains: name => el.className.split(/\s+/).includes(name), add(...names) { el.className = [...new Set([...el.className.split(/\s+/), ...names])].join(" ").trim(); }, remove(...names) { el.className = el.className.split(/\s+/).filter(name => !names.includes(name)).join(" "); }, toggle(name, value) { const next = value ?? !this.contains(name); next ? this.add(name) : this.remove(name); return next; } }; }
   setAttribute(key, value) { this.attributes[key] = String(value); if (key.startsWith("data-")) this.dataset[key.slice(5).replace(/-([a-z])/g, (_, char) => char.toUpperCase())] = String(value); }
   getAttribute(key) { return this.attributes[key] ?? null; }
   addEventListener(name, fn) { this.listeners.set(name, [...(this.listeners.get(name) || []), fn]); }
-  appendChild(node) { node.remove(); node.parentNode = this; this.children.push(node); return node; }
+  appendChild(node) { node.remove(); node.parentNode = this; this.childNodes.push(node); return node; }
   append(...nodes) { nodes.forEach(node => this.appendChild(node)); }
-  insertBefore(node, sibling) { node.remove(); node.parentNode = this; this.children.splice(sibling ? this.children.indexOf(sibling) : this.children.length, 0, node); }
-  remove() { if (this.parentNode) this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1); this.parentNode = null; }
+  insertBefore(node, sibling) { node.remove(); node.parentNode = this; this.childNodes.splice(sibling ? this.childNodes.indexOf(sibling) : this.childNodes.length, 0, node); }
+  remove() { if (this.parentNode) this.parentNode.childNodes.splice(this.parentNode.childNodes.indexOf(this), 1); this.parentNode = null; }
   get textContent() { return this._text + this.children.map(child => child.textContent).join(""); }
-  set textContent(value) { this.children = []; this._text = String(value); }
+  set textContent(value) { this.childNodes = []; this._text = String(value); }
   set innerHTML(html) {
-    this.children = []; this._text = ""; this._html = html;
+    this.childNodes = []; this._text = ""; this._html = html;
     const stack = [this];
     for (const match of String(html).matchAll(/<\/?([\w-]+)([^>]*)>|([^<]+)/g)) {
       if (match[3]) { stack.at(-1)._text += match[3]; continue; }
@@ -131,7 +136,7 @@ class Element {
 test("readonly pending tool renders saved request without initializing widgets, timers or callbacks", () => {
   const host = new Element(); let mutations = 0; let intervals = 0;
   const presenter = createConversationPresenter({ messages: host, readOnly: true,
-    document: { createElement: tag => new Element(tag) },
+    document: { createElement: tag => new Element(tag), createComment: () => new Element("#comment") },
     window: { requestAnimationFrame: fn => fn(), setInterval: () => { intervals += 1; }, clearInterval() {} },
     isUiToolCall: () => true, maybeAttachHitlWidget: () => { mutations += 1; }, renderHitlWidget: () => { mutations += 1; }, resumeDeferred: () => { mutations += 1; },
   });
@@ -145,7 +150,166 @@ test("readonly pending tool renders saved request without initializing widgets, 
   assert.match(host.textContent, /等待操作 · 只读/);
   assert.equal(host.querySelectorAll(".tool-block").length, 1);
   assert.match(host.querySelector(".args").textContent, /Confirm\?/);
+  assert.equal(host.querySelector(".tool-block").parentNode, host.querySelector(".bubble-wrap"));
+  assert.equal(host.querySelector(".tool-block").classList.contains("open"), true);
+  assert.equal(host.querySelector(".assistant-process").classList.contains("hidden"), true);
   assistant.dispose();
+});
+
+function interactivePresentation({ history = false } = {}) {
+  const host = new Element();
+  const document = { createElement: tag => new Element(tag), createComment: () => new Element("#comment") };
+  let submissions = 0;
+  // Exercise the real UI argument normalization, validation and widget renderer.
+  // A fake widget would miss history inputs serialized as JSON strings.
+  const ui = {
+    document, window: {},
+    BUILTIN_UI_TOOLS: new Set(["builtin__confirm", "builtin__choice"]),
+    LEGACY_BUILTIN_UI_TOOLS: new Set(["confirm_action", "ask_user_choice"]),
+    uiToolsByName: new Map([
+      ["builtin__confirm", { widget: "confirm" }],
+      ["builtin__choice", { widget: "choice" }],
+      ["custom_confirm", { widget: "confirm" }],
+    ]),
+    validateUiToolCall, normalizeOption, buildChoiceResult, normalizeStructuredFields,
+    escapeHtml: value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]),
+  };
+  vm.runInNewContext([
+    chatSource.slice(chatSource.indexOf("function mergeUiToolCall("), chatSource.indexOf("async function loadUiTools(")),
+    chatSource.slice(chatSource.indexOf("function renderHitlWidget("), chatSource.indexOf("function setToolBlockExpanded(")),
+    chatSource.slice(chatSource.indexOf("function renderHitlError("), chatSource.indexOf("function renderStructuredForm(")),
+  ].join("\n"), ui);
+  const factory = createConversationPresenter({ messages: host, document,
+    window: { requestAnimationFrame: fn => fn(), setInterval: () => 1, clearInterval() {} },
+    mergeUiToolCall: ui.mergeUiToolCall, isUiToolCall: ui.isUiToolCall,
+    maybeAttachHitlWidget: (block, call) => { if (ui.isUiToolCall(call)) ui.renderHitlWidget(block, call, () => submissions++); },
+    renderHitlWidget: ui.renderHitlWidget, resumeDeferred: () => submissions++,
+  });
+  const assistant = factory.createAssistantMessage(history ? "2026-10-13T00:00:00Z" : null, 2, null, { autoAttachDeferred: !history });
+  return { host, assistant, submissions: () => submissions, normalizeCall: ui.mergeUiToolCall };
+}
+
+const confirmCall = { tool: "builtin__confirm", widget: "confirm", tool_call_id: "confirmation", args: { message: "请核对后确认" } };
+
+test("SSE 待确认工具与 final 同层默认展开，前面的过程折叠", () => {
+  const h = interactivePresentation();
+  applyAssistantPresentationActions(h.assistant, assistantActionsFromSse("thinking", { delta: "检查前提" }));
+  applyAssistantPresentationActions(h.assistant, assistantActionsFromSse("tool_call", { tool: "lookup", tool_call_id: "lookup", args: { q: "数据" } }));
+  applyAssistantPresentationActions(h.assistant, assistantActionsFromSse("tool_result", { tool_call_id: "lookup", result: "完成" }));
+  applyAssistantPresentationActions(h.assistant, assistantActionsFromSse("tool_call", confirmCall));
+  applyAssistantPresentationActions(h.assistant, assistantActionsFromSse("final", { output: null }));
+  applyAssistantPresentationActions(h.assistant, assistantActionsFromDeferred({ calls: [confirmCall] }));
+  const pending = h.host.querySelector(".hitl-pending");
+  const process = h.host.querySelector(".assistant-process");
+  assert.equal(pending.parentNode, h.host.querySelector(".bubble-wrap"));
+  assert.equal(pending.classList.contains("open"), true);
+  assert.equal(pending.querySelector(".tool-head").getAttribute("aria-expanded"), "true");
+  assert.equal(process.classList.contains("open"), false);
+  assert.equal(process.querySelector(".assistant-thinking").classList.contains("open"), false);
+  assert.equal(process.querySelector(".tool-block").classList.contains("open"), false);
+  assert.equal(h.host.querySelectorAll(".hitl-widget").length, 1);
+  assert.equal(h.submissions(), 0);
+  h.assistant.dispose();
+});
+
+test("重新打开 History 的 awaiting_input 卡片直接可见，已完成工具不激活", () => {
+  const h = interactivePresentation({ history: true });
+  applyAssistantPresentationActions(h.assistant, assistantActionsFromHistoryItems([
+    { kind: "tool", call_id: "old", tool_name: "builtin__confirm", widget: "confirm", input: { message: "之前的确认" }, output: { confirmed: true }, status: "completed" },
+    { kind: "tool", call_id: confirmCall.tool_call_id, tool_name: confirmCall.tool, widget: "confirm", input: confirmCall.args, status: "awaiting_input" },
+  ]));
+  assert.equal(h.host.querySelectorAll(".hitl-widget").length, 1);
+  assert.equal(h.host.querySelector(".hitl-pending").parentNode, h.host.querySelector(".bubble-wrap"));
+  assert.equal(h.host.querySelector(".hitl-pending").classList.contains("open"), true);
+  assert.equal(h.host.querySelector(".assistant-process").classList.contains("open"), false);
+  assert.equal(h.host.querySelector(".assistant-process").querySelector(".tool-block").dataset.toolCallId, "old");
+  assert.equal(h.submissions(), 0);
+  h.assistant.dispose();
+});
+
+test("History 中 JSON 字符串入参的内置和自定义待确认工具恢复真实操作控件", () => {
+  for (const tool of ["builtin__confirm", "custom_confirm"]) {
+    const h = interactivePresentation({ history: true });
+    const input = JSON.stringify({ message: "这是历史保存的确认内容", confirm_label: "继续", cancel_label: "返回" });
+    applyAssistantPresentationActions(h.assistant, assistantActionsFromHistoryItems([
+      { kind: "tool", call_id: "pending-json", tool_name: tool, input, widget: null, status: "awaiting_input", mode: "deferred" },
+    ]));
+    const block = h.host.querySelector(".hitl-pending");
+    assert.equal(block.parentNode, h.host.querySelector(".bubble-wrap"));
+    assert.equal(block.classList.contains("open"), true);
+    assert.equal(block.querySelector(".hitl-prompt").textContent, "这是历史保存的确认内容");
+    assert.equal(block.querySelector(".hitl-confirm").textContent, "继续");
+    assert.equal(block.querySelector(".hitl-cancel").textContent, "返回");
+    assert.equal(h.submissions(), 0);
+    h.assistant.dispose();
+  }
+});
+
+test("UI 参数归一化不改变普通工具字符串、原对象或无效的未完成参数", () => {
+  const h = interactivePresentation({ history: true });
+  const plain = { tool: "read_file", args: '{"path":"sample.txt"}' };
+  assert.equal(h.normalizeCall(plain), plain);
+  const args = { message: "已完成参数" };
+  assert.equal(h.normalizeCall({ tool: "builtin__confirm", args }).args, args);
+  for (const raw of ['{"message":', '"not an object"', '[]', 'null']) {
+    const normalized = h.normalizeCall({ tool: "builtin__confirm", args: raw });
+    assert.equal(normalized.args, raw);
+    assert.equal(validateUiToolCall(normalized).pending, true);
+  }
+  const invalidChoice = h.normalizeCall({ tool: "builtin__choice", args: '{"options":"invalid"}' });
+  assert.equal(validateUiToolCall(invalidChoice).pending, false);
+  assert.equal(validateUiToolCall(invalidChoice).ok, false);
+  h.assistant.dispose();
+});
+
+test("确认结果、撤回与取消会收回待操作卡片，保留原过程顺序", () => {
+  const h = interactivePresentation();
+  h.assistant.addProcessText("步骤一");
+  h.assistant.addToolCall(confirmCall);
+  h.assistant.addProcessText("步骤二");
+  h.assistant.addToolCall({ ...confirmCall, tool_call_id: "second", args: { message: "第二个确认" } });
+  assert.equal(h.host.querySelectorAll(".hitl-pending").length, 2);
+  h.assistant.addToolResult({ tool_call_id: "confirmation", result: { confirmed: true } });
+  const processBody = h.host.querySelector(".assistant-process-body");
+  assert.deepEqual(processBody.children.map(node => node.dataset.toolCallId || node.textContent), ["步骤一", "confirmation", "步骤二"]);
+  assert.equal(processBody.querySelector(".tool-block").classList.contains("open"), false);
+  assert.equal(processBody.querySelectorAll(".hitl-widget").length, 0);
+  h.assistant.removeToolCall({ tool_call_id: "second" });
+  assert.equal(h.host.querySelectorAll(".hitl-pending").length, 0);
+  h.assistant.addToolCall({ ...confirmCall, tool_call_id: "third" });
+  h.assistant.markInterrupted();
+  assert.equal(h.host.querySelectorAll(".hitl-pending").length, 0);
+  assert.equal(h.host.querySelectorAll(".hitl-widget").length, 0);
+  assert.equal(h.host.querySelector(".assistant-process").classList.contains("open"), false);
+  assert.deepEqual(processBody.children.filter(node => node.classList.contains("tool-block")).map(node => node.dataset.toolCallId), ["confirmation", "third"]);
+  assert.equal(processBody.childNodes.some(node => node.nodeType === 8), false);
+  assert.equal(h.submissions(), 0);
+  h.assistant.dispose();
+});
+
+test("增量 History 不把默认折叠复制到新待操作卡片，确认后恢复折叠", async () => {
+  const source = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
+  const code = source.slice(source.indexOf("function restoreHistoryDisclosure("), source.indexOf("\nconst sessionDeletesInFlight"));
+  const sandbox = {}; vm.runInNewContext(code, sandbox);
+  const old = interactivePresentation({ history: true });
+  old.assistant.addToolCall(confirmCall);
+  const pending = interactivePresentation({ history: true });
+  pending.assistant.addToolCall(confirmCall); pending.assistant.attachHitlWidget(confirmCall);
+  sandbox.restoreHistoryDisclosure(old.assistant.row, pending.assistant.row);
+  const block = pending.host.querySelector(".hitl-pending");
+  assert.equal(block.classList.contains("open"), true);
+  const process = old.host.querySelector(".assistant-process");
+  process.classList.add("open"); // An automatically opened live process is not a user preference.
+  const completed = interactivePresentation({ history: true });
+  completed.assistant.addToolCall(confirmCall); completed.assistant.addToolResult({ tool_call_id: "confirmation", result: { confirmed: true } });
+  completed.assistant.complete("最终回答");
+  block.dataset.disclosureTouched = "1";
+  sandbox.restoreHistoryDisclosure(pending.assistant.row, completed.assistant.row);
+  sandbox.restoreHistoryDisclosure(old.assistant.row, completed.assistant.row);
+  assert.equal(completed.host.querySelector(".tool-block").classList.contains("open"), false);
+  assert.equal(completed.host.querySelector(".assistant-process").classList.contains("open"), false);
+  assert.match(completed.host.querySelector(".assistant-final").textContent, /最终回答/);
+  for (const h of [old, pending, completed]) h.assistant.dispose();
 });
 
 test("missing saved timestamps and corrupt metadata remain unknown, not current time or zero", () => {

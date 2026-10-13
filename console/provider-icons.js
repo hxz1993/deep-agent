@@ -8,6 +8,9 @@ export const COMPOSER_PROVIDER_BRANDS = {
   openai: "./assets/provider-logos/openai.svg?v=20260926-centered-2",
   openai_codex: "./assets/provider-logos/openai.svg?v=20260926-centered-2",
   anthropic: "./assets/provider-logos/anthropic.png",
+  anthropic_compatible: "./assets/provider-logos/anthropic.png",
+  minimax: "./assets/provider-logos/minimax.ico",
+  stepfun: "./assets/provider-logos/stepfun.svg",
   google: "./assets/provider-logos/google-gemini.png",
   openai_compatible: "./assets/provider-logos/openai-compatible.svg",
 };

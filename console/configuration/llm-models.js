@@ -92,6 +92,7 @@ function findCatalogProvider(catalog, modelCode) {
 }
 
 const CATALOG_PROVIDER_TYPE_ALIASES = {
+  "minimax-cn": "minimax",
   moonshot: "moonshotai",
   qwen: "alibaba",
   zhipu: "zai",

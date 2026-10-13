@@ -9,6 +9,7 @@ from deep_agent.models.catalog import (
     CatalogValidationError,
     PROVIDER_ALLOWLIST,
     build_catalog_page,
+    catalog_provider_type,
     export_models_dev_catalog,
     normalize_models_dev_bundle,
 )
@@ -78,6 +79,55 @@ LABS = [
 ]
 
 
+ADDITIONAL_PROVIDERS = {
+    "minimax": {
+        "name": "MiniMax (International)",
+        "npm": "@ai-sdk/anthropic",
+        "api": "https://api.minimax.io/anthropic/v1",
+        "models": {
+            "MiniMax-M2.5": {
+                "id": "MiniMax-M2.5",
+                "name": "MiniMax M2.5",
+                "modalities": {"input": ["text"], "output": ["text"]},
+                "limit": {"context": 204_800, "output": 32_768},
+                "reasoning": True,
+                "tool_call": True,
+            }
+        },
+    },
+    "minimax-cn": {
+        "name": "MiniMax (China)",
+        "npm": "@ai-sdk/anthropic",
+        "api": "https://api.minimax.cn/anthropic/v1",
+        "models": {
+            "MiniMax-M2.5": {
+                "id": "MiniMax-M2.5",
+                "name": "MiniMax M2.5",
+                "modalities": {"input": ["text"], "output": ["text"]},
+                "limit": {"context": 204_800, "output": 32_768},
+                "reasoning": True,
+                "tool_call": True,
+            }
+        },
+    },
+    "stepfun": {
+        "name": "StepFun (China)",
+        "npm": "@ai-sdk/openai-compatible",
+        "api": "https://api.stepfun.com/v1",
+        "models": {
+            "step-3.5-flash": {
+                "id": "step-3.5-flash",
+                "name": "Step 3.5 Flash",
+                "modalities": {"input": ["text"], "output": ["text"]},
+                "limit": {"context": 256_000, "output": 65_536},
+                "reasoning": True,
+                "tool_call": True,
+            }
+        },
+    },
+}
+
+
 class CatalogNormalizationTests(unittest.TestCase):
     def test_normalizes_three_dimensions_and_preserves_generic_metadata(self) -> None:
         rows, stats = normalize_models_dev_bundle(MODELS, PROVIDERS, LABS)
@@ -109,7 +159,7 @@ class CatalogNormalizationTests(unittest.TestCase):
         self.assertNotIn("cost", claude["model_metadata"])
         self.assertNotIn("cost", str(claude["provider_metadata"]))
 
-    def test_allowlist_contains_only_supported_first_release_providers(self) -> None:
+    def test_allowlist_contains_only_supported_providers(self) -> None:
         self.assertEqual(
             PROVIDER_ALLOWLIST,
             {
@@ -118,12 +168,63 @@ class CatalogNormalizationTests(unittest.TestCase):
                 "deepseek",
                 "google",
                 "minimax",
+                "minimax-cn",
                 "moonshotai",
                 "openai",
+                "stepfun",
                 "xai",
                 "zhipuai",
             },
         )
+
+    def test_domestic_minimax_and_stepfun_preserve_runtime_metadata(self) -> None:
+        rows, stats = normalize_models_dev_bundle({}, ADDITIONAL_PROVIDERS, [])
+
+        self.assertEqual(stats.row_count, 3)
+        self.assertEqual(stats.model_count, 2)
+        self.assertEqual(stats.lab_count, 2)
+        minimax = [row for row in rows if row["lab_id"] == "minimax"]
+        self.assertEqual({row["provider_id"] for row in minimax}, {"minimax", "minimax-cn"})
+        for row in minimax:
+            self.assertEqual(row["canonical_model_id"], "minimax/MiniMax-M2.5")
+            self.assertEqual(row["lab_label"], "MiniMax")
+            self.assertEqual(row["provider_metadata"]["adapter"], "anthropic_compatible")
+        stepfun = next(row for row in rows if row["provider_id"] == "stepfun")
+        self.assertEqual(stepfun["canonical_model_id"], "stepfun/step-3.5-flash")
+        self.assertEqual(stepfun["lab_label"], "StepFun")
+        self.assertEqual(stepfun["provider_metadata"]["adapter"], "openai_compatible")
+        self.assertEqual(stepfun["provider_api_url"], "https://api.stepfun.com/v1")
+
+        # Export/import must retain both regional endpoints, without duplicating
+        # the canonical MiniMax model or losing either provider's model entry.
+        exported = export_models_dev_catalog([ModelCatalog(**row) for row in rows])
+        imported, _ = normalize_models_dev_bundle(
+            exported["models"], exported["providers"], exported["labs"]
+        )
+        fields = ("provider_id", "canonical_model_id", "provider_api_url")
+        self.assertEqual(
+            {tuple(row[key] for key in fields) for row in imported},
+            {tuple(row[key] for key in fields) for row in rows},
+        )
+
+    def test_new_providers_keep_non_chat_and_deprecated_models_filtered(self) -> None:
+        for provider_id in ("minimax-cn", "stepfun"):
+            with self.subTest(provider_id=provider_id):
+                provider = ADDITIONAL_PROVIDERS[provider_id]
+                chat = next(iter(provider["models"].values()))
+                models = {
+                    **provider["models"],
+                    "audio-only": {**chat, "modalities": {"input": ["audio"], "output": ["text"]}},
+                    "tts": {**chat, "modalities": {"input": ["text"], "output": ["audio"]}},
+                    "unknown-limits": {**chat, "limit": {"context": 0, "output": 0}},
+                    "retired": {**chat, "status": "deprecated"},
+                }
+                rows, _ = normalize_models_dev_bundle(
+                    {}, {provider_id: {**provider, "models": models}}, []
+                )
+                self.assertEqual(
+                    [row["provider_model_id"] for row in rows], list(provider["models"])
+                )
 
     def test_invalid_complete_bundle_is_rejected(self) -> None:
         invalid = {
@@ -322,6 +423,44 @@ class CatalogViewTests(unittest.TestCase):
             limit=50,
         )
         self.assertIsNone(page["items"][0]["providers"][0]["configured_preset"])
+
+    def test_new_provider_types_match_configured_models_without_protocol_aliases(self) -> None:
+        rows, _ = normalize_models_dev_bundle({}, ADDITIONAL_PROVIDERS, [])
+        for provider_id, provider_type, model_code, prefix in (
+            ("minimax-cn", "minimax", "MiniMax-M2.5", "anthropic"),
+            ("stepfun", "stepfun", "step-3.5-flash", "openai"),
+        ):
+            with self.subTest(provider_id=provider_id):
+                self.assertEqual(catalog_provider_type(provider_id), provider_type)
+                provider = LlmProvider(
+                    id="22222222222222222222222222222222",
+                    name="Configured provider",
+                    provider_type=provider_type,
+                    use_default_base_url=True,
+                    api_key="test-key",
+                )
+                model = LlmModel(
+                    provider_id=provider.id,
+                    name="Configured model",
+                    model=model_code,
+                    context_window_tokens=256_000,
+                    max_output_tokens=8_192,
+                )
+                page = build_catalog_page(
+                    [ModelCatalog(**row) for row in rows],
+                    [model],
+                    [provider],
+                    view="model",
+                    q=None,
+                    lab_id=None,
+                    provider_id=provider_id,
+                    modality=None,
+                    offset=0,
+                    limit=50,
+                )
+                option = page["items"][0]["providers"][0]
+                self.assertEqual(option["configured_preset"], model.name)
+                self.assertEqual(option["runtime_model"], f"{prefix}:{model_code}")
 
     def test_model_results_are_sorted_by_release_date_descending(self) -> None:
         page = build_catalog_page(

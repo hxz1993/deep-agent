@@ -21,8 +21,10 @@ PROVIDER_ALLOWLIST = frozenset(
         "deepseek",
         "google",
         "minimax",
+        "minimax-cn",
         "moonshotai",
         "openai",
+        "stepfun",
         "xai",
         "zhipuai",
     }
@@ -37,6 +39,8 @@ PROVIDER_ADAPTERS: dict[str, str] = {
     "moonshotai": "openai_compatible",
     "zhipuai": "openai_compatible",
     "minimax": "anthropic_compatible",
+    "minimax-cn": "anthropic_compatible",
+    "stepfun": "openai_compatible",
     "xai": "openai_compatible",
 }
 
@@ -45,6 +49,7 @@ PROVIDER_API_DEFAULTS = {
 }
 
 LAB_ALIASES = {
+    "minimax-cn": "minimax",
     "moonshot": "moonshotai",
     "qwen": "alibaba",
     "zai": "zhipuai",
@@ -59,6 +64,7 @@ LAB_LABELS = {
     "minimax": "MiniMax",
     "moonshotai": "Moonshot AI",
     "openai": "OpenAI",
+    "stepfun": "StepFun",
     "xai": "xAI",
     "zhipuai": "Zhipu AI",
 }
@@ -587,6 +593,7 @@ def export_models_dev_catalog(rows: Iterable[ModelCatalog]) -> dict[str, Any]:
 
 
 _CATALOG_PROVIDER_TYPE_ALIASES = {
+    "minimax-cn": "minimax",
     "moonshot": "moonshotai",
     "qwen": "alibaba",
     "zhipu": "zai",

@@ -723,8 +723,16 @@
         <button type="button" class="icon-btn" id="closeProviderCatalogPickerModal" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body provider-catalog-picker-body">
+        <label class="field hidden" id="providerCatalogSourceField">
+          <span>目录供应商</span>
+          <select id="providerCatalogSource"><option value="">请选择目录供应商</option></select>
+        </label>
+        <label class="agent-search">
+          <i data-lucide="search"></i>
+          <input type="search" id="providerCatalogSearch" placeholder="搜索模型名称或 ID" aria-label="搜索目录模型" autocomplete="off" />
+        </label>
         <div class="provider-catalog-picker-toolbar">
-          <span class="field-subtitle">勾选模型后添加，已添加项不可重复选择</span>
+          <span class="field-subtitle" id="providerCatalogPickerHint">勾选模型后添加，已添加项不可重复选择</span>
           <button type="button" class="btn-link" id="toggleProviderCatalogSelection">全选可添加</button>
         </div>
         <div class="provider-catalog-choice-list" id="providerCatalogChoiceList" aria-live="polite"></div>

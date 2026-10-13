@@ -52,7 +52,7 @@ const themesCss = await readFile(
   "utf8",
 );
 
-test("过程、工具和 HITL 默认折叠且等待操作标题清晰", () => {
+test("历史过程和普通工具默认折叠，等待操作标题清晰", () => {
   assert.equal(processDisclosureLabel(), "已处理");
   assert.equal(processDisclosureLabel({ running: true }), "处理中");
   assert.equal(processDisclosureLabel({ pending: true }), "等待操作");

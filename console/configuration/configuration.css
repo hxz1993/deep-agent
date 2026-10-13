@@ -1891,12 +1891,42 @@ dialog.console-action-dialog::backdrop {
 
 .provider-catalog-picker-modal {
   width: min(560px, calc(100vw - 32px)) !important;
+  height: min(840px, calc(100dvh - 48px));
+  max-height: calc(100dvh - 48px);
+}
+
+.provider-catalog-picker-modal > form {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.provider-catalog-picker-modal :is(.modal-header, .modal-footer, .form-error) {
+  flex-shrink: 0;
+}
+
+.provider-catalog-picker-modal .form-error {
+  max-height: 20%;
+  overflow: auto;
+}
+
+.provider-catalog-picker-modal.is-generic {
+  width: min(720px, calc(100vw - 32px)) !important;
 }
 
 .provider-catalog-picker-body {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   gap: 12px;
-  min-height: 220px;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+}
+
+.provider-catalog-picker-body > :not(.provider-catalog-choice-list) {
+  flex-shrink: 0;
 }
 
 .provider-catalog-picker-toolbar {
@@ -1931,7 +1961,8 @@ dialog.console-action-dialog::backdrop {
   display: grid;
   align-content: start;
   gap: 6px;
-  max-height: min(480px, 52vh);
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   padding-right: 3px;
 }
@@ -1984,6 +2015,18 @@ dialog.console-action-dialog::backdrop {
 
 .provider-catalog-choice.is-added .provider-catalog-choice-copy code { color: var(--text-dim); }
 .provider-catalog-choice-copy small { color: var(--text-faint); font-size: 12px; }
+.provider-catalog-choice-copy .provider-catalog-choice-error { color: var(--danger); overflow-wrap: anywhere; }
+
+.da-select:has(> #agentModelId) .da-select-option {
+  min-height: 24px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.da-select:has(> #agentModelId) .da-select-group {
+  padding-top: 5px;
+  padding-bottom: 2px;
+}
 
 @media (max-width: 900px) {
   .provider-admin-workspace { grid-template-columns: minmax(210px, 280px) minmax(360px, 1fr); }

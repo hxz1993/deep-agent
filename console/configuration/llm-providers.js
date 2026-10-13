@@ -12,6 +12,15 @@ const providerAdminState = {
 const providerCatalogPickerState = {
   provider: null,
   choices: [],
+  sources: [],
+  sourceId: "",
+  selectedIds: new Set(),
+  createdKeys: new Set(),
+  query: "",
+  generation: 0,
+  controller: null,
+  loading: false,
+  submitting: false,
 };
 
 function providerTypeByCode(code) {
@@ -35,6 +44,9 @@ const PROVIDER_BRANDS = {
   openai: { src: "./assets/provider-logos/openai.svg?v=20260926-centered-2", tone: "openai" },
   openai_codex: { src: "./assets/provider-logos/openai.svg?v=20260926-centered-2", tone: "openai" },
   anthropic: { src: "./assets/provider-logos/anthropic.png", tone: "anthropic" },
+  anthropic_compatible: { src: "./assets/provider-logos/anthropic.png", tone: "anthropic" },
+  minimax: { src: "./assets/provider-logos/minimax.ico", tone: "minimax" },
+  stepfun: { src: "./assets/provider-logos/stepfun.svg", tone: "stepfun" },
   google: { src: "./assets/provider-logos/google-gemini.png", tone: "google" },
   openai_compatible: { src: "./assets/provider-logos/openai-compatible.svg", tone: "compatible" },
 };
@@ -59,12 +71,22 @@ function providerCatalogId(provider) {
   return window.DeepAgentProviderCatalog?.catalogProviderIdForType(provider?.provider_type) || null;
 }
 
+function isGenericCatalogProvider(provider) {
+  return Boolean(window.DeepAgentProviderCatalog?.isGenericCatalogProvider(provider?.provider_type));
+}
+
+function catalogChoiceKey(choice) {
+  return `${providerCatalogPickerState.sourceId}:${choice.id}`;
+}
+
 function renderProviderTypeOptions(selectedCode = "") {
   const select = document.getElementById("llmProviderType");
   if (!select) return;
-  select.innerHTML = (state.llmProviderTypes || []).filter((item) => item.code !== "openai_codex" || selectedCode === "openai_codex").map((item) =>
+  const types = (state.llmProviderTypes || []).filter((item) => item.code !== "openai_codex" || selectedCode === "openai_codex");
+  const groups = window.DeepAgentProviderCatalog.groupProviderTypes(types);
+  select.innerHTML = groups.map((group) => `<optgroup label="${escapeHtml(group.label)}">${group.items.map((item) =>
     `<option value="${escapeHtml(item.code)}" ${item.code === selectedCode ? "selected" : ""}>${escapeHtml(item.label)}</option>`,
-  ).join("");
+  ).join("")}</optgroup>`).join("");
 }
 
 function suggestedProviderName(mode = providerAdminState.accessMode) {
@@ -287,6 +309,7 @@ const llmProvidersAdmin = {
     `).join("");
     list.querySelectorAll("[data-provider-id]").forEach((button) => button.addEventListener("click", () => {
       this.cancelModelTests();
+      this.closeCatalogPicker({ force: true });
       providerAdminState.selectedId = button.dataset.providerId;
       this.renderList();
       this.renderDetail();
@@ -304,7 +327,7 @@ const llmProvidersAdmin = {
       return;
     }
     const models = providerModels(provider.id);
-    const catalogId = providerCatalogId(provider);
+    const catalogAvailable = providerCatalogId(provider) || isGenericCatalogProvider(provider);
     host.innerHTML = `
       <header class="provider-detail-header">
         <div class="provider-detail-identity">
@@ -326,7 +349,7 @@ const llmProvidersAdmin = {
         </div>
       </header>
       <section class="provider-models-section">
-        <div class="provider-section-head"><h4>关联模型</h4><div class="row-actions provider-action-group">${catalogId ? `<button type="button" class="provider-action" data-provider-catalog><i data-lucide="library"></i><span>从目录添加</span></button>` : ""}<button type="button" class="provider-action" data-provider-model><i data-lucide="plus"></i><span>新建模型</span></button></div></div>
+        <div class="provider-section-head"><h4>关联模型</h4><div class="row-actions provider-action-group">${catalogAvailable ? `<button type="button" class="provider-action" data-provider-catalog><i data-lucide="library"></i><span>从目录添加</span></button>` : ""}<button type="button" class="provider-action" data-provider-model><i data-lucide="plus"></i><span>新建模型</span></button></div></div>
         <div class="provider-related-models">${models.length ? models.map((model) => `
           <div class="provider-related-model ${model.selectable === false ? "is-disabled" : ""}">
             <button type="button" class="model-enabled-switch ${model.enabled === false ? "off" : "on"}" data-toggle-model="${escapeHtml(model.id)}" role="switch" aria-checked="${model.enabled !== false}" title="${model.enabled === false ? "启用模型" : "停用模型"}" aria-label="${model.enabled === false ? "启用模型" : "停用模型"}"><span></span></button>
@@ -350,116 +373,190 @@ const llmProvidersAdmin = {
     this.updateModelTests();
   },
 
-  async initializeFromCatalog(provider, button) {
+  async initializeFromCatalog(provider) {
     const catalogId = providerCatalogId(provider);
-    if (!catalogId || !window.DeepAgentProviderCatalog) return;
-    button.disabled = true;
-    button.classList.add("is-loading");
+    const generic = isGenericCatalogProvider(provider);
+    if ((!catalogId && !generic) || !window.DeepAgentProviderCatalog) return;
+    if (providerCatalogPickerState.submitting) return;
+    this.closeCatalogPicker();
+    const generation = providerCatalogPickerState.generation;
+    const controller = new AbortController();
+    Object.assign(providerCatalogPickerState, { provider, controller, loading: true });
+    document.getElementById("providerCatalogSearch").value = "";
+    document.getElementById("providerCatalogPickerModal")?.classList.toggle("is-generic", generic);
+    AdminFormFeedback.clear(document.getElementById("providerCatalogPickerForm"));
+    this.renderCatalogPicker();
+    document.getElementById("providerCatalogPickerModal")?.showModal();
     try {
-      const params = new URLSearchParams({ view: "provider", provider_id: catalogId, offset: "0", limit: "200" });
-      const catalog = await apiFetch(`/api/v1/llm-models/catalog?${params}`);
-      const catalogModels = (catalog.items || []).flatMap((item) => item.models || []);
-      if (!catalogModels.length) {
-        showToast("目录中暂无可初始化模型", true);
-        return;
-      }
-      const { choices } = window.DeepAgentProviderCatalog.buildProviderCatalogChoices({
-        provider,
-        catalogModels,
-        existingModels: providerModels(provider.id),
-      });
-      providerCatalogPickerState.provider = provider;
-      providerCatalogPickerState.choices = choices;
-      this.renderCatalogPicker();
-      document.getElementById("providerCatalogPickerModal")?.showModal();
+      const params = new URLSearchParams({ view: "provider", offset: "0", limit: "200" });
+      if (!generic) params.set("provider_id", catalogId);
+      const catalog = await apiFetch(`/api/v1/llm-models/catalog?${params}`, { signal: controller.signal });
+      if (generation !== providerCatalogPickerState.generation) return;
+      providerCatalogPickerState.sources = (catalog.items || []).filter((item) => item.provider_id);
+      providerCatalogPickerState.loading = false;
+      this.selectCatalogSource(generic ? "" : catalogId);
     } catch (error) {
-      showToast(`目录模型加载失败：${error.message}`, true);
+      if (generation !== providerCatalogPickerState.generation || controller.signal.aborted) return;
+      providerCatalogPickerState.loading = false;
+      this.renderCatalogPicker();
+      AdminFormFeedback.show(document.getElementById("providerCatalogPickerForm"), `目录模型加载失败：${error.message}`);
     } finally {
-      button.disabled = false;
-      button.classList.remove("is-loading");
+      if (generation === providerCatalogPickerState.generation) providerCatalogPickerState.controller = null;
     }
   },
 
+  selectCatalogSource(sourceId) {
+    if (providerCatalogPickerState.submitting) return;
+    const source = providerCatalogPickerState.sources.find((item) => item.provider_id === sourceId);
+    providerCatalogPickerState.sourceId = source?.provider_id || "";
+    providerCatalogPickerState.selectedIds.clear();
+    providerCatalogPickerState.query = "";
+    document.getElementById("providerCatalogSearch").value = "";
+    const { choices } = window.DeepAgentProviderCatalog.buildProviderCatalogChoices({
+      provider: providerCatalogPickerState.provider,
+      catalogModels: source?.models || [],
+      existingModels: providerModels(providerCatalogPickerState.provider?.id),
+    });
+    providerCatalogPickerState.choices = choices;
+    AdminFormFeedback.clear(document.getElementById("providerCatalogPickerForm"));
+    this.renderCatalogPicker();
+  },
+
+  visibleCatalogChoices() {
+    const query = providerCatalogPickerState.query.trim().toLowerCase();
+    return providerCatalogPickerState.choices.filter((choice) => !query || `${choice.model} ${choice.label}`.toLowerCase().includes(query));
+  },
+
   renderCatalogPicker() {
-    const provider = providerCatalogPickerState.provider;
-    const choices = providerCatalogPickerState.choices;
+    const picker = providerCatalogPickerState;
+    const provider = picker.provider;
     const host = document.getElementById("providerCatalogChoiceList");
     if (!provider || !host) return;
+    const generic = isGenericCatalogProvider(provider);
     document.getElementById("providerCatalogPickerTitle").textContent = "选择要添加的模型";
     document.getElementById("providerCatalogPickerProvider").textContent = provider.name;
-    host.innerHTML = choices.length ? choices.map((choice) => {
+    document.getElementById("providerCatalogSourceField").classList.toggle("hidden", !generic);
+    const sourceSelect = document.getElementById("providerCatalogSource");
+    sourceSelect.innerHTML = `<option value="">请选择目录供应商</option>${picker.sources.map((source) =>
+      `<option value="${escapeHtml(source.provider_id)}" ${source.provider_id === picker.sourceId ? "selected" : ""}>${escapeHtml(source.provider_label || source.provider_id)}</option>`,
+    ).join("")}`;
+    sourceSelect.disabled = picker.loading || picker.submitting;
+    document.getElementById("providerCatalogPickerHint").textContent = generic
+      ? "从目录预填模型配置，添加到当前供应商；实际可用模型以接入服务为准。"
+      : "勾选模型后添加，已添加项不可重复选择";
+    const choices = this.visibleCatalogChoices();
+    const labels = { text: "文本", image: "图像", audio: "音频", video: "视频" };
+    host.innerHTML = picker.loading ? `<div class="provider-model-empty">正在加载模型目录…</div>` : choices.length ? choices.map((choice) => {
+      const created = picker.createdKeys.has(catalogChoiceKey(choice));
+      const disabled = choice.added || created || picker.submitting;
       const context = window.__LlmModelConfigurationUI?.formatTokenCount?.(choice.payload.context_window_tokens) || "—";
-      const modalities = (choice.payload.input_modalities || []).join("、") || "text";
-      return `<label class="provider-catalog-choice ${choice.added ? "is-added" : ""}">
-        <input type="checkbox" name="providerCatalogChoice" value="${escapeHtml(choice.id)}" ${choice.added ? "disabled" : ""} />
-        <span class="provider-catalog-choice-copy"><code>${escapeHtml(choice.model)}</code><small>${escapeHtml(modalities)} · ${escapeHtml(context)}</small></span>
-        <span class="badge ${choice.added ? "on" : ""}">${choice.added ? "已添加" : "可添加"}</span>
+      const modalities = (choice.payload.input_modalities || []).map((item) => labels[item] || item).join("、") || "文本";
+      return `<label class="provider-catalog-choice ${choice.added || created ? "is-added" : ""}">
+        <input type="checkbox" name="providerCatalogChoice" value="${escapeHtml(choice.id)}" ${disabled ? "disabled" : ""} ${picker.selectedIds.has(choice.id) ? "checked" : ""} />
+        <span class="provider-catalog-choice-copy"><code title="${escapeHtml(choice.model)}">${escapeHtml(choice.model)}</code><small>${escapeHtml(modalities)} · ${escapeHtml(context)}</small>${choice.error ? `<small class="provider-catalog-choice-error">${escapeHtml(choice.error)}</small>` : ""}</span>
+        <span class="badge ${choice.added || created ? "on" : ""}">${created ? "本次已添加" : choice.added ? "已添加" : choice.error ? "添加失败" : "可添加"}</span>
       </label>`;
-    }).join("") : `<div class="provider-model-empty">目录中暂无模型</div>`;
+    }).join("") : `<div class="provider-model-empty">${generic && !picker.sourceId ? "请先选择目录供应商" : picker.query ? "未找到匹配模型" : "目录中暂无模型"}</div>`;
     host.querySelectorAll('input[name="providerCatalogChoice"]').forEach((input) => {
-      input.addEventListener("change", () => this.updateCatalogPickerSelection());
+      input.addEventListener("change", () => {
+        if (input.checked) picker.selectedIds.add(input.value);
+        else picker.selectedIds.delete(input.value);
+        this.updateCatalogPickerSelection();
+      });
     });
-    AdminFormFeedback.clear(document.getElementById("providerCatalogPickerForm"));
+    for (const id of ["closeProviderCatalogPickerModal", "cancelProviderCatalogPickerBtn", "providerCatalogSearch"]) {
+      document.getElementById(id).disabled = picker.submitting;
+    }
     this.updateCatalogPickerSelection();
   },
 
   updateCatalogPickerSelection() {
-    const inputs = Array.from(document.querySelectorAll('#providerCatalogChoiceList input[name="providerCatalogChoice"]:not(:disabled)'));
-    const selected = inputs.filter((input) => input.checked).length;
+    const picker = providerCatalogPickerState;
+    const selectable = this.visibleCatalogChoices().filter((choice) => !choice.added && !picker.createdKeys.has(catalogChoiceKey(choice)));
+    const selected = picker.selectedIds.size;
     const confirm = document.getElementById("confirmProviderCatalogPickerBtn");
     const toggle = document.getElementById("toggleProviderCatalogSelection");
     if (confirm) {
-      confirm.disabled = selected === 0;
-      confirm.textContent = selected ? `添加所选（${selected}）` : "添加所选";
+      confirm.disabled = picker.submitting || selected === 0;
+      confirm.textContent = picker.submitting ? "添加中…" : selected ? `添加所选（${selected}）` : "添加所选";
     }
     if (toggle) {
-      toggle.disabled = inputs.length === 0;
-      toggle.textContent = inputs.length > 0 && selected === inputs.length ? "取消全选" : "全选可添加";
+      toggle.disabled = picker.submitting || !selectable.length;
+      toggle.textContent = selectable.length && selectable.every((choice) => picker.selectedIds.has(choice.id)) ? "取消全选" : "全选可添加";
     }
   },
 
   toggleCatalogPickerSelection() {
-    const inputs = Array.from(document.querySelectorAll('#providerCatalogChoiceList input[name="providerCatalogChoice"]:not(:disabled)'));
-    const shouldSelect = inputs.some((input) => !input.checked);
-    inputs.forEach((input) => { input.checked = shouldSelect; });
-    this.updateCatalogPickerSelection();
+    if (providerCatalogPickerState.submitting) return;
+    const selectable = this.visibleCatalogChoices().filter((choice) => !choice.added && !providerCatalogPickerState.createdKeys.has(catalogChoiceKey(choice)));
+    const shouldSelect = selectable.some((choice) => !providerCatalogPickerState.selectedIds.has(choice.id));
+    selectable.forEach((choice) => {
+      if (shouldSelect) providerCatalogPickerState.selectedIds.add(choice.id);
+      else providerCatalogPickerState.selectedIds.delete(choice.id);
+    });
+    this.renderCatalogPicker();
   },
 
-  closeCatalogPicker() {
+  closeCatalogPicker({ force = false } = {}) {
+    const picker = providerCatalogPickerState;
+    if (picker.submitting && !force) return false;
+    picker.controller?.abort();
+    picker.generation += 1;
+    Object.assign(picker, { provider: null, choices: [], sources: [], sourceId: "", query: "", controller: null, loading: false, submitting: false });
+    picker.selectedIds.clear();
+    picker.createdKeys.clear();
     document.getElementById("providerCatalogPickerModal")?.close();
-    providerCatalogPickerState.provider = null;
-    providerCatalogPickerState.choices = [];
+    return true;
   },
 
   async submitCatalogPicker(event) {
     event.preventDefault();
+    const picker = providerCatalogPickerState;
+    if (picker.submitting || !picker.provider) return;
     const form = event.currentTarget;
-    const selectedIds = new Set(Array.from(
-      form.querySelectorAll('input[name="providerCatalogChoice"]:checked:not(:disabled)'),
-      (input) => input.value,
-    ));
-    const selected = providerCatalogPickerState.choices.filter((choice) => selectedIds.has(choice.id));
+    const generation = picker.generation;
+    const selected = picker.choices.filter((choice) => picker.selectedIds.has(choice.id) && !choice.added && !picker.createdKeys.has(catalogChoiceKey(choice)));
     if (!selected.length) return;
     AdminFormFeedback.clear(form);
-    AdminFormFeedback.setSubmitting(form, true);
+    picker.submitting = true;
+    this.renderCatalogPicker();
     let created = 0;
     let failed = 0;
     try {
       for (const choice of selected) {
+        if (generation !== picker.generation) return;
         try {
           await apiFetch("/api/v1/llm-models", { method: "POST", body: JSON.stringify(choice.payload) });
+          if (generation !== picker.generation) return;
           created += 1;
-        } catch {
+          picker.createdKeys.add(catalogChoiceKey(choice));
+          picker.selectedIds.delete(choice.id);
+          choice.error = "";
+        } catch (error) {
+          if (generation !== picker.generation) return;
           failed += 1;
+          choice.error = error.message || "请求失败";
         }
+        this.renderCatalogPicker();
       }
-      await this.refresh();
-      this.closeCatalogPicker();
-      showToast(window.DeepAgentProviderCatalog.providerCatalogSummary({ created, skipped: 0, failed }), failed > 0);
+      const refreshed = created ? await this.refresh() : true;
+      if (generation !== picker.generation) return;
+      picker.submitting = false;
+      const summary = window.DeepAgentProviderCatalog.providerCatalogSummary({ created, skipped: 0, failed });
+      if (failed) {
+        this.renderCatalogPicker();
+        AdminFormFeedback.show(form, `${summary}；失败原因见对应模型${refreshed ? "" : "。列表刷新失败，请重新加载"}`);
+      } else {
+        this.closeCatalogPicker();
+        showToast(`${summary}${refreshed ? "" : "，列表刷新失败，请重新加载"}`, !refreshed);
+      }
     } catch (error) {
-      AdminFormFeedback.show(form, error);
+      if (generation === picker.generation) AdminFormFeedback.show(form, error);
     } finally {
-      AdminFormFeedback.setSubmitting(form, false);
+      if (generation === picker.generation) {
+        picker.submitting = false;
+        this.renderCatalogPicker();
+      }
     }
   },
 
@@ -661,12 +758,28 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("llmProviderModal")?.addEventListener("close", () => { void cancelProviderAuthorization(); });
   document.getElementById("providerCatalogPickerForm")?.addEventListener("submit", (event) => llmProvidersAdmin.submitCatalogPicker(event));
   document.getElementById("toggleProviderCatalogSelection")?.addEventListener("click", () => llmProvidersAdmin.toggleCatalogPickerSelection());
+  document.getElementById("providerCatalogSource")?.addEventListener("change", (event) => llmProvidersAdmin.selectCatalogSource(event.currentTarget.value));
+  document.getElementById("providerCatalogSearch")?.addEventListener("input", (event) => {
+    if (providerCatalogPickerState.submitting) return;
+    providerCatalogPickerState.query = event.currentTarget.value;
+    llmProvidersAdmin.renderCatalogPicker();
+  });
   document.getElementById("closeProviderCatalogPickerModal")?.addEventListener("click", () => llmProvidersAdmin.closeCatalogPicker());
   document.getElementById("cancelProviderCatalogPickerBtn")?.addEventListener("click", () => llmProvidersAdmin.closeCatalogPicker());
+  document.getElementById("providerCatalogPickerModal")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    llmProvidersAdmin.closeCatalogPicker();
+  });
+  document.getElementById("providerCatalogPickerModal")?.addEventListener("close", (event) => {
+    if (!event.currentTarget.open && providerCatalogPickerState.provider) llmProvidersAdmin.closeCatalogPicker({ force: true });
+  });
 });
 
 document.addEventListener("deep-agent-configuration-tab", (event) => {
-  if (event.detail?.name !== "llm-providers") llmProvidersAdmin.cancelModelTests();
+  if (event.detail?.name !== "llm-providers") {
+    llmProvidersAdmin.cancelModelTests();
+    llmProvidersAdmin.closeCatalogPicker({ force: true });
+  }
 });
 
 window.__LlmProviderConfigurationUI = { providerBrand, providerTypeLabel, syncProviderBaseUrl };

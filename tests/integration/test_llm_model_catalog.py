@@ -17,7 +17,7 @@ from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
-from tests.unit.test_catalog import LABS, MODELS, PROVIDERS
+from tests.unit.test_catalog import ADDITIONAL_PROVIDERS, LABS, MODELS, PROVIDERS
 
 
 class LlmModelCatalogIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -80,6 +80,40 @@ class LlmModelCatalogIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["rows"], 2)
         self.assertEqual(len(await self.stores.model_catalog.list_all()), 2)
+
+    async def test_imported_domestic_providers_are_selectable_from_saved_catalog(self) -> None:
+        raw = json.dumps({"models": {}, "providers": ADDITIONAL_PROVIDERS}).encode()
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/llm-models/catalog/import",
+                files={"file": ("catalog.json", raw, "application/json")},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["rows"], 3)
+            with patch(
+                "deep_agent.api.v1.llm_models.fetch_models_dev_bundle",
+                new=AsyncMock(side_effect=AssertionError("catalog reads must remain local")),
+            ):
+                for provider_id, adapter, runtime_model in (
+                    ("minimax-cn", "anthropic_compatible", "anthropic:MiniMax-M2.5"),
+                    ("stepfun", "openai_compatible", "openai:step-3.5-flash"),
+                ):
+                    with self.subTest(provider_id=provider_id):
+                        result = await client.get(
+                            "/api/v1/llm-models/catalog",
+                            params={"view": "model", "provider_id": provider_id},
+                        )
+                        self.assertEqual(result.status_code, 200, result.text)
+                        body = result.json()
+                        self.assertEqual(body["total"], 1)
+                        self.assertEqual(
+                            {item["id"] for item in body["facets"]["providers"]},
+                            set(ADDITIONAL_PROVIDERS),
+                        )
+                        option = body["items"][0]["providers"][0]
+                        self.assertEqual(option["provider_id"], provider_id)
+                        self.assertEqual(option["adapter"], adapter)
+                        self.assertEqual(option["runtime_model"], runtime_model)
 
     async def test_fetch_failure_preserves_old_catalog(self) -> None:
         await self._seed_catalog()

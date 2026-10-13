@@ -1,10 +1,10 @@
-import { composerProviderIcon } from "./provider-icons.js?v=20260929-model-provider";
+import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-usage-tab-2";
 import { renderPlanItems } from "./plan-view.js?v=20260922-trajectory-8";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
 import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20260923-usage-tab-2";
 import { cacheTrajectorySummary } from "./cache-usage.js?v=20260923-usage-tab-2";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20261002-console-audit";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20261013-console-ui-4";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
   contextCompactionPresentation,
@@ -22,7 +22,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20261002-console-audit";
-import { createTrajectoryController } from "./trajectory.js?v=20260924-ptc-execution-6";
+import { createTrajectoryController } from "./trajectory.js?v=20261013-session-navigation";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
@@ -82,15 +82,23 @@ function refreshLucideIcons() {
 
 function mergeUiToolCall(call) {
   const def = uiToolsByName.get(call.tool);
-  if (!def) return call;
-  return {
+  const merged = def ? {
     ...call,
     widget: call.widget || def.widget || null,
     metadata: call.metadata ?? def.metadata ?? null,
     source: call.source || def.source || null,
     parameters_json_schema: call.parameters_json_schema || def.parameters_json_schema || null,
     result_schema: call.result_schema || def.result_schema || null,
-  };
+  } : call;
+  // History can preserve complete tool arguments as JSON text. Normalize only
+  // UI calls here; ordinary tool inputs and incomplete streaming args stay raw.
+  if (isUiToolCall(merged) && typeof merged.args === "string") {
+    try {
+      const args = JSON.parse(merged.args);
+      if (args && typeof args === "object" && !Array.isArray(args)) return { ...merged, args };
+    } catch (_) { /* Keep the existing pending/invalid-argument handling. */ }
+  }
+  return merged;
 }
 
 function isUiToolCall(call) {
@@ -114,6 +122,7 @@ function resolveWidgetType(call) {
 }
 
 async function loadUiTools(agentId, { signal, isCurrent = () => true } = {}) {
+  const revision = state.navigationRevision || 0;
   try {
     const params = new URLSearchParams();
     if (agentId) params.set("agent_id", agentId);
@@ -121,6 +130,7 @@ async function loadUiTools(agentId, { signal, isCurrent = () => true } = {}) {
     if (!r.ok) return;
     const data = await r.json();
     if (!isCurrent() || signal?.aborted) return;
+    if (state.agentId !== agentId || (state.navigationRevision || 0) !== revision) return;
     const rows = Array.isArray(data?.items) ? data.items : [];
     uiToolsByName.clear();
     for (const tool of rows) {
@@ -188,6 +198,8 @@ window.addEventListener("pagehide", () => {
   state.stopController?.abort();
   state.stopController = null;
   streamController?.abort();
+  for (const controller of state.backgroundStreams || []) controller.abort();
+  state.backgroundStreams?.clear();
 });
 
 const LLM_MODALITY_LABELS = {
@@ -883,14 +895,26 @@ function toggleNewChatMenu(anchor) {
   el.newChatMenu.querySelector(".new-chat-menu-item")?.focus();
 }
 
+// The POST connection owns execution. Keep consuming it when leaving the view;
+// aborting it here would cancel the server Run. Its callbacks lose UI ownership.
+function detachChatView() {
+  state.navigationRevision = (state.navigationRevision || 0) + 1;
+  state.abortController = null;
+  state.stopController?.abort();
+  state.stopController = null;
+  stopHistoryObservation();
+  state.stopRequested = false;
+  state.streamSessionConfirmed = false;
+  state.streamRecoveryNote = null;
+  state.awaitingHitl = false;
+  state.assistantPresenter?.dispose?.();
+  setStreaming(false);
+}
+
 function newChat(agentId) {
   const id = normalizeAgentId(agentId);
   closeNewChatMenu();
-  if (state.streaming && !state.observingRun) {
-    showConsoleToast("请先停止当前生成，再新建会话", true);
-    return;
-  }
-  stopHistoryObservation();
+  detachChatView();
   if (id) {
     state.agentId = id;
     localStorage.setItem("da_console_agent_id_v1", state.agentId);
@@ -1040,15 +1064,13 @@ function renderSessions() {
 }
 
 async function switchSession(s) {
-  if (state.streaming && !state.observingRun) {
-    showConsoleToast("请先停止当前生成，再切换会话", true);
-    return;
-  }
-  stopHistoryObservation();
+  detachChatView();
   const session = normalizeSession(s);
   state.sessionId = session.id;
   state.sessionCache = null;
   state.runCache = null;
+  state.contextStatus = null;
+  state.conversationId = null;
   state.lastRunUsage = null;
   state.lastRunMetrics = null;
   if (session.agentId) {
@@ -1426,6 +1448,11 @@ function applyObservedHistory(history, status) {
 }
 
 async function loadContextStatus(session, { signal, isCurrent = () => true } = {}) {
+  const target = normalizeSession(session);
+  const revision = state.navigationRevision || 0;
+  const current = () => isCurrent() && !signal?.aborted
+    && (state.navigationRevision || 0) === revision
+    && state.sessionId === target.id && state.agentId === target.agentId;
   const lastCompaction = state.contextStatus?.last_compaction;
   try {
     const response = await daFetch(
@@ -1433,13 +1460,13 @@ async function loadContextStatus(session, { signal, isCurrent = () => true } = {
       { signal },
     );
     const context = response.ok ? await response.json() : null;
-    if (!isCurrent() || signal?.aborted) return;
+    if (!current()) return;
     state.contextStatus = context;
     if (state.contextStatus && lastCompaction) {
       state.contextStatus.last_compaction = lastCompaction;
     }
   } catch {
-    if (!isCurrent() || signal?.aborted) return;
+    if (!current()) return;
     if (!lastCompaction) state.contextStatus = null;
   }
   updateComposerContextControls();
@@ -1748,7 +1775,8 @@ function restoreHistoryDisclosure(oldRow, nextRow) {
       const previous = selector === ".tool-block"
         ? oldBlocks.find((candidate) => candidate.dataset.toolCallId === block.dataset.toolCallId)
         : oldBlocks[index];
-      if (!previous) continue;
+      if (!previous?.dataset.disclosureTouched) continue;
+      if (selector === ".tool-block" && previous.classList.contains("hitl-pending") !== block.classList.contains("hitl-pending")) continue;
       const open = previous.classList.contains("open");
       block.classList.toggle("open", open);
       if (previous.dataset.disclosureTouched) block.dataset.disclosureTouched = "1";
@@ -1895,7 +1923,7 @@ function setConn(kind, text) {
   el.connStatus.querySelector(".conn-text").textContent = text;
 }
 
-async function loadAgents() {
+async function loadAgents({ isCurrent = () => true } = {}) {
   if (!el.agentSelect) return;
   el.agentSelect.innerHTML = '<option value="">加载中…</option>';
   try {
@@ -1905,6 +1933,7 @@ async function loadAgents() {
     if (!Array.isArray(agents)) {
       throw new Error(`Agent 列表响应格式错误：${serviceUrl("api/v1/agents")}`);
     }
+    if (!isCurrent()) return;
     state.agents = agents;
     el.agentSelect.innerHTML = "";
     if (!state.agents.length) {
@@ -2212,9 +2241,9 @@ async function copyCurrentSessionId() {
 }
 
 function updateAgentSelectState() {
-  if (el.agentSelect) el.agentSelect.disabled = state.streaming && !state.observingRun;
+  if (el.agentSelect) el.agentSelect.disabled = !state.agents.length;
   const trigger = document.getElementById("workspaceAgentSelectTrigger");
-  if (trigger) trigger.disabled = state.streaming && !state.observingRun;
+  if (trigger) trigger.disabled = !state.agents.length;
   updateComposerModelInfo();
 }
 
@@ -2335,6 +2364,8 @@ async function runChatStream(payload, assistant) {
   state.historyFollower = null;
   state.historyController = null;
   const streamController = new AbortController();
+  (state.backgroundStreams ||= new Set()).add(streamController);
+  const sourceSession = { id: payload.session_id, agentId: payload.agent_id || state.agentId };
   state.stopController?.abort();
   state.abortController = streamController;
   const current = () => state.abortController === streamController;
@@ -2359,7 +2390,7 @@ async function runChatStream(payload, assistant) {
       // persisted session yet; reloading History would erase this error and
       // the unsaved question, then leave the composer waiting on a 404.
       // Timeouts/server errors remain ambiguous and still recover History.
-      if (resp.status >= 400 && resp.status < 500 && resp.status !== 408) {
+      if (current() && resp.status >= 400 && resp.status < 500 && resp.status !== 408) {
         state.refreshHistoryAfterStream = false;
       }
       let detail = await resp.text().catch(() => "");
@@ -2370,12 +2401,17 @@ async function runChatStream(payload, assistant) {
       } catch { /* Non-JSON upstream errors keep their response text. */ }
       throw new Error(detail || `HTTP ${resp.status}`);
     }
-    if (!current()) return;
-    setConn("ok", "已连接");
+    if (current()) setConn("ok", "已连接");
 
     await readSse(resp.body, (evt) => {
-      if (!current() || streamController.signal.aborted) return;
-      handleEvent(evt, assistant);
+      if (streamController.signal.aborted) return;
+      if (current()) handleEvent(evt, assistant);
+      else if (evt.event === "session") {
+        sourceSession.id = evt.data.session_id || sourceSession.id;
+        upsertSession(sourceSession.id, null, sourceSession.agentId, agentNameById(sourceSession.agentId));
+      } else if (evt.event === "session_title") {
+        applySessionTitle(sourceSession, evt.data.title);
+      }
       if (["final", "error", "cancelled"].includes(evt.event || evt.data?.type)) {
         // A real terminal frame needs no further socket bytes to finish.
         streamController.abort();
@@ -2395,7 +2431,11 @@ async function runChatStream(payload, assistant) {
     }
   } finally {
     streamController.signal.removeEventListener("abort", abortStop);
-    if (!current()) return;
+    state.backgroundStreams.delete(streamController);
+    if (!current()) {
+      streamController.abort();
+      return;
+    }
     state.stopController?.abort();
     state.stopController = null;
     applyAssistantPresentationActions(assistant, assistantActionsFromSse("error"));
@@ -3222,11 +3262,6 @@ function renderMarkdownDiagrams(...args) { return getConversationPresenter().ren
 
 async function selectAgent(agentId) {
   if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return false;
-  if (state.streaming && !state.observingRun) {
-    showConsoleToast("请先停止当前生成，再切换 Agent", true);
-    return false;
-  }
-
   if (state.agentId === agentId) return true;
   newChat(agentId);
   await syncSessionsFromBackend();
@@ -3236,17 +3271,39 @@ async function selectAgent(agentId) {
 async function refreshAgentWorkspace() {
   const previousAgentId = state.agentId;
   const previousSessionId = state.sessionId;
-  await loadAgents();
+  const revision = state.navigationRevision || 0;
+  const current = () => (state.navigationRevision || 0) === revision
+    && state.sessionId === previousSessionId;
+  await loadAgents({ isCurrent: current });
+  if (!current()) return false;
   await syncSessionsFromBackend();
-
-  const scoped = state.sessions.filter(
-    (session) => (session.agentId || "") === (state.agentId || ""),
-  );
-  const target = scoped.find((session) => (
-    state.agentId === previousAgentId && session.id === previousSessionId
-  )) || scoped[0];
-  if (target && (!state.streaming || state.observingRun)) await switchSession(target);
-  return true;
+  if (!current()) return false;
+  if (state.agentId !== previousAgentId || !state.agents.some((agent) => agent.id === previousAgentId)) {
+    newChat();
+    return true;
+  }
+  // A new conversation stays new, including its draft and selected model.
+  if (!previousSessionId || (state.abortController && !state.streamSessionConfirmed)) return true;
+  const session = { id: previousSessionId, agentId: previousAgentId };
+  try {
+    // List pages/search results cannot prove deletion. Check the actual record.
+    const response = await daFetch(sessionApiUrl(session));
+    if (!current()) return false;
+    if (response.status === 404) {
+      state.sessions = state.sessions.filter((item) => sessionLookupKey(item) !== sessionLookupKey(session));
+      newChat();
+    } else if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    } else if (!state.abortController) {
+      const target = state.sessions.find((item) => sessionLookupKey(item) === sessionLookupKey(session));
+      await switchSession(target || { ...session, title: el.chatTitle.textContent });
+    }
+    // An attached POST stream already has the freshest view; do not interrupt it.
+    return true;
+  } catch (error) {
+    if (current()) showConsoleToast(`刷新会话失败：${error.message}`, true);
+    return false;
+  }
 }
 
 window.DeepAgentConsoleChat = {

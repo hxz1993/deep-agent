@@ -236,7 +236,7 @@ test("供应商目录初始化只映射明确渠道并跳过当前供应商已�
   assert.match(providerSource, /view: "provider"/);
   assert.match(template, /id="providerCatalogPickerModal"[\s\S]*id="providerCatalogChoiceList"[\s\S]*添加所选/);
   assert.match(providerSource, /buildProviderCatalogChoices/);
-  assert.match(providerSource, /choice\.added \? "disabled"/);
+  assert.match(providerSource, /const disabled = choice\.added \|\| created \|\| picker\.submitting/);
   assert.match(providerSource, /submitCatalogPicker\(event\)/);
   assert.match(providerSource, /for \(const choice of selected\)/);
 });

@@ -14,7 +14,9 @@ from loguru import logger
 from pydantic_ai import RunCancelled
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from deep_agent.agent.deferred import build_deferred_tool_results
+from deep_agent.agent.deferred import (
+    DeferredResultConflict, build_deferred_tool_results, validate_deferred_results,
+)
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import usage_dict
 from deep_agent.agent.context.compaction import ContextWindowExceededError
@@ -176,7 +178,10 @@ def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
 def _deferred_results(body: StreamChatRequest):
     if not body.deferred_tool_results:
         return None
-    return build_deferred_tool_results(body.deferred_tool_results)
+    try:
+        return build_deferred_tool_results(body.deferred_tool_results)
+    except DeferredResultConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)}) from exc
 
 
 async def _current_channel_context(ctx, body, account):
@@ -333,6 +338,10 @@ async def chat_stream(
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user
     )
+    try:
+        await validate_deferred_results(ctx.store, session_id, deferred_tool_results)
+    except DeferredResultConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)}) from exc
     message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
     try:
         runner = await build_runner_for_agent(
@@ -420,6 +429,11 @@ async def chat_stream(
                 async for ev in stream:
                     ctx.session_live.publish(live_key, deps.run_id, ev["type"], ev)
                     yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
+        except DeferredResultConflict as exc:
+            # A concurrent resume can pass HTTP preflight before the first completes.
+            # Reject only this request; do not persist an execution/error or final.
+            yield {"event": "error", "data": json.dumps(
+                {"type": "error", "code": exc.code, "message": str(exc)}, ensure_ascii=False)}
         except asyncio.CancelledError:
             active_run.observe_cancellation(transport_cancel_reason())
             raise

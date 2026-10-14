@@ -41,6 +41,7 @@ from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from deep_agent.agent import events
+from deep_agent.agent.deferred import validate_deferred_results
 from deep_agent.agent.active_runs import ActiveRun, ActiveRunRegistry
 from deep_agent.agent.context.budget import build_context_budget
 from deep_agent.agent.context.compaction import (
@@ -1698,6 +1699,7 @@ class AgentRunner:
     ) -> dict[str, Any]:
         deps.agent_name = self.agent_name
         self._start_run_identity(session_id, deps, run_id=run_id)
+        await validate_deferred_results(self.store, session_id, deferred_tool_results)
         await self._ensure_turn_identity(
             session_id, deps, message=message, attachments=attachments,
             context_refs=context_refs, deferred_tool_results=deferred_tool_results,
@@ -1718,6 +1720,9 @@ class AgentRunner:
         self._set_tool_discovery_inputs(deps, message, context_refs)
         title_task: asyncio.Task[None] | None = None
         async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id):
+            # Recheck after waiting: another request may have consumed the UI result.
+            # This rejection must stay outside the execution-error persistence block.
+            await validate_deferred_results(self.store, session_id, deferred_tool_results)
             try:
                 prepared = await self._prepare_history(
                     session_id,
@@ -2100,6 +2105,7 @@ class AgentRunner:
             deps,
             run_id=active_run.run_id if active_run is not None else None,
         )
+        await validate_deferred_results(self.store, session_id, deferred_tool_results)
         await self._ensure_turn_identity(
             session_id, deps, message=message, attachments=attachments,
             context_refs=context_refs, deferred_tool_results=deferred_tool_results,
@@ -2129,6 +2135,9 @@ class AgentRunner:
         stream_snapshot = _StreamRunSnapshot()
         self._set_tool_discovery_inputs(deps, message, context_refs)
         async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id):
+            # Recheck after waiting: another request may have consumed the UI result.
+            # This rejection must stay outside the execution-error persistence block.
+            await validate_deferred_results(self.store, session_id, deferred_tool_results)
             try:
                 prepared = await self._prepare_history(
                     session_id,

@@ -270,9 +270,29 @@ Content-Type: application/json
 - `tool_call_id` 必须与 pending 的 `tool_call` 一致
 - 多个 pending call 时，可在一轮请求中提交多条 `deferred_tool_results`（需全部解决后 agent 才继续）
 
+重复与过期回传防护（2026-10-14，v0.13.5）：只接受当前已持久化 pending 响应中尚未处理的调用。
+已经回传、终止、被新消息取代的调用，以及同一请求内重复的调用 ID，返回 HTTP 409。
+如果续跑在写入确认结果之前失败，原 pending 调用仍可重试；不能仅凭存在错误事件就封死重试。
+
+```json
+{"detail":{"code":"deferred_result_conflict","message":"工具确认已处理或已失效，请刷新会话后继续；本次未重复执行。"}}
+```
+
+执行前还会在现有会话锁内复查，防止并发请求都通过预检。若 SSE 已建立后才发现冲突，发送
+`error` 帧并携带相同 `code/message`，不写入 `execution/error`、不生成新的 final、不再次请求模型。
+此类错误是本次回传请求被拒绝，不能解释为原执行失败；客户端应刷新 History、停用旧确认入口，
+不要自动重试或覆盖已有完成结果。历史调用 ID 不做全局去重，后续响应合法复用 ID 仍可继续。
+
+回归：`tests/unit/test_deferred_admission.py` 与
+`tests/integration/test_chat_stream_cancel_and_history.py` 覆盖正常确认、重复/冲突值、过期调用、并发、
+混入旧 ID、ID 复用，以及拒绝前后事件和 History 不变。无需数据库迁移，不回写修复既有错误事件。
+本地验收：全量单元 2337 项（8 项跳过，其余通过），相关集成 60 项通过；8000 重启后实际回传
+过期结果返回 409，History 保持不变。确认写入前失败的合法重试仍能续跑并保留原轮请求预算。
+
 ### 6.3 非流式接口
 
-`POST /api/v1/chat` 同样支持 `deferred_tool_results`；响应含 `status` / `deferred` 字段（见 [`schemas/chat.py`](../../src/deep_agent/schemas/chat.py)）。
+`POST /api/v1/chat` 响应含 `status` / `deferred` 字段，但当前请求 Schema 不接收
+`deferred_tool_results`；UI 确认续跑使用 `POST /api/v1/chat/stream`（见 [`schemas/chat.py`](../../src/deep_agent/schemas/chat.py)）。
 
 ---
 

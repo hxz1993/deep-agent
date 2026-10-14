@@ -697,25 +697,66 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             json_body={"session_id": session_id, "message": "放弃旧确认"},
         )
 
-        resume_model = text_only_model("should not run")
-        events = await self._stream_events(
-            model=resume_model,
-            json_body={
+        await self._assert_deferred_conflict_unchanged(session_id, tool_call_id)
+
+    async def _assert_deferred_conflict_unchanged(self, session_id, call_id, *, duplicate=False):
+        ctx = get_context()
+        before = [r.public_dict() for r in await ctx.store.list_all_events(session_id)]
+        history_before = await self._history(session_id)
+        item = {"tool_call_id": call_id, "result": {"confirmed": True}}
+        with patch("deep_agent.api.v1.chat.build_runner_for_agent") as build:
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post("/api/v1/chat/stream", json={
+                    "agent_id": self._agent_id, "session_id": session_id,
+                    "deferred_tool_results": [item, item] if duplicate else [item],
+                })
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertEqual(response.json()["detail"]["code"], "deferred_result_conflict")
+            build.assert_not_called()
+        self.assertEqual(before, [r.public_dict() for r in await ctx.store.list_all_events(session_id)])
+        self.assertEqual(history_before, await self._history(session_id))
+
+    async def test_completed_ui_duplicate_is_http_conflict_without_failed_run(self):
+        session_id, call_id = await self._run_hitl_pending()
+        await self._assert_deferred_conflict_unchanged(session_id, call_id, duplicate=True)
+        events = await self._stream_events(model=text_only_model("completed"), json_body={
+            "session_id": session_id,
+            "deferred_tool_results": [{"tool_call_id": call_id, "result": {"confirmed": True}}],
+        })
+        self.assertEqual(events[-1]["status"], "completed")
+        await self._assert_deferred_conflict_unchanged(session_id, call_id)
+
+    async def test_deferred_race_after_http_admission_preserves_completed_history(self):
+        from pydantic_ai.messages import ModelRequest, ModelResponse, ToolReturnPart, TextPart
+        from deep_agent.agent.deferred import validate_deferred_results
+
+        session_id, call_id = await self._run_hitl_pending()
+        store = get_context().store
+        completed_snapshot = []
+
+        async def completed_between_preflight_and_execution(*args):
+            await store.append(session_id, [
+                ModelRequest(parts=[ToolReturnPart("builtin__confirm", {"confirmed": True}, call_id)]),
+                ModelResponse(parts=[TextPart("other request finished")]),
+            ], agent_id=self._agent_id, user_id=TEST_USER_ID,
+                run_id="winning-request", turn_id="winning-request", terminal_status="completed")
+            completed_snapshot.extend(r.public_dict() for r in await store.list_all_events(session_id))
+            await validate_deferred_results(*args)
+
+        model = text_only_model("must not run")
+        with patch("deep_agent.agent.runner.validate_deferred_results",
+                   side_effect=completed_between_preflight_and_execution):
+            events = await self._stream_events(model=model, json_body={
                 "session_id": session_id,
-                "deferred_tool_results": [
-                    {
-                        "tool_call_id": tool_call_id,
-                        "result": {"confirmed": True},
-                    }
-                ],
-            },
-        )
-        types = {ev.get("type") for ev in events}
-        final = next((ev for ev in reversed(events) if ev.get("type") == "final"), None)
-        if final is not None:
-            self.assertNotEqual(final.get("status"), "completed")
-        else:
-            self.assertIn("error", types)
+                "deferred_tool_results": [{"tool_call_id": call_id, "result": {"confirmed": True}}],
+            })
+        errors = [e for e in events if e.get("type") == "error"]
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["code"], "deferred_result_conflict")
+        self.assertFalse(any(e.get("type") == "final" for e in events))
+        self.assertEqual(completed_snapshot,
+                         [r.public_dict() for r in await store.list_all_events(session_id)])
+        self.assertEqual(_last_assistant(await self._history(session_id))["text"], "other request finished")
 
     async def test_e9_deferred_resume_cancel_no_duplicate_tool_call(self) -> None:
         """HITL confirm then cancel resume stream must not duplicate tool_call in DB."""

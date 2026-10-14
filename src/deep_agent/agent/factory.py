@@ -35,6 +35,7 @@ from deep_agent.capabilities.codes import is_ptc_selected
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.options import OPTION
+from deep_agent.skills.instructions import SKILL_SELECTION_INSTRUCTIONS
 
 _OPENAI_PREFIXES = {"openai", "openai-chat"}
 _ANTHROPIC_PREFIXES = {"anthropic"}
@@ -343,6 +344,8 @@ def build_agent(
     instructions: list[Any] = []
     if spec.instructions:
         instructions.append(spec.instructions)
+    if skill_capability is not None:
+        instructions.append(SKILL_SELECTION_INSTRUCTIONS)
     instructions.append(context_reference_instructions)
     return Agent(
         model,

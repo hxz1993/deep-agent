@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.13.3`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.13.4`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -42,7 +42,7 @@
 
 集成入口见[集成配置](docs/guides/integrations.md)：固定目录由后端定义，`004`新增`integration_settings`但不插入初始记录。仅保存非空配置才落库；清空删除配置记录。普通组件按集成编码读取JSON，未配置返回409；管理操作仍需企业管理员。
 
-Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格包取自 Alpha 正式导出的 V91 资产，DeepCube 保留 2026-09-14 Test 官方导出包，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。旧 Agent.ui_tool_selection 列仅为历史数据库兼容保留，运行与安装只按 capabilities 启用整包；旧 ZIP 名单忽略，新保存清空旧列，新导出不携带名单。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
+Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格包基于 Alpha 正式 V91 导出包合入已冻结的 V92 提示词与工作流 Skill 1.4.6（不会自动更新已安装 Agent），DeepCube 保留 2026-09-14 Test 官方导出包，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。旧 Agent.ui_tool_selection 列仅为历史数据库兼容保留，运行与安装只按 capabilities 启用整包；旧 ZIP 名单忽略，新保存清空旧列，新导出不携带名单。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
 
 
 企微应用与成员资料见[使用指南](docs/guides/wecom-applications.md)及[渠道接入](docs/guides/wecom-channel.md)。本次 v0.10.1 功能增量 `006` 新增企业应用配置和可重建成员缓存，保留已发布 `005`。渠道页面在标题同行切换账户与应用；应用采用左侧列表、右侧应用标题及合并企业信息的配置卡、缓存统计与按需加载的只读成员分页表。渠道 `settings.wecom.user_details_enabled` 默认为关闭，开启必须引用有效应用；查询开关独立于渠道启停，关闭时不访问资料接口。

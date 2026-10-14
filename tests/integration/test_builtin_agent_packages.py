@@ -40,7 +40,7 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(listing.status_code, 200, listing.text)
                     self.assertEqual(listing.json()['errors'], [])
                     self.assertEqual({item['code'] for item in listing.json()['items']}, {'deeptable-assistant', 'deepcube-assistant'})
-                    self.assertEqual({item['code']: item['prompt_version'] for item in listing.json()['items']}, {'deeptable-assistant': 'V91', 'deepcube-assistant': 'V34'})
+                    self.assertEqual({item['code']: item['prompt_version'] for item in listing.json()['items']}, {'deeptable-assistant': 'V92', 'deepcube-assistant': 'V34'})
                     self.assertEqual(await stores.agent.list_all(), [])
                     for code, expected_skills, tool_count in (
                         ('deeptable-assistant', {'deeptable-assistant-workflows', 'deeptable-intelligent-analysis', 'consolidation-model-analysis'}, 3),

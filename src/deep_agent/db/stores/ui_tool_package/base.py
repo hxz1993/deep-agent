@@ -73,13 +73,17 @@ class UiToolPackageStoreBase(SessionBoundMixin):
 
     async def delete(self, code: str) -> bool:
         async with self._write() as db:
-            if await lock_optional(db, UiToolPackage, UiToolPackage.code, code) is None:
+            row = await lock_optional(db, UiToolPackage, UiToolPackage.code, code)
+            if row is None:
                 return False
-            tools = (await db.execute(select(UiToolDefinition.name).where(
-                UiToolDefinition.package_code == code).order_by(UiToolDefinition.name).with_for_update())).all()
+            if row.source == "builtin":
+                raise ReferenceConflict("Builtin UI tool package cannot be deleted")
             refs = (await db.execute(select(Agent.name, Agent.capabilities).order_by(Agent.id).with_for_update())).all()
-            if tools or any(code in (caps or []) for _, caps in refs):
-                raise ReferenceConflict("UI 工具包包含工具或正在被 Agent 引用，不能删除")
+            if any(code in (caps or []) for _, caps in refs):
+                raise ReferenceConflict("UI 工具包正在被 Agent 引用，不能删除，请先解除关联")
+            # The parent lock also serializes tool creation/moves and Agent association.
+            # Remove children and parent in one transaction; rollback retains both.
+            await db.execute(delete(UiToolDefinition).where(UiToolDefinition.package_code == code))
             result = await db.execute(delete(UiToolPackage).where(UiToolPackage.code == code))
             await db.flush()
             return result.rowcount > 0

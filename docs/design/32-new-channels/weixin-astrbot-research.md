@@ -124,8 +124,8 @@ WebChat 左侧聊天列表不会自动混入微信会话。该渠道查看页展
 - [腾讯客户端协议说明](https://github.com/Tencent/openclaw-weixin/blob/main/docs/protocol_zh_CN.md)：接入时重新核验最新字段与服务端限制。
 - [社区 Python SDK](https://github.com/nightsailer/wechat-clawbot)：仅候选参考，非官方。
 - [AstrBot 固定版本微信 Adapter](https://github.com/AstrBotDevs/AstrBot/tree/95e98b8aed75d56713666eff39e31bafffd95426/astrbot/core/platform/sources/weixin_oc)
-- [AstrBot 本地学习索引](../../../../agent-labs/astrbot_代码索引.md)
-- AstrBot 本地源码根：`deepfos-AI/agent-labs/astrbot/`。重点：`astrbot/core/platform/{platform.py,register.py,manager.py,message_session.py}`、`sources/weixin_oc/{weixin_oc_client.py,weixin_oc_adapter.py,weixin_oc_event.py}`（后三者相对 platform 目录）、`astrbot/core/db/po.py`、`astrbot/dashboard/services/conversation_service.py`、`dashboard/src/views/conversation/ConversationWorkspacePage.vue`。
+- [AstrBot 本地学习索引](/Users/wuzhiruge/PycharmProjects/AI-hub/agent-labs/astrbot_代码索引.md)
+- AstrBot 本地源码根：`/Users/wuzhiruge/PycharmProjects/AI-hub/agent-labs/astrbot/`。重点：`astrbot/core/platform/{platform.py,register.py,manager.py,message_session.py}`、`sources/weixin_oc/{weixin_oc_client.py,weixin_oc_adapter.py,weixin_oc_event.py}`（后三者相对 platform 目录）、`astrbot/core/db/po.py`、`astrbot/dashboard/services/conversation_service.py`、`dashboard/src/views/conversation/ConversationWorkspacePage.vue`。
 - DeepAgent 当前依据：[渠道设计](../22-wecom-channel/wecom-channel-design.md)、[企微成员资料指南](../../guides/wecom-applications.md)；源码 `src/deep_agent/db/models.py` 的三种 Channel 模型、`schemas/channel.py`、`channels/registry.py`、`channels/gateway/deepagent_client.py`。旧设计中的发布版本和迁移号是历史信息，当前行为以源码及现行指南为准。
 
 本地研究环境：AstrBot 4.28.1 已通过 DevBox 的 AstrBot 服务启动，监听 `127.0.0.1:6185`；用于学习和用户自测，不是 DeepAgent 运行依赖。不在文档保存启动密码或微信凭据。

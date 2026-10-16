@@ -51,7 +51,7 @@ standard首次原生线程报 `recursive_mutex lock failed: Invalid argument`，
 - [MP官方榜摘录](benchmark-snapshot.json)、[Logics作者自报摘录](logics-author-snapshot.json)：与本次实测明确分开
 - [部署和许可证核验来源](deployment-notes.md)
 
-完整运行日志及ZIP保留在知识库根 `TMP_to_delete-document-parsing-eval/`，标记为可删除临时产物；本目录保存继续研究所需的小型样本和结果。测试结束已删除临时venv、模型和下载缓存，复现时需重新安装/下载。没有在交付目录保存远程签名URL、私密Key或客户文档。
+2026-10-08根目录整理：历史ZIP、执行事实及复现脚本已归档到本地私有目录 `docs/local-artifacts/文档解析早期实验/`；重复解包副本和安装／运行日志已删除。`local-runs.json` 的 `artifact` 保留当时的路径记录，现从上述归档目录的 `local/` 查找同名ZIP。本目录的小型样本和结果不变。私有归档由Git本地exclude排除，不提交供应商原始响应或敏感数据。测试结束已删除临时venv、模型和下载缓存，复现时需重新安装/下载。
 
 ## 复现
 

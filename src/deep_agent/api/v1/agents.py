@@ -151,6 +151,7 @@ async def estimate_agent_prompt(
 @router.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: str,
+    user: RequestUserDep,
     store: AgentStoreBase = Depends(get_agent_store),
 ) -> AgentResponse:
     normalized_id = _parse_agent_id(agent_id)

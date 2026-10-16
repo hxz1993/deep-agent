@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import AsyncMock
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
@@ -16,6 +17,7 @@ from deep_agent.db.models import McpServer
 from deep_agent.schemas.agent import AgentCreate
 from deep_agent.schemas.mcp import McpServerCreate, McpServerUpdate
 from deep_agent.schemas.ui_tools import UiToolPackageCreate
+from deep_agent.security import ConsoleAdminAuthorizer
 from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
@@ -33,6 +35,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 mcp_lease_manager=McpLeaseManager(),
                 db_engine=self._engine,
                 db_session_factory=session_factory,
+                console_admin_authorizer=ConsoleAdminAuthorizer(AsyncMock(return_value=True)),
             )
         )
         self._transport = ASGITransport(app=self._app, raise_app_exceptions=False)
@@ -67,7 +70,8 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
             )
             responses = [
                 await client.get("/api/v1/agents"),
-                await client.get("/api/v1/llm-models"),
+                await client.get("/api/v1/llm-models", params={"selectable_only": False},
+                                 headers={"user": "fixture-admin"}),
                 await client.get("/api/v1/llm-providers"),
                 await client.get("/api/v1/ui-tools"),
                 await client.get("/api/v1/mcp"),

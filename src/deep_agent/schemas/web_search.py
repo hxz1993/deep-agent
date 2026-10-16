@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from deep_agent.web.settings import WebSearchCredentialSource, WebSearchProvider
+from deep_agent.web.settings import WebFetchMode, WebSearchCredentialSource, WebSearchProvider
 from deep_agent.time import UtcDatetime
 
 
@@ -15,6 +15,7 @@ class WebSearchValueInput(BaseModel):
     provider: WebSearchProvider | None = None
     api_key: str | None = Field(default=None, max_length=8192)
     model: str | None = Field(default=None, max_length=191)
+    fetch_mode: WebFetchMode = "system"
     credential_source: WebSearchCredentialSource | None = None
     llm_provider_id: str | None = Field(default=None, max_length=64)
 
@@ -47,6 +48,7 @@ class WebSearchValueResponse(BaseModel):
     mode: Literal["unconfigured", "provider"]
     provider: WebSearchProvider | None = None
     model: str | None = None
+    fetch_mode: WebFetchMode = "system"
     api_key_set: bool = False
     api_key_masked: str | None = None
     credential_source: WebSearchCredentialSource | None = None

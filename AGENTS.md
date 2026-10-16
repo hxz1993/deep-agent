@@ -23,7 +23,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.13.5`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.13.6`，数据库Head为`011`（企微应用 Webhook 凭据；010 已发布且保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -115,6 +115,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 - 这套主数据库以共享 Test 的**配置数据**为基础，保留 Provider、Model、Agent、MCP 和 Skill 等真实
   配置；不复制 Test 会话历史。日常开发应继续沿用其中的本地会话、附件和验收数据，不得因为开始新
   任务就删除、覆盖、重新初始化或换成另一个数据库文件。
+- DevBox的“备份 DeepAgent Test 配置”任务使用 `env PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m maintenance.config_backup`，与项目服务共用虚拟环境；不得使用系统Python或解析虚拟环境解释器软链后执行。任务需自然退出为0，并核验备份SQLite完整性、源Revision及运行事实表为空。
 - Test 配置发生变化时，使用正式配置备份/恢复工具做受控刷新，并保留本地会话和本地文件；不要直接
   用新空库替换稳定库，也不要把 Test 的聊天历史混入本地库。
 - 启动 SQLite 服务前确认 Profile、`DEEP_AGENT_SQLITE_PATH`、本地文件根目录和 Alembic Revision
@@ -272,6 +273,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - v0.3.19 起 URL MCP 只在显式检测时执行 initialize/tools-list 并保存无敏感信息的工具快照；聊天 Run 用快照完成工具披露，真实调用时才按当前请求 Header 建连。同一 Run 复用连接，缺少或配置失效的快照不进入模型工具列表，必须重新“检测并更新”。Builtin MCP 和 Resource 代理保持原链路。
 - v0.4.11补齐URL MCP实际工具调用超时的错误分类：Pydantic AI将协议超时包装为`ModelRetry`时，DeepAgent识别其MCP超时、连接中断或5xx原因并转成脱敏`ToolFailed`，让模型改用其他工具或解释失败；参数、对象选择等可纠正错误仍保持`ModelRetry`，正式取消不受影响。
 - v0.4.12增加Console企业管理员兜底鉴权：`systemAdmin=true`按平台综合权限语义映射为内部`enterprise_admin`；固定`admin`账号不特殊放行。管理Router统一依赖同一授权器，聊天、会话、附件和固定Agent读取等运行接口不受影响。
+- 2026-10-17业务选模权限拆分：默认`GET /llm-models`和单模型详情只要求可信登录身份，返回业务投影；`selectable_only=false`完整列表及模型维护、目录、Provider仍校验管理员。固定Agent读取也显式要求用户身份。不能用本地管理员绕过验收普通权限；回归入口`tests/integration/test_model_read_access.py`，边界见`docs/guides/console-admin-access.md`。
 - v0.4.13兼容Canvas MCP通过`CallToolResult.isError`返回的Go `context deadline exceeded`及稳定`CANVAS_ERROR`文本契约；不可纠正的超时形成失败Tool Result并允许Run继续回答，结果未知的修改操作提示先读取Canvas快照。可纠正错误和正式取消保持原语义。
 - v0.4.15在URL MCP工具最后一次可纠正重试仍失败时，将最后一条模型可见的业务校验原因收口为失败Tool Result并要求模型结束当前Run；失败调用、Result和最终解释正常进入History。该链路只依赖Pydantic AI原生`ModelRetry → ToolFailed`语义，不额外维护同一Run的工具封锁状态。
 - v0.4.18增加系统工具`export_file_to_download_center`：新UTF-8文本先上传平台DL文件再登记下载中心；当前会话附件或大工具Artifact复用原File ID，只登记不重传。合法已有文件必须从当前Session原始History恢复授权，工具只在可信user/App/Space上下文中直接披露，不进入Agent能力配置。
@@ -311,6 +313,8 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
   用户要求减少普通全文重复续读，不以逐个微调数字代替完整性和调用次数验收。
 
 ### 框架能力说明方式
+
+2026-10-16增量研究入口：`docs/design/38-pydantic-ai-harness-upgrade/upstream-review-20261016.md`。Harness独立仓库已归档，新源码随Core主仓库维护；研究快照2.57/0.57不等于产品已升级（实装仍2.46/0.32/Monty0.0.23）。升级先核验Skills Workspace/异步校验、PTC自定义包装与Hook生命周期，不将`repl_store`或`Conversation`误称为自动获得会话级业务草稿。
 
 向产品或客户端解释 Pydantic AI、Harness、Provider 能力时，不能只给类名和抽象结论。至少按以下顺序说明：
 

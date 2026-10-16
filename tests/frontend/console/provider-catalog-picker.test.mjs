@@ -44,18 +44,26 @@ function harness({ request = async () => directory, existing = [], providerTypes
   return { admin, picker, context, node, calls, listeners, submit };
 }
 
-test("供应商类型按协议分组，并保持订阅入口独立", () => {
+test("供应商类型按协议分组，通用供应商排在各组末尾，订阅入口独立", () => {
   const h = harness({ providerTypes: [
+    { code: "openai_compatible", label: "OpenAI Compatible", model_protocol: "openai_chat" },
+    { code: "anthropic_compatible", label: "Anthropic Compatible", model_protocol: "anthropic" },
     { code: "google", label: "Google", model_protocol: "google" },
     { code: "stepfun", label: "阶跃", model_protocol: "openai_chat" },
     { code: "minimax", label: "MiniMax", model_protocol: "anthropic" },
-    { code: "anthropic_compatible", label: "Anthropic Compatible", model_protocol: "anthropic" },
-    { code: "openai_compatible", label: "OpenAI Compatible", model_protocol: "openai_chat" },
     { code: "openai_codex", label: "ChatGPT", model_protocol: "openai_codex" },
   ] });
   h.context.renderProviderTypeOptions("minimax");
   const html = h.node("llmProviderType").innerHTML;
-  assert.match(html, /OpenAI 兼容协议.*stepfun.*Anthropic 兼容协议.*minimax.*其他协议.*google.*自定义接入.*openai_compatible.*anthropic_compatible/);
+  const groups = [...html.matchAll(/<optgroup label="([^"]+)">(.*?)<\/optgroup>/g)].map(([, label, options]) => ({
+    label,
+    codes: [...options.matchAll(/<option value="([^"]+)"/g)].map(([, code]) => code),
+  }));
+  assert.deepEqual(groups, [
+    { label: "OpenAI 兼容协议", codes: ["stepfun", "openai_compatible"] },
+    { label: "Anthropic 兼容协议", codes: ["minimax", "anthropic_compatible"] },
+    { label: "其他协议", codes: ["google"] },
+  ]);
   assert.match(html, /value="minimax" selected/);
   assert.doesNotMatch(html, /openai_codex/);
   assert.equal(catalog.catalogProviderIdForType("minimax"), "minimax-cn");

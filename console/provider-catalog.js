@@ -21,17 +21,14 @@ export function groupProviderTypes(types) {
     { label: "Anthropic 兼容协议", protocol: "anthropic", items: [] },
     { label: "其他协议", protocol: null, items: [] },
   ];
-  const custom = { label: "自定义接入", items: [] };
   for (const type of types || []) {
-    if (isGenericCatalogProvider(type.code)) {
-      custom.items.push(type);
-      continue;
-    }
     const group = groups.find((item) => item.protocol === type.model_protocol) || groups[2];
     group.items.push(type);
   }
-  custom.items.sort((a, b) => Number(a.code === "anthropic_compatible") - Number(b.code === "anthropic_compatible"));
-  return [...groups, custom].filter((group) => group.items.length);
+  for (const group of groups) {
+    group.items.sort((a, b) => Number(isGenericCatalogProvider(a.code)) - Number(isGenericCatalogProvider(b.code)));
+  }
+  return groups.filter((group) => group.items.length);
 }
 
 export function catalogProviderIdForType(providerType) {

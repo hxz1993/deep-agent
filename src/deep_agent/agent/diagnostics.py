@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Any
 
-from pydantic_ai import RunContext, ToolReturn
+from pydantic_ai import RunContext, ToolReturn, ToolDenied
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, ToolRetryError
 
@@ -18,7 +19,7 @@ from deep_agent.agent.tool_errors import native_error_facts
 
 
 class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
-    """No new schemas, messages, events, retries, network calls or run state."""
+    """Observe execution; retain safe timing metadata on existing messages."""
 
     def __init__(self, *, wait_after: float = 30, wait_interval: float = 60) -> None:
         self.wait_after = wait_after
@@ -107,6 +108,7 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             fields["model_name"] = ctx.model.model_name
         except Exception:
             pass
+        started_at = datetime.now(timezone.utc).isoformat()
         async with self._observe("model_request", fields, request_headers=getattr(ctx.deps, "request_headers", None)) as started:
             try:
                 request_context.model = observed_model(
@@ -116,6 +118,17 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             except Exception:
                 pass
             response = await handler(request_context)
+            duration_ms = self._duration(started)
+            # SDK/provider timestamps and database write timestamps have other
+            # meanings. Keep the actual request interval through stream EOF.
+            try:
+                if response.metadata is None or isinstance(response.metadata, dict):
+                    response.metadata = {**(response.metadata or {}), "deepagent_timing": {
+                        "version": 1, "kind": "model_request", "started_at": started_at,
+                        "completed_at": datetime.now(timezone.utc).isoformat(), "duration_ms": duration_ms,
+                    }}
+            except Exception:
+                pass
             extra = {}
             try:
                 stamp_cache_usage(response)
@@ -128,7 +141,7 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             except Exception:
                 pass
             self._emit("model_request_completed", **fields, **extra,
-                       duration_ms=self._duration(started))
+                       duration_ms=duration_ms)
             return response
 
     async def wrap_tool_execute(self, ctx, *, call, tool_def, args, handler):
@@ -137,8 +150,10 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             fields.update(tool=call.tool_name, tool_call_id=call.tool_call_id, attempt=ctx.retry + 1)
         except Exception:
             pass
+        started_at = datetime.now(timezone.utc).isoformat()
         async with self._observe("agent_tool", fields, request_headers=getattr(ctx.deps, "request_headers", None)) as started:
             result = await handler(args)
+            duration_ms = self._duration(started)
             outcome = {}
             # Sandbox failures are successful tool returns with a typed envelope.
             # Read only its status/code, never arbitrary result text or metadata.
@@ -150,7 +165,15 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
                     if type(error) is dict and type(error.get("code")) is str:
                         outcome["error_code"] = error["code"]
             self._emit("agent_tool_completed", **fields, **outcome, status="completed",
-                       duration_ms=self._duration(started))
+                       duration_ms=duration_ms)
+            if not isinstance(result, ToolDenied):
+                wrapped = result if isinstance(result, ToolReturn) else ToolReturn(result)
+                if wrapped.metadata is None or isinstance(wrapped.metadata, dict):
+                    wrapped.metadata = {**(wrapped.metadata or {}), "deepagent_timing": {
+                        "version": 1, "kind": "tool_execution", "started_at": started_at,
+                        "completed_at": datetime.now(timezone.utc).isoformat(), "duration_ms": duration_ms,
+                    }}
+                    return wrapped
             return result
 
     async def on_tool_validate_error(self, ctx, *, call, tool_def, args, error):

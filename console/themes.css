@@ -35,6 +35,10 @@
   --scrollbar-thumb-hover: #3d444d;
   --brand-accent-2: #a855f7;
   --conn-ok: #2ea043;
+  --duration-fast: #75c995;
+  --duration-steady: #79cdd1;
+  --duration-elevated: #e3bd68;
+  --duration-slow: #f0a263;
   --send-fg: #fff;
   --hljs-theme: dark;
 }
@@ -73,6 +77,10 @@
   --scrollbar-thumb-hover: #afb8c1;
   --brand-accent-2: #7c3aed;
   --conn-ok: #1a7f37;
+  --duration-fast: #1b774d;
+  --duration-steady: #137c83;
+  --duration-elevated: #956817;
+  --duration-slow: #b25c19;
   --send-fg: #fff;
   --hljs-theme: light;
 }
@@ -111,6 +119,10 @@
   --scrollbar-thumb-hover: #cdb7a7;
   --brand-accent-2: #f09a58;
   --conn-ok: #2b865c;
+  --duration-fast: #1b774d;
+  --duration-steady: #137c83;
+  --duration-elevated: #956817;
+  --duration-slow: #b25c19;
   --send-fg: #fff;
   --hljs-theme: light;
 }
@@ -149,6 +161,10 @@
   --scrollbar-thumb-hover: #666666;
   --brand-accent-2: #6600cc;
   --conn-ok: #006400;
+  --duration-fast: #006400;
+  --duration-steady: #005b66;
+  --duration-elevated: #725000;
+  --duration-slow: #8a4300;
   --send-fg: #ffffff;
   --hljs-theme: light;
 }

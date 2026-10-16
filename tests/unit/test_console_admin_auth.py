@@ -16,6 +16,7 @@ from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 from deep_agent.api.v1 import api_router
 from deep_agent.api.v1.admin import require_console_admin
+from deep_agent.api.v1.request_identity import require_request_user
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.security import (
     ConsoleAdminAuthenticationError,
@@ -536,6 +537,13 @@ class ConsoleAdminRouteAuditTests(unittest.TestCase):
             should_be_protected = route.path in protected_exact or route.path.startswith(
                 protected_prefixes
             )
+            # Business reads require identity; full inventory is gated by the
+            # selectable_only=false branch, verified by API permission tests.
+            if route.path in {"/api/v1/llm-models", "/api/v1/llm-models/{model_id}"} and route.methods == {"GET"}:
+                dependencies = {dependency.call for dependency in route.dependant.dependencies}
+                self.assertIn(require_request_user, dependencies)
+                self.assertNotIn(require_console_admin, dependencies)
+                continue
             if route.path.startswith("/api/v1/agents/") and route.path != "/api/v1/agents/prompt-estimate":
                 should_be_protected = route.methods != {"GET"}
             if route.path.startswith("/api/v1/integrations/") and route.methods & {"PUT", "DELETE"}:

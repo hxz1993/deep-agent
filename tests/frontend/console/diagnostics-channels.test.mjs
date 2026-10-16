@@ -7,6 +7,12 @@ import { channelEntryFilters, diagnosticHash, parseDiagnosticRoute, sessionRange
 import { createSessionReader, sessionQueryError } from "../../../console/diagnostics-session-query.js";
 import { escapeHtml as e, icon, selectHtml } from "../../../console/diagnostics-ui.js";
 const source = await readFile(new URL("../../../console/diagnostics-channels.js", import.meta.url), "utf8");
+test("channel and session tabs share one cached session module instance", async () => {
+ const center = await readFile(new URL("../../../console/diagnostics-center.js", import.meta.url), "utf8");
+ const specifier = text => text.match(/from "(\.\/diagnostics-sessions\.js\?v=[^"]+)"/)?.[1];
+ assert.ok(specifier(center));
+ assert.equal(specifier(source), specifier(center));
+});
 const settle = async () => { for(let i=0;i<4;i++) await new Promise(setImmediate); };
 const later = () => { let resolve; const promise=new Promise(r=>resolve=r); return {promise,resolve}; };
 const peer = (id="member",kind="user") => ({peer_id:id,kind,name:null,session_count:2,question_count:3,latest_session:{session_id:`${id}-session`,question_count:2,latest_question:"最新问题"}});

@@ -1,5 +1,9 @@
 # Provider 与模型配置分层
 
+## 专项研究
+
+- [决策 API 与轻量路由研究](decision-api-research.md)：2026-10-14 核验快照，包含 OpenAI Decisions、Jev、Strom 的格式、上下文、价格、评价与本地连通性；尚未接入产品，后续采用前须重新核验。
+
 ## 结论
 
 DeepAgent 自 v0.5.6 起完成模型接入信息与模型事实的归一化分层，统一采用以下层级：
@@ -99,11 +103,16 @@ DELETE /api/v1/llm-providers/{provider_id}
 `provider_unconfigured`不可用状态，补回密钥后自动恢复。
 
 模型创建和更新接收 `provider_id`，管理接口不再通过模型修改地址或密钥。模型响应增加Provider摘要，
-并保留从Provider派生的 `base_url`和 `api_key_set`兼容字段；`selectable`表示当前有效可用性，
+管理响应保留从Provider派生的 `base_url`和 `api_key_set`兼容字段；`selectable`表示当前有效可用性，
 `unavailable_reason`只返回模型停用、Provider未配置或配置无效等脱敏原因。
 `GET /llm-models`支持可选 `provider_id`过滤，默认只读取可选模型；管理界面显式传
 `selectable_only=false`读取包括停用模型在内的完整目录。
 原有核心字段与 `model_id`语义不变。
+
+2026-10-17业务权限拆分：默认模型列表和单模型详情允许可信登录用户读取，不要求管理员；
+业务投影不返回`base_url`、Agent引用数及创建更新时间。`selectable_only=false`完整管理列表，
+模型增删改、连接测试、目录和Provider管理继续校验管理员。指定Agent读取同样显式要求可信身份。
+详见[权限指南](../../guides/console-admin-access.md)。
 
 ## 运行时
 

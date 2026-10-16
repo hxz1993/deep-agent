@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from pydantic import ValidationError
 from pydantic_ai import Agent, DeferredToolRequests, ModelRetry
@@ -13,6 +13,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import event
 
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
@@ -212,21 +213,74 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
                 agent_store=self.stores.agent,
             )
 
-    async def test_ui_tool_package_with_tools_cannot_be_deleted(self) -> None:
-        await self.store.create_manual(
-            UiToolCreate(
-                name="demo__protected",
-                package_code="ui:demo",
-                description="Protected",
+    async def _seed_package_tools(self) -> None:
+        for name in ("demo__first", "demo__second"):
+            await self.store.create_manual(UiToolCreate(
+                name=name, package_code="ui:demo", description="test",
                 parameters_json_schema={"type": "object"},
-            )
-        )
-        with self.assertRaisesRegex(Exception, "contains tools|包含工具"):
+            ))
+
+    async def test_unreferenced_package_deletes_its_tools_only(self) -> None:
+        await self._seed_package_tools()
+        await self.stores.ui_tool_package.create_manual(UiToolPackageCreate(code="ui:other", label="Other"))
+        await self.store.create_manual(UiToolCreate(
+            name="other__retained", package_code="ui:other", description="retain",
+            parameters_json_schema={"type": "object"},
+        ))
+        await delete_ui_tool_package("ui:demo", store=self.stores.ui_tool_package, agent_store=self.stores.agent)
+        self.assertIsNone(await self.stores.ui_tool_package.get_by_code("ui:demo"))
+        self.assertIsNone(await self.store.get_by_name("demo__first"))
+        self.assertIsNone(await self.store.get_by_name("demo__second"))
+        self.assertIsNotNone(await self.store.get_by_name("other__retained"))
+        self.assertIsNotNone(await self.stores.ui_tool_package.get_by_code("ui:other"))
+
+    async def test_referenced_package_retains_all_tools_and_reports_agents(self) -> None:
+        await self._seed_package_tools()
+        agent = await self.stores.agent.create_unique(AgentCreate(name="Using UI", prompt="test", capabilities=["ui:demo"]))
+        with self.assertRaises(HTTPException) as caught:
             await delete_ui_tool_package(
                 "ui:demo",
                 store=self.stores.ui_tool_package,
                 agent_store=self.stores.agent,
             )
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(caught.exception.detail["referenced_by"], [agent.name])
+        self.assertEqual(caught.exception.detail["tools"], ["demo__first", "demo__second"])
+        self.assertIsNotNone(await self.stores.ui_tool_package.get_by_code("ui:demo"))
+        self.assertEqual(await self.stores.ui_tool_package.list_tool_names("ui:demo"), ["demo__first", "demo__second"])
+        await self.stores.agent.delete(agent.id)
+        await delete_ui_tool_package("ui:demo", store=self.stores.ui_tool_package, agent_store=self.stores.agent)
+        self.assertEqual(await self.stores.ui_tool_package.list_tool_names("ui:demo"), [])
+
+    async def test_transaction_rechecks_agent_references_after_api_precheck(self) -> None:
+        await self._seed_package_tools()
+        await self.stores.agent.create_unique(AgentCreate(name="Late UI reference", prompt="test", capabilities=["ui:demo"]))
+        # Simulate a stale API precheck; the real database guard must still reject.
+        with patch.object(self.stores.agent, "list_referencing_capability", new=AsyncMock(return_value=[])):
+            with self.assertRaises(HTTPException) as caught:
+                await delete_ui_tool_package("ui:demo", store=self.stores.ui_tool_package, agent_store=self.stores.agent)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(await self.stores.ui_tool_package.list_tool_names("ui:demo"), ["demo__first", "demo__second"])
+        self.assertIsNotNone(await self.stores.ui_tool_package.get_by_code("ui:demo"))
+
+    async def test_package_delete_failure_rolls_back_child_deletion(self) -> None:
+        await self._seed_package_tools()
+        def fail_parent_delete(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("DELETE FROM UI_TOOL_PACKAGES"):
+                raise RuntimeError("injected parent delete failure")
+        event.listen(self.engine.sync_engine, "before_cursor_execute", fail_parent_delete)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "parent delete failure"):
+                await self.stores.ui_tool_package.delete("ui:demo")
+        finally:
+            event.remove(self.engine.sync_engine, "before_cursor_execute", fail_parent_delete)
+        self.assertIsNotNone(await self.stores.ui_tool_package.get_by_code("ui:demo"))
+        self.assertEqual(await self.stores.ui_tool_package.list_tool_names("ui:demo"), ["demo__first", "demo__second"])
+
+    async def test_missing_package_returns_404(self) -> None:
+        with self.assertRaises(HTTPException) as caught:
+            await delete_ui_tool_package("ui:missing", store=self.stores.ui_tool_package, agent_store=self.stores.agent)
+        self.assertEqual(caught.exception.status_code, 404)
 
     async def test_management_list_includes_read_only_builtin_tools(self) -> None:
         response = await list_ui_tools(

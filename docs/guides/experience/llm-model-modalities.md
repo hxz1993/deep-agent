@@ -20,7 +20,7 @@ llm_models
 ### 供应商与通用接入
 
 品牌供应商按实际调用协议分组：OpenAI 兼容协议、Anthropic 兼容协议、其他协议；
-两个通用类型集中在列表底部的“自定义接入”，依次为 OpenAI Compatible、Anthropic Compatible。
+OpenAI Compatible、Anthropic Compatible 分别放在各自协议组的末尾，不另设“自定义接入”分组。
 MiniMax 使用 Anthropic Messages API，默认地址为 `https://api.minimax.cn/anthropic`；
 StepFun（阶跃星辰）使用 OpenAI Chat Completions API，默认地址为 `https://api.stepfun.com/v1`。
 两者允许自定义地址。Pydantic AI 保持 2.46.0，协议收发复用其现有实现。

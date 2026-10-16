@@ -289,3 +289,18 @@ class LlmModelSummary(BaseModel):
             tags=row.tags or [],
             enabled=row.enabled,
         )
+
+
+class LlmModelClientResponse(LlmModelSummary):
+    """Model selection facts without provider endpoints or management metadata."""
+
+    description: str | None = None
+    provider_id: str
+    provider: LlmProviderSummary
+    api_key_set: bool
+    selectable: bool
+    unavailable_reason: str | None = None
+
+    @classmethod
+    def from_response(cls, response: LlmModelResponse) -> LlmModelClientResponse:
+        return cls.model_validate(response.model_dump())

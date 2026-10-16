@@ -12,6 +12,8 @@ from deep_agent.api.v1 import api_router
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.db.models import ChatSession, ChatSessionEvent, ChannelMessageRun, ChannelSessionBinding
 from deep_agent.schemas.channel import ChannelAccountCreate
+from deep_agent.schemas.agent import AgentUpdate
+from deep_agent.schemas.ui_tools import UiToolCreate, UiToolPackageCreate
 from deep_agent.services.resource_deletion import delete_resource, DeleteConfirmation
 from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
@@ -44,6 +46,27 @@ class ResourceDeletionTests(unittest.IsolatedAsyncioTestCase):
     async def count(self, model):
         async with self.factory() as db:
             return await db.scalar(select(func.count()).select_from(model))
+
+    async def test_ui_package_delete_cascades_only_after_agent_reference_is_removed(self):
+        code = "ui:delete_fixture"
+        await self.stores.ui_tool_package.create_manual(UiToolPackageCreate(code=code, label="Delete fixture"))
+        for name in ("delete_fixture_first", "delete_fixture_second"):
+            await self.stores.ui_tool.create_manual(UiToolCreate(name=name, package_code=code,
+                description="fixture", parameters_json_schema={"type": "object"}))
+        await self.stores.agent.update_unique(self.agent_id, AgentUpdate(capabilities=[code]))
+        path = f"/api/v1/ui-tool-packages/{code}"
+        blocked = await self.client.delete(path)
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertTrue(blocked.json()["detail"]["referenced_by"])
+        self.assertEqual(len(await self.stores.ui_tool_package.list_tool_names(code)), 2)
+        await self.stores.agent.update_unique(self.agent_id, AgentUpdate(capabilities=[]))
+        deleted = await self.client.delete(path)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertIsNone(await self.stores.ui_tool_package.get_by_code(code))
+        self.assertEqual(await self.stores.ui_tool_package.list_tool_names(code), [])
+        self.assertEqual((await self.client.get("/api/v1/ui-tools/delete_fixture_first")).status_code, 404)
+        self.assertEqual((await self.client.delete(path)).status_code, 404)
+        self.assertEqual((await self.client.delete("/api/v1/ui-tool-packages/ui:builtin")).status_code, 403)
 
     async def test_agent_requires_exact_owner_bound_confirmation_and_cascades_events(self):
         await self.seed_sessions()

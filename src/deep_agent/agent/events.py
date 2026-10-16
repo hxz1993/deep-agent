@@ -41,7 +41,11 @@ def tool_call(tool: str, args: Any, tool_call_id: str | None = None) -> dict[str
         payload["source"] = "planning"
     elif tool == "web_search":
         payload.update(source="web", execution="provider")
-    elif tool in {"web_fetch", "web_image_view"}:
+    elif tool == "web_fetch":
+        # A call alone does not identify the configured backend. The real
+        # execution mode is carried by the completed tool's audit metadata.
+        payload["source"] = "web"
+    elif tool == "web_image_view":
         payload.update(source="web", execution="local")
     return payload
 
@@ -65,7 +69,9 @@ def tool_result(
         payload["source"] = "planning"
     elif tool == "web_search":
         payload.update(source="web", execution="provider")
-    elif tool in {"web_fetch", "web_image_view"}:
+    elif tool == "web_fetch":
+        payload["source"] = "web"
+    elif tool == "web_image_view":
         payload.update(source="web", execution="local")
     return payload
 
@@ -190,6 +196,12 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
     )
     if part.outcome != "success":
         payload["outcome"] = part.outcome
+    if isinstance(part.metadata, dict):
+        timing = part.metadata.get("deepagent_timing")
+        if isinstance(timing, dict):
+            payload["timing"] = {key: timing[key] for key in (
+                "version", "kind", "started_at", "completed_at", "duration_ms",
+            ) if key in timing}
     if part.tool_name == "run_code" and isinstance(part.metadata, dict):
         # CodeMode owns redaction and aggregate bounds; never copy arbitrary
         # tool metadata (which may contain internal credentials) onto SSE.
@@ -201,6 +213,8 @@ def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
         audit = part.metadata.get(part.tool_name)
         if isinstance(audit, dict):
             payload["web"] = _to_jsonable(audit)
+            if part.tool_name == "web_fetch" and audit.get("mode") in {"local", "provider"}:
+                payload["execution"] = audit["mode"]
         sources = part.metadata.get("sources")
         if isinstance(sources, list):
             payload["sources"] = _to_jsonable(sources)

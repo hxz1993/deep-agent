@@ -693,6 +693,8 @@ DEEP_AGENT_LOCAL_TOKEN_COOKIE=<可选，仅在目标环境要求 Cookie 时填�
 
 管理Router统一使用`CONSOLE_ADMIN_DEPENDENCIES`，不要在业务函数里复制账号或角色判断。新增管理接口
 必须加入路由审计测试；Chat、Session、History、附件和固定Agent读取等运行接口不能误加管理员门禁。
+默认`GET /llm-models`及单模型详情同属可信登录用户的业务读取，返回精简投影；
+`selectable_only=false`完整模型列表才走统一管理员判定。固定Agent读取显式要求`RequestUserDep`。
 完整边界见[`../../docs/guides/console-admin-access.md`](../../docs/guides/console-admin-access.md)。
 
 ### Agent（`DEEP_AGENT_` 前缀）
@@ -740,7 +742,8 @@ alembic upgrade head
 | GET | `/health`, `/info`, `/docs` | 否 |
 | GET | `/api/v1/admin/access` | 否；当前平台身份，企业管理员返回`allowed=true` |
 | POST | `/api/v1/chat`, `/api/v1/chat/stream` | 否（持久化需 DB） |
-| GET | `/api/v1/agents/{agent_id}` | 是；业务助手公开读取固定Agent |
+| GET | `/api/v1/agents/{agent_id}` | 是；可信登录用户读取固定Agent，无需管理员 |
+| GET | `/api/v1/llm-models`、`/api/v1/llm-models/{model_id}` | 是；可信登录用户；默认只列可选模型。`selectable_only=false`全量列表仍要求管理员 |
 | CRUD | `/api/v1/agents` | 是；企业管理员，单个GET除外 |
 | CRUD | `/api/v1/mcp` | 是；企业管理员 |
 | CRUD | `/api/v1/ui-tools` | 是；企业管理员 |

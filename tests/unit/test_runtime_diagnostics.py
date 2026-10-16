@@ -333,6 +333,48 @@ class RuntimeDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("model_request_completed", rows)
         self.assertFalse([task for task in asyncio.all_tasks() if task.get_name() == "agent-diagnostic-wait"])
 
+    async def test_stream_timing_includes_wait_after_first_chunk_until_eof(self):
+        # The provider timestamp/first output is not the end of a request. A
+        # deterministic monotonic clock makes this independent of test speed.
+        clock = [10.0]
+        first_chunk, release = asyncio.Event(), asyncio.Event()
+        records, completed = [], []
+
+        async def stream(messages, info):
+            yield "first "
+            first_chunk.set()
+            await release.wait()
+            yield "last"
+
+        async def consume():
+            agent = Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps,
+                          capabilities=[RuntimeDiagnostics()])
+            async with agent.run_stream_events("x", deps=self.deps()) as events:
+                async for event in events:
+                    response = getattr(getattr(event, "result", None), "all_messages", None)
+                    if callable(response):
+                        completed.extend(response())
+
+        with patch.object(RuntimeDiagnostics, "_clock", side_effect=lambda: clock[0]), patch(
+            "deep_agent.agent.diagnostics.log_event",
+            side_effect=lambda name, **fields: records.append((name, fields)),
+        ):
+            task = asyncio.create_task(consume())
+            try:
+                await asyncio.wait_for(first_chunk.wait(), 2)
+                self.assertFalse(any(name == "model_request_completed" for name, _ in records))
+                clock[0] = 42.0
+                release.set()
+                await asyncio.wait_for(task, 2)
+            finally:
+                release.set()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        response = next(message for message in completed if isinstance(message, ModelResponse))
+        self.assertEqual(response.metadata["deepagent_timing"]["duration_ms"], 32000)
+        logged = next(fields for name, fields in records if name == "model_request_completed")
+        self.assertEqual(logged["duration_ms"], 32000)
+
     async def test_real_runner_records_model_completion_before_next_tool_finishes(self):
         stores, engine, _ = await make_sqlite_stores()
         agent_id = await seed_default_agent(stores)
@@ -373,6 +415,19 @@ class RuntimeDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                 events = await asyncio.wait_for(task, 3)
                 self.assertEqual(events[-1]["type"], "final")
                 self.assertEqual(rows.count("model_request_completed"), 2)
+                history = await stores.coordinator.get_history("diag-live", agent_id=agent_id)
+                responses = [m for m in history if isinstance(m, ModelResponse)]
+                self.assertEqual(len(responses), 2)
+                for response in responses:
+                    timing = response.metadata["deepagent_timing"]
+                    self.assertEqual(timing["kind"], "model_request")
+                    self.assertGreaterEqual(timing["duration_ms"], 0)
+                    self.assertLessEqual(timing["started_at"], timing["completed_at"])
+                returns = [p for m in history for p in m.parts if isinstance(p, ToolReturnPart)]
+                self.assertEqual(returns[0].content, "safe fixture")
+                timing = returns[0].metadata["deepagent_timing"]
+                self.assertEqual(timing["kind"], "tool_execution")
+                self.assertEqual(next(e for e in events if e["type"] == "tool_result")["timing"], timing)
             finally:
                 release.set()
                 task.cancel()

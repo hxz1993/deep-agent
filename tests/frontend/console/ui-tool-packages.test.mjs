@@ -164,6 +164,48 @@ function controllerWith(elements) {
   return sandbox.window.uiToolsAdmin;
 }
 
+function deletionController({ confirm = true, error = null } = {}) {
+  const calls = { requests: [], prompts: [], toasts: [], refreshes: 0, capabilities: 0 };
+  const sandbox = {
+    window: {}, document: { addEventListener() {} },
+    confirmAction: async (options) => { calls.prompts.push(options); return confirm; },
+    apiFetch: async (url, options) => { calls.requests.push({ url, options }); if (error) throw error; },
+    showToast: (...args) => calls.toasts.push(args),
+    refreshAfterSuccessfulMutation: async (_label, refresh) => refresh(),
+    loadCapabilities: async () => { calls.capabilities++; },
+  };
+  vm.runInNewContext(source, sandbox);
+  const admin = sandbox.window.uiToolsAdmin;
+  admin.selectedPackageCode = "ui:demo";
+  admin.refresh = async () => { calls.refreshes++; };
+  return { admin, calls };
+}
+
+test("删除工具包先确认全部工具，成功后更新目录和能力列表", async () => {
+  const { admin, calls } = deletionController();
+  await admin.removePackage("ui:demo");
+  assert.match(calls.prompts[0].message, /包内全部 UI 工具/);
+  assert.equal(calls.prompts[0].confirmLabel, "删除工具包及工具");
+  assert.equal(calls.requests[0].url, "/api/v1/ui-tool-packages/ui%3Ademo");
+  assert.equal(calls.requests[0].options.method, "DELETE");
+  assert.equal(admin.selectedPackageCode, null);
+  assert.equal(calls.refreshes, 1);
+  assert.equal(calls.capabilities, 1);
+  assert.match(calls.toasts[0][0], /包内工具已删除/);
+});
+
+test("取消整包删除不发请求，引用冲突不移除目录或显示成功", async () => {
+  const cancelled = deletionController({ confirm: false });
+  await cancelled.admin.removePackage("ui:demo");
+  assert.equal(cancelled.calls.requests.length, 0);
+  assert.equal(cancelled.admin.selectedPackageCode, "ui:demo");
+  const blocked = deletionController({ error: new Error("正在被 Agent 引用：租赁助手") });
+  await blocked.admin.removePackage("ui:demo");
+  assert.equal(blocked.admin.selectedPackageCode, "ui:demo");
+  assert.equal(blocked.calls.refreshes, 0);
+  assert.deepEqual(blocked.calls.toasts, [["正在被 Agent 引用：租赁助手", true]]);
+});
+
 test("Widget 保留未知标识和 custom 原值，清空才返回 null", () => {
   const input = { value: "" };
   const admin = controllerWith({ uiToolWidget: input });

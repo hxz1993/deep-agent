@@ -72,11 +72,26 @@ class WebSearchSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("api_key", config.to_stored_value())
         self.assertEqual(value["model"], "kimi-k3")
 
-    def test_deepseek_default_and_explicit_models(self):
+    def test_deepseek_legacy_models_ignored_and_removed_on_save(self):
         value = {"mode": "provider", "provider": "deepseek", "api_key": "key"}
-        self.assertEqual(resolve_web_search_config(value).model, "deepseek-flash")
+        self.assertIsNone(resolve_web_search_config(value).model)
         value["model"] = "custom-future-model"
-        self.assertEqual(resolve_web_search_config(value).model, "custom-future-model")
+        config = resolve_web_search_config(value)
+        self.assertIsNone(config.model)
+        self.assertNotIn("model", config.to_stored_value())
+        self.assertEqual(value["model"], "custom-future-model")
+
+    def test_fetch_defaults_preservation_and_unsupported_supplier(self):
+        value = {"mode": "provider", "provider": "deepseek", "api_key": "key"}
+        self.assertEqual(resolve_web_search_config(value).fetch_mode, "system")
+        config = resolve_web_search_config({**value, "fetch_mode": "follow_search"})
+        self.assertEqual(config.fetch_mode, "follow_search")
+        self.assertEqual(config.to_stored_value()["fetch_mode"], "follow_search")
+        self.assertEqual(resolve_web_search_config(value, existing=config).fetch_mode, "follow_search")
+        for provider in ("tavily", "exa", "you", "duckduckgo"):
+            other = resolve_web_search_config({**value, "provider": provider}, existing=config)
+            self.assertEqual(other.fetch_mode, "system")
+        self.assertEqual(resolve_web_search_config({"mode": "unconfigured"}).fetch_mode, "system")
 
     async def test_storage_infrastructure_errors_are_not_hidden(self):
         store = SimpleNamespace(get=AsyncMock(side_effect=RuntimeError("database unavailable")))

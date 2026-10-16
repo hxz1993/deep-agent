@@ -198,7 +198,8 @@ def _web_search_response(row, config: WebSearchRuntimeConfig) -> WebSearchSettin
         value=WebSearchValueResponse(
             mode=config.mode,
             provider=config.provider,
-            model=config.model,
+            model=None,
+            fetch_mode=config.fetch_mode,
             api_key_set=bool(config.api_key),
             api_key_masked=(
                 mask_api_key(config.api_key)
@@ -242,7 +243,7 @@ async def _resolve_web_search_write(
 ) -> WebSearchRuntimeConfig:
     try:
         config = resolve_web_search_config(
-            body.value.model_dump(exclude_none=True),
+            body.value.model_dump(exclude_none=True, exclude_unset=True),
             existing=existing,
         )
         return await resolve_web_search_credentials(

@@ -440,16 +440,16 @@ const uiToolsAdmin = {
   async removePackage(code) {
     if (!(await confirmAction({
       title: "删除 UI 工具包？",
-      message: `工具包包含工具或被 Agent 引用时不能删除，请先移除相关工具和引用。当前对象：${code}`,
+      message: `确认后将删除此工具包及包内全部 UI 工具。若仍有 Agent 关联，删除会被阻止，请先解除关联。当前对象：${code}`,
       icon: "trash-2",
       tone: "danger",
-      confirmLabel: "删除",
+      confirmLabel: "删除工具包及工具",
     }))) return;
     try {
       await apiFetch(`/api/v1/ui-tool-packages/${encodeURIComponent(code)}`, { method: "DELETE" });
       if (this.selectedPackageCode === code) this.selectedPackageCode = null;
-      showToast("UI 工具包已删除");
-      await refreshAfterSuccessfulMutation("UI 工具包已删除", async () => {
+      showToast("UI 工具包及包内工具已删除");
+      await refreshAfterSuccessfulMutation("UI 工具包及包内工具已删除", async () => {
         await this.refresh();
         await loadCapabilities();
       });

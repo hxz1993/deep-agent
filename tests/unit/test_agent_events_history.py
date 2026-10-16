@@ -90,6 +90,17 @@ class AgentEventsTests(unittest.TestCase):
         self.assertEqual(payload["web"]["elapsed_ms"], 12)
         self.assertEqual(payload["sources"][0]["url"], "https://example.com")
 
+    def test_provider_fetch_execution_comes_from_result_not_tool_name(self) -> None:
+        call = events.tool_call("web_fetch", {"url": "https://example.com"}, "fetch-1")
+        self.assertEqual(call["source"], "web")
+        self.assertNotIn("execution", call)
+        for provider in ("deepseek", "kimi"):
+            part = ToolReturnPart("web_fetch", {"content": "body"}, "fetch-1",
+                                  metadata={"web_fetch": {"mode": "provider", "provider": provider}})
+            payload = events.map_part(part)
+            self.assertEqual(payload["execution"], "provider")
+            self.assertEqual(payload["web"]["provider"], provider)
+
     def test_web_image_sse_exposes_reference_without_base64(self) -> None:
         part = ToolReturnPart(
             "web_image_view",

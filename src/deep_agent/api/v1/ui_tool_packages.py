@@ -104,19 +104,21 @@ async def delete_ui_tool_package(
     row = await store.get_by_code(code)
     if row is None:
         raise HTTPException(status_code=404, detail=f"UI tool package not found: {code}")
-    tool_names = await store.list_tool_names(code)
+    if row.source == "builtin":
+        raise HTTPException(status_code=403, detail="Builtin UI tool package cannot be deleted")
     referenced_by = await agent_store.list_referencing_capability(code)
-    if tool_names or referenced_by:
+    if referenced_by:
         raise HTTPException(
             status_code=409,
             detail={
-                "message": "UI 工具包包含工具或正在被 Agent 引用，不能删除",
+                "message": "UI 工具包正在被 Agent 引用，不能删除，请先解除关联",
                 "resource": code,
-                "tools": tool_names,
+                "tools": await store.list_tool_names(code),
                 "referenced_by": [agent.name for agent in referenced_by],
             },
         )
     try:
-        await store.delete(code)
+        if not await store.delete(code):
+            raise HTTPException(status_code=404, detail=f"UI tool package not found: {code}")
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -7,10 +7,10 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20261013-console-ui-4";
+} from "./configuration.js?v=20261017-web-search-radio";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261013-console-ui-4";
-import { initWorkspace } from "./workspace.js?v=20261013-session-navigation";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261017-console-audit";
+import { initWorkspace } from "./workspace.js?v=20261017-console-audit";
 import "./time.js?v=20260913-49";
 
 initUserIdentityControls();

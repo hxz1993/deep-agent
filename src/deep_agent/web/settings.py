@@ -16,11 +16,10 @@ WebSearchProvider = Literal[
     "duckduckgo",
 ]
 WebSearchCredentialSource = Literal["api_key", "llm_provider"]
+WebFetchMode = Literal["system", "follow_search"]
 
 _PROVIDERS = frozenset({"deepseek", "kimi", "tavily", "exa", "you", "duckduckgo"})
-_MODEL_DEFAULTS = {
-    "deepseek": "deepseek-flash",
-}
+FETCH_PROVIDERS = frozenset({"deepseek", "kimi"})
 _KEYLESS_PROVIDERS = frozenset({"duckduckgo"})
 _REUSABLE_LLM_PROVIDER_TYPES = {
     "deepseek": "deepseek",
@@ -38,6 +37,7 @@ class WebSearchRuntimeConfig:
     provider: WebSearchProvider | None = None
     api_key: str | None = None
     model: str | None = None
+    fetch_mode: WebFetchMode = "system"
     credential_source: WebSearchCredentialSource | None = None
     llm_provider_id: str | None = None
     llm_provider_name: str | None = None
@@ -51,11 +51,10 @@ class WebSearchRuntimeConfig:
         value: dict[str, Any] = {
             "mode": "provider",
             "provider": self.provider,
+            "fetch_mode": self.fetch_mode if self.provider in FETCH_PROVIDERS else "system",
         }
         if self.api_key and self.credential_source != "llm_provider":
             value["api_key"] = self.api_key
-        if self.model and self.provider == "deepseek":
-            value["model"] = self.model
         if self.credential_source:
             value["credential_source"] = self.credential_source
         if self.credential_source == "llm_provider" and self.llm_provider_id:
@@ -138,17 +137,20 @@ def resolve_web_search_config(
         if require_credentials and not api_key:
             raise WebSearchConfigurationError(f"API key is required for {provider}")
 
-    model = _normalized_optional(raw.get("model"))
-    if provider in _MODEL_DEFAULTS:
-        model = model or _MODEL_DEFAULTS[provider]
-    else:
-        model = None
+    # Old clients may omit the new field. Reads of historical rows still default
+    # to system; writes preserve an already saved choice until explicitly changed.
+    fetch_mode = raw.get("fetch_mode", existing.fetch_mode if existing else "system")
+    if fetch_mode not in {"system", "follow_search"}:
+        raise WebSearchConfigurationError("fetch_mode must be system or follow_search")
+    if provider not in FETCH_PROVIDERS:
+        fetch_mode = "system"
 
     return WebSearchRuntimeConfig(
         mode="provider",
         provider=provider,  # type: ignore[arg-type]
         api_key=api_key,
-        model=model,
+        model=None,  # Legacy input is accepted but never used or stored.
+        fetch_mode=fetch_mode,
         credential_source=credential_source,
         llm_provider_id=llm_provider_id,
     )

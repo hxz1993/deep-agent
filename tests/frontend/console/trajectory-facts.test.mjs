@@ -181,6 +181,24 @@ test("tool-only assistant responses remain visible and exportable without invent
   assert.equal(JSON.parse(JSON.stringify(rows)).filter(row => row.kind === "assistant").length, 4);
 });
 
+test("presentation-only tool result frames preserve persisted execution endpoints", () => {
+  withController((controller) => {
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    const call = fact("call", 1, 0, 0, { part_kind: "tool-call", tool_name: "lookup", tool_call_id: "a" });
+    const timing = { version: 1, kind: "tool_execution", duration_ms: 1234,
+      started_at: "2026-10-15T01:00:00Z", completed_at: "2026-10-15T01:00:01.234Z" };
+    const result = fact("result", 2, 1, 0, { part_kind: "tool-return", tool_name: "lookup", tool_call_id: "a",
+      content: "完成", metadata: { deepagent_timing: timing } }, "tool/results");
+    controller.ingest({ event: "session_event_appended", data: { event: call } });
+    controller.ingest({ event: "session_event_appended", data: { event: result } });
+    controller.ingest({ event: "tool_result", data: { tool: "lookup", tool_call_id: "a", result: "完成" } });
+    const tool = controller.events().find(row => row.tool_call_id === "a");
+    assert.equal(tool.duration_ms, timing.duration_ms);
+    assert.equal(tool.timestamp, timing.started_at);
+    assert.equal(tool.timestamp_end, timing.completed_at);
+  });
+});
+
 test("reused tool call IDs in different loops retain distinct arguments, results, selection and SSE rows", () => {
   withController((controller, elements) => {
     controller.ingest({ event: "session", data: { run_id: "run-1" } });
@@ -295,5 +313,91 @@ test("title Event keeps initial and latest title records without HTTP labels", (
     assert.match(html, /initial-title/);
     assert.match(html, /latest-title/);
     assert.doesNotMatch(html, />Request<|>Result</);
+  });
+});
+
+test("legacy model intervals cover generation and ignore mutable database update times", () => {
+  const first = fact("thinking", 1, 31, 0, { part_kind: "thinking", content: "fixture" });
+  first.payload.message.timestamp = "2026-10-15T13:33:12.565091Z";
+  first.created_at = "2026-10-15T13:36:06Z";
+  first.updated_at = "2026-10-15T13:37:16Z";
+  const call = fact("call", 2, 31, 1, {part_kind: "tool-call", tool_name: "write_plan", tool_call_id: "c"});
+  call.payload.message.timestamp = first.payload.message.timestamp;
+  call.created_at = call.updated_at = "2026-10-15T13:36:07Z";
+  const assistant = buildTrajectory({items: [first, call]})[0];
+  assert.equal(assistant.duration_ms, 173435);
+  assert.equal(assistant.duration_source, "estimated");
+  assert.equal(assistant.timestamp_end, first.created_at);
+  first.updated_at = "2026-10-16T00:00:00Z";
+  assert.equal(buildTrajectory({items:[first,call]})[0].duration_ms, assistant.duration_ms);
+});
+
+test("measured model and parallel tool durations survive event grouping and reused IDs", () => {
+  const timing = (kind, duration_ms, started_at = "2026-10-15T13:33:11Z", completed_at = "2026-10-15T13:36:04Z") => ({version:1, kind, duration_ms, started_at, completed_at});
+  const call = fact("call", 1, 1, 0, {part_kind:"tool-call", tool_name:"lookup",tool_call_id:"c"});
+  call.payload.message.metadata = {deepagent_timing:timing("model_request",172751)};
+  const result = fact("result", 2, 2, 0, {part_kind:"tool-return",tool_name:"lookup",tool_call_id:"c",content:"ok",metadata:{deepagent_timing:timing("tool_execution", 812)}}, "tool/results");
+  const later = fact("later", 3, 3, 0, {part_kind:"tool-call",tool_name:"lookup",tool_call_id:"c"});
+  later.payload.message.metadata = {deepagent_timing:timing("model_request", 58783)};
+  const rows = buildTrajectory({items:[call,result,later]});
+  assert.deepEqual(rows.filter(x=>x.kind==="assistant").map(x=>x.duration_ms), [172751,58783]);
+  assert.equal(rows.find(x=>x.id==="tool:c").duration_ms,812);
+  assert.equal(rows.find(x=>x.id==="tool:c").duration_source,"execution");
+  assert.equal(rows.filter(x=>x.tool_call_id==="c").at(-1).duration_ms,undefined);
+});
+
+test("missing or invalid timing stays unknown instead of becoming zero or a database interval", () => {
+  const row = fact("unknown", 1, 0, 0, {part_kind:"text",content:"fixture"});
+  row.updated_at = "2026-10-16T00:00:00Z";
+  row.payload.message.metadata = {deepagent_timing:{version:1,kind:"model_request",duration_ms:null}};
+  assert.equal(buildTrajectory({items:[row]})[0].duration_ms,undefined);
+  withController((controller,elements)=>{
+    controller.setHistory({session_id:"unknown",items:[row]});
+    assert.match(elements.get("inspectorContent").innerHTML,/耗时未知/);
+  });
+});
+
+test("legacy tool intervals use result production time and never count deferred human waiting", () => {
+  const call = fact("call",1,0,0,{part_kind:"tool-call",tool_name:"lookup",tool_call_id:"a"});
+  const result = fact("result",2,1,0,{part_kind:"tool-return",tool_name:"lookup",tool_call_id:"a",content:"ok",timestamp:"2026-09-08T01:00:02Z"},"tool/results");
+  result.updated_at = "2026-09-09T00:00:00Z";
+  assert.equal(buildTrajectory({items:[call,result]}).find(x=>x.tool_call_id==="a").duration_ms,2000);
+  call.payload.message.parts[0].metadata = {widget:"builtin.confirm"};
+  assert.equal(buildTrajectory({items:[call,result]}).find(x=>x.tool_call_id==="a").duration_ms,undefined);
+});
+
+test("duration toggle preserves selection/order and classifies timing boundaries without treating unknown as fast", () => {
+  withController((controller, elements) => {
+    const durations = [5000, 5001, 10000, 10001, 20000, 20001];
+    const items = durations.map((duration_ms, i) => {
+      const item = fact(`model-${i}`, i+1, i, 0, {part_kind:"text",content:`response ${i}`});
+      item.payload.message.metadata = {deepagent_timing:{version:1,kind:"model_request",duration_ms,started_at:"2026-10-15T00:00:00Z",completed_at:new Date(Date.parse("2026-10-15T00:00:00Z")+duration_ms).toISOString()}};
+      return item;
+    });
+    items.push(fact("unknown", 7, 7, 0, {part_kind:"text",content:"unknown"}));
+    controller.setHistory({session_id:"duration-toggle",items});
+    const before = controller.events().map(x=>x.id);
+    const selected = controller.snapshot().selectedId;
+    const list = elements.get("trajectoryList");
+    assert.match(list.innerHTML, /<time>/);
+    list.scrollTop = 50;
+    const toggle = elements.get("trajectoryClockToggle").listeners.get("click");
+    toggle();
+    assert.equal(controller.snapshot().clockMode,"duration");
+    assert.deepEqual(controller.events().map(x=>x.id),before);
+    assert.equal(controller.snapshot().selectedId,selected);
+    assert.equal(list.scrollTop,50);
+    assert.doesNotMatch(list.innerHTML,/<time>/);
+    assert.equal((list.innerHTML.match(/trajectory-duration fast/g)||[]).length,1);
+    assert.equal((list.innerHTML.match(/trajectory-duration steady/g)||[]).length,2);
+    assert.equal((list.innerHTML.match(/trajectory-duration elevated/g)||[]).length,2);
+    assert.equal((list.innerHTML.match(/trajectory-duration slow/g)||[]).length,1);
+    assert.match(list.innerHTML,/trajectory-duration unknown/);
+    const snapshot = controller.snapshot();
+    toggle();
+    assert.match(list.innerHTML,/<time>/);
+    controller.restore(snapshot);
+    assert.equal(controller.snapshot().clockMode,"duration");
+    assert.match(list.innerHTML,/trajectory-duration slow/);
   });
 });

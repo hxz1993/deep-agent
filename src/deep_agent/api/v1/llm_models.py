@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 
 from deep_agent.models.catalog import (
     CatalogValidationError,
@@ -21,7 +21,9 @@ from deep_agent.models.models_dev import (
 )
 from deep_agent.models.connectivity import probe_model
 from deep_agent.models.provider_registry import model_unavailable_reason
-from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES, require_console_admin, resolve_console_admin_access
+from deep_agent.api.v1.request_identity import RequestUserDep
+from deep_agent.core.context import AppContextDep
 from deep_agent.db.deps import (
     get_llm_configuration_service,
     get_llm_model_store,
@@ -33,7 +35,7 @@ from deep_agent.db.stores.llm_model import (
     LlmModelValidationError,
 )
 from deep_agent.db.stores.model_catalog import ModelCatalogStoreBase
-from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelResponse, LlmModelUpdate, LlmModelTestResponse
+from deep_agent.schemas.llm_model import LlmModelClientResponse, LlmModelCreate, LlmModelResponse, LlmModelUpdate, LlmModelTestResponse
 from deep_agent.schemas.model_catalog import (
     ModelCatalogRefreshResponse,
     ModelCatalogResponse,
@@ -44,7 +46,7 @@ from deep_agent.services.llm_configuration import (
     LlmConfigurationValidationError,
 )
 
-router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
+router = APIRouter()
 _catalog_refresh_lock = asyncio.Lock()
 _MAX_CATALOG_IMPORT_BYTES = 16 * 1024 * 1024
 _model_test_slots = asyncio.Semaphore(2)
@@ -88,8 +90,11 @@ async def _response_for_row(
     )
 
 
-@router.get("/llm-models", response_model=list[LlmModelResponse])
+@router.get("/llm-models", response_model=list[LlmModelResponse | LlmModelClientResponse])
 async def list_llm_models(
+    request: Request,
+    user: RequestUserDep,
+    ctx: AppContextDep,
     provider_id: str | None = Query(None),
     selectable_only: bool = Query(
         True,
@@ -97,14 +102,18 @@ async def list_llm_models(
     ),
     store: LlmModelStoreBase = Depends(get_llm_model_store),
     service: LlmConfigurationService = Depends(get_llm_configuration_service),
-) -> list[LlmModelResponse]:
+) -> list[LlmModelResponse | LlmModelClientResponse]:
+    # Business reads require trusted identity, but must not depend on the
+    # Console admin service. The full inventory is a management operation.
+    if not selectable_only:
+        await require_console_admin(await resolve_console_admin_access(request, user, ctx))
     rows = await store.list_all()
     if provider_id is not None:
         normalized_provider_id = _parse_provider_id(provider_id)
         rows = [row for row in rows if row.provider_id == normalized_provider_id]
     providers = {row.id: row for row in await service.list_providers()}
-    agent_counts = await store.count_agents_by_model()
-    responses: list[LlmModelResponse] = []
+    agent_counts = await store.count_agents_by_model() if not selectable_only else {}
+    responses: list[LlmModelResponse | LlmModelClientResponse] = []
     for row in rows:
         provider = providers.get(row.provider_id)
         if provider is None:
@@ -120,11 +129,11 @@ async def list_llm_models(
             agent_count=agent_counts.get(row.id, 0),
         )
         if not selectable_only or response.selectable:
-            responses.append(response)
+            responses.append(response if not selectable_only else LlmModelClientResponse.from_response(response))
     return responses
 
 
-@router.get("/llm-models/catalog", response_model=ModelCatalogResponse)
+@router.get("/llm-models/catalog", response_model=ModelCatalogResponse, dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 async def list_model_catalog(
     view: Literal["model", "provider"] = Query("model"),
     q: str | None = Query(None, description="Search Lab, model, or Provider."),
@@ -156,7 +165,7 @@ async def list_model_catalog(
     )
 
 
-@router.get("/llm-models/catalog/export")
+@router.get("/llm-models/catalog/export", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 async def export_model_catalog(
     catalog_store: ModelCatalogStoreBase = Depends(get_model_catalog_store),
 ) -> Response:
@@ -181,6 +190,7 @@ async def export_model_catalog(
 
 @router.post(
     "/llm-models/catalog/refresh",
+    dependencies=CONSOLE_ADMIN_DEPENDENCIES,
     response_model=ModelCatalogRefreshResponse,
 )
 async def refresh_model_catalog(
@@ -223,6 +233,7 @@ async def refresh_model_catalog(
 
 @router.post(
     "/llm-models/catalog/import",
+    dependencies=CONSOLE_ADMIN_DEPENDENCIES,
     response_model=ModelCatalogRefreshResponse,
 )
 async def import_model_catalog(
@@ -278,7 +289,7 @@ async def import_model_catalog(
     )
 
 
-@router.post("/llm-models/{model_id}/test", response_model=LlmModelTestResponse)
+@router.post("/llm-models/{model_id}/test", response_model=LlmModelTestResponse, dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 async def test_llm_model(
     model_id: str,
     provider_id: str = Query(...),
@@ -310,20 +321,21 @@ async def test_llm_model(
         return await probe_model(row, provider)
 
 
-@router.get("/llm-models/{model_id}", response_model=LlmModelResponse)
+@router.get("/llm-models/{model_id}", response_model=LlmModelClientResponse)
 async def get_llm_model(
     model_id: str,
+    user: RequestUserDep,
     store: LlmModelStoreBase = Depends(get_llm_model_store),
     service: LlmConfigurationService = Depends(get_llm_configuration_service),
-) -> LlmModelResponse:
+) -> LlmModelClientResponse:
     normalized_id = _parse_model_id(model_id)
     row = await store.get_by_id(normalized_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
-    return await _response_for_row(store, service, row)
+    return LlmModelClientResponse.from_response(await _response_for_row(store, service, row, agent_count=0))
 
 
-@router.post("/llm-models", response_model=LlmModelResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/llm-models", response_model=LlmModelResponse, status_code=status.HTTP_201_CREATED, dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 async def create_llm_model(
     body: LlmModelCreate,
     store: LlmModelStoreBase = Depends(get_llm_model_store),
@@ -338,7 +350,7 @@ async def create_llm_model(
     return await _response_for_row(store, service, row)
 
 
-@router.patch("/llm-models/{model_id}", response_model=LlmModelResponse)
+@router.patch("/llm-models/{model_id}", response_model=LlmModelResponse, dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 async def update_llm_model(
     model_id: str,
     body: LlmModelUpdate,
@@ -360,7 +372,7 @@ async def update_llm_model(
     return await _response_for_row(store, service, row)
 
 
-@router.delete("/llm-models/{model_id}", status_code=status.HTTP_200_OK)
+@router.delete("/llm-models/{model_id}", status_code=status.HTTP_200_OK, dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 async def delete_llm_model(
     model_id: str,
     service: LlmConfigurationService = Depends(get_llm_configuration_service),

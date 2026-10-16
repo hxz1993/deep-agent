@@ -95,8 +95,10 @@ class ReferenceBehavior:
         with self.assertRaises(ValueError):
             await self.stores.ui_tool.create_manual(tool('ui:missing'))
         await self.stores.ui_tool.create_manual(tool('ui:first'))
+        first_agent = await self.agent(capabilities=['ui:first'])
         with self.assertRaises(ValueError):
             await self.stores.ui_tool_package.delete('ui:first')
+        await self.stores.agent.delete(first_agent.id)
         with self.assertRaises(ValueError):
             await self.stores.ui_tool.update('example_tool', UiToolUpdate(package_code='ui:missing'))
         updated = await self.stores.ui_tool.update('example_tool', UiToolUpdate(package_code='ui:second'))
@@ -106,8 +108,8 @@ class ReferenceBehavior:
         with self.assertRaises(ValueError):
             await self.stores.ui_tool.delete('example_tool')
         await self.stores.agent.delete(agent.id)
-        self.assertTrue(await self.stores.ui_tool.delete('example_tool'))
         self.assertTrue(await self.stores.ui_tool_package.delete('ui:second'))
+        self.assertIsNone(await self.stores.ui_tool.get_by_name('example_tool'))
         await self.assert_integrity()
 
     async def test_session_history_unicode_delete_and_late_event(self):

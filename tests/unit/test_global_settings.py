@@ -200,6 +200,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
                 "mode": "unconfigured",
                 "provider": None,
                 "model": None,
+                "fetch_mode": "system",
                 "api_key_set": False,
                 "api_key_masked": None,
                 "credential_source": None,
@@ -226,7 +227,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
         self.assertEqual(created.status_code, 200, created.text)
         self.assertTrue(created.json()["value"]["api_key_set"])
         self.assertNotIn("deepseek-secret", created.text)
-        self.assertEqual(created.json()["value"]["model"], "deepseek-flash")
+        self.assertIsNone(created.json()["value"]["model"])
 
         retained = self.client.put(
             "/api/v1/global-settings/web-search",
@@ -242,7 +243,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
         )
         self.assertEqual(retained.status_code, 200, retained.text)
         self.assertTrue(retained.json()["value"]["api_key_set"])
-        self.assertEqual(retained.json()["value"]["model"], "deepseek-v4-pro")
+        self.assertIsNone(retained.json()["value"]["model"])
 
     def test_switching_provider_does_not_reuse_previous_key(self) -> None:
         headers = {"user": "enterprise-admin"}
@@ -323,6 +324,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
                 "mode": "provider",
                 "provider": "duckduckgo",
                 "model": None,
+                "fetch_mode": "system",
                 "api_key_set": False,
                 "api_key_masked": None,
                 "credential_source": None,
@@ -398,7 +400,7 @@ class GlobalSettingsApiTests(unittest.TestCase):
     def test_all_keyed_providers_validate_only_their_required_fields(self) -> None:
         headers = {"user": "enterprise-admin"}
         cases = (
-            ("deepseek", "deepseek-flash"),
+            ("deepseek", None),
             ("kimi", None),
             ("tavily", None),
             ("exa", None),

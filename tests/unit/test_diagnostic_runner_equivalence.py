@@ -26,7 +26,7 @@ from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 
 
 _VOLATILE = frozenset({
-    "timestamp", "created_at", "updated_at", "duration_ms", "run_id", "conversation_id",
+    "timestamp", "created_at", "updated_at", "started_at", "completed_at", "duration_ms", "run_id", "conversation_id",
     "agent_id", "message_id", "event_id", "execution_id", "provider_response_id",
 })
 

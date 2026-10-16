@@ -105,7 +105,7 @@ class AgentRequestLimitApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         self.assertNotIn("max_requests", response.json())
 
-        fetched = self.client.get(f"/api/v1/agents/{response.json()['id']}")
+        fetched = self.client.get(f"/api/v1/agents/{response.json()['id']}", headers={"user": "fixture-user"})
         self.assertEqual(fetched.status_code, 200, fetched.text)
         self.assertNotIn("max_requests", fetched.json())
 

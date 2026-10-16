@@ -60,6 +60,7 @@ function loadGlobalSettingsUi() {
 function webSearchOperationHarness() {
   const nodes = new Map();
   const requests = [];
+  const toasts = [];
   const node = (id) => {
     if (!nodes.has(id)) nodes.set(id, {
       value: "", disabled: false, open: true, dataset: {},
@@ -73,11 +74,11 @@ function webSearchOperationHarness() {
       addEventListener() {}, getElementById: node,
       querySelectorAll(selector) {
         assert.match(selector, /input.*select.*console-select-trigger.*console-select-option/);
-        return ["categoryRadio", "credentialRadio", "webSearchApiKey", "webSearchModel", "webSearchLlmProvider", "webSearchProviderTrigger", "webSearchModelTrigger", "webSearchLlmProviderTrigger", "openMenuOption"].map(node);
+        return ["categoryRadio", "credentialRadio", "fetchRadio", "webSearchApiKey", "webSearchLlmProvider", "webSearchProviderTrigger", "webSearchLlmProviderTrigger", "openMenuOption"].map(node);
       },
     },
     apiFetch: (path, options) => new Promise((resolve, reject) => requests.push({ path, options, resolve, reject })),
-    showToast() {},
+    showToast: (...args) => toasts.push(args),
   });
   vm.runInContext(source, context);
   vm.runInContext(`
@@ -87,7 +88,7 @@ function webSearchOperationHarness() {
     closeWebSearchMenus = () => {};
     renderWebSearchSettings = () => setWebSearchTestFeedback();
   `, context);
-  return { context, node, requests, admin: context.window.globalSettingsAdmin };
+  return { context, node, requests, toasts, admin: context.window.globalSettingsAdmin };
 }
 
 test("搜索测试和保存均拒绝重复调用", async () => {
@@ -104,7 +105,7 @@ test("搜索测试和保存均拒绝重复调用", async () => {
 
 test("测试和保存期间锁定草稿控件，成功或失败后恢复编辑", async () => {
   const h = webSearchOperationHarness();
-  const controls = ["categoryRadio", "credentialRadio", "webSearchApiKey", "webSearchModel", "webSearchLlmProvider", "webSearchProviderTrigger", "webSearchModelTrigger", "webSearchLlmProviderTrigger", "openMenuOption"];
+  const controls = ["categoryRadio", "credentialRadio", "fetchRadio", "webSearchApiKey", "webSearchLlmProvider", "webSearchProviderTrigger", "webSearchLlmProviderTrigger", "openMenuOption"];
   const testing = h.admin.testWebSearch();
   controls.forEach(id => assert.equal(h.node(id).disabled, true, id));
   h.requests[0].resolve({ ok: true, message: "搜索成功" });
@@ -209,20 +210,27 @@ test("Agent 是配置中心默认页，全局配置整合三个二级目录", ()
   assert.doesNotMatch(indexHtml, /data-tab="database-connection"/);
 });
 
-test("Web Search 三段切换及独立暂不配置选项，直接展示 DeepSeek 模型", () => {
+test("网络搜索保留原切换样式，抓取使用左对齐Radio且不再配置模型", () => {
   const radios = templateHtml.match(/<input[^>]*name="webSearchCategory"[^>]*>/g);
   assert.equal(radios.length, 4);
   assert.ok(radios.every(radio => !radio.includes("checked")));
   for (const category of ["deepseek", "kimi", "third-party", "unconfigured"]) assert.ok(radios.some(radio => radio.includes(`value="${category}"`)));
   assert.match(templateHtml, /id="webSearchUnconfigured"/);
   assert.match(templateHtml, /id="saveWebSearchBtn"[^>]*disabled/);
-  assert.match(templateHtml, /<div class="field" data-web-search-field="model">/);
+  const dialog = templateHtml.match(/<dialog[^>]*id="webSearchSettingsDialog"[\s\S]*?<\/dialog>/)[0];
+  assert.doesNotMatch(dialog, /webSearchModel|搜索模型|测试抓取/);
+  assert.match(templateHtml, /<h3 id="webSearchSettingsTitle">网络搜索<\/h3>/);
+  const fetchOptions = templateHtml.match(/name="webFetchMode" value="[^"]+"/g);
+  assert.deepEqual(fetchOptions, ['name="webFetchMode" value="follow_search"', 'name="webFetchMode" value="system"']);
+  assert.match(templateHtml, /class="web-fetch-options"/);
   assert.doesNotMatch(templateHtml, /高级设置|第三方搜索/);
   assert.match(templateHtml, /name="webSearchCredentialSource" value="llm_provider"/);
   assert.match(templateHtml, /name="webSearchCredentialSource" value="api_key"/);
   assert.doesNotMatch(templateHtml, /webSearchTestModel|会话模型原生搜索|name="webSearchMode"/);
   assert.doesNotMatch(source, /test-model|webSearchTestModel|renderWebSearchTestModels/);
   assert.equal((templateHtml.match(/class="web-search-mode-option"/g) || []).length, 3);
+  assert.equal((dialog.match(/class="web-fetch-option"/g) || []).length, 2);
+  assert.match(dialog, /搜索服务 <span class="web-fetch-caption">Web Search/);
   assert.match(templateHtml, /class="web-search-unconfigured-option"[\s\S]*?暂不配置/);
   assert.match(templateHtml, /id="webSearchTestFeedback"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(source, /webSearchSettingsDialog[\s\S]*showModal\(\)/);
@@ -253,7 +261,7 @@ test("Web Search 连接测试在当前弹框内展示简短反馈", () => {
   assert.doesNotMatch(testMethod, /showToast/);
 });
 
-test("Web Search 摘要只回显当前生效的一个供应商选择", () => {
+test("网络搜索摘要仅显示搜索供应商", () => {
   const ui = loadGlobalSettingsUi();
   for (const settings of [null, {}, { value: {} }, { value: { mode: "native" } }, { value: { mode: "unconfigured" } }]) assert.equal(ui.webSearchSummaryLabel(settings), "未配置");
   assert.equal(
@@ -263,7 +271,7 @@ test("Web Search 摘要只回显当前生效的一个供应商选择", () => {
   assert.equal(ui.webSearchSummaryLabel({ value: { mode: "provider", provider: "kimi", configuration_error: "供应商已删除" } }), "配置不可用");
   assert.match(templateHtml, /id="webSearchSummaryValue">未配置/);
   const webSearchSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsWebSearch">[\s\S]*?<\/section>/)?.[0] || "";
-  assert.match(webSearchSection, /网络搜索[\s\S]*?配置 Web Search 工具使用的搜索供应商。[\s\S]*?id="webSearchSummaryValue"[\s\S]*?openWebSearchSettingsBtn/);
+  assert.match(webSearchSection, /网络搜索[\s\S]*?配置 Web Search 搜索及 Web Fetch 网页抓取。[\s\S]*?id="webSearchSummaryValue"[\s\S]*?openWebSearchSettingsBtn/);
   assert.doesNotMatch(webSearchSection, /global-settings-summary-row|<p|当前支持|Kimi/);
   const runtimeSection = templateHtml.match(/<section class="global-settings-section" id="globalSettingsRuntime">[\s\S]*?<\/section>/)?.[0] || "";
   assert.doesNotMatch(runtimeSection, /数据库连接、密钥|查看当前 DeepAgent 进程/);
@@ -273,29 +281,28 @@ test("Web Search 摘要只回显当前生效的一个供应商选择", () => {
 test("不同搜索供应商只生成必要配置", () => {
   const ui = loadGlobalSettingsUi();
   assert.throws(() => ui.buildPayload({ mode: "native" }), /请选择搜索供应商/);
-  assert.deepEqual(JSON.parse(JSON.stringify(ui.buildPayload({ mode: "unconfigured", provider: "kimi", apiKey: "discard", llmProviderId: "discard" }))), { version: 1, value: { mode: "unconfigured" } });
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.buildPayload({ mode: "unconfigured", provider: "kimi", apiKey: "discard", llmProviderId: "discard" }))), { version: 1, value: { mode: "unconfigured", fetch_mode: "system" } });
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "deepseek", model: "", apiKey: "secret", credentialSource: "api_key" }))),
-    { version: 1, value: { mode: "provider", provider: "deepseek", model: "deepseek-flash", credential_source: "api_key", api_key: "secret" } },
+    { version: 1, value: { mode: "provider", provider: "deepseek", fetch_mode: "system", credential_source: "api_key", api_key: "secret" } },
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "kimi", model: "kimi-k3", credentialSource: "llm_provider", llmProviderId: "provider-1" }))),
-    { version: 1, value: { mode: "provider", provider: "kimi", credential_source: "llm_provider", llm_provider_id: "provider-1" } },
+    { version: 1, value: { mode: "provider", provider: "kimi", fetch_mode: "system", credential_source: "llm_provider", llm_provider_id: "provider-1" } },
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "tavily", model: "ignored", apiKey: "key" }))),
-    { version: 1, value: { mode: "provider", provider: "tavily", api_key: "key" } },
+    { version: 1, value: { mode: "provider", provider: "tavily", fetch_mode: "system", api_key: "key" } },
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(ui.buildPayload({ mode: "provider", provider: "duckduckgo", model: "ignored", apiKey: "ignored" }))),
-    { version: 1, value: { mode: "provider", provider: "duckduckgo" } },
+    { version: 1, value: { mode: "provider", provider: "duckduckgo", fetch_mode: "system" } },
   );
-  assert.equal(ui.providerState("kimi").requiresModel, false);
-  assert.equal(ui.providerState("exa").requiresModel, false);
+  assert.equal(ui.providerState("deepseek").requiresModel, undefined);
   assert.equal(ui.providerState("duckduckgo").requiresKey, false);
 });
 
-test("历史 DeepSeek 模型不被推荐列表覆盖，失效 Provider 不静默换绑", () => {
+test("历史模型不再生成配置，失效 Provider 不静默换绑", () => {
   const nodes = new Map();
   const node = id => { if (!nodes.has(id)) nodes.set(id, { value: "", innerHTML: "" }); return nodes.get(id); };
   const context = vm.createContext({
@@ -304,13 +311,9 @@ test("历史 DeepSeek 模型不被推荐列表覆盖，失效 Provider 不静默
     document: { addEventListener() {}, getElementById: node },
   });
   vm.runInContext(source, context);
-  vm.runInContext('renderConsoleSelect = () => {}; renderWebSearchModelMenu("deepseek-v4-flash");', context);
-  assert.equal(node("webSearchModel").value, "deepseek-v4-flash");
-  assert.match(node("webSearchModel").innerHTML, /deepseek-v4-flash/);
-  vm.runInContext('renderWebSearchModelMenu("proxy-custom-model");', context);
-  assert.equal(node("webSearchModel").value, "proxy-custom-model");
-  vm.runInContext('renderWebSearchModelMenu(""); renderWebSearchLlmProviderOptions("deepseek", "deleted-provider");', context);
-  assert.equal(node("webSearchModel").value, "deepseek-flash");
+  vm.runInContext('renderConsoleSelect = () => {}; renderWebSearchLlmProviderOptions("deepseek", "deleted-provider");', context);
+  const payload = context.window.__GlobalSettingsUI.buildPayload({ mode: "provider", provider: "deepseek", model: "proxy-custom-model" });
+  assert.equal(Object.hasOwn(payload.value, "model"), false);
   assert.equal(node("webSearchLlmProvider").value, "deleted-provider");
   assert.match(node("webSearchLlmProvider").innerHTML, /供应商已不可用/);
 });
@@ -416,4 +419,117 @@ test("重新打开回显同供应商脱敏值，切换供应商不串用密钥",
   assert.equal(input.value, "tvly-abc********xyz");
   vm.runInContext('globalSettingsAdmin.webSearch.value.credential_source = "llm_provider"; resetWebSearchApiKey("tavily")', context);
   assert.equal(input.value, "");
+});
+
+function webSearchDraftHarness(settings) {
+  const nodes = new Map();
+  const radios = {};
+  const node = id => {
+    if (!nodes.has(id)) {
+      const classes = new Set();
+      nodes.set(id, { value: "", innerHTML: "", textContent: "", dataset: {}, disabled: false, open: false,
+        classList: { toggle(name, force) { const add = force ?? !classes.has(name); if (add) classes.add(name); else classes.delete(name); }, contains: name => classes.has(name) },
+        showModal() { this.open = true; }, close() { this.open = false; } });
+    }
+    return nodes.get(id);
+  };
+  for (const [group, values] of Object.entries({ webSearchCategory: ["deepseek", "kimi", "third-party", "unconfigured"], webSearchCredentialSource: ["llm_provider", "api_key"], webFetchMode: ["follow_search", "system"] })) {
+    radios[group] = values.map(value => {
+      const input = node(`${group}-${value}`);
+      input.value = value;
+      let checked = false;
+      Object.defineProperty(input, "checked", { get: () => checked, set(value) {
+        if (value) for (const other of radios[group] || []) if (other !== input) other.checked = false;
+        checked = value;
+      } });
+      return input;
+    });
+  }
+  const document = {
+    addEventListener() {}, getElementById: node,
+    querySelectorAll(selector) {
+      const group = selector.match(/^input\[name="([^"]+)"\]$/)?.[1];
+      return group ? radios[group] : [];
+    },
+    querySelector(selector) {
+      const match = selector.match(/^input\[name="([^"]+)"\](?::checked|\[value="([^"]+)"\])$/);
+      if (match) return radios[match[1]].find(input => match[2] ? input.value === match[2] : input.checked) || null;
+      return node(selector);
+    },
+  };
+  const context = vm.createContext({ window: {}, document, escapeHtml, state: { llmProviders: [] } });
+  vm.runInContext(source, context);
+  vm.runInContext('renderConsoleSelect = () => {};', context);
+  context.window.globalSettingsAdmin.webSearch = settings;
+  return { node, radios, context, run: code => vm.runInContext(code, context) };
+}
+
+test("历史配置默认系统内置，取消及重开恢复服务端抓取选择", () => {
+  const h = webSearchDraftHarness({ value: { mode: "provider", provider: "deepseek", model: "historical-model" } });
+  h.run("openWebSearchSettings()");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
+  assert.equal(h.run('Object.hasOwn(currentWebSearchDraft().value, "model")'), false);
+  h.radios.webFetchMode[0].checked = true;
+  h.run("updateWebFetchMode()");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "follow_search");
+  h.run("closeWebSearchSettings(); openWebSearchSettings()");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
+  h.context.window.globalSettingsAdmin.webSearch.value.fetch_mode = "follow_search";
+  h.run("renderWebSearchSettings(globalSettingsAdmin.webSearch)");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "follow_search");
+});
+
+test("跟随仅支持两家，切换搜索服务商和未配置时收敛为系统内置", () => {
+  const h = webSearchDraftHarness({ value: { mode: "provider", provider: "kimi", fetch_mode: "follow_search" } });
+  h.run("openWebSearchSettings()");
+  assert.equal(h.node("webFetchFollowOption").classList.contains("hidden"), false);
+  assert.match(h.node("webFetchDescription").textContent, /Kimi/);
+  h.radios.webSearchCategory[2].checked = true;
+  h.node("webSearchProvider").value = "exa";
+  h.run("updateWebSearchCategory({ resetCredentialSource: true })");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
+  assert.equal(h.node("webFetchFollowOption").classList.contains("hidden"), true);
+  h.radios.webSearchCategory[1].checked = true;
+  h.run("updateWebSearchCategory({ resetCredentialSource: true })");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
+  h.radios.webFetchMode[0].checked = true;
+  h.radios.webSearchCategory[3].checked = true;
+  h.run("updateWebSearchCategory()");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
+  assert.equal(h.node("webFetchFollowOption").classList.contains("hidden"), true);
+});
+
+test("两家跟随配置不复制凭据，其他供应商不能生成跟随配置", () => {
+  const ui = loadGlobalSettingsUi();
+  for (const provider of Object.keys(ui.providers)) {
+    const payload = ui.buildPayload({ mode: "provider", provider, fetchMode: "follow_search", credentialSource: "llm_provider", llmProviderId: "selected-provider" });
+    const supported = ["deepseek", "kimi"].includes(provider);
+    assert.equal(payload.value.fetch_mode, supported ? "follow_search" : "system");
+    assert.equal(Object.hasOwn(payload.value, "model"), false);
+    if (supported) {
+      assert.equal(payload.value.llm_provider_id, "selected-provider");
+      assert.equal(Object.hasOwn(payload.value, "api_key"), false);
+    }
+  }
+  assert.equal(ui.webSearchSummaryLabel({ value: { mode: "provider", provider: "kimi", fetch_mode: "follow_search" } }), "Kimi");
+  assert.equal(ui.webSearchSummaryLabel({ value: { mode: "provider", provider: "exa", fetch_mode: "follow_search" } }), "Exa");
+});
+
+test("保存网络配置后回读权威状态，回读失败不误报保存失败", async () => {
+  const h = webSearchOperationHarness();
+  const pending = h.admin.saveWebSearch();
+  h.requests[0].resolve({ value: { mode: "provider", provider: "deepseek", fetch_mode: "follow_search" } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.requests.length, 2);
+  assert.equal(h.requests[1].options, undefined);
+  h.requests[1].resolve({ value: { mode: "provider", provider: "deepseek", fetch_mode: "system" } });
+  await pending;
+  assert.equal(h.admin.webSearch.value.fetch_mode, "system");
+  const retry = h.admin.saveWebSearch();
+  h.requests[2].resolve({ value: { mode: "provider", provider: "deepseek", fetch_mode: "follow_search" } });
+  await new Promise(resolve => setImmediate(resolve));
+  h.requests[3].reject(new Error("网络断开"));
+  await retry;
+  assert.equal(h.admin.webSearch.value.fetch_mode, "follow_search");
+  assert.match(h.toasts.at(-1)[0], /已保存，刷新失败：网络断开/);
 });

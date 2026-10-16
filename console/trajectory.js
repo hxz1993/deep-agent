@@ -172,6 +172,33 @@ function messageMeta(message = {}) {
   return meta;
 }
 
+function applyExecutionTiming(row, timing, kind) {
+  if (timing?.version !== 1 || timing.kind !== kind
+    || typeof timing.duration_ms !== "number" || !Number.isFinite(timing.duration_ms) || timing.duration_ms < 0) return false;
+  const start = parseServerTimestamp(timing.started_at)?.getTime();
+  const end = parseServerTimestamp(timing.completed_at)?.getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return false;
+  row.timestamp = timing.started_at;
+  row.timestamp_end = timing.completed_at;
+  row.duration_ms = timing.duration_ms;
+  row.duration_source = "execution";
+  row.duration_description = kind === "model_request"
+    ? "模型请求耗时：包含等待响应和完整流式生成，不含工具执行；采用服务端单调时钟。"
+    : "工具执行耗时：服务端实际执行区间，不含模型生成参数、人工等待及事件入库。并行工具耗时不能直接相加。";
+  return true;
+}
+
+function applyLegacyInterval(row, start, end, description) {
+  const a = start ? parseServerTimestamp(start)?.getTime() : NaN;
+  const b = end ? parseServerTimestamp(end)?.getTime() : NaN;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return;
+  row.timestamp = start;
+  row.timestamp_end = end;
+  row.duration_ms = b - a;
+  row.duration_source = "estimated";
+  row.duration_description = description;
+}
+
 function toolRole(part) {
   if (["tool-call", "builtin-tool-call"].includes(part?.part_kind)) return "call";
   if (["tool-return", "builtin-tool-return", "retry-prompt"].includes(part?.part_kind)) return "result";
@@ -389,7 +416,13 @@ export function buildTrajectory(history = {}) {
       assistant.sequence = Number(group.event.sequence || 0);
       assistant.turn_id = event.turn_id || null;
       assistant.event_type = event.event_type;
-      assistant.timestamp_end = event.updated_at || assistant.timestamp;
+      // Writes happen after generation; updated_at can change again at Run
+      // finalization. Neither timestamp measures a model request.
+      assistant.timestamp_end = null;
+      if (!applyExecutionTiming(assistant, message.metadata?.deepagent_timing, "model_request")) {
+        applyLegacyInterval(assistant, message.timestamp, group.event.created_at,
+          "旧记录估算：供应商响应时间戳至首次入库，可能缺少首字节前等待并包含入库等待，不是精确模型请求耗时。未使用更新时间。");
+      }
       if (group.row) Object.assign(group.row, assistant);
       else {
         group.row = assistant;
@@ -452,7 +485,12 @@ export function buildTrajectory(history = {}) {
           metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls, ptc_diagnostics: metadata.ptc_diagnostics },
         }));
         tool.native = { ...(tool.native || {}), result_event_id: event.event_id, result_part_offset: offset };
-        tool.timestamp_end = event.updated_at || part.timestamp || tool.timestamp_end;
+        tool.timestamp_end = null;
+        if (!applyExecutionTiming(tool, metadata.deepagent_timing, "tool_execution")
+          && tool.kind !== "deferred") {
+          applyLegacyInterval(tool, tool.timestamp, part.timestamp,
+            "旧记录估算：工具调用入库至结果产生，包含调度等待，不是精确执行耗时。未使用更新时间。");
+        }
         tool.summary = eventSummary(tool.kind, { type: "tool_result", result: part.content });
       }
     });
@@ -619,7 +657,9 @@ function hasMeaningfulValue(value) {
 }
 
 function eventDuration(event) {
-  if (Number.isFinite(Number(event.duration_ms))) return Number(event.duration_ms);
+  if (event.duration_ms != null && Number.isFinite(Number(event.duration_ms))) return Number(event.duration_ms);
+  if (["input", "error", "title"].includes(event.kind)) return null;
+  if (["assistant", "tool", "code", "ui", "ui_tool"].includes(event.kind) || event.tool_call_id) return null;
   const started = event.timestamp ? parseServerTimestamp(event.timestamp)?.getTime() : NaN;
   const ended = event.timestamp_end ? parseServerTimestamp(event.timestamp_end)?.getTime() : NaN;
   return Number.isFinite(started) && Number.isFinite(ended) ? Math.max(0, ended - started) : null;
@@ -629,6 +669,16 @@ function durationLabel(value) {
   if (!Number.isFinite(value)) return null;
   if (value < 1000) return `${Math.round(value)} ms`;
   return `${(value / 1000).toFixed(value < 10000 ? 2 : 1)} s`;
+}
+
+function renderRowTime(event, clockMode) {
+  if (clockMode !== "duration") return `<time>${escapeHtml(formatTime(event.timestamp))}</time>`;
+  const duration = eventDuration(event);
+  if (duration == null) return '<span class="trajectory-duration unknown" title="没有可确认的执行耗时；瞬时事件和人工等待不计为0秒">—</span>';
+  const band = duration <= 5000 ? "fast" : duration <= 10000 ? "steady" : duration <= 20000 ? "elevated" : "slow";
+  const range = {fast:"≤5秒",steady:"5–10秒",elevated:"10–20秒",slow:">20秒"}[band];
+  const label = durationLabel(duration);
+  return `<span class="trajectory-duration ${band}" title="${escapeHtml(`${range}；${event.duration_description || "服务端记录的耗时"}`)}"><i aria-hidden="true"></i>${escapeHtml(label)}</span>`;
 }
 
 function renderMarkdown(content, emptyMessage = "No content in this event.") {
@@ -674,11 +724,11 @@ function renderMeta(event) {
   const usage = trajectoryUsage(event);
   const items = [
     ["clock-3", event.timestamp ? formatTime(event.timestamp) : null],
-    ["timer", durationLabel(duration)],
+    ["timer", duration == null && (event.kind === "assistant" || event.tool_call_id) ? "耗时未知" : durationLabel(duration)],
     ["coins", usage?.total != null ? `${usage.total.toLocaleString("zh-CN")} Token` : null],
   ].filter(([, value]) => value);
   if (!items.length) return "";
-  return `<div class="trajectory-summary-meta">${items.map(([name, value]) => `<span${name === "coins" ? ' title="本次模型请求的 Token 合计"' : ""}>${icon(name)}${escapeHtml(value)}</span>`).join("")}</div>`;
+  return `<div class="trajectory-summary-meta">${items.map(([name, value]) => `<span title="${escapeHtml(name === "coins" ? "本次模型请求的 Token 合计" : name === "timer" ? event.duration_description || "缺少服务端执行起止记录；事件创建或更新时间不能作为执行耗时。" : "事件时间")}">${icon(name)}${escapeHtml(value)}</span>`).join("")}</div>`;
 }
 
 function renderSummarySection(title, body, { targetTab = null, className = "" } = {}) {
@@ -1065,6 +1115,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   const trajectoryTab = byId("trajectoryViewTab");
   const search = byId("trajectorySearch");
   const exportButton = byId("exportTrajectoryBtn");
+  const clockToggle = byId("trajectoryClockToggle");
   let exportReady = !readOnly;
   function setExportReady(ready) {
     exportReady = Boolean(ready);
@@ -1089,6 +1140,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let ptcExpanded = null;
   let ptcDetailTab = "result";
   let mode = "sequence";
+  let clockMode = "time";
   let renderQueued = false;
   let renderedSelectedId = null;
 
@@ -1144,7 +1196,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       const summary = event.summary || "No content";
       html.push(`<button type="button" class="trajectory-row ${escapeHtml(event.kind)} ${selectedId === event.id ? "active" : ""}" data-trajectory-id="${escapeHtml(event.id)}">
         <span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
-        <span class="trajectory-row-meta"><time>${escapeHtml(formatTime(event.timestamp))}</time><em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></span>
+        <span class="trajectory-row-meta">${renderRowTime(event, clockMode)}<em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></span>
       </button>`);
     });
     list.innerHTML = html.join("");
@@ -1158,6 +1210,12 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     const events = allEvents();
     const stats = trajectoryStats(events);
     const visible = filterTrajectory(events, { mode, query: search?.value });
+    if (clockToggle) {
+      clockToggle.innerHTML = `${icon(clockMode === "duration" ? "timer" : "clock-3")}<span>${clockMode === "duration" ? "耗时" : "时间"}</span>`;
+      clockToggle.setAttribute("aria-pressed", String(clockMode === "duration"));
+      clockToggle.setAttribute("aria-label", clockMode === "duration" ? "切换为时间显示" : "切换为耗时显示");
+      clockToggle.title = clockMode === "duration" ? "切换为时间；耗时分档：≤5秒、5–10秒、10–20秒、>20秒；橙色表示较慢，非错误" : "切换为耗时：≤5秒、5–10秒、10–20秒、>20秒";
+    }
     if (byId("trajectoryCallCount")) byId("trajectoryCallCount").textContent = String(stats.calls);
     const selected = events.find((event) => event.id === selectedId) || visible[0] || null;
     selectedId = selected?.id || null;
@@ -1358,7 +1416,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
           metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics } }));
         call.summary = liveSummary(type, payload);
         call.status = toolResultPresentation(payload).status;
-        call.timestamp_end = timestamp;
+        if (call.duration_source !== "execution") call.timestamp_end = timestamp;
+        applyExecutionTiming(call, payload.timing, "tool_execution");
         if (activeAssistantLoop?.run_id === currentRunId) {
           activeAssistantLoop.status = "completed";
           activeAssistantLoop = null;
@@ -1457,6 +1516,10 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     scheduleRender();
   });
   listen(search, "input", scheduleRender);
+  listen(clockToggle, "click", () => {
+    clockMode = clockMode === "time" ? "duration" : "time";
+    scheduleRender();
+  });
   listen(exportButton, "click", exportTrace);
   listen(list, "click", (event) => {
         const row = event.target.closest("[data-trajectory-id]");
@@ -1540,9 +1603,10 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     return true;
   }
   function snapshot() {
-    return { selectedId, selectionPinned, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, mode, view: activeView, query: search?.value || "", listScrollTop: list.scrollTop, detailScrollTop: detail.scrollTop };
+    return { selectedId, selectionPinned, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, mode, clockMode, view: activeView, query: search?.value || "", listScrollTop: list.scrollTop, detailScrollTop: detail.scrollTop };
   }
   function restore(value = {}) {
+    clockMode = value.clockMode === "duration" ? "duration" : "time";
     if (value.selectedId && allEvents().some((event) => event.id === value.selectedId)) {
       selectedId = value.selectedId;
       selectionPinned = value.selectionPinned !== false;

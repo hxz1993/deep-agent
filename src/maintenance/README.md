@@ -23,11 +23,13 @@ PYTHONPATH=src python3.12 -m maintenance.channel_origins --help
 
 ## 配置备份
 
+本地及DevBox任务必须使用仓库的 `.venv/bin/python`，与服务共用已安装依赖；不要使用系统Python或把虚拟环境解释器解析成系统软链目标。备份最后会加载DeepAgent数据层验证，系统环境缺少项目依赖（如 `pydantic_ai.models.openai_codex`）会导致导出失败。
+
 这个维护命令把一个 DeepAgent 环境的配置导出为单个 SQLite `.db` 文件。
 文件可以直接用 DBeaver 打开，也可以复制后作为本地 DeepAgent 数据库使用。
 
 ```bash
-PYTHONPATH=src python3.12 -m maintenance.config_backup \
+PYTHONPATH=src .venv/bin/python -m maintenance.config_backup \
   --config ~/.config/deep-agent/test.env \
   --environment test
 ```
@@ -35,7 +37,7 @@ PYTHONPATH=src python3.12 -m maintenance.config_backup \
 Alpha 使用独立的私有连接文件，不能只改 `--environment` 后继续使用 Test 配置：
 
 ```bash
-PYTHONPATH=src python3.12 -m maintenance.config_backup \
+PYTHONPATH=src .venv/bin/python -m maintenance.config_backup \
   --config ~/.config/deep-agent/alpha.env \
   --environment alpha
 ```

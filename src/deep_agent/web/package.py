@@ -24,7 +24,7 @@ def build_web_tool_package() -> ToolPackage:
             ToolInfo(
                 name="web_fetch",
                 display_name="获取网页内容",
-                description="抓取公开 HTTP(S) 网页并转换为受限 Markdown。",
+                description="按全局抓取配置获取公开 HTTP(S) 网页正文及来源；图片链接需另行查看。",
             ),
             ToolInfo(
                 name="web_image_view",

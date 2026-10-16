@@ -28,7 +28,7 @@
                 <div class="global-settings-section-heading">
                   <div class="global-settings-section-title">
                     <h3>网络搜索</h3>
-                    <span class="global-settings-section-copy">配置 Web Search 工具使用的搜索供应商。</span>
+                    <span class="global-settings-section-copy">配置 Web Search 搜索及 Web Fetch 网页抓取。</span>
                   </div>
                   <div class="global-settings-section-actions">
                     <span class="global-settings-summary-value" id="webSearchSummaryValue">未配置</span>
@@ -323,15 +323,15 @@
     </section>
   </div>
 
-  <dialog class="modal console-detail-dialog web-search-settings-dialog" id="webSearchSettingsDialog">
+  <dialog class="modal console-detail-dialog web-search-settings-dialog" id="webSearchSettingsDialog" aria-labelledby="webSearchSettingsTitle">
     <form class="web-search-settings-form" id="webSearchSettingsForm" novalidate>
       <div class="modal-header">
-        <h3>编辑 Web Search</h3>
+        <h3 id="webSearchSettingsTitle">网络搜索</h3>
         <button class="icon-action" id="closeWebSearchSettingsBtn" type="button" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
       </div>
       <div class="modal-body web-search-settings-body">
         <fieldset class="web-search-mode-fieldset">
-          <legend>搜索服务</legend>
+          <legend>搜索服务 <span class="web-fetch-caption">Web Search</span></legend>
           <label class="web-search-unconfigured-option">
             <input type="radio" name="webSearchCategory" value="unconfigured" />
             <span>暂不配置</span>
@@ -370,15 +370,6 @@
                 </select>
               </div>
             </div>
-          </div>
-
-          <div class="field" data-web-search-field="model">
-              <span>搜索模型</span>
-              <div class="console-select" data-console-select="webSearchModel">
-                <button class="console-select-trigger" id="webSearchModelTrigger" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="webSearchModelLabel"></span><i data-lucide="chevron-down"></i></button>
-                <div class="console-select-menu hidden" id="webSearchModelMenu" role="listbox" aria-label="选择搜索模型"></div>
-                <select class="hidden" id="webSearchModel" tabindex="-1" aria-hidden="true"></select>
-              </div>
           </div>
 
           <div class="web-search-credential-row" id="webSearchCredentialRow">
@@ -420,6 +411,20 @@
             <span class="web-search-test-feedback-dot" aria-hidden="true"></span>
             <span id="webSearchTestFeedbackText"></span>
           </div>
+        <fieldset class="web-search-mode-fieldset web-fetch-fieldset">
+          <legend>网页抓取 <span class="web-fetch-caption">Web Fetch</span></legend>
+          <div class="web-fetch-options">
+            <label class="web-fetch-option" id="webFetchFollowOption">
+              <input type="radio" name="webFetchMode" value="follow_search" />
+              <span>跟随搜索</span>
+            </label>
+            <label class="web-fetch-option">
+              <input type="radio" name="webFetchMode" value="system" checked />
+              <span>系统内置</span>
+            </label>
+          </div>
+          <p class="web-fetch-description" id="webFetchDescription">由 DeepAgent 直接获取网页，无需供应商 Key。</p>
+        </fieldset>
       </div>
 
       <footer class="modal-footer">

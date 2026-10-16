@@ -143,7 +143,7 @@ DeepAgent 已有 Event Store，首版不应再建立一套与之竞争的消息�
 
 ## 10. 证据索引与未验证项
 
-本地参考库根：`deepfos-AI/agent-labs/`；Pydantic 与 Hermes 在 `upstream-agent-references/projects/`；DSH 在 `deepfos-AI/deepseek-harness/`。以上路径与版本表共同定位源码，不依赖未来 main 分支行为。
+本地参考库根：`/Users/wuzhiruge/PycharmProjects/AI-hub/agent-labs/`；Pydantic 与 Hermes 在 `upstream-agent-references/projects/`；DSH 在 `deepfos-AI/deepseek-harness/`。以上路径与版本表共同定位源码，不依赖未来 main 分支行为。
 
 没有在本次执行真实停机、重启或发送定时消息测试。Codex 私有调度算法未知；Prefect/Temporal/DBOS 的具体生产部署行为需选型后按指定版本验收；所有系统都不能仅凭“有持久化”宣称外部工具副作用 exactly-once。
 

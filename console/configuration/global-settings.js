@@ -1,5 +1,5 @@
 const WEB_SEARCH_PROVIDERS = {
-  deepseek: { label: "DeepSeek", requiresKey: true, llmProviderType: "deepseek", defaultModel: "deepseek-flash", models: ["deepseek-flash", "deepseek-v4-pro"] },
+  deepseek: { label: "DeepSeek", requiresKey: true, llmProviderType: "deepseek" },
   kimi: { label: "Kimi", requiresKey: true, llmProviderType: "moonshotai" },
   tavily: { label: "Tavily", requiresKey: true },
   exa: { label: "Exa", requiresKey: true },
@@ -100,11 +100,8 @@ function providerUiState(provider, apiKeySet = false) {
   return {
     provider,
     requiresKey: definition.requiresKey,
-    requiresModel: Boolean(definition.defaultModel),
     supportsLlmProvider: Boolean(definition.llmProviderType),
     llmProviderType: definition.llmProviderType || "",
-    defaultModel: definition.defaultModel || "",
-    models: definition.models || [],
     apiKeySet: Boolean(apiKeySet),
   };
 }
@@ -199,17 +196,6 @@ function setWebSearchCredentialSource(source) {
   if (input) input.checked = true;
 }
 
-function renderWebSearchModelMenu(selectedModel) {
-  const config = providerUiState("deepseek");
-  const select = document.getElementById("webSearchModel");
-  if (!select) return;
-  const selected = String(selectedModel ?? select.value).trim() || config.defaultModel;
-  const models = [...new Set([...config.models, selected])];
-  select.innerHTML = models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("");
-  select.value = selected;
-  renderConsoleSelect("webSearchModel");
-}
-
 function renderWebSearchLlmProviderOptions(provider, selectedId = "") {
   const select = document.getElementById("webSearchLlmProvider");
   if (!select) return;
@@ -220,11 +206,29 @@ function renderWebSearchLlmProviderOptions(provider, selectedId = "") {
   renderConsoleSelect("webSearchLlmProvider", "暂无可沿用的供应商");
 }
 
+function webSearchFetchMode(provider, requestedMode) {
+  return ["deepseek", "kimi"].includes(provider) && requestedMode === "follow_search" ? "follow_search" : "system";
+}
+
+function updateWebFetchMode() {
+  const provider = selectedWebSearchProvider();
+  const supportsFollow = ["deepseek", "kimi"].includes(provider);
+  document.getElementById("webFetchFollowOption")?.classList.toggle("hidden", !supportsFollow);
+  const requested = document.querySelector('input[name="webFetchMode"]:checked')?.value;
+  const mode = webSearchFetchMode(provider, requested);
+  document.querySelectorAll('input[name="webFetchMode"]').forEach(input => { input.checked = input.value === mode; });
+  const description = document.getElementById("webFetchDescription");
+  if (description) description.textContent = mode === "follow_search"
+    ? `使用 ${WEB_SEARCH_PROVIDERS[provider].label} 抓取网页，沿用搜索凭据。`
+    : "由 DeepAgent 直接获取网页，无需供应商 Key。";
+}
+
 function webSearchSummaryLabel(settings) {
   const value = settings?.value || {};
-  if (value.mode !== "provider") return "未配置";
   if (value.configuration_error) return "配置不可用";
-  return WEB_SEARCH_PROVIDERS[value.provider]?.label || value.provider || "未配置";
+  const configured = value.mode === "provider";
+  const label = configured ? WEB_SEARCH_PROVIDERS[value.provider]?.label || value.provider || "未配置" : "未配置";
+  return label;
 }
 
 function webSearchTestFeedbackPresentation(status, message = "") {
@@ -263,12 +267,11 @@ function renderWebSearchSummary(settings) {
   }
 }
 
-function buildWebSearchPayload({ mode, provider, model, apiKey, maskedApiKey, credentialSource, llmProviderId }) {
-  if (mode === "unconfigured") return { version: 1, value: { mode: "unconfigured" } };
+function buildWebSearchPayload({ mode, provider, fetchMode, apiKey, maskedApiKey, credentialSource, llmProviderId }) {
+  if (mode === "unconfigured") return { version: 1, value: { mode: "unconfigured", fetch_mode: "system" } };
   if (mode !== "provider" || !WEB_SEARCH_PROVIDERS[provider]) throw new Error("请选择搜索供应商");
   const state = providerUiState(provider);
-  const value = { mode: "provider", provider };
-  if (state.requiresModel) value.model = String(model || state.defaultModel).trim();
+  const value = { mode: "provider", provider, fetch_mode: webSearchFetchMode(provider, fetchMode) };
   if (state.supportsLlmProvider) {
     value.credential_source = credentialSource === "llm_provider" ? "llm_provider" : "api_key";
     if (value.credential_source === "llm_provider") {
@@ -299,6 +302,7 @@ function updateWebSearchCategory({ resetCredentialSource = false } = {}) {
   document.querySelector('[data-web-search-detail="provider"]')?.classList.toggle("hidden", !configured);
   document.querySelector('[data-web-search-field="provider"]')?.classList.toggle("hidden", category !== "third-party");
   if (configured) updateWebSearchProvider({ resetCredentialSource });
+  updateWebFetchMode();
   setWebSearchBusy(Boolean(webSearchOperation));
 }
 
@@ -307,13 +311,11 @@ function updateWebSearchProvider({ resetCredentialSource = false } = {}) {
   const provider = selectedWebSearchProvider();
   const current = globalSettingsAdmin.webSearch?.value || {};
   const state = providerUiState(provider);
-  const modelField = document.querySelector('[data-web-search-field="model"]');
   const credentialRow = document.getElementById("webSearchCredentialRow");
   const credentialSourceField = document.querySelector('[data-web-search-field="credential-source"]');
   const llmProviderField = document.querySelector('[data-web-search-field="llm-provider"]');
   const keyField = document.querySelector('[data-web-search-field="api-key"]');
   const keylessTest = document.querySelector('[data-web-search-field="keyless-test"]');
-  modelField?.classList.toggle("hidden", !state.requiresModel);
 
   const reusableProviders = reusableLlmProviders(provider);
   if (resetCredentialSource) {
@@ -326,10 +328,10 @@ function updateWebSearchProvider({ resetCredentialSource = false } = {}) {
   keylessTest?.classList.toggle("hidden", state.requiresKey);
   credentialRow?.classList.toggle("simple", !state.supportsLlmProvider);
 
-  if (state.requiresModel) renderWebSearchModelMenu();
   const selectedLlmProviderId = current.provider === provider ? current.llm_provider_id : "";
   renderWebSearchLlmProviderOptions(provider, resetCredentialSource ? selectedLlmProviderId : (document.getElementById("webSearchLlmProvider")?.value || selectedLlmProviderId));
   if (resetCredentialSource) resetWebSearchApiKey(provider);
+  updateWebFetchMode();
   window.lucide?.createIcons();
 }
 
@@ -353,7 +355,8 @@ function renderWebSearchSettings(settings) {
   const providerInput = document.getElementById("webSearchProvider");
   if (providerInput) providerInput.value = category === "third-party" ? provider : "tavily";
   renderConsoleSelect("webSearchProvider");
-  renderWebSearchModelMenu(provider === "deepseek" ? value.model || "" : "");
+  const fetchMode = webSearchFetchMode(provider, value.fetch_mode);
+  document.querySelectorAll('input[name="webFetchMode"]').forEach(input => { input.checked = input.value === fetchMode; });
   setWebSearchCredentialSource(value.credential_source || (value.llm_provider_id ? "llm_provider" : "api_key"));
   renderWebSearchLlmProviderOptions(provider, value.llm_provider_id || "");
   resetWebSearchApiKey(provider);
@@ -366,7 +369,7 @@ function currentWebSearchDraft() {
   return buildWebSearchPayload({
     mode: selectedWebSearchCategory() === "unconfigured" ? "unconfigured" : "provider",
     provider: selectedWebSearchProvider(),
-    model: document.getElementById("webSearchModel")?.value,
+    fetchMode: document.querySelector('input[name="webFetchMode"]:checked')?.value,
     apiKey: document.getElementById("webSearchApiKey")?.value,
     maskedApiKey: document.getElementById("webSearchApiKey")?.dataset.maskedValue,
     credentialSource: selectedWebSearchCredentialSource(),
@@ -678,9 +681,13 @@ const globalSettingsAdmin = {
       this.webSearch = saved;
       renderWebSearchSettings(saved);
       document.getElementById("webSearchSettingsDialog")?.close();
-      showToast("Web Search 配置已保存");
+      try {
+        this.webSearch = await apiFetch("/api/v1/global-settings/web-search");
+        renderWebSearchSettings(this.webSearch);
+        showToast("网络搜索配置已保存");
+      } catch (error) { showToast(`网络搜索配置已保存，刷新失败：${error.message}`, true); }
     } catch (error) {
-      showToast(error?.message || "Web Search 配置保存失败", true);
+      showToast(error?.message || "网络搜索配置保存失败", true);
     } finally {
       finishWebSearchOperation(operation);
     }
@@ -726,6 +733,7 @@ window.__GlobalSettingsUI = {
   switchHtml: globalSettingsSwitchHtml,
   matches: globalSettingMatches,
   webSearchSummaryLabel,
+  webSearchFetchMode,
   webSearchTestFeedbackPresentation,
   documentParsingSummaryLabel,
   documentParsingCapabilitiesLabel,
@@ -766,7 +774,6 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("closeWebSearchSettingsBtn")?.addEventListener("click", closeWebSearchSettings);
   bindConsoleSelect("webSearchProvider");
   bindConsoleSelect("webSearchLlmProvider");
-  bindConsoleSelect("webSearchModel");
   document.querySelectorAll('input[name="webSearchCategory"]').forEach((input) => input.addEventListener("change", () => {
     const key = document.getElementById("webSearchApiKey");
     if (key) key.value = "";
@@ -779,7 +786,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.querySelectorAll('input[name="webSearchCredentialSource"]').forEach((input) => input.addEventListener("change", () => updateWebSearchProvider()));
   document.getElementById("webSearchLlmProvider")?.addEventListener("change", () => setWebSearchTestFeedback());
-  document.getElementById("webSearchModel")?.addEventListener("change", () => setWebSearchTestFeedback());
+  document.querySelectorAll('input[name="webFetchMode"]').forEach(input => input.addEventListener("change", updateWebFetchMode));
   document.getElementById("webSearchSettingsForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     globalSettingsAdmin.saveWebSearch();

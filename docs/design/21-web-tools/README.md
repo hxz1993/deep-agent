@@ -2,6 +2,8 @@
 
 > 2026-09-19：**独立搜索服务改版v0.10.14 已实现**。
 
+2026-10-16增量：DeepSeek已迁移独立Search，DeepSeek／Kimi Fetch按“跟随搜索”接入；历史默认系统内置，移除搜索模型。当前权威说明为[使用与API指南](../../guides/web-tools.md)、[本轮验收](web-search-fetch-20261016-validation.md)。[前期调研](deepseek-search-fetch-20261016-research.md)保留政策快照，以下为2026-09-19历史实施记录，不代表当前仍使用Messages。
+
 - [改版设计](web-tools-design.md)：统一普通 `web_search`、三个配置入口、旧 native 空态兼容、
   DeepSeek Messages / Kimi Search API，以及失败 Tool Result 后会话继续的事件契约。
 - [研究与实测依据](web-tools-research.md)：DSH 源码链路、DeepSeek 不同协议实测、Pydantic AI/Harness 职责。

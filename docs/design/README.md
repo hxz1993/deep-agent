@@ -18,7 +18,7 @@
 | `11` | [`工具包与工具目录`](11-tool-packages/README.md) | 2026-08 | v0.3.2 已完成工具包目录、UI 工具包、运行 Toolset 与 Console 统一改造 |
 | `12` | [`Agent Skill`](12-agent-skills/README.md) | 2026-08 | v0.3.18 已完成 ToolPackage 分离、上传安装、Harness 渐进披露与资源治理 |
 | `13` | [`工具检索与渐进披露`](13-tool-discovery/README.md) | 2026-08 | v0.3.12 已完成词法 Top 3/Top 5、附件条件过滤和 Pydantic AI 渐进披露 |
-| `14` | [`框架能力采用基线`](14-framework-capabilities/README.md) | 2026-08 | 当前固定审计 Pydantic AI 2.35.1 与 Harness 0.26.0；记录已采用、暂缓和不采用边界 |
+| `14` | [`框架能力采用基线`](14-framework-capabilities/README.md) | 2026-08 | 框架职责与历史采用边界；本轮Core/Harness升级及A～E分档独立归38课题 |
 | `15` | [`浏览器与页面操作`](15-browser-and-page-actions/README.md) | 2026-08 | 区分当前页面 UI Tool、Harness BrowserUse 与 Provider Computer Use；旧 Web 分支不整体合并 |
 | `16` | [`PDF 与演示文稿解析`](16-pdf-and-presentation-parsing/README.md) | 2026-08 | 已完成行业与AI Labs调研；独立文档系统工具尚未实施 |
 | `17` | [`Console UI`](17-console-ui/README.md) | 2026-08 | 轻量企业控制台视觉体系持续落地；保留真实功能、分栏交互和四主题边界 |
@@ -39,6 +39,7 @@
 
 | `32` | [`新渠道接入`](32-new-channels/README.md) | 微信研究始于 2026-09-23；09-26 独立整理 | 微信原调研从 22 移入；企微自建应用公网回调/Gateway 交接；飞书 SDK、扫码与长连接专项调研；个人微信暂缓 |
 | `37` | [`文档解析：复杂 PDF 选型与工具化`](37-document-parsing/README.md) | 2026-09-29 | MPDocBench研究；MinerU本地/线上及Paddle官方Demo定向测试；商业API与长文档横评待补，尚未接入产品 |
+| `38` | [`Pydantic AI / Harness升级与能力采用`](38-pydantic-ai-harness-upgrade/README.md) | 2026-10-16 | Core 2.46→2.57、Harness 0.32→0.57研究；A～E分档及逐项TODO已记录，升级与新能力尚未实施 |
 
 ## 文档命名
 

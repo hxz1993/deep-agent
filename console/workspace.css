@@ -434,9 +434,10 @@ html, body {
   min-height: 48px;
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: 6px 12px;
   padding: 7px 14px;
   border-bottom: 0;
 }
@@ -447,9 +448,13 @@ html, body {
   align-items: center;
   gap: 6px;
 }
-.trajectory-actions { justify-content: flex-end; }
+.trajectory-actions { justify-content: flex-end; flex: 1 1 300px; }
+.trajectory-modes { flex-shrink: 0; }
 .trajectory-modes button,
-.trajectory-export {
+.trajectory-export,
+.trajectory-clock-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
   min-height: 30px;
   display: inline-flex;
   align-items: center;
@@ -464,7 +469,10 @@ html, body {
   cursor: pointer;
 }
 .trajectory-modes button:hover,
-.trajectory-export:hover { color: var(--text); background: var(--bg-hover); }
+.trajectory-export:hover,
+.trajectory-clock-toggle:hover { color: var(--text); background: var(--bg-hover); }
+.trajectory-clock-toggle[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.trajectory-clock-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .trajectory-modes button.active {
   border-color: var(--border);
   background: var(--bg-soft);
@@ -472,6 +480,7 @@ html, body {
 }
 .trajectory-modes svg,
 .trajectory-export svg,
+.trajectory-clock-toggle svg,
 .trajectory-search svg { width: 14px; height: 14px; }
 .trajectory-modes small {
   min-width: 17px;
@@ -484,8 +493,9 @@ html, body {
   text-align: center;
 }
 .trajectory-search {
+  flex: 1 1 120px;
   width: min(240px, 24vw);
-  min-width: 120px;
+  min-width: 90px;
   height: 32px;
   display: flex;
   align-items: center;
@@ -623,6 +633,13 @@ html, body {
 .trajectory-kind.error { background: var(--danger-soft); color: var(--danger-text); }
 .trajectory-row-meta { font-size: 12px; line-height: 18px; display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding-left: 8px; white-space: nowrap; }
 .trajectory-row-meta time { display: block; line-height: 18px; color: var(--text-faint); font-family: var(--mono); font-size: 12px; }
+.trajectory-duration { display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; min-width: 78px; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.trajectory-duration i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.trajectory-duration.fast { color: var(--duration-fast); }
+.trajectory-duration.steady { color: var(--duration-steady); }
+.trajectory-duration.elevated { color: var(--duration-elevated); }
+.trajectory-duration.slow { color: var(--duration-slow); }
+.trajectory-duration.unknown { color: var(--text-faint); }
 .trajectory-row-meta em { display: block; line-height: 18px; font-size: 12px; font-style: normal; color: var(--text-faint); }
 .trajectory-row-meta em.failed { color: var(--danger); }
 .trajectory-row-meta em.running,

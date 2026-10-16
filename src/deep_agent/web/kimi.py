@@ -8,6 +8,7 @@ import httpx2
 
 from openai import AsyncOpenAI
 from pydantic_ai import ToolFailed
+from deep_agent.web.provider_api import parse_fetch, post_json, tool_endpoint
 
 
 def search_client(api_key: str | None, base_url: str | None = None) -> AsyncOpenAI:
@@ -38,3 +39,13 @@ async def execute_search(client: AsyncOpenAI, query: str) -> dict[str, Any]:
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
             raise ToolFailed("Kimi Web Search returned invalid source URLs")
     return {"search_results": rows[:5], "untrusted_external_content": True}
+
+
+async def execute_fetch(*, api_key: str, base_url: str | None, url: str) -> dict[str, str]:
+    endpoint = tool_endpoint(base_url, default="https://api.moonshot.cn/v1", tool="fetch")
+    payload = await post_json(endpoint, api_key, {"url": url})
+    # The standalone Kimi endpoint returns `markdown`, unlike DeepSeek's
+    # `content`. Do not accept an answer/summary as a substitute for this body.
+    if isinstance(payload, dict):
+        payload = {"title": payload.get("title"), "content": payload.get("markdown")}
+    return parse_fetch(payload, "Kimi")

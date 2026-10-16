@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -9,6 +10,7 @@ from sqlalchemy import text
 from deep_agent.api.v1 import api_router
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from deep_agent.db.models import LlmModel
+from deep_agent.security import ConsoleAdminAuthorizer
 from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 
@@ -26,11 +28,13 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
                 stores=self.stores,
                 db_engine=self._engine,
                 db_session_factory=self._session_factory,
+                console_admin_authorizer=ConsoleAdminAuthorizer(AsyncMock(return_value=True)),
             )
         )
         self._client = AsyncClient(
             transport=ASGITransport(app=app, raise_app_exceptions=False),
             base_url="http://test",
+            headers={"user": "fixture-admin"},
         )
         self._default_model = (await self.stores.llm_model.list_all())[0]
 
@@ -478,7 +482,7 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated_provider.status_code, 200, updated_provider.text)
 
         response = await self._client.get(
-            "/api/v1/llm-models", params={"provider_id": provider.id}
+            "/api/v1/llm-models", params={"provider_id": provider.id, "selectable_only": False}
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(len(response.json()), 1)

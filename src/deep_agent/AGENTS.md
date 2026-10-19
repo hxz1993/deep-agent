@@ -846,3 +846,7 @@ MCP 工具合计不超过 10 个时全部直接披露，超过 10 个时预选�
 Part差异只记录固定SDK字段名，不记录内容、参数、任意metadata键、SQL或原始异常；字段仅在
 `message_persistence_failed`事件白名单开放，并在文本日志读取时再次校验。写入边界区分增量、终态、
 状态收口和后台队列。不可把一个ValueError直接描述为已证实的不可变冲突，须核对新分类与位置。
+
+### 可选首轮标题（v0.13.9）
+
+`ChatRequest.session_title`仅首次真实用户输入生效，普通/流式共用`_prepare_history`；Coordinator在Session锁和归属校验后核对首条user事件ID并追加user标题事件，自动标题沿用既有latest-title保护。渠道/new预创建的空会话可命名，渠道来源事件不改；续聊或纯deferred回传不改名。省略/null不进入新增存储路径，Console不发送，后续改名继续PATCH。

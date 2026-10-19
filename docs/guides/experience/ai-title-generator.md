@@ -6,6 +6,14 @@ DeepAgent 普通会话只在首轮自动生成一次标题。标题请求复用�
 渠道来源是例外：创建Session时已写入`source=channel`的标题事件，按外部用户/群名称或ID命名，
 不启动模型标题请求。来源快照与该Session绑定，不因渠道Binding转向新Session或人工改名而丢失。
 
+## 客户端首次命名（v0.13.9）
+
+`POST /api/v1/chat`和`POST /api/v1/chat/stream`可选传`session_title`。省略或null不改变原自动命名流程；非空名称最多80字，去掉首尾空格，空白或超长拒绝。Console不传，仅供定制客户端按需使用。
+
+首次持久化用户输入时，在既有会话锁及所有者校验内核对第一条`user/message`，采用名称并追加`source=user`标题事件；随后原自动流程发现已有标题而跳过fallback和模型请求。渠道`/new`已有空会话和渠道标题也可在首条用户输入时接受明确名称，原渠道来源事件不变。标题不进入模型输入，SSE沿用`session_title`通知。
+
+续聊携带此参数不会改名，纯工具回传没有新用户输入也不处理；后续改名继续`PATCH /sessions/{id}`。不新增会话创建接口、数据库结构或配置项。
+
 ## 调用链
 
 1. 持久化首条 `user/message`。

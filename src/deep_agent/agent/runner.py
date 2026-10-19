@@ -847,6 +847,7 @@ class AgentRunner:
         message: str,
         deps: AgentDeps,
         *,
+        session_title: str | None = None,
         attachments: list[AttachmentRef] | None = None,
         context_refs: list[ContextReference] | None = None,
         branch_from: int | None = None,
@@ -892,6 +893,14 @@ class AgentRunner:
                     )
             if rows:
                 user_event_id = rows[0].event_id
+            if user_event_id is not None and session_title is not None:
+                title_event = await self.store.apply_initial_session_title(
+                    session_id, agent_id=deps.agent_id, user_id=deps.user,
+                    title=session_title, source_event_id=user_event_id,
+                    turn_id=deps.turn_id, run_id=deps.run_id,
+                )
+                if title_event is not None and session_event_queue is not None:
+                    self._publish_title_events(session_event_queue, title_event)
             history = [*history, user_request]
             raw_history = [*raw_history, user_request]
             pre_persisted_user = True
@@ -1694,6 +1703,7 @@ class AgentRunner:
         message: str,
         deps: AgentDeps,
         *,
+        session_title: str | None = None,
         attachments: list[AttachmentRef] | None = None,
         context_refs: list[ContextReference] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
@@ -1731,6 +1741,7 @@ class AgentRunner:
                     session_id,
                     message,
                     deps,
+                    session_title=session_title,
                     attachments=attachments,
                     context_refs=context_refs,
                     branch_from=branch_from,
@@ -2095,6 +2106,7 @@ class AgentRunner:
         message: str,
         deps: AgentDeps,
         *,
+        session_title: str | None = None,
         attachments: list[AttachmentRef] | None = None,
         context_refs: list[ContextReference] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
@@ -2146,6 +2158,7 @@ class AgentRunner:
                     session_id,
                     message,
                     deps,
+                    session_title=session_title,
                     attachments=attachments,
                     context_refs=context_refs,
                     branch_from=branch_from,

@@ -86,6 +86,11 @@ class SessionStore(Protocol):
     async def update_session_title(
         self, session_id: str, agent_id: str | None, title: str,
     ) -> None: ...
+    async def apply_initial_session_title(
+        self, session_id: str, *, agent_id: str | None, user_id: str | None,
+        title: str, source_event_id: str, turn_id: str | None, run_id: str | None,
+    ) -> SessionEventSnapshot | None: ...
+
     async def ensure_title_fallback(
         self, session_id: str, *, agent_id: str | None, user_id: str | None,
         title: str, source_event_id: str, turn_id: str | None,
@@ -790,6 +795,40 @@ class SqlConversationCoordinator:
             return await self._chat_sessions.update_session_title_if_current(
                 db, scope, session_id, expected_title=expected_title, title=title
             )
+
+    async def apply_initial_session_title(
+        self, session_id: str, *, agent_id: str | None, user_id: str | None,
+        title: str, source_event_id: str, turn_id: str | None, run_id: str | None,
+    ) -> SessionEventSnapshot | None:
+        """Accept a caller title only for the first persisted user input.
+
+        A channel /new may already have a title-only session. Keep that origin
+        event intact while atomically appending the explicit title projection.
+        """
+        scope, user = self._required_identity(agent_id, user_id)
+        normalized = title.strip()[:80]
+        if not normalized:
+            raise ValueError("Session title must not be blank")
+        async with self._write() as db:
+            owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
+            if not owner.exists or owner.user_id != user:
+                raise PermissionError("Session belongs to another Agent or user")
+            first = await db.scalar(select(ChatSessionEvent.event_id).where(
+                ChatSessionEvent.session_id == session_id,
+                ChatSessionEvent.event_type == "user/message",
+            ).order_by(ChatSessionEvent.sequence).limit(1))
+            if first is None or first != source_event_id:
+                return None
+            latest = await self._events._latest_title(db, session_id)
+            if latest is not None and latest.payload.get("source") == "user" and latest.payload.get("source_event_id") == source_event_id:
+                return None
+            session = await db.get(ChatSession, session_id)
+            assert session is not None
+            row = await self._events._append_title(
+                db, session, title=normalized, source="user",
+                source_event_id=source_event_id, turn_id=turn_id, run_id=run_id,
+            )
+            return SessionEventSnapshot.from_row(row)
 
     async def ensure_title_fallback(
         self,

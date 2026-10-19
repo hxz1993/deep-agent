@@ -24,6 +24,26 @@ from tests.helpers.models import text_only_model
 
 
 class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_client_initial_title_smoke_for_both_chat_interfaces(self) -> None:
+        for streaming in (False, True):
+            with self.subTest(streaming=streaming):
+                title_mock = AsyncMock()
+                body = {"agent_id": self._agent_id, "message": "解析附件", "session_title": "  客户合同填报  ", "capabilities": []}
+                with patch("deep_agent.agent.factory._resolve_model", return_value=text_only_model("已收到")), \
+                     patch("deep_agent.agent.title_generator.generate_title", title_mock), mock_request_disconnect():
+                    async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                        response = await client.post("/api/v1/chat/stream" if streaming else "/api/v1/chat", json=body)
+                self.assertEqual(response.status_code, 200, response.text)
+                events = parse_sse_events(response.text) if streaming else []
+                session_id = next(e["session_id"] for e in events if e["type"] == "session") if streaming else response.json()["session_id"]
+                self.assertEqual(await self._stores.coordinator.get_session_title(session_id, agent_id=self._agent_id), "客户合同填报")
+                title_mock.assert_not_awaited()
+                rows = await self._stores.coordinator.list_events(session_id, limit=500)
+                titles = [row for row in rows if row.event_type == "session/title"]
+                self.assertEqual([row.payload["source"] for row in titles], ["user"])
+                if streaming:
+                    self.assertEqual([e["title"] for e in events if e["type"] == "session_title"], ["客户合同填报"])
+
     async def asyncSetUp(self) -> None:
         stores, self._engine, self._session_factory = await make_sqlite_stores()
         model_row = await stores.llm_configuration.create_model(

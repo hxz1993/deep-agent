@@ -25,6 +25,21 @@ class ChatRequest(BaseModel):
         default=None,
         description="Conversation id. If omitted, a new session id is generated.",
     )
+    session_title: str | None = Field(
+        default=None, min_length=1, max_length=80,
+        description="Optional title for the first user turn, including a pre-created empty session. Later turns ignore it; omit for existing automatic naming.",
+    )
+
+    @field_validator("session_title")
+    @classmethod
+    def _validate_session_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        title = value.strip()
+        if not title:
+            raise ValueError("Session title must not be blank")
+        return title
+
     model: str | None = Field(
         default=None,
         description='Optional model override, e.g. "anthropic:claude-sonnet-4-5". Ignored when model_id is set.',

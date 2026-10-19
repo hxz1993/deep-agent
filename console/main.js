@@ -7,11 +7,12 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20261017-web-search-radio";
+} from "./configuration.js?v=20261019-release0137";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261017-console-audit";
-import { initWorkspace } from "./workspace.js?v=20261017-console-audit";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261019-release0137";
+import { initWorkspace } from "./workspace.js?v=20261019-release0137";
 import "./time.js?v=20260913-49";
+import "./configuration-directory.js?v=20261019-release0137";
 
 initUserIdentityControls();
 
@@ -107,6 +108,7 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   }
   if (consoleAllowed && next === "workspace" && current !== "workspace") {
     void window.DeepAgentConsoleWorkspace?.refreshChannelAccounts();
+    void window.DeepAgentConsoleChat?.refreshConfiguration({ force: true });
   }
   window.lucide?.createIcons();
 }

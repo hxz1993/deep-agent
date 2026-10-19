@@ -40,6 +40,17 @@ test('refresh does not replace an active POST stream',async()=>{
   const h=refreshHarness({streaming:true}); await h.refreshAgentWorkspace();
   assert.equal(h.calls.some(c=>c[0]==='switch'),false);
 });
+test('manual refresh preserves observations, pending confirmations, and history loads',async()=>{
+  for (const flag of ['observingRun', 'awaitingHitl', 'historyLoading']) {
+    const h=refreshHarness(); h.state[flag]=true;
+    await h.refreshAgentWorkspace();
+    assert.equal(h.state.sessionId,'old');
+    assert.equal(h.calls.some(c=>c[0]==='switch'||c[0]==='new'),false);
+  }
+  const h=refreshHarness({status:404,streaming:true});
+  await h.refreshAgentWorkspace();
+  assert.equal(h.state.sessionId,'old');
+});
 test('late refresh cannot jump back after user navigation',async()=>{
   const h=refreshHarness(); let finish;
   h.daFetch=()=>new Promise(resolve=>{finish=resolve;});

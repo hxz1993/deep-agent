@@ -2,9 +2,9 @@ import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 import { peerPickerHtml, bindPeerPicker } from "./channel-peer-picker.js?v=20260928-channel-profiles";
 import { escapeHtml as e, icon, icons, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260915-release-audit";
 import { diagnosticHash, sessionRange, channelEntryFilters } from "./diagnostics-navigation.js?v=20260915-release-audit";
-import { createSessionReader, sessionQueryError } from "./diagnostics-session-query.js?v=20260915-release-audit";
+import { createSessionReader, sessionQueryError } from "./diagnostics-session-query.js?v=20261019-release0137";
 import { bindChannelResizer } from "./channel-resizer.js?v=20260915-release-audit";
-import { shortQuestionTime } from "./diagnostics-sessions.js?v=20261017-console-audit";
+import { shortQuestionTime } from "./diagnostics-sessions.js?v=20261019-release0137";
 
 const PERIODS = [["24", "最近 1 天"], ["168", "最近 7 天"], ["720", "最近 30 天"]];
 const PAGE_SIZE = 25;

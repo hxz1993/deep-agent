@@ -148,6 +148,7 @@ const state = {
   llmModels: [],
   uploadCapabilities: { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 },
   llmModelId: "",
+  modelManuallySelected: false,
   sessionModelIds: {},
   sessionId: null,
   conversationId: null,
@@ -669,8 +670,20 @@ function init() {
   loadCapabilities();
   loadUploadCapabilities();
   window.addEventListener("document-parsing-settings-changed", () => { void loadUploadCapabilities(); });
+  let directoryTimer;
+  const scheduleDirectoryRefresh = () => {
+    clearTimeout(directoryTimer);
+    directoryTimer = setTimeout(() => { void refreshConfiguration(); }, 50);
+  };
+  window.DeepAgentConsoleDirectory?.subscribe(scheduleDirectoryRefresh);
+  const revalidateDirectory = () => {
+    if (document.visibilityState === "visible" && document.body.dataset.consolePage === "workspace") {
+      void refreshConfiguration({ force: true });
+    }
+  };
+  window.addEventListener("focus", revalidateDirectory);
+  document.addEventListener("visibilitychange", revalidateDirectory);
   loadAgents().then(async () => {
-    await loadLlmModels();
     loadUiTools(state.agentId);
     if (agentFromUrl) newChat(agentFromUrl);
     else updateAgentSelectState();
@@ -911,7 +924,7 @@ function detachChatView() {
   setStreaming(false);
 }
 
-function newChat(agentId) {
+function newChat(agentId, { preserveDraft = false } = {}) {
   const id = normalizeAgentId(agentId);
   closeNewChatMenu();
   detachChatView();
@@ -933,7 +946,8 @@ function newChat(agentId) {
   state.lastRunUsage = null;
   state.lastRunMetrics = null;
   state.llmModelId = defaultLlmModelId();
-  clearPendingAttachments();
+  state.modelManuallySelected = false;
+  if (!preserveDraft) clearPendingAttachments();
   clearMessages();
   trajectory?.reset();
   showEmptyState();
@@ -1925,38 +1939,71 @@ function setConn(kind, text) {
 
 async function loadAgents({ isCurrent = () => true } = {}) {
   if (!el.agentSelect) return;
-  el.agentSelect.innerHTML = '<option value="">加载中…</option>';
+  if (!state.agents.length) el.agentSelect.innerHTML = '<option value="">加载中…</option>';
   try {
-    const r = await daFetch(serviceUrl("api/v1/agents"));
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const agents = await r.json();
-    if (!Array.isArray(agents)) {
-      throw new Error(`Agent 列表响应格式错误：${serviceUrl("api/v1/agents")}`);
-    }
-    if (!isCurrent()) return;
-    state.agents = agents;
-    el.agentSelect.innerHTML = "";
-    if (!state.agents.length) {
-      el.agentSelect.innerHTML = '<option value="">无可用 Agent</option>';
-      return;
-    }
-    for (const a of state.agents) {
-      const opt = document.createElement("option");
-      opt.value = a.id;
-      opt.textContent = a.name;
-      el.agentSelect.appendChild(opt);
-    }
-    ensureAgentSelected();
-    updateChatHeader();
-    await loadLlmModels();
-    if (el.newChatMenu && !el.newChatMenu.classList.contains("hidden")) {
-      renderNewChatMenu();
-    }
+    const updated = await refreshConfiguration({ force: true, isCurrent });
+    if (updated === false && !state.agents.length) el.agentSelect.innerHTML = '<option value="">加载失败</option>';
   } catch (e) {
-    el.agentSelect.innerHTML = `<option value="">加载失败</option>`;
+    if (!state.agents.length) el.agentSelect.innerHTML = '<option value="">加载失败</option>';
     console.warn("[deep-agent] 加载 Agent 失败", e);
   } finally {
     updateEmptyAgentName();
+  }
+}
+
+let configurationRefreshRevision = 0;
+let directoryDeletionDeferred = false;
+async function refreshConfiguration({ force = false, isCurrent = () => true } = {}) {
+  const directory = window.DeepAgentConsoleDirectory;
+  if (!directory) return;
+  const revision = ++configurationRefreshRevision;
+  try {
+    const [agents, models] = await Promise.all([
+      directory.read("/api/v1/agents", { force }),
+      directory.read("/api/v1/llm-models", { force }),
+    ]);
+    if (revision !== configurationRefreshRevision || !isCurrent()) return;
+    const busy = state.streaming || state.observingRun || state.awaitingHitl || state.historyLoading || state.abortController;
+    const previousAgent = currentAgent();
+    const previousModel = selectedLlmModel();
+    const previousDefault = defaultLlmModelId();
+    const missingAgent = state.agentId && !agents.some(agent => agent.id === state.agentId);
+    // Keep a deleted Agent visible until its active interaction finishes.
+    state.agents = missingAgent && busy && previousAgent ? [...agents, previousAgent] : agents;
+    directoryDeletionDeferred = Boolean(missingAgent && busy);
+    if (!busy && missingAgent) {
+      state.agentId = "";
+      state.llmModels = models;
+      newChat(undefined, { preserveDraft: true });
+    } else {
+      if (!state.agentId) ensureAgentSelected();
+      if (!busy && !state.sessionId && !state.modelManuallySelected
+        && (!state.llmModelId || state.llmModelId === previousDefault)) {
+        state.llmModelId = defaultLlmModelId();
+      }
+      // Removed/disabled selections remain visible as unavailable, never silently replaced.
+      state.llmModels = preserveCurrentModel(preserveCurrentModel(models, currentAgent()?.model), previousModel);
+      if (!state.llmModelId && !busy) ensureLlmModelSelected();
+    }
+    el.agentSelect.replaceChildren();
+    if (!state.agents.length) el.agentSelect.innerHTML = '<option value="">无可用 Agent</option>';
+    for (const agent of state.agents) {
+      const option = document.createElement("option");
+      option.value = agent.id;
+      option.textContent = agent.name;
+      el.agentSelect.appendChild(option);
+    }
+    el.agentSelect.value = state.agentId;
+    updateEmptyAgentName();
+    updateAgentSelectState();
+    updateHitlInputState();
+    window.DeepAgentConsoleWorkspace?.renderDirectory?.();
+    if (el.newChatMenu && !el.newChatMenu.classList.contains("hidden")) renderNewChatMenu();
+    return true;
+  } catch (error) {
+    // Background refresh failures leave the last usable directory and draft intact.
+    console.warn("[deep-agent] 配置列表同步失败", error);
+    return false;
   }
 }
 
@@ -1981,6 +2028,7 @@ function rememberSessionModel() {
 }
 
 function restoreSessionModel(session) {
+  state.modelManuallySelected = true;
   const normalized = normalizeSession(session);
   const key = sessionLookupKey(normalized);
   const remembered = state.sessionModelIds[key];
@@ -2043,6 +2091,7 @@ function composerModelLabel(model) {
 
 
 function selectComposerModel(modelId) {
+  state.modelManuallySelected = true;
   if (!modelId || modelId === state.llmModelId) {
     setComposerModelMenuOpen(false);
     return;
@@ -2115,22 +2164,6 @@ async function loadUploadCapabilities() {
     console.warn("[deep-agent] 加载上传能力失败", e);
   }
   updateComposerModelInfo();
-}
-
-async function loadLlmModels() {
-  try {
-    const r = await daFetch(serviceUrl("api/v1/llm-models"));
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    state.llmModels = preserveCurrentModel(await r.json(), currentAgent()?.model);
-    ensureLlmModelSelected();
-    updateComposerModelInfo();
-    updateHitlInputState();
-  } catch (e) {
-    state.llmModels = [];
-    console.warn("[deep-agent] 加载 LLM 模型失败", e);
-    updateComposerModelInfo();
-    updateHitlInputState();
-  }
 }
 
 function updateComposerModelInfo() {
@@ -2582,6 +2615,7 @@ function setStreaming(v) {
   updateAgentSelectState();
   updateHitlInputState();
   updateComposerContextControls();
+  if (!v && directoryDeletionDeferred) queueMicrotask(() => { void refreshConfiguration(); });
 }
 
 function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) {
@@ -3290,11 +3324,12 @@ async function refreshAgentWorkspace() {
     const response = await daFetch(sessionApiUrl(session));
     if (!current()) return false;
     if (response.status === 404) {
+      if (state.streaming || state.observingRun || state.awaitingHitl || state.abortController || state.historyLoading) return true;
       state.sessions = state.sessions.filter((item) => sessionLookupKey(item) !== sessionLookupKey(session));
-      newChat();
+      newChat(undefined, { preserveDraft: true });
     } else if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
-    } else if (!state.abortController) {
+    } else if (!state.abortController && !state.streaming && !state.observingRun && !state.awaitingHitl && !state.historyLoading) {
       const target = state.sessions.find((item) => sessionLookupKey(item) === sessionLookupKey(session));
       await switchSession(target || { ...session, title: el.chatTitle.textContent });
     }
@@ -3325,6 +3360,7 @@ window.DeepAgentConsoleChat = {
   },
   selectAgent,
   refreshAgentWorkspace,
+  refreshConfiguration,
 };
 
 // Presentation is shared with diagnostics; execution callbacks stay owned here.

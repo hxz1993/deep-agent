@@ -130,6 +130,10 @@
       credentials: "same-origin",
       headers: buildHeaders(extra, { includeContext }),
     });
+    if (response.ok) {
+      try { window.DeepAgentConsoleDirectory?.mutation(url, rest.method || "GET"); }
+      catch { /* A notification failure must never turn a successful save into an error. */ }
+    }
     if (reportStatus && [401, 403, 503].includes(response.status)) {
       window.dispatchEvent(
         new CustomEvent("deep-agent-console-api-status", {

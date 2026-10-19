@@ -190,6 +190,43 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(items["old"]["recent_question"])
         self.assertEqual(items["empty"]["latest_status"], "not_started")
 
+    async def test_recent_questions_select_first_per_session_before_limit(self):
+        expected = []
+        for index in range(12):
+            event = await self.question(f"session-{index:02d}", f"First question {index}",
+                at=self.now - timedelta(hours=12 - index))
+            expected.append(event.event_id)
+        await self.question("busy", "First busy question", at=self.now - timedelta(hours=20))
+        for index in range(11):
+            await self.question("busy", f"Follow-up {index}", at=self.now - timedelta(minutes=12 - index))
+        overview = await self.queries.overview(self.filters)
+        recent = overview["recent_questions"]
+        self.assertEqual([row["event_id"] for row in recent], list(reversed(expected))[:10])
+        self.assertEqual(len({row["session_id"] for row in recent}), 10)
+        self.assertEqual(overview["metrics"]["question_count"], 24)
+        self.assertEqual(sum(row["question_count"] for row in overview["trend"]), 24)
+
+    async def test_first_question_respects_range_filters_and_event_sequence(self):
+        from dataclasses import replace
+        # Only the first input within the selected range is eligible. A later
+        # follow-up with the same timestamp must not replace it by random ID.
+        await self.question("selected", "Before range", at=self.filters.start - timedelta(seconds=1))
+        first = await self.question("selected", "First in range", at=self.filters.start)
+        later = await self.question("selected", "Follow-up", at=self.filters.start)
+        await self.question("selected", "At excluded end", at=self.filters.end)
+        await self.question("other-owner", user="user-two")
+        async with self.factory() as db:
+            await db.execute(update(ChatSessionEvent).where(ChatSessionEvent.event_id == first.event_id)
+                .values(event_id="f" * 32))
+            await db.execute(update(ChatSessionEvent).where(ChatSessionEvent.event_id == later.event_id)
+                .values(event_id="0" * 32))
+            await db.commit()
+        overview = await self.queries.overview(replace(self.filters, user_id="user-one"))
+        self.assertEqual(len(overview["recent_questions"]), 1)
+        self.assertEqual(overview["recent_questions"][0]["event_id"], "f" * 32)
+        self.assertEqual(overview["recent_questions"][0]["summary"], "First in range")
+        self.assertEqual(overview["metrics"]["question_count"], 2)
+
     async def test_error_scope_not_latest_error_and_replay_does_not_double_count(self):
         first = await self.question("recover", run="first", terminal="failed")
         await self.error("recover", "first")
@@ -242,6 +279,83 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.queries.list(SessionFilters(*base, query="a", user_id="not-owner")))["total"], 0)
         pages = [await self.queries.list(SessionFilters(*base, limit=1, offset=index)) for index in range(3)]
         self.assertEqual([p["items"][0]["session_id"] for p in pages], ["c", "b", "a"])
+
+    async def test_status_filters_share_detail_semantics_before_pagination(self):
+        from dataclasses import replace
+
+        await self.question("recovered", run="failed", terminal="failed")
+        await self.error("recovered", "failed")
+        await self.question("recovered", run="recovered", terminal="completed")
+        await self.question("failed", terminal="failed")
+        await self.question("waiting", terminal="pending")
+        await self.question("stopped", terminal="cancelled")
+        await self.question("unknown")
+        await self.question("running")
+        await self.question("resumed", terminal="pending")
+        await self.store.append("resumed", [ModelRequest(parts=[ToolReturnPart("ui", "accepted", "call")])],
+            agent_id=self.agent_id, user_id="user-one", run_id="resume-only-results", turn_id="turn")
+        # New execution outside the activity window still determines latest status.
+        await self.question("latest-outside-range", run="old", terminal="failed")
+        await self.question("latest-outside-range", run="future", terminal="completed",
+                            at=self.filters.end + timedelta(hours=1))
+        await self.question("null-run", terminal="completed")
+        await self.question("null-latest-error", run="older-public-run", terminal="completed")
+        null_error = await self.error("null-latest-error", "legacy-error")
+        async with self.factory() as db:
+            await db.execute(update(ChatSessionEvent).where(ChatSessionEvent.session_id == "null-run")
+                             .values(run_id=None))
+            await db.execute(update(ChatSessionEvent).where(ChatSessionEvent.event_id == null_error.event_id)
+                             .values(run_id=None))
+            db.add(ChatSession(session_id="not-started", agent_id=self.agent_id, user_id="user-one",
+                created_at=self.now - timedelta(hours=1), updated_at=self.now))
+            await db.commit()
+        self.active.register(agent_id=self.agent_id, session_id="running", user_id="user-one",
+                             conversation_id="conversation", run_id="live")
+        # An active entry for another owner must not override stored state.
+        self.active.register(agent_id=self.agent_id, session_id="waiting", user_id="other-user",
+                             conversation_id="other", run_id="unrelated")
+        queries = DiagnosticSessionQueries(self.factory, self.active.snapshot())
+        expected = {"completed": {"recovered", "latest-outside-range", "null-run"},
+                    "error": {"failed", "null-latest-error"}, "waiting": {"waiting"}, "stopped": {"stopped"},
+                    "unknown": {"unknown", "resumed"}, "running": {"running"},
+                    "not_started": {"not-started"}}
+        for status, ids in expected.items():
+            selected = replace(self.filters, latest_status=status, user_id="user-one", limit=1)
+            found = set()
+            for offset in range(len(ids) + 1):
+                listing = await queries.list(replace(selected, offset=offset))
+                self.assertEqual(listing["total"], len(ids), status)
+                for row in listing["items"]:
+                    found.add(row["session_id"])
+                    self.assertEqual(row["latest_status"], status)
+                    self.assertEqual((await queries.detail(row["session_id"]))["latest_status"], status)
+            self.assertEqual(found, ids, status)
+            self.assertEqual((await queries.overview(selected))["metrics"]["session_count"], len(ids))
+        null_detail = await queries.detail("null-run")
+        self.assertIsNone(null_detail["run_id"])
+        self.assertEqual((await queries.detail("null-latest-error"))["run_id"], "older-public-run")
+        self.assertEqual((await queries.list(replace(self.filters, latest_status="error", user_id="other-user")))["total"], 0)
+
+    async def test_status_filter_query_plan_avoids_repeated_terminal_sorts(self):
+        await self.question("failed", terminal="failed")
+        statements = []
+        def capture(_conn, _cursor, statement, params, *_args):
+            statements.append((statement, params))
+        sql_event.listen(self.engine.sync_engine, "before_cursor_execute", capture)
+        try:
+            listing = await self.queries.list(SessionFilters(
+                self.filters.start, self.filters.end, latest_status="error"))
+        finally:
+            sql_event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
+        self.assertEqual(listing["total"], 1)
+        async with self.engine.connect() as connection:
+            statement, params = statements[0]  # COUNT is the pre-pagination bottleneck.
+            plan = [row[3] for row in (await connection.exec_driver_sql(
+                "EXPLAIN QUERY PLAN " + statement, params)).all()]
+        # Activity/existence probes remain indexed; latest terminal selection
+        # must be grouped rather than re-sorted in every CASE branch.
+        self.assertLessEqual(sum("CORRELATED SCALAR SUBQUERY" in row for row in plan), 6, plan)
+        self.assertFalse(any("USE TEMP B-TREE FOR ORDER BY" in row for row in plan), plan)
 
     async def test_half_open_dst_calendar_days_and_zero_bins(self):
         f = SessionFilters(datetime(2026, 3, 7, 5, tzinfo=UTC), datetime(2026, 3, 10, 4, tzinfo=UTC), timezone="America/New_York")
@@ -313,13 +427,16 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
         finally:
             sql_event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
         self.assertEqual(overview["metrics"]["question_count"], count * rounds)
+        self.assertEqual(len(overview["recent_questions"]), 10)
+        self.assertEqual(len({row["session_id"] for row in overview["recent_questions"]}), 10)
+        self.assertTrue(all(row["sequence"] == 1 for row in overview["recent_questions"]))
         self.assertEqual(page["total"], count)
         self.assertEqual(len(page["items"]), 50)
         self.assertLessEqual(overview_count, 8)
         self.assertLessEqual(len(statements) - overview_count, 8)
         plans = []
         async with self.engine.connect() as connection:
-            for statement, params in (statements[0], statements[overview_count + 1]):
+            for statement, params in (statements[0], statements[5], statements[overview_count + 1]):
                 plans.extend(row[3] for row in (await connection.exec_driver_sql("EXPLAIN QUERY PLAN " + statement, params)).all())
         self.assertTrue(any("INDEX ix_chat_session_events" in item for item in plans), plans)
         print(f"Diagnostic isolated SQL benchmark: {count} sessions / {len(events)} events; overview + list {elapsed:.3f}s; {overview_count} + {len(statements) - overview_count} SELECTs; existing event indexes used")

@@ -429,6 +429,7 @@ function webSearchDraftHarness(settings) {
       const classes = new Set();
       nodes.set(id, { value: "", innerHTML: "", textContent: "", dataset: {}, disabled: false, open: false,
         classList: { toggle(name, force) { const add = force ?? !classes.has(name); if (add) classes.add(name); else classes.delete(name); }, contains: name => classes.has(name) },
+        querySelector(selector) { return selector === ":scope > span" ? node(`${id}-label`) : null; },
         showModal() { this.open = true; }, close() { this.open = false; } });
     }
     return nodes.get(id);
@@ -491,12 +492,34 @@ test("跟随仅支持两家，切换搜索服务商和未配置时收敛为系�
   assert.equal(h.node("webFetchFollowOption").classList.contains("hidden"), true);
   h.radios.webSearchCategory[1].checked = true;
   h.run("updateWebSearchCategory({ resetCredentialSource: true })");
-  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "follow_search");
   h.radios.webFetchMode[0].checked = true;
   h.radios.webSearchCategory[3].checked = true;
   h.run("updateWebSearchCategory()");
   assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
   assert.equal(h.node("webFetchFollowOption").classList.contains("hidden"), true);
+});
+
+test("新配置选择DeepSeek或Kimi默认跟随，明确选择及重新打开仍按已保存值", () => {
+  const h = webSearchDraftHarness({ value: { mode: "unconfigured" } });
+  h.run("openWebSearchSettings()");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
+  for (const category of ["deepseek", "kimi"]) {
+    h.radios.webSearchCategory.find(input => input.value === category).checked = true;
+    h.run("updateWebSearchCategory({ resetCredentialSource: true })");
+    assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "follow_search");
+    h.radios.webFetchMode.find(input => input.value === "system").checked = true;
+    h.run("updateWebFetchMode(); updateWebSearchProvider()");
+    assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
+  }
+  h.run("closeWebSearchSettings(); openWebSearchSettings()");
+  assert.equal(h.run("currentWebSearchDraft().value.mode"), "unconfigured");
+  h.context.window.globalSettingsAdmin.webSearch = { value: { mode: "provider", provider: "deepseek", fetch_mode: "system" } };
+  h.run("renderWebSearchSettings(globalSettingsAdmin.webSearch)");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "system");
+  h.radios.webSearchCategory.find(input => input.value === "kimi").checked = true;
+  h.run("updateWebSearchCategory({ resetCredentialSource: true })");
+  assert.equal(h.run("currentWebSearchDraft().value.fetch_mode"), "follow_search");
 });
 
 test("两家跟随配置不复制凭据，其他供应商不能生成跟随配置", () => {

@@ -296,5 +296,7 @@ test("Agent 和 Chat 统一复用供应商分组模型选项", () => {
   assert.match(coreSource, /renderGroupedModelOptions/);
   assert.match(chatSource, /renderGroupedModelOptions/);
   assert.match(chatSource, /firstSelectableModelId/);
-  assert.match(chatSource, /preserveCurrentModel\(await r\.json\(\), currentAgent\(\)\?\.model\)/);
+  // Runtime behavior is covered by configuration-directory.test.mjs; the
+  // shared model option helper is also used when reads come from the directory.
+  assert.match(chatSource, /\bpreserveCurrentModel\(/);
 });

@@ -119,28 +119,6 @@ def _active_condition(entries):
                      ChatSession.user_id == entry.user_id) for entry in entries)) if entries else literal(False)
 
 
-def latest_status_expression(active_entries=()):
-    """One SQL interpretation for list filters, list rows and detail metadata.
-
-    Tool success and missing active registration never imply completion. Older
-    records without a committed assistant terminal state remain unknown.
-    """
-    latest = aliased(ChatSessionEvent)
-    latest_run = select(latest.run_id).where(latest.session_id == ChatSession.session_id,
-        latest.event_type.in_(EXECUTION_EVENT_TYPES)).correlate(ChatSession).order_by(latest.sequence.desc()).limit(1).scalar_subquery()
-    last = aliased(ChatSessionEvent)
-    relevant = ("user/message", "assistant/message", "execution/error")
-    # A resumed Run can contain only tool results before its first assistant
-    # response. Never reuse an older Run's waiting/completed terminal state.
-    conditions = (last.session_id == ChatSession.session_id, last.event_type.in_(relevant),
-                  last.run_id.is_not_distinct_from(latest_run))
-    kind = select(last.event_type).where(*conditions).order_by(last.sequence.desc()).limit(1).scalar_subquery()
-    state = select(last.status).where(*conditions).order_by(last.sequence.desc()).limit(1).scalar_subquery()
-    has_execution = exists(select(last.event_id).where(last.session_id == ChatSession.session_id,
-        last.event_type.in_(EXECUTION_EVENT_TYPES)))
-    return _status_case(kind, state, has_execution, active_entries)
-
-
 def _status_case(kind, state, has_execution, active_entries=()):
     return case(
         (_active_condition(active_entries), "running"),
@@ -152,7 +130,7 @@ def _status_case(kind, state, has_execution, active_entries=()):
         (~has_execution, "not_started"), else_="unknown")
 
 
-def execution_summary_statement(session_ids=None, active_entries=()):
+def execution_summary_statement(session_ids=None, active_entries=(), *, include_run_id=True):
     """Derive each latest Run/terminal once, without loading event payloads.
 
     The latest execution may have a NULL run ID; null-safe matching is required
@@ -176,13 +154,17 @@ def execution_summary_statement(session_ids=None, active_entries=()):
             terminal.event_type.in_(("user/message", "assistant/message", "execution/error"))))\
         .group_by(terminal.session_id).subquery()
     state = _status_case(terminal.event_type, terminal.status, heads.c.sequence.is_not(None), active_entries)
-    statement = select(ChatSession.session_id, public_run.run_id, state.label("latest_status"))\
+    columns = [ChatSession.session_id, state.label("latest_status")]
+    if include_run_id:
+        columns.insert(1, public_run.run_id)
+    statement = select(*columns)\
         .outerjoin(heads, heads.c.session_id == ChatSession.session_id)\
-        .outerjoin(public_run, and_(public_run.session_id == heads.c.session_id,
-            public_run.sequence == heads.c.run_sequence))\
         .outerjoin(terminal_head, terminal_head.c.session_id == ChatSession.session_id)\
         .outerjoin(terminal, and_(terminal.session_id == terminal_head.c.session_id,
             terminal.sequence == terminal_head.c.sequence))
+    if include_run_id:
+        statement = statement.outerjoin(public_run, and_(public_run.session_id == heads.c.session_id,
+            public_run.sequence == heads.c.run_sequence))
     if session_ids is not None:
         statement = statement.where(ChatSession.session_id.in_(session_ids))
     return statement
@@ -252,7 +234,7 @@ class DiagnosticSessionQueries(SessionBoundMixin):
             identity.is_not(None), func.trim(identity) != ""
         ).distinct().order_by(identity).limit(200))).all())
 
-    def _filters(self, f, *, activity=True):
+    def _filters(self, f, *, activity=True, status=True):
         from deep_agent.db.session_source import session_source_conditions
         conditions = session_source_conditions(f.source_type, f.source_id)
         if f.agent_id:
@@ -279,8 +261,16 @@ class DiagnosticSessionQueries(SessionBoundMixin):
                 found = exists(select(event.event_id).where(event.session_id == ChatSession.session_id,
                     event.event_type == kind, _range(event.created_at, f)))
                 conditions.append(found if value else ~found)
-        if f.latest_status:
-            conditions.append(latest_status_expression(self.active_entries) == f.latest_status)
+        if status and f.latest_status:
+            # Keep status before COUNT/pagination, but derive it with grouped
+            # event heads instead of repeating nested LIMIT subqueries in CASE.
+            # The SQL subquery also avoids an unbounded Python list of IDs.
+            candidates = select(ChatSession.session_id).where(*conditions).correlate(None)
+            execution = execution_summary_statement(
+                candidates, self.active_entries, include_run_id=False,
+            ).subquery()
+            conditions.append(ChatSession.session_id.in_(
+                select(execution.c.session_id).where(execution.c.latest_status == f.latest_status)))
         return conditions
 
     async def overview(self, f: SessionFilters):
@@ -308,14 +298,28 @@ class DiagnosticSessionQueries(SessionBoundMixin):
                 .group_by(facts.c.agent_id, Agent.name).order_by(func.count().desc(), facts.c.agent_id))).all()
             users = (await db.execute(select(facts.c.user_id, func.count().label("count"))
                 .where(is_question).group_by(facts.c.user_id).order_by(func.count().desc(), facts.c.user_id).limit(20))).all()
-            recent = []
-            for kind, limit in (("user/message", 10), ("execution/error", 5)):
-                rows = (await db.execute(select(ChatSessionEvent, ChatSession, Agent.name)
-                    .join(ChatSession, ChatSession.session_id == ChatSessionEvent.session_id)
-                    .outerjoin(Agent, Agent.id == ChatSession.agent_id).where(*scope,
-                        ChatSessionEvent.event_type == kind, _range(ChatSessionEvent.created_at, f))
-                    .order_by(ChatSessionEvent.created_at.desc(), ChatSessionEvent.event_id.desc()).limit(limit))).all()
-                recent.append([event_link(event, session, name, error=kind == "execution/error") for event, session, name in rows])
+            # Aggregate narrow keys within the selected scope first. Only read
+            # payloads for the final ten rows, never all inputs or ten rows per
+            # session. Sequence is the Event Store's authoritative input order.
+            first_questions = events.with_only_columns(ChatSessionEvent.session_id,
+                func.min(ChatSessionEvent.sequence).label("sequence"))\
+                .where(ChatSessionEvent.event_type == "user/message")\
+                .group_by(ChatSessionEvent.session_id).subquery("first_questions")
+            question_page = select(ChatSessionEvent.event_id, ChatSessionEvent.created_at)\
+                .join(first_questions, and_(ChatSessionEvent.session_id == first_questions.c.session_id,
+                    ChatSessionEvent.sequence == first_questions.c.sequence))\
+                .order_by(ChatSessionEvent.created_at.desc(), ChatSessionEvent.event_id.desc())\
+                .limit(10).subquery("question_page")
+            questions = (await db.execute(select(ChatSessionEvent, ChatSession, Agent.name)
+                .join(question_page, question_page.c.event_id == ChatSessionEvent.event_id)
+                .join(ChatSession, ChatSession.session_id == ChatSessionEvent.session_id)
+                .outerjoin(Agent, Agent.id == ChatSession.agent_id)
+                .order_by(question_page.c.created_at.desc(), question_page.c.event_id.desc()))).all()
+            errors = (await db.execute(select(ChatSessionEvent, ChatSession, Agent.name)
+                .join(ChatSession, ChatSession.session_id == ChatSessionEvent.session_id)
+                .outerjoin(Agent, Agent.id == ChatSession.agent_id).where(*scope,
+                    ChatSessionEvent.event_type == "execution/error", _range(ChatSessionEvent.created_at, f))
+                .order_by(ChatSessionEvent.created_at.desc(), ChatSessionEvent.event_id.desc()).limit(5))).all()
             return {"range": f.public_range(), "generated_at": utc_rfc3339(datetime.now(UTC)),
                 "agent_options": await self._agent_options(db),
                 "metrics": {"session_count": sessions, "question_count": aggregate[0],
@@ -324,22 +328,29 @@ class DiagnosticSessionQueries(SessionBoundMixin):
                     "question_count": counts.get(day, 0)} for day, start, end in days],
                 "agents": [{"agent_id": agent_scope_to_api(row[0]), "agent_name": row[1], "question_count": row[2]} for row in agents],
                 "active_users": [{"user_id": row[0], "question_count": row[1]} for row in users],
-                "recent_questions": recent[0], "recent_errors": recent[1]}
+                "recent_questions": [event_link(event, session, name) for event, session, name in questions],
+                "recent_errors": [event_link(event, session, name, error=True) for event, session, name in errors]}
 
-    def _activity(self):
-        event = aliased(ChatSessionEvent)
-        last = select(func.max(event.created_at)).where(event.session_id == ChatSession.session_id,
-            event.event_type.in_(REAL_EVENT_TYPES)).scalar_subquery()
-        return case((last > ChatSession.created_at, last), else_=ChatSession.created_at)
+    def _activity(self, session_ids):
+        event = ChatSessionEvent
+        summary = select(event.session_id, func.max(event.created_at).label("last_activity"))\
+            .where(event.session_id.in_(session_ids), event.event_type.in_(REAL_EVENT_TYPES))\
+            .group_by(event.session_id).subquery()
+        # Preserve creation-time fallback, including sessions without events.
+        value = case((summary.c.last_activity > ChatSession.created_at, summary.c.last_activity),
+                     else_=ChatSession.created_at)
+        return summary, value
 
     async def list(self, f: SessionFilters):
         async with self._read() as db:
             scope = self._filters(f)
             total = (await db.execute(select(func.count()).select_from(ChatSession).where(*scope))).scalar_one()
-            activity = self._activity()
+            candidates = select(ChatSession.session_id).where(*self._filters(f, status=False)).correlate(None)
+            activity_head, activity = self._activity(candidates)
             # Display-only states are derived in one page-bounded batch below.
             # State filtering remains in scope, before count/order/pagination.
             rows = (await db.execute(select(ChatSession, Agent.name, literal(None), activity)
+                .outerjoin(activity_head, activity_head.c.session_id == ChatSession.session_id)
                 .outerjoin(Agent, Agent.id == ChatSession.agent_id).where(*scope)
                 .order_by(activity.desc(), ChatSession.session_id.desc()).limit(f.limit).offset(f.offset))).all()
             items = await self._items(db, rows, f)
@@ -350,7 +361,9 @@ class DiagnosticSessionQueries(SessionBoundMixin):
 
     async def detail(self, session_id):
         async with self._read() as db:
-            rows = (await db.execute(select(ChatSession, Agent.name, latest_status_expression(self.active_entries), self._activity())
+            activity_head, activity = self._activity([session_id])
+            rows = (await db.execute(select(ChatSession, Agent.name, literal(None), activity)
+                .outerjoin(activity_head, activity_head.c.session_id == ChatSession.session_id)
                 .outerjoin(Agent, Agent.id == ChatSession.agent_id).where(ChatSession.session_id == session_id))).all()
             if not rows:
                 raise DiagnosticQueryError("会话不存在或已删除", 404)

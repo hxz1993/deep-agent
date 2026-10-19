@@ -220,6 +220,11 @@ async function refreshAfterSuccessfulSave(label, refresh) {
 }
 
 async function apiFetch(path, options = {}) {
+  if ((!options.method || options.method === "GET") && !options.signal
+    && /^\/api\/v1\/(agents|llm-models)(\?selectable_only=false)?$/.test(path)
+    && window.DeepAgentConsoleDirectory) {
+    return window.DeepAgentConsoleDirectory.read(path, { force: true });
+  }
   const { headers: optionHeaders, ...rest } = options;
   const url = typeof serviceUrl === "function" ? serviceUrl(path) : `${getBaseUrl()}${path}`;
   const resp = await daFetch(url, {

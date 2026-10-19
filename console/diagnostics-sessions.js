@@ -5,7 +5,7 @@ import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSel
 import { diagnosticTime } from "./diagnostics.js?v=20260915-ui-polish";
 import { diagnosticHash, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260915-app-filter";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
-import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20260915-app-filter";
+import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261019-release0137";
 import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261017-console-audit";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
@@ -137,7 +137,9 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   }
   function listHtml(data) {
     const f = state.filters, total = Number(data?.total ?? state.listTotal ?? 0), offset = Number(f.offset || 0), limit = PAGE_SIZE, items = data?.items || [];
+    const totalKnown = !state.error && (data?.total != null || state.listTotal != null);
     const currentPage = Math.floor(offset / limit) + 1, pageCount = Math.max(1, Math.ceil(total / limit));
+    const pageLabel = totalKnown ? `第 ${currentPage} / ${pageCount} 页 · 共 ${total.toLocaleString()} 项` : state.error ? "加载失败" : "正在加载…";
     const appOptions = [...new Set([...(data?.app_options || []), f.app_id].filter(Boolean))];
     return `<section class="diagnostic-list-workbench" aria-label="会话列表">
       <form autocomplete="off" class="diagnostic-list-toolbar" data-session-form="search"><div class="diagnostic-list-search"><label class="diagnostics-field"><button class="diagnostic-search-submit" type="submit" aria-label="查询会话">${icon("search")}</button><input autocomplete="off" type="search" name="query" value="${e(f.query || "")}" placeholder="搜索会话名称或 ID" aria-label="搜索会话名称或 ID" maxlength="200"/></label></div>
@@ -155,9 +157,9 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
           <time role="cell">${e(diagnosticTime(item.last_activity_at || item.updated_at))}</time>
         </div>`).join("")}
       </div>
-      ${!items.length && !state.busy ? empty("没有匹配会话，可重置筛选条件后再查询。") : ""}
+      ${!items.length && !state.busy ? empty(state.error ? "会话列表未加载，请重新查询。" : "没有匹配会话，可重置筛选条件后再查询。") : ""}
       </div>
-      <footer class="diagnostic-list-footer"><nav class="diagnostic-pagination" aria-label="会话分页" title="共 ${total.toLocaleString()} 个会话">${button("上一页", "previous", `aria-label="上一页" ${offset <= 0 || state.busy ? "disabled" : ""}`, "btn-sm")}<span class="diagnostic-page-current models-page-info" aria-live="polite" aria-label="第 ${currentPage} 页，共 ${pageCount} 页">第 ${currentPage} / ${pageCount} 页 · 共 ${total.toLocaleString()} 项</span>${button("下一页", "next", `aria-label="下一页" ${offset + limit >= total || state.busy ? "disabled" : ""}`, "btn-sm")}</nav></footer>
+      <footer class="diagnostic-list-footer"><nav class="diagnostic-pagination" aria-label="会话分页" title="${totalKnown ? `共 ${total.toLocaleString()} 个会话` : pageLabel}">${button("上一页", "previous", `aria-label="上一页" ${!totalKnown || offset <= 0 || state.busy ? "disabled" : ""}`, "btn-sm")}<span class="diagnostic-page-current models-page-info" aria-live="polite" aria-label="${totalKnown ? `第 ${currentPage} 页，共 ${pageCount} 页` : pageLabel}">${pageLabel}</span>${button("下一页", "next", `aria-label="下一页" ${!totalKnown || offset + limit >= total || state.busy ? "disabled" : ""}`, "btn-sm")}</nav></footer>
     </section>`;
   }
   function render() {
@@ -340,7 +342,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       case "agents": state.showAgents = !state.showAgents; render(); break;
       case "reset": state.filters = { period: "168", limit: 50, offset: 0 }; void loadCurrent(); break;
       case "previous":
-        if (state.busy || Number(state.filters.offset || 0) <= 0) break;
+        if (state.busy || state.error || !state.data || Number(state.filters.offset || 0) <= 0) break;
         state.filters.offset = Math.max(0, Number(state.filters.offset || 0) - PAGE_SIZE); void loadCurrent({ pageChange: true }); break;
       case "next":
         if (state.busy || Number(state.filters.offset || 0) + PAGE_SIZE >= Number(state.data?.total || 0)) break;

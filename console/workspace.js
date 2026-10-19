@@ -5,7 +5,7 @@ import { channelOriginPresentation } from "./session-display.js?v=20260929-relea
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20261017-console-audit";
+const WORKSPACE_ASSET_VERSION = "20261019-release0137";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
@@ -73,7 +73,7 @@ function installLegacyDom(source) {
   const agentSwitcher = document.createElement("div");
   agentSwitcher.className = "agent-switcher";
   agentSwitcher.innerHTML = `
-    <button type="button" class="icon-action refresh-agent" id="refreshWorkspaceAgentsBtn" title="刷新 Agent" aria-label="刷新 Agent">
+    <button type="button" class="icon-action refresh-agent" id="refreshWorkspaceAgentsBtn" title="刷新会话" aria-label="刷新会话">
       <i data-lucide="refresh-cw"></i>
     </button>`;
   if (agentSelect) {
@@ -607,6 +607,11 @@ function bindWorkspaceControls() {
 }
 
 window.DeepAgentConsoleWorkspace = {
+  renderDirectory() {
+    lastRenderKey = "";
+    renderAgentSwitcher();
+    renderInspector();
+  },
   setHistoryLoading,
   refreshChannelAccounts,
   isContextReferenceSelected,

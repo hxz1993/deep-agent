@@ -272,6 +272,58 @@ test("query errors distinguish login, permission, deleted object, history, input
   assert.match(messages[2], /不存在或已删除/); assert.match(messages[3], /轨迹/);
 });
 
+test("503 query timeouts and busy responses keep distinct safe guidance", () => {
+  assert.equal(sessionQueryError({ status: 503, message: "诊断查询超时，请缩小时间范围或筛选条件" }), "查询超时，请缩小时间范围或增加筛选条件后重试。");
+  assert.equal(sessionQueryError({ status: 503, message: "诊断查询繁忙，请稍后重试" }), "诊断查询繁忙，请稍后重试。");
+  const unsafe = "SQL timeout SELECT private-data FROM internal-table";
+  assert.doesNotMatch(sessionQueryError({ status: 503, message: unsafe }), /SELECT|private-data|internal-table/);
+});
+
+test("failed list query does not claim no matches or zero items and can be retried", async () => {
+  let failed = true;
+  const h = sessionHarness(async () => {
+    if (failed) throw { status: 503, message: "诊断查询超时，请缩小时间范围或筛选条件" };
+    return { total: 0, items: [] };
+  });
+  h.activate("list"); await settle();
+  assert.match(h.root.innerHTML, /role="alert">查询超时/);
+  assert.match(h.root.innerHTML, /会话列表未加载，请重新查询。/);
+  assert.match(h.root.innerHTML, /aria-label="加载失败">加载失败/);
+  assert.doesNotMatch(h.root.innerHTML, /没有匹配会话|共 0 项|共 0 个会话/);
+  for (const action of ["previous", "next"]) assert.match(h.root.innerHTML, new RegExp(`data-session-action="${action}"[^>]*disabled`));
+  failed = false; h.submit({}, "search"); await settle();
+  assert.doesNotMatch(h.root.innerHTML, /role="alert"|加载失败/);
+  assert.match(h.root.innerHTML, /没有匹配会话/);
+  assert.match(h.root.innerHTML, /共 0 项/);
+});
+
+test("failed status filter never leaves other-filter results or counts on screen", async () => {
+  const h = sessionHarness(async path => {
+    if (new URL(path, "http://local").searchParams.has("latest_status")) throw { status: 503 };
+    return { total: 128, items: [session()] };
+  });
+  h.activate("list"); await settle();
+  assert.match(h.root.innerHTML, /真实会话|共 128 项/);
+  h.select("latest_status", "error"); await settle();
+  assert.equal(h.controller.snapshot().data, null);
+  assert.match(h.root.innerHTML, /加载失败/);
+  assert.doesNotMatch(h.root.innerHTML, /真实会话|共 128 项|共 0 项|没有匹配会话/);
+});
+
+test("failed page query hides the previously known total and disables pagination", async () => {
+  const h = sessionHarness(async path => {
+    if (new URL(path, "http://local").searchParams.get("offset") === "50") throw { status: 503 };
+    return { total: 128, items: [] };
+  });
+  h.activate("list"); await settle();
+  await h.click({ sessionAction: "next" }); await settle();
+  assert.doesNotMatch(h.root.innerHTML, /共 128 项|共 0 项|没有匹配会话/);
+  assert.match(h.root.innerHTML, /加载失败/);
+  const count = h.requests.length;
+  await h.click({ sessionAction: "previous" }); await h.click({ sessionAction: "next" });
+  assert.equal(h.requests.length, count);
+});
+
 test("overview session, question and exception metrics drill to correctly labelled session filters", async () => {
   const h = sessionHarness(); h.activate(); await settle();
   for (const [key, expected] of [["session_count", {}], ["question_count", { has_questions: "true" }], ["error_session_count", { has_execution_error: "true" }]]) {

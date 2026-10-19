@@ -325,12 +325,19 @@ function updateWebSearchProvider({ resetCredentialSource = false } = {}) {
   credentialSourceField?.classList.toggle("hidden", !state.supportsLlmProvider);
   llmProviderField?.classList.toggle("hidden", !state.supportsLlmProvider || credentialSource !== "llm_provider");
   keyField?.classList.toggle("hidden", !state.requiresKey || (state.supportsLlmProvider && credentialSource === "llm_provider"));
+  keyField?.querySelector(":scope > span")?.classList.toggle("hidden", state.supportsLlmProvider);
   keylessTest?.classList.toggle("hidden", state.requiresKey);
   credentialRow?.classList.toggle("simple", !state.supportsLlmProvider);
 
   const selectedLlmProviderId = current.provider === provider ? current.llm_provider_id : "";
   renderWebSearchLlmProviderOptions(provider, resetCredentialSource ? selectedLlmProviderId : (document.getElementById("webSearchLlmProvider")?.value || selectedLlmProviderId));
-  if (resetCredentialSource) resetWebSearchApiKey(provider);
+  if (resetCredentialSource) {
+    resetWebSearchApiKey(provider);
+    // A newly selected search supplier starts with its Fetch default. Merely
+    // opening saved/legacy settings or editing credentials keeps the selection.
+    const fetchMode = webSearchFetchMode(provider, "follow_search");
+    document.querySelectorAll('input[name="webFetchMode"]').forEach(input => { input.checked = input.value === fetchMode; });
+  }
   updateWebFetchMode();
   window.lucide?.createIcons();
 }

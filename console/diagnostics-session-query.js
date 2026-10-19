@@ -12,7 +12,11 @@ export function sessionQueryError(error) {
   if (code === 404) return "会话不存在或已删除。";
   if (code === 409) return "历史投影暂不可用，可切换轨迹继续排查。";
   if (code === 422) return `查询条件无效：${error.message || "请检查时间范围和标识。"}`;
-  if (code === 503) return "查询暂不可用或服务繁忙，请稍后手动刷新。";
+  if (code === 503) {
+    if (error.message === "诊断查询超时，请缩小时间范围或筛选条件") return "查询超时，请缩小时间范围或增加筛选条件后重试。";
+    if (error.message === "诊断查询繁忙，请稍后重试") return "诊断查询繁忙，请稍后重试。";
+    return "查询暂不可用或服务繁忙，请稍后手动刷新。";
+  }
   return "读取失败，请检查网络后手动刷新。";
 }
 // Each controller is independent of live chat and owns a single read generation.

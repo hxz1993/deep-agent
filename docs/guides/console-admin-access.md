@@ -41,6 +41,7 @@ GET /api/v1/admin/access
 - 完整模型管理列表：`GET /api/v1/llm-models?selectable_only=false`。
 - MCP、Skill、UI Tool、UI Tool Package。
 - 内置工具、系统工具、全局设置、数据库信息、Sandbox健康和上下文测试场景。
+- 会话、用量、日志、渠道诊断查询与导出，包括 v0.13.8 新增的同路径 POST JSON 只读查询；GET 兼容入口与 POST 使用同一管理员门禁。
 
 继续按业务使用语义开放：
 

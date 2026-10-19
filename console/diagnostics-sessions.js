@@ -1,12 +1,12 @@
 import { channelOriginPresentation } from "./session-display.js?v=20260929-release0124";
-import { DIAGNOSTIC_PERIODS as PERIODS, diagnosticRangeHelpHtml, bindDiagnosticRangeDismiss } from "./diagnostic-range-control.js?v=20260923-c04-8";
+import { DIAGNOSTIC_PERIODS as PERIODS, diagnosticRangeHelpHtml, bindDiagnosticRangeDismiss } from "./diagnostic-range-control.js?v=20261019-release0138";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
-import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260915-release-audit";
-import { diagnosticTime } from "./diagnostics.js?v=20260915-ui-polish";
-import { diagnosticHash, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20260915-app-filter";
+import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20261019-release0138";
+import { diagnosticTime } from "./diagnostics.js?v=20261019-release0138";
+import { diagnosticTarget, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
-import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261019-release0137";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261017-console-audit";
+import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261019-release0138";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261019-release0138";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PAGE_SIZE = 50;
@@ -62,7 +62,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     if (typeof ResizeObserver !== "undefined") { trendObserver = new ResizeObserver(resize); trendObserver.observe(host); }
   }
   const cancelReaders = () => { clearTimeout(userTimer); userReader.cancel(); releaseColumns(); disconnectTrend(); reader.cancel(); contextReader.cancel(); eventsReader.cancel(); eventsLoading = false; };
-  const publishFilters = () => replace(diagnosticHash(state.route.view, state.filters));
+  const publishFilters = () => replace(diagnosticTarget(state.route.view, state.filters));
   const scrollRegions = { scroll: ".diagnostic-session-scroll", tableScroll: ".diagnostic-session-table-scroll", questionsScroll: ".diagnostic-question-list", errorsScroll: ".diagnostic-dashboard-side > section:first-child", usersScroll: "#diagnosticActiveUsers", agentsScroll: ".diagnostic-agent-bars" };
   const captureScroll = () => Object.fromEntries(Object.entries(scrollRegions).map(([key, selector]) => [key, root.querySelector(selector)?.scrollTop || 0]));
   function restoreScroll(saved = {}) {
@@ -199,11 +199,11 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     } catch (error) { if (scope.current() && state.active) state.error = sessionQueryError(error); }
     finally { if (scope.current() && state.active) { state.busy = false; render(); } }
   }
-  const openSession = (id, focus = {}) => navigate(diagnosticHash("detail", focus, id));
-  const drill = extra => navigate(diagnosticHash("list", sessionDrilldown(state.filters, extra)));
+  const openSession = (id, focus = {}) => navigate(diagnosticTarget("detail", focus, id));
+  const drill = extra => navigate(diagnosticTarget("list", sessionDrilldown(state.filters, extra)));
   function mountDetail(saved) {
     detail?.destroy(); selectBinding?.dispose(); detailData = saved?.detailData || null;
-    detail = createReadonlySessionView({ root, onBack, onRefresh: () => void loadDetail(), onViewChange: view => { state.route.filters.view = view; replace(diagnosticHash("detail", state.route.filters, state.route.id)); if (view === "trajectory") void loadEvents(); } });
+    detail = createReadonlySessionView({ root, onBack, onRefresh: () => void loadDetail(), onViewChange: view => { state.route.filters.view = view; replace(diagnosticTarget("detail", state.route.filters, state.route.id)); if (view === "trajectory") void loadEvents(); } });
     if (detailData && (detailData.history != null || detailData.historyError)) void restoreDetail(saved);
     else void loadDetail();
   }
@@ -318,7 +318,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     if (target.dataset.sessionView) {
       if (state.route.view === "list") listFilters = Object.fromEntries(Object.entries(state.filters).filter(([key]) => ["user_id", "app_id", "query", "latest_status", "has_questions", "has_execution_error", "limit"].includes(key)));
       const common = overviewFilters(state.filters);
-      navigate(diagnosticHash(target.dataset.sessionView, target.dataset.sessionView === "overview" ? common : { ...listFilters, ...common, offset: 0 })); return;
+      navigate(diagnosticTarget(target.dataset.sessionView, target.dataset.sessionView === "overview" ? common : { ...listFilters, ...common, offset: 0 })); return;
     }
     if (target.dataset.sessionPage) {
       const page = Number(target.dataset.sessionPage), limit = PAGE_SIZE, pages = Math.ceil(Number(state.data?.total || 0) / limit);
@@ -334,7 +334,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     if (target.dataset.clearSession) { delete state.filters[target.dataset.clearSession]; state.filters.offset = 0; void loadCurrent(); return; }
     if (target.dataset.stat) { if (target.dataset.stat === "active_user_count") { state.showUsers = true; scrollToUsers = true; render(); } else drill(target.dataset.stat === "question_count" ? { has_questions: true } : target.dataset.stat === "error_session_count" ? { has_execution_error: true } : {}); return; }
     switch (target.dataset.sessionAction) {
-      case "channels": navigate(diagnosticHash("channels", channelEntryFilters(state.filters))); break;
+      case "channels": navigate(diagnosticTarget("channels", channelEntryFilters(state.filters))); break;
       case "all-questions": drill({ has_questions: true }); break;
       case "users": state.showUsers = !state.showUsers; render(); break;
       case "more-users": void searchUserOptions(userSearchQuery, true); break;

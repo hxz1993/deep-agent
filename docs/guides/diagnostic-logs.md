@@ -212,3 +212,21 @@ Agent 名称取本轮已加载配置，字段限定为最多100个名称字符�
 列表只显示正文，会话标识显示前8位且不省略。详情用中文标签和原始值，未知标量字段保留原名；
 仅会话ID提供复制和跳转。详情的原始日志默认折叠，展开显示带边框的完整文本。
 原始视图和 `.log` 导出始终使用真实 `raw`，不从界面重新拼接；不改写历史文件或增加历史格式兼容。
+
+### 会话内容写入失败定位
+
+`message_persistence_failed` 保留 `phase=incremental/terminal/status_finalization/background`，
+附带 `write_hook` 和增量 `write_stage=assemble/append/publish`，区分消息组装、入库及已保存事件发布。
+失败时记录实际产品、Pydantic AI/Harness、SQLAlchemy版本及数据库方言；记录本轮消息/Part数量、
+异常类别链和本项目内的代码位置。数据库异常仅补充数字错误码和五位SQLSTATE，不记录SQL或参数。
+
+不可变Part冲突单列 `persistence_reason=immutable_part_conflict`，记录冲突Event ID、
+message ordinal、part index、旧/新Part类型及固定白名单差异字段（例如`content`、
+`args`、`metadata.deepagent_timing`），未知字段归`other`；字段值和未知metadata键都不写日志。
+`message_identity_merges/response_id_mismatches`仅为失败时的内存归并计数，用于检查身份判同风险，
+不能单靠计数认定根因。冲突仍拒绝且事务回滚，不覆盖已保存内容，不新增会话事件。
+这些是新增代码发布之后的诊断能力，旧Cloud日志不能补出此前未记录的字段。
+
+## 查询传输兼容（v0.13.8）
+
+Console 查询与导出使用同路径 POST，动态筛选及分页条件位于 JSON Body；旧 GET 保留兼容，权限、查询预算和 no-store 不变。浏览器地址只保留模块及资源定位信息，筛选保存在页面内存，刷新浏览器后重新计算默认相对时间；本次分页、下钻及返回保留原查询范围。

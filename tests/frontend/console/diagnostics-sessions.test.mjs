@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 import {
-  parseDiagnosticRoute, diagnosticHash, sessionRange, sessionDrilldown,
+  parseDiagnosticRoute, diagnosticHash, diagnosticTarget, sessionRange, sessionDrilldown,
   createDiagnosticNavigation, overviewFilters, channelEntryFilters,
 } from "../../../console/diagnostics-navigation.js";
 import {
@@ -65,7 +65,7 @@ function sessionHarness(request = async () => overview()) {
     FormData: class { constructor(form) { this.values = form.values; } [Symbol.iterator]() { return Object.entries(this.values)[Symbol.iterator](); } },
     e: escapeHtml, icon, shortId: value => value, icons() {}, localInput, selectHtml,
     bindDiagnosticSelects(_root, callback) { selectCallback = callback; return { dispose() {}, close() {} }; },
-    diagnosticTime: value => value || "未记录", diagnosticHash, sessionRange, sessionDrilldown, overviewFilters, channelEntryFilters,
+    diagnosticTime: value => value || "未记录", diagnosticTarget, sessionRange, sessionDrilldown, overviewFilters, channelEntryFilters,
     COLUMN_BOUNDS, bindDiagnosticColumns: () => () => {},
     buildSessionQuery, sessionQueryError, createSessionReader,
     diagnosticRequest: (path, signal) => { requests.push({ path, signal }); return request(path, signal); },
@@ -89,7 +89,7 @@ function sessionHarness(request = async () => overview()) {
   };
 }
 
-function navigationHarness(initialHash = diagnosticHash("list", filters), initialState = null) {
+function navigationHarness(initialHash = diagnosticTarget("list", filters), initialState = null) {
   const entries = [{ hash: initialHash, state: initialState }]; let index = 0, snapshot = { scroll: 100 }, restored;
   const history = {
     get state() { return entries[index].state; },
@@ -104,7 +104,7 @@ function navigationHarness(initialHash = diagnosticHash("list", filters), initia
     set snapshot(value) { snapshot = value; }, pop() { restored = nav.enter(); return restored; } };
 }
 
-function centerHarness(initialHash = diagnosticHash("logs", { q: "original", level: "ERROR" })) {
+function centerHarness(initialHash = diagnosticTarget("logs", { q: "original", level: "ERROR" })) {
   const navigation = navigationHarness(initialHash), handlers = new Map(), navCalls = [];
   const node = () => ({ classList: { toggle() {} }, setAttribute() {}, removeAttribute() {} });
   const logs = { activated: [], saved: { scroll: 88, selectedId: "log-record" }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
@@ -115,7 +115,7 @@ function centerHarness(initialHash = diagnosticHash("logs", { q: "original", lev
     document: { getElementById: () => node(), querySelectorAll: () => [] },
     window: { addEventListener(name, callback) { handlers.set(name, callback); }, dispatchEvent() {}, DeepAgentConsole: { showPage(page, options) { navCalls.push({ page, options }); } } },
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
-    createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute,
+    createDiagnosticNavigation, diagnosticHash, diagnosticTarget, parseDiagnosticRoute,
     initDiagnosticUsage() { return { activate() {}, deactivate() {}, clear() {}, snapshot() { return {}; } }; },
     initDiagnosticLogs(options) { logs.options = options; return logs; },
     initDiagnosticChannels(options) { channels.options = options; return channels; },
@@ -130,7 +130,7 @@ test("diagnostic routes accept only internal views and preserve complete IDs wit
   assert.equal(parseDiagnosticRoute("#/diagnostics").view, "logs");
   assert.equal(parseDiagnosticRoute("#/diagnostics/sessions").view, "overview");
   for (const hash of ["https://evil.example", "#/workspace", "#/diagnostics/logs/extra", "#/diagnostics/sessions/%2fetc", "#/diagnostics/sessions/%00", "#/diagnostics/sessions/%ZZ"]) assert.equal(parseDiagnosticRoute(hash), null);
-  const route = parseDiagnosticRoute(diagnosticHash("detail", { view: "trajectory", event_id: "e&1", run_id: "r+1", token: "secret", prompt: "private", return: "https://evil.example" }, "session:exact-ID"));
+  const route = parseDiagnosticRoute(diagnosticTarget("detail", { view: "trajectory", event_id: "e&1", run_id: "r+1", token: "secret", prompt: "private", return: "https://evil.example" }, "session:exact-ID"));
   assert.equal(route.id, "session:exact-ID");
   assert.deepEqual(route.filters, { view: "trajectory", event_id: "e&1", run_id: "r+1" });
 });
@@ -165,9 +165,9 @@ test("drilldowns preserve public filters but remove unrelated list search/status
 test("back and forward restore original filters, page and scroll using memory-only snapshots", () => {
   const h = navigationHarness(); h.nav.enter();
   h.snapshot = { filters: { ...filters, offset: 100 }, scroll: 321 };
-  h.nav.navigate(diagnosticHash("detail", { run_id: "run-question" }, "session-full-id"));
+  h.nav.navigate(diagnosticTarget("detail", { run_id: "run-question" }, "session-full-id"));
   h.snapshot = { detailSnapshot: { scroll: 44 } };
-  h.nav.back(diagnosticHash("overview")); h.pop();
+  h.nav.back(diagnosticTarget("overview")); h.pop();
   assert.equal(h.restored.scroll, 321); assert.equal(h.restored.filters.offset, 100);
   assert.equal(h.hash, diagnosticHash("list", filters));
   h.history.forward(); h.pop(); assert.equal(h.restored.detailSnapshot.scroll, 44);
@@ -175,18 +175,18 @@ test("back and forward restore original filters, page and scroll using memory-on
 });
 
 test("navigation does not collide with a history key preserved across reload", () => {
-  const h = navigationHarness(diagnosticHash("list", filters), { diagnosticsKey: "diagnostics-1" }); h.nav.enter();
+  const h = navigationHarness(diagnosticTarget("list", filters), { diagnosticsKey: "diagnostics-1" }); h.nav.enter();
   h.snapshot = { scroll: 321 };
-  h.nav.navigate(diagnosticHash("detail", {}, "session-full-id"));
+  h.nav.navigate(diagnosticTarget("detail", {}, "session-full-id"));
   assert.notEqual(h.entries[0].state.diagnosticsKey, h.entries[1].state.diagnosticsKey);
-  h.snapshot = { scroll: 44 }; h.nav.back(diagnosticHash("overview")); h.pop();
+  h.snapshot = { scroll: 44 }; h.nav.back(diagnosticTarget("overview")); h.pop();
   assert.equal(h.restored.scroll, 321);
 });
 
 test("external return addresses are rejected and direct detail fallback remains inside Console", () => {
-  const h = navigationHarness(diagnosticHash("detail", {}, "session-full-id"), { diagnosticsFrom: "https://evil.example" }); h.nav.enter();
+  const h = navigationHarness(diagnosticTarget("detail", {}, "session-full-id"), { diagnosticsFrom: "https://evil.example" }); h.nav.enter();
   assert.equal(h.nav.navigate("https://evil.example"), false);
-  h.nav.back(diagnosticHash("overview"));
+  h.nav.back(diagnosticTarget("overview"));
   assert.equal(parseDiagnosticRoute(h.hash).view, "overview");
 });
 
@@ -201,14 +201,15 @@ test("center log-to-session link carries only Session ID and Back restores selec
   h.sessions.options.onBack(); h.context.setDiagnosticsActive(true);
   const [, saved] = h.logs.activated.at(-1);
   assert.equal(saved.selectedId, "log-record"); assert.equal(saved.scroll, 88);
-  route = parseDiagnosticRoute(h.navigation.hash); assert.equal(route.filters.q, "original"); assert.equal(route.filters.level, "ERROR");
+  assert.equal(h.logs.activated.at(-1)[0].q, "original"); assert.equal(h.logs.activated.at(-1)[0].level, "ERROR");
+  assert.equal(h.navigation.hash, "#/diagnostics/logs");
 });
 
 test("center session-to-log and browser Back preserve the session-list page and filters", () => {
-  const h = centerHarness(diagnosticHash("list", { ...filters, offset: 50 })); h.context.setDiagnosticsActive(true);
-  h.sessions.options.navigate(diagnosticHash("detail", { view: "trajectory", event_id: "event-error" }, "session-full-id"));
+  const h = centerHarness(diagnosticTarget("list", { ...filters, offset: 50 })); h.context.setDiagnosticsActive(true);
+  h.sessions.options.navigate(diagnosticTarget("detail", { view: "trajectory", event_id: "event-error" }, "session-full-id"));
   h.sessions.saved = { detailSnapshot: { view: "trajectory", scroll: 55 } };
-  h.sessions.options.navigate(diagnosticHash("logs", { session_id: "session-full-id", run_id: "run-question" }));
+  h.sessions.options.navigate(diagnosticTarget("logs", { session_id: "session-full-id", run_id: "run-question" }));
   assert.equal(h.logs.activated.at(-1)[0].run_id, undefined);
   assert.equal(h.logs.activated.at(-1)[0].q, undefined, "cross-link drops unrelated prior log keywords");
   h.logs.options.onBack(); h.context.setDiagnosticsActive(true);
@@ -220,12 +221,15 @@ test("center session-to-log and browser Back preserve the session-list page and 
 });
 
 test("center keeps last session view for menu entry and routes via existing unsaved-editor gate", () => {
-  const h = centerHarness(diagnosticHash("list", { ...filters, query: "name", offset: 50 })); h.context.setDiagnosticsActive(true);
-  h.sessions.options.navigate(diagnosticHash("logs", {}));
+  const h = centerHarness(diagnosticTarget("list", { ...filters, query: "name", offset: 50 })); h.context.setDiagnosticsActive(true);
+  h.sessions.options.navigate(diagnosticTarget("logs", {}));
   h.context.openDiagnostics("sessions");
   assert.equal(h.navCalls.at(-1).page, "diagnostics");
   const route = parseDiagnosticRoute(h.navCalls.at(-1).options.diagnosticTarget);
-  assert.equal(route.view, "list"); assert.equal(route.filters.query, "name"); assert.equal(route.filters.offset, "50");
+  assert.equal(route.view, "list"); assert.deepEqual(route.filters, {});
+  h.navigation.history.replaceState(null, "", h.navCalls.at(-1).options.diagnosticTarget);
+  h.context.setDiagnosticsActive(true);
+  assert.equal(h.sessions.activated.at(-1)[0].filters.query, "name"); assert.equal(h.sessions.activated.at(-1)[0].filters.offset, "50");
 });
 
 test("permission loss clears both page snapshots and disables further activation until gate succeeds", () => {
@@ -237,7 +241,7 @@ test("permission loss clears both page snapshots and disables further activation
 test("legacy log Run ID URLs are ignored, while actual session event定位 remains available", () => {
   const route = parseDiagnosticRoute("#/diagnostics/logs?session_id=full-id&run_id=old-hidden-filter");
   assert.deepEqual(route.filters, { session_id: "full-id" });
-  assert.doesNotMatch(diagnosticHash("logs", { session_id: "full-id", run_id: "hidden" }), /run_id/);
+  assert.doesNotMatch(diagnosticTarget("logs", { session_id: "full-id", run_id: "hidden" }).hash, /run_id/);
 });
 
 test("reader cancels old generation and never accepts its late event results", async () => {
@@ -702,11 +706,11 @@ test("diagnostic request uses same-origin API helper, no App, no cache and propa
 
 
 test("channel statistics mounts its own controller and keeps the channel snapshot on return from readonly detail", () => {
-  const h = centerHarness(diagnosticHash("channels", { period: "720", account_id: "account-a" }));
+  const h = centerHarness(diagnosticTarget("channels", { period: "720", account_id: "account-a" }));
   h.context.setDiagnosticsActive(true);
   assert.equal(h.channels.activated.length, 1);
   assert.equal(h.sessions.activated.length, 0);
-  h.channels.options.navigate(diagnosticHash("detail", { view: "conversation" }, "session-a"));
+  h.channels.options.navigate(diagnosticTarget("detail", { view: "conversation" }, "session-a"));
   assert.equal(h.sessions.activated.at(-1)[0].id, "session-a");
   h.navigation.history.back();
   h.context.setDiagnosticsActive(true);
@@ -826,4 +830,73 @@ test("restoring a run-only conversation target resumes its interrupted event loo
   assert.equal(h.views.at(-1).loads.at(-1).focus.runId, "run-target");
   staleEvents.resolve({ items: [], next_after_sequence: null }); await settle();
   assert.equal(h.views.at(-1).loads.at(-1).events[0].event_id, "target");
+});
+
+test("diagnostic URLs omit all query conditions while in-memory targets retain literal filters", () => {
+  const conditions = { period: "168", start: "2026-10-01T00:00:00Z", end: "2026-10-08T00:00:00Z", timezone: "Asia/Shanghai", query: "customer & private", user_id: "owner", agent_id: "agent", offset: 100 };
+  for (const view of ["overview", "list", "channels", "logs", "usage"]) {
+    assert.doesNotMatch(diagnosticHash(view, conditions), /[?&]/);
+    assert.equal(parseDiagnosticRoute(diagnosticTarget(view, conditions)).filters.period, "168");
+  }
+  assert.equal(parseDiagnosticRoute(diagnosticTarget("list", conditions)).filters.query, "customer & private");
+  assert.equal(diagnosticHash("detail", { view: "trajectory", event_id: "event", run_id: "run", ...conditions }, "session"), "#/diagnostics/sessions/session?view=trajectory&event_id=event&run_id=run");
+});
+
+test("legacy relative URLs are cleaned and a full reload cannot recover frozen timestamps from browser history", () => {
+  const old = "#/diagnostics/sessions/overview?start=2026-10-01T00%3A00%3A00Z&end=2026-10-08T00%3A00%3A00Z&period=168&timezone=Asia%2FShanghai&agent_id=agent";
+  const h = navigationHarness(old, { diagnosticsKey: "diagnostics-3", filters: { end: "PRIVATE_STALE" }, diagnosticsFrom: "#/diagnostics/sessions/list?query=PRIVATE_QUERY&end=PRIVATE_STALE" });
+  h.nav.enter();
+  assert.equal(h.hash, "#/diagnostics/sessions/overview");
+  assert.equal(h.nav.route.filters.period, "168"); assert.equal(h.nav.route.filters.end, undefined);
+  const current = sessionRange(h.nav.route.filters, new Date("2026-10-19T08:00:00Z"));
+  assert.equal(current.end, "2026-10-19T08:00:00.000Z");
+  assert.equal(current.start, "2026-10-12T08:00:00.000Z");
+  assert.doesNotMatch(JSON.stringify(h.entries), /PRIVATE|start|end|agent_id|query/);
+  const reloaded = navigationHarness(h.hash, h.history.state); reloaded.nav.enter();
+  assert.deepEqual(reloaded.nav.route.filters, {});
+  assert.equal(sessionRange(reloaded.nav.route.filters, new Date("2026-10-20T08:00:00Z")).end, "2026-10-20T08:00:00.000Z");
+  const custom = parseDiagnosticRoute("#/diagnostics/sessions/list?period=custom&start=2026-10-01T00:00:00Z&end=2026-10-02T00:00:00Z");
+  assert.equal(sessionRange(custom.filters).end, "2026-10-02T00:00:00.000Z");
+});
+
+test("same-route navigation and Back distinguish memory conditions without URL query strings", () => {
+  const h = centerHarness(diagnosticTarget("list", { query: "first", period: "168" }));
+  h.context.setDiagnosticsActive(true);
+  h.sessions.options.navigate(diagnosticTarget("list", { query: "second", period: "24", offset: 50 }));
+  assert.equal(h.navigation.hash, "#/diagnostics/sessions/list");
+  assert.equal(h.sessions.activated.at(-1)[0].filters.query, "second");
+  assert.equal(h.sessions.activated.at(-1)[1], null);
+  h.navigation.history.back(); h.context.setDiagnosticsActive(true);
+  assert.equal(h.sessions.activated.at(-1)[0].filters.query, "first");
+  assert.equal(h.sessions.activated.at(-1)[1].scroll, 321);
+  h.navigation.history.forward(); h.context.setDiagnosticsActive(true);
+  assert.equal(h.sessions.activated.at(-1)[0].filters.query, "second");
+  assert.doesNotMatch(JSON.stringify(h.navigation.entries), /first|second|offset|period/);
+});
+
+test("replace navigation does not revive an old snapshot just because the clean route is equal", () => {
+  const h = navigationHarness(diagnosticTarget("list", { query: "first" })); h.nav.enter();
+  h.snapshot = { filters: { query: "first" }, data: { private: "old" } };
+  h.nav.navigate(diagnosticTarget("list", { query: "second" }), { replace: true });
+  assert.equal(h.restored, null);
+  assert.equal(h.nav.route.filters.query, "second");
+  assert.equal(h.entries.length, 1);
+});
+
+test("inactive diagnostics cannot overwrite the snapshot saved before leaving the page", () => {
+  const h = navigationHarness(diagnosticTarget("list", { query: "kept" })); h.nav.enter();
+  h.snapshot = { filters: { query: "kept" }, scroll: 123 }; h.nav.remember();
+  h.snapshot = null;
+  h.history.replaceState(null, "", "#/diagnostics/logs"); h.nav.enter();
+  h.history.replaceState({diagnosticsKey: "diagnostics-1"}, "", "#/diagnostics/sessions/list"); h.pop();
+  assert.equal(h.restored.scroll, 123);
+  assert.equal(h.nav.route.filters.query, "kept");
+});
+
+test("a refused menu navigation does not leave a stale pending filter payload", async () => {
+  const h = centerHarness(diagnosticTarget("list", { query: "kept" })); h.context.setDiagnosticsActive(true);
+  h.sessions.options.navigate(diagnosticTarget("logs", {}));
+  await h.context.openDiagnostics("sessions"); // showPage guard did not change the route.
+  h.navigation.history.replaceState(null, "", "#/diagnostics/sessions/list"); h.context.setDiagnosticsActive(true);
+  assert.equal(h.sessions.activated.at(-1)[0].filters.query, undefined);
 });

@@ -16,6 +16,11 @@ def describe(record: dict) -> str:
     state = _STATE.get(suffix, "")
     message = record["summary"]
     details = []
+    if event == "message_persistence_failed":
+        for key, label in (("persistence_reason", "分类"), ("write_hook", "写入边界"),
+                           ("conflict_field", "冲突字段"), ("failure_location", "位置")):
+            if key in record:
+                details.append(f"{label} {record[key]}")
     if event.startswith("document_"):
         for key, label in (("provider_name", "供应商"), ("model_name", "模型"),
                            ("document_api_path", "接口"), ("document_task_id", "任务"),

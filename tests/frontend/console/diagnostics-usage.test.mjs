@@ -2,27 +2,27 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
-import { escapeHtml, icon, selectHtml } from '../../../console/diagnostics-ui.js';
-import { diagnosticHash } from '../../../console/diagnostics-navigation.js';
+import { escapeHtml, icon, selectHtml, diagnosticRequestOptions } from '../../../console/diagnostics-ui.js';
+import { diagnosticTarget, sameDiagnosticFilters } from '../../../console/diagnostics-navigation.js';
 const source = await readFile(new URL('../../../console/diagnostics-usage.js', import.meta.url), 'utf8');
 const filters = { period:'7', start:'2026-09-16T00:00:00Z', end:'2026-09-23T00:00:00Z', timezone:'UTC' };
 const settle = () => new Promise(setImmediate);
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise, resolve}; };
-function harness(request, extra = {}) {
-  const listeners = {}, requests = [];
+function harness(request, extra = {}, routeFilters = filters) {
+  const listeners = {}, requests = [], replacements = [];
   const nodes = new Map(['#usageDetailRows','#usageDetailFooter','#usageContributionRows','#usageContributionFooter','.usage-workbench','.usage-table-frame'].map(key => [key,{innerHTML:'',clientWidth:1000}]));
   const root = {set innerHTML(value) { this.html=value; for (const node of nodes.values()) { node.scrollTop=0; node.scrollLeft=0; } }, addEventListener(name, fn) { listeners[name] = fn; }, querySelector(selector) { return nodes.get(selector) || null; }};
   const context = vm.createContext({ Date, Intl, URLSearchParams, AbortController, setTimeout, clearTimeout,
-    ResizeObserver: class {observe(){} disconnect(){}}, e:escapeHtml, icon, icons(){}, selectHtml, diagnosticHash,
+    ResizeObserver: class {observe(){} disconnect(){}}, e:escapeHtml, icon, icons(){}, selectHtml, diagnosticTarget, sameDiagnosticFilters, diagnosticRequestOptions,
     DIAGNOSTIC_PERIODS:[['168','最近 7 天']], diagnosticRangeHelpHtml:()=>'', bindDiagnosticRangeDismiss(){}, bindDiagnosticSelects(){},
     bindChannelResizer:()=>()=>{}, diagnosticTime:value=>value, window:{},
     diagnosticRequest(path,signal) { requests.push({path,signal}); return request(path,signal); }
   });
   vm.runInContext(source.replace(/^import .*;\n/gm,'').replace(/^export /gm,''),context);
-  const controller=context.initDiagnosticUsage({root,navigate(){},replace(){}});
+  const controller=context.initDiagnosticUsage({root,navigate(){},replace(target){replacements.push(target);}});
   const saved={filters,draft:filters,report:{},details:{items:[],total:21},...extra};
-  controller.activate({filters},saved);
-  return {controller,requests,nodes, dispatch:event=>listeners.click(event), event(selector,dataset) { return listeners.click({target:{closest(wanted) { return wanted===selector ? {dataset} : null; }}}); }, click(action) { return listeners.click({target:{closest(selector) { return selector==='[data-usage-action]' ? {dataset:{usageAction:action}} : null; }}}); }};
+  controller.activate({filters:routeFilters},saved);
+  return {controller,requests,replacements,nodes, dispatch:event=>listeners.click(event), event(selector,dataset) { return listeners.click({target:{closest(wanted) { return wanted===selector ? {dataset} : null; }}}); }, click(action) { return listeners.click({target:{closest(selector) { return selector==='[data-usage-action]' ? {dataset:{usageAction:action}} : null; }}}); }};
 }
 
 test('multi-channel contribution icons deduplicate and cycle without new requests', async () => {
@@ -141,4 +141,25 @@ test('Agent contribution heading abbreviates ID but retains full copy value', as
   assert.ok(html.includes(`data-usage-copy="${id}"`));
   assert.match(html, /aria-label="复制 Agent ID"/);
   assert.doesNotMatch(html, /Agent ·/);
+});
+
+test('usage restoration compares actual conditions rather than equal clean URLs', async () => {
+  const h = harness(() => new Promise(() => {}), { report: { sentinel: 'stale report' } }, { ...filters, agent_id: 'other-agent' });
+  assert.equal(h.controller.snapshot().report, null);
+  assert.equal(h.controller.snapshot().filters.agent_id, 'other-agent');
+  assert.equal(h.replacements.at(-1).hash, '#/diagnostics/usage');
+  assert.equal(h.replacements.at(-1).filters.agent_id, 'other-agent');
+  assert.ok(h.requests.some(item => item.path.startsWith('/api/v1/diagnostics/usage?')));
+  h.controller.deactivate();
+});
+
+test('initial usage bounds publish only to page memory and remain restorable on Back', () => {
+  const h = harness(() => new Promise(() => {}), {}, {});
+  const snapshot = h.controller.snapshot(), target = h.replacements.at(-1);
+  assert.equal(target.hash, '#/diagnostics/usage');
+  assert.equal(target.filters.end, snapshot.filters.end);
+  h.controller.deactivate();
+  h.controller.activate({filters:target.filters}, {...snapshot, report:{ sentinel:'restored' }});
+  assert.equal(h.controller.snapshot().report.sentinel, 'restored');
+  h.controller.deactivate();
 });

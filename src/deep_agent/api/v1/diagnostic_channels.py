@@ -8,6 +8,7 @@ from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.diagnostic_sessions import (
     DiagnosticSessionRoute,
     filters,
+    body_filters,
     with_users,
 )
 from deep_agent.api.v1.request_identity import RequestUserDep
@@ -15,6 +16,9 @@ from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.channels import DiagnosticChannelQueries
 from deep_agent.services.channel_profiles import ChannelProfileService
 from deep_agent.diagnostics.sessions import SessionFilters, query_budget
+from deep_agent.schemas.diagnostic_query import (
+    DiagnosticSessionQuery, DiagnosticChannelPeersQuery, DiagnosticChannelSessionsQuery,
+)
 
 router = APIRouter(
     prefix="/diagnostics/channels",
@@ -77,3 +81,21 @@ async def channel_sessions(
         return await DiagnosticChannelQueries(ctx.db_session_factory, profiles=ChannelProfileService(ctx)).sessions(
             account_id, selected, kind, peer_id, sender_id=sender_id
         )
+
+
+@router.post("/{account_id}/overview")
+async def query_channel_overview(ctx: AppContextDep, account_id: str, body: DiagnosticSessionQuery):
+    return await channel_overview(ctx, account_id, body_filters(body))
+
+
+@router.post("/{account_id}/peers")
+async def query_channel_peers(ctx: AppContextDep, account_id: str, body: DiagnosticChannelPeersQuery):
+    return await channel_peers(ctx, account_id, body_filters(body), kind=body.kind,
+        options_only=body.options_only, include_group_senders=body.include_group_senders,
+        sender_id=body.sender_id, peer_id=body.peer_id)
+
+
+@router.post("/{account_id}/sessions")
+async def query_channel_sessions(ctx: AppContextDep, account_id: str, body: DiagnosticChannelSessionsQuery):
+    return await channel_sessions(ctx, account_id, body_filters(body), peer_id=body.peer_id,
+        sender_id=body.sender_id, kind=body.kind)

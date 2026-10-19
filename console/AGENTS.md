@@ -278,9 +278,9 @@ Headers JSON使用透明输入层与语法高亮层重叠，两层及高亮token
   “范围内有执行异常”不等同“最近一轮异常”，提问数下钻的列表仍按会话计数。
   用户只显示平台User ID对应用户名，不显示头像/邮箱；候选从当前时间与Agent范围内的去重会话用户分页查询，支持原始ID/Username，实际筛选提交ID；
   不依赖测试App或企微发送人接口。
-- `diagnostics-navigation.js`负责白名单路由、完整ID、范围和返回快照；`diagnostics-session-query.js`
+- `diagnostics-navigation.js`负责白名单路由、完整ID、内存筛选范围和返回快照；`diagnostics-session-query.js`
   负责可取消读取和Events分页。`diagnostics-sessions.js`使用独立状态，History/Events/上下文估算各有请求代次，
-  切会话、刷新、离开与鉴权失败均取消旧读取并拒绝迟到响应。URL仅保存筛选/定位ID，正文、日志、头像和认证
+  切会话、刷新、离开与鉴权失败均取消旧读取并拒绝迟到响应。URL仅保存模块/定位ID，正文、日志、头像和认证
   不写URL或LocalStorage；来源/滚动/展开仅当前历史与内存保存，鉴权失效清空诊断数据。
   会话列表表头/分页留在工作区内；返回同时恢复外层、表格和概览内部滚动，不能只保存外层位置。
 - `diagnostic-detail.js`注入共享正文Presenter、`trajectory.js`和`session-inspector.js`，不导入会触发
@@ -525,7 +525,7 @@ App Secret 的短说明位于标签同行，标题右侧复用 API Key 的 `fiel
 
 会话与提问图标统一：完整会话、会话数和发起对话使用 `messages-square`；提问、提问数（用户回合数）使用 `message-circle-more`。工作台左侧列表仅显示提问数，不显示附件数。标题栏及右侧概览/渠道页签显示 Session ID 前 8 位，复制仍使用完整 ID；标题栏复制图标常显。
 
-Markdown 正文采用 12px，标题依次 20/16/14/12px。表格透明背景、无外框与竖线，仅保留表头和行间横线。代码块透明背景、保留细外框，左侧语言标题可折叠（默认展开），右侧为自动换行和复制图标；默认不换行，复制仅取代码正文。新建对话按钮使用 `message-circle-plus`；Mermaid 渲染后提供可折叠源码及复制。脚注使用每次渲染独立命名空间；正文锚点仅在当前 Markdown 容器内滚动，不修改 Console hash 路由。公式通过本地 KaTeX 与 Marked 扩展解析，不处理代码中的公式标记；GitHub 提示引用支持 NOTE/TIP/IMPORTANT/WARNING/CAUTION。数学、脚注、代码和普通 HTML 统一保持净化流程。
+Markdown 正文采用 12px，标题依次 20/16/14/12px。表格透明背景、无外框与竖线，仅保留表头和行间横线。代码块透明背景、保留细外框，左侧语言标题可折叠（超过15行默认折叠，15行及以下默认展开），右侧为自动换行和复制图标；Markdown默认不换行，JSON沿用自动换行，复制始终取完整代码正文；工具参数/结果JSON复用同一标题栏，`.args`及轨迹JSON类保留在`pre`上。手动折叠与换行选择在流式重渲染、同事件详情更新和History重建时局部恢复，不写全局或持久化状态。新建对话按钮使用 `message-circle-plus`；Mermaid 渲染后提供可折叠源码及复制。脚注使用每次渲染独立命名空间；正文锚点仅在当前 Markdown 容器内滚动，不修改 Console hash 路由。公式通过本地 KaTeX 与 Marked 扩展解析，不处理代码中的公式标记；GitHub 提示引用支持 NOTE/TIP/IMPORTANT/WARNING/CAUTION。数学、脚注、代码和普通 HTML 统一保持净化流程。
 
 新对话欢迎语将上下文嵌入同一句副标题，仅 App ID 或“不分应用”为主题色链接，复用标题栏调试浮层与有效上下文刷新。Markdown 表格右侧复制图标在悬停或键盘焦点时出现，复制解析器保留的该表格 Markdown 原文，不能从表格 DOM 文本重建；触屏保持入口可见。
 
@@ -647,3 +647,7 @@ channel 详情、标题或 Runs 的存在推断来源。`channel` 仅提供渠�
 
 轨迹耗时优先读取现有消息／工具结果 `metadata.deepagent_timing`（v1）：模型请求覆盖等待和完整流，工具执行单独计时；SSE `tool_result.timing` 使用同一计时。禁止使用 `updated_at-created_at` 计算模型／工具执行时间。旧模型只允许供应商时间戳至首次入库的明确估算，旧工具只允许调用至结果产生的估算；缺失则显示未知，UI 人工等待不冒充工具执行。并行执行不能直接相加作为总耗时。
 轨迹时间列通过搜索与导出之间的单按钮在时间／耗时切换；仅改变显示，不排序或重新查询。耗时分档≤5s/≤10s/≤20s/>20s，用主题token的绿/青/琥珀/橙表示，红色仍归错误状态。缺失值不着速度颜色，列表及详情只展示时长数值，估算口径保留在悬停提示中，snapshot/restore保留clockMode。窄栏工具栏整体换行，按钮文字不拆行。
+
+### 诊断查询与地址栏（v0.13.8）
+
+`diagnosticTarget` 在当前页面内存中传递筛选，浏览器历史只存导航 key 和干净来源路径。动态筛选不持久化到 URL/history.state；刷新页面按当前时间重新建立默认相对范围，本次分页、下钻及返回使用原范围。`diagnosticRequestOptions` 将已知诊断查询统一转换为同路径 POST JSON，导出同样复用；不扩大管理员或只读预览权限。无筛选状态、账户、History 等保持 GET。

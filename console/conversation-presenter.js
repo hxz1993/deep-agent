@@ -316,19 +316,20 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
     return finalContent;
   }
 
-  function addProcessText(content) {
+  function addProcessText(content, codeState) {
     const value = String(content || "");
     if (!value) return;
     const text = document.createElement("div");
     text.className = "assistant-process-text markdown";
     text.innerHTML = renderMarkdownBody(value);
+    window.DeepAgentMarkdown?.restoreCodeState?.(text, codeState);
     processBody.appendChild(text);
     updateProcessDisclosure();
   }
 
   function promoteFinalToProcess() {
     if (!textBuffer) return;
-    addProcessText(textBuffer);
+    addProcessText(textBuffer, window.DeepAgentMarkdown?.captureCodeState?.(finalContent));
     finalContent?.remove();
     finalActions?.remove();
     finalContent = null;
@@ -386,7 +387,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   function sealFinalContent() {
     if (!finalContent) return;
     finalContent.classList.remove("streaming");
-    finalContent.innerHTML = renderMarkdownBody(textBuffer);
+    replaceMarkdownBody(finalContent, textBuffer);
     void renderMarkdownDiagrams(finalContent);
   }
 
@@ -414,7 +415,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
     addProcessText,
     appendText(delta) {
       textBuffer += delta;
-      ensureFinalContent().innerHTML = renderMarkdownBody(textBuffer);
+      replaceMarkdownBody(ensureFinalContent(), textBuffer);
     },
     setFinalText(content) {
       const output = typeof content === "string"
@@ -425,7 +426,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         promoteFinalToProcess();
       }
       textBuffer = output;
-      ensureFinalContent().innerHTML = renderMarkdownBody(textBuffer);
+      replaceMarkdownBody(ensureFinalContent(), textBuffer);
     },
     finalizeText() {
       sealFinalContent();
@@ -471,7 +472,10 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       if (existing) {
         if (hasArgs) {
           const argsEl = existing.querySelector(".args");
-          if (argsEl) argsEl.innerHTML = window.DeepAgentJson?.highlight(merged.args) || escapeHtml(pretty(merged.args));
+          if (argsEl) {
+            if (window.DeepAgentJson?.updateBlock) window.DeepAgentJson.updateBlock(argsEl, merged.args);
+            else argsEl.innerHTML = window.DeepAgentJson?.highlight(merged.args) || escapeHtml(pretty(merged.args));
+          }
         }
         if (merged.widget) existing.dataset.widget = merged.widget;
         if (merged.metadata) existing.dataset.metadata = JSON.stringify(merged.metadata);
@@ -535,10 +539,13 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const body = block.querySelector(".tool-body");
       const existingWidget = body.querySelector(".hitl-widget");
       if (existingWidget) existingWidget.remove();
-      body.querySelector("[data-tool-result]")?.remove();
+      const previousResult = body.querySelector("[data-tool-result]");
+      const codeState = window.DeepAgentMarkdown?.captureCodeState?.(previousResult);
+      previousResult?.remove();
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
       res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}${renderLocalFileDownload(data.result, data.artifacts)}`;
+      window.DeepAgentMarkdown?.restoreCodeState?.(res, codeState);
       body.appendChild(res);
       refreshLucideIcons();
       updateProcessDisclosure();
@@ -699,6 +706,11 @@ function renderMarkdown(src) {
 
 function renderMarkdownBody(src) {
   return window.DeepAgentMarkdown?.renderBody(src) ?? `<div class="markdown-body">${renderMarkdown(src)}</div>`;
+}
+
+function replaceMarkdownBody(root, source) {
+  if (window.DeepAgentMarkdown?.replaceBody) window.DeepAgentMarkdown.replaceBody(root, source);
+  else root.innerHTML = renderMarkdownBody(source);
 }
 
 function renderMarkdownDiagrams(root) {

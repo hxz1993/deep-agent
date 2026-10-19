@@ -1142,7 +1142,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let mode = "sequence";
   let clockMode = "time";
   let renderQueued = false;
-  let renderedSelectedId = null;
+  let renderedSelectedId = null, renderedDetailTab = null;
 
   const allEvents = () => [...historyEvents, ...liveEvents].sort((left, right) => {
     const leftSequence = Number.isFinite(Number(left.sequence)) ? Number(left.sequence) : Number.MAX_SAFE_INTEGER;
@@ -1221,7 +1221,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     selectedId = selected?.id || null;
     renderRows(visible);
     if (query("main.chat")?.classList.contains("trajectory-active")) {
+      const codeState = selectedId === renderedSelectedId && detailTab === renderedDetailTab ? globalThis.DeepAgentMarkdown?.captureCodeState?.(detail) : [];
       detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl, { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab });
+      globalThis.DeepAgentMarkdown?.restoreCodeState?.(detail, codeState);
       globalThis.DeepAgentMarkdown?.renderDiagrams?.(detail);
       if (selectedId === renderedSelectedId) {
         detail.scrollTop = detailScrollTop;
@@ -1233,7 +1235,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     }
     list.scrollTop = listScrollTop;
     if (selectedId !== renderedSelectedId) onSelectEvent?.(selected);
-    renderedSelectedId = selectedId;
+    renderedSelectedId = selectedId; renderedDetailTab = detailTab;
     window.lucide?.createIcons();
   }
 

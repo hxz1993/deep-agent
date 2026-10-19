@@ -46,3 +46,7 @@ PYTHONPATH=src .venv/bin/python -m maintenance.usage_backfill --config ~/.config
 - 导出按当前时间、Agent、维度和排序生成汇总 CSV，可选全部或当前页；包含身份、Token、请求、单次平均、用量占比及缺失请求数，不含会话正文或 Payload。
 
 所有汇总从同一事件事实计算，不另建 Usage 表或 Redis 计数器。单次平均按 Token／模型请求次数计算，有未报告请求时显示未知；用量占比以当前筛选范围的已报告总 Token 为分母。
+
+## 查询传输兼容（v0.13.8）
+
+Console 查询与导出使用同路径 POST，动态筛选及分页条件位于 JSON Body；旧 GET 保留兼容，权限、查询预算和 no-store 不变。浏览器地址只保留模块及资源定位信息，筛选保存在页面内存，刷新浏览器后重新计算默认相对时间；本次分页、下钻及返回保留原查询范围。

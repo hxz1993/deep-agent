@@ -1,6 +1,6 @@
 import { createDiagnosticsExport, logExportSummary } from "./diagnostics-export.js?v=20260912-21";
 import { createDiagnosticsQuery } from "./diagnostics-query.js?v=20260912-21";
-import { escapeHtml as escape, icon, icons, localInput, diagnosticRequest, bindDiagnosticResizer, bindDiagnosticSelects, selectHtml } from "./diagnostics-ui.js?v=20260915-release-audit";
+import { escapeHtml as escape, icon, icons, localInput, diagnosticRequest, bindDiagnosticResizer, bindDiagnosticSelects, selectHtml } from "./diagnostics-ui.js?v=20261019-release0138";
 
 const SOURCES = { api: "API", gateway: "网关" };
 const OPTIONS = {

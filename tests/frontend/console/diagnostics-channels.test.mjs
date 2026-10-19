@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-import { channelEntryFilters, diagnosticHash, parseDiagnosticRoute, sessionRange } from "../../../console/diagnostics-navigation.js";
+import { channelEntryFilters, diagnosticTarget, parseDiagnosticRoute, sessionRange } from "../../../console/diagnostics-navigation.js";
 import { createSessionReader, sessionQueryError } from "../../../console/diagnostics-session-query.js";
 import { escapeHtml as e, icon, selectHtml } from "../../../console/diagnostics-ui.js";
 const source = await readFile(new URL("../../../console/diagnostics-channels.js", import.meta.url), "utf8");
@@ -21,7 +21,7 @@ function harness(request) {
  const pickerCallbacks={}, listeners={}, calls=[], navigations=[], copies=[], inspector={innerHTML:"",querySelector:()=>null};
  const root={innerHTML:"",addEventListener:(n,f)=>listeners[n]=f,querySelector:()=>inspector,replaceChildren(){this.innerHTML="";}};
  const context=vm.createContext({ renderUserIdentity, URLSearchParams,Date,Intl,AbortController,e,icon,icons(){},selectHtml,
-  peerPickerHtml(){return "";},bindPeerPicker(root, options){pickerCallbacks[options.kind]=options;return()=>{};},bindChannelResizer(){return()=>{};},bindDiagnosticSelects(){return{dispose(){}};},diagnosticHash,sessionRange,channelEntryFilters,createSessionReader,sessionQueryError,
+  peerPickerHtml(){return "";},bindPeerPicker(root, options){pickerCallbacks[options.kind]=options;return()=>{};},bindChannelResizer(){return()=>{};},bindDiagnosticSelects(){return{dispose(){}};},diagnosticTarget,sessionRange,channelEntryFilters,createSessionReader,sessionQueryError,
   shortQuestionTime:v=>v||"—",navigator:{clipboard:{writeText:async id=>copies.push(id)}},
   diagnosticRequest:(path,signal)=>{calls.push({path,signal});return request(path,signal);}});
  vm.runInContext(source.replace(/^import .*;\n/gm,"").replace(/^export /gm,""),context);
@@ -36,7 +36,7 @@ function response(path) {
 }
 test("channel entry carries only the relative period; custom time has a seven-day fallback",()=>{
  const f={period:"720",agent_id:"x",source:"channel",query:"private",user_id:"y",start:"2026-09-01",offset:50};
- assert.equal(diagnosticHash("channels",channelEntryFilters(f)),"#/diagnostics/sessions/channels?period=720");
+ assert.deepEqual(diagnosticTarget("channels",channelEntryFilters(f)),{hash:"#/diagnostics/sessions/channels",filters:{period:"720"}});
  assert.deepEqual(channelEntryFilters({...f,period:"custom"}),{period:"168"});
  const parsed=parseDiagnosticRoute("#/diagnostics/sessions/channels?period=24&account_id=a&agent_id=x&token=secret");
  assert.equal(parsed.view,"channels");assert.equal(parsed.id,null);assert.deepEqual(parsed.filters,{period:"24",account_id:"a"});
@@ -52,7 +52,7 @@ test("peers select the first result, groups get their own fallback identity, and
  const h=harness(path=>path.includes("kind=group")?path.includes("/peers?")?{items:[peer("chat-id","group")],total:1}:history("chat-id"):response(path));
  h.activate();await settle();assert.equal(h.controller.snapshot().selected.peer_id,"member");
  await h.click({channelKind:"group"});await settle();assert.match(h.root.innerHTML,/群聊/);assert.match(h.root.innerHTML,/channel-avatar group/);
- await h.click({channelOpen:"full-session-id"});assert.equal(h.navigations.at(-1),"#/diagnostics/sessions/full-session-id?view=conversation");
+ await h.click({channelOpen:"full-session-id"});assert.equal(h.navigations.at(-1).hash,"#/diagnostics/sessions/full-session-id?view=conversation");
  await h.click({channelCopy:"full-session-id"});assert.deepEqual(h.copies,["full-session-id"]);
  h.controller.clear();assert.equal(h.root.innerHTML,"");
 });

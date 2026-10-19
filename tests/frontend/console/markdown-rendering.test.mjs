@@ -132,7 +132,7 @@ test("主对话只在完整回复落定后渲染 Mermaid", () => {
   const sealStart = chatSource.indexOf("function sealFinalContent()");
   const sealEnd = chatSource.indexOf("const presenter", sealStart);
   const sealSource = chatSource.slice(sealStart, sealEnd);
-  assert.match(sealSource, /finalContent\.innerHTML = renderMarkdownBody\(textBuffer\)/);
+  assert.match(sealSource, /replaceMarkdownBody\(finalContent, textBuffer\)/);
   assert.match(sealSource, /renderMarkdownDiagrams\(finalContent\)/);
 
   const appendStart = chatSource.indexOf("appendFinal(delta)");
@@ -188,4 +188,110 @@ test("Markdown 脚注定位只滚动最近内容面板并保持外层及路由�
   assert.equal(details.open, true);
   assert.equal(prevented, true);
   assert.equal(focused.preventScroll, true);
+});
+
+test("代码围栏以15行为边界，不计结尾换行，保留全部原文和既有按钮", () => {
+  for (const language of ["json", "python", "bom_clarify_v2", ""]) {
+    for (const [lines, collapsed] of [[15, false], [16, true]]) {
+      const body = Array.from({length: lines}, (_, n) => `line ${n + 1}`).join("\n");
+      const html = render(`\`\`\`${language}\n${body}\n\`\`\``);
+      assert.equal(/<pre[^>]* hidden>/.test(html), collapsed);
+      assert.match(html, new RegExp(`aria-expanded="${!collapsed}"`));
+      assert.match(html, /markdown-code-toggle/); assert.match(html, /markdown-code-copy/);
+      assert.match(html.replace(/<[^>]*>/g, ""), new RegExp(`line ${lines}`));
+    }
+  }
+  assert.doesNotMatch(render('```text\r\n' + Array(15).fill('line').join('\r\n') + '\r\n```'), /<pre[^>]* hidden>/);
+});
+
+function codeDom({ expanded = false, language = 'json', wrapped = false, text = '' } = {}) {
+  const classes = new Set(wrapped ? ['is-wrapped'] : []), attrs = new Map();
+  const code = { textContent: text, innerHTML: '' };
+  const pre = { hidden: !expanded, querySelector: () => code, closest: () => block };
+  const control = kind => ({
+    title: '', disabled: false, innerHTML: '', classList: { contains: name => name === kind },
+    setAttribute(name,value) { attrs.set(`${kind}:${name}`, value); },
+    closest(selector) { return selector === '.markdown-code-block' ? block : selector === '.markdown-body' ? root : null; },
+  });
+  const toggle = control('markdown-code-toggle'), wrap = control('markdown-code-wrap'), copy = control('markdown-code-copy');
+  const block = { dataset: {codeLanguage:language}, classList: { contains: name => classes.has(name), toggle(name, value) { const next = value ?? !classes.has(name); if(next) classes.add(name); else classes.delete(name); return next; } },
+    querySelector(selector) { return selector === 'pre' ? pre : selector === 'pre > code' ? code : selector === '.markdown-code-toggle' ? toggle : selector === '.markdown-code-wrap' ? wrap : null; } };
+  const root = { querySelectorAll: () => [block] };
+  return {block, root, pre, code, toggle, wrap, copy, attrs};
+}
+
+async function interactiveCodeHarness() {
+  let click;
+  const copied = [];
+  const context = vm.createContext({console, document: {addEventListener: (name,handler) => {if(name === 'click') click = handler;}}, navigator: {clipboard: {writeText: async value => copied.push(value)}}, setTimeout() {}});
+  context.window = context;
+  context.DOMPurify = {addHook(){}, sanitize: html => html};
+  vm.runInContext(await readFile(new URL('../../../console/vendor/marked.min.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(await readFile(new URL('../../../console/json-view.js', import.meta.url), 'utf8'), context);
+  vm.runInContext(markdownSource, context);
+  context.DeepAgentMarkdown.init();
+  return {md:context.DeepAgentMarkdown, json:context.DeepAgentJson, copied,
+    click(control, selector) { return click({target:{closest: query => query.includes(selector) ? control : null}, preventDefault(){}, stopPropagation(){}}); }};
+}
+
+test("工具参数JSON复用代码栏，保留args与轨迹类，默认阈值按实际格式化行数", async () => {
+  const h = await interactiveCodeHarness();
+  for (const [fields, collapsed] of [[13,false], [14,true]]) {
+    const value = Object.fromEntries(Array.from({length:fields}, (_,n) => [`field${n}`, `<value ${n}>`]));
+    const html = h.json.renderBlock(value, {className:'args trajectory-json is-flat',ariaLabel:'工具参数 JSON'});
+    assert.equal(/<pre[^>]* hidden>/.test(html),collapsed);
+    assert.match(html, /<pre class="json-view args trajectory-json is-flat" aria-label="工具参数 JSON"/);
+    assert.match(html, /markdown-code-copy/); assert.match(html, /class="markdown-code-block is-wrapped"/);
+    assert.doesNotMatch(html, /<value/); assert.match(html, new RegExp(`field${fields-1}`));
+  }
+});
+
+test("手动展开或折叠及换行在同一正文重渲染恢复，未触碰的代码仍按新行数默认", async () => {
+  const h = await interactiveCodeHarness(), first = codeDom();
+  await h.click(first.toggle, 'markdown-code-toggle');
+  assert.equal(first.pre.hidden,false); assert.equal(first.attrs.get('markdown-code-toggle:aria-expanded'),'true');
+  await h.click(first.wrap, 'markdown-code-wrap');
+  const saved = h.md.captureCodeState(first.root), next = codeDom();
+  h.md.restoreCodeState(next.root,saved);
+  assert.equal(next.pre.hidden,false); assert.equal(next.block.dataset.codeDisclosureTouched,'1');
+  assert.equal(next.block.classList.contains('is-wrapped'),true);
+  h.md.updateCodeBlock(next.block,Array(25).fill('line').join('\n'));
+  assert.equal(next.pre.hidden,false, '原位更新不能覆盖手动展开');
+  await h.click(next.toggle,'markdown-code-toggle');
+  const final = codeDom({expanded:true}); h.md.restoreCodeState(final.root,h.md.captureCodeState(next.root));
+  assert.equal(final.pre.hidden,true); assert.equal(final.attrs.get('markdown-code-toggle:aria-expanded'),'false');
+  const untouched = codeDom({expanded:true}); h.md.updateCodeBlock(untouched.block,Array(16).fill('line').join('\n'));
+  assert.equal(untouched.pre.hidden,true);
+  const independent = codeDom({expanded:true}); h.md.restoreCodeState(independent.root,[]);
+  assert.equal(independent.pre.hidden,false, '另一个代码块不继承全局状态');
+});
+
+test("折叠后复制仍取得完整原文，JSON参数更新保留code节点与手动状态", async () => {
+  const h = await interactiveCodeHarness(), text = Array(20).fill('完整正文').join('\n'), dom = codeDom({text});
+  await h.click(dom.copy,'markdown-code-copy');
+  assert.equal(h.copied[0],text); assert.equal(dom.pre.hidden,true);
+  await h.click(dom.toggle,'markdown-code-toggle');
+  const code = dom.code;
+  h.json.updateBlock(dom.pre,{updated:'new value',rows:Array(20).fill('item')});
+  assert.equal(dom.code,code); assert.equal(dom.pre.hidden,false);
+  assert.match(code.innerHTML,/new value/); assert.match(code.innerHTML,/json-key/);
+  assert.match(chatSource,/DeepAgentJson\.updateBlock\(argsEl, merged\.args\)/);
+  assert.match(chatSource,/restoreCodeState\?\.\(nextRow/);
+});
+
+test("流式正文替换调用真实renderer后恢复手动选择；工具代码按调用ID恢复而不串行", async () => {
+  const h = await interactiveCodeHarness();
+  let current = codeDom();
+  await h.click(current.toggle,'markdown-code-toggle');
+  const host = {querySelectorAll: () => [current.block], set innerHTML(html) {
+    current = codeDom({expanded: !/<pre[^>]* hidden>/.test(html), language:'json'});
+  }};
+  h.md.replaceBody(host,'```json\n'+Array(20).fill('{}').join('\n')+'\n```');
+  assert.equal(current.pre.hidden,false);
+  assert.equal(current.block.dataset.codeDisclosureTouched,'1');
+  const attachTool = (dom,id) => { dom.block.closest = () => ({dataset:{toolCallId:id}}); dom.pre.getAttribute = () => '工具参数 JSON'; return dom; };
+  const old = attachTool(codeDom(),'call-a'); await h.click(old.toggle,'markdown-code-toggle');
+  const saved = h.md.captureCodeState(old.root), other = attachTool(codeDom(),'call-b'), same = attachTool(codeDom(),'call-a');
+  h.md.restoreCodeState({querySelectorAll: () => [other.block,same.block]},saved);
+  assert.equal(other.pre.hidden,true); assert.equal(same.pre.hidden,false);
 });

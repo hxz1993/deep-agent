@@ -1,4 +1,4 @@
-import { buildTrajectory, redactTrajectoryValue } from "./trajectory.js?v=20261017-console-audit";
+import { buildTrajectory, redactTrajectoryValue } from "./trajectory.js?v=20261019-release0138";
 import { cacheSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 

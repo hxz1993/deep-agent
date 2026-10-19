@@ -67,6 +67,7 @@ from deep_agent.agent.attachments import (
 from deep_agent.agent.deferred import serialize_deferred
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
+from deep_agent.diagnostics.persistence import persistence_failure_fields
 from deep_agent.agent.message_persistence import MessagePersistenceCapability, StreamMessagePersistenceCapability, MessagePersistenceError
 from deep_agent.db.run_ownership import live_run
 from deep_agent.agent.limits import format_stream_error
@@ -1407,7 +1408,8 @@ class AgentRunner:
         except Exception as exc:
             log_event("message_persistence_failed", session_id=session_id,
                       run_id=deps.run_id, agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
-                      phase="terminal", error_type=type(exc).__name__)
+                      phase="terminal", error_type=type(exc).__name__,
+                      **persistence_failure_fields(exc, store=self.store, messages=to_append, hook="terminal"))
             raise
         if result_queue is not None:
             for row in rows or []:
@@ -1433,7 +1435,8 @@ class AgentRunner:
         except Exception as exc:
             log_event("message_persistence_failed", session_id=session_id,
                       run_id=deps.run_id, agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
-                      phase="status_finalization", error_type=type(exc).__name__)
+                      phase="status_finalization", error_type=type(exc).__name__,
+                      **persistence_failure_fields(exc, store=self.store, hook="status_finalization"))
             return False
 
     def _publish_run_complete(

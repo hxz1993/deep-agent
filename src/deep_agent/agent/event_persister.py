@@ -15,6 +15,8 @@ from deep_agent.agent.history import (
 )
 from deep_agent.db.conversation import SessionStore
 from deep_agent.db.session_scope import runtime_session_key
+from deep_agent.agent.observability import log_event
+from deep_agent.diagnostics.persistence import persistence_failure_fields
 
 _SENTINEL = object()
 _WRITE_TIMEOUT = 10.0
@@ -186,14 +188,27 @@ class EventPersister:
         agent_id: str | None,
         ev: PersistEvent,
     ) -> None:
-        lock = getattr(self._store, "lock", None)
-        if callable(lock):
-            async with lock(session_id, agent_id=agent_id):
+        try:
+            lock = getattr(self._store, "lock", None)
+            if callable(lock):
+                async with lock(session_id, agent_id=agent_id):
+                    async with asyncio.timeout(_WRITE_TIMEOUT):
+                        await self._persist_locked(session_id, agent_id, ev)
+            else:
                 async with asyncio.timeout(_WRITE_TIMEOUT):
                     await self._persist_locked(session_id, agent_id, ev)
-        else:
-            async with asyncio.timeout(_WRITE_TIMEOUT):
-                await self._persist_locked(session_id, agent_id, ev)
+        except Exception as exc:
+            # Draining can process a later Run than the worker's outer item.
+            # Attribute failure to the actual event without replacing its error.
+            try:
+                log_event("message_persistence_failed", session_id=session_id, agent_id=agent_id,
+                          run_id=ev.run_id, phase="background", error_type=type(exc).__name__,
+                          **persistence_failure_fields(exc, store=self._store,
+                              messages=ev.new_messages or ev.result_messages or
+                                       ([ev.user_message] if ev.user_message else []), hook="event_worker"))
+            except Exception:
+                pass
+            raise
 
     async def _persist_locked(
         self,

@@ -76,6 +76,47 @@ class EventPersisterTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "persistence failed"):
                 await self.persister.flush("failed-write", agent_id=self.agent.id)
 
+    async def test_drained_failure_logs_actual_run_once(self) -> None:
+        records = []
+        async def write(*args, **kwargs):
+            if kwargs["run_id"] == "later-run":
+                raise ValueError("PRIVATE_STORAGE_ERROR")
+            return []
+        with patch.object(self.store, "append", side_effect=write), \
+                patch.object(self.persister, "_drain_pending", wraps=self.persister._drain_pending) as drain, \
+                patch("deep_agent.diagnostics.emit", side_effect=lambda name, **fields: records.append((name, fields))):
+            self.persister.publish(PersistEvent(
+                session_id="drained-failure", agent_id=self.agent.id, user_id="owner",
+                kind="run_complete", turn_id="earlier-turn", run_id="earlier-run",
+                new_messages=[ModelResponse(parts=[TextPart("PRIVATE_EARLIER")])],
+                repair_dangling_tool_calls=False,
+            ))
+            self.persister.publish(PersistEvent(
+                session_id="drained-failure", agent_id=self.agent.id, user_id="owner",
+                kind="user_turn", turn_id="later-turn", run_id="later-run",
+                user_message=ModelRequest(parts=[UserPromptPart("PRIVATE_LATER"), UserPromptPart("PRIVATE_SECOND")]),
+            ))
+            with self.assertRaisesRegex(RuntimeError, "persistence failed"):
+                await self.persister.flush("drained-failure", agent_id=self.agent.id)
+            self.assertEqual(drain.await_count, 1)
+        failures = [fields for name, fields in records if name == "message_persistence_failed"]
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["run_id"], "later-run")
+        self.assertEqual(failures[0]["write_part_count"], 2)
+        self.assertEqual(failures[0]["phase"], "background")
+        self.assertNotIn("PRIVATE", repr(records))
+
+    async def test_background_diagnostic_failure_does_not_replace_storage_exception(self) -> None:
+        original = ValueError("PRIVATE_STORAGE_ERROR")
+        event = PersistEvent(session_id="failed", agent_id=self.agent.id, user_id="owner",
+            kind="user_turn", turn_id="turn", run_id="run",
+            user_message=ModelRequest(parts=[UserPromptPart("PRIVATE_BODY")]))
+        with patch.object(self.store, "append", side_effect=original), \
+                patch("deep_agent.agent.event_persister.persistence_failure_fields", side_effect=RuntimeError("diagnostics unavailable")):
+            with self.assertRaises(ValueError) as caught:
+                await self.persister._handle_event("failed", self.agent.id, event)
+        self.assertIs(caught.exception, original)
+
     async def test_stalled_write_times_out_and_releases_session_lock(self) -> None:
         exited = asyncio.Event()
 

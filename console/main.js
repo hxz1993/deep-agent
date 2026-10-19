@@ -9,8 +9,8 @@ import {
   rememberConfigurationTab,
 } from "./configuration.js?v=20261019-release0137";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261019-release0137";
-import { initWorkspace } from "./workspace.js?v=20261019-release0137";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261019-release0138";
+import { initWorkspace } from "./workspace.js?v=20261019-release0138";
 import "./time.js?v=20260913-49";
 import "./configuration-directory.js?v=20261019-release0137";
 

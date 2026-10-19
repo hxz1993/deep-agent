@@ -16,6 +16,10 @@ from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.diagnostic_routes import NoStoreRoute
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.schemas.session_source import SessionSourceType
+from deep_agent.schemas.diagnostic_query import (
+    DiagnosticUsageQuery, DiagnosticUsageDetailsQuery, DiagnosticUsageSessionsQuery,
+    DiagnosticUsageExportQuery,
+)
 from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, SessionFilters, query_budget
 from deep_agent.diagnostics.usage import UsageQueries
@@ -157,3 +161,30 @@ async def export_details(request: Request, ctx: AppContextDep, caller: RequestUs
             f'{row["total_tokens"] / detail["summary"]["total_tokens"]:.1%}' if detail["summary"]["total_tokens"] else "", row["missing_requests"]])
     return Response("\ufeff" + output.getvalue(), media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=deepagent-usage.csv"})
+
+
+def body_filters(body: DiagnosticUsageQuery):
+    return filters(**body.model_dump(include=set(DiagnosticUsageQuery.model_fields)))
+
+
+@router.post("")
+async def query_usage(request: Request, ctx: AppContextDep, caller: RequestUserDep, body: DiagnosticUsageQuery):
+    return await get_usage(request, ctx, caller, body_filters(body))
+
+
+@router.post("/details")
+async def query_details(request: Request, ctx: AppContextDep, caller: RequestUserDep, body: DiagnosticUsageDetailsQuery):
+    return await get_details(request, ctx, caller, body_filters(body), group_by=body.group_by,
+        sort=body.sort, descending=body.descending, limit=body.limit, offset=body.offset)
+
+
+@router.post("/sessions")
+async def query_contributing_sessions(ctx: AppContextDep, body: DiagnosticUsageSessionsQuery):
+    return await get_contributing_sessions(ctx, body_filters(body), group_by=body.group_by,
+        key=body.key, offset=body.offset)
+
+
+@router.post("/export")
+async def query_export_details(request: Request, ctx: AppContextDep, caller: RequestUserDep, body: DiagnosticUsageExportQuery):
+    return await export_details(request, ctx, caller, body_filters(body), group_by=body.group_by,
+        sort=body.sort, descending=body.descending, scope=body.scope, offset=body.offset)

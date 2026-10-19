@@ -7,6 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.diagnostic_routes import NoStoreRoute
 from deep_agent.diagnostics.query import QueryError, logs_status, query_logs
+from deep_agent.schemas.diagnostic_query import DiagnosticLogsQuery
 
 router = APIRouter(prefix="/diagnostics/logs", dependencies=CONSOLE_ADMIN_DEPENDENCIES, route_class=NoStoreRoute)
 tag = "diagnostics"
@@ -25,6 +26,11 @@ async def get_logs_status():
         return await run_in_threadpool(logs_status, config, runtime)
     except QueryError as exc:
         raise HTTPException(exc.status_code, detail={"code": exc.code}) from exc
+
+
+@router.post("")
+async def query_diagnostic_logs(body: DiagnosticLogsQuery):
+    return await get_logs(**body.model_dump())
 
 
 @router.get("")

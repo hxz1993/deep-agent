@@ -143,6 +143,52 @@ BUNDLE_FIELDS = BUNDLE_NUMBER_FIELDS | frozenset({
     "model_name", "tool", "phase", "status", "elapsed_ms", "byte_size", "reason_code",
 })
 BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_merge_tables", "parse_relevel_titles", "parse_layout_visualization"})
+PERSISTENCE_NUMBER_FIELDS = frozenset({
+    "write_message_count", "write_part_count", "message_ordinal", "part_index",
+    "stored_part_count", "incoming_part_count", "database_error_code",
+    "message_identity_merges", "response_id_mismatches",
+})
+
+
+def _persistence_fields(fields: dict, result: dict) -> None:
+    """Failure-only vocabulary; no arbitrary SQL, exception or payload text."""
+    choices = {
+        "persistence_reason": {"immutable_part_conflict", "database_integrity", "database_operational",
+                               "database_data", "database_driver", "timeout", "invalid_value", "unexpected"},
+        "db_dialect": {"mysql", "postgresql", "sqlite"},
+        "write_stage": {"assemble", "append", "publish"},
+        "write_hook": {"unknown", "_prepare_model_node", "after_model_request", "after_node_run",
+                       "before_tool_execute", "wrap_tool_execute", "after_tool_execute",
+                       "wrap_run_event_stream", "terminal", "status_finalization", "event_worker"},
+        "conflict_field": {"part_kind", "content", "args", "tool_name", "tool_call_id", "tool_kind",
+                           "metadata", "provider_details", "id", "signature", "provider_name", "outcome",
+                           "tools_added", "tools_removed", "other", "parts_count", "metadata.deepagent_timing",
+                           "metadata.deepagent_plan", "metadata.overflow_handle", "metadata.ptc_diagnostics"},
+    }
+    kinds = {"text", "thinking", "tool-call", "tool-return", "builtin-tool-call", "builtin-tool-return",
+             "retry-prompt", "user-prompt", "system-prompt", "tool-availability-delta", "other"}
+    choices.update(stored_part_kind=kinds, incoming_part_kind=kinds)
+    for key, allowed in choices.items():
+        value = fields.get(key)
+        if type(value) is str and value in allowed:
+            result[key] = value
+    patterns = {"conflict_event_id": r"[0-9a-f]{32}", "database_sqlstate": r"[A-Z0-9]{5}",
+                "cause_type": r"[A-Za-z_][A-Za-z0-9_]{0,79}",
+                "exception_chain": r"[A-Za-z_][A-Za-z0-9_:]{0,179}"}
+    for key in ("failure_location", "failure_caller"):
+        patterns[key] = r"(?:agent|db|diagnostics)/[a-zA-Z0-9_/.]+\.py:[0-9]{1,6}:[A-Za-z_][A-Za-z0-9_]{0,79}"
+    for key in ("product_version", "pydantic_ai_version", "pydantic_harness_version", "sqlalchemy_version"):
+        patterns[key] = r"(?:[0-9][A-Za-z0-9_.+-]{0,39}|unavailable)"
+    for key, pattern in patterns.items():
+        value = fields.get(key)
+        if type(value) is str and len(value) <= 180 and re.fullmatch(pattern, value):
+            result[key] = value
+    for key in PERSISTENCE_NUMBER_FIELDS:
+        value = fields.get(key)
+        if type(value) is int and 0 <= value <= 10**15:
+            result[key] = value
+
+
 TOKEN = re.compile(r"[A-Za-z0-9_.:/-]{1,180}\Z")
 ISSUE_CODES = frozenset({
     "directory_unavailable", "write_failed", "queue_full", "capacity_exceeded", "shutdown_incomplete",
@@ -262,6 +308,8 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     if type(name) is str and re.fullmatch(r"[\w .:/()\-|\\]{1,100}", name) and "://" not in name:
         result["agent_name"] = name
     _model_api_fields(fields, result)
+    if event == "message_persistence_failed":
+        _persistence_fields(fields, result)
     origin = _safe_model_origin(fields.get("target_origin"))
     if origin is not None:
         result["target_origin"] = origin

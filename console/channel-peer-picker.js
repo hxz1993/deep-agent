@@ -1,4 +1,4 @@
-import { escapeHtml as e, icon, icons } from "./diagnostics-ui.js?v=20260915-release-audit";
+import { escapeHtml as e, icon, icons } from "./diagnostics-ui.js?v=20261019-release0138";
 
 export function uniqueChannelPeers(items) {
   const peers = new Map();

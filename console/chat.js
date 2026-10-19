@@ -2,9 +2,9 @@ import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-usage-tab-2";
 import { renderPlanItems } from "./plan-view.js?v=20260922-trajectory-8";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
-import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20261017-console-audit";
+import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20261019-release0138";
 import { cacheTrajectorySummary } from "./cache-usage.js?v=20260923-usage-tab-2";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20261013-console-ui-4";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20261019-release0138";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
   contextCompactionPresentation,
@@ -22,7 +22,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20261002-console-audit";
-import { createTrajectoryController } from "./trajectory.js?v=20261017-console-audit";
+import { createTrajectoryController } from "./trajectory.js?v=20261019-release0138";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
@@ -1783,6 +1783,7 @@ function renderHistory(items, { updating = false, running = false } = {}) {
 }
 
 function restoreHistoryDisclosure(oldRow, nextRow) {
+  globalThis.DeepAgentMarkdown?.restoreCodeState?.(nextRow, globalThis.DeepAgentMarkdown?.captureCodeState?.(oldRow));
   for (const selector of [".assistant-process", ".assistant-thinking", ".tool-block"]) {
     const oldBlocks = [...oldRow.querySelectorAll(selector)];
     for (const [index, block] of [...nextRow.querySelectorAll(selector)].entries()) {

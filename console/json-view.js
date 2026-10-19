@@ -59,8 +59,19 @@
 
   function renderBlock(value, { className = "", ariaLabel = "JSON" } = {}) {
     const classes = ["json-view", className].filter(Boolean).join(" ");
-    return `<pre class="${escapeHtml(classes)}" aria-label="${escapeHtml(ariaLabel)}"><code>${highlight(value)}</code></pre>`;
+    const highlighted = highlight(value);
+    if (global.DeepAgentMarkdown?.renderCodeBlock) {
+      return `<div class="markdown-body markdown-json-block">${global.DeepAgentMarkdown.renderCodeBlock(highlighted, "json", { source: stringify(value), preClass: classes, ariaLabel, wrapped: true })}</div>`;
+    }
+    return `<pre class="${escapeHtml(classes)}" aria-label="${escapeHtml(ariaLabel)}"><code>${highlighted}</code></pre>`;
   }
 
-  global.DeepAgentJson = Object.freeze({ stringify, highlight, renderBlock });
+  function updateBlock(pre, value) {
+    const code = pre.querySelector("code");
+    if (code) code.innerHTML = highlight(value);
+    else pre.innerHTML = `<code>${highlight(value)}</code>`;
+    global.DeepAgentMarkdown?.updateCodeBlock?.(pre.closest(".markdown-code-block"), stringify(value));
+  }
+
+  global.DeepAgentJson = Object.freeze({ stringify, highlight, renderBlock, updateBlock });
 })(window);

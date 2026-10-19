@@ -616,7 +616,7 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(after)
                 following = await client.get("/api/v1/diagnostics/sessions/private/events", params={"after_sequence": after}, headers={"user": "admin-user"})
                 self.assertTrue(all(row["sequence"] > after for row in following.json()["items"]))
-                self.assertEqual((await client.post("/api/v1/diagnostics/sessions/private", headers={"user": "admin-user"})).status_code, 405)
+                self.assertEqual((await client.post("/api/v1/diagnostics/sessions/private", json={}, headers={"user": "admin-user"})).status_code, 200)
                 async with self.factory() as db:
                     await db.execute(update(ChatSessionEvent).where(ChatSessionEvent.session_id == "private",
                         ChatSessionEvent.event_type == "user/message").values(schema_version=99))

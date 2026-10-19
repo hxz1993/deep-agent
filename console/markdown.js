@@ -16,9 +16,56 @@
     return serialize([definition[0], { ...definition[1], "aria-hidden": "true", class: "markdown-code-icon" }, definition[2]]);
   }
 
-  function codeBlock(highlighted, language) {
-    const label = language || "纯文本";
-    return `<div class="markdown-code-block"><div class="markdown-code-header"><button type="button" class="markdown-code-toggle" aria-expanded="true" aria-label="折叠代码">${codeIcon("Code")}<span title="代码语言：${escapeHtml(label)}">${escapeHtml(label)}</span><span class="markdown-code-chevron">${codeIcon("ChevronDown")}</span></button><div class="markdown-code-actions"><button type="button" class="markdown-code-wrap" aria-label="自动换行" title="自动换行" aria-pressed="false">${codeIcon("WrapText")}</button><button type="button" class="markdown-code-copy" aria-label="复制代码" title="复制代码">${codeIcon("Copy")}</button></div></div><pre><code class="hljs${language ? ` language-${escapeHtml(language)}` : ""}">${highlighted}</code></pre></div>`;
+  const CODE_PREVIEW_LINES = 15;
+  const longCode = source => String(source ?? "").replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").length > CODE_PREVIEW_LINES;
+
+  function codeBlock(highlighted, language, { source = "", preClass = "", ariaLabel = "", wrapped = false } = {}) {
+    const label = language || "纯文本", collapsed = longCode(source);
+    return `<div class="markdown-code-block${wrapped ? " is-wrapped" : ""}" data-code-language="${escapeHtml(language || "")}"><div class="markdown-code-header"><button type="button" class="markdown-code-toggle" aria-expanded="${!collapsed}" aria-label="${collapsed ? "展开代码" : "折叠代码"}">${codeIcon("Code")}<span title="代码语言：${escapeHtml(label)}">${escapeHtml(label)}</span><span class="markdown-code-chevron">${codeIcon("ChevronDown")}</span></button><div class="markdown-code-actions"><button type="button" class="markdown-code-wrap" aria-label="自动换行" title="${wrapped ? "关闭自动换行" : "自动换行"}" aria-pressed="${wrapped}">${codeIcon("WrapText")}</button><button type="button" class="markdown-code-copy" aria-label="复制代码" title="复制代码">${codeIcon("Copy")}</button></div></div><pre${preClass ? ` class="${escapeHtml(preClass)}"` : ""}${ariaLabel ? ` aria-label="${escapeHtml(ariaLabel)}"` : ""}${collapsed ? " hidden" : ""}><code class="hljs${language ? ` language-${escapeHtml(language)}` : ""}">${highlighted}</code></pre></div>`;
+  }
+
+  function setCodeExpanded(block, expanded) {
+    const pre = block?.querySelector("pre"), toggle = block?.querySelector(".markdown-code-toggle");
+    if (!pre || !toggle) return;
+    pre.hidden = !expanded;
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.setAttribute("aria-label", expanded ? "折叠代码" : "展开代码");
+  }
+
+  function updateCodeBlock(block, source) {
+    if (block && !block.dataset.codeDisclosureTouched) setCodeExpanded(block, !longCode(source));
+  }
+
+  function captureCodeState(root) {
+    return [...(root?.querySelectorAll?.(".markdown-code-block") || [])].map((block, index) => ({
+      index, language: block.dataset.codeLanguage || "", expanded: !block.querySelector("pre")?.hidden,
+      toolCallId: block.closest?.("[data-tool-call-id]")?.dataset.toolCallId || "",
+      label: block.querySelector("pre")?.getAttribute?.("aria-label") || "",
+      touched: Boolean(block.dataset.codeDisclosureTouched), wrapped: block.classList.contains("is-wrapped"),
+      wrapTouched: Boolean(block.dataset.codeWrapTouched),
+    })).filter(item => item.touched || item.wrapTouched);
+  }
+
+  function restoreCodeState(root, saved = []) {
+    const blocks = [...(root?.querySelectorAll?.(".markdown-code-block") || [])];
+    for (const item of saved) {
+      const block = item.toolCallId ? blocks.find(candidate => candidate.closest?.("[data-tool-call-id]")?.dataset.toolCallId === item.toolCallId && (candidate.querySelector("pre")?.getAttribute?.("aria-label") || "") === item.label) : blocks[item.index];
+      if (!block || (block.dataset.codeLanguage || "") !== item.language) continue;
+      if (item.touched) { block.dataset.codeDisclosureTouched = "1"; setCodeExpanded(block, item.expanded); }
+      if (item.wrapTouched) {
+        block.dataset.codeWrapTouched = "1";
+        block.classList.toggle("is-wrapped", item.wrapped);
+        const wrap = block.querySelector(".markdown-code-wrap");
+        wrap?.setAttribute("aria-pressed", String(item.wrapped));
+        if (wrap) wrap.title = item.wrapped ? "关闭自动换行" : "自动换行";
+      }
+    }
+  }
+
+  function replaceBody(root, source) {
+    const saved = captureCodeState(root);
+    root.innerHTML = renderBody(source);
+    restoreCodeState(root, saved);
   }
 
   async function handleMarkdownClick(event) {
@@ -28,14 +75,13 @@
       event.preventDefault();
       event.stopPropagation();
       if (toggle.classList.contains("markdown-code-wrap")) {
+        block.dataset.codeWrapTouched = "1";
         const wrapped = block.classList.toggle("is-wrapped");
         toggle.setAttribute("aria-pressed", String(wrapped));
         toggle.title = wrapped ? "关闭自动换行" : "自动换行";
       } else {
-        const pre = block.querySelector("pre");
-        pre.hidden = !pre.hidden;
-        toggle.setAttribute("aria-expanded", String(!pre.hidden));
-        toggle.setAttribute("aria-label", pre.hidden ? "展开代码" : "折叠代码");
+        block.dataset.codeDisclosureTouched = "1";
+        setCodeExpanded(block, block.querySelector("pre").hidden);
       }
       return;
     }
@@ -134,7 +180,7 @@
           const text = String(codeText ?? "");
           const language = normalizeLanguage(lang);
           if (language === "mermaid") {
-            return `<div class="mermaid-diagram" data-mermaid-state="pending">${codeBlock(escapeHtml(text), language)}</div>\n`;
+            return `<div class="mermaid-diagram" data-mermaid-state="pending">${codeBlock(escapeHtml(text), language, { source: text })}</div>\n`;
           }
 
           let highlighted = escapeHtml(text);
@@ -145,7 +191,7 @@
               } catch (_) { /* keep escaped fallback */ }
             }
           }
-          return `${codeBlock(highlighted, language)}\n`;
+          return `${codeBlock(highlighted, language, { source: text })}\n`;
         },
       },
     };
@@ -262,7 +308,7 @@
       node.dataset.mermaidState = "rendered";
       const source = document.createElement("details");
       source.className = "markdown-diagram-source";
-      source.innerHTML = `<summary>Mermaid 源码</summary>${codeBlock(escapeHtml(definition), "mermaid")}`;
+      source.innerHTML = `<summary>Mermaid 源码</summary>${codeBlock(escapeHtml(definition), "mermaid", { source: definition })}`;
       node.appendChild(source);
       result.bindFunctions?.(node);
     } catch (error) {
@@ -304,5 +350,5 @@
     }
   }
 
-  global.DeepAgentMarkdown = Object.freeze({ init, render, renderBody, renderDiagrams });
+  global.DeepAgentMarkdown = Object.freeze({ init, render, renderBody, renderDiagrams, replaceBody, captureCodeState, restoreCodeState, updateCodeBlock, renderCodeBlock(highlighted, language, options) { init(); return codeBlock(highlighted, language, options); } });
 })(window);

@@ -43,6 +43,22 @@ _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 
+def _read_only_diagnostic_post(path: str) -> bool:
+    """Allow only the JSON aliases of existing administrator diagnostic reads."""
+    prefix = "/api/v1/diagnostics/"
+    if not path.startswith(prefix):
+        return False
+    parts = path[len(prefix):].split("/")
+    if parts == ["logs"] or parts == ["sessions"] or parts == ["usage"]:
+        return True
+    if len(parts) == 2:
+        return parts[0] == "sessions" or (parts[0] == "usage" and parts[1] in {"details", "sessions", "export"})
+    if len(parts) == 3:
+        return (parts[0] == "sessions" and parts[2] == "events" and bool(parts[1])) or (
+            parts[0] == "channels" and bool(parts[1]) and parts[2] in {"overview", "peers", "sessions"})
+    return False
+
+
 @dataclass(frozen=True)
 class LocalIdentity:
     user: str
@@ -128,7 +144,9 @@ class LocalIdentityAdapter:
             if scope.get("type") == "websocket":
                 await send({"type": "websocket.close", "code": 1008})
                 return
-            if scope.get("method", "GET").upper() not in {"GET", "HEAD", "OPTIONS"}:
+            method = scope.get("method", "GET").upper()
+            readonly_query = method == "POST" and _read_only_diagnostic_post(scope.get("path", ""))
+            if method not in {"GET", "HEAD", "OPTIONS"} and not readonly_query:
                 from starlette.responses import JSONResponse
 
                 await JSONResponse(

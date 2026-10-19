@@ -1,35 +1,38 @@
-import { initDiagnosticLogs } from "./diagnostics.js?v=20260929-release0124";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20261019-release0137";
-import { createDiagnosticNavigation, diagnosticHash, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20260923-c04-1";
+import { initDiagnosticLogs } from "./diagnostics.js?v=20261019-release0138";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20261019-release0138";
+import { createDiagnosticNavigation, diagnosticHash, diagnosticTarget, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20261019-release0138";
 
-import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20261019-release0137";
-import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20261013-providers";
+import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20261019-release0138";
+import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20261019-release0138";
 
 let center = null;
 export function initDiagnostics() {
   if (center) return;
   const logPage = document.getElementById("diagnosticsLogPage"), sessionPage = document.getElementById("diagnosticsSessionsPage"), channelPage = document.getElementById("diagnosticsChannelsPage"), usagePage = document.getElementById("diagnosticsUsagePage");
-  let active = false, route = null, currentHash = "", lastSessions = diagnosticHash("overview"), lastLogs = diagnosticHash("logs"), lastUsage = diagnosticHash("usage");
+  let active = false, route = null, currentHash = "", currentEntryKey = null, pendingTarget = null, lastSessions = diagnosticTarget("overview"), lastLogs = diagnosticTarget("logs"), lastUsage = diagnosticTarget("usage");
   const capture = () => route ? { kind: route.view === "channels" ? "channels" : route.kind, value: route.kind === "logs" ? logs.snapshot() : route.kind === "usage" ? usage.snapshot() : route.view === "channels" ? channels.snapshot() : sessions.snapshot() } : null;
-  const navigation = createDiagnosticNavigation({ getHash: () => location.hash, history, getSnapshot: capture, onNavigate: () => showRoute() });
-  const replace = hash => {
-    currentHash = hash; navigation.replaceCurrent(hash);
-    const parsed = parseDiagnosticRoute(hash);
-    if (parsed?.kind === "logs") lastLogs = hash;
-    else if (parsed?.kind === "usage") lastUsage = hash;
-    else if (parsed?.view !== "detail") lastSessions = hash;
+  const navigation = createDiagnosticNavigation({ getHash: () => location.hash, history, getSnapshot: capture, onNavigate: () => showRoute({ force: true }) });
+  const replace = target => {
+    navigation.replaceCurrent(target); currentHash = location.hash;
+    const parsed = parseDiagnosticRoute(target);
+    if (parsed?.kind === "logs") lastLogs = target;
+    else if (parsed?.kind === "usage") lastUsage = target;
+    else if (parsed?.view !== "detail") lastSessions = target;
   };
   const back = () => navigation.back(lastSessions);
-  const logs = initDiagnosticLogs({ page: logPage, onQuery: filters => replace(diagnosticHash("logs", filters)), onOpenSession: id => navigation.navigate(diagnosticHash("detail", { view: "conversation" }, id)), onBack: back });
+  const logs = initDiagnosticLogs({ page: logPage, onQuery: filters => replace(diagnosticTarget("logs", filters)), onOpenSession: id => navigation.navigate(diagnosticTarget("detail", { view: "conversation" }, id)), onBack: back });
   const sessions = initDiagnosticSessions({ root: sessionPage, navigate: navigation.navigate, replace, onBack: back });
   const channels = initDiagnosticChannels({ root: channelPage, navigate: navigation.navigate, replace, onBack: fallback => navigation.back(fallback) });
   const usage = initDiagnosticUsage({ root: usagePage, navigate: navigation.navigate, replace });
-  function showRoute() {
+  function showRoute({ force = false } = {}) {
     if (!active) return;
-    const next = parseDiagnosticRoute(location.hash);
+    let next = parseDiagnosticRoute(location.hash);
     if (!next) { navigation.navigate(lastLogs, { replace: true }); return; }
-    if (route && currentHash === location.hash) return;
-    const snapshot = navigation.enter();
+    if (!force && route && currentHash === location.hash && currentEntryKey === history.state?.diagnosticsKey && !pendingTarget) return;
+    const supplied = pendingTarget?.hash === diagnosticHash(next.view, next.filters, next.id) ? pendingTarget : null;
+    pendingTarget = null;
+    const snapshot = navigation.enter(supplied);
+    next = navigation.route; currentEntryKey = navigation.key;
     logs.deactivate(); sessions.deactivate(); channels.deactivate(); usage.deactivate();
     route = next; currentHash = location.hash;
     logPage.classList.toggle("hidden", next.kind !== "logs"); sessionPage.classList.toggle("hidden", next.kind !== "sessions" || next.view === "channels"); channelPage.classList.toggle("hidden", next.view !== "channels"); usagePage.classList.toggle("hidden", next.kind !== "usage");
@@ -38,21 +41,23 @@ export function initDiagnostics() {
       button.classList.toggle("active", selected); selected ? button.setAttribute("aria-current", "page") : button.removeAttribute("aria-current");
     });
     if (next.kind === "logs") logs.activate(next.filters, snapshot?.kind === "logs" ? snapshot.value : null, Boolean(parseDiagnosticRoute(history.state?.diagnosticsFrom)));
-    else if (next.kind === "usage") { lastUsage = location.hash; usage.activate(next, snapshot?.kind === "usage" ? snapshot.value : null); }
-    else if (next.view === "channels") { lastSessions = diagnosticHash("channels", next.filters); channels.activate(next, snapshot?.kind === "channels" ? snapshot.value : null); }
-    else { if (next.view !== "detail") lastSessions = diagnosticHash(next.view, next.filters); sessions.activate(next, snapshot?.kind === "sessions" ? snapshot.value : null); }
+    else if (next.kind === "usage") { lastUsage = diagnosticTarget(next.view, next.filters); usage.activate(next, snapshot?.kind === "usage" ? snapshot.value : null); }
+    else if (next.view === "channels") { lastSessions = diagnosticTarget("channels", next.filters); channels.activate(next, snapshot?.kind === "channels" ? snapshot.value : null); }
+    else { if (next.view !== "detail") lastSessions = diagnosticTarget(next.view, next.filters); sessions.activate(next, snapshot?.kind === "sessions" ? snapshot.value : null); }
   }
   center = {
     setActive(value) {
-      if (!value) { if (active) navigation.remember(); active = false; logs.deactivate(); sessions.deactivate(); channels.deactivate(); usage.deactivate(); route = null; currentHash = ""; return; }
+      if (!value) { if (active) navigation.remember(); active = false; logs.deactivate(); sessions.deactivate(); channels.deactivate(); usage.deactivate(); route = null; currentHash = ""; currentEntryKey = null; return; }
       active = true; showRoute();
     },
-    open(kind) {
+    async open(kind) {
       const target = kind === "sessions" ? lastSessions : kind === "usage" ? lastUsage : lastLogs;
       // The main page controller retains unsaved configuration guards.
-      return window.DeepAgentConsole.showPage("diagnostics", { diagnosticTarget: target });
+      pendingTarget = target;
+      try { return await window.DeepAgentConsole.showPage("diagnostics", { diagnosticTarget: target.hash }); }
+      finally { if (pendingTarget === target) pendingTarget = null; }
     },
-    clear() { navigation.clear(); logs.clear(); sessions.clear(); channels.clear(); usage.clear(); route = null; currentHash = ""; active = false; },
+    clear() { navigation.clear(); logs.clear(); sessions.clear(); channels.clear(); usage.clear(); route = null; currentHash = ""; currentEntryKey = null; pendingTarget = null; lastSessions = diagnosticTarget("overview"); lastLogs = diagnosticTarget("logs"); lastUsage = diagnosticTarget("usage"); active = false; },
   };
   window.addEventListener("deep-agent-diagnostics-denied", event => {
     center.clear();

@@ -19,6 +19,7 @@ from deep_agent.db.event_codec import (
     tool_part_references,
 )
 from deep_agent.db.ids import new_event_id
+from deep_agent.db.persistence_errors import ImmutableMessagePartConflict
 from deep_agent.db.models import ChatSession, ChatSessionEvent
 from deep_agent.db.reference_integrity import lock_reference
 from deep_agent.db.run_ownership import run_is_live
@@ -239,8 +240,15 @@ class SessionEventStore(SessionBoundMixin):
                 def immutable_parts(payload):
                     return [{key: value for key, value in part.items() if key != "timestamp"}
                             for part in payload.get("message", {}).get("parts", [])]
-                if immutable_parts(row.payload) != immutable_parts(draft.payload):
-                    raise ValueError(f"Immutable message part conflict for event_id={draft.event_id}")
+                stored_parts = immutable_parts(row.payload)
+                incoming_parts = immutable_parts(draft.payload)
+                if stored_parts != incoming_parts:
+                    raise ImmutableMessagePartConflict(
+                        event_id=draft.event_id,
+                        message_ordinal=source.get("message_ordinal"),
+                        part_index=source.get("part_index"),
+                        stored_parts=stored_parts, incoming_parts=incoming_parts,
+                    )
                 old_source = row.payload.get("source")
                 source = draft.payload.get("source")
                 if isinstance(old_source, dict) and isinstance(source, dict) and old_source != source:

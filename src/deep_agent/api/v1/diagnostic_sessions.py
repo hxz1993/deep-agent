@@ -20,6 +20,10 @@ from deep_agent.conversation.display_names import decorate_history_display_names
 from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.projector import ConversationProjectionError
 from deep_agent.schemas.session_source import SessionSourceType
+from deep_agent.schemas.diagnostic_query import (
+    DiagnosticSessionQuery, DiagnosticUsersQuery, DiagnosticUserProfileQuery,
+    DiagnosticSessionDetailQuery, DiagnosticSessionEventsQuery,
+)
 from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, DiagnosticSessionQueries, SessionFilters, detail_event_metadata, project_diagnostic_history, query_budget
 from deep_agent.services.channel_profiles import ChannelProfileService
@@ -117,8 +121,13 @@ async def get_diagnostic_user_profile(
     user_id: str = Query(min_length=1, max_length=128),
 ):
     """Manually inspect one platform account without requiring a session."""
-    if (len(request.query_params.getlist("user_id")) != 1 or not user_id.strip()
-            or user_id != user_id.strip() or any(ord(char) < 32 for char in user_id)):
+    if len(request.query_params.getlist("user_id")) != 1:
+        raise HTTPException(422, "请输入有效的平台 User ID")
+    return await _user_profile(request, caller_user_id, user_id)
+
+
+async def _user_profile(request, caller_user_id, user_id):
+    if (not user_id.strip() or user_id != user_id.strip() or any(ord(char) < 32 for char in user_id)):
         raise HTTPException(422, "请输入有效的平台 User ID")
     result = await with_users(request, caller_user_id, {}, [user_id])
     return {"user": result["users"][user_id]}
@@ -205,3 +214,42 @@ async def get_diagnostic_events(ctx: AppContextDep, session_id: str,
             event_type=event_type, turn_id=turn_id, run_id=run_id, call_id=call_id)
         items = await run_in_threadpool(lambda: [SessionEventResponse.model_validate(event.public_dict()) for event in events])
         return SessionEventsResponse(items=items, next_after_sequence=items[-1].sequence if len(items) == limit else None)
+
+
+def body_filters(body: DiagnosticSessionQuery):
+    return filters(**body.model_dump(include=set(DiagnosticSessionQuery.model_fields)))
+
+
+@router.post("/overview")
+async def query_diagnostic_overview(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep,
+                                    body: DiagnosticSessionQuery):
+    return await get_diagnostic_overview(request, ctx, caller_user_id, body_filters(body))
+
+
+@router.post("")
+async def query_diagnostic_sessions(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep,
+                                    body: DiagnosticSessionQuery):
+    return await list_diagnostic_sessions(request, ctx, caller_user_id, body_filters(body))
+
+
+@router.post("/users")
+async def query_diagnostic_users(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep,
+                                 body: DiagnosticUsersQuery):
+    return await search_diagnostic_users(request, ctx, caller_user_id, body_filters(body), body.after)
+
+
+@router.post("/user-profile")
+async def query_diagnostic_user_profile(request: Request, caller_user_id: RequestUserDep,
+                                        body: DiagnosticUserProfileQuery):
+    return await _user_profile(request, caller_user_id, body.user_id)
+
+
+@router.post("/{session_id}")
+async def query_diagnostic_session(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep,
+                                   session_id: str, body: DiagnosticSessionDetailQuery):
+    return await get_diagnostic_session(request, ctx, caller_user_id, session_id, body.include_context)
+
+
+@router.post("/{session_id}/events", response_model=SessionEventsResponse)
+async def query_diagnostic_events(ctx: AppContextDep, session_id: str, body: DiagnosticSessionEventsQuery):
+    return await get_diagnostic_events(ctx, session_id, **body.model_dump())

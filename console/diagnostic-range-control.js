@@ -1,4 +1,4 @@
-import { escapeHtml as e, icon, localInput } from "./diagnostics-ui.js?v=20260915-release-audit";
+import { escapeHtml as e, icon, localInput } from "./diagnostics-ui.js?v=20261019-release0138";
 
 export const DIAGNOSTIC_PERIODS = [["24", "最近 1 天"], ["168", "最近 7 天"], ["720", "最近 30 天"], ["custom", "自定义时间"]];
 

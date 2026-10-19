@@ -24,6 +24,7 @@ from deep_agent.agent.planning import (
 )
 from deep_agent.db.run_ownership import live_run
 from deep_agent.db.execution_error import safe_execution_error
+from deep_agent.diagnostics.persistence import persistence_failure_fields
 
 
 class MessagePersistenceError(RuntimeError):
@@ -53,6 +54,8 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         self._accepted: set[tuple[int, str]] = set()
         self._results: dict[str, Any] = {}
         self._write_lock = asyncio.Lock()
+        self._message_identity_merges = 0
+        self._response_id_mismatches = 0
         self._executing_parent: ContextVar[tuple[int, str] | None] = ContextVar(
             "deepagent_message_executing_parent", default=None,
         )
@@ -86,6 +89,11 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         for index, existing in enumerate(self._ledger):
             if self._same_message(existing, message):
                 if existing is not message:
+                    self._message_identity_merges += 1
+                    old_id = getattr(existing, "provider_response_id", None)
+                    new_id = getattr(message, "provider_response_id", None)
+                    if isinstance(message, ModelResponse) and old_id and new_id and old_id != new_id:
+                        self._response_id_mismatches += 1
                     self._accepted.update((id(message), call_id)
                                           for response_id, call_id in tuple(self._accepted)
                                           if response_id == id(existing))
@@ -244,13 +252,16 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 messages.append(request)
         return messages
 
-    async def _flush(self, ctx: RunContext[AgentDeps]) -> None:
+    async def _flush(self, ctx: RunContext[AgentDeps], *, hook: str = "unknown") -> None:
         async with self._write_lock:
             if self.persistence_error is not None:
                 raise self.persistence_error
-            messages = self._completed_messages()
             deps = ctx.deps
+            messages = []
+            write_stage = "assemble"
             try:
+                messages = self._completed_messages()
+                write_stage = "append"
                 async with asyncio.timeout(10):
                     rows = await self.store.append_message_parts(
                         deps.session_id, agent_id=deps.agent_id, user_id=deps.user,
@@ -262,6 +273,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                         usage_provider_id=self.provider_id,
                     )
                 self.messages = messages
+                write_stage = "publish"
                 if self.event_queue is not None:
                     for row in rows or []:
                         self.event_queue.put_nowait({
@@ -271,12 +283,16 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             except Exception as exc:
                 log_event("message_persistence_failed", session_id=deps.session_id,
                           run_id=deps.run_id, agent_id=deps.agent_id,
-                          phase="incremental", error_type=type(exc).__name__)
+                          phase="incremental", error_type=type(exc).__name__,
+                          write_stage=write_stage,
+                          message_identity_merges=self._message_identity_merges,
+                          response_id_mismatches=self._response_id_mismatches,
+                          **persistence_failure_fields(exc, store=self.store, messages=messages, hook=hook))
                 self.persistence_error = MessagePersistenceError("Unable to persist completed message")
                 raise self.persistence_error from exc
 
-    async def _save(self, ctx: RunContext[AgentDeps]) -> None:
-        await self._flush(ctx)
+    async def _save(self, ctx: RunContext[AgentDeps], *, hook: str = "unknown") -> None:
+        await self._flush(ctx, hook=hook)
 
     async def wrap_node_run(self, ctx, *, node, handler):
         await self._prepare_model_node(ctx, node)
@@ -299,11 +315,11 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                     self._ledger = [message for message in self._ledger if message is not self._next_request]
                 self._record(node.request)
             self._next_request = None
-            await self._save(ctx)
+            await self._save(ctx, hook="_prepare_model_node")
 
     async def after_model_request(self, ctx, *, request_context, response):
         self._record(response)
-        await self._save(ctx)
+        await self._save(ctx, hook="after_model_request")
         return response
 
     async def after_node_run(self, ctx, *, node, result):
@@ -317,15 +333,15 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             response = getattr(result, "model_response", None)
             if isinstance(response, ModelResponse):
                 self._record(response)
-        await self._save(ctx)
+        await self._save(ctx, hook="after_node_run")
         return result
 
     async def before_tool_execute(self, ctx, *, call, tool_def, args):
         if self._accept(ctx, call, allow_nested=True):
-            await self._save(ctx)
+            await self._save(ctx, hook="before_tool_execute")
         else:
             # Propagate an earlier persistence failure even if a nested tool caught it.
-            await self._flush(ctx)
+            await self._flush(ctx, hook="before_tool_execute")
         return args
 
     async def wrap_tool_execute(self, ctx, *, call, tool_def, args, handler):
@@ -341,7 +357,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         except ToolFailedError as exc:
             if self.capture_execute_results and previous_parent is None:
                 self._results[call.tool_call_id] = deepcopy(exc.tool_failed)
-                await self._save(ctx)
+                await self._save(ctx, hook="wrap_tool_execute")
             raise
         finally:
             self._executing_parent.reset(token)
@@ -380,7 +396,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 wrapped.metadata = deepcopy(part.metadata)
                 result = wrapped
         self._results[call.tool_call_id] = part
-        await self._save(ctx)
+        await self._save(ctx, hook="after_tool_execute")
         return result
 
 
@@ -395,13 +411,13 @@ class StreamMessagePersistenceCapability(MessagePersistenceCapability):
             async for event in stream:
                 if isinstance(event, FunctionToolCallEvent) and event.args_valid:
                     self._accept(ctx, event.part)
-                    await self._save(ctx)
+                    await self._save(ctx, hook="wrap_run_event_stream")
                 elif isinstance(event, FunctionToolResultEvent):
                     await self._capture_plan_result(ctx, event.part)
                     self._results[event.part.tool_call_id] = deepcopy(event.part)
-                    await self._save(ctx)
+                    await self._save(ctx, hook="wrap_run_event_stream")
                 yield event
-            await self._flush(ctx)
+            await self._flush(ctx, hook="wrap_run_event_stream")
         finally:
             close = getattr(stream, "aclose", None)
             if callable(close):

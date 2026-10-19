@@ -112,7 +112,8 @@ test("diagnostics retains its navigation entry and replaces all placeholder capa
 });
 
 test("query uses central same-origin helper without App context, no polling or server-side download", () => {
-  assert.match(ui, /window\.daFetch\(window\.serviceUrl\(path\)/);
+  assert.match(ui, /const transport = diagnosticRequestOptions\(path\)/);
+  assert.match(ui, /window\.daFetch\(window\.serviceUrl\(transport\.path\)/);
   assert.match(ui, /includeContext: false, reportStatus: false/);
   assert.doesNotMatch(source, /setInterval|EventSource|WebSocket|\/download|localStorage/);
   assert.match(source, /window\.addEventListener\("pagehide"/);

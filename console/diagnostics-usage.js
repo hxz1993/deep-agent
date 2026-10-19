@@ -1,8 +1,8 @@
 import { bindChannelResizer } from "./channel-resizer.js?v=20260915-release-audit";
-import { DIAGNOSTIC_PERIODS, diagnosticRangeHelpHtml, bindDiagnosticRangeDismiss } from "./diagnostic-range-control.js?v=20260923-c04-8";
-import { diagnosticTime } from "./diagnostics.js?v=20260915-ui-polish";
-import { escapeHtml as e, icon, icons, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260915-release-audit";
-import { diagnosticHash } from "./diagnostics-navigation.js?v=20260923-c04-1";
+import { DIAGNOSTIC_PERIODS, diagnosticRangeHelpHtml, bindDiagnosticRangeDismiss } from "./diagnostic-range-control.js?v=20261019-release0138";
+import { diagnosticTime } from "./diagnostics.js?v=20261019-release0138";
+import { escapeHtml as e, icon, icons, selectHtml, bindDiagnosticSelects, diagnosticRequest, diagnosticRequestOptions } from "./diagnostics-ui.js?v=20261019-release0138";
+import { diagnosticTarget, sameDiagnosticFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
 
 const PERIODS = DIAGNOSTIC_PERIODS.map(([value, name]) => [value === "custom" ? value : String(Number(value) / 24), name]);
 const DIMENSIONS = [["model", "按模型"], ["user", "按用户"], ["agent", "按 Agent"]];
@@ -231,7 +231,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
       const bounds = usageRange(period, new Date(), custom);
       state.filters = {...bounds, period, timezone:state.filters?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", agent_id:state.draft.agent_id || ""};
       state.draft = {...state.filters}; state.offset = 0; state.details = null; state.contributing = null;
-      replace(diagnosticHash("usage", state.filters)); load();
+      replace(diagnosticTarget("usage", state.filters)); load();
     } catch (error) { state.error = error.message; render(); }
   }
   function setSelect(name, value) {
@@ -288,7 +288,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
     const sort = event.target.closest("[data-usage-sort]");
     if (sort) { state.descending = state.sort === sort.dataset.usageSort ? !state.descending : true; state.sort = sort.dataset.usageSort; state.offset = 0; loadDetails(true); return; }
     const session = event.target.closest("[data-usage-session]");
-    if (session) { navigate(diagnosticHash("detail", {view:"conversation"}, session.dataset.usageSession)); return; }
+    if (session) { navigate(diagnosticTarget("detail", {view:"conversation"}, session.dataset.usageSession)); return; }
     const row = event.target.closest("[data-usage-key]");
     if (row) {
       const name = row.querySelector(".usage-detail-name")?.innerText?.trim().split(/\n+/).filter(Boolean).join(" · ") || row.dataset.usageKey;
@@ -298,7 +298,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
     }
     const action = event.target.closest("[data-usage-action]")?.dataset.usageAction;
     if (!action) return;
-    if (action === "reset") { const range = usageRange("7"); state.filters = {...range, period:"7", timezone:Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", agent_id:""}; state.draft = {...state.filters}; state.offset = 0; replace(diagnosticHash("usage", state.filters)); load(); }
+    if (action === "reset") { const range = usageRange("7"); state.filters = {...range, period:"7", timezone:Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", agent_id:""}; state.draft = {...state.filters}; state.offset = 0; replace(diagnosticTarget("usage", state.filters)); load(); }
     else if (action === "previous" || action === "next") { if (state.detailBusy || state.busy) return; state.offset = Math.max(0, state.offset + (action === "next" ? 10 : -10)); loadDetails(true); }
     else if (action === "contribution-more") { if (state.contributionBusy) return; state.contributionOffset = state.contributions?.items?.length || 0; await loadContributions(); }
     else if (action === "export") { const dialog = root.querySelector("#usageExportDialog"); dialog.querySelector("#usageExportRange").textContent = `${new Date(state.filters.start).toLocaleString()} — ${new Date(state.filters.end).toLocaleString()}`; dialog.querySelector("#usageExportAgent").textContent = state.report?.agents?.[state.filters.agent_id] || "全部 Agent"; dialog.querySelector("#usageExportDimension").textContent = DIMENSIONS.find(([key]) => key === state.dimension)?.[1] || ""; dialog.showModal(); }
@@ -309,7 +309,8 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
       try {
         const scope = dialog.querySelector('input[name="usage_export_scope"]:checked').value;
         const path = `/api/v1/diagnostics/usage/export?${queryString({...params(), group_by:state.dimension, sort:state.sort, descending:state.descending, scope, offset:state.offset})}`;
-        const response = await window.daFetch(window.serviceUrl(path), {includeContext:false, reportStatus:false, cache:"no-store"});
+        const transport = diagnosticRequestOptions(path);
+        const response = await window.daFetch(window.serviceUrl(transport.path), {...transport.options, includeContext:false, reportStatus:false, cache:"no-store"});
         if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail || `HTTP ${response.status}`);
         const url = URL.createObjectURL(await response.blob()), link = document.createElement("a"); link.href = url; link.download = "deepagent-usage.csv"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); dialog.close();
       } catch (error) { status.textContent = error.message; } finally { button.disabled = false; }
@@ -318,12 +319,13 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
   return {
     activate(route, snapshot) {
       state.active = true;
-      const restoring = snapshot?.filters && diagnosticHash("usage", snapshot.filters) === diagnosticHash("usage", route.filters) && snapshot.report;
+      const restoring = snapshot?.filters && sameDiagnosticFilters(snapshot.filters, route.filters) && snapshot.report;
       if (restoring) Object.assign(state, {...snapshot, active:true, focused:snapshot.focused || null});
       else {
         const period = route.filters.period || "7", bounds = route.filters.start && route.filters.end ? route.filters : {...usageRange(period), ...route.filters};
         state.filters = {...bounds, timezone:route.filters.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", period, agent_id:route.filters.agent_id || ""};
         state.draft = {...state.filters}; state.report = null; state.details = null; state.offset = 0; state.contributing = null; state.contributions = null;
+        replace(diagnosticTarget("usage", state.filters));
       }
       render(restoring ? snapshot.scroll || [] : []); if (!state.report) load(); else loadDetails();
     },

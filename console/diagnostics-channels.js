@@ -1,10 +1,10 @@
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
-import { peerPickerHtml, bindPeerPicker } from "./channel-peer-picker.js?v=20260928-channel-profiles";
-import { escapeHtml as e, icon, icons, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20260915-release-audit";
-import { diagnosticHash, sessionRange, channelEntryFilters } from "./diagnostics-navigation.js?v=20260915-release-audit";
-import { createSessionReader, sessionQueryError } from "./diagnostics-session-query.js?v=20261019-release0137";
+import { peerPickerHtml, bindPeerPicker } from "./channel-peer-picker.js?v=20261019-release0138";
+import { escapeHtml as e, icon, icons, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20261019-release0138";
+import { diagnosticTarget, sessionRange, channelEntryFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
+import { createSessionReader, sessionQueryError } from "./diagnostics-session-query.js?v=20261019-release0138";
 import { bindChannelResizer } from "./channel-resizer.js?v=20260915-release-audit";
-import { shortQuestionTime } from "./diagnostics-sessions.js?v=20261019-release0137";
+import { shortQuestionTime } from "./diagnostics-sessions.js?v=20261019-release0138";
 
 const PERIODS = [["24", "最近 1 天"], ["168", "最近 7 天"], ["720", "最近 30 天"]];
 const PAGE_SIZE = 25;
@@ -34,7 +34,7 @@ export function initDiagnosticChannels({ root, navigate, replace, onBack }) {
   let selectBinding, disposeResizer, disposePicker;
   let inspectorWidth = 0;
   const cancel = () => { accountsReader.cancel(); overviewReader.cancel(); peersReader.cancel(); historyReader.cancel(); };
-  const publish = () => replace(diagnosticHash("channels", state.filters));
+  const publish = () => replace(diagnosticTarget("channels", state.filters));
   const base = () => `api/v1/diagnostics/channels/${encodeURIComponent(state.filters.account_id)}`;
   const account = () => state.accounts.find(item => item.id === state.filters.account_id);
   function accountHtml() {
@@ -186,12 +186,12 @@ export function initDiagnosticChannels({ root, navigate, replace, onBack }) {
       if (user) selectFilter("user", {peer_id:user.user_id, name:user.name, kind:"user"});
       return;
     }
-    if (target.dataset.channelOpen) { navigate(diagnosticHash("detail", { view: "conversation" }, target.dataset.channelOpen)); return; }
+    if (target.dataset.channelOpen) { navigate(diagnosticTarget("detail", { view: "conversation" }, target.dataset.channelOpen)); return; }
     if (target.dataset.channelAccount) { state.filters = { ...state.filters, account_id: target.dataset.channelAccount, peer_id: undefined, channel_user_id: undefined, channel_group_id: undefined, filter_peer_id: undefined, query: "", offset: 0 }; void loadAccount(); return; }
     if (target.dataset.channelKind) { state.filters = { ...state.filters, kind: target.dataset.channelKind, peer_id: undefined, query: "", offset: 0 }; state.error = ""; void loadPeers(); return; }
     if (target.dataset.channelPeer) { state.selected = state.peers.items.find(item => item.peer_id === target.dataset.channelPeer); state.filters.peer_id = state.selected?.peer_id; state.sessions = null; state.historyError = ""; publish(); render(); void loadHistory(); return; }
     switch (target.dataset.channelAction) {
-      case "back": (onBack || navigate)(diagnosticHash("overview", channelEntryFilters(state.filters))); break;
+      case "back": (onBack || navigate)(diagnosticTarget("overview", channelEntryFilters(state.filters))); break;
       case "reset": state.filters = { period: "168", account_id: state.filters.account_id, kind: "user", offset: 0 }; void loadAccount(); break;
       case "previous": if (!state.peersLoading && Number(state.filters.offset) > 0) { state.filters.offset -= PAGE_SIZE; void loadPeers(); } break;
       case "next": if (!state.peersLoading && Number(state.filters.offset || 0) + PAGE_SIZE < state.peers?.total) { state.filters.offset = Number(state.filters.offset || 0) + PAGE_SIZE; void loadPeers(); } break;

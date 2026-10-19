@@ -1,5 +1,5 @@
-// Only identifiers and query conditions belong in diagnostic URLs. Content,
-// identity credentials and return snapshots are deliberately memory-only.
+// URLs carry resource locators only. Query conditions and return snapshots
+// stay in this page lifetime; a reload always resolves relative time afresh.
 export const DIAGNOSTIC_PREFIX = "#/diagnostics";
 export const COMMON_FILTER_KEYS = ["start", "end", "timezone", "agent_id", "user_id", "period"];
 export const OVERVIEW_FILTER_KEYS = COMMON_FILTER_KEYS.filter(key => key !== "user_id");
@@ -11,7 +11,14 @@ export const CHANNEL_FILTER_KEYS = ["period", "start", "end", "timezone", "accou
 export const channelEntryFilters = filters => ({ period: ["24", "168", "720"].includes(String(filters.period)) ? String(filters.period) : "168" });
 export const DETAIL_KEYS = ["view", "event_id", "run_id"];
 
+const filterKeys = view => view === "channels" ? CHANNEL_FILTER_KEYS : view === "logs" ? LOG_FILTER_KEYS : view === "usage" ? USAGE_FILTER_KEYS : view === "detail" ? DETAIL_KEYS : view === "overview" ? OVERVIEW_FILTER_KEYS : LIST_FILTER_KEYS;
+const selectFilters = (view, filters = {}) => Object.fromEntries(filterKeys(view).filter(key => filters[key] !== undefined && filters[key] !== null && filters[key] !== "" && filters[key] !== false).map(key => [key, String(filters[key])]));
+
 export function parseDiagnosticRoute(hash = "") {
+  if (hash && typeof hash === "object") {
+    const route = parseDiagnosticRoute(hash.hash);
+    return route ? { ...route, filters: selectFilters(route.view, hash.filters) } : null;
+  }
   const [path, search = ""] = String(hash).split("?");
   const match = path.match(/^#\/diagnostics(?:\/(logs|sessions|usage)(?:\/([^/?#]+))?)?$/);
   if (!match) return null;
@@ -21,18 +28,31 @@ export function parseDiagnosticRoute(hash = "") {
   if ((kind === "logs" || kind === "usage") && tail) return null;
   const view = kind === "logs" || kind === "usage" ? kind : !tail || ["overview", "list", "channels"].includes(tail) ? tail || "overview" : "detail";
   if (view === "detail" && (!tail || tail.length > 128 || /[\x00-\x1f/\\]/.test(tail))) return null;
-  const allowed = view === "channels" ? CHANNEL_FILTER_KEYS : view === "logs" ? LOG_FILTER_KEYS : view === "usage" ? USAGE_FILTER_KEYS : view === "detail" ? DETAIL_KEYS : view === "overview" ? OVERVIEW_FILTER_KEYS : LIST_FILTER_KEYS;
+  const allowed = filterKeys(view);
   const params = new URLSearchParams(search);
   const filters = Object.fromEntries(allowed.filter(key => params.has(key)).map(key => [key, params.get(key)]));
+  // Old links may carry a frozen relative range. Import only its period and
+  // other conditions, then let the controller resolve the range against now.
+  if (view !== "detail" && filters.period !== "custom") { delete filters.start; delete filters.end; }
   return { kind, view, id: view === "detail" ? tail : null, filters };
 }
 
 export function diagnosticHash(view, filters = {}, id = null) {
-  const keys = view === "channels" ? CHANNEL_FILTER_KEYS : view === "logs" ? LOG_FILTER_KEYS : view === "usage" ? USAGE_FILTER_KEYS : view === "detail" ? DETAIL_KEYS : view === "overview" ? OVERVIEW_FILTER_KEYS : LIST_FILTER_KEYS;
+  const keys = view === "detail" ? DETAIL_KEYS : [];
   const path = view === "logs" ? "/logs" : view === "usage" ? "/usage" : view === "detail" ? `/sessions/${encodeURIComponent(id || "")}` : `/sessions/${["list", "channels"].includes(view) ? view : "overview"}`;
   const params = new URLSearchParams();
   for (const key of keys) if (filters[key] !== undefined && filters[key] !== null && filters[key] !== "" && filters[key] !== false) params.set(key, String(filters[key]));
   return `${DIAGNOSTIC_PREFIX}${path}${params.size ? `?${params}` : ""}`;
+}
+
+export function diagnosticTarget(view, filters = {}, id = null) {
+  return { hash: diagnosticHash(view, filters, id), filters: selectFilters(view, filters) };
+}
+
+// Compare conditions directly: clean URLs intentionally cannot distinguish them.
+export function sameDiagnosticFilters(left = {}, right = {}) {
+  const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].filter(key => left[key] != null || right[key] != null).sort();
+  return keys.every(key => String(left[key] ?? "") === String(right[key] ?? ""));
 }
 
 export function sessionRange(values = {}, now = new Date()) {
@@ -49,41 +69,62 @@ export function sessionDrilldown(filters, extra = {}) {
 }
 
 export function createDiagnosticNavigation({ getHash, history, onNavigate, getSnapshot = () => null }) {
-  const snapshots = new Map();
-  let serial = 0;
-  let currentKey = null;
-  let currentHash = null;
+  const snapshots = new Map(), routes = new Map();
+  let serial = 0, currentKey = null, currentHash = null, currentRoute = null, pendingEntry = false;
+  const cleanHash = route => diagnosticHash(route.view, route.filters, route.id);
+  const safeFrom = value => { const parsed = parseDiagnosticRoute(value); return parsed ? cleanHash(parsed) : undefined; };
+  const trim = () => { while (snapshots.size > 12) { const key = snapshots.keys().next().value; snapshots.delete(key); routes.delete(key); } };
   function remember() {
-    if (currentKey && currentHash) snapshots.set(currentKey, { hash: currentHash, value: getSnapshot() });
-    while (snapshots.size > 12) snapshots.delete(snapshots.keys().next().value);
+    const value = getSnapshot();
+    // Leaving diagnostics captures before deactivation. A later enter must
+    // not overwrite that saved view with the now-inactive controller's null.
+    if (currentKey && currentHash && value != null) snapshots.set(currentKey, { hash: currentHash, filters: { ...currentRoute?.filters }, value });
+    trim();
   }
-  function enter() {
-    remember();
-    const hash = getHash();
+  function enter(target = null) {
+    if (!pendingEntry) remember();
+    pendingEntry = false;
+    const parsed = parseDiagnosticRoute(target || getHash());
+    if (!parsed) return null;
     let key = history.state?.diagnosticsKey;
     if (key) serial = Math.max(serial, Number(String(key).split("-").at(-1)) || 0);
-    if (!key) { key = `diagnostics-${++serial}`; history.replaceState({ diagnosticsKey: key }, "", hash); }
+    if (!key) key = `diagnostics-${++serial}`;
+    const hash = cleanHash(parsed), stored = routes.get(key);
+    currentRoute = !target && stored?.hash === hash ? stored.route : parsed;
+    const from = safeFrom(history.state?.diagnosticsFrom);
+    history.replaceState({ diagnosticsKey: key, ...(from ? { diagnosticsFrom: from } : {}) }, "", hash);
     currentKey = key; currentHash = hash;
+    routes.set(key, { hash, route: currentRoute });
     const saved = snapshots.get(key);
-    return saved?.hash === hash ? saved.value : null;
+    return saved?.hash === hash && sameDiagnosticFilters(saved.filters, currentRoute.filters) ? saved.value : null;
   }
-  function navigate(hash, { replace = false } = {}) {
-    if (!parseDiagnosticRoute(hash)) return false;
+  function navigate(target, { replace = false } = {}) {
+    const route = parseDiagnosticRoute(target);
+    if (!route) return false;
     remember();
-    const key = replace ? currentKey || `diagnostics-${++serial}` : `diagnostics-${++serial}`;
-    const from = replace ? history.state?.diagnosticsFrom : parseDiagnosticRoute(getHash()) ? getHash() : undefined;
-    history[replace ? "replaceState" : "pushState"]({ diagnosticsKey: key, ...(parseDiagnosticRoute(from) ? { diagnosticsFrom: from } : {}) }, "", hash);
+    const hash = cleanHash(route), key = replace ? currentKey || `diagnostics-${++serial}` : `diagnostics-${++serial}`;
+    const from = safeFrom(replace ? history.state?.diagnosticsFrom : getHash());
+    routes.set(key, { hash, route });
+    if (replace) snapshots.delete(key);
+    history[replace ? "replaceState" : "pushState"]({ diagnosticsKey: key, ...(from ? { diagnosticsFrom: from } : {}) }, "", hash);
+    pendingEntry = true;
     onNavigate();
     return true;
   }
   function back(fallback) {
-    if (parseDiagnosticRoute(history.state?.diagnosticsFrom)) { remember(); history.back(); }
+    if (safeFrom(history.state?.diagnosticsFrom)) { remember(); history.back(); }
     else navigate(fallback, { replace: true });
   }
-  function replaceCurrent(hash) {
-    if (!parseDiagnosticRoute(hash)) return;
-    currentHash = hash;
-    history.replaceState(history.state, "", hash);
+  function replaceCurrent(target) {
+    const route = parseDiagnosticRoute(target);
+    if (!route) return;
+    currentHash = cleanHash(route); currentRoute = route;
+    const key = currentKey || history.state?.diagnosticsKey || `diagnostics-${++serial}`;
+    currentKey = key;
+    routes.set(key, { hash: currentHash, route });
+    const from = safeFrom(history.state?.diagnosticsFrom);
+    history.replaceState({ diagnosticsKey: key, ...(from ? { diagnosticsFrom: from } : {}) }, "", currentHash);
   }
-  return { enter, remember, navigate, back, replaceCurrent, clear: () => { snapshots.clear(); currentKey = null; currentHash = null; } };
+  return { enter, remember, navigate, back, replaceCurrent, get route() { return currentRoute; },
+    get key() { return currentKey; }, clear: () => { snapshots.clear(); routes.clear(); currentKey = null; currentHash = null; currentRoute = null; pendingEntry = false; } };
 }

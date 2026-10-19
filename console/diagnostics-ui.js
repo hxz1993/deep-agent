@@ -57,6 +57,18 @@ export function bindDiagnosticSelects(root, onSelect) {
   return { close, dispose: () => { close(); root.removeEventListener("click", click); root.removeEventListener("keydown", key); document.removeEventListener("click", outside); window.removeEventListener("resize", close); } };
 }
 
+// Keep filters out of HTTP URLs as well as browser history. Match only the
+// administrator's read-only diagnostic routes; unrelated requests stay GET.
+export function diagnosticRequestOptions(path) {
+  const [pathname, query = ""] = String(path).split("?", 2);
+  const route = pathname.replace(/^\//, "").replace(/\/$/, "");
+  const queryRoute = /^api\/v1\/diagnostics\/(?:sessions(?:\/(?:overview|users|user-profile))?|usage(?:\/(?:details|sessions|export))?|logs|channels\/[^/]+\/(?:overview|peers|sessions))$/.test(route);
+  const sessionResource = /^api\/v1\/diagnostics\/sessions\/[^/]+(?:\/events)?$/.test(route);
+  if (!queryRoute && !(query && sessionResource)) return { path, options: {} };
+  const body = query ? Object.fromEntries(new URLSearchParams(query)) : {};
+  return { path: pathname, options: { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } };
+}
+
 export async function diagnosticRequest(path, signal) {
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -64,7 +76,8 @@ export async function diagnosticRequest(path, signal) {
   if (signal?.aborted) abort();
   const timeout = setTimeout(abort, 30000);
   try {
-    const response = await window.daFetch(window.serviceUrl(path), { signal: controller.signal, includeContext: false, reportStatus: false, cache: "no-store" });
+    const transport = diagnosticRequestOptions(path);
+    const response = await window.daFetch(window.serviceUrl(transport.path), { ...transport.options, signal: controller.signal, includeContext: false, reportStatus: false, cache: "no-store" });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
       if ([401, 403].includes(response.status)) window.dispatchEvent(new CustomEvent("deep-agent-diagnostics-denied", { detail: { status: response.status } }));

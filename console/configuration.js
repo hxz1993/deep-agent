@@ -1,4 +1,6 @@
 let initialized = false;
+import * as JsonInput from "./json-input.js?v=20261022-release0141";
+if (typeof window !== "undefined") window.DeepAgentJsonInput = JsonInput;
 import "./model-options.js?v=20260925-codex-1";
 import * as ProviderCatalog from "./provider-catalog.js?v=20261015-provider-protocol-groups";
 import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260913-49";
@@ -7,7 +9,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20261022-release0140";
+const CONFIGURATION_ASSET_VERSION = "20261022-release0141";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -91,8 +93,8 @@ async function loadAdminScripts() {
     "./configuration/database-connection.js",
     "./configuration/llm-providers.js",
     "./configuration/llm-models.js",
-    "./configuration/agent-output.js?v=20261022-release0140",
-    "./configuration/agents.js?v=20261022-release0140",
+    "./configuration/agent-output.js?v=20261022-release0141",
+    "./configuration/agents.js?v=20261022-release0141",
     "./configuration/agent-packages.js",
     "./configuration/agent-package-export.js",
     "./configuration/builtin-tools.js",

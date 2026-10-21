@@ -32,7 +32,7 @@ function agentUpdaterName(agent) {
 function renderAgentUpdater(agent, list = false) {
   const name = escapeHtml(agentUpdaterName(agent)).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
   const time = escapeHtml(formatDate(agent.updated_at));
-  return list ? `<span class="agent-update-cell"><span>${time}</span><span class="agent-updater" title="更新人：${name}"><i data-lucide="user-round"></i>${name}</span></span>` : `<span class="agent-card-update"><span class="agent-updater" title="更新人：${name}"><i data-lucide="user-round"></i>${name}</span><span>${time}</span></span>`;
+  return `<span class="${list ? "agent-update-cell" : "agent-card-update"}"><span class="agent-updater" title="更新人：${name}"><i data-lucide="user-round"></i><span class="agent-updater-name">${name}</span></span><span class="agent-update-time">${time}</span></span>`;
 }
 
 function renderAgentChannelBadge(agentId) {
@@ -661,7 +661,12 @@ const agentsAdmin = {
     }
     let outputPayload = {};
     try { outputPayload = window.DeepAgentOutputEditor?.payload() || {}; }
-    catch (error) { this.switchCapTab("output"); AdminFormFeedback.show(form, error); return; }
+    catch (error) {
+      this.switchCapTab("output");
+      if (error.field === "name") document.getElementById("agentOutputName").focus();
+      AdminFormFeedback.show(form, error);
+      return;
+    }
     AdminFormFeedback.setSubmitting(form, true);
     const capabilities = this.getSelectedCapabilities();
     const payload = {

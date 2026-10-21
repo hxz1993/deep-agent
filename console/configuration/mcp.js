@@ -21,37 +21,6 @@ function escapeJsonEditorHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function highlightJsonEditorSource(value) {
-  const source = String(value ?? "");
-  const tokenPattern = /("(?:\\.|[^"\\])*"\s*:)|("(?:\\.|[^"\\])*")|\b(true|false)\b|\b(null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|([{}[\],:])/g;
-  let cursor = 0;
-  let html = "";
-  for (const match of source.matchAll(tokenPattern)) {
-    const index = match.index ?? 0;
-    html += escapeJsonEditorHtml(source.slice(cursor, index));
-    const token = match[0];
-    if (match[1]) {
-      const colonIndex = token.lastIndexOf(":");
-      const key = token.slice(0, colonIndex).trimEnd();
-      const spacing = token.slice(key.length, colonIndex);
-      html += `<span class="json-key">${escapeJsonEditorHtml(key)}</span>${escapeJsonEditorHtml(spacing)}:`;
-    } else if (match[2]) {
-      html += `<span class="json-string">${escapeJsonEditorHtml(token)}</span>`;
-    } else if (match[3]) {
-      html += `<span class="json-boolean">${escapeJsonEditorHtml(token)}</span>`;
-    } else if (match[4]) {
-      html += `<span class="json-null">${escapeJsonEditorHtml(token)}</span>`;
-    } else if (match[5]) {
-      html += `<span class="json-number">${escapeJsonEditorHtml(token)}</span>`;
-    } else {
-      html += escapeJsonEditorHtml(token);
-    }
-    cursor = index + token.length;
-  }
-  html += escapeJsonEditorHtml(source.slice(cursor));
-  return `${html}\n`;
-}
-
 function inspectionErrorMessage(error) {
   return error?.message || "";
 }
@@ -493,12 +462,7 @@ const mcpAdmin = {
     const input = document.getElementById("mcpHeaders");
     const highlight = document.getElementById("mcpHeadersHighlight");
     if (!input || !highlight) return;
-    highlight.innerHTML = highlightJsonEditorSource(input.value);
-    const pre = highlight.parentElement;
-    if (pre) {
-      pre.scrollTop = input.scrollTop;
-      pre.scrollLeft = input.scrollLeft;
-    }
+    window.DeepAgentJsonInput.syncJsonInput(input, highlight);
   },
 
   formatHeadersInput() {
@@ -843,7 +807,7 @@ window.__McpInspectionUI = {
   renderInspectionCounts,
   missingInspectionAppHint,
   inspectionFailureMessage,
-  highlightJsonEditorSource,
+  highlightJsonEditorSource: value => window.DeepAgentJsonInput.highlightJsonEditorSource(value),
   inspectionView,
   inspectionToast,
   savedInspectionToast,

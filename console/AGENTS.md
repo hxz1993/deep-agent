@@ -658,7 +658,11 @@ channel 详情、标题或 Runs 的存在推断来源。`channel` 仅提供渠�
 
 ### 结构化输出与更新人（0.14.0）
 
-Agent 编辑器新增“输出”页签，`configuration/agent-output.js` 维护唯一页级草稿，卡片与 JSON Schema 不创建双份定义。详情无独立保存；无效原文保留并阻止页头保存。关闭但保留草稿与删除定义有不同语义，不把隐藏控件视为删除。完整定义仅管理员 `/agents/{id}/output-config` 读取，编辑和复制都要包含该请求；普通 Agent 初始化不依赖此接口。
+Agent 编辑器新增“输出”页签，`configuration/agent-output.js` 维护唯一页级草稿，卡片与 JSON Schema 不创建双份定义。结构详情底部“确定／取消”只应用或撤销弹框草稿，关闭和 Esc 等同取消；新增结构也在确定后才加入。无效原文留在弹框并就地报错，页头保存才提交 API；原生完整 Schema 的无效原文保留并阻止页头保存。结果名称必填错误定位在名称输入框旁，不混入结构校验提示。关闭但保留草稿与删除定义有不同语义，不把隐藏控件视为删除。完整定义仅管理员 `/agents/{id}/output-config` 读取，编辑和复制都要包含该请求；普通 Agent 初始化不依赖此接口。
+
+MCP Header 与两处输出 Schema 复用 `json-input.js` 和 `console.css` 的 `.json-input` 叠层编辑器；textarea 是唯一输入源，高亮层只着色并同步滚动，不修改原文。Agent 卡片和列表的更新信息统一为 Username 在上、较小的时间在下；长账号省略并保留完整悬停值，不能挤占操作按钮。
+
+输出配置左栏只标“说明”；说明框和右侧原生 Schema 随资源区域向下撑满、底边对齐，不再使用固定的默认短框。空结构用弱色虚线占位，说明内的“添加结构”文字按钮与顶部入口共用新增逻辑，取消详情仍保留空态。
 
 `structured-output.js` 是回复与轨迹共用的通用 JSON/正文展示器，视图切换不请求模型。只有明确 `accepted` 的 SSE output 或 History `kind: structured_output` 进入普通回复，使用 `output_id/item_id` 去重；final 的 `output_info` 同样复用这个身份。不要按当前 Agent 输出名称猜测历史工具类别。长 JSON 折叠后复制/下载仍使用完整原值。
 

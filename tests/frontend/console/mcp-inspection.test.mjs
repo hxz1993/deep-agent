@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import * as JsonInput from "../../../console/json-input.js";
 
 const source = await readFile(
   new URL("../../../console/configuration/mcp.js", import.meta.url),
@@ -18,6 +19,7 @@ const styles = await readFile(
 
 function loadInspectionUi(overrides = {}) {
   const window = overrides.window || {};
+  window.DeepAgentJsonInput = JsonInput;
   const document = {
     addEventListener() {},
   };
@@ -113,15 +115,15 @@ test("MCP 表单居中限宽，窄屏不保留横向最小宽度", () => {
 });
 
 test("MCP JSON 编辑器使用普通输入底色，高亮与输入层保持透明叠加", () => {
-  assert.match(styles, /\.mcp-json-input\s*\{[^}]*background: var\(--bg\);/);
-  assert.match(styles, /\.mcp-json-input > \.mcp-json-highlight\s*\{[^}]*background: transparent;/);
-  assert.match(styles, /\.mcp-editor-page \.mcp-json-input #mcpHeaders\s*\{[^}]*background: transparent;/);
+  assert.match(styles, /\.json-input\s*\{[^}]*background: var\(--bg\);/);
+  assert.match(styles, /\.json-input > \.json-input-highlight\s*\{[^}]*background: transparent;/);
+  assert.match(styles, /\.json-input > \.json-input-text\s*\{[^}]*background: transparent;/);
 });
 
 test("MCP 高亮层与输入层共用字形度量且高亮不撑大输入框", () => {
-  assert.match(styles, /\.mcp-json-input > \.mcp-json-highlight,\s*\.mcp-json-input > #mcpHeaders\s*\{[^}]*font-weight: 400;[^}]*word-break: normal;[^}]*scrollbar-gutter: stable;/);
-  assert.match(styles, /\.mcp-json-input \.mcp-json-highlight code span\s*\{\s*font: inherit;\s*letter-spacing: inherit;/);
-  assert.match(styles, /\.mcp-json-input > \.mcp-json-highlight\s*\{[^}]*position: absolute;[^}]*height: 100%;/);
+  assert.match(styles, /\.json-input > \.json-input-highlight,\s*\.json-input > \.json-input-text\s*\{[^}]*font-weight: 400;[^}]*word-break: normal;[^}]*scrollbar-gutter: stable;/);
+  assert.match(styles, /\.json-input \.json-input-highlight code span\s*\{\s*font: inherit;\s*letter-spacing: inherit;/);
+  assert.match(styles, /\.json-input > \.json-input-highlight\s*\{[^}]*position: absolute;[^}]*height: 100%;/);
 });
 
 test("MCP Header 来源使用互斥的外部固定和内部继承", () => {
@@ -129,7 +131,7 @@ test("MCP Header 来源使用互斥的外部固定和内部继承", () => {
   assert.doesNotMatch(template, /Headers JSON（可选）/);
   assert.match(template, /value="isolated" checked[\s\S]*外部固定/);
   assert.match(template, /value="inherit"[\s\S]*内部继承/);
-  assert.match(template, /class="mcp-json-input" id="mcpFixedHeaders"/);
+  assert.match(template, /class="json-input" id="mcpFixedHeaders"/);
   assert.match(template, /id="mcpHeadersHighlight"/);
   assert.doesNotMatch(template, /mcp-json-editor-bar/);
   assert.match(source, /mcpFixedHeaders"\)\?\.classList\.toggle\("hidden", mode === "inherit"\)/);
@@ -137,7 +139,7 @@ test("MCP Header 来源使用互斥的外部固定和内部继承", () => {
   assert.match(source, /允许透传：/);
   assert.doesNotMatch(source, /data-context-help/);
   assert.doesNotMatch(source, /仅发送这里配置的固定 Header/);
-  assert.match(styles, /\.mcp-json-input:focus-within/);
+  assert.match(styles, /\.json-input:focus-within/);
   assert.match(styles, /\.context-mode-description\s*\{[\s\S]*border-radius:/);
 });
 

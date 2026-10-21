@@ -1705,21 +1705,21 @@ dialog.agent-editor-page::backdrop { display: none; }
   outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
   outline-offset: 1px;
 }
-.mcp-json-input {
+.json-input {
   position: relative;
   display: grid;
   min-height: 170px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--console-card-border));
-  border-radius: 9px;
+  border-radius: var(--ui-radius);
   background: var(--bg);
 }
-.mcp-json-input:focus-within {
+.json-input:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
-.mcp-json-input > .mcp-json-highlight,
-.mcp-json-input > #mcpHeaders {
+.json-input > .json-input-highlight,
+.json-input > .json-input-text {
   grid-area: 1 / 1;
   width: 100%;
   min-height: 170px;
@@ -1727,7 +1727,7 @@ dialog.agent-editor-page::backdrop { display: none; }
   margin: 0;
   padding: 10px 12px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--ui-radius);
   font-family: var(--mono);
   font-size: 12px;
   font-weight: 400;
@@ -1741,7 +1741,7 @@ dialog.agent-editor-page::backdrop { display: none; }
   word-break: normal;
   scrollbar-gutter: stable;
 }
-.mcp-json-input > .mcp-json-highlight {
+.json-input > .json-input-highlight {
   position: absolute;
   inset: 0;
   height: 100%;
@@ -1751,12 +1751,12 @@ dialog.agent-editor-page::backdrop { display: none; }
   color: var(--text);
 }
 /* 高亮只改变颜色；字段标签及只读 JSON 的字体样式不能改变编辑器字形尺寸。 */
-.mcp-json-input .mcp-json-highlight code,
-.mcp-json-input .mcp-json-highlight code span {
+.json-input .json-input-highlight code,
+.json-input .json-input-highlight code span {
   font: inherit;
   letter-spacing: inherit;
 }
-.mcp-editor-page .mcp-json-input #mcpHeaders {
+.json-input > .json-input-text {
   position: relative;
   background: transparent;
   color: transparent;
@@ -1764,15 +1764,15 @@ dialog.agent-editor-page::backdrop { display: none; }
   -webkit-text-fill-color: transparent;
   resize: vertical;
 }
-.mcp-editor-page .mcp-json-input #mcpHeaders::placeholder {
+.json-input > .json-input-text::placeholder {
   color: var(--text-faint);
   -webkit-text-fill-color: var(--text-faint);
   opacity: 1;
 }
-.mcp-editor-page .mcp-json-input #mcpHeaders::selection {
+.json-input > .json-input-text::selection {
   background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
-.mcp-editor-page .mcp-json-input #mcpHeaders:focus { outline: 0; box-shadow: none; }
+.json-input > .json-input-text:focus { outline: 0; box-shadow: none; }
 .mcp-editor-page .context-mode-description {
   display: grid;
   gap: 5px;

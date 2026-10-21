@@ -1111,7 +1111,7 @@ dialog.console-detail-dialog.modal.mcp-catalog-modal { width: min(1120px, calc(1
 /* Dialogs use the same surface as editors; insets are reserved for read-only content. */
 dialog.modal .table-wrap { background: var(--console-surface, var(--bg)); }
 dialog.modal .data-table thead th { background: var(--console-readonly-surface); }
-dialog:is(.modal, .console-action-dialog) :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([readonly]):not(:disabled) {
+dialog:is(.modal, .console-action-dialog) :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([readonly]):not(:disabled):not(.json-input-text) {
   background: var(--console-surface, var(--bg));
 }
 dialog:is(.modal, .console-action-dialog) :is(input, textarea)[readonly],

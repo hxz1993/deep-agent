@@ -76,7 +76,7 @@ v0.8.3 将本地与线上统一到上述源码目录，业务逻辑和接口不�
 
 ## 本地启动
 
-所有命令从仓库根执行，默认使用本机 Python 3.12。安装依赖：
+所有命令从仓库根执行，默认使用本机 Python 3.12。安装依赖（以下用于本地开发；生产固定依赖镜像的变更须按[运维交接规则](deploy/dependency-images.md)单独汇总）：
 
 ```bash
 python3.12 -m pip install -r requirements.txt

@@ -44,6 +44,80 @@ class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 if streaming:
                     self.assertEqual([e["title"] for e in events if e["type"] == "session_title"], ["客户合同填报"])
 
+    async def _title_regression_request(self, streaming: bool, **fields):
+        body = {"agent_id": self._agent_id, "message": "处理业务内容", "capabilities": [], **fields}
+        title_mock = AsyncMock(return_value=TitleGenerationResult(title="自动业务名称", image_used=False))
+        with patch("deep_agent.agent.factory._resolve_model", return_value=text_only_model("业务处理完成")), \
+             patch("deep_agent.agent.title_generator.generate_title", title_mock), mock_request_disconnect():
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post("/api/v1/chat/stream" if streaming else "/api/v1/chat", json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        events = parse_sse_events(response.text) if streaming else []
+        self.assertFalse([e for e in events if e["type"] == "error"])
+        sid = next(e["session_id"] for e in events if e["type"] == "session") if streaming else response.json()["session_id"]
+        await get_context().event_persister.flush(sid, agent_id=self._agent_id)
+        return sid, events, title_mock
+
+    async def test_post_push_omitted_and_null_keep_automatic_titles(self):
+        for streaming in (False, True):
+            for fields in ({}, {"session_title": None}):
+                with self.subTest(streaming=streaming, fields=fields):
+                    sid, _, generated = await self._title_regression_request(streaming, **fields)
+                    generated.assert_awaited_once()
+                    self.assertEqual(await self._stores.coordinator.get_session_title(sid, agent_id=self._agent_id), "自动业务名称")
+                    rows = await self._stores.coordinator.list_events(sid, limit=500)
+                    self.assertEqual([r.payload["source"] for r in rows if r.event_type == "session/title"], ["fallback", "model"])
+
+    async def test_post_push_continuation_never_renames_and_manual_rename_still_works(self):
+        for streaming in (False, True):
+            for explicit in (False, True):
+                with self.subTest(streaming=streaming, explicit=explicit):
+                    fields = {"session_title": "客户端首轮名称"} if explicit else {}
+                    sid, _, _ = await self._title_regression_request(streaming, **fields)
+                    title = await self._stores.coordinator.get_session_title(sid, agent_id=self._agent_id)
+                    _, events, generated = await self._title_regression_request(streaming, session_id=sid, session_title="不应覆盖的续聊名称")
+                    generated.assert_not_awaited()
+                    self.assertFalse([e for e in events if e["type"] == "session_title"])
+                    self.assertEqual(await self._stores.coordinator.get_session_title(sid, agent_id=self._agent_id), title)
+                    async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                        response = await client.patch(f"/api/v1/sessions/{sid}", json={"title": "人工改名"})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertEqual(await self._stores.coordinator.get_session_title(sid, agent_id=self._agent_id), "人工改名")
+
+    async def test_post_push_new_channel_empty_session_uses_optional_title_without_changing_origin(self):
+        from deep_agent.schemas.channel import ChannelAccountCreate
+        for streaming in (False, True):
+            for explicit in (False, True):
+                with self.subTest(streaming=streaming, explicit=explicit):
+                    channel = self._stores.channel
+                    key = f"peer-{streaming}-{explicit}"
+                    account = await channel.create_account(ChannelAccountCreate(
+                        name=key, bot_id=key, secret="test-only-placeholder",
+                        agent_id=self._agent_id, session_user_id=TEST_USER_ID, enabled=True,
+                    ))
+                    peer = dict(account_id=account.id, peer_type="single", peer_id=key)
+                    previous = await channel.resolve_binding(**peer)
+                    binding = previous.binding
+                    claim = await channel.claim_message(account_id=account.id, binding_id=binding.id,
+                        external_message_id="new-command", external_request_id="fixture", sender_id=key,
+                        session_id=previous.session.session_id, payload_hash="a" * 64)
+                    current = await channel.rotate_binding(**peer, command_run_id=claim.run.id)
+                    sid = current.session.session_id
+                    self.assertNotEqual(sid, previous.session.session_id)
+                    self.assertFalse(await channel.has_user_messages(sid))
+                    origin = await channel.get_session_origin(sid)
+                    default_title = current.session.title
+                    fields = {"session_title": "附件识别的业务名称"} if explicit else {}
+                    _, _, generated = await self._title_regression_request(streaming, session_id=sid, **fields)
+                    generated.assert_not_awaited()
+                    self.assertTrue(await channel.has_user_messages(sid))
+                    self.assertEqual(await self._stores.coordinator.get_session_title(sid, agent_id=self._agent_id), "附件识别的业务名称" if explicit else default_title)
+                    self.assertEqual(await channel.get_session_origin(sid), origin)
+                    self.assertEqual((await channel.get_binding(account.id,"single",key)).session_id, sid)
+                    self.assertEqual(await self._stores.coordinator.get_session_title(previous.session.session_id, agent_id=self._agent_id), previous.session.title)
+                    rows = await self._stores.coordinator.list_events(sid, limit=500)
+                    self.assertEqual([r.payload["source"] for r in rows if r.event_type == "session/title"], ["channel", "user"] if explicit else ["channel"])
+
     async def asyncSetUp(self) -> None:
         stores, self._engine, self._session_factory = await make_sqlite_stores()
         model_row = await stores.llm_configuration.create_model(

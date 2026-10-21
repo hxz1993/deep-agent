@@ -782,6 +782,45 @@ dialog#documentParsingSettingsDialog {
   font: 600 12px/1 var(--mono);
 }
 
+.database-charset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--text-faint);
+  border-radius: 4px;
+  background: var(--bg-elev);
+  font-size: 12px;
+}
+
+.database-charset-row[data-state="ok"] {
+  border-left-color: var(--conn-ok);
+  background: color-mix(in srgb, var(--conn-ok) 6%, var(--bg));
+}
+
+.database-charset-row[data-state="warning"] {
+  border-left-color: var(--warning-text, #9a6700);
+  background: color-mix(in srgb, var(--warning-text, #9a6700) 7%, var(--bg));
+}
+
+.database-charset-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.database-charset-badge svg { width: 15px; height: 15px; }
+.database-charset-row[data-state="ok"] .database-charset-badge { color: var(--conn-ok); }
+.database-charset-row[data-state="warning"] .database-charset-badge { color: var(--warning-text, #9a6700); }
+.database-charset-note { color: var(--text-dim); overflow-wrap: anywhere; }
+.database-charset-issues { flex-basis: 100%; min-width: 0; color: var(--text-dim); }
+.database-charset-issues summary { cursor: pointer; width: fit-content; }
+.database-charset-issues ul { margin: 8px 0 0; padding-left: 20px; overflow-wrap: anywhere; }
+
 .database-connection-card {
   display: grid;
   gap: 12px;

@@ -12,6 +12,7 @@ from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.url import get_database_url
+from deep_agent.db.charset import DatabaseCharsetInfo, read_database_charset
 
 
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
@@ -27,6 +28,7 @@ class DatabaseInfoResponse(BaseModel):
     database: str
     connection_summary: str
     credentials_hidden: bool = True
+    charset: DatabaseCharsetInfo | None = None
 
 
 _DATABASE_TYPE_LABELS = {
@@ -85,6 +87,7 @@ async def get_database_info(
         async with ctx.db_session_factory() as session:
             result = await session.execute(text("SELECT version_num FROM alembic_version"))
             version = result.scalar_one_or_none()
+            charset = await read_database_charset(session, session.bind.dialect.name)
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -95,4 +98,6 @@ async def get_database_info(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database schema version is unavailable",
         )
-    return build_database_info(schema_version=str(version))
+    info = build_database_info(schema_version=str(version))
+    info.charset = charset
+    return info

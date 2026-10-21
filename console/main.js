@@ -7,7 +7,7 @@ import {
   initConfiguration,
   restoreConfigurationTab,
   rememberConfigurationTab,
-} from "./configuration.js?v=20261019-release0137";
+} from "./configuration.js?v=20261020-database-charset";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
 import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261019-release0138";
 import { initWorkspace } from "./workspace.js?v=20261019-release0138";

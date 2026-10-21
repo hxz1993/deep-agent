@@ -303,10 +303,12 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         pending_tool = next(item for item in pending_history["items"] if item["kind"] == "tool")
         self.assertEqual(pending_tool["status"], "awaiting_input")
 
+        title_before = await get_context().store.get_session_title(session_id, agent_id=self._agent_id)
         resume_events = await self._stream_events(
             model=tool_call_model("builtin__confirm", text="time is noon"),
             json_body={
                 "session_id": session_id,
+                "session_title": "工具回传不应改名",
                 "capabilities": _CONFIRM_CAPABILITIES,
                 "deferred_tool_results": [
                     {"tool_call_id": tool_call_id, "result": {"confirmed": True}},
@@ -317,6 +319,8 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resume_final["status"], "completed")
         self.assertNotIn("error", {ev.get("type") for ev in resume_events})
 
+        self.assertEqual(await get_context().store.get_session_title(session_id, agent_id=self._agent_id), title_before)
+        self.assertNotIn("session_title", {ev.get("type") for ev in resume_events})
         done_history = await self._history(session_id)
         self.assertGreaterEqual(len(_message_items(done_history)), 2)
         self.assertGreaterEqual(len(_assistant_messages(done_history)), 1)

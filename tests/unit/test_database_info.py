@@ -38,7 +38,7 @@ class DatabaseInfoBuilderTests(unittest.TestCase):
         self.assertEqual(info.connection_summary, "MySQL · test-db:3307/deep_agent")
         self.assertNotIn("secret-user", payload)
         self.assertNotIn("secret-password", payload)
-        self.assertNotIn("charset", payload)
+        self.assertNotIn("charset=utf8mb4", payload)
 
 
 class DatabaseInfoApiTests(unittest.TestCase):
@@ -94,10 +94,13 @@ class DatabaseInfoApiTests(unittest.TestCase):
                 "database",
                 "connection_summary",
                 "credentials_hidden",
+                "charset",
             },
         )
         self.assertEqual(response.json()["schema_version"], "002")
         self.assertTrue(response.json()["credentials_hidden"])
+        self.assertEqual(response.json()["charset"]["status"], "ok")
+        self.assertEqual(response.json()["charset"]["database"], "UTF-8")
 
     def test_requires_authenticated_user(self) -> None:
         app = FastAPI()

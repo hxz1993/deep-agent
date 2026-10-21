@@ -96,3 +96,35 @@ test("数据库连接渲染会转义服务端字段", () => {
   assert.doesNotMatch(html, /<script>|<img|<b>/);
   assert.match(html, /&lt;script&gt;/);
 });
+
+test("字符集正常状态在第二行显示实查值与字段范围", () => {
+  const html = loadUi().databaseInfoHtml({ database_type: "mysql", charset: {
+    status: "ok", database: "utf8mb4", connection: "utf8mb4", checked_columns: 42, issues: [],
+  } });
+  assert.match(html, /data-state="ok"/);
+  assert.match(html, /字符集正常/);
+  assert.match(html, /utf8mb4/);
+  assert.match(html, /42 项/);
+  assert.ok(html.indexOf("database-charset-row") > html.indexOf("</dl>"));
+});
+
+test("字符集异常可查看具体字段且转义检查信息", () => {
+  const html = loadUi().databaseCharsetHtml({ database_type: "mysql", charset: {
+    status: "warning", database: "utf8mb4", connection: "utf8", checked_columns: 42,
+    issues: ["chat_session_events.payload：utf8", "<script>unsafe</script>"],
+  } });
+  assert.match(html, /字符集需处理/);
+  assert.match(html, /<details/);
+  assert.match(html, /chat_session_events.payload/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;script&gt;/);
+});
+
+test("旧接口缺少检查结果或检查失败不能显示正常", () => {
+  for (const info of [{}, { charset: { status: "unknown", issues: ["字符集检查未完成"] } }, { charset: { status: '" onmouseover="bad' } }]) {
+    const html = loadUi().databaseCharsetHtml(info);
+    assert.match(html, /data-state="unknown"/);
+    assert.match(html, /字符集未确认/);
+    assert.doesNotMatch(html, /字符集正常|onmouseover/);
+  }
+});

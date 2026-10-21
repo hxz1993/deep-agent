@@ -1,562 +1,705 @@
-# DeepAgent 结构化最终输出设计
+# DeepAgent 结构化输出与 Agent 更新人完整设计
 
-> 首次研究：2026-08-03
+> 首次研究：2026-08-03；本次完整修订：2026-10-22。
 >
-> 当前运行基线：`pydantic-ai-slim 2.35.1` + `pydantic-ai-harness 0.26.0`
+> 状态：**0.14.0 已实施，按 286 项清单验收**。本文替代本文件原有的“多个互斥 Output Tool＋可选/严格模式”方案。历史正文通过 Git 查看，不作为本次实施依据。
 >
-> 状态：设计结论；当前 DeepAgent 尚未启用 `ToolOutput`、`NativeOutput` 或 `PromptedOutput`
+> 核对基线：`test@552b7b25291e85a23b22244d5178823f1c60570e`，产品 `0.13.9`，数据库 Head `011`；实际安装和 requirements 均为 Pydantic AI `2.46.0` / Harness `0.32.0`。本次数据库版本为 **012**，迁移已在隔离 SQLite/MySQL/PostgreSQL 验证；生产发布仍须运维配套执行。本文说明设计契约，实际证据见验收报告。
 
-## 1. 结论
+## 1. 阅读入口与交付边界
 
-DeepAgent 应把三类结构化数据分开：
+### 2026-10-22 执行补充（0.14.0）
 
-| 类型 | 权威生产者 | 运行语义 | 典型用途 |
+用户已明确批准本设计的数据库 012（`agent_output_configs`、Agent 开关及更新人）并要求进入实施。
+管理端通过只读 `GET /api/v1/agents/{id}/output-config` 获取完整定义；普通详情和列表不加载 Schema。
+创建和 PATCH 仍用原接口一次事务提交开关、定义、更新时间和可信更新人，不能拆成两个保存请求。
+
+完整 JSON Schema 校验由现有 Python/jsonschema 子进程隔离执行，不新增生产依赖；每 Worker 最多两个运行、16 个等待，排队最多 2 秒，单次执行最多 2 秒。超时和取消必须 kill 并回收进程。容量、超时及系统故障直接失败，不消耗模型格式修正机会；Schema/工具缓存有界。
+
+本次发布包含原有 19 项工作，分别审计和回归，版本目标为 `0.14.0`、带说明 Tag `v0.14.0`。
+真实旧版冻结 `552b7b2`，必须用新版正式接口生成的 ZIP 在独立旧版端完成预检、安装及回读。
+SQLite、隔离 MySQL/PostgreSQL、平台协议、Console 和安装门禁全部通过才推送；实际两个客户端适配及业务写入另列后续验收，不计通过、不跨仓修改。不得部署 Cloud 或执行共享环境生产 DDL。
+
+本文说明配置、存储、执行、安装、Console、更新人、升级及实现拆分。四个配套文件属于同一份设计：
+
+| **文件** | **内容** |
+| --- | --- |
+| [公共输出与持久化协议](structured-output-protocol-design.md) | HTTP、SSE、Live、History、Event Store、输出失败与终态、幂等与恢复的字段和例子 |
+| [测试与回归计划](structured-output-test-plan.md) | 固定测试夹具、逐项用例、跨版本安装矩阵、故障注入、跨数据库及上线门禁 |
+| [本次核验记录](verification-20261022.md) | 当前已执行的旧解析器、真实历史包、固定版本框架隔离验证；明确未验证范围 |
+| [BOM与租赁联合设计确认](client-design-alignment-20261022.md) | 两轮三方确认、两类业务映射、客户端适配边界、流式预览差异与联合验收 |
+
+本次文档工作不改产品代码、测试代码、正式协议指南、依赖、数据库、版本、Tag，不提交或推送。原有 19 项未提交改动保留。正式实施前按本设计确认具体 DDL 和目标环境，不能因写完文档而启动自动迁移。
+
+## 2. 最终产品形态与已确认决策
+
+### 2.1 两种运行情况
+
+1. **关闭**：沿用当前普通正文和 UI Deferred 逻辑，不注册输出工具，不读取输出定义，不产生新增输出协议字段。新旧 Agent 默认关闭。
+2. **开启**：Agent 配置一个最终结果的 JSON Schema。模型可以先查询、思考或暂停等待 UI；成功结束时必须提交符合该 Schema 的结果。普通文字不能绕过结构约束结束运行。
+
+“成功结束时必须符合结构”不等于每次模型请求都要提交最终输出。中间普通工具和 UI 工具仍可正常工作。
+
+### 2.2 本次只保留一个组合结果
+
+租赁示例的正文、合同、修正和澄清是**同一个结果中的可组合字段**，不是四个只能择一的输出工具。
+
+- Agent 上只有一个开关、一个输出配置、一套完整 JSON Schema。
+- 配置中的每个顶层结构可以单独设为“必须”。未设为必须的可以省略。
+- **允许所有顶层结构都不必须，也允许零个结构。** 默认不添加 `minProperties: 1` 或“至少返回一项”配置。
+- 同一套说明和 Schema 从本轮第一个模型请求起可见，后续模型请求重复携带；不按业务轮次动态改定义。
+- 不强制第一轮返回合同、第二轮返回修正。客户端继续判断是否有基线、修订是否过期、内容能否应用。
+- 组合字段可以用同一份Schema的静态互斥/条件约束表达合法搭配，例如租赁的完整合同与合同patch互斥；不因此变成多个输出工具或每轮动态Schema。text/contract等只是示例键，BOM可直接保留自己的v3根包。
+- 不新增普通/严格两个模式，不新增请求级 Schema、跨 Agent 输出库、输出契约组或可执行输出脚本。
+- 输出定义不进入 `agents.capabilities`，不加入 `/tools` 的执行工具目录。
+- 开启 Agent 的普通说明也可以通过 `text` 等字符串字段交付；不再额外允许独立 `str` 作为最终结果。
+- `NativeOutput`、`PromptedOutput`、Harness Guardrail 和 38 号课题依赖升级均不随本次接入。
+
+### 2.3 与其他数据的分工
+
+| **数据** | **产生者** | **含义** | **本次处理** |
 | --- | --- | --- | --- |
-| 业务工具结果 | Function/MCP 后端 | 工具完成后返回给模型，Agent 可继续运行 | 查询结果、公式图、文件内容、来源证据 |
-| UI Deferred 结果 | 浏览器、用户或外部任务 | Agent 暂停，收到结果后恢复 | 确认、选择、表单、异步任务 |
-| 结构化最终输出 | 模型 + Pydantic AI Output | 校验成功后结束当前 Agent Run | 分类结果、报告摘要、流程节点输入、API 机器可读响应 |
+| 普通/MCP 工具结果 | 业务后端 | 查询或执行的事实 | 保留原生命周期，不让模型输出替代权威结果 |
+| UI 工具结果 | 客户端或用户 | 中间交互的答案或动作回执 | 保留 Pending、恢复、取消及授权 |
+| 结构化最终结果 | 模型，经服务端验证 | 本次执行接受的答案 | 原生 JSON 返回和保存，成功后不再要求模型复述 |
+| 客户端业务状态 | 合同/BOM 等客户端 | 已应用的修正、已保存业务数据 | 客户端自己的校验与保存，不因格式合法自动改变 |
 
-当前推荐：
+## 3. JSON Schema 与字段语义
 
-1. 首版结构化最终输出使用 Pydantic AI Core `ToolOutput`，不修改 Pydantic AI 源码。
-2. 普通 Agent 保持 `[str, DeferredToolRequests]`；明确配置输出契约组后，可以同时提供多种 Output Tool。
-3. 默认的可选模式仍允许 `str`，模型可按任务需要选择普通文本或某个 Output Tool；只有显式严格模式才移除 `str`，避免绕过结构化契约。
-4. 固定业务结构优先使用 Pydantic Model；动态 JSON Schema 必须由 DeepAgent 再执行一次完整校验。
-5. 多种互斥结果优先注册为多个小型 Output Tool，不使用一个塞满 Optional 字段的宽松结构。
-6. Output Tool 与 UI Deferred 可以存在于同一个 Agent，但不能合并成同一种运行语义。
-7. MCP 已经返回完整权威结构时，前端直接渲染 `tool_result`；不得让模型通过 Output Tool 重写事实。
-8. Harness 0.26 可补充最终结果业务校验，但不替代 Core 的结构化输出能力，也不是首版前置依赖。
-9. Output Tool 不是 Agent 可选执行能力，不加入现有 `agents.capabilities` 或 `/tools` 工具目录；
-   Agent 通过独立的输出契约选择一组互斥终止类型。
+### 3.1 一份可直接使用的合同定义
 
-## 2. 设计边界
-
-本文只讨论“当前 Agent Run 如何形成最终输出”，不讨论：
-
-- 普通工具参数和结果 Schema 的设计。
-- MCP 业务结果的计算逻辑。
-- UI Tool 的具体表单组件。
-- 高风险工具的执行审批和授权。
-- 大工具结果的截断、摘要和外置存储。
-- 整个多轮会话什么时候算业务完成。
-
-每条用户消息都会触发一次独立 Agent Run。Output Tool 能表示“本次 Run 已完成”，但无法自动
-判断一个可能持续多轮的业务会话是否已经最终结束。需要“聊完后生成成果”时，应由 Agent 固定
-配置、请求级显式参数或独立的“生成成果”动作决定，不能让前后端猜测用户是否还会继续追问。
-
-## 3. Pydantic AI 的原始语义
-
-### 3.1 Output Tool 从第一次模型请求起可见
-
-Pydantic AI 不会先判断模型是否进入 Final 阶段，再临时添加 Output Tool。启用严格结构化输出后，
-本次 Run 的每次模型请求都会携带普通工具和 Output Tool 定义：
-
-```text
-模型请求 1
-  可见：search、read_file、return_report
-  模型响应：调用 search
-
-模型请求 2
-  输入：search 的 ToolReturn
-  可见：search、read_file、return_report
-  模型响应：调用 read_file
-
-模型请求 3
-  输入：read_file 的 ToolReturn
-  可见：search、read_file、return_report
-  模型响应：调用 return_report({...})
-```
-
-模型调用 `return_report` 的同一个响应同时表达：
-
-1. 当前任务所需信息已经具备。
-2. 当前参数就是最终结构化结果。
-
-协议中不存在一个更早的 `final=true` 信号，也不存在“倒数第二轮先通知框架，再执行最后一轮”
-的过程。
-
-### 3.2 校验成功才真正结束
-
-```text
-模型调用 Output Tool
-  → Pydantic AI 校验调用参数
-      ├─ 成功：参数或输出函数结果成为 result.output，当前 Run 结束
-      └─ 失败：向模型返回校验错误，在预算内要求重试
-```
-
-以下情况尚未形成最终结果：
-
-- 参数不符合 Schema。
-- Output Function 主动抛出 `ModelRetry`。
-- 输出业务校验要求模型重新生成。
-
-成功结果不会再作为普通 Tool Return 发回模型，因此不会多一次“请把结果复述成最终答案”的模型
-调用。
-
-### 3.3 为什么工具定义需要重复发送
-
-需要区分两个调用边界：
-
-| 边界 | 是否需要每轮重复传 Schema | 原因 |
-| --- | --- | --- |
-| 浏览器 → DeepAgent | 不一定 | Agent 固定 Schema 可以由后端从配置读取 |
-| DeepAgent → Model Provider | 需要 | 标准模型请求无状态，每次请求都要声明当前可用工具 |
-
-如果采用 Agent 固定配置，浏览器仍只发送 `agent_id` 和用户消息；DeepAgent 在运行时读取
-`output_schema` 并为本次 Run 的所有模型请求准备 Output Tool。只有采用请求级临时契约时，调用方
-才需要在该次请求中显式携带 Schema。
-
-为了控制 Schema Token：
-
-- 未配置结构化输出的 Agent 不添加 Output Tool。
-- 工具名、描述和 Schema 保持简洁且顺序稳定。
-- 结合 Provider Prompt Cache 观测实际缓存命中，不通过延迟注入工具破坏 Agent Loop。
-
-## 4. 三种结构化输出模式
-
-| 模式 | 约束方式 | 优点 | 风险与适用边界 |
-| --- | --- | --- | --- |
-| `ToolOutput` | 模型调用专用输出工具 | Tool Calling 兼容面广；终止语义明确 | 每次模型请求携带工具 Schema；首版推荐 |
-| `NativeOutput` | Provider 原生 response schema | Provider 支持时约束强 | Provider 和模型能力不一致，需要能力探测和回归 |
-| `PromptedOutput` | Prompt 注入 Schema，解析模型文本 | 对不支持 Tool Calling 的模型兼容 | 约束最弱，容易出现截断和非 JSON 内容，只作兜底 |
-
-DeepAgent 第一版不自动在三种模式间切换。先使用跨 Provider 更稳定的 `ToolOutput`；未来模型目录
-具备可靠的结构化输出能力标签后，再评估按模型选择 `NativeOutput`。
-
-## 5. Output Tool 与 UI Deferred
-
-### 5.1 两者生命周期不同
-
-| 环节 | UI Tool | Output Tool |
-| --- | --- | --- |
-| Pydantic AI 入口 | `ExternalToolset` | `output_type=ToolOutput(...)` |
-| 模型调用的含义 | 请求浏览器或外部系统完成交互 | 提交当前 Run 的最终答案 |
-| 调用后状态 | 暂停 | 结束 |
-| 应用层结果 | `DeferredToolRequests` | 已校验的结构化对象 |
-| 是否等待前端 | 是 | 否 |
-| 恢复输入 | `DeferredToolResults` | 无 |
-| 模型是否继续 | 恢复后通常继续 | 校验成功后不继续 |
-
-`DeferredToolRequests` 不是模型看到的工具，而是 Pydantic AI 返回给宿主应用的一种暂停状态：
-
-```text
-模型调用 builtin__choice
-  → Pydantic AI 返回 DeferredToolRequests
-  → DeepAgent 持久化 Pending 状态并通过 SSE 通知前端
-  → 用户提交选择
-  → 前端发送 DeferredToolResults
-  → DeepAgent 恢复 Agent Run
-  → 结果作为 ToolReturn 发给模型
-```
-
-因此下面的输出类型表示两种可能的 Run 结果：
-
-```python
-output_type=[
-    ToolOutput(FinalResult, name="return_final_result"),
-    DeferredToolRequests,
-]
-```
-
-- `FinalResult`：本轮已经完成。
-- `DeferredToolRequests`：本轮尚未完成，等待外部结果后恢复。
-
-### 5.2 不使用 Deferred 模拟 Output Tool
-
-把 Output Tool 做成特殊 UI Tool 会产生不必要的链路：
-
-```text
-模型提交最终参数
-  → 会话 Pending
-  → 前端原样回传
-  → DeepAgent 恢复
-  → 模型收到 ToolReturn
-  → 模型可能再次生成内容
-```
-
-如果 DeepAgent 拦截这个特殊 Deferred 调用并直接终止，就等于自行重写 Pydantic AI 已有的输出
-状态机，同时会混淆 Pending、取消、恢复、工具配对和历史语义。
-
-需要用户确认时，应保持两个阶段：
-
-```text
-UI Deferred Tool 收集或确认用户输入
-  → 恢复模型
-  → 模型调用 Output Tool 提交最终结构
-```
-
-## 6. 多种输出结构
-
-不同业务结果应注册成多个独立 Output Tool：
-
-```python
-class ReportResult(BaseModel):
-    title: str
-    summary: str
-    risks: list[str]
-
-
-class ClassificationResult(BaseModel):
-    category: str
-    confidence: float
-
-
-output_type = [
-    ToolOutput(ReportResult, name="return_report"),
-    ToolOutput(ClassificationResult, name="return_classification"),
-    DeferredToolRequests,
-]
-```
-
-Pydantic AI会把它们作为多个清晰的小型 Output Tool 提供给模型。模型选择其中一种，首个成功
-校验的结果成为最终输出。
-
-不推荐把互斥结构合并成一个所有字段均为 Optional 的模型：
-
-```python
-class BadFinalResult(BaseModel):
-    report_title: str | None = None
-    category: str | None = None
-    confidence: float | None = None
-```
-
-这种设计不能保证字段组合有效，也让模型和前端都需要猜测结果类型。只有以下情况才使用
-Optional：
-
-- 字段在同一种业务结果中确实可选。
-- 分支结构使用明确 discriminator 并能严格校验。
-
-前端需要统一协议时，由 DeepAgent 在 API 层归一化，不要求模型面对宽松 Schema：
+配置名使用英文编码，例如 `lease_result`；中文显示名称放在各结构的 `title`，说明放在 `description`。下例所有顶层结构都可省略，但返回合同或修正时内部字段必须符合定义。
 
 ```json
 {
-  "output_type": "report",
-  "data": {
-    "title": "分析报告",
-    "summary": "...",
-    "risks": []
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "title": "正文",
+      "description": "向用户说明本轮处理结果。"
+    },
+    "contract": {
+      "type": "object",
+      "title": "合同结构",
+      "description": "本轮需要提供完整合同时返回。",
+      "properties": {
+        "contract_name": {"type": "string", "minLength": 1},
+        "lessor": {"type": "string"},
+        "lessee": {"type": "string"}
+      },
+      "required": ["contract_name"],
+      "additionalProperties": false
+    },
+    "contract_patch": {
+      "type": "array",
+      "title": "合同修正",
+      "description": "对已有合同的增量修改。",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {"type": "string", "minLength": 1},
+          "value": {},
+          "reason": {"type": "string"}
+        },
+        "required": ["field", "value"],
+        "additionalProperties": false
+      }
+    },
+    "clarification": {
+      "type": "array",
+      "title": "澄清问题",
+      "description": "需要客户端展示的问题数据，不等同于 UI 工具等待。",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "question": {"type": "string", "minLength": 1}
+        },
+        "required": ["id", "question"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}
+```
+
+同一个定义在每轮均可接受下列结果：
+
+```json
+{"text":"已提取合同，请确认出租方。","contract":{"contract_name":"办公室租赁合同"},"clarification":[{"id":"q1","question":"出租方名称是否正确？"}]}
+```
+
+```json
+{"contract_patch":[{"field":"lessor","value":"示例出租方"}],"clarification":[{"id":"q2","question":"租金是否含税？"}]}
+```
+
+```json
+{"contract_patch":[{"field":"tax_included","value":true}]}
+```
+
+```json
+{"text":"本轮没有需要修改的内容。"}
+```
+
+```json
+{}
+```
+
+以下例子不合法，因为返回了 `contract`，但缺少它内部必须的 `contract_name`：
+
+```json
+{"contract":{"lessor":"示例出租方"}}
+```
+
+### 3.2 必须、省略、空值和默认值
+
+| **表达** | **检查规则** |
+| --- | --- |
+| 顶层 `required` 不含 `contract` | 可以整个不返回 `contract` |
+| 返回 `contract`，其内部 `required` 含 `contract_name` | `contract_name` 必须出现，且符合字符串等限制 |
+| `contract: null` | 只有该结构类型显式允许 `null` 才通过；可省略不代表可空 |
+| `clarification: []` | 是否通过取决于 `minItems`；默认没有“非空”要求 |
+| `text: ""` | 是否通过取决于 `minLength`；不暗中改成省略 |
+| 值是 `false`、`0` 或 `null` | 根据类型正常处理，不能用真值判断把它当作缺失 |
+| Schema 中 `default` | 说明性默认值，不自动补到输出，不填造模型没提供的数据 |
+| Schema 没写 `additionalProperties` | 沿用 JSON Schema 标准语义；服务端不偷偷补 `false` |
+
+字段卡片新建的对象模板默认使用 `additionalProperties: false`，但原生 Schema 编辑明确写出的规则保持原样。`required` 只表示存在性，不代表业务正确、不代表轮次约束，也不触发保存合同。
+
+### 3.3 根类型与两种编辑视图
+
+- 字段卡片视图编辑根 `object` 的 `properties/required`，它是 JSON Schema 的可视化投影，不额外保存字段列表。
+- 原生 Schema 编辑可表达对象、数组、标量及组合定义；数组和复杂根定义不能无损显示成字段卡片时，提示继续使用 JSON Schema 视图，**不丢弃或转换定义**。
+- Schema 本身必须是合法 JSON Schema 对象；不接受把业务 JSON 样例当作 Schema，也不自动猜测样例结构。
+- 根数组/标量对模型工具调用需要内部 `response` 参数包装；公共 `output` 必须解包后保留原始类型，不能让包装进入客户端业务结果。
+- 根 `null` 结果与 Pending 的 `output: null` 依靠状态和 `output_info` 区分，不能只比较值。
+- 动态根对象使用 `StructuredDict` 提供 Schema；其他根可使用带 JSON Schema 的动态类型。两者都要经过同一个 JSON Schema 服务端验证器。
+
+### 3.4 Schema 方言与约束
+
+采用 JSON Schema Draft 2020-12。不提供任意代码执行、网络加载 Schema、外部业务校验脚本。
+
+- 缺省 `$schema` 按 2020-12；显式使用未支持方言返回配置错误，不静默换方言。
+- 支持对象、数组、标准数值/字符串限制、`enum/const`、`required`、`additionalProperties`、`allOf/anyOf/oneOf/not`、条件定义等当前验证器支持的标准约束。
+- 支持本文件内、可展开且无循环的 `$defs/$ref`；拒绝外部 URL、文件引用、跨文档引用、循环引用及 `$dynamicRef/$dynamicAnchor`。禁止因校验而联网。
+- 配置验证先检查 Schema 自身，再检查引用、展开预算和框架可编译性，最后才允许开启保存。
+- 标准说明性关键字和 `x-*` 注解保留；不把未知关键字误当成已经执行的约束。文档和错误明确当前支持范围。
+- 首版对 `format` 明确支持 `date/date-time/time/uuid` 并执行检查；其他 format 保存时提示不支持，不能假装已验证格式。
+- 输出值不做字符串到数字、字符串到布尔等隐式业务转换；拒绝 NaN/Infinity、非 JSON 对象和重复 JSON 键。
+- 组合 Schema 是否可由某 Provider 接受需要真实验证；不支持时明确失败，不改成另一个业务结构。
+
+初始资源上限作为服务端常量，不新增环境变量或运维配置：
+
+| **项目** | **初始上限 / 行为** |
+| --- | --- |
+| 输出编码 | 1–64 个 ASCII 字符，`[A-Za-z][A-Za-z0-9_]*`，禁止与本轮其他工具重名 |
+| 输出说明 | 8,192 个 Unicode 字符；空说明允许 |
+| 规范化 Schema | UTF-8 64 KiB；外部请求先遵守现有 body 限额 |
+| Schema 层级 | 16 层，引用展开后也检查 |
+| Schema 节点 / 字段总数 | 节点 2,048；properties 总数 512；不是只检查顶层 |
+| enum 总条目 | 1,024；仍受字节和节点预算限制 |
+| 单次规范化输出 | UTF-8 1 MiB，额外遵守模型输出和现有会话预算 |
+| 返回的结构错误 | 最多 20 项，每条最多 256 字符；只给路径/约束，不回显敏感值 |
+| 正则约束 | 限制表达式长度；校验在可超时、可终止的隔离执行边界进行，不能阻塞 SSE 事件循环 |
+| Schema 编译缓存 | 有界、按规范化 Schema 指纹复用；不能按任意用户输入无限增长 |
+
+这些是本次设计的初始边界，不是当前已有能力。开发必须验证边界值、展开攻击、恶意正则和超时取消；若现有依赖无法满足可中止校验，须在开启任意 `pattern` 前解决，不以线程超时后继续占用 CPU 代替终止。
+
+## 4. Console 配置交互
+
+### 4.1 布局与文案
+
+沿用已验收的本地原型方向和正式 Console UI 基线，不把原型模拟信息写进生产。
+
+- Agent 资源页签文案为“输出”。
+- 正标题“结构化输出”使用现有小标题字号；说明在标题右侧，同一行右端放开关。
+- 开关默认关闭；关闭时隐藏配置区并展示简短空态，不能误显示运行已启用。
+- 开启后外层左右布局：左侧结果编码与结果说明上下排列；右侧字段/JSON Schema。
+- 第一行操作区：字段配置 / JSON Schema 切换，旁边信息提示，右侧“添加结构”和“检查定义”。不加“预览结果”。
+- 不再显示根类型标签、“至少返回一项”或页尾运行流程说明。
+- 编码字段明确要求英文，例如 `lease_result`；不是合同中文名称。
+
+### 4.2 字段卡片
+
+每张两行，无前置图标：
+
+1. 英文字段名、数据类型、字段数等简要信息。
+2. 中文 `title` 和说明。
+
+卡片外只可切换“必须”及删除。点击主体打开详情，详情中编辑字段名和该字段的完整 JSON Schema；类型、标题、说明和嵌套结构都在详情里编辑，外部不放类型下拉。
+
+“添加结构”先生成不重名草稿名，打开详情；新结构默认不必须。重命名同步根 `properties` 和 `required`，删除同步去除 required 引用；复杂跨字段引用不能由 UI 猜测修复，保存前准确提示。
+
+### 4.3 草稿与保存
+
+- 详情文本区域使用正常可编辑视觉，不置灰。
+- 详情只有关闭/返回，不提供“保存定义”；有效编辑实时进入页面草稿。
+- 无效 JSON 文本可暂存在编辑草稿中；关闭详情不能吞掉原始输入。卡片标“定义待修正”，页头保存阻止并定位错误。
+- 页头“保存”一次性提交 Agent 基础配置、开关和完整定义；“取消”放弃整页草稿。
+- 切换视图时，无法解析的文本先报错并保留，不使用旧 Schema 假装切换成功。
+- 卡片视图与原生视图共享一份数据，不相互覆盖未知的合法 Schema 关键字。
+- 从开启改关闭保留已保存定义。关闭状态下不提交草稿变化时不验证已有定义；关闭同时提交新定义时，该新定义仍必须是合法配置。
+- 服务端是最后校验方；前端“检查定义”通过不能替代保存校验，也不触发模型或收费调用。
+- 网络失败保留本地草稿；保存成功后按返回数据回显，不显示原型的硬编码操作者/时间。
+- 切换 Agent、返回列表和取消遵循现有未保存提醒，不新建自动保存机制。
+
+## 5. 数据库版本 012
+
+### 5.1 必要性与范围
+
+当前 `agents` 没有通用配置 JSON。`capabilities/skills/ui_tool_selection` 各有资源语义，不复用它们存输出配置。输出 Schema 可较大且运行默认不用，拆一张 1:1 配置表可避免 Agent 列表携带全部 Schema；开关放 Agent 上形成唯一事实源。
+
+本次只新增一张表，修改 Agent 两个字段；不加输出字段明细表、输出结果表、Run 表或用户表。
+
+### 5.2 `agents` 新增字段
+
+| **字段** | **逻辑类型与约束** | **说明** |
+| --- | --- | --- |
+| `structured_output_enabled` | Boolean，NOT NULL，数据库默认 false | 是否启用；存量行补 false，应用和数据库默认一致 |
+| `updated_by` | VARCHAR(128)，NULL | 最近一次成功配置写入的可信账号 ID；存量保留 NULL |
+
+不新增 `created_by`；不把当前用户伪造为历史更新人。
+
+### 5.3 新表 `agent_output_configs`
+
+| **字段** | **逻辑类型与约束** | **说明** |
+| --- | --- | --- |
+| `agent_id` | VARCHAR(36)，PK，NOT NULL | 一 Agent 一定义，逻辑关联 `agents.id` |
+| `name` | VARCHAR(64)，NOT NULL | 模型输出工具的英文编码；只需每 Agent 内有效，不做全局唯一 |
+| `description` | TEXT，NULL | 交给模型的结果说明；API 统一空值展示 |
+| `json_schema` | 仓库 `JSONType`，NOT NULL | 原始规范化 JSON Schema，一份存储，不另存卡片数组 |
+| `created_at` | 仓库 `UtcTimestamp`，NOT NULL | 创建时间 |
+| `updated_at` | 仓库 `UtcTimestamp`，NOT NULL | 定义最近更新时间 |
+
+表内不存 `enabled`、协议版本、用户资料、验证结果、模型输出或运行状态。主键已经满足按 Agent 查询和唯一性，不额外加 name/时间索引。
+
+遵守现有 `003` 后的逻辑引用模式，不引入物理外键：配置写入先锁父 Agent，删除在同事务显式清理；`reference_schema.py` 增加关联和孤儿审计。
+
+### 5.4 状态不变量
+
+| **开关** | **配置行** | **含义及动作** |
+| --- | --- | --- |
+| false | 无 | 旧 Agent/新 Agent 默认状态；普通运行，不查询新表 |
+| false | 有 | 关闭但保留定义草稿；普通运行和 Agent ZIP 导出都忽略定义 |
+| true | 合法行 | 启用；开始新 Turn 时读取并快照 |
+| true | 缺失或非法 | 配置损坏；拒绝执行并明确提示，不退回普通文本 |
+
+### 5.5 读写、事务与并发
+
+1. Schema 解析、引用展开和编译在写事务前完成，事务中不请求模型、账号中心或外部文件。
+2. 进入现有配置写入屏障，按一致锁序锁引用资源和父 Agent；锁后复核 Agent 和关联未被并发改变。
+3. 同一事务写 Agent、输出定义、`updated_at/updated_by`，任一失败全部回滚。不能前端先保存 Agent 再用第二个提交保存定义。
+4. 新建关闭且未带定义不建配置行。关闭且显式带合法定义可存为草稿。
+5. 开启必须存在本次提供或已保存的有效定义。编码与最终装配的所有工具名冲突时拒绝运行；当前可知冲突保存时提前拒绝。
+6. 普通 PATCH 省略新字段表示保持，不清空。**安装整包覆盖省略输出定义表示关闭并移除目标旧定义**，两种语义分开。
+7. 显式 `output_config: null` 表示删除定义；按合并后的最终状态检查，最终仍开启就返回 422。当前开启、只提交 null 而省略开关也应拒绝；关闭时可删除，单纯关闭不删除。
+8. 删除 Agent、复制 Agent、整包安装覆盖都必须走同样的事务边界。删除不留孤儿；复制不共享同一配置行，操作者是复制人。
+9. 遵循现有冲突行为；不要通过额外提交、异常后重试覆盖或忽略错误吞掉并发变更。本次不另加数据库修订列。
+10. 列表只读开关和更新人，不加载 Schema；运行关闭不查新表；详情显式按 ID 查询，避免 ORM 1+N 隐式加载。
+
+### 5.6 迁移、备份和回退
+
+- 新迁移 `012` 的 `down_revision=011`；001–011 原样保留，不能恢复 0805 实验的旧 003 或历史同名 012。
+- SQLite/MySQL/PostgreSQL 分别验证实际类型、布尔默认和 UTC 往返，不能只跑 SQLite 就认定三方言通过。
+- 不批量生成默认配置行；不迁移会话和旧输出；不回填更新人。
+- `configuration_transfer.py` 显式把新表列为配置表，插入顺序在 Agent 后，清理顺序相反；全量备份包括开启定义及关闭草稿。
+- 全量配置备份与 Agent ZIP 不同：备份必须保留关闭草稿；ZIP 关闭时必须完全省略。历史 Revision 备份的识别保持兼容，不能强行要求 011 备份含新表。
+- 降级默认阻止存在任何输出配置、启用标记、非 NULL updated_by 或需要保留的新运行语义的环境，逐项给出计数；不隐式丢弃更新人、删配置、删事件或修改 Alembic 标记。只有无新增事实的隔离空库可验证无损降级；正式回退必须另行确认备份与保留方案。
+- 关闭所有开关只是功能回退，不等于可直接使用旧二进制读取所有新增历史事件。已产生结构化历史的环境，回退兼容须通过专门回归；首选保持数据库 012、关闭功能，或发布修复版本。
+- 生产 MySQL/PG 的版本、Agent 数量、长事务、权限、DDL 算法、锁等待、耗时、发布窗口和恢复备份需部署前只读调查，当前没有这些证据。不能依据临时 SQLite 的速度承诺无锁或在线无感。
+
+## 6. Agent 管理 API 设计
+
+复用现有 `/api/v1/agents`、`/agents/{agent_id}`，不增加一套独立配置保存 API。以下均为**拟新增字段**。
+
+### 6.1 创建和更新
+
+```json
+{
+  "name": "租赁合同助手",
+  "prompt": "按附件和用户确认处理合同。",
+  "model_id": null,
+  "capabilities": [],
+  "skills": [],
+  "structured_output_enabled": true,
+  "output_config": {
+    "name": "lease_result",
+    "description": "按需组合正文、合同、修正和澄清；完成中间工具与UI交互后提交。",
+    "json_schema": {
+      "type": "object",
+      "properties": {"text": {"type": "string", "title": "正文"}},
+      "required": [],
+      "additionalProperties": false
+    }
   }
 }
 ```
 
-### 6.1 输出契约组是 Agent 选择颗粒度
-
-需要区分四层：
-
-| 层级 | 例子 | 作用 |
+| **输入情况** | **POST 创建** | **PATCH 更新** |
 | --- | --- | --- |
-| UI Tool 定义 | `deep_cube__clarify` | 一项稳定的交互协议和参数 Schema |
-| UI Tool Package | `ui:deepcube` | Agent 一次选择的一组 UI Tool；运行时展开为多个 External Tool |
-| Output Tool 定义 | `return_deepcube_code` | 模型可选择的一种终止结果 Schema |
-| 输出契约组 | `deepcube.v1` | Agent 或本次请求选择的一组互斥 Output Tool |
+| 两个新字段都省略 | 关闭、无定义，旧客户端正常 | 保持原开关和定义 |
+| 开关 false，定义省略 | 关闭、无定义 | 关闭，保留原定义 |
+| 开关 true，定义省略 | 422 缺少定义 | 原有合法定义可复用，否则 422 |
+| 开关省略，提供定义 | 默认关闭，存合法草稿 | 保持原开关，原子更新定义 |
+| 开关 true，定义 null | 422 | 422 |
+| 当前开启，仅定义 null，省略开关 | 不适用 | 422；最终状态仍开启，不能形成开启无定义 |
+| 开关 false，定义 null | 关闭、无定义 | 关闭并删除定义 |
+| 开关 null / 字符串 | 422 | 422，不能把 null 当省略 |
+| 定义含无效 Schema | 422，不写入 | 422，保留旧状态 |
+| 客户端传 updated_by | 拒绝只读字段，不采用 | 拒绝只读字段，不采用 |
 
-Output Tool 不应复用 `agents.capabilities`：
+原有字段的校验、模型选择、capabilities/skills 显式关联和管理员权限保持。安装包放宽未知字段不扩散到 CRUD 的授权或字段语义。
 
-- Tool Package 表示模型在运行中可以调用的一组执行、查询或交互工具。
-- Output Contract 表示模型如何结束本次 Run。
-- UI Tool 调用后可能 Pending 并恢复；Output Tool 校验成功后直接结束。
-- Console 可以都展示在 Agent 配置中，但必须分成“能力”和“输出契约”两个配置区。
+### 6.2 读取和操作者资料
 
-推荐配置形态：
+- 管理员列表返回开关、`updated_by` 和显示资料摘要，不返回完整 Schema。
+- 管理员编辑详情返回 `output_config`，包括关闭时保留的定义。
+- 普通登录态 `GET /agents/{id}` 的现有初始化权限不能改成管理员；可返回开关，不为显示更新人额外强制账号中心鉴权，也不泄露管理用完整 Schema。
+- `output_config` 的完整管理读取由同一路由的管理员视图/现有管理鉴权分支控制；必须测试普通工作台初始化不被新依赖阻断。
+- `updated_by_user` 拟只包含 `id/username` 和必要解析状态，不为了显示头像查全员目录。列表批量解析一次，同一 ID 去重。
+- 平台账号查询已经返回 401/403 时遵守现有管理接口鉴权约定，不能伪装成功；普通服务超时/无资料则列表仍可显示 ID。
+- 失败字段返回具体 JSON 路径，如 `output_config.json_schema.properties.contract.required`；不回显完整客户 Schema 或参数值到日志。
+
+### 6.3 错误分类
+
+| **情况** | **处理** |
+| --- | --- |
+| 管理输入类型、Schema、编码不合法 | 422，字段级错误，零写入 |
+| Agent 不存在 / 普通会话归属不符 | 沿用现有 404 语义 |
+| 并发引用或预检状态变化 | 409，提示刷新/重新预检 |
+| 存储状态为开启但缺定义 | 新 Turn 409 `output_config_invalid`；流开始后发现则终态错误，不调用模型 |
+| Provider 不支持或拒绝本工具定义 | 明确模型请求错误，不关闭开关、不降级文本 |
+| 输出不合法且尚有预算 | 记录失败尝试，模型内部重试，不是运行终态 |
+| 校验/请求预算耗尽 | 明确终态错误，保留失败尝试，不创建接受结果 |
+| 结果落库失败 | 终态持久化错误，不能先对外宣布完成 |
+
+## 7. Runner 与工具生命周期
+
+### 7.1 装配
+
+```text
+新用户 Turn
+  → 校验归属/模型/Agent
+  → 关闭：现有 [str, DeferredToolRequests]
+  → 开启：读取配置，冻结本轮说明和Schema
+       → 生成一个 ToolOutput(name=配置编码)
+       → 保留 DeferredToolRequests
+       → 装配分发前混调检查 + 服务端JSON Schema校验
+  → 普通或流式Runner执行
+```
+
+不能只修改工厂默认参数：当前普通/流式 Runner 显式覆盖 `output_type`，二者都需改成同一个装配结果。`api/v1/deps.py` 保持共享装配入口，事件映射保留在 `agent/events.py`。
+
+使用公开 `AbstractCapability` 生命周期 Hook，不修改 Pydantic AI。运行时覆盖 `output_type` 时，不能直接叠加与之不兼容的 Agent 全局 output validator；本次隔离验证已用公开 Hook 验证候选路径，完整 Runner 仍须实施后验证。
+
+输出工具显式使用 Provider `strict=False`，不让部分供应商的严格生成模式把所有可选字段改成必须/nullable。这里关闭的是供应商工具生成限制，**没有关闭服务端 JSON Schema 校验**。最终请求适配后仍要检查 required 未被改写；不支持本定义时明确失败，不静默换结构。
+
+### 7.2 固定定义与运行快照
+
+- 新 Turn 开始时冻结开关、编码、说明、Schema 和内容指纹。运行中 Agent 被修改不改变本轮定义。
+- 快照写在本 Turn 首条已有真实用户请求事件的应用 metadata，详情见协议文档。不新建 Run 持久化表。
+- UI Deferred 恢复继承原 Turn 快照，不重新读取最新输出配置，不因关闭或改名绕过原契约。
+- 新用户消息创建新 Turn，使用当前配置；既有会话不永久绑定旧 Schema。
+- 关闭时不生成输出快照；旧 Pending 无快照且没有任何当时启用的引用证据，沿用旧普通路径，不因管理员刚开启而变成结构化续跑。
+- 开启 Turn 的后续真实消息 metadata 保存来源快照事件 ID 与指纹引用，Deferred 从其来源响应验证引用。已有启用证据但快照查无、损坏、摘要不符或当前服务不能解释时，恢复明确失败，保留 Pending，不拿最新配置猜测修复。
+- 每次请求的 Schema 稳定；MCP 渐进披露可以改变普通工具可见性，但不改变输出定义。
+
+### 7.3 混调策略：整批拒绝，分开提交
+
+只在完整模型响应收齐、任何工具进入分发前判断：
+
+| **响应包含** | **处理** |
+| --- | --- |
+| 普通/MCP/UI 工具，没有输出工具 | 现有执行/Deferred 逻辑 |
+| 一个输出工具，没有其他工具调用 | 校验并决定接受或重试 |
+| 输出工具＋普通/MCP/UI/native 调用 | 整批拒绝；这批普通工具不执行、UI 不进入 Pending；请求模型先单独完成中间调用再提交输出 |
+| 同响应多个输出工具调用 | 整批拒绝，要求只提交一个组合结果，不选第一条或最后一条 |
+| 未知工具与输出混在一起 | 拒绝，保留真实错误证据，不接受输出 |
+
+不能让 `end_strategy` 默认行为代替产品规则。首版明确使用 `graceful` 作为框架执行底座，但能否接受结果由前置混调检查决定。这里的 graceful 仅是框架策略名，不是一个新增配置开关。
+
+Streaming 不在收到首段输出参数时提早结束。使用完整运行事件路径；关闭会话流也不能让已拒绝的工具被后台补执行。多个 partial 不多算尝试、不触发最终校验、不写多条尝试事件。
+
+被拒批次的普通/UI调用必须保留“未分发”证据，不能仅因原始ToolCall已保存就显示为工具已执行、等待用户输入或计入工具执行数。标记字段、来源配对及统计规则见协议设计第6.4节。
+
+注意 Provider 托管 native 工具可能在完整响应返回前已由供应商执行；前置 Hook 无法撤销这类服务端行为。当前首版只承诺阻止宿主分发的工具副作用；启用输出时禁止将不可证明可分离的托管执行与输出在同次请求混用，并覆盖 Web Search 路由。不能宣称 Hook 能回滚供应商内部行为。
+
+### 7.4 验证与重试
+
+1. 完整工具参数先按 JSON 解析；非对象根按内部包装解包。
+2. 按本轮冻结 Schema 执行真正的服务端验证，不能只信 `StructuredDict` 或 Provider strict 模式。
+3. 记录一次输出尝试；失败返回有界路径/规则给模型，请其修正。
+4. 本设计每 Turn 最多 **2 次输出修正机会**，即通常首次＋2 次修正；混调拒绝、缺少合法最终结果等也消耗同一输出纠错预算，不另外开无限循环。
+5. 所有实际模型请求仍计入现有 Turn 总请求上限，Deferred 恢复不重置纠错预算。余量不足时立即失败，不为结构化输出加额外请求。
+6. Provider 网络重试、普通工具重试保持各自现有预算；不能把同一失败反复通过多个重试层放大。
+7. 只返回验证通过的原生 JSON，不删未知字段、不补 defaults、不排序数组、不调用业务保存动作。
+8. 输出成功后不再做一次模型调用改写正文；用量取真实请求，不伪造工具执行量。
+9. Schema 校验必须可取消，失败/超时不能阻塞心跳；校验器异常是服务错误，不能伪装模型结构错误无限重试。
+
+纠错按真实响应身份去重，把检查点保存到真实SDK RetryPrompt消息metadata；耗尽时即使SDK不生成重试消息，也在现有execution/error事实记录最后预算状态。恢复从原始事件读取，并把剩余额度映射给SDK及同一个自定义控制器，成功/Deferred/系统故障不扣格式纠错。精确字段见协议设计第6.5节。
+
+### 7.5 最后一次请求
+
+当前 `TurnRequestBudget` 最后一次请求会清空所有输出工具并强制文本；开启时必须改造：
+
+- 移除业务、MCP、UI 和 native 执行工具，保留本轮唯一输出工具。
+- 保持不允许纯文本终止；指令要求在已取得的信息内提交合规结果，不臆造未查询事实。
+- 最后响应含非输出调用、混调或不合法结果则失败；不再额外调用模型，不文本降级。
+- 关闭状态保持原有最后文本收口行为。
+- 累计请求数、输出重试与压缩请求预算共享既有记账，Pending/恢复不能重置。
+
+### 7.6 UI Deferred、取消与续聊
+
+- UI 工具与输出工具并存于同一 Agent，但输出不进入 `deferred.calls/approvals`。
+- UI 真正发起后返回 Pending；客户端仍用原 tool_call_id 交答案，重复/过期/跨用户答案按现有规则拒绝。
+- 恢复后可继续查询、再次 UI Pending，最终提交输出；不是收到 UI 答案就自动完成业务。
+- 输出 JSON 中的 `clarification` 只是问题数据，客户端下一轮回答；它不自动生成 Deferred 请求。
+- 取消在模型、校验、等待和持久化各阶段传播；已持久化的事实保留，未接受候选不能成为正式回复。
+- 普通会话、渠道 `/new` 预建空会话、UI 恢复和后续新消息均单独回归，首轮命名不受本次重置。
+
+## 8. 公共输出、历史与 Console 展示
+
+完整字段和事件序列见[公共协议设计](structured-output-protocol-design.md)，本节列产品约束。
+
+- `/chat`、`/chat/stream`、只读 `/live`、`/history`、`/events` 都能识别同一接受结果；客户端不用识别 Markdown 围栏或猜工具名。
+- 关闭路径不发新增 output 事件或 output_info，不把旧工具重解释为输出。
+- 输出尝试在轨迹中统一标签“输出”；失败 `Error`，成功 `Completed`。不增加独立“校验”标签。
+- 失败候选在轨迹可查，普通对话只展示最后接受的结果。格式修正成功后整轮成功，失败尝试不是终态 error。
+- History结构化项强制item_id等于对应output_id，保证POST/Live/final/History同一身份。混调拒绝后未分发的普通/MCP/UI调用不投影为普通History工具项，只在Event API/轨迹保留，不作为审批/查询证据。
+- Console 只做通用 JSON/文本展示，不渲染合同表单、金额清单或可操作澄清 UI。
+- 代码块标题使用 `lease_result/contract/clarification` 等原始英文编码，不使用中文工具名。
+- 不展示没有来源的 v1/Schema 版本；内部配置指纹用于一致性，不作为用户版本号。
+- 回复区域和输出详情内提供“完整 JSON / 按结构分组”，作为正式展示功能，不放页面顶部方案栏。
+- 完整模式显示整个原生结果；分组模式对根对象逐 key 展示：字符串按正文，其余用 JSON，原键名保留。根数组或标量使用完整 JSON，并说明不适合顶层分组。
+- 分组是同一份 JSON 的视图，不拆成多次工具调用，不改变客户端保存对象。空对象显示 `{}`，空字符串/零/false/null 显示原值，不显示为“无结果”。
+- 代码超过 15 行默认折叠，可展开/收起；复制和下载永远取完整值，不取被裁剪 DOM。
+- 展示偏好按本地 UI 记忆；切换不调用模型、不发业务请求、不修改历史。刷新和轨迹详情得到一致数据。
+- 输出 attempt 和原始 ModelResponse 的重复信息在轨迹投影中关联，不额外显示一张普通工具卡。
+- Markdown 字符串、JSON 键值及错误都按现有安全渲染；禁止 JSON 原文插入 innerHTML 或意外执行链接/脚本。
+
+## 9. Agent 安装包与历史兼容
+
+### 9.1 只有一种导出
+
+继续使用现有 manifest 格式 `deepagent-agent-package` 和整数 `schema_version: 1`，软件 `exported_from` 正常更新。不做兼容版/完整版两种按钮。
+
+**关闭时完全省略新增内容**：`agent.json` 不出现 `structured_output_enabled` 或 `output_config`，也不出现新输出文件；即使关闭但数据库保留定义草稿也一样。不能输出 false/null/空对象占位。
+
+开启时采用 `agent.json` 的可选扩展，内嵌整份定义，不额外增加 sidecar：
 
 ```json
 {
-  "capabilities": ["builtin:general", "mcp:deepcube", "ui:deepcube"],
-  "output_contract": "deepcube.v1"
+  "name": "租赁合同助手",
+  "prompt": "示例提示词",
+  "model_reference": null,
+  "capabilities": [],
+  "skills": [],
+  "structured_output_enabled": true,
+  "output_config": {
+    "name": "lease_result",
+    "description": "提交本轮结果。",
+    "json_schema": {"type":"object","properties":{},"required":[],"additionalProperties":false}
+  }
 }
 ```
 
-`deepcube.v1` 内部可以注册多个互斥输出：
+包内不携带源端 agent_id、updated_by、账号资料、会话、输出历史和凭据。已有 Skill/UI 工具/MCP 引用和模型匹配规则保持。
 
-```text
-return_deepcube_answer
-return_deepcube_code
-return_deepcube_config
-return_deepcube_mixed
-```
+### 9.2 双向兼容矩阵
 
-Agent 选择的是整个契约组，不应要求管理员逐个勾选这些 Output Tool。否则可能出现只启用
-`return_deepcube_config`、却漏掉普通说明或混合结果，导致同一 Agent 无法覆盖完整终止路径。
-
-UI Tool Package 与 Output Tool 是两条独立配置链路。v0.3.2 已确定 UI 工具整包选择，旧
-`ui:<tool_name>` 只在 Alembic 002 中一次性迁移；这不改变 Output Tool 的实施前置条件，也不改变
-工具协议名、SSE 和历史记录。
-
-## 7. 普通工具与 Output Tool 同响应边界
-
-模型可能在同一个 ModelResponse 中同时生成普通工具调用和 Output Tool。Pydantic AI通过
-`end_strategy` 决定同批其他调用的处理方式；流式 API 还存在“先识别到的最终输出优先”的行为。
-
-DeepAgent 实施时必须：
-
-1. 在 Output Tool 描述中要求：只有普通工具、UI 交互和审批全部完成后才允许提交最终输出。
-2. 明确选择并记录 `end_strategy`，不得依赖框架默认值而不测试。
-3. 覆盖“普通工具在前、Output Tool 在后”和相反顺序。
-4. 覆盖同响应出现 `DeferredToolRequests` 与 Output Tool 的优先级。
-5. 确认普通和 SSE 链路结果一致；不能出现普通请求完成、SSE 请求 Pending 的差异。
-6. 已成功形成 Output 后，不再向模型发送普通工具结果或追加一次模型请求。
-
-这个边界是结构化输出落地的主要运行风险之一。
-
-## 8. AI Labs 参考项目
-
-| 项目 | 做法 | 对 DeepAgent 的启示 |
-| --- | --- | --- |
-| Pi | 示例扩展注册 `structured_output`，结果带 `terminate: true`；底层 Loop 在终止工具批次后停止 | Output Tool 应具备明确终止语义，不需要额外模型复述 |
-| OpenCode | 请求声明 JSON Schema，服务端动态注入固定 `StructuredOutput`，强制调用并单独保存结构化结果 | 适合请求级临时输出契约；客户端只提交 Schema，不提交可执行工具逻辑 |
-| Deep Agents | `response_format` 支持 Tool、Provider 和 Auto Strategy，结果保存在 `structured_response` | 输出策略可以抽象，但首版不必过早自动化 Provider 选择 |
-| Agno | `output_schema` 按模型能力选择原生结构、JSON Schema、JSON Mode 或文本解析 | 兼容链路完整但故障面较多，适合作为后续演进参考 |
-| Hermes | 正常最终结果为自由文本，部分内部流程通过 Prompt 生成 YAML 后解析和兜底 | Prompt 解析适合低风险内部摘要，不适合作为强契约 |
-
-推荐采用“OpenCode 的产品配置边界 + Pi 的明确终止语义”，运行时直接使用 Pydantic AI Core，
-不在 DeepAgent 内复制这些项目的 Agent Loop。
-
-## 9. Pydantic AI Harness 的边界
-
-`pydantic-ai-harness 0.26.0` 没有另一套结构化输出机制。结构化结果仍由 Pydantic AI Core 的
-`ToolOutput`、`NativeOutput` 和 `PromptedOutput` 负责。
-
-Harness Guardrail 可以在最终结果形成后增加业务规则：
-
-```text
-ToolOutput 校验结构
-  → OutputGuard 检查引用、敏感数据或业务约束
-      ├─ allow
-      ├─ block
-      ├─ replace
-      └─ retry
-```
-
-流式链路仍有明确边界：
-
-- 只检查最终输出，已经通过 SSE 发出的文本无法撤回。
-- 流式模式不支持 OutputGuard 输出重试。
-
-因此不把 Harness 作为结构化输出的前置依赖。首版可使用 Pydantic AI
-输出校验、DeepAgent `jsonschema` 二次校验和有限重试；需要引用、合规或敏感信息检查时再评估
-Harness Guardrail。
-
-Harness `ToolOutputLimits`已在v0.4.0管理普通工具结果过大，不是Agent最终结构化输出，两个概念
-不得混用。
-
-## 10. DeepAgent 推荐运行设计
-
-### 10.1 输出契约来源
-
-首版推荐支持 Agent 固定契约组，并区分可选和严格两种模式：
-
-```text
-Agent 未配置 output_schema
-  → output_type=[str, DeferredToolRequests]
-
-Agent 配置 output_contract，mode=optional
-  → output_type=[str, ToolOutput(...), DeferredToolRequests]
-
-Agent 配置 output_contract，mode=strict
-  → output_type=[ToolOutput(...), DeferredToolRequests]
-```
-
-可选模式适合同时承担自由问答和格式化成果的业务 Agent；严格模式适合分类、审批材料提取和
-固定 API 响应。完全自由聊天的 Agent 可以不配置输出契约。
-
-后续可增加：
-
-- 请求级临时 Schema：供工作流/API 调用者明确指定本次返回结构。
-- “生成结构化成果”动作：多轮聊天后由用户显式触发，不自动猜测会话是否完成。
-
-优先级建议为：
-
-```text
-请求级显式契约
-  > Agent 固定契约
-  > 普通文本输出
-```
-
-请求级接口只接收 JSON Schema、模式和必要元数据，不允许客户端提交工具代码、URL 或任意执行
-逻辑。Output Tool 名称、描述、校验和终止行为全部由 DeepAgent 固定实现。
-
-### 10.2 DeepAgent 改造面
-
-不修改 Pydantic AI 源码，但需要调整应用层：
-
-1. Agent 配置和 Schema：保存可选输出契约，校验大小、深度、字段数和保留名称。
-2. Runner：将当前固定 `[str, DeferredToolRequests]` 改为请求级动态 `output_type`。
-3. 校验：固定结构用 Pydantic Model；动态 Schema 使用 `StructuredDict` 时再执行 `jsonschema` 校验。
-4. SSE：`final.output` 支持 JSON 原始类型，并增加稳定的 `output_type` 标识。
-5. 历史：保留原始 ModelResponse 中的 Output Tool Call，并能重建最终结构化结果。
-6. Console：终止型 Output 不显示为普通工具卡片；按 Schema 或通用 JSON 只读组件展示。
-7. Deferred：保留当前 Pending、恢复、取消和 UI Tool 逻辑，不让 Output Tool进入该分支。
-8. Usage：Output Tool 调用纳入正常模型请求和输出 Token 统计，不额外伪造工具执行 Usage。
-
-是否为 Agent 增加独立数据库字段、复用配置 JSON，需在实施计划中结合检索、版本化和迁移要求
-单独决策，本文不提前锁定 DDL。
-
-### 10.3 0805 实验实现的归档结论
-
-`feat-ruge-0805@9f528b8` 曾在旧基线上完整实现一次固定输出契约。该分支不合并代码，但以下
-结果是后续重新实施的有效证据：
-
-已验证可行：
-
-1. 独立 `Output Contract → 多个 Output Definition` 的建模可以和 ToolPackage 分离。
-2. 动态 JSON Schema 可通过 `StructuredDict` 提供给模型，并由 DeepAgent 使用 `jsonschema`
-   二次校验和有限 `ModelRetry`。
-3. `final.output/output_type`、原始 ModelResponse、历史 `structured_output` 和 Console 通用只读卡片
-   可以保持同一份结构化结果。
-4. UI Deferred 可以先 Pending，恢复模型后再由 Output Tool 结束本轮；两者不需要合并状态机。
-5. Output Call/acknowledgement可以作为完整配对参与安全切分；契约与Schema指纹可让不兼容的
-   Compaction投影失效，而不改写原始Event。
-
-不应沿用：
-
-1. 实验把 Agent 固定为一个严格契约并移除 `str`，无法覆盖同一 Agent 的普通解释、图表、建议、
-   配置等不同终止形态；正式方案必须支持契约组内多种输出，并默认允许普通文本。
-2. 实验采用 `end_strategy=early`：模型若在同一响应同时调用普通/UI 工具和 Output Tool，只接受
-   Output，其他调用不会执行。它能避免副作用，但也可能让最终结果引用尚未执行的工具，因此正式
-   实现必须确定性拒绝这种混合响应并让模型重试，不能静默忽略。
-3. 实验分支曾使用的 Alembic `003` 建立在旧迁移链上，该编号现已由 v0.3.18 Skill 重构正式使用。
-   Output Tool 以后若实施，必须基于当前 head 重新编号并重新设计 migration，不能复制或 stamp
-   实验分支的旧 `003`。
-4. 实验对直连 DeepSeek 的 thinking/tool_choice 做过特殊处理。当前已升级为 Pydantic AI 官方
-   DeepSeek Provider，这条兼容结论只能作为回归用例，不能直接恢复旧适配代码。
-
-因此当前结论是“技术路径已验证，产品配置与混合调用规则未完全锁定，暂缓实施”。删除 0805
-分支不会丢失上述证据，也不代表把实验数据库结构认定为当前方案。
-
-## 11. 典型适用案例：DeepCube 助手
-
-DeepCube 助手当前会在完成 MCP 查询和必要的 UI 澄清后，用 Markdown 正文同时返回：
-
-- DeepCube 脚本。
-- 运行参数和数据加载范围。
-- 元素名称与说明。
-- 风险和下一步建议。
-
-其中 `config_fill` 是 Markdown 代码块中的 JSON，Python 前端再执行 `JSON.parse`、归一化和
-页面语义校验。这种方式已经表达了结构化输出意图，但仍有明显缺口：
-
-- JSON 引号、截断或 Markdown Fence 错误只能在前端发现。
-- 后端不能在同一 Run 内把具体校验错误反馈给模型纠正。
-- 历史只能把最终成果恢复成普通 Assistant 文本。
-- 配置、脚本和说明的组合依赖 Prompt 约定，缺少稳定结果类型。
-
-因此 DeepCube 是 Output Tool 的典型场景。推荐定义一个 `deepcube.v1` 输出契约组，至少包含：
-
-```text
-deepcube_answer：普通解释、能力边界和下一步建议
-deepcube_code：脚本、解释、风险和建议动作
-deepcube_config：运行参数、数据范围、元素信息和风险
-deepcube_mixed：配置、脚本、说明和风险
-```
-
-DeepCube 助手默认采用可选模式：普通解释可以继续输出文本，需要交付脚本、配置或组合成果时
-调用对应 Output Tool。只有业务前端通过独立“生成严格成果”动作明确要求机器可读结果时，才切换
-严格模式并移除 `str`。`deep_cube__clarify` 继续作为 UI Deferred Tool：信息不足时先 Pending，
-用户提交后恢复模型，最后再选择普通文本或上述 Output Tool。
-
-Output Tool 只返回待应用成果，不直接修改 Python 页面。填充配置、插入脚本和覆盖脚本仍由业务
-前端按钮执行；前端也继续负责当前 Cube 维度、Scope 表达式、中文占位和页面版本等环境语义校验。
-
-实施时必须拒绝“普通 MCP Tool 与 Output Tool 在同一响应中、最终输出却依赖该工具结果”的情况。
-Output Tool 从第一次模型请求起可见，并不会自动只在最后一轮出现；提示词、输出校验和
-`end_strategy` 测试必须共同保证它只在查询和 Deferred 已闭环后提交。
-
-### 11.1 分仓边界
-
-- DeepAgent 负责 Output Contract、校验与重试、终止语义、SSE `final.output` 和历史恢复。
-- `element-python3` 负责业务卡片、页面配置校验以及填充、插入、覆盖等本地动作。
-- DeepAgent 不修改 Python 前端，Python 前端也不模拟 DeepAgent 的 Output Tool 和 Agent Loop。
-
-## 12. 混合适用案例：电子表格数据追溯
-
-电子表格来源分析同时包含“权威事实”和“模型综合判断”，不能简单归为完全适用或完全不适用。
-公式节点、汇总关系、写入历史、金额、权限遮罩和证据状态来自后端业务服务，继续以 MCP Tool
-Result 为事实源；模型根据多类证据判断最可能来源、矛盾和缺口时，可以使用 Output Tool。
-
-```text
-电子表格提供当前单元格事实
-  → Biz-Go MCP 编排财务模型、公式和维度服务
-  → 多个 MCP 返回标准 Evidence Envelope
-  → DeepAgent 写入 Run 级 Evidence Ledger
-  → 模型综合判断并调用 source_analysis.v1 Output Tool
-  → Validator 检查证据覆盖、引用和结论等级
-  → 前端按 final.output 渲染 SourceAnalysisCard
-```
-
-Output Tool 不复制完整节点图、日志、金额序列和权限数据，只返回对原始证据的引用以及模型观点：
-
-```text
-MCP Tool Result：客观证据和权威业务结果
-Output Tool：confirmed / inferred / ambiguous / unknown、证据引用、矛盾、缺口和建议
-```
-
-第一版不建设跨服务“大证据收集器”，优先采用：
-
-```text
-多个只读 MCP 工具
-  + DeepAgent 通用 Evidence Ledger
-  + source_analysis.v1 Coverage Policy
-  + Output Validator
-```
-
-输出结构只返回引用 `analysis_id` 的结论、风险和建议，不复制完整节点图：
-
-```json
-{
-  "analysis_id": "sa_xxx",
-  "status": "inferred",
-  "conclusion": "该值最可能来自营业收入成员公式",
-  "evidence_refs": ["ev_formula_1", "ev_audit_2"],
-  "contradictions": [],
-  "gaps": ["历史公式版本不可用"],
-  "suggested_action_ids": []
-}
-```
-
-系统提示词负责告诉模型应该查询哪些来源，Coverage Policy 和 Validator 负责确定性兜底。电子表格
-侧定义业务适用性规则和 SourceAnalysisCard；DeepAgent 只实现通用编排、输出约束、SSE 与历史，
-双方不得跨仓代改。
-
-## 13. 测试要求
-
-实施结构化最终输出时至少覆盖：
-
-1. 未配置 Schema 时仍返回字符串，并兼容现有 Deferred UI Tool。
-2. 配置单一 Schema 时只接受 Output Tool，不允许普通文本绕过。
-3. 多种结构注册为多个 Output Tool，能返回正确的 `output_type`。
-4. 参数校验失败触发有限重试，超限返回明确错误。
-5. 动态 JSON Schema 由服务端二次校验，不能只依赖 `StructuredDict`。
-6. Output Tool 成功后不再发起模型请求。
-7. Output Tool、普通工具和 Deferred 同响应时覆盖不同顺序及 `end_strategy`。
-8. 普通请求和 SSE 的完成、Pending、失败语义一致。
-9. Output Tool 不进入普通工具卡片或 UI Deferred 渲染分支。
-10. 实时响应和历史恢复得到相同结构化结果。
-11. Schema 大小、深度、字段数、递归和非法关键字受到限制。
-12. Provider 不支持或拒绝 Tool Calling 时返回明确错误，不静默降级为非结构化文本。
-13. DeepCube 的 answer、code、config、mixed 四类终止结果均能严格校验并恢复历史。
-14. DeepCube 先 Deferred 澄清、恢复后提交 Output Tool；页面应用失败不恢复模型或篡改最终历史。
-15. 来源分析只引用 Ledger 中存在的 Evidence，不复制权威 Tool Result；缺证据时有限重试后降级。
-
-## 14. 待决问题
-
-| 问题 | 影响 | 候选方案 | 当前建议 |
+| **源包** | **目标** | **新建** | **覆盖已有 Agent** |
 | --- | --- | --- | --- |
-| 输出 Schema 存储位置 | DDL、查询和版本管理 | Agent 独立字段 / 现有配置 JSON | 实施规划时结合版本化需求决定 |
-| 是否首版开放请求级 Schema | API 安全和产品理解 | 仅 Agent 固定 / 同时支持请求覆盖 | 先做 Agent 固定，真实工作流提出需求后再开放 |
-| 是否启用 Provider Native Output | 兼容性和 Schema 约束 | 仅 ToolOutput / 按模型能力切换 | 首版仅 ToolOutput |
-| 最终结果如何展示 | Console 可用性 | 通用 JSON / Schema 专用卡片 | 首版通用只读展示，业务前端自行渲染 |
-| 同响应多工具策略 | 副作用与一致性 | graceful / early / exhaustive | 结合当前 SSE Runner 做专项实验后锁定 |
-| 是否接入 Harness OutputGuard | 业务校验和流式风险 | 首版接入 / 后续接入 | 后续按引用、合规等真实需求评估 |
-| UI Tool 是否按包分配 | Agent 配置复杂度和历史迁移 | 整包选择 / 逐工具授权 | v0.3.2 采用 Tool Package 整包选择；逐工具授权作为后续独立能力 |
-| Output Tool 配置颗粒度 | 是否容易漏配终止路径 | 逐 Output Tool / 输出契约组 | Agent 选择契约组，组内注册多个互斥 Output Tool |
+| 真实历史旧 v1 包 | 新服务 | 正常，输出关闭 | 正常，输出关闭，清除目标旧输出定义 |
+| 新版关闭输出导出包 | 旧服务 | 必须完整预检、安装、回读成功 | 必须成功，按旧规则覆盖 |
+| 新版关闭但有定义草稿的导出包 | 旧服务 | 同上；草稿完全不随包 | 同上 |
+| 新版开启输出导出包 | 当前旧服务 | 允许明确拒绝，零写入 | 允许明确拒绝，原目标不变 |
+| 新版开启输出导出包 | 新服务 | 开启，定义完整保留 | 原子替换开关和定义 |
+| 新版关闭包 | 新服务 | 关闭，无定义 | 关闭并清除目标旧定义 |
+| 新包仅来源软件版本较新、无新增功能字段 | 旧服务 | 不按软件版本号拒绝 | 同左 |
 
-## 15. 参考资料
+“新版导旧版通过”必须使用**新版真实导出产物＋冻结旧版本完整预检/安装/回读**验收。单独用新版解析器读取自己导出的包不算跨版本验证。
 
-- [Pydantic AI Outputs](https://ai.pydantic.dev/output/)
-- [Pydantic AI Deferred Tools](https://ai.pydantic.dev/deferred-tools/)
-- [Pydantic AI Harness](https://github.com/pydantic/pydantic-ai-harness)
-- [Pi structured output extension](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/structured-output.ts)
-- [OpenCode structured output implementation](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/prompt.ts)
-- [Deep Agents](https://github.com/langchain-ai/deepagents)
-- [Agno](https://github.com/agno-agi/agno)
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+### 9.3 新版导入允许未知扩展
+
+- 包内容中额外字段、安全的额外文件忽略，不安装、不执行、不登记为资源；已认识且必需的内容仍严格验证。
+- 必需文件仍是 `manifest.json/agent.json/ui-tools.json`；实际携带的上传 Skill ZIP 必须与文件名、编码和 Agent 引用一致。未携带 ZIP 的内置或缺失 Skill 引用沿用现有 reuse/missing 预检规则，不能借本次改变成所有引用都必须带原包。
+- manifest format 与格式主版本仍校验，未来未知 schema_version 不能当 v1 强行解析。
+- `structured_output_enabled=true` 而定义缺失/非法：拒绝整个安装，不能当未知配置忽略。
+- false/缺开关却显式带非空已认识 output_config 的外来包：拒绝矛盾包，要求源端规范导出；旧包是两个键均不存在，不属于矛盾。
+- 包 DTO 的扩展容忍与操作指令分开：不能全局放宽当前 `StrictModel`，因为 InstallOptions 也继承它。安装模式、目标 ID、预检摘要等操作参数继续原校验。
+- ZIP 全部条目先经过路径穿越、重复名、符号链接、加密、压缩/解压字节、数量和损坏检查，之后才忽略未知条目；不能先过滤未知文件绕过预算。
+- 已认识 JSON 的重复键、非法数值、已知字段类型、资源重复和逻辑引用冲突仍报错。
+- 全部文件名及解压后内容（包括忽略的安全扩展）继续进入 package.digest，任一文件内容变化必须使原预检失效。仅重压缩或 ZIP 时间戳不同但内容相同可以同摘要；原始 ZIP SHA256 另行记录。
+- 新版重新导出只保留认识的有效配置，不承诺透传未知扩展文件。
+
+### 9.4 预检、覆盖与补偿
+
+- 预检显示源端结构化输出开/关、目标将开启/关闭/替换定义；覆盖开启 Agent 的旧包明确提示本次会关闭输出。
+- 不新增“保持目标输出配置”安装选项；整包覆盖以包为准，不混用 PATCH 语义。
+- 新表加入配置快照、预检摘要、导出前后校验、安装状态和提交结果核对。只有 Schema 变化也必须令预检失效。
+- 安装源码直接写 ORM，不能只改 CRUD Store；同事务更新 Agent 开关、定义和更新人。
+- 保留现有文件上传先行、独占屏障二次预检、失败补偿及提交确认丢失后的回读机制；不得误删实际已提交引用的文件。
+- 成功安装后独立回读 Agent 与定义，核对开启状态、内部 required、英文编码、Unicode 和操作者；失败核对目标及关联资源完全不变。
+- 自带旧包原样读取，不为本次功能重打包或更新内置业务提示词；实际安装时默认关闭。
+
+## 10. Agent 更新人
+
+### 10.1 记录规则
+
+记录可信网关身份解析后的账号 ID，与会话用量的账号体系一致，不记录名字快照、不使用渠道发言人替代配置操作者。
+
+| **操作** | **更新人** |
+| --- | --- |
+| 新建 Agent | 当前操作账号 |
+| 修改名称/模型/提示词/能力/Skill/输出定义/开关 | 本次成功写入的当前账号 |
+| 复制 Agent | 复制操作账号，不沿用源更新人 |
+| 安装新建/覆盖 | 目标环境安装账号，不采用包内来源用户 |
+| 读取/预检/导出/聊天/标题更新 | 不改变 Agent 更新人 |
+| 写入失败/回滚/拒绝冲突 | 不改变 |
+| 历史 Agent | NULL，不伪造 |
+| 全量配置恢复 | 保留恢复数据的原更新人事实；与跨环境 Agent ZIP 的操作者规则区分 |
+
+用户显式点击保存且服务端成功执行配置写入时，更新配置时间和更新人；不为纯 GET 或前端切换渲染模式写入。所有相关 Store/安装分支必须检查，不能漏掉只改扩展表的操作。
+
+### 10.2 用户名显示与性能
+
+- 复用 `security/diagnostic_users.py` 的平台账号批量解析与现有权限隔离缓存；不新建用户缓存表，不逐 Agent 请求。
+- 取 `username` 显示；username 不可得显示原 ID，历史 NULL 显示“—”，不把昵称冒充 Username。
+- 卡片页脚使用现有个人头像图标＋用户名＋更新时间。
+- 列表“最近更新”列两行：时间、用户名；无需新增创建人列。
+- ID 去重后分批，沿用有界耗时；账号查询普通不可用时列表数据仍有效。不能无限等待或把失败反复重试。
+- 普通聊天初始化、工具目录、运行授权和模型装配不依赖更新人资料。
+- 任意客户端伪造 body.updated_by、源包携带该字段均不得改变目标操作者。
+
+## 11. 渠道、定制客户端与未开启 Agent
+
+### 11.1 渠道
+
+当前渠道只接受字符串 final.output；需要在渠道适配层补原生 JSON 的通用文本投递：
+
+- API 结果仍是原生 JSON，不为了渠道全局字符串化。
+- 渠道收到结构化接受结果后，用确定性 JSON 序列化显示英文输出编码和 JSON 文本；遵守各渠道长度/分段限制。
+- 不依据业务字段 text/contract 猜测展示，不做合同专用 UI；空对象也明确投递 `{}`，不显示“无可展示文本”。
+- 失败尝试不外发为最终答案，Pending 不冒充完成，停止不再发送成功结果。
+- `/new` 先预建空会话再发送内容时，新消息仍读取当前配置；不复制上一个 Turn 的输出或 Schema。
+- 未开启 Agent 的渠道文字、附件、首轮标题、命令、发送状态均走原逻辑。
+
+### 11.2 合同和 BOM 定制客户端
+
+2026-10-22已与“峰梅｜智能填报BOM”和“达美乐｜租赁智能填报”完成两轮设计核对，双方最终确认无剩余设计阻碍；确认记录和准确映射见[三方联审](client-design-alignment-20261022.md)。这是设计确认，不是客户端已经适配或端到端通过。
+
+本仓提供公共契约和通用 Console，不跨仓修改合同/BOM。启用前客户端必须明确适配原生 JSON、输出标识和 History 新项；原有只接受字符串的客户端只要继续使用关闭 Agent 即不受影响。
+
+客户端继续负责 revision/hash、patch ID、source_signature、节点引用、费用模型、业务授权、保存和问题回执等语义校验；结构通过不等于可以应用业务变化。保留客户端有界业务纠错，不因为后端已有格式重试就全部删除。
+
+- BOM输出编码bom_turn_v3，最终直接保留原BomTurnV3根对象；请求上下文中的submission_id/rules_version不强行迁到最终包。平台turn_id/run_id/output_id与业务JSON内的turn_id/版本/基准分别保留。
+- 租赁组合可含text、lease_contract、lease_contract_patch、lease_clarification、lease_review、lease_review_file；contract/patch、review/review_file各自静态互斥。省略字段或空对象不清空原业务基线。
+- 租赁大复核保留原文件引用与客户端5MiB下载限制；平台1MiB仅限制内联输出，不提高全局限额、不新增文件服务或放宽鉴权。Hash、snapshot_signature、版本和权限仍由客户端核对。
+- 首版没有结构字段partial公共协议，租赁采用过程进度＋accepted后完整显示；原字段级围栏预览不计为本版保留能力，不能宣称原样兼容。
+- 平台内部格式纠错期间客户端不另开repair；平台格式预算耗尽也不自动转成客户端新轮重置预算。只有accepted之后的业务基准/引用错误才进入有界业务repair，网络/下载/保存错误不一律重调模型。
+- 两项目当前澄清/needs_adjustment通过下一次普通提交继续，不自动变Deferred；租赁旧挂起UI会话保持客户端既有只读策略。真正Deferred能力仍可供以后显式启用。
+- 接收器、History/终态等待、回放/时间线、文件引用及原生审批证明都要适配，不能仅改final SSE。完整生产Schema的实际大小、展开预算和Provider兼容性在启用前验收，当前未验证。
+
+本次不提供自动生成旧围栏的另一套兼容输出模式；现有业务围栏仍在关闭路径按原逻辑运行。适配由客户端维护方单独执行和验收。
+
+## 12. 诊断、性能与资源
+
+- 运行查询：关闭只读 Agent；开启额外一次配置主键查询，新 Turn 之后使用冻结快照；Deferred 恢复从已有事件恢复，不随每次 token 查询数据库。
+- 管理列表不查询每个 Schema；更新人批量解析。记录 SQL 次数和账号请求数，数据量增加时应按批次增长，不按行产生 N+1。
+- 输出 Schema 进入模型预算估算和提示缓存指纹，不只是写进 output_type 后忽略成本；配置变化使旧请求基准失效。
+- 不让普通 `ToolOutputLimits` 裁剪正式结构化结果。完整结果受单独大小上限；超过上限报明确错误，不能截断成无效 JSON。
+- 压缩输入可以摘要旧输出，但不能删除用于 History/轨迹的原始接受结果；模型投影与用户历史分开。
+- 日志只记录输出编码、ID、尝试序号、Schema 指纹、约束错误类别/路径、大小、耗时和安全错误码；禁止完整 Schema、合同/BOM 内容、账号凭据、原始参数与返回值进入文本日志。
+- 失败候选可在有权限的原始会话轨迹查看；日志不是另一套明文业务存储。
+- 语义事件以现有会话归属做权限过滤；更新人是显示信息，不扩大用户可读其他会话的权限。
+
+## 13. 实现影响清单
+
+以下是开发范围，不代表已经修改。
+
+| **模块** | **必须完成的变更** |
+| --- | --- |
+| `db/models.py`、新 `012` | Agent 开关/更新人、一对一输出配置，方言类型与默认 |
+| `schemas/agent.py`、`api/v1/agents.py` | 原子保存输入、只读更新人、详情/列表分层、旧客户端省略语义 |
+| `db/stores/agent/` | 创建/更新/删除/复制事务、父锁、草稿保留和清理 |
+| `db/reference_schema.py`、`db/configuration_transfer.py` | 逻辑引用、表分类、备份导入顺序 |
+| `agent_packages/archive.py/service.py` | 关闭省略、开启扩展、容忍未知、预检/事务/摘要/补偿完整覆盖 |
+| `api/v1/deps.py`、`agent/factory.py`、`agent/runner.py` | 普通与流式统一输出装配、快照、Deferred 恢复、序列化、先持久化后完成 |
+| `agent/request_budget.py` | 最后请求保留输出工具、统一纠错预算、不越预算 |
+| `agent/message_persistence.py`、`db/event_codec.py`、相关事件 Store | 原始输出调用/重试保留，快照与尝试语义事件，幂等和分片重组 |
+| `agent/history.py`、`agent/context/` | SDK 可重放消息投影、输出调用配对、压缩后历史不变 |
+| `agent/events.py`、ChatResponse、Live 分发 | 公共 output 事件、原生 output、output_info，关闭省略 |
+| `conversation/models.py` 及 History projector | 接受结果项，不把失败候选映射成正式回复 |
+| `security/diagnostic_users.py` 调用方 | 管理列表批量 Username 展示，普通初始化不新增权限 |
+| `console/configuration/agents.js` 及现有 Agent 编辑区域 | 输出页签/卡片/Schema/草稿、更新人卡片和列表 |
+| Console SSE/Conversation/轨迹/输出详情/代码块 | 输出分类、两种视图、失败尝试、折叠和复制，普通路径不变 |
+| `channels/service.py` 及文本投影 | 原生 JSON 通用序列化，旧文字和命令不变 |
+| 单元/集成/前端/跨版本/方言测试 | 执行配套测试计划并保留独立回读证据 |
+| `docs/guides/`、安装/协议/部署说明、CHANGELOG | 功能完成后再同步正式指南；本次仍只改 design |
+
+不修改第三方 Pydantic AI、不恢复旧实验分支、不合入 sandbox 分支、不重做 UI Tools 三套 Schema、不改独立客户端、不自动升级依赖。
+
+## 14. 开发顺序与阶段门禁
+
+| **阶段** | **交付** | **进入下一阶段的条件** |
+| --- | --- | --- |
+| A：设计核对 | 本课题与必要隔离验证 | 当前用户确认功能边界；具体 DDL、环境及生产影响完成确认 |
+| B：012 与配置事务 | 数据模型/管理 API/更新人/备份及安装配置层 | 三方言迁移与回滚策略、原子故障测试、旧包默认关通过 |
+| C：运行与公共协议 | ToolOutput/Hook/重试/快照/语义事件/SSE/History | 普通与流式结果一致、失败不误接受、Deferred/预算/取消通过 |
+| D：Console 和渠道 | 配置交互、通用结果、轨迹、更新人、渠道 JSON | 浏览器真实保存和刷新回读、命令与普通聊天冒烟通过 |
+| E：完整兼容和审计 | 新旧服务交叉导出安装、故障注入与相关回归 | 测试计划 P0 全通过、已知限制明确、无旧路径回归 |
+| F：发布准备 | 迁移窗口、依赖交接、指南和变更说明 | 用户另行授权发布动作；未通过项不以“后续观察”替代 |
+
+不因为阶段 A 的模型模拟测试通过，就跳过真实 Runner、数据库、浏览器和冻结旧版安装验收。也不因为用户认为风险小而省略本次明确要求的兼容矩阵。
+
+## 15. 依赖与发布约束
+
+- 本设计基于现有 `jsonschema>=4.23,<5`、Pydantic AI 2.46.0、Harness 0.32.0，原则上不要求升级框架或新增生产依赖。
+- 固定依赖镜像不会因改 requirements 自动生效；如隔离校验或后续实现确需新增/升级依赖，必须单列旧→新、用途、验证和是否重建基础镜像，由用户交接运维。不能启动时 pip install 绕过。
+- 本次文档修改的依赖变更：**无**。未核验线上基础镜像安装清单，不据此承诺镜像已具备全部运行能力。
+- 数据库 012 和产品语义联动发布。生产多 Pod 新旧代码混跑时不能让旧 Worker 接到开启输出 Agent；先升级数据库与所有兼容服务，再显式开启，具体滚动顺序依部署窗口确认。
+- Agent 包格式 v1 不等于数据库 012，也不等于输出结果版本；三个概念不能混写。
+- 发布后按测试计划检查配置、安装包、普通会话、渠道 /new、续聊和历史；关闭功能时保留定义和已生成结果，不批量删除数据。
+
+## 16. 历史研究与本次取舍
+
+0805 实验 `9f528b8` 曾证明动态 Schema、Deferred、SSE 和历史可以接通，但其旧迁移、Checkpoint、契约组和 Provider 专用补丁不适用于当前 Event Store。只作为研究证据，不恢复代码。
+
+本次明确替代原设计的地方：
+
+| **原方向** | **本次决定** |
+| --- | --- |
+| 多个互斥 Output Tool / 契约组 | 一个组合 JSON Schema，内部结构可同时出现 |
+| optional/strict 两种模式 | 一个开关，关闭旧逻辑，开启必须按 Schema 成功结束 |
+| 默认允许独立文本与结构择一 | 开启后的正文进入 Schema 字符串字段 |
+| 存储位置待定 | Agent 开关＋一张独立配置表，012 同时加更新人 |
+| 按 Schema 渲染业务卡片 | Console 仅通用 JSON/文本，两种展示方式 |
+| 混调等待策略未定 | 完整响应分发前整批拒绝并有界修正 |
+| 包碰到未知内容即拒绝 | 新导入器容忍未知安全扩展，已知内容仍验证 |
+| 结果协议仅提 final.output | 公共尝试事件、HTTP/SSE/Live/History/轨迹及持久化统一 |
+
+其他项目也有结构化最终结果概念，不是 Pydantic AI 独有。本次选择它是因为当前 DeepAgent 已使用该运行时，能直接复用输出终止和重试机制；不需要复制其他项目的 Agent Loop。
+
+## 17. 仍需实施验证与上线前信息
+
+产品方向已经收口，不再把组合结果、是否至少一项、是否两种导出列为开放选择。以下是工程门禁，不是假装已完成的功能：
+
+1. 当前 SDK Hook 在完整 Runner 的持久化顺序、分片消息和取消边界必须验证；隔离模型通过不代表链路通过。
+2. 校验执行的超时/取消/恶意正则边界必须实现并实测；如需依赖调整单独交接。
+3. 托管 native 搜索与结构化输出的 Provider 行为需要按实际模型验证；不能保证时明确拒绝该组合，不静默换用未授权工具。
+4. 012 生产目标数据库版本、规模、锁与窗口尚未调查，DDL 执行前另行确认。
+5. 冻结旧服务环境＋新版真实导出物的完整安装需开发后执行；现有核验只证明旧解析器行为。
+6. 合同/BOM 客户端适配不在本仓修改范围；启用其 Agent 前由客户端维护方完成对接。
+
+## 18. 证据与参考
+
+- 当前源码及精确入口见[核验记录](verification-20261022.md)。
+- [Pydantic AI Output](https://ai.pydantic.dev/output/)：输出工具、动态 Schema 及验证边界。
+- [Pydantic AI Deferred Tools](https://ai.pydantic.dev/deferred-tools/)：中间暂停与最终输出的区别。
+- [Pydantic AI Capabilities](https://ai.pydantic.dev/capabilities/)：公开生命周期扩展；具体签名以本仓安装的 2.46.0 源码和隔离验证为准。
+- [现行安装指南](../../guides/agent-packages.md)、[现行 SSE 指南](../../guides/sse-protocol.md)、[现行 History 迁移指南](../../guides/session-event-client-migration.md)：描述当前系统，开发完成后再按本设计升级。
+- 跨课题排期只维护在 [TODO](../TODO.md)，本课题章节是功能拆分和验收设计，不另建平行研发台账。

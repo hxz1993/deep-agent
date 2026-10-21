@@ -86,7 +86,7 @@ class AgentRequestLimitApiTests(unittest.TestCase):
         app = FastAPI()
         app.include_router(api_router)
         allow_console_admin(app)
-        self.client = TestClient(app)
+        self.client = TestClient(app, headers={"user": "fixture-user"})
         self.model_id = asyncio.run(self.stores.llm_model.list_all())[0].id
 
     def tearDown(self) -> None:

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from loguru import logger
-from sqlalchemy import Boolean, DateTime, Float, Integer, func, inspect, select, text
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, MetaData, Table, func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from deep_agent.capabilities.codes import canonical_tool_package_codes
@@ -36,6 +36,24 @@ MAX_SKILLS_PER_IMPORT = 100
 _IMPORT_LOCK = asyncio.Lock()
 _MYSQL_LOCK_NAME = "deep-agent-configuration-import"
 _POSTGRES_LOCK_KEY = 2_024_070_230_001
+
+# 011 is the real pre-output release schema. Keep its backup contract explicit:
+# a same-011 restore must not require 012's table or inject 012 ORM defaults.
+# This does not perform cross-revision import or alter an Alembic revision.
+_AGENT_011 = Table("agents", MetaData(), *(
+    Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
+    for column in Base.metadata.tables["agents"].columns
+    if column.name not in {"structured_output_enabled", "updated_by"}
+))
+
+
+def _configuration_tables(revision: str) -> tuple[str, ...]:
+    return tuple(name for name in configuration_table_names()
+                 if revision != "011" or name != "agent_output_configs")
+
+
+def _contract_table(table_name: str, revision: str):
+    return _AGENT_011 if table_name == "agents" and revision == "011" else Base.metadata.tables[table_name]
 
 
 class ConfigurationImportError(ValueError):
@@ -148,8 +166,8 @@ def _actual_foreign_keys(inspector: Any, table_name: str) -> set[tuple[Any, ...]
     }
 
 
-def _validate_table_shape(inspector: Any, table_name: str) -> None:
-    table = Base.metadata.tables[table_name]
+def _validate_table_shape(inspector: Any, table_name: str, *, revision: str) -> None:
+    table = _contract_table(table_name, revision)
     actual_columns = inspector.get_columns(table_name)
     actual_by_name = {str(item["name"]): item for item in actual_columns}
     expected_names = [column.name for column in table.columns]
@@ -188,16 +206,22 @@ def _validate_table_shape(inspector: Any, table_name: str) -> None:
 
 def _validate_schema_sync(sync_connection: Any, *, backup: bool) -> None:
     inspector = inspect(sync_connection)
-    expected = set(Base.metadata.tables) | {"alembic_version"}
+    actual = set(inspector.get_table_names())
+    if "alembic_version" not in actual:
+        raise ConfigurationImportError("Database is missing alembic_version")
+    revision = str(sync_connection.scalar(text("SELECT version_num FROM alembic_version")) or "")
+    tables = set(Base.metadata.tables)
+    if revision == "011":
+        tables.discard("agent_output_configs")
+    expected = tables | {"alembic_version"}
     if backup:
         expected.add("_backup_info")
-    actual = set(inspector.get_table_names())
     if actual != expected:
         raise ConfigurationImportError(
             "Database table scope does not match the current configuration contract"
         )
-    for table_name in Base.metadata.tables:
-        _validate_table_shape(inspector, table_name)
+    for table_name in tables:
+        _validate_table_shape(inspector, table_name, revision=revision)
     revision_columns = {
         str(item["name"]) for item in inspector.get_columns("alembic_version")
     }
@@ -363,7 +387,7 @@ async def inspect_configuration_backup(
                 manifest = json.loads(str(info["scope_manifest"]))
             except (TypeError, ValueError) as exc:
                 raise ConfigurationImportError("Invalid backup scope manifest") from exc
-            config_tables = configuration_table_names()
+            config_tables = _configuration_tables(revision)
             if manifest != backup_scope_manifest(config_tables):
                 raise ConfigurationImportError(
                     "Backup scope manifest does not match the current contract"
@@ -376,7 +400,7 @@ async def inspect_configuration_backup(
 
             rows: dict[str, list[dict[str, Any]]] = {}
             for table_name in config_tables:
-                table = Base.metadata.tables[table_name]
+                table = _contract_table(table_name, revision)
                 result = await connection.execute(select(table))
                 rows[table_name] = [dict(row) for row in result.mappings().all()]
             for row in rows.get("llm_providers", []):
@@ -540,17 +564,17 @@ async def _validate_target(
     *,
     source_revision: str,
 ) -> str:
+    target_revision = await _read_revision(connection)
+    if target_revision != source_revision:
+        raise ConfigurationImportConflictError(
+            "Backup revision does not match the target database revision"
+        )
     await connection.run_sync(
         lambda sync_connection: _validate_schema_sync(
             sync_connection,
             backup=False,
         )
     )
-    target_revision = await _read_revision(connection)
-    if target_revision != source_revision:
-        raise ConfigurationImportConflictError(
-            "Backup revision does not match the target database revision"
-        )
     await _validate_empty_sessions(connection, target=True)
     await _validate_logical_references(connection, prefix="Target database")
     return target_revision
@@ -694,10 +718,11 @@ async def _insert_rows(
     connection: AsyncConnection,
     table_name: str,
     rows: Sequence[Mapping[str, Any]],
+    *, revision: str,
 ) -> None:
     if not rows:
         return
-    table = Base.metadata.tables[table_name]
+    table = _contract_table(table_name, revision)
     batch_size = 500
     for offset in range(0, len(rows), batch_size):
         await connection.execute(table.insert(), list(rows[offset : offset + batch_size]))
@@ -719,14 +744,14 @@ async def _replace_configuration(
             connection,
             source_revision=plan.source.revision,
         )
-        table_names = configuration_table_names()
+        table_names = _configuration_tables(plan.target_revision)
         # Profiles are rebuildable and must not survive replacement of their application identity.
         for table_name in CACHE_TABLES:
             await connection.execute(Base.metadata.tables[table_name].delete())
         for table_name in reversed(table_names):
             await connection.execute(Base.metadata.tables[table_name].delete())
         for table_name in table_names:
-            await _insert_rows(connection, table_name, rows[table_name])
+            await _insert_rows(connection, table_name, rows[table_name], revision=plan.target_revision)
         await _validate_empty_sessions(connection, target=True)
         await _validate_logical_references(connection, prefix="Imported configuration")
         for table_name, expected in plan.row_counts.items():

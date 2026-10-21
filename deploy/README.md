@@ -76,6 +76,14 @@ docker compose --project-directory "$PWD" -f deploy/docker-compose.yml up -d
 保留原地；源码路径整理不迁移、不重建业务数据。完整目录说明见
 [`项目结构与职责`](../docs/guides/project-structure.md)。
 
+## v0.14.0 / 数据库 012 发布要求
+
+012 新增 `agent_output_configs`，`agents` 增加非空默认 false 的 `structured_output_enabled` 和可空 `updated_by`；不增加结果表或 Run 表。开关默认关闭，历史更新人保持 NULL。先备份、停止旧 API/Gateway 写入，按维护流程执行 `alembic upgrade head`，核验 Revision=012、物理表/列、旧 Agent 默认关闭及原会话/文件可读，再启动同版 API/Gateway/Console。MySQL 非事务 DDL 的故障恢复与锁耗时须按实际环境评估，不混跑旧写入实例，不以本地时间估算生产耗时。
+
+已有定义（含关闭草稿）、更新人或输出事件/快照时，降级会保护性拒绝；优先关功能并保留 012。必须回退时停写并使用经批准的升级前数据库与匹配代码/镜像备份，不能静默删新事实。配置备份恢复仍要求 Revision 相同；Agent ZIP 的跨软件版本兼容是另一套规则，不代表旧全量数据库备份能跨 Revision 覆盖。详见 [结构化输出指南](../docs/guides/structured-output.md) 与 [依赖交接](dependency-images.md#0140-交接补充)。
+
+本仓本次不部署 Cloud、不执行共享生产 DDL；完整验收范围及未执行的生产/客户端步骤见 [0.14.0 验收报告](<../docs/reports/Report DeepAgent 0.14.0 验收/验收报告.md>)。
+
 ## v0.9.7 / 数据库 003 发布要求
 
 完整备份 → 停止旧 API 与 Gateway 的写入 → 执行 `alembic upgrade head` 并核验003、10类逻辑引用及业务数据 → 启动新版 → 冒烟测试。

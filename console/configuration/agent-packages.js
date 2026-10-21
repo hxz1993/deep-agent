@@ -30,6 +30,13 @@
     }
     return blob ? response.blob() : response.json();
   }
+  function outputInstallSummary(preview) {
+    const output = preview?.structured_output;
+    if (!output) return '';
+    if (output.enabled) return `<span>结构化输出：<strong>${escapeHtml(output.name || '已开启')}</strong> · 随包安装定义</span>`;
+    if (output.target_enabled) return '<span class="is-warning">结构化输出：将关闭，并移除目标原有输出定义</span>';
+    return '<span>结构化输出：关闭</span>';
+  }
   const admin = {
     step: 1, mode: 'builtin', items: [], catalogErrors: [], source: null, preview: null, choices: null,
     busy: false, installing: false, generation: 0, installed: null, installResult: null,
@@ -288,7 +295,7 @@
     renderSummary() {
       const choices = this.choices;
       const target = this.agents.find(agent => agent.id === this.targetAgentId);
-      return `<div class="agent-package-summary"><span>${this.operationMode === 'overwrite' ? '覆盖' : '新建'} <strong>${escapeHtml(choices.name)}</strong></span><span>默认模型：${escapeHtml(this.modelLabel(choices.model_id, target))}</span></div>`;
+      return `<div class="agent-package-summary"><span>${this.operationMode === 'overwrite' ? '覆盖' : '新建'} <strong>${escapeHtml(choices.name)}</strong></span><span>默认模型：${escapeHtml(this.modelLabel(choices.model_id, target))}</span>${outputInstallSummary(this.preview)}</div>`;
     },
     renderSuccess() {
       const result = this.installResult, agent = this.installed;
@@ -379,6 +386,6 @@
     },
   };
   window.agentPackagesAdmin = admin;
-  window.__AgentPackageUI = { sourceBody, statusLabels, kindLabels, groupedResources };
+  window.__AgentPackageUI = { sourceBody, statusLabels, kindLabels, groupedResources, outputInstallSummary };
   document.addEventListener('DOMContentLoaded', () => admin.init());
 })();

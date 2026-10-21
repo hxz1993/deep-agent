@@ -73,7 +73,7 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=default)
 
         with patch("deep_agent.api.v1.deps._build_runner_from_spec", new_callable=AsyncMock) as build:
-            build.return_value = object()
+            build.return_value = SimpleNamespace()
             await build_runner_for_agent(ctx, agent.id)
             spec = build.call_args.args[0]
             self.assertEqual(spec.model, "openai:gpt-a")
@@ -88,7 +88,7 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=override)
 
         with patch("deep_agent.api.v1.deps._build_runner_from_spec", new_callable=AsyncMock) as build:
-            build.return_value = object()
+            build.return_value = SimpleNamespace()
             await build_runner_for_agent(ctx, agent.id, model_id=override.id)
             spec = build.call_args.args[0]
             self.assertEqual(spec.model, "openai:gpt-b")
@@ -142,7 +142,7 @@ class BuildRunnerForAgentTests(unittest.IsolatedAsyncioTestCase):
         ctx.stores.llm_model.get_by_id = AsyncMock(return_value=override)
 
         with patch("deep_agent.api.v1.deps._build_runner_from_spec", new_callable=AsyncMock) as build:
-            build.return_value = object()
+            build.return_value = SimpleNamespace()
             await build_runner_for_agent(ctx, agent.id, model_id=override.id)
             spec = build.call_args.args[0]
             self.assertEqual(spec.model, "openai:gpt-b")

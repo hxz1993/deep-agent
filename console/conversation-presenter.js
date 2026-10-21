@@ -1,8 +1,9 @@
+import { mountStructuredOutput, serializeStructuredOutput } from "./structured-output.js?v=20261022-release0140";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
-import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20261002-console-audit";
+import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20261022-release0140";
 
 // No controller imports or initialization: each host owns its DOM and capabilities.
 export function createConversationPresenter({
@@ -385,14 +386,25 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   function sealFinalContent() {
-    if (!finalContent) return;
+    if (!finalContent || finalContent.dataset.structuredOutputId) return;
     finalContent.classList.remove("streaming");
     replaceMarkdownBody(finalContent, textBuffer);
     void renderMarkdownDiagrams(finalContent);
   }
 
+  let acceptedOutputId = null;
   const presenter = {
     row,
+    setStructuredOutput(value) {
+      if (acceptedOutputId === value.id && finalContent?.dataset.structuredOutputId === value.id) return;
+      promoteFinalToProcess();
+      acceptedOutputId = value.id;
+      textBuffer = serializeStructuredOutput(value.output);
+      const host = ensureFinalContent();
+      host.classList.remove("markdown", "streaming");
+      host.dataset.structuredOutputId = value.id || "";
+      mountStructuredOutput(host, value, { document, window });
+    },
     resumeProcess() {
       startProcess();
     },

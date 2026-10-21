@@ -114,8 +114,11 @@ class ReferenceMigrationDatabasesTests(unittest.TestCase):
             inspector = sa.inspect(db)
             return {(table, fk["constrained_columns"][0], fk["referred_table"], fk["referred_columns"][0], fk["options"].get("ondelete", "RESTRICT"))
                     for table in inspector.get_table_names() for fk in inspector.get_foreign_keys(table)}
+        existing_tables = self.run_connection(url, lambda db: set(sa.inspect(db).get_table_names()))
         self.assertEqual(self.run_connection(url, foreign_key_rules),
-                         {(ref.table, ref.column, ref.parent_table, ref.parent_column, ref.ondelete) for ref in LOGICAL_REFERENCES})
+                         {(ref.table, ref.column, ref.parent_table, ref.parent_column, ref.ondelete)
+                          for ref in LOGICAL_REFERENCES
+                          if ref.table in existing_tables and ref.parent_table in existing_tables})
         self.assertEqual(self.snapshot(url), before)
         command.upgrade(config, "003")
         self.run_connection(url, assert_logical_references)

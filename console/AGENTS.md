@@ -655,3 +655,15 @@ channel 详情、标题或 Runs 的存在推断来源。`channel` 仅提供渠�
 ### 诊断查询与地址栏（v0.13.8）
 
 `diagnosticTarget` 在当前页面内存中传递筛选，浏览器历史只存导航 key 和干净来源路径。动态筛选不持久化到 URL/history.state；刷新页面按当前时间重新建立默认相对范围，本次分页、下钻及返回使用原范围。`diagnosticRequestOptions` 将已知诊断查询统一转换为同路径 POST JSON，导出同样复用；不扩大管理员或只读预览权限。无筛选状态、账户、History 等保持 GET。
+
+### 结构化输出与更新人（0.14.0）
+
+Agent 编辑器新增“输出”页签，`configuration/agent-output.js` 维护唯一页级草稿，卡片与 JSON Schema 不创建双份定义。详情无独立保存；无效原文保留并阻止页头保存。关闭但保留草稿与删除定义有不同语义，不把隐藏控件视为删除。完整定义仅管理员 `/agents/{id}/output-config` 读取，编辑和复制都要包含该请求；普通 Agent 初始化不依赖此接口。
+
+`structured-output.js` 是回复与轨迹共用的通用 JSON/正文展示器，视图切换不请求模型。只有明确 `accepted` 的 SSE output 或 History `kind: structured_output` 进入普通回复，使用 `output_id/item_id` 去重；final 的 `output_info` 同样复用这个身份。不要按当前 Agent 输出名称猜测历史工具类别。长 JSON 折叠后复制/下载仍使用完整原值。
+
+轨迹从 `output/attempt` 和其真实源事件展示失败/成功，统一“输出”标签。SDK 输出重试可能没有工具名且生成新 call ID；有输出预算标记的全局 RetryPrompt 不是已执行普通工具，不能增加调用数。冻结 Schema 取原 Turn 用户事件，显示未知耗时为“耗时未知”。
+
+Agent 更新人由服务端批量返回 `updated_by_user.username`，缺失时回退 `updated_by`，历史空值显示“—”。前端不提交账号字段，不使用昵称伪装 Username。安装预检 `structured_output` 摘要应显示旧包覆盖将关闭原输出并移除定义；关闭草稿不随 Agent ZIP 导出。
+
+输出双视图只持久化 `da_console_output_view_v1` 的 `full` / `grouped` 枚举，跨刷新和新会话恢复。禁止在该偏好里保存业务值、Schema、用户或输出 ID；storage 不可用或值无效时退回完整 JSON。

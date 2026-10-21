@@ -24,6 +24,20 @@ from tests.helpers.models import text_only_model
 
 
 class SessionTitleIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chat_titles_and_continuation_never_touch_agent_updater(self):
+        from deep_agent.schemas.agent import AgentUpdate
+        before = await self._stores.agent.update_unique(self._agent_id, AgentUpdate(prompt="helpful assistant"), user_id="config-editor")
+        for streaming in (False, True):
+            for fields in ({}, {"session_title": "Synthetic client title"}):
+                with self.subTest(streaming=streaming, explicit=bool(fields)):
+                    sid, _, _ = await self._title_regression_request(streaming, **fields)
+                    await self._title_regression_request(streaming, session_id=sid)
+                    async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                        response = await client.patch(f"/api/v1/sessions/{sid}", json={"title": "Synthetic manual title"})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    current = await self._stores.agent.get_by_id(self._agent_id)
+                    self.assertEqual((current.updated_by, current.updated_at), (before.updated_by, before.updated_at))
+
     async def test_client_initial_title_smoke_for_both_chat_interfaces(self) -> None:
         for streaming in (False, True):
             with self.subTest(streaming=streaming):

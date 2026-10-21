@@ -25,7 +25,7 @@ from deep_agent.db.session_scope import agent_scope_to_api
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.time import ensure_utc, utc_rfc3339
 
-REAL_EVENT_TYPES = ("user/message", "assistant/message", "tool/results", "model/request", "session/title", "compaction", "execution/error")
+REAL_EVENT_TYPES = ("user/message", "assistant/message", "tool/results", "model/request", "session/title", "compaction", "execution/error", "output/attempt")
 EXECUTION_EVENT_TYPES = ("user/message", "assistant/message", "tool/results", "model/request", "execution/error")
 STATUSES = ("running", "waiting", "completed", "stopped", "error", "unknown", "not_started")
 _SLOTS: WeakKeyDictionary = WeakKeyDictionary()
@@ -458,8 +458,12 @@ def detail_event_metadata(events, active_run_id=None):
         if not message:
             continue
         message_count += 1
+        metadata = message.get("metadata") or {}
+        output_name = (metadata.get("deepagent_output") or {}).get("name")
+        dispatch_rejected = (metadata.get("deepagent_dispatch") or {}).get("rejected")
         for part in message.get("parts") or []:
-            if part.get("part_kind") in ("tool-call", "builtin-tool-call"):
+            if (part.get("part_kind") in ("tool-call", "builtin-tool-call")
+                    and not dispatch_rejected and part.get("tool_name") != output_name):
                 tool_call_count += 1
             if part.get("part_kind") == "user-prompt" and isinstance(part.get("content"), list):
                 attachment_count += sum(isinstance(item, dict) and item.get("kind") == "attachment-ref"

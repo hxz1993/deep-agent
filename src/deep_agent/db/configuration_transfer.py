@@ -19,7 +19,7 @@ BACKUP_SCOPE_SCHEMA_VERSION = "1.1"
 CONFIGURATION_TABLE_ORDER = (
     "global_settings", "llm_providers", "mcp_servers", "model_catalog",
     "skill_packages", "ui_tool_packages", "llm_models", "ui_tool_definitions",
-    "agents", "wecom_applications", "channel_accounts", "integration_settings",
+    "agents", "agent_output_configs", "wecom_applications", "channel_accounts", "integration_settings",
 )
 
 

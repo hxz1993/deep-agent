@@ -531,6 +531,7 @@
               <button type="button" class="cap-tab" role="tab" data-kind="ui" aria-selected="false"><i data-lucide="monitor-check" aria-hidden="true"></i>UI <span class="cap-tab-badge" data-kind-badge="ui">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="mcp" aria-selected="false"><i data-lucide="plug" aria-hidden="true"></i>MCP <span class="cap-tab-badge" data-kind-badge="mcp">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="skills" aria-selected="false"><i data-lucide="book-open-check" aria-hidden="true"></i>Skill <span class="cap-tab-badge" id="agentSkillCounter">0</span></button>
+              <button type="button" class="cap-tab" role="tab" data-kind="output" aria-selected="false"><i data-lucide="braces" aria-hidden="true"></i>输出</button>
             </nav>
 
             <div class="agent-editor-pane">
@@ -540,6 +541,13 @@
                   <div class="cap-panel hidden agent-skill-panel" data-kind-panel="skills">
                     <div class="agent-skill-grid" id="agentSkillChoices"></div>
                   </div>
+                  <section class="cap-panel hidden agent-output-panel" data-kind-panel="output">
+                    <div class="agent-output-heading"><h4>结构化输出</h4><span>定义 Agent 最终返回的内容与格式。</span><label class="agent-output-switch"><span class="cap-switch"><input type="checkbox" id="agentOutputEnabled" role="switch" aria-label="结构化输出"><span class="cap-switch-ui"></span></span><span id="agentOutputEnabledLabel">已关闭</span></label></div>
+                    <div class="agent-output-settings hidden" id="agentOutputSettings">
+                      <div class="agent-output-general"><label class="field"><span>输出编码</span><input id="agentOutputName" type="text" maxlength="64" placeholder="例如 lease_result" autocomplete="off"></label><label class="field"><span>使用说明 <span class="field-hint">发送给模型</span></span><textarea id="agentOutputDescription" rows="12" maxlength="8192" placeholder="说明何时返回各类结构，可按需组合。"></textarea></label></div>
+                      <div class="agent-output-definition"><div class="agent-output-toolbar"><div class="agent-view-switch" role="group" aria-label="定义编辑方式"><button type="button" id="agentOutputFieldsTab" class="active">字段配置</button><button type="button" id="agentOutputSchemaTab">JSON Schema</button></div><span class="agent-output-help" tabindex="0" title="字段可按需组合，不按轮次限定。未设为必须的字段可以省略；返回时须符合其内部定义。" aria-label="字段可按需组合，不按轮次限定。未设为必须的字段可以省略；返回时须符合其内部定义。"><i data-lucide="info"></i></span><div class="agent-output-toolbar-actions"><button type="button" class="btn-link" id="agentOutputAdd"><i data-lucide="plus"></i>添加结构</button><button type="button" class="btn-link" id="agentOutputCheck"><i data-lucide="check-check"></i>检查定义</button></div></div><div id="agentOutputFields" class="agent-output-fields"></div><textarea id="agentOutputSchema" class="agent-output-schema hidden" spellcheck="false" aria-label="完整 JSON Schema"></textarea><p class="field-error hidden" id="agentOutputError" role="alert"></p></div>
+                    </div>
+                  </section>
                 </div>
               </section>
             </div>
@@ -548,6 +556,11 @@
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>
     </form>
+  </dialog>
+
+  <dialog class="modal agent-output-detail" id="agentOutputDetail" aria-labelledby="agentOutputDetailTitle">
+    <header class="modal-header"><h3 id="agentOutputDetailTitle">结构详情</h3><button type="button" class="icon-action" id="agentOutputDetailClose" aria-label="关闭"><i data-lucide="x"></i></button></header>
+    <div class="modal-body"><label class="field"><span>结构编码</span><input id="agentOutputFieldKey" type="text" autocomplete="off"></label><label class="field field-grow"><span>内容 JSON Schema</span><textarea id="agentOutputFieldSchema" class="agent-output-schema" spellcheck="false" aria-label="内容 JSON Schema"></textarea></label></div>
   </dialog>
 
   <!-- LLM 供应商 modal -->

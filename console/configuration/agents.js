@@ -21,8 +21,19 @@ let agentListView = "cards";
 let agentEditorDirty = false;
 let agentsLoadedOnce = false;
 let agentListRecords = [];
+let agentEditorRequestId = 0;
 let agentChannelNames = new Map();
 const agentDeletesInFlight = new Set();
+
+function agentUpdaterName(agent) {
+  return agent.updated_by_user?.username || agent.updated_by_username || agent.updated_by || "—";
+}
+
+function renderAgentUpdater(agent, list = false) {
+  const name = escapeHtml(agentUpdaterName(agent)).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+  const time = escapeHtml(formatDate(agent.updated_at));
+  return list ? `<span class="agent-update-cell"><span>${time}</span><span class="agent-updater" title="更新人：${name}"><i data-lucide="user-round"></i>${name}</span></span>` : `<span class="agent-card-update"><span class="agent-updater" title="更新人：${name}"><i data-lucide="user-round"></i>${name}</span><span>${time}</span></span>`;
+}
 
 function renderAgentChannelBadge(agentId) {
   const names = agentChannelNames.get(agentId) || [];
@@ -174,7 +185,7 @@ const agentsAdmin = {
           ${renderAgentCapabilityCounts(agent)}
         </div>
         <footer class="agent-card-footer">
-          <span><i data-lucide="clock-3"></i>${escapeHtml(formatDate(agent.updated_at))}</span>
+          ${renderAgentUpdater(agent)}
           <div class="row-actions agent-row-actions">
             <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="messages-square"></i></a>
             <button type="button" class="row-action icon-only" data-export-agent="${escapeHtml(agent.id)}" title="导出安装包" aria-label="导出安装包"><i data-lucide="download"></i></button>
@@ -193,7 +204,7 @@ const agentsAdmin = {
         <td><div class="agent-name-line"><strong title="${escapeHtml(agent.name)}">${escapeHtml(agent.name)}</strong>${renderAgentChannelBadge(agent.id)}</div></td>
         <td title="${escapeHtml(agent.model?.name || "未配置模型")}">${escapeHtml(agent.model?.name || "未配置模型")}</td>
         <td>${renderAgentCapabilityCounts(agent)}</td>
-        <td title="${escapeHtml(formatDate(agent.updated_at))}">${escapeHtml(formatDate(agent.updated_at))}</td>
+        <td>${renderAgentUpdater(agent, true)}</td>
         <td><div class="row-actions agent-row-actions">
           <a class="btn-link row-action icon-only" data-agent-chat href="${chatUrlForAgent(agent.id)}" title="发起对话" aria-label="发起对话"><i data-lucide="messages-square"></i></a>
           <button type="button" class="row-action icon-only" data-export-agent="${escapeHtml(agent.id)}" title="导出安装包" aria-label="导出安装包"><i data-lucide="download"></i></button>
@@ -547,6 +558,8 @@ const agentsAdmin = {
   },
 
   openCreate() {
+    agentEditorRequestId += 1;
+    window.DeepAgentOutputEditor?.reset();
     state.editingAgentId = null;
     document.getElementById("agentModalTitle").textContent = "新建 Agent";
     document.getElementById("agentModalId").textContent = "";
@@ -564,8 +577,14 @@ const agentsAdmin = {
   },
 
   async openEdit(agentId) {
+    const requestId = ++agentEditorRequestId;
     try {
-      const agent = await apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`);
+      const [agent, output] = await Promise.all([
+        apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`),
+        apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/output-config`),
+      ]);
+      if (requestId !== agentEditorRequestId) return;
+      window.DeepAgentOutputEditor?.reset(output);
       state.editingAgentId = agentId;
       document.getElementById("agentModalId").textContent = `Agent ID：${agent.id || agentId}`;
       document.getElementById("agentModalId").classList.remove("hidden");
@@ -587,14 +606,15 @@ const agentsAdmin = {
   async copy(agentId, button = null) {
     if (button) button.disabled = true;
     try {
-      const [agent, agents] = await Promise.all([
+      const [agent, agents, output] = await Promise.all([
         apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`),
         apiFetch("/api/v1/agents"),
+        apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/output-config`),
       ]);
       const existingNames = new Set((agents || []).map((item) => item.name));
       const values = await requestActionFields({
         title: "复制 Agent",
-        message: "除 Agent ID 外，模型、Prompt、工具包和 Skill 都会完整复制。",
+        message: "除 Agent ID 外，模型、Prompt、工具包、Skill 和输出定义都会完整复制。",
         icon: "copy",
         confirmLabel: "复制",
         fields: [{
@@ -615,6 +635,8 @@ const agentsAdmin = {
           prompt: agent.prompt,
           capabilities: [...(agent.capabilities || [])],
           skills: [...(agent.skills || [])],
+          structured_output_enabled: output.structured_output_enabled,
+          ...(output.output_config ? { output_config: output.output_config } : {}),
         }),
       });
       showToast("Agent 已复制");
@@ -637,6 +659,9 @@ const agentsAdmin = {
       AdminFormFeedback.show(form, "名称和 System Prompt 不能为空");
       return;
     }
+    let outputPayload = {};
+    try { outputPayload = window.DeepAgentOutputEditor?.payload() || {}; }
+    catch (error) { this.switchCapTab("output"); AdminFormFeedback.show(form, error); return; }
     AdminFormFeedback.setSubmitting(form, true);
     const capabilities = this.getSelectedCapabilities();
     const payload = {
@@ -644,6 +669,7 @@ const agentsAdmin = {
       prompt,
       capabilities,
       skills: this.getSelectedSkills(),
+      ...outputPayload,
     };
 
     let saved = false;
@@ -749,7 +775,7 @@ const agentsAdmin = {
 };
 
 window.agentsAdmin = agentsAdmin;
-window.__AgentAdminUI = { nextAgentCopyName };
+window.__AgentAdminUI = { nextAgentCopyName, agentUpdaterName, renderAgentUpdater };
 
 document.addEventListener("DOMContentLoaded", () => {
   agentsAdmin.initCapSection();

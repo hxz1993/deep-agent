@@ -9,7 +9,7 @@ from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import column, insert, table, text
+from sqlalchemy import column, insert, inspect, table, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from deep_agent.db.models import (
@@ -130,7 +130,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     )
                 }
                 self.assertTrue(
-                    set(CONFIG_TABLES)
+                    (set(CONFIG_TABLES) - {"agent_output_configs"})
                     | set(SESSION_TABLES)
                     | {"alembic_version", "_backup_info"}
                     <= tables
@@ -247,7 +247,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(
                     scope_manifest,
-                    _backup_scope_manifest(CONFIG_TABLES),
+                    _backup_scope_manifest(tuple(name for name in CONFIG_TABLES if name != "agent_output_configs")),
                 )
                 self.assertEqual(
                     scope_manifest["schema_version"],
@@ -409,8 +409,8 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             try:
                 with self.assertRaisesRegex(ValueError, "Structure-only table must be empty: wecom_user_profiles"):
                     await _validate_backup(engine, revision=result.revision,
-                                           expected_counts={name: result.row_counts[name] for name in CONFIG_TABLES},
-                                           copied_tables=CONFIG_TABLES)
+                                           expected_counts={name: result.row_counts[name] for name in CONFIG_TABLES if name in result.row_counts},
+                                           copied_tables=tuple(name for name in CONFIG_TABLES if name in result.row_counts))
             finally:
                 await engine.dispose()
 
@@ -437,8 +437,8 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             try:
                 with self.assertRaisesRegex(ValueError, "Structure-only table must be empty: channel_message_operations"):
                     await _validate_backup(engine, revision=result.revision,
-                                           expected_counts={name: result.row_counts[name] for name in CONFIG_TABLES},
-                                           copied_tables=CONFIG_TABLES)
+                                           expected_counts={name: result.row_counts[name] for name in CONFIG_TABLES if name in result.row_counts},
+                                           copied_tables=tuple(name for name in CONFIG_TABLES if name in result.row_counts))
             finally:
                 await engine.dispose()
 
@@ -480,13 +480,15 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
         engine = create_async_engine(self._url(path))
         try:
             async with engine.begin() as connection:
+                physical_columns = await connection.run_sync(lambda db: {
+                    name: {item["name"] for item in inspect(db).get_columns(name)}
+                    for name in inspect(db).get_table_names()
+                })
                 for name in ("channel_message_runs", "channel_session_bindings",
                              "chat_session_events", "chat_sessions", *reversed(CONFIG_TABLES)):
-                    if name == "wecom_applications" and revision not in {"006", "007", "008", "009", "010", "011"}:
-                        continue
-                    if name != "integration_settings" or revision in {"004", "005", "006", "007", "008", "009", "010", "011"}:
+                    if name in physical_columns:
                         await connection.execute(Base.metadata.tables[name].delete())
-                if revision in {"004", "005", "006", "007", "008", "009", "010", "011"}:
+                if "integration_settings" in physical_columns:
                     await connection.execute(insert(IntegrationSettings.__table__), {"code": "deeptable-assistant", "settings": {"enabled": True, "options": [1, None, "中文"]}})
                 await connection.execute(
                     insert(GlobalSetting.__table__),
@@ -566,7 +568,10 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
                 await connection.execute(
-                    insert(Agent.__table__ if revision in {"005", "006", "007", "008", "009", "010", "011"} else table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name != "ui_tool_selection"])),
+                    # The fixture deliberately creates released revisions as
+                    # well as Head. Use that physical revision's Agent columns,
+                    # so new ORM defaults never leak into an old INSERT.
+                    insert(table("agents", *[column(item.name, item.type) for item in Agent.__table__.columns if item.name in physical_columns["agents"]])),
                     {
                         "id": "agent-1",
                         "name": "agent",
@@ -574,6 +579,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "capabilities": ["mcp:remote"],
                         "skills": ["uploaded-skill"],
                         "prompt": "test",
+                        **({"ui_tool_selection": {}} if "ui_tool_selection" in physical_columns["agents"] else {}),
                     },
                 )
                 await connection.execute(insert(ChannelAccount.__table__), {

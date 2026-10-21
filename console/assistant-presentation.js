@@ -26,6 +26,7 @@ export const ASSISTANT_PRESENTATION_ACTIONS = Object.freeze({
   TOOL_REMOVE: "tool_remove",
   DEFERRED: "deferred",
   COMPLETE: "complete",
+  STRUCTURED_OUTPUT: "structured_output",
   INTERRUPT: "interrupt",
 });
 
@@ -84,6 +85,10 @@ export function assistantActionsFromHistoryItems(items = []) {
       continue;
     }
 
+    if (item?.kind === "structured_output" && item.status === "completed") {
+      actions.push({ type: ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT, name: item.name, output: item.output, outputId: item.item_id });
+      continue;
+    }
     if (item?.kind !== "tool" || item.status === "removed") continue;
     const call = toolCallFromConversationItem(item);
     actions.push({ type: ASSISTANT_PRESENTATION_ACTIONS.TOOL_CALL, call });
@@ -138,8 +143,15 @@ export function assistantActionsFromSse(type, data = {}) {
       return [{ type: ASSISTANT_PRESENTATION_ACTIONS.TOOL_RESULT, result: data }];
     case "tool_call_removed":
       return [{ type: ASSISTANT_PRESENTATION_ACTIONS.TOOL_REMOVE, call: data }];
+    case "output":
+      return data.accepted === true && data.status === "completed" && Object.hasOwn(data, "output")
+        ? [{ type: ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT, name: data.name, output: data.output, outputId: data.output_id }]
+        : [];
     case "final":
-      return [{ type: ASSISTANT_PRESENTATION_ACTIONS.COMPLETE, output: data.output }];
+      return [
+        ...(data.output_info && Object.hasOwn(data, "output") ? [{ type: ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT, name: data.output_info.name, output: data.output, outputId: data.output_info.output_id }] : []),
+        { type: ASSISTANT_PRESENTATION_ACTIONS.COMPLETE, output: data.output_info ? undefined : data.output },
+      ];
     case "error":
       return [
         { type: ASSISTANT_PRESENTATION_ACTIONS.FINALIZE_THINKING },
@@ -199,6 +211,9 @@ export function applyAssistantPresentationActions(
         break;
       case ASSISTANT_PRESENTATION_ACTIONS.DEFERRED:
         presenter.attachHitlWidget(prepareDeferredCall(action.call || {}));
+        break;
+      case ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT:
+        presenter.setStructuredOutput?.({ name: action.name, output: action.output, id: action.outputId });
         break;
       case ASSISTANT_PRESENTATION_ACTIONS.COMPLETE:
         presenter.complete(action.output);

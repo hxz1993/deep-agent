@@ -19,6 +19,7 @@ from deep_agent.schemas.mcp import McpServerCreate, McpServerUpdate
 from deep_agent.schemas.ui_tools import UiToolPackageCreate
 from deep_agent.security import ConsoleAdminAuthorizer
 from tests.helpers.admin_auth import allow_console_admin
+from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
@@ -26,6 +27,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.stores, self._engine, session_factory = await make_sqlite_stores()
         self._app = FastAPI()
+        install_test_user_header(self._app)
         self._app.include_router(api_router)
         allow_console_admin(self._app)
         init_context(

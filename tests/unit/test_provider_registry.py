@@ -50,6 +50,22 @@ def _config(
 
 
 class ProviderDefinitionTests(unittest.TestCase):
+    def test_thinking_providers_do_not_force_output_tool_on_wire(self) -> None:
+        from pydantic_ai.models import ModelRequestParameters
+        from pydantic_ai.tools import ToolDefinition
+        params = ModelRequestParameters(output_tools=[ToolDefinition(name="result", parameters_json_schema={"type": "object"})],
+                                        allow_text_output=False)
+        for provider_type, model_name in (("deepseek", "deepseek-flash"), ("deepseek", "deepseek-v4-pro"),
+                                          ("moonshotai", "kimi-k2.6")):
+            for use_default in (True, False):
+                with self.subTest(provider=provider_type, default=use_default):
+                    model = resolve_provider_model(model_name=model_name,
+                        provider=_config(provider_type, use_default_base_url=use_default))
+                    tools, choice = model._get_tool_choice({}, params)
+                    self.assertEqual(choice, "auto")
+                    self.assertEqual(tools[0]["function"]["name"], "result")
+                    self.assertFalse(params.allow_text_output)
+
     def test_deepseek_output_limit_mapping_preserves_native_profile(self) -> None:
         for use_default in (True, False):
             with self.subTest(use_default=use_default):

@@ -75,9 +75,13 @@ class TurnRequestBudget(AbstractCapability[AgentDeps]):
         self.final_request = used >= limit - 1
         if self.final_request:
             parameters = request_context.model_request_parameters
+            structured = getattr(getattr(ctx, "deps", None), "output_state", None) is not None
             request_context.model_request_parameters = replace(
-                parameters, function_tools=[], native_tools=[], output_tools=[],
-                output_mode="text", output_object=None, allow_text_output=True,
+                parameters, function_tools=[], native_tools=[],
+                output_tools=parameters.output_tools if structured else [],
+                output_mode=parameters.output_mode if structured else "text",
+                output_object=parameters.output_object if structured else None,
+                allow_text_output=not structured,
                 allow_image_output=False, tool_visibility=None, revealed_tool_names=set(),
                 deferred_capability_ids=set(), prompted_output_template=None,
             )
@@ -87,7 +91,8 @@ class TurnRequestBudget(AbstractCapability[AgentDeps]):
             for key in tuple(settings):
                 if key == "tool_choice" or key.endswith("_tool_choice"):
                     settings.pop(key)
-            settings["tool_choice"] = "none"
+            if not structured:
+                settings["tool_choice"] = "none"
             request_context.model_settings = settings
             instruction = (
                 "本轮已进入单次回复调用次数上限前的最后一次模型请求。不得再调用任何工具。"
@@ -95,6 +100,8 @@ class TurnRequestBudget(AbstractCapability[AgentDeps]):
                 "不要将未完成的任务说成已完成。最后简短告知用户：本轮已达到单次回复的调用上限，"
                 "可以回复‘继续’，在下一轮接着处理。不要暴露内部实现细节。"
             )
+            if structured:
+                instruction = "本轮已到最后一次模型请求。不得调用业务工具；请根据已有证据使用输出工具提交最终结果，未完成内容如实说明。"
         elif used >= max(1, limit * 4 // 5):
             instruction = (
                 "本轮剩余调用额度较少，请聚焦关键缺口，优先使用已有证据，准备给出阶段性结论。"
@@ -122,7 +129,9 @@ class TurnRequestBudget(AbstractCapability[AgentDeps]):
             **(response.metadata or {}),
             BUDGET_METADATA: {"run_requests": ctx.usage.requests},
         }
-        if self.final_request and any(isinstance(part, ToolCallPart) for part in response.parts):
+        if self.final_request and any(isinstance(part, ToolCallPart)
+                and (ctx.deps.output_state is None or part.tool_name != ctx.deps.output_state.contract["name"])
+                for part in response.parts):
             # A provider ignoring the no-tools contract must not execute one or
             # silently get an extra model request. This is a real protocol error.
             raise UnexpectedModelBehavior("The final answer request returned a tool call despite having no tools.")

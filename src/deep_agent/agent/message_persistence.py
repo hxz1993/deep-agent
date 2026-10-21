@@ -212,22 +212,23 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             copy = deepcopy(message)
             indices = list(range(len(copy.parts)))
             if isinstance(message, ModelResponse):
+                output_fact = bool((message.metadata or {}).get("deepagent_output"))
                 accepted_in_round = {part.tool_call_id for part in message.parts
                                      if isinstance(part, ToolCallPart)
                                      and (id(message), part.tool_call_id) in self._accepted}
                 indices = [i for i, part in enumerate(message.parts)
-                           if not isinstance(part, ToolCallPart)
+                           if output_fact or not isinstance(part, ToolCallPart)
                            or (id(message), part.tool_call_id) in self._accepted]
                 copy.parts = [copy.parts[i] for i in indices]
             elif isinstance(message, ModelRequest):
                 # Validation corrections were never accepted tool executions.
                 # Do not persist their raw validators' arguments or exceptions.
                 indices = [i for i, part in enumerate(copy.parts)
-                           if not isinstance(part, RetryPromptPart)
+                           if (copy.metadata or {}).get("deepagent_output_budget") or not isinstance(part, RetryPromptPart)
                            or part.tool_call_id in accepted_in_round]
                 copy.parts = [copy.parts[i] for i in indices]
                 for part in copy.parts:
-                    if isinstance(part, RetryPromptPart):
+                    if isinstance(part, RetryPromptPart) and not (copy.metadata or {}).get("deepagent_output_budget"):
                         part.content = safe_execution_error({"message": part.content})["message"]
             copy.metadata = {**(copy.metadata or {}),
                              "deepagent_message_ordinal": ordinal,
@@ -306,6 +307,8 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
 
     async def _prepare_model_node(self, ctx, node):
         if isinstance(node, ModelRequestNode):
+            if ctx.deps.output_state is not None:
+                ctx.deps.output_state.prepare_request(node.request)
             self._results.clear()
             if not node.is_resuming_without_prompt:
                 # after_node may expose the next request before other public
@@ -318,6 +321,8 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             await self._save(ctx, hook="_prepare_model_node")
 
     async def after_model_request(self, ctx, *, request_context, response):
+        if ctx.deps.output_state is not None:
+            await ctx.deps.output_state.check_response(ctx, response, progress=self)
         self._record(response)
         await self._save(ctx, hook="after_model_request")
         return response

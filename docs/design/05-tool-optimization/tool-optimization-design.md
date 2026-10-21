@@ -427,9 +427,10 @@ Agent 本轮只选择整个包，不继续保留 `ui:<tool_name>` 单工具授�
 协议保持不变，只调整 Agent 配置如何展开工具集合。未来确有细粒度授权需求时扩展独立的选择结构，
 不再让工具协议名兼任授权主键。
 
-Output Tool 不属于 UI Tool Package，也不加入 `agents.capabilities`。多个互斥 Output Tool 应由
-独立的输出契约组统一选择，例如 `deepcube.v1` 内包含 answer、code、config 和 mixed 四种终止
-结构。详见 [`../09-structured-output/structured-output-design.md`](../09-structured-output/structured-output-design.md)。
+Output Tool 不属于 UI Tool Package，也不加入 `agents.capabilities`。2026-10-22已确认：Agent默认关闭，
+开启后配置一份组合JSON Schema，正文与多个结构可同时出现，顶层字段可以全部非必须；不再采用
+多个互斥输出工具、输出契约组或optional/strict双模式。完整设计、012存储、公共协议和安装兼容以
+[`../09-structured-output/structured-output-design.md`](../09-structured-output/structured-output-design.md)为准，正式功能尚未实施。
 
 仍需补强：
 
@@ -1038,7 +1039,7 @@ list/read 上游失败使用 `ToolFailed`；文件 ID、MIME、分页范围、Re
 | 按来源条件注入统一文件工具 | 已实现 | 当前请求/原始会话有合法附件，或 Agent有可读 Skill资源时注入系统 `read_file`；无来源时不注入，执行时继续复检权限 |
 | MCP 工具名原样展示 | 已关闭额外映射 | 模型、SSE、历史和 Console 统一使用最终稳定协议名，不增加 MCP `display_name` |
 | MCP `ToolSearch` | 已实现 | 在 ToolPackage 授权范围内 Top 3 预选、Top 5 搜索和渐进披露 |
-| 结构化最终输出 | 有潜力 | 产品锁定普通文本、多输出组合、严格模式和混合工具调用规则后重新实施 |
+| 结构化最终输出 | 设计已收口，待实现 | 2026-10-22默认关闭、单组合Schema、分发前拒绝混调；09课题含完整设计和回归矩阵，当前只更新文档 |
 | 高风险工具审批 | 有潜力 | 出现真实副作用工具并完成风险元数据、审计、TTL、幂等和权限复检设计后打开 |
 | `CombinedToolset` | 已关闭为独立事项 | 继续作为运行时组合实现细节按需使用，不成为产品概念 |
 | Provider Native 工具 | 有潜力 | 只在特定托管 Provider 能力成为明确产品功能时接入，不替代公共能力 |
@@ -1049,13 +1050,13 @@ list/read 上游失败使用 `ToolFailed`；文件 ID、MIME、分页范围、Re
 - MCP 工具保持最终协议名原样展示，不增加另一套名称映射。
 - 同步补充每轮工具数量和 Schema 体积观测，为后续 Tool Search 提供数据。
 
-### 有潜力：结构化最终输出
+### 待实现：结构化最终输出
 
 详细设计和测试边界见
 [`../09-structured-output/structured-output-design.md`](../09-structured-output/structured-output-design.md)。
 
-- 首版默认使用 `ToolOutput`，兼容私有 OpenAI-compatible 模型。
-- 要求严格结构化时，输出类型只保留 `ToolOutput(...)` 与 `DeferredToolRequests`，不同时允许 `str` 绕过结构约束。
+- 首版使用 `ToolOutput`，具体Provider和私有兼容端点需按09课题实测，不静默降级。
+- Agent默认关闭沿用旧正文；开启时只保留一个组合 `ToolOutput(...)` 与 `DeferredToolRequests`，不允许独立 `str` 绕过；正文可定义为结构中的字符串字段。
 - 固定业务结构优先使用 Pydantic Model；Agent 动态 JSON Schema 使用 `StructuredDict` 时，DeepAgent 必须补服务端校验和有限重试。
 - 中间 Thinking、普通工具和 Pending 继续流式；结构化结果第一版在 `final.output` 一次性返回，不把终止输出工具渲染成普通工具卡片。
 

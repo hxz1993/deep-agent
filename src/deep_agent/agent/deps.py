@@ -44,6 +44,8 @@ class AgentDeps:
     file_store: "FileStore | None" = field(default=None, repr=False)
     context_state: "ContextRunState | None" = None
     request_budget: "TurnRequestBudget | None" = None
+    output_state: Any = field(default=None, repr=False)
+    output_store: Any = field(default=None, repr=False)
     tool_discovery: "ToolDiscoveryTelemetry | None" = None
     tool_output_limits: "ToolOutputTelemetry | None" = None
     # Names only, per Run, for model-wire diagnostics; never a tool authority.

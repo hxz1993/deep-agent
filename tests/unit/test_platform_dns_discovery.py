@@ -10,6 +10,7 @@ from deepfos_platform.options import PlatformOptions
 
 class DNSDiscoveryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        await ServiceDiscovery.stop()
         self.option = PlatformOptions()
         self.option.srvdis.implementation = 'dns'
         self.option.general.system_env = 'dev-'

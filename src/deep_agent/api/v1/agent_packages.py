@@ -16,6 +16,7 @@ from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.schemas.agent import AgentResponse
+from deep_agent.api.v1.request_identity import RequestUserDep
 
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 tag = 'agent-packages'
@@ -105,6 +106,7 @@ async def preview_agent_package(
              summary='安装 Agent 安装包', status_code=201)
 async def install_agent_package(
     request: Request, ctx: AppContextDep,
+    user: RequestUserDep,
     options: Annotated[str, Form(max_length=65536)],
     file: Annotated[UploadFile | None, File()] = None,
     builtin_code: Annotated[str | None, Form(max_length=64)] = None,
@@ -112,7 +114,7 @@ async def install_agent_package(
     try:
         selection = InstallOptions.model_validate(archive.json_read(options))
         p = await source(file, builtin_code)
-        return await install_package(ctx, p, selection, extract_forward_headers(request))
+        return await install_package(ctx, p, selection, extract_forward_headers(request), user_id=user)
     except (ValueError, KeyError) as exc:
         raise package_error(exc) from exc
     finally:

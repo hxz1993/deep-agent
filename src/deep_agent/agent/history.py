@@ -169,6 +169,9 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
     rejected_calls = _rejected_tool_calls(messages)
     filtered: list[ModelMessage] = []
     for message_index, message in enumerate(messages):
+        if (message.metadata or {}).get("deepagent_output") or (message.metadata or {}).get("deepagent_output_budget"):
+            filtered.append(message)
+            continue
         if (
             isinstance(message, ModelResponse)
             and message.state != "interrupted"
@@ -359,6 +362,8 @@ def repair_unprocessed_tool_calls(
                 pending.pop(tool_call_id, None)
             flush_pending()
             repaired.append(message)
+            if (message.metadata or {}).get("deepagent_dispatch", {}).get("rejected"):
+                continue
             if message.state == "interrupted":
                 # Pydantic AI will synthesize a return on the next run, but that
                 # future-only receipt cannot carry diagnostics from this Run.

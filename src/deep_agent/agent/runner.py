@@ -69,6 +69,8 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
 from deep_agent.diagnostics.persistence import persistence_failure_fields
 from deep_agent.agent.message_persistence import MessagePersistenceCapability, StreamMessagePersistenceCapability, MessagePersistenceError
+from deep_agent.agent.structured_output import StructuredOutputState, CONTRACT, CONTRACT_REF, BUDGET
+from deep_agent.structured_output.validation import OutputValidationServiceError
 from deep_agent.db.run_ownership import live_run
 from deep_agent.agent.limits import format_stream_error
 from deep_agent.agent.request_budget import TurnRequestBudget, restored_request_count
@@ -143,6 +145,9 @@ def _safe_run_failure(exc: Exception) -> dict[str, Any]:
     elif isinstance(exc, UsageLimitExceeded):
         diagnostic.update(code="usage_limit_exceeded", phase="model",
                           message="模型请求或用量达到执行上限，本轮已停止。")
+    elif isinstance(exc, OutputValidationServiceError):
+        diagnostic.update(code="output_" + exc.code, phase="output_validation",
+                          message="结构化输出校验服务暂不可用，本轮已停止，未接受候选结果。")
     if isinstance(exc, UnexpectedModelBehavior):
         diagnostic.update(code="unexpected_model_behavior", phase="model",
                           message="模型返回未满足执行协议，本轮已停止。")
@@ -158,6 +163,9 @@ def _safe_run_failure(exc: Exception) -> dict[str, Any]:
                 phase="tool_validation",
                 message=f"工具 {match.group(1)} 参数纠错次数已达上限（{match.group(2)} 次），本轮已停止；可以补充要求后继续。",
             )
+        elif str(exc).startswith("output_retry_exhausted:"):
+            diagnostic.update(code="output_retry_exhausted", phase="output_validation",
+                              message="结构化输出格式修正次数已达上限，本轮未接受结果。")
     return diagnostic
 
 
@@ -284,6 +292,59 @@ class AgentRunner:
         self._active_runs = active_runs or ActiveRunRegistry()
         self._skill_runtime_context = skill_runtime_context
         self._tool_output_store = tool_output_store
+        self._output_config_loader = None
+
+    async def _prepare_output_contract(self, session_id, deps):
+        deps.output_state = None
+        deps.output_store = self.store
+        if deps.resume_from_run_id:
+            rows = []
+            after = 0
+            while True:
+                page = await self.store.list_events(session_id, turn_id=deps.turn_id,
+                                                    after_sequence=after, limit=500)
+                rows.extend(page)
+                if len(page) < 500:
+                    break
+                after = page[-1].sequence
+            contract = None
+            event_id = None
+            rejected = []
+            attempts = 0
+            referenced = False
+            references = []
+            for row in rows:
+                message = (row.payload or {}).get("message") or {}
+                if not isinstance(message, dict):
+                    message = {}
+                metadata = message.get("metadata") or {}
+                if CONTRACT in metadata:
+                    if contract is not None and contract != metadata[CONTRACT]:
+                        raise ValueError("Conflicting output contract snapshots")
+                    contract, event_id = metadata[CONTRACT], row.event_id
+                referenced = referenced or bool(metadata.get(CONTRACT_REF))
+                if metadata.get(CONTRACT_REF):
+                    references.append(metadata[CONTRACT_REF])
+                rejected.extend((metadata.get(BUDGET) or {}).get("rejected_response_keys") or [])
+                rejected.extend(((row.payload or {}).get(BUDGET) or {}).get("rejected_response_keys") or [])
+                attempts += int(row.event_type == "output/attempt")
+            if contract is None:
+                if referenced:
+                    raise ValueError("Output contract snapshot is missing")
+                return  # A legacy Pending never inherits today's Agent setting.
+            deps.output_state = StructuredOutputState(contract, source_event_id=event_id,
+                rejected_keys=rejected, attempts=attempts)
+            if any(ref != {"event_id": event_id, "schema_digest": deps.output_state.contract["schema_digest"]}
+                   for ref in references):
+                raise ValueError("Output contract reference is inconsistent")
+        elif self._output_config_loader is not None:
+            config = await self._output_config_loader()
+            if config is not None:
+                deps.output_state = StructuredOutputState(config)
+
+    @staticmethod
+    def _output_types(deps):
+        return deps.output_state.output_types if deps.output_state is not None else _STREAM_OUTPUT_TYPE
 
     def _bind_tool_output_store(
         self,
@@ -400,6 +461,8 @@ class AgentRunner:
         if status not in {"failed", "interrupted"}:
             return None
         deps = run_event.deps
+        if deps.output_state is not None and deps.output_state.accepted is not None:
+            return None
         append_error = getattr(self.store, "append_execution_error", None)
         if not callable(append_error):
             return None
@@ -412,6 +475,8 @@ class AgentRunner:
             payload = _safe_run_failure(exception)
         if phase:
             payload["phase"] = phase
+        if deps.output_state is not None:
+            payload[BUDGET] = deps.output_state.budget
         try:
             async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
                 return await append_error(
@@ -505,6 +570,41 @@ class AgentRunner:
         if state is None or not state.telemetry.triggered:
             return "none"
         return state.telemetry.strategy
+
+    @asynccontextmanager
+    async def _completion_step(self, deps: AgentDeps, stage: str):
+        """Optional work cannot revoke an already committed output receipt.
+
+        This guard is used only after required message/ack/status writes. It
+        leaves the legacy path and all pre-accept failures unchanged, and does
+        not suppress transport/task cancellation.
+        """
+        try:
+            yield
+        except Exception as exc:
+            if deps.output_state is None or deps.output_state.accepted is None:
+                raise
+            self._log_post_accept_failure(deps, stage, exc)
+
+    @staticmethod
+    def _log_post_accept_failure(deps: AgentDeps, stage: str, exc: Exception):
+        # A broken log sink must not turn this best-effort diagnostic into
+        # another post-commit exception.
+        with suppress(Exception):
+            log_event("output_post_accept_failed", session_id=deps.session_id,
+                      run_id=deps.run_id, agent_id=deps.agent_id,
+                      phase=stage, status="completed", error_type=type(exc).__name__)
+
+    def _completion_metrics(self, deps: AgentDeps, **kwargs):
+        try:
+            return run_metrics(**kwargs)
+        except Exception as exc:
+            if deps.output_state is None or deps.output_state.accepted is None:
+                raise
+            self._log_post_accept_failure(deps, "metrics", exc)
+            # Missing optional metrics are unknown, not invented zero usage.
+            return {"status": kwargs["status"], "model_id": kwargs["model_id"],
+                    "duration_ms": max(0, round((time.perf_counter() - kwargs["started_at"]) * 1000))}
 
     @asynccontextmanager
     async def _session_lock(self, session_id: str, *, agent_id: str | None,
@@ -858,6 +958,7 @@ class AgentRunner:
             raise ValueError("Branch From is not implemented for session events")
         raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
         raw_history = await raw_reader(session_id, agent_id=deps.agent_id)
+        await self._prepare_output_contract(session_id, deps)
         history = await self.store.get_history(session_id, agent_id=deps.agent_id)
         deps.turn_id = deps.turn_id or deps.run_id
         if not deferred_tool_results:
@@ -872,6 +973,8 @@ class AgentRunner:
         if has_user_turn(message, attachments, context_refs):
             content = refs_from_attachments(message, attachments, context_refs)
             user_request = ModelRequest(parts=[UserPromptPart(content=content)])
+            if deps.output_state is not None:
+                user_request.metadata = {CONTRACT: deepcopy(deps.output_state.contract)}
             rows = await self.store.append(
                 session_id,
                 [user_request],
@@ -893,6 +996,8 @@ class AgentRunner:
                     )
             if rows:
                 user_event_id = rows[0].event_id
+                if deps.output_state is not None:
+                    deps.output_state.source_event_id = user_event_id
             if user_event_id is not None and session_title is not None:
                 title_event = await self.store.apply_initial_session_title(
                     session_id, agent_id=deps.agent_id, user_id=deps.user,
@@ -1017,7 +1122,9 @@ class AgentRunner:
 
     @staticmethod
     def _run_capabilities(deps: AgentDeps, progress):
-        return [capability for capability in (progress, deps.request_budget) if capability is not None]
+        if deps.output_state is not None:
+            deps.output_state.progress = progress
+        return [capability for capability in (progress, deps.request_budget, deps.output_state) if capability is not None]
 
     def _bind_compaction_lifecycle(
         self, *, session_id: str, deps: AgentDeps,
@@ -1807,7 +1914,8 @@ class AgentRunner:
                     message_history=llm_history,
                     usage_limits=self._run_limits(deps),
                     deferred_tool_results=deferred_tool_results,
-                    output_type=_STREAM_OUTPUT_TYPE,
+                    output_type=self._output_types(deps),
+                    retries={"output": 2} if deps.output_state is not None else None,
                     model_settings=self.model_settings,
                     conversation_id=deps.conversation_id,
                     run_id=deps.run_id,
@@ -1856,6 +1964,8 @@ class AgentRunner:
                     repair_dangling_tool_calls=not isinstance(result.output, DeferredToolRequests),
                     terminal_status="pending" if isinstance(result.output, DeferredToolRequests) else "completed",
                 )
+                if deps.output_state is not None and not isinstance(result.output, DeferredToolRequests):
+                    await deps.output_state.accept(deps)
             except BaseException as exc:
                 self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
                                        started_at=started_at, error=exc, phase="persistence")
@@ -1872,12 +1982,14 @@ class AgentRunner:
                 raise
             compaction_event_saved: bool | None = (True if deps.context_state is not None and deps.context_state.committed_event is not None else None)
             if not isinstance(result.output, DeferredToolRequests):
-                compaction_event = await self._maybe_save_compaction(
-                    session_id,
-                    deps,
-                    projected_history=result.all_messages(),
-                    expected_row_version=0,
-                )
+                compaction_event = False
+                async with self._completion_step(deps, "compaction"):
+                    compaction_event = await self._maybe_save_compaction(
+                        session_id,
+                        deps,
+                        projected_history=result.all_messages(),
+                        expected_row_version=0,
+                    )
                 compaction_event_saved = (
                     None
                     if compaction_event is None
@@ -1886,7 +1998,8 @@ class AgentRunner:
                     else True
                 )
         if title_task is not None:
-            await title_task
+            async with self._completion_step(deps, "title"):
+                await title_task
         response = _build_run_result(
             result,
             self.ui_tool_hints,
@@ -1894,7 +2007,9 @@ class AgentRunner:
         )
         response["conversation_id"] = result.conversation_id or deps.conversation_id
         response["run_id"] = result.run_id or deps.run_id
-        response["run_metrics"] = run_metrics(
+        if deps.output_state is not None and deps.output_state.accepted is not None:
+            response["output_info"] = deps.output_state.accepted
+        response["run_metrics"] = self._completion_metrics(deps,
             status=response["status"],
             started_at=started_at,
             model_id=self._model_id,
@@ -1904,8 +2019,10 @@ class AgentRunner:
             cache_metrics_available=cache_usage_available(result.new_messages()),
             messages=result.new_messages(),
         )
-        response["context"] = self._context_status(prepared.projected, deps)
-        response["context"]["compaction"]["compaction_event_saved"] = compaction_event_saved
+        response["context"] = None
+        async with self._completion_step(deps, "context_display"):
+            response["context"] = self._context_status(prepared.projected, deps)
+            response["context"]["compaction"]["compaction_event_saved"] = compaction_event_saved
         terminal_status = (
             "pending" if isinstance(result.output, DeferredToolRequests) else "completed"
         )
@@ -1914,14 +2031,15 @@ class AgentRunner:
         )
         if updated_run_event is not None:
             response["session_event"] = updated_run_event.public_dict()
-        log_event(
-            "agent_run_pending" if terminal_status == "pending" else "agent_run_completed",
-            conversation_id=deps.conversation_id,
-            run_id=deps.run_id,
-            agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
-            session_id=session_id,
-            **response["run_metrics"],
-        )
+        async with self._completion_step(deps, "completion_log"):
+            log_event(
+                "agent_run_pending" if terminal_status == "pending" else "agent_run_completed",
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
+                agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
+                session_id=session_id,
+                **response["run_metrics"],
+            )
         return response
 
     @asynccontextmanager
@@ -1963,7 +2081,8 @@ class AgentRunner:
             message_history=message_history,
             usage_limits=self._run_limits(deps),
             deferred_tool_results=deferred_tool_results,
-            output_type=_STREAM_OUTPUT_TYPE,
+            output_type=self._output_types(deps),
+            retries={"output": 2} if deps.output_state is not None else None,
             model_settings=self.model_settings,
             cancellation_token=cancellation_token,
             conversation_id=deps.conversation_id,
@@ -2166,6 +2285,8 @@ class AgentRunner:
                     session_event_queue=session_events,
                 )
                 await self._prepare_request_budget(session_id, deps)
+                if deps.output_state is not None:
+                    deps.output_state.queue = session_events
             except BaseException as exc:
                 self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
                                        started_at=started_at, error=exc, phase="history")
@@ -2311,6 +2432,11 @@ class AgentRunner:
                                     continue
                                 await self._capture_planning_result(event, deps)
                                 mapped = events.map_event(event)
+                                if (deps.output_state is not None and mapped is not None
+                                        and mapped.get("type") == "text"):
+                                    # A text-only response may still be rejected.
+                                    # Structured values publish only after acceptance.
+                                    continue
                                 if mapped is not None:
                                     if not _should_publish_tool_call(event, mapped):
                                         continue
@@ -2412,6 +2538,8 @@ class AgentRunner:
                             result_queue=session_events,
                         )
                     run_published = True
+                    if deps.output_state is not None and not deferred_pending:
+                        await deps.output_state.accept(deps)
                     if not deferred_pending and pre_saved_compaction_event is None:
                         compaction_projection = result.all_messages()
 
@@ -2628,9 +2756,11 @@ class AgentRunner:
             return
 
         if result is not None:
-            self._record_loaded_skills(deps, result.all_messages())
+            async with self._completion_step(deps, "loaded_skills"):
+                self._record_loaded_skills(deps, result.all_messages())
             try:
-                await persister.flush(session_id, agent_id=deps.agent_id)
+                async with self._completion_step(deps, "optional_flush"):
+                    await persister.flush(session_id, agent_id=deps.agent_id)
             except Exception as exc:
                 self._log_run_terminal(run_event, status="failed", started_at=started_at, error=exc, phase="persistence")
                 failed_run_event = await self._finish_run_event(
@@ -2659,7 +2789,8 @@ class AgentRunner:
                 yield buffered_call
             buffered_ui_tool_calls.clear()
         if title_task is not None:
-            await title_task
+            async with self._completion_step(deps, "title"):
+                await title_task
             while not session_events.empty():
                 yield session_events.get_nowait()
         committed_compaction = deps.context_state.committed_event if deps.context_state is not None else None
@@ -2667,13 +2798,15 @@ class AgentRunner:
             True if pre_saved_compaction_event is not None or committed_compaction is not None else None
         )
         if compaction_projection is not None and committed_compaction is None:
-            compaction_event = await self._compaction_after_persist(
-                persister,
-                session_id,
-                deps,
-                projected_history=compaction_projection,
-                expected_row_version=0,
-            )
+            compaction_event = False
+            async with self._completion_step(deps, "compaction"):
+                compaction_event = await self._compaction_after_persist(
+                    persister,
+                    session_id,
+                    deps,
+                    projected_history=compaction_projection,
+                    expected_row_version=0,
+                )
             compaction_event_saved = (
                 None
                 if compaction_event is None
@@ -2690,9 +2823,11 @@ class AgentRunner:
                     "event": compaction_event.public_dict(),
                 }
 
-        final_context = self._context_status(prepared.projected, deps)
-        final_context["compaction"]["compaction_event_saved"] = compaction_event_saved
-        metrics = run_metrics(
+        final_context = None
+        async with self._completion_step(deps, "context_display"):
+            final_context = self._context_status(prepared.projected, deps)
+            final_context["compaction"]["compaction_event_saved"] = compaction_event_saved
+        metrics = self._completion_metrics(deps,
             status=(
                 "pending"
                 if result is not None and isinstance(result.output, DeferredToolRequests)
@@ -2708,14 +2843,15 @@ class AgentRunner:
             ),
             messages=result.new_messages() if result is not None else [],
         )
-        log_event(
-            "agent_run_pending" if metrics["status"] == "pending" else "agent_run_completed",
-            conversation_id=deps.conversation_id,
-            run_id=deps.run_id,
-            agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
-            session_id=session_id,
-            **metrics,
-        )
+        async with self._completion_step(deps, "completion_log"):
+            log_event(
+                "agent_run_pending" if metrics["status"] == "pending" else "agent_run_completed",
+                conversation_id=deps.conversation_id,
+                run_id=deps.run_id,
+                agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
+                session_id=session_id,
+                **metrics,
+            )
         terminal_status = (
             "pending"
             if result is not None and isinstance(result.output, DeferredToolRequests)
@@ -2733,7 +2869,7 @@ class AgentRunner:
                 "persisted": True,
                 "event": updated_run_event.public_dict(),
             }
-        yield _final_event(
+        final_event = _final_event(
             result,
             self.ui_tool_hints,
             self.tool_display_names,
@@ -2742,6 +2878,9 @@ class AgentRunner:
             run_id=deps.run_id,
             run_metrics=metrics,
         )
+        if deps.output_state is not None and deps.output_state.accepted is not None:
+            final_event["output_info"] = deps.output_state.accepted
+        yield final_event
 
 
 def _build_run_result(
@@ -2807,7 +2946,7 @@ def _final_event(
 
 
 def _serialize_output(output: Any) -> Any:
-    if isinstance(output, (str, int, float, bool)) or output is None:
+    if isinstance(output, (str, int, float, bool, dict, list)) or output is None:
         return output
     if hasattr(output, "model_dump"):
         return output.model_dump()

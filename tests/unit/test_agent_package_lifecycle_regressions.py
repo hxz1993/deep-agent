@@ -203,8 +203,8 @@ class AgentScopeConfigurationRoundtrip(unittest.IsolatedAsyncioTestCase):
 
     async def test_actual_backup_export_and_import_keep_partial_and_empty_scope(self):
         from maintenance.config_backup import export_backup
-        await self._backup(revision='010')
-        source=self.root/'source-False-010.db'
+        await self._backup(revision='012')
+        source=self.root/'source-False-012.db'
         self.assertTrue(source.is_file())
         scope={'ui:builtin':['builtin__confirm']}
         with sqlite3.connect(source) as db:

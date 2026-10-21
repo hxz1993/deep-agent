@@ -62,6 +62,7 @@
     render() {
       const data = this.data, agent = data.agent;
       const rows = [resourceRow('Agent', ['名称、提示词与关联配置'], '随包导出')];
+      if (agent.structured_output_enabled) rows.push(resourceRow('结构化输出', ['已开启，包含完整输出定义'], '随包导出'));
       if (data.skills.length) rows.push(resourceRow('Skill', data.skills.map(skill => skill.label || skill.code), data.uploaded.length === data.skills.length ? '随包导出' : data.uploaded.length ? `${data.uploaded.length} 随包 · ${data.skills.length - data.uploaded.length} 引用` : '内置引用', !data.uploaded.length));
       if (data.packages.length) rows.push(resourceRow('UI 工具', data.tools.length ? data.tools.map(tool => tool.metadata?.display_name || tool.name) : data.packages.map(pkg => pkg.label || pkg.code), data.custom.length === data.packages.length ? '工具包与定义' : data.custom.length ? '导出与引用' : '内置引用', !data.custom.length));
       const mcp = (agent.capabilities || []).filter(code => code.startsWith('mcp:'));

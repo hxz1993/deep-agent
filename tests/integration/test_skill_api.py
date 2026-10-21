@@ -14,6 +14,7 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
 from tests.helpers.admin_auth import allow_console_admin
+from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import make_sqlite_stores
 from tests.unit.test_skill_packages import skill_zip
 
@@ -54,6 +55,7 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
         _FakePlatformAPI.headers = []
         self.stores, self.engine, session_factory = await make_sqlite_stores()
         self.app = FastAPI()
+        install_test_user_header(self.app)
         self.app.include_router(api_router)
         allow_console_admin(self.app)
         init_context(

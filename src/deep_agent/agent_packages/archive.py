@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolPackageCreate
+from deep_agent.schemas.agent import AgentOutputConfig
 from deep_agent.skills.package import parse_skill_zip
 
 MAX_PACKAGE_BYTES = 50 * 1024 * 1024
@@ -37,23 +38,40 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
 
-class Manifest(StrictModel):
+class ExtensiblePackageModel(BaseModel):
+    """Ignore safe future package data; installation operation DTOs stay strict."""
+    model_config = ConfigDict(extra='ignore')
+
+
+class Manifest(ExtensiblePackageModel):
     format: Literal['deepagent-agent-package']
     schema_version: Literal[1]
     exported_from: str = Field(min_length=1, max_length=64)
 
 
-class ModelReference(StrictModel):
+class ModelReference(ExtensiblePackageModel):
     name: str = Field(min_length=1, max_length=191)
     provider_type: str = Field(min_length=1, max_length=64)
 
 
-class PackageAgent(StrictModel):
+class PackageOutputConfig(AgentOutputConfig):
+    model_config = ConfigDict(extra='ignore', from_attributes=True)
+
+
+class PackageAgent(ExtensiblePackageModel):
     name: str = Field(min_length=1, max_length=191)
     prompt: str = Field(min_length=1, max_length=2 * 1024 * 1024)
     model_reference: ModelReference | None = None
     capabilities: list[str] = Field(default_factory=list, max_length=256)
     skills: list[str] = Field(default_factory=list, max_length=256)
+    structured_output_enabled: bool = Field(default=False, strict=True)
+    output_config: PackageOutputConfig | None = None
+
+    @model_validator(mode='after')
+    def consistent_output(self):
+        if self.structured_output_enabled != (self.output_config is not None):
+            raise ValueError('开启输出必须携带定义，关闭输出的安装包不得携带定义草稿')
+        return self
 
     @model_validator(mode='before')
     @classmethod
@@ -77,11 +95,15 @@ class PackageAgent(StrictModel):
         return values
 
 
-class PackageUi(StrictModel):
+class PackageUiTool(UiToolCreate):
+    model_config = ConfigDict(extra='ignore')
+
+
+class PackageUi(ExtensiblePackageModel):
     code: str
     label: str
     description: str | None = None
-    tools: list[UiToolCreate] = Field(max_length=256)
+    tools: list[PackageUiTool] = Field(max_length=256)
 
     def validated(self):
         UiToolPackageCreate.model_validate(self.model_dump(exclude={'tools'}))
@@ -191,8 +213,6 @@ def parse_package(raw: bytes) -> Package:
     required = {'manifest.json', 'agent.json', 'ui-tools.json'}
     if not required.issubset(files):
         raise PackageError('缺少 manifest.json、agent.json 或 ui-tools.json')
-    if any(n not in required and not (n.startswith('skills/') and n.endswith('.zip') and len(PurePosixPath(n).parts) == 2) for n in files):
-        raise PackageError('安装包包含无法识别的文件')
     manifest_data = json_read(files['manifest.json'])
     if not isinstance(manifest_data, dict) or type(manifest_data.get('schema_version')) is not int or manifest_data['schema_version'] != 1:
         raise PackageError('不支持的安装包格式版本，当前支持 v1')
@@ -210,7 +230,7 @@ def parse_package(raw: bytes) -> Package:
         raise PackageError('无法识别的能力引用')
     skills = {}
     for name, payload in files.items():
-        if not name.startswith('skills/'):
+        if not (name.startswith('skills/') and name.endswith('.zip') and len(PurePosixPath(name).parts) == 2):
             continue
         read_zip(payload, budget)
         parsed = parse_skill_zip(payload)

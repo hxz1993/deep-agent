@@ -13,7 +13,7 @@
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |
 | `07` | [`Python Sandbox 与会话运行环境`](07-python-sandbox/README.md) | 2026-07 起 | 无状态子进程已落地；2026-09-16 收敛活跃会话复用、可过期清理与 Shell 方向，长期持久化及快照非硬要求，尚未开发 |
 | `08` | [`Artifact 与出站产物`](08-artifact-export/README.md) | 2026-08 | v0.4.0实现会话内大工具结果Artifact；v0.4.18支持主动发布文件到下载中心 |
-| `09` | [`结构化最终输出`](09-structured-output/README.md) | 2026-08 | 0805 实验实现已归档；产品边界未锁定，当前暂缓正式实施 |
+| `09` | [`结构化输出与 Agent 更新人`](09-structured-output/README.md) | 2026-10-22完整修订 | 默认关闭、单一组合Schema；012一配置表＋Agent开关/更新人；与BOM/租赁两轮确认可接入；0.14.0正式实现及012迁移已完成，安装矩阵/286项逐项验收见课题入口 |
 | `10` | [`上下文引用`](10-context-reference/README.md) | 2026-08 | v0.3.5 已完成公共协议；DeepCube/DeepTable业务前端已迁移并验证 |
 | `11` | [`工具包与工具目录`](11-tool-packages/README.md) | 2026-08 | v0.3.2 已完成工具包目录、UI 工具包、运行 Toolset 与 Console 统一改造 |
 | `12` | [`Agent Skill`](12-agent-skills/README.md) | 2026-08 | v0.3.18 已完成 ToolPackage 分离、上传安装、Harness 渐进披露与资源治理 |

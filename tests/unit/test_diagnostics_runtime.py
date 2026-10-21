@@ -44,6 +44,22 @@ class DiagnosticRuntimeTests(unittest.TestCase):
         return [sanitize_record(parse_record(line)) for file in self.directory.glob("*.log")
                 for line in file.read_text().splitlines()]
 
+    def test_post_accept_failure_is_queryable_without_candidate_or_exception_text(self):
+        from types import SimpleNamespace
+        from deep_agent.agent.runner import AgentRunner
+        writer = self.writer()
+        deps = SimpleNamespace(session_id="session-1", run_id="run-1", agent_id="agent-1")
+        with patch.object(module, "_runtime", writer):
+            AgentRunner._log_post_accept_failure(deps, "compaction", RuntimeError("NEVER_LOG_PRIVATE_VALUE"))
+        self.drain(writer)
+        records = self.records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["event"], "output_post_accept_failed")
+        self.assertEqual(records[0]["phase"], "compaction")
+        self.assertEqual(records[0]["status"], "completed")
+        self.assertEqual(records[0]["error_type"], "RuntimeError")
+        self.assertNotIn("NEVER_LOG_PRIVATE_VALUE", str(records))
+
     def test_history_repair_events_are_safe_and_queryable(self):
         from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart, UserPromptPart
         from deep_agent.agent.history import repair_unprocessed_tool_calls

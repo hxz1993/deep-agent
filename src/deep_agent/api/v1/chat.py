@@ -312,6 +312,7 @@ async def chat(
         conversation_id=deps.conversation_id,
         run_id=deps.run_id,
         output=result["output"],
+        output_info=result.get("output_info"),
         usage=result["usage"],
         status=result.get("status", "completed"),
         deferred=result.get("deferred"),

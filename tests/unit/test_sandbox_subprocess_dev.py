@@ -412,7 +412,9 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
                 request_id="public-net",
                 code=(
                     "import urllib.request\n"
-                    "urllib.request.urlopen('https://example.com', timeout=10).status"
+                    # A public numeric address keeps this network-policy test
+                    # independent of workstation proxy fake-IP DNS (198.18/15).
+                    "urllib.request.urlopen('https://1.1.1.1/cdn-cgi/trace', timeout=10).status"
                 ),
                 timeout_ms=15_000,
             )

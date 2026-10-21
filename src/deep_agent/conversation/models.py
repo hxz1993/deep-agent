@@ -103,11 +103,20 @@ class PlanConversationItem(ConversationItemBase):
     completed: int = 0
 
 
+class StructuredOutputConversationItem(ConversationItemBase):
+    kind: Literal["structured_output"] = "structured_output"
+    name: str
+    tool_call_id: str
+    attempt: int
+    output: Any
+
+
 ConversationItem = (
     UserConversationItem
     | AssistantConversationItem
     | ToolConversationItem
     | PlanConversationItem
+    | StructuredOutputConversationItem
 )
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer
 
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference, validate_context_references
@@ -103,6 +103,14 @@ class ChatResponse(BaseModel):
     conversation_id: str | None = None
     run_id: str | None = None
     output: Any
+    output_info: dict[str, Any] | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_disabled_output_info(self, handler):
+        result = handler(self)
+        if self.output_info is None:
+            result.pop("output_info", None)
+        return result
     usage: dict[str, Any] = Field(default_factory=dict)
     status: str = Field(default="completed", description="completed, pending (awaiting UI input), or cancelled.")
     deferred: dict[str, Any] | None = Field(

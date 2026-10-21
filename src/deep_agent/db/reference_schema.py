@@ -21,6 +21,7 @@ LOGICAL_REFERENCES = (
     Relation("wecom_user_profiles", "wecom_application_id", "wecom_applications", "id", "CASCADE"),
     Relation("llm_models", "provider_id", "llm_providers", "id", "RESTRICT"),
     Relation("agents", "model_id", "llm_models", "id", "RESTRICT"),
+    Relation("agent_output_configs", "agent_id", "agents", "id", "CASCADE"),
     Relation("chat_sessions", "agent_id", "agents", "id", "RESTRICT"),
     Relation("ui_tool_definitions", "package_code", "ui_tool_packages", "code", "RESTRICT"),
     Relation("chat_session_events", "session_id", "chat_sessions", "session_id", "CASCADE"),

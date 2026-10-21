@@ -348,8 +348,9 @@ def _web_fetch_tool() -> Tool[Any]:
             url: An HTTP(S) URL without embedded credentials.
         """
         try:
+            httpx2.URL(url)  # Validate IDNA before DNS/private-address resolution.
             parsed = urlsplit(url)
-        except ValueError as exc:
+        except (ValueError, httpx2.InvalidURL) as exc:
             raise ModelRetry("Web Fetch only accepts valid absolute HTTP(S) URLs") from exc
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ModelRetry("Web Fetch only accepts absolute HTTP(S) URLs")

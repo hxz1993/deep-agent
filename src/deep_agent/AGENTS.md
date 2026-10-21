@@ -28,6 +28,13 @@
 
 ## 架构与数据流
 
+### 0.14.0 结构化输出
+
+Agent 开关默认关闭；配置由 `agent_output_configs` 保存，`structured_output_enabled`、定义与可信 `updated_by` 原子写入。完整定义只走管理员 `GET /agents/{id}/output-config`，普通详情不依赖管理或账号查询。
+`agent/structured_output.py` 管理同 Turn 冻结契约、完整响应分发前检查及两次共享修正额度；`structured_output/` 提供有界 Schema 准入和可 kill/reap 的独立 jsonschema 子进程，不新增依赖。
+原始 SDK call/ack 与不可变 `output/attempt` 共用现有事件表，接受事实最后提交；只接受项进入 `structured_output` History，item_id 等于 output_id。失败候选不成为业务工具、审批或普通正文。恢复必须读原始事件快照，不能套用当前 Agent 定义。
+关闭 Agent ZIP 完全省略新配置及草稿，开启 inline 导出；旧包覆盖清空输出配置。全量配置备份保留关闭草稿，012 与真实 011 备份按各自结构识别，同 Revision 才恢复。参见[正式指南](../../docs/guides/structured-output.md)和[完整验收计划](../../docs/design/09-structured-output/structured-output-test-plan.md)。
+
 ### 诊断日志边界
 
 `diagnostics.emit` 只接收白名单事实，后台有界队列负责安全序列化后的双出口与文件轮转；
@@ -850,3 +857,5 @@ Part差异只记录固定SDK字段名，不记录内容、参数、任意metadat
 ### 可选首轮标题（v0.13.9）
 
 `ChatRequest.session_title`仅首次真实用户输入生效，普通/流式共用`_prepare_history`；Coordinator在Session锁和归属校验后核对首条user事件ID并追加user标题事件，自动标题沿用既有latest-title保护。渠道/new预创建的空会话可命名，渠道来源事件不改；续聊或纯deferred回传不改名。省略/null不进入新增存储路径，Console不发送，后续改名继续PATCH。
+
+0.14.0 渠道仅在成功 final 含 output_info 时，将原生 JSON 以英文编码标记、按 text_limit 的 UTF-8 字节预算分段投递；首段结束原 reply，后续复用现有 send_component 固定当前 peer 并等待确认。失败不重发已发或确认未知的段。普通文字仍沿用原 stream ID。公共 API 不转为 Markdown；Pending/error 不投递候选。

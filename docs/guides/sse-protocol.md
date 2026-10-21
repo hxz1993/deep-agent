@@ -1,4 +1,4 @@
-# SSE 流式消息协议（v0.6.0）
+# SSE 流式消息协议（v0.14.0）
 
 `POST /api/v1/chat/stream` 使用 `text/event-stream`。实时会话和重新打开的 History 使用不同生命周期：
 
@@ -12,12 +12,48 @@
 | --- | --- | --- |
 | `text` / `thinking` | 否 | 按 `item_id` 追加当前 Assistant Delta |
 | `tool_call` / `tool_result` / `tool_call_removed` | 否 | 按 `tool_call_id` 更新当前 Run 的临时工具项 |
+| `output`（显式开启结构化输出） | 是 | 尝试失败仅更新轨迹，accepted 成功按 output_id 展示原生 JSON |
 | `session_title` | 是 | 更新会话列表和页头标题 |
 | `final` | 否 | 收口 Run 状态、Usage 和上下文预算；保留本轮直播结果，不额外刷新 `/history` |
 | `cancelled` / `error` | 否 | 保留当前直播结果并结束 Run；重连或重新打开时由 `/history`校准 |
 
 直播中的 Thinking、工具进度、自动压缩提示等可以只存在于当前页面，不要求在 History 中重放。
 History 的用户消息、助手回复、工具、Plan、附件和 Context 均由后端从 Event Store 确定性投影。
+
+## 结构化输出（0.14.0，默认关闭）
+
+Agent 显式开启后，输出尝试使用独立 `type:"output"`；它不是 UI Deferred 工具，也不是顶层运行 error。
+通用字段为 `session_id,turn_id,run_id,output_id,sequence,name,tool_call_id,attempt,status,accepted,schema_digest`。
+失败为 `status:"error",accepted:false,errors:[...]`，不复制候选到普通回复；成功为 `status:"completed",accepted:true,output:<原生JSON>`，包括显式 null。
+普通工具与输出混调时整个响应在宿主分发前拒绝，原始调用保留在轨迹，不发布假工具执行或审批。
+
+只有来源 SDK call/ack、预算及必要状态保存后才提交不可变 `output/attempt` 接受事实，再发送成功。连接发送失败不能撤销已保存结果。
+`final.output` 与 HTTP `ChatResponse.output` 保持原生 JSON；成功附加 `output_info:{name,output_id,tool_call_id,attempt,turn_id}`。
+关闭不新增字段或 output 事件，Pending 仍只有旧 deferred 状态且没有接受结果。
+
+History 外壳继续 `schema_version:1`，已接受结果新增：
+
+```json
+{
+  "item_id": "same-output-id",
+  "kind": "structured_output",
+  "status": "completed",
+  "turn_id": "turn-id",
+  "run_id": "run-id",
+  "order": {"sequence": 12, "part_offset": 0},
+  "source_event_ids": ["same-output-id", "source-call-event-id"],
+  "created_at": "2026-10-22T00:00:00Z",
+  "updated_at": "2026-10-22T00:00:00Z",
+  "name": "lease_result",
+  "tool_call_id": "provider-call-id",
+  "attempt": 2,
+  "output": {"text": "处理完成"}
+}
+```
+
+同一结果的 History.item_id、output.output_id、final.output_info.output_id 和事件 ID 完全一致；Live 原样包装，不产生另一个模型执行或事实。客户端按此 ID 去重。
+失败与成功轨迹均标“输出”，Error/Completed 区分，不增加“校验”类型。格式修正失败不额外计一次运行异常；只有最终失败记一次 execution/error。业务工具/请求/Token 不因语义事件重复计数。
+完整配置、恢复、限制、包兼容及客户端迁移规则见[结构化输出指南](structured-output.md)。
 
 ## 上下文预算与Usage（v0.10.18）
 

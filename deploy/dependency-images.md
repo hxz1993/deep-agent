@@ -50,3 +50,12 @@
 实际基础镜像名称、不可变digest、构建日期、Python/系统版本、宿主与沙箱的完整安装清单、内部wheel版本/哈希应随镜像交接保存。目前这些实物信息尚未在本仓库核实，不填入推测值。镜像重建时需关注间接依赖解析差异，并验证导入、联合健康、沙箱及受影响能力。
 
 仓库`deploy/jenkins/Jenkinsfile.gateway`与`Jenkinsfile.api-only`当前仍含apt/pip安装步骤，是现存源码示例；同事最新简化流水线可能在实际Jenkins Job或其他构建仓中。本文不改这两份脚本，不假装它们已经与当前运维流程一致。
+
+
+## 0.14.0 交接补充
+
+比较基线为 v0.13.9 / 552b7b2。requirements、沙箱 requirements、开发依赖、内部 wheel 和 vendor 均未升级。Core 仍为 2.46.0，Harness 仍为 0.32.0。
+
+本次校验子进程直接使用 `jsonschema` 及其必需传递依赖 `referencing.Registry`，阻止外部引用检索。jsonschema 4.26.0 的已安装元数据要求 `referencing>=0.28.4`；本机验证为 0.37.0。没有增加安装项或可选 extras，但固定镜像应核对已有 jsonschema 安装完整，并执行导入及 Schema 校验冒烟。本机结果不代表线上镜像清单已核验。
+
+需配套数据库 012 和本次完整源码/Console。先停止旧写入、备份并升级数据库及服务，再显式开启结构化输出；不混跑旧写入实例。没有要求发布时动态 pip 安装，也未改 Jenkins 示例。

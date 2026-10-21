@@ -103,11 +103,15 @@ def encode_message_parts(
                 run_id=run_id, first_message_ordinal=ordinal,
             ))
             continue
+        seen_part_keys: set[str] = set()
         for local_index, part in enumerate(parts):
             part_index = int(indices[local_index]) if indices is not None else local_index
             kind = str(part.get("part_kind") or "")
             call_id = part.get("tool_call_id")
             part_key = f"{kind}:{call_id}" if call_id else f"{kind}:{part_index}"
+            if part_key in seen_part_keys:
+                part_key += f":part:{part_index}"
+            seen_part_keys.add(part_key)
             piece = {**serialized, "parts": [part]}
             event_type = event_type_for_message(piece)
             if has_results and kind == "user-prompt":

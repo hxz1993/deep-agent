@@ -6,6 +6,8 @@ from typing import Any
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
+    OutputToolCallEvent,
+    OutputToolResultEvent,
     PartDeltaEvent,
     PartStartEvent,
     RetryPromptPart,
@@ -303,3 +305,11 @@ def _map_function_tool_result(event: FunctionToolResultEvent) -> dict[str, Any] 
 @map_event.register(PartDeltaEvent)
 def _map_part_delta_event(event: PartDeltaEvent) -> dict[str, Any] | None:
     return map_part(event.delta)
+
+
+@map_event.register(OutputToolCallEvent)
+@map_event.register(OutputToolResultEvent)
+def _map_output_tool_event(event) -> None:
+    # Raw SDK output candidates are audit facts. The runner publishes `output`
+    # only after the immutable attempt/acceptance transaction commits.
+    return None

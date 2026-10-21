@@ -79,8 +79,7 @@ class AgentPackageArchiveTests(unittest.TestCase):
 
     def test_temperature_is_not_part_of_package_format(self):
         self.assertNotIn('temperature', make_package().agent.model_dump())
-        with self.assertRaises(ValueError):
-            make_package(agent_changes={'temperature': 0.5})
+        self.assertNotIn('temperature', make_package(agent_changes={'temperature': 0.5}).agent.model_dump())
 
     def test_package_content_and_nested_skill_bytes_are_preserved(self):
         files = package_files(resources=True)
@@ -100,9 +99,9 @@ class AgentPackageArchiveTests(unittest.TestCase):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 archive.parse_package(archive.build_zip(files))
 
-    def test_missing_unknown_and_duplicate_json_fields_are_rejected(self):
-        for changes in ({'unknown.json': b'{}'}, {'agent.json': b'{"name":"a","name":"b"}'},
-                        {'agent.json': archive.canonical({'name': 'a', 'prompt': 'b', 'future_behavior': True})}):
+    def test_missing_and_duplicate_json_fields_are_rejected(self):
+        for changes in ({'agent.json': b'{"name":"a","name":"b"}'},
+                        {'agent.json': archive.canonical({'name': 'a', 'future_behavior': True})}):
             files = package_files()
             files.update(changes)
             with self.subTest(changes=changes), self.assertRaises(ValueError):
@@ -111,6 +110,22 @@ class AgentPackageArchiveTests(unittest.TestCase):
         del files['ui-tools.json']
         with self.assertRaises(PackageError):
             archive.parse_package(archive.build_zip(files))
+
+    def test_safe_unknown_package_extensions_are_ignored_but_hashed(self):
+        files = package_files(resources=True)
+        original = archive.parse_package(archive.build_zip(files))
+        files['extensions/future.json'] = b'{"future":true}'
+        agent = json.loads(files['agent.json'])
+        agent['future_behavior'] = True
+        files['agent.json'] = archive.canonical(agent)
+        ui = json.loads(files['ui-tools.json'])
+        ui[0]['future'] = True
+        ui[0]['tools'][0]['future'] = True
+        files['ui-tools.json'] = archive.canonical(ui)
+        extended = archive.parse_package(archive.build_zip(files))
+        self.assertNotEqual(extended.digest, original.digest)
+        self.assertEqual(extended.agent.model_dump(), original.agent.model_dump())
+        self.assertEqual(extended.ui[0].tools[0].model_dump(), original.ui[0].tools[0].model_dump())
 
     def test_unsafe_paths_duplicates_links_and_corrupt_zip_are_rejected(self):
         for filename in ('../outside', '/outside', 'skills/../../outside', 'C:/outside', 'skills\\outside.zip', './agent.json'):

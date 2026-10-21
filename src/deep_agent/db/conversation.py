@@ -300,6 +300,165 @@ class SqlConversationCoordinator:
             )
             return SessionEventSnapshot.from_row(row)
 
+    async def append_output_attempt(
+        self, session_id: str, *, agent_id: str, user_id: str,
+        turn_id: str, run_id: str, payload: dict[str, Any],
+    ) -> SessionEventSnapshot:
+        """Immutable acceptance, after the complete SDK call/ack are durable.
+
+        A commit acknowledgement can be lost after the database commits. The
+        stable event ID is then read from a fresh session; it is never rewritten
+        or blindly retried. Cancellation before commit rolls back. Once commit
+        has begun, settle it before closing its session and confirm the fact.
+        """
+        import anyio
+        from copy import deepcopy
+        from deep_agent.agent.structured_output import output_id_for
+        from deep_agent.structured_output.schema import json_bytes, validate_output_name
+        payload = deepcopy(payload)
+        json_bytes(payload)
+        validate_output_name(payload.get("name"))
+        if type(payload.get("accepted")) is not bool or type(payload.get("attempt")) is not int or payload["attempt"] < 1:
+            raise ValueError("Output attempt identity is invalid")
+        if not isinstance(payload.get("schema_digest"), str) or len(payload["schema_digest"]) != 64:
+            raise ValueError("Output attempt Schema digest is invalid")
+        if payload["accepted"] and ("output" not in payload or "errors" in payload):
+            raise ValueError("Accepted output must contain its value and no errors")
+        if not payload["accepted"] and ("output" in payload or not payload.get("errors")):
+            raise ValueError("Failed output must contain errors and no accepted value")
+        source = payload.get("source")
+        if not isinstance(source, dict):
+            raise ValueError("Output source is required")
+        ordinal, part_index = source.get("message_ordinal"), source.get("part_index")
+        if type(ordinal) is not int or ordinal < 0 or type(part_index) is not int or part_index < -1 or (payload["accepted"] and part_index < 0):
+            raise ValueError("Output source part is invalid")
+        if not turn_id or not run_id:
+            raise ValueError("Output attempt requires its Turn and Run")
+        event_id = output_id_for(session_id, run_id, ordinal, part_index)
+        scope, user = self._required_identity(agent_id, user_id)
+
+        async def settle(task):
+            with anyio.CancelScope(shield=True):
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                return task.result()
+
+        async def write_attempt(db):
+            owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
+            if not owner.exists or owner.user_id != user:
+                raise PermissionError("Output source session belongs to another user")
+            session = (await db.execute(select(ChatSession).where(ChatSession.session_id == session_id)
+                                       .with_for_update())).scalar_one()
+            rows = list((await db.execute(select(ChatSessionEvent).where(
+                ChatSessionEvent.session_id == session_id, ChatSessionEvent.run_id == run_id,
+                ChatSessionEvent.turn_id == turn_id,
+                ChatSessionEvent.event_type.in_(MESSAGE_EVENT_TYPES),
+            ).order_by(ChatSessionEvent.sequence))).scalars())
+            calls = [row for row in rows if row.event_type == "assistant/message"
+                     and (row.payload.get("source") or {}).get("message_ordinal") == ordinal
+                     and (part_index < 0 or (row.payload.get("source") or {}).get("part_index") == part_index)]
+            if not calls:
+                raise ValueError("Output source response is not durable")
+            for call in calls:
+                metadata = (call.payload.get("message") or {}).get("metadata") or {}
+                fact = metadata.get("deepagent_output") or {}
+                if fact.get("name") != payload["name"] or fact.get("schema_digest") != payload["schema_digest"]:
+                    raise ValueError("Output source contract does not match")
+                if payload["accepted"] and ((metadata.get("deepagent_dispatch") or {}).get("rejected")
+                                             or part_index not in fact.get("part_indices", [])):
+                    raise ValueError("Rejected output cannot be accepted")
+            call_id = payload.get("tool_call_id")
+            if payload.get("accepted"):
+                matching_parts = [part for row in calls if row.status == "completed" for part in message_parts(row)
+                                  if part.get("part_kind") == "tool-call" and part.get("tool_call_id") == call_id
+                                  and part.get("tool_name") == payload["name"]]
+                if len(matching_parts) != 1:
+                    raise ValueError("Accepted output has no matching source call")
+                if not any(part.get("part_kind") == "tool-return" and part.get("tool_call_id") == call_id
+                           and part.get("tool_name") == payload["name"]
+                           for row in rows if row.sequence > max(call.sequence for call in calls)
+                           and (row.payload.get("source") or {}).get("message_ordinal", -1) > ordinal
+                           for part in message_parts(row)):
+                    raise ValueError("Accepted output has no durable SDK acknowledgement")
+                snapshot_rows = list((await db.execute(select(ChatSessionEvent).where(
+                    ChatSessionEvent.session_id == session_id, ChatSessionEvent.turn_id == turn_id,
+                    ChatSessionEvent.event_type == "user/message",
+                ))).scalars())
+                contracts = [((item.payload.get("message") or {}).get("metadata") or {}).get("deepagent_output_contract")
+                             for item in snapshot_rows]
+                contract = next((item for item in contracts if item), None)
+                if not contract or contract.get("schema_digest") != payload["schema_digest"] or contract.get("name") != payload["name"]:
+                    raise ValueError("Accepted output has no matching frozen contract")
+                args = matching_parts[0].get("args")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except (ValueError, TypeError) as exc:
+                        raise ValueError("Accepted output source has invalid JSON") from exc
+                if (contract.get("json_schema") or {}).get("type") != "object":
+                    if not isinstance(args, dict) or "response" not in args:
+                        raise ValueError("Accepted output source has no native value")
+                    args = args["response"]
+                if json_bytes(args) != json_bytes(payload["output"]):
+                    raise ValueError("Accepted output differs from its source candidate")
+            committed_payload = {**payload, "source": {**source, "event_ids": [row.event_id for row in calls]}}
+            existing = await db.get(ChatSessionEvent, event_id)
+            if existing is not None:
+                if existing.payload != committed_payload or existing.event_type != "output/attempt":
+                    raise ValueError("Immutable output attempt conflict")
+                return SessionEventSnapshot.from_row(existing)
+            now = datetime.now(timezone.utc)
+            row = ChatSessionEvent(event_id=event_id, session_id=session_id,
+                sequence=int(session.next_sequence), schema_version=1, event_type="output/attempt",
+                status="completed" if payload["accepted"] else "failed", turn_id=turn_id,
+                run_id=run_id, payload=committed_payload, search_text=None, created_at=now, updated_at=now)
+            session.next_sequence = int(session.next_sequence) + 1
+            session.updated_at = now
+            db.add(row)
+            await db.flush()
+            return SessionEventSnapshot.from_row(row)
+
+        expected = None
+        try:
+            async with serialized_sqlite_session(self._session_factory):
+                async with self._session_factory() as db:
+                    try:
+                        if db.get_bind().dialect.name == "sqlite":
+                            await db.execute(text("BEGIN IMMEDIATE"))
+                        await acquire_write_barrier(db)
+                        expected = await write_attempt(db)
+                    except BaseException:
+                        await settle(asyncio.create_task(db.rollback()))
+                        raise
+                    committing = asyncio.create_task(db.commit())
+                    try:
+                        await asyncio.shield(committing)
+                    except asyncio.CancelledError:
+                        await settle(committing)
+                    except BaseException:
+                        await settle(asyncio.create_task(db.rollback()))
+                        raise
+                    return expected
+        except BaseException:
+            # Never treat a source/permission/conflict error as committed. Only
+            # a transaction which produced an exact expected row can be read
+            # back after losing its commit acknowledgement.
+            if expected is not None:
+                with anyio.CancelScope(shield=True):
+                    try:
+                        async with self._session_factory() as check:
+                            found = await check.get(ChatSessionEvent, event_id)
+                            if (found is not None and found.event_type == "output/attempt"
+                                    and found.session_id == session_id and found.run_id == run_id
+                                    and found.turn_id == turn_id and found.payload == expected.payload):
+                                return SessionEventSnapshot.from_row(found)
+                    except Exception:
+                        pass
+            raise
+
     async def append_execution_error(
         self, session_id: str, *, status: LifecycleStatus,
         agent_id: str | None, user_id: str | None, turn_id: str | None,

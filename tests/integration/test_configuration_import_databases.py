@@ -51,12 +51,12 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await db.execute(text(f"CREATE DATABASE {name}{suffix}"))
                 created = True
             target_url = url.set(database=name).render_as_string(hide_password=False)
-            await asyncio.to_thread(_upgrade_target_schema, target_url, "011")
+            await asyncio.to_thread(_upgrade_target_schema, target_url, "012")
             target = create_async_engine(target_url)
             with tempfile.TemporaryDirectory(prefix="TMP_to_delete-import-") as directory:
                 root = Path(directory)
                 source = root / "source.db"
-                await config_backup_tests.ConfigBackupTests()._create_source(source, revision="011")
+                await config_backup_tests.ConfigBackupTests()._create_source(source, revision="012")
                 with sqlite3.connect(source) as db:
                     db.execute("UPDATE agents SET skills='[]', prompt='中文 👋📊🙂'")
                     db.execute("DELETE FROM skill_packages")
@@ -95,7 +95,7 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 async with target.connect() as db:
                     self.assertEqual(await db.scalar(text("SELECT prompt FROM agents WHERE id='agent-1'")), "中文 👋📊🙂")
                     self.assertEqual(await db.scalar(text("SELECT agent_id FROM channel_accounts WHERE id='channel-1'")), "agent-1")
-                    self.assertEqual(await db.scalar(text("SELECT version_num FROM alembic_version")), "006")
+                    self.assertEqual(await db.scalar(text("SELECT version_num FROM alembic_version")), "012")
                     self.assertEqual(await db.run_sync(lambda c: sum(len(inspect(c).get_foreign_keys(t))
                                                                      for t in Base.metadata.tables)), 0)
                 await self._verify_imported_agent_chat(target, target_url)

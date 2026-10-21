@@ -354,4 +354,5 @@ def build_agent(
         toolsets=toolsets,
         capabilities=capabilities or None,
         retries=request_retries,
+        end_strategy="graceful",
     )

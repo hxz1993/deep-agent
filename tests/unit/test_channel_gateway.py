@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -92,6 +94,27 @@ class PresentationWeComClient(FakeWeComClient):
         await super().reply_stream(_frame, stream_id, content, finish)
 
 
+class StructuredOutputChannelAdapter(PresentationWeComClient):
+    def __init__(self, *, text_limit=20480, fail_native=None):
+        super().__init__()
+        self.text_limit = text_limit
+        self.fail_native = fail_native
+        self.native_attempts = []
+        self.native_delivered = []
+
+    def message_capabilities(self):
+        return SimpleNamespace(text_limit=self.text_limit)
+
+    async def send_component(self, target, component, *, reply_to_current=False):
+        from deep_agent.channels.outbound import ComponentReceipt
+        request_id = f"native-request-{len(self.native_attempts) + 1}"
+        self.native_attempts.append((request_id, target, component.text))
+        if len(self.native_attempts) == self.fail_native:
+            raise TimeoutError("synthetic uncertain send acknowledgment")
+        self.native_delivered.append((request_id, target, component.text))
+        return ComponentReceipt(kind="text", request_id=request_id)
+
+
 class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -150,7 +173,7 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
         self.tmp.cleanup()
 
-    async def _run_presentation(self, events, *, message_id="presentation", adapter=None, stream_interval=0):
+    async def _run_presentation(self, events, *, message_id="presentation", adapter=None, stream_interval=0, sent_texts=()):
         message = parse_message({
             "headers": {"req_id": f"request-{message_id}"},
             "body": {
@@ -162,6 +185,16 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
         agent = PresentationDeepAgentClient(events)
         adapter = adapter or PresentationWeComClient()
         service = ChannelService(self.store, agent, stream_interval=stream_interval)
+        if sent_texts:
+            original_stream = agent.stream_chat
+            async def confirmed_send_stream(*args, **kwargs):
+                async for event in original_stream(*args, **kwargs):
+                    if event.event == "final":
+                        job = service.peers[(self.account.id, message.peer_type, message.peer_id)].active
+                        job.message_tool_sent = True
+                        job.sent_text_hashes.update(hashlib.sha256(text.strip().encode()).hexdigest() for text in sent_texts)
+                    yield event
+            agent.stream_chat = confirmed_send_stream
         await service.receive(self.account, adapter, message)
         peer = service.peers[(self.account.id, message.peer_type, message.peer_id)]
         if peer.worker is not None:
@@ -170,6 +203,86 @@ class ChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(agent.closed)
         self.assertTrue(all(stream_id == "reply-id" for stream_id, _, _ in adapter.attempts))
         return service, agent, adapter, row, message
+
+    async def test_structured_output_utf8_chunks_preserve_long_chinese_emoji_tail(self):
+        value = {"text": "合同😀中文" * 4000 + "最后一项🧾", "flag": False, "count": 0, "empty": None}
+        adapter = StructuredOutputChannelAdapter()
+        service, agent, adapter, row, message = await self._run_presentation([
+            StreamEvent("output", {"accepted": False, "output": {"private": "rejected candidate"}}),
+            StreamEvent("final", {"status": "completed", "output": value,
+                                  "output_info": {"name": "lease_result", "output_id": "accepted"}}),
+        ], message_id="structured-long", adapter=adapter)
+        first = [text for text, finish in adapter.replies if finish]
+        self.assertEqual(len(first), 1)
+        parts = first + [text for _, _, text in adapter.native_delivered]
+        self.assertGreater(len(parts), 2)
+        self.assertTrue(all(len(text.encode("utf-8")) <= adapter.text_limit for text in parts))
+        self.assertTrue(all(text.startswith("lease_result [") for text in parts))
+        raw = "".join(text.split("```json\n", 1)[1].removesuffix("\n```") for text in parts)
+        self.assertEqual(json.loads(raw), value)
+        self.assertIn("最后一项🧾", raw)
+        self.assertEqual(row.processing_status, "completed")
+        self.assertEqual(row.delivery_status, "sent")
+        self.assertTrue(all(target.account_id == self.account.id and target.peer_id == message.peer_id
+                            and target.message_id == message.message_id for _, target, _ in adapter.native_delivered))
+        self.assertEqual(len({request_id for request_id, _, _ in adapter.native_delivered}), len(parts) - 1)
+        self.assertEqual(agent.calls, 1)
+
+    async def test_structured_output_failed_second_segment_stops_without_retry_or_first_duplication(self):
+        adapter = StructuredOutputChannelAdapter(text_limit=256, fail_native=1)
+        service, agent, adapter, row, message = await self._run_presentation([
+            StreamEvent("final", {"status": "completed", "output": {"text": "长中文😀" * 1000},
+                                  "output_info": {"name": "lease_result"}}),
+        ], message_id="structured-send-failure", adapter=adapter)
+        self.assertEqual(len([text for text, finish in adapter.replies if finish]), 1)
+        self.assertEqual(len(adapter.native_attempts), 1)
+        self.assertEqual(adapter.native_delivered, [])
+        self.assertEqual(row.processing_status, "completed")
+        self.assertEqual(row.delivery_status, "failed")
+        attempts = list(adapter.attempts), list(adapter.native_attempts)
+        await service.receive(self.account, adapter, message)
+        self.assertEqual((adapter.attempts, adapter.native_attempts), attempts)
+        self.assertEqual(agent.calls, 1)
+
+    async def test_structured_output_scalar_false_zero_null_empty_is_visible_json(self):
+        for index, value in enumerate((False, 0, None, {}, [], "", [False, 0, None])):
+            with self.subTest(value=value):
+                _, _, adapter, row, _ = await self._run_presentation([
+                    StreamEvent("final", {"status": "completed", "output": value,
+                                          "output_info": {"name": "typed_result"}}),
+                ], message_id=f"structured-scalar-{index}", adapter=StructuredOutputChannelAdapter())
+                text, finish = adapter.replies[-1]
+                self.assertTrue(finish)
+                self.assertTrue(text.startswith("typed_result\n```json\n"))
+                decoded = json.loads(text.split("```json\n", 1)[1].removesuffix("\n```"))
+                self.assertEqual(decoded, value)
+                self.assertIs(type(decoded), type(value))
+                self.assertEqual(row.delivery_status, "sent")
+
+    async def test_structured_output_confirmed_proactive_text_is_not_sent_again(self):
+        from deep_agent.channels.service import structured_output_text_parts
+        value = {"ok": True, "text": "已由主动工具发出"}
+        raw, parts = structured_output_text_parts("lease_result", value, 20480)
+        for index, sent in enumerate((raw, parts[0])):
+            with self.subTest(sent=index):
+                _, _, adapter, row, _ = await self._run_presentation([
+                    StreamEvent("final", {"status": "completed", "output": value,
+                                          "output_info": {"name": "lease_result"}}),
+                ], message_id=f"structured-dedup-{index}", adapter=StructuredOutputChannelAdapter(), sent_texts=[sent])
+                self.assertEqual(adapter.replies[-1], ("已发送。", True))
+                self.assertEqual(adapter.native_attempts, [])
+                self.assertEqual(row.delivery_status, "sent")
+
+    async def test_structured_output_pending_error_candidates_are_never_delivered(self):
+        for index, status in enumerate(("pending", "failed", "interrupted")):
+            with self.subTest(status=status):
+                _, _, adapter, row, _ = await self._run_presentation([
+                    StreamEvent("output", {"accepted": False, "output": {"private": "PRIVATE_CANDIDATE"}}),
+                    StreamEvent("final", {"status": status, "output": "PRIVATE_CANDIDATE",
+                                          "output_info": {"name": "lease_result"}}),
+                ], message_id=f"structured-non-success-{index}", adapter=StructuredOutputChannelAdapter())
+                self.assertNotIn("PRIVATE_CANDIDATE", adapter.replies[-1][0])
+                self.assertEqual(adapter.native_attempts, [])
 
     async def test_presentation_accumulates_phases_with_newlines_and_only_rearms_loading_on_transition(self):
         _, _, adapter, row, _ = await self._run_presentation([

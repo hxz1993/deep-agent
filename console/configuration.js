@@ -7,7 +7,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20261020-database-charset";
+const CONFIGURATION_ASSET_VERSION = "20261022-release0140";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -91,7 +91,8 @@ async function loadAdminScripts() {
     "./configuration/database-connection.js",
     "./configuration/llm-providers.js",
     "./configuration/llm-models.js",
-    "./configuration/agents.js",
+    "./configuration/agent-output.js?v=20261022-release0140",
+    "./configuration/agents.js?v=20261022-release0140",
     "./configuration/agent-packages.js",
     "./configuration/agent-package-export.js",
     "./configuration/builtin-tools.js",

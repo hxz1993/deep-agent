@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.13.9`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.14.0`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -58,7 +58,7 @@ v0.7.0新增可选渠道网关：同仓、同镜像独立运行，公共Gateway/
 | [`src/deepfos_platform/`](src/deepfos_platform/README.md) | 平台配置、客户端、服务发现和部署运行时支撑 |
 | [`src/maintenance/`](src/maintenance/README.md) | 人工维护程序，不属于 Agent 工具 |
 | [`deploy/`](deploy/README.md) | Jenkins、Gunicorn 和 Docker Compose 部署配置 |
-| [`migrations/`](migrations/) | 数据库迁移；结构版本为 `011` |
+| [`migrations/`](migrations/) | 数据库迁移；结构版本为 `012` |
 | [`scripts/`](scripts/) | 开发、构建与环境准备脚本 |
 | [`tests/`](tests/README.md) | Python、接口、MCP 和 Console 测试 |
 | [`docs/`](docs/README.md) | 当前说明、技术设计和交互原型 |
@@ -228,6 +228,8 @@ DeepAgent 当前支持：
 启停状态：Agent 的 `capabilities` 字段保存本 Agent 明确关联的工具包编码，新 Agent 默认为空；
 `agents.skills` 同样只保存明确关联的 Skill。UI 工具包支持按 Agent 保存单工具范围；未限定时沿用整包关联。Output Tool 是最终输出契约，
 不属于工具包，也不进入 `capabilities`。
+
+0.14.0 起可在 Agent 的“输出”页签显式开启一份组合 JSON Schema；默认关闭并沿用旧文字/工具路径。开启后 HTTP/SSE 和 History 返回原生 JSON，Console 提供完整/分组视图。配置、校验额度、安装兼容和数据库 012 的部署要求见[结构化输出指南](docs/guides/structured-output.md)。
 
 Skill 管理接口和包格式见
 [`docs/design/12-agent-skills/skill-system-design.md`](docs/design/12-agent-skills/skill-system-design.md)。

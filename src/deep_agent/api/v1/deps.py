@@ -156,7 +156,23 @@ async def build_runner_for_agent(
         spec = replace(spec, instructions=f"{spec.instructions}\n\n{entry_instructions}")
     if capabilities is not None:
         spec.capabilities = canonical_tool_package_codes(capabilities)
-    return await _build_runner_from_spec(spec, ctx, request_headers=request_headers, channel_context=channel_context)
+    runner = await _build_runner_from_spec(spec, ctx, request_headers=request_headers, channel_context=channel_context)
+    async def load_output_config():
+        current = await ctx.stores.agent.get_by_id(agent_id)
+        if current is None:
+            raise AgentNotFoundError(agent_id)
+        if not current.structured_output_enabled:
+            return None
+        current, config = await ctx.stores.agent.get_output_configuration(agent_id)
+        if current is None:
+            raise AgentNotFoundError(agent_id)
+        if not current.structured_output_enabled:
+            return None
+        if config is None:
+            raise ValueError("Enabled structured output has no definition")
+        return {"name": config.name, "description": config.description, "json_schema": config.json_schema}
+    runner._output_config_loader = load_output_config
+    return runner
 
 
 async def _build_runner_from_spec(

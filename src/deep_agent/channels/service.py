@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -15,6 +17,42 @@ from deep_agent.core.exceptions import AgentModelNotConfiguredError
 from .commands import help_text, parse_command
 from .contracts import ChannelAdapter, InboundMessage
 from .metadata import wecom_application_id
+from .outbound import MessageTarget, PreparedComponent
+
+
+def structured_output_text_parts(name: str, output: Any, byte_limit: int) -> tuple[str, list[str]]:
+    """Closed Markdown blocks, split only between complete UTF-8 characters.
+
+    This is a deterministic IM projection. The API/Event Store retain the
+    original JSON; a split block is a fragment, not a second business result.
+    """
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", name) is None:
+        raise ValueError("Structured output has no valid output name")
+    if not isinstance(byte_limit, int) or isinstance(byte_limit, bool) or byte_limit <= 0:
+        raise ValueError("Channel text byte limit is invalid")
+    value = json.dumps(output, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2)
+    suffix = "\n```"
+    single = f"{name}\n```json\n{value}{suffix}"
+    if len(single.encode("utf-8")) <= byte_limit:
+        return value, [single]
+    # Reserving the maximum possible digit width avoids iterative renumbering
+    # changing the split boundaries. Real adapters permit at least 2 KiB.
+    digits = "9" * len(str(len(value)))
+    header = f"{name} [{digits}/{digits}]\n```json\n"
+    available = byte_limit - len((header + suffix).encode("utf-8"))
+    if available < 4:
+        raise ValueError("Channel text byte limit cannot contain output framing")
+    raw_parts, start, size = [], 0, 0
+    for index, character in enumerate(value):
+        width = len(character.encode("utf-8"))
+        if size + width > available:
+            raw_parts.append(value[start:index])
+            start, size = index, 0
+        size += width
+    raw_parts.append(value[start:])
+    count = len(raw_parts)
+    return value, [f"{name} [{index}/{count}]\n```json\n{part}{suffix}"
+                   for index, part in enumerate(raw_parts, 1)]
 
 
 @dataclass
@@ -379,6 +417,7 @@ class ChannelService:
             _log_job("channel_dispatched", job)
             last_sent = 0.0
             final_status = "completed"
+            structured_output = None
             stream = self.deep_agent.stream_chat(
                 account, session_id=job.session_id, message=job.message.prompt, attachments=attachments,
                 channel_run_id=job.run_id, **input_options,
@@ -420,6 +459,13 @@ class ChannelService:
                     if "output" in event.data:
                         value = event.data["output"]
                         final_output = value if isinstance(value, str) else ""
+                        if event.data.get("output_info") is not None:
+                            # An attempt/Pending/error candidate is never an
+                            # accepted final answer, even with malformed metadata.
+                            final_output = ""
+                            if final_status == "completed":
+                                info = event.data["output_info"]
+                                structured_output = (info.get("name") if isinstance(info, dict) else None, value)
                 elif event.event == "cancelled":
                     job.terminal = True
                     final_status = "interrupted"
@@ -449,6 +495,9 @@ class ChannelService:
             _log_job("channel_processing_failed" if processing == "failed" else
                      "channel_cancelled" if processing == "interrupted" else "channel_completed",
                      job, status=final_status)
+            if structured_output is not None and final_status == "completed":
+                await self._deliver_structured_output(job, *structured_output)
+                return
             if processing == "completed" and job.message_tool_sent:
                 if not output.strip() or hashlib.sha256(output.strip().encode()).hexdigest() in job.sent_text_hashes:
                     output = "已发送。"
@@ -518,6 +567,51 @@ class ChannelService:
         else:
             await self.store.update_run(job.run_id, delivery_status="sent")
             _log_job("channel_delivery_sent", job)
+
+    async def _deliver_structured_output(self, job: MessageJob, name: str, output: Any) -> None:
+        """One attempt per segment; a lost ACK must not resend earlier segments."""
+        try:
+            capabilities = job.adapter.message_capabilities()
+            raw, parts = structured_output_text_parts(name, output, capabilities.text_limit)
+            full = f"{name}\n```json\n{raw}\n```"
+            hashes = job.sent_text_hashes
+            if job.message_tool_sent and any(hashlib.sha256(text.strip().encode()).hexdigest() in hashes
+                                             for text in (raw, full)):
+                await self._deliver(job, "已发送。")
+                return
+            remaining = [part for part in parts if hashlib.sha256(part.strip().encode()).hexdigest() not in hashes]
+            if not remaining:
+                await self._deliver(job, "已发送。")
+                return
+            metadata = job.message.source_metadata or {}
+            target = MessageTarget(
+                account_id=job.account.id, peer_type=job.message.peer_type,
+                peer_id=job.message.peer_id, message_id=job.message.message_id,
+                thread_id=job.message.thread_id,
+                chat_id=metadata.get("dingtalk_conversation_id" if job.account.channel_type == "dingtalk" else "lark_chat_id"),
+                recipient_id=metadata.get("dingtalk_staff_id") if job.account.channel_type == "dingtalk" else None,
+            )
+            for index, part in enumerate(remaining):
+                if job.stopped:
+                    raise asyncio.CancelledError
+                async with asyncio.timeout(120):
+                    if index == 0:
+                        # Finish the existing preview/spinner under its original ID.
+                        await job.adapter.reply(job.message, job.reply_id, part, True)
+                    else:
+                        # WeCom's SDK does not promise multiple streams per incoming
+                        # frame. Existing outbound sends create independent native
+                        # request/message IDs and are already scoped to this peer.
+                        await job.adapter.send_component(target, PreparedComponent(kind="text", text=part),
+                                                         reply_to_current=False)
+                hashes.add(hashlib.sha256(part.strip().encode()).hexdigest())
+        except Exception as exc:
+            _log_job("channel_delivery_failed", job, error_type=type(exc).__name__)
+            await self.store.update_run(job.run_id, delivery_status="failed", error_code="delivery_failed",
+                                        error_message="Channel structured output delivery failed")
+            return
+        await self.store.update_run(job.run_id, delivery_status="sent")
+        _log_job("channel_delivery_sent", job)
 
     async def _read_command(self, peer: PeerQueue, job: MessageJob, command: str) -> None:
         await self.store.update_run(job.run_id, processing_status="running")

@@ -211,3 +211,11 @@ test('预制目录只显示存在的提示词版本',async()=>{
  assert.match(html,/提示词 V85/);
  assert.equal((html.match(/class="agent-package-version"/g)||[]).length,1);
 });
+
+test('安装摘要显示输出开关和覆盖旧定义的影响',()=>{
+ const {api}=harness();
+ assert.equal(api.outputInstallSummary({}), '');
+ assert.match(api.outputInstallSummary({structured_output:{enabled:true,name:'lease_result'}}),/lease_result.*随包安装定义/);
+ assert.match(api.outputInstallSummary({structured_output:{enabled:false,target_enabled:true}}),/将关闭，并移除目标原有输出定义/);
+ assert.match(api.outputInstallSummary({structured_output:{enabled:false,target_enabled:false}}),/关闭/);
+});

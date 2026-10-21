@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationInfo, field_validator, model_validator
 
 from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.schemas.llm_model import LlmModelSummary
@@ -26,7 +26,34 @@ class _RejectRemovedAgentFields(BaseModel):
             raise ValueError("temperature 已移除，模型使用服务端默认采样参数")
         if isinstance(value, dict) and "max_requests" in value:
             raise ValueError(LEGACY_MAX_REQUESTS_MESSAGE)
+        if isinstance(value, dict) and ("updated_by" in value or "updated_by_user" in value):
+            raise ValueError("updated_by is read-only and comes from the authenticated operator")
         return value
+
+
+class AgentOutputConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    description: str | None = Field(default=None, max_length=8192)
+    json_schema: dict
+
+    @field_validator("json_schema")
+    @classmethod
+    def validate_schema(cls, value: dict) -> dict:
+        from deep_agent.structured_output.schema import normalize_schema
+        return normalize_schema(value)
+
+
+class AgentOutputConfigResponse(BaseModel):
+    structured_output_enabled: bool
+    output_config: AgentOutputConfig | None
+
+
+class AgentUpdater(BaseModel):
+    id: str
+    username: str | None = None
+    resolution: str
 
 
 class AgentChatRequest(BaseModel):
@@ -51,6 +78,14 @@ class AgentCreate(_RejectRemovedAgentFields):
         default_factory=list,
         description="Skill package codes explicitly associated with this agent.",
     )
+    structured_output_enabled: StrictBool = False
+    output_config: AgentOutputConfig | None = None
+
+    @model_validator(mode="after")
+    def require_output_definition(self):
+        if self.structured_output_enabled and self.output_config is None:
+            raise ValueError("output_config is required when structured output is enabled")
+        return self
 
     @field_validator(*AGENT_REQUIRED_FIELDS, "model_id")
     @classmethod
@@ -83,6 +118,8 @@ class AgentUpdate(_RejectRemovedAgentFields):
     prompt: str | None = None
     capabilities: list[str] | None = None
     skills: list[str] | None = None
+    structured_output_enabled: StrictBool | None = None
+    output_config: AgentOutputConfig | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -95,6 +132,8 @@ class AgentUpdate(_RejectRemovedAgentFields):
                 raise ValueError("skills cannot be null")
             if "capabilities" in value and value["capabilities"] is None:
                 raise ValueError("capabilities cannot be null")
+            if "structured_output_enabled" in value and value["structured_output_enabled"] is None:
+                raise ValueError("structured_output_enabled cannot be null")
         return value
 
     @field_validator(*AGENT_REQUIRED_FIELDS, "model_id")
@@ -147,6 +186,9 @@ class AgentResponse(BaseModel):
     prompt: str
     capabilities: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    structured_output_enabled: bool = False
+    updated_by: str | None = None
+    updated_by_user: AgentUpdater | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 
@@ -160,6 +202,8 @@ class AgentResponse(BaseModel):
             prompt=row.prompt,
             capabilities=canonical_tool_package_codes(row.capabilities),
             skills=row.skills or [],
+            structured_output_enabled=bool(row.structured_output_enabled),
+            updated_by=row.updated_by,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

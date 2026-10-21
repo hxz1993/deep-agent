@@ -1,12 +1,13 @@
+import { mountStructuredOutput } from "./structured-output.js?v=20261022-release0140";
 import { cacheMessageSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 import { tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
-import { renderPlanSnapshot } from "./plan-view.js?v=20260922-trajectory-8";
+import { renderPlanSnapshot } from "./plan-view.js?v=20261022-release0140";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { attachmentPreviewAttributes, attachmentDownloadUrl } from "./attachment-preview.js?v=20260922-trajectory-8";
-import { toolResultPresentation } from "./assistant-presentation.js?v=20260912-21";
+import { toolResultPresentation } from "./assistant-presentation.js?v=20261022-release0140";
 import { renderPtcExecution } from "./ptc-execution.js?v=20260924-5";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
@@ -57,6 +58,7 @@ function eventLabel(kind, part = {}) {
   if (kind === "assistant") return "Assistant message";
   if (kind === "title") return "Session title";
   if (kind === "error") return "异常";
+  if (kind === "output") return part.name || "输出";
   if (kind === "compaction") return "Compaction";
   if (kind === "planning") return part.tool || "任务计划";
   if (kind === "deferred") return part.tool || "等待用户操作";
@@ -68,6 +70,7 @@ function eventSummary(kind, source = {}) {
   if (kind === "input") return valuePreview(source.content) || "仅包含附件或上下文引用";
   if (["thinking", "assistant"].includes(kind)) return valuePreview(source.content);
   if (kind === "title") return valuePreview(source.title) || "Session title";
+  if (kind === "output") return source.accepted ? "已接受结构化输出" : valuePreview(source.errors) || "输出未被接受";
   if (kind === "error") return valuePreview(source.message) || "执行异常";
   if (kind === "compaction") {
     const before = source.budget?.estimated_tokens_before ?? source.budget?.estimated_before;
@@ -308,6 +311,52 @@ function projectExecutionError(event, inputSequence) {
   return projected;
 }
 
+function outputContract(items, turnId) {
+  for (const event of items) {
+    if (event.turn_id !== turnId) continue;
+    const contract = storedMessage(event)?.metadata?.deepagent_output_contract;
+    if (contract?.enabled === true || contract?.name) return contract;
+  }
+  return null;
+}
+
+function outputSourceMatches(fact, event, part, offset) {
+  const source = fact.payload?.source || {};
+  const sourceIds = source.event_ids || [];
+  const sourceIndex = Number(event.payload?.source?.part_index || 0) + offset;
+  if (sourceIds.length && !sourceIds.includes(event.event_id)) return false;
+  if (!sourceIds.length && (fact.run_id !== event.run_id || source.message_ordinal !== event.payload?.source?.message_ordinal)) return false;
+  return part?.tool_call_id === fact.payload?.tool_call_id
+    && (source.part_index == null || source.part_index === sourceIndex);
+}
+
+function projectOutputAttempt(event, inputSequence, items) {
+  const payload = event.payload || {};
+  const contract = outputContract(items, event.turn_id);
+  let candidate, candidateFound = Object.hasOwn(payload, "output");
+  if (candidateFound) candidate = payload.output;
+  else {
+    for (const source of items) {
+      const parts = storedMessage(source)?.parts || [];
+      const index = parts.findIndex((part, offset) => toolRole(part) === "call" && outputSourceMatches(event, source, part, offset));
+      if (index < 0) continue;
+      candidate = parts[index].args;
+      if (typeof candidate === "string") { try { candidate = JSON.parse(candidate); } catch { /* Invalid raw arguments remain visible as text. */ } }
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate) && contract?.json_schema && contract.json_schema.type !== "object" && Object.hasOwn(candidate, "response")) candidate = candidate.response;
+      candidateFound = true;
+      break;
+    }
+  }
+  return {
+    ...newEvent({ id: event.event_id, kind: "output", inputSequence: Math.max(inputSequence, 1), runId: event.run_id,
+      timestamp: event.created_at, status: payload.accepted ? "completed" : "failed", part: payload, payload,
+      native: { event_ids: [event.event_id], source_event_ids: payload.source?.event_ids || [], contract },
+    }),
+    sequence: Number(event.sequence || 0), turn_id: event.turn_id, event_type: "output/attempt",
+    tool_call_id: payload.tool_call_id, candidate, candidate_found: candidateFound,
+  };
+}
+
 /** Build semantic trajectory rows from complete Message Events. */
 export function buildTrajectory(history = {}) {
   const items = [...(Array.isArray(history?.items) ? history.items : [])]
@@ -315,9 +364,15 @@ export function buildTrajectory(history = {}) {
   let inputSequence = 0;
   const projected = [];
   const tools = new Map();
+  const outputCallsByRun = new Map();
   const assistantMessages = new Map();
   const automaticTitles = new Map();
+  const outputFacts = items.filter(event => event.event_type === "output/attempt");
   for (const event of items) {
+    if (event.event_type === "output/attempt") {
+      projected.push(projectOutputAttempt(event, inputSequence, items));
+      continue;
+    }
     if (event.event_type === "execution/error") {
       projected.push(projectExecutionError(event, inputSequence));
       continue;
@@ -434,6 +489,16 @@ export function buildTrajectory(history = {}) {
       const role = toolRole(part);
       const callId = part?.tool_call_id;
       if (!role || !callId) return;
+      if (part.part_kind === "retry-prompt" && !part.tool_name && message.metadata?.deepagent_output_budget) return;
+      const outputMetadata = message.metadata?.deepagent_output;
+      const absolutePartIndex = Number(event.payload?.source?.part_index || 0) + offset;
+      const outputCallKey = `${event.run_id || ""}:${callId}`;
+      if (role === "call") outputCallsByRun.set(outputCallKey,
+        (outputMetadata?.part_indices || []).includes(absolutePartIndex)
+        || outputFacts.some(fact => outputSourceMatches(fact, event, part, offset)));
+      // SDK RetryPrompt may omit tool_name. Pair it with the nearest actual call
+      // in this Run, rather than creating a normal tool or guessing by its name.
+      if (outputCallsByRun.get(outputCallKey)) return;
       const toolName = part.tool_name || null;
       let tool = tools.get(callId);
       const repeatedCall = role === "call" && tool?.native?.call_event_id
@@ -465,6 +530,10 @@ export function buildTrajectory(history = {}) {
         tool.sequence = Number(event.sequence || 0) + (offset + 1) / 1000;
         tool.turn_id = event.turn_id || null;
         tool.event_type = "tool/interaction";
+        const dispatch = message.metadata?.deepagent_dispatch;
+        const partIndex = Number(event.payload?.source?.part_index || 0) + offset;
+        tool.dispatched = !(dispatch?.rejected === true && (dispatch.not_dispatched_part_indices || []).includes(partIndex));
+        if (!tool.dispatched) { tool.status = "failed"; tool.summary = "未分发：模型响应被拒绝"; }
         tool.timestamp_end = event.updated_at || tool.timestamp;
         tools.set(callId, tool);
         projected.push(tool);
@@ -476,7 +545,7 @@ export function buildTrajectory(history = {}) {
         tool.native = { ...(tool.native || {}), call_event_id: event.event_id, call_part_offset: offset };
       } else {
         const metadata = part.metadata && typeof part.metadata === "object" ? part.metadata : {};
-        tool.status = toolResultPresentation(part).status;
+        tool.status = tool.dispatched === false ? "failed" : toolResultPresentation(part).status;
         tool.result = redactTrajectoryValue(jsonClone({
           result: part.content ?? null,
           outcome: part.outcome || null,
@@ -491,7 +560,7 @@ export function buildTrajectory(history = {}) {
           applyLegacyInterval(tool, tool.timestamp, part.timestamp,
             "旧记录估算：工具调用入库至结果产生，包含调度等待，不是精确执行耗时。未使用更新时间。");
         }
-        tool.summary = eventSummary(tool.kind, { type: "tool_result", result: part.content });
+        tool.summary = tool.dispatched === false ? "未分发：模型响应被拒绝" : eventSummary(tool.kind, { type: "tool_result", result: part.content });
       }
     });
   }
@@ -521,6 +590,7 @@ export function trajectoryStats(events = []) {
     calls: events.filter((event) => (
       TOOL_KINDS.has(event.kind)
       && event.event_type === "tool/interaction"
+      && event.dispatched !== false
     )).length,
     runs: new Set(events.map((event) => event.run_id).filter(Boolean)).size,
   };
@@ -611,6 +681,7 @@ function kindBadge(kind) {
     deferred: "交互",
     compaction: "压缩",
     error: "异常",
+    output: "输出",
   }[kind] || String(kind || "事件");
 }
 
@@ -960,7 +1031,12 @@ const SUMMARY_RENDERERS = Object.freeze({
   compaction: renderCompactionSummary,
   title: renderTitleSummary,
   error: renderExecutionErrorSummary,
+  output: renderOutputSummary,
 });
+
+function renderOutputSummary(event) {
+  return renderSummarySection("输出信息", `${renderFact("输出编码", event.payload?.name, { mono: true })}${renderFact("调用 ID", event.tool_call_id, { mono: true })}${renderFact("尝试", event.payload?.attempt)}${renderFact("状态", event.payload?.accepted ? "Completed" : "Error")}${event.payload?.errors?.length ? `<pre class="trajectory-raw">${escapeHtml(JSON.stringify(event.payload.errors, null, 2))}</pre>` : ""}<button type="button" class="btn-link" data-trajectory-detail-tab="output">查看输出</button>`);
+}
 
 function renderSummary(event, events, attachmentUrl) {
   const renderer = SUMMARY_RENDERERS[event.kind];
@@ -1026,6 +1102,7 @@ function renderRunCode(event, line = null, callName = null, compact = false) {
 function detailTabs(event) {
   const tabs = [["summary", "Summary"]];
   if (trajectoryUsage(event)) tabs.push(["usage", "Usage"]);
+  if (event.kind === "output") return [...tabs, ["output", "输出"], ...(event.native?.contract?.json_schema ? [["schema", "Schema"]] : []), ["event", "原始记录"]];
   if (isPythonCodeEvent(event)) tabs.push(["code", "Code"]);
   if (isRunCodeEvent(event)) tabs.push(["execution", "Calls"]);
   if (TOOL_KINDS.has(event.kind)) {
@@ -1079,12 +1156,15 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, 
     });
   }
   if (activeTab === "result") content = renderJsonBlock(event.result);
+  if (activeTab === "output" && event.kind === "output") content = event.candidate_found
+    ? '<div data-structured-output-detail></div>' : '<p class="trajectory-summary-empty">原始候选不可用。</p>';
+  if (activeTab === "schema" && event.kind === "output") content = renderJsonBlock(event.native?.contract?.json_schema);
   if (activeTab === "preview") content = renderPreview(event);
   if (activeTab === "raw") content = renderRaw(event);
   if (activeTab === "usage") content = renderTrajectoryUsage(event);
   if (activeTab === "code") content = renderRunCode(event);
   if (activeTab === "execution") content = renderPtcExecution(event, { ...ptcState, codeView: (step) => renderRunCode(event, step.source_line, step.tool_name, true) });
-  const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title"].includes(event.kind)
+  const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title", "output"].includes(event.kind)
     ? event.label
     : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
   const detailBodyClass = activeTab === "code"
@@ -1092,7 +1172,7 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, 
     : activeTab === "execution" ? "trajectory-detail-body is-ptc" : "trajectory-detail-body";
   return `
     <header class="trajectory-detail-head">
-      <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}<em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></div>
+      <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}<em class="${escapeHtml(event.status)}">${escapeHtml(event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status))}</em></div>
     </header>
     <nav class="trajectory-detail-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="${activeTab === id ? "active" : ""}" data-trajectory-detail-tab="${id}">${label}</button>`).join("")}</nav>
     <div class="${detailBodyClass}">${content}</div>`;
@@ -1192,11 +1272,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     }
     const html = [];
     events.forEach((event) => {
-      const showToolName = TOOL_KINDS.has(event.kind);
+      const showToolName = TOOL_KINDS.has(event.kind) || event.kind === "output";
       const summary = event.summary || "No content";
       html.push(`<button type="button" class="trajectory-row ${escapeHtml(event.kind)} ${selectedId === event.id ? "active" : ""}" data-trajectory-id="${escapeHtml(event.id)}">
         <span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
-        <span class="trajectory-row-meta">${renderRowTime(event, clockMode)}<em class="${escapeHtml(event.status)}">${escapeHtml(statusLabel(event.status))}</em></span>
+        <span class="trajectory-row-meta">${renderRowTime(event, clockMode)}<em class="${escapeHtml(event.status)}">${escapeHtml(event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status))}</em></span>
       </button>`);
     });
     list.innerHTML = html.join("");
@@ -1223,6 +1303,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (query("main.chat")?.classList.contains("trajectory-active")) {
       const codeState = selectedId === renderedSelectedId && detailTab === renderedDetailTab ? globalThis.DeepAgentMarkdown?.captureCodeState?.(detail) : [];
       detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl, { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab });
+      const outputHost = detail.querySelector?.("[data-structured-output-detail]");
+      if (outputHost && selected?.candidate_found) mountStructuredOutput(outputHost, { id: selected.id, name: selected.payload.name, output: selected.candidate, failed: !selected.payload.accepted });
       globalThis.DeepAgentMarkdown?.restoreCodeState?.(detail, codeState);
       globalThis.DeepAgentMarkdown?.renderDiagrams?.(detail);
       if (selectedId === renderedSelectedId) {
@@ -1339,6 +1421,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       if (stored.event_type === "user/message") {
         if (liveInput) liveEvents = liveEvents.filter((item) => item !== liveInput);
       }
+      if (stored.event_type === "output/attempt") liveEvents = liveEvents.filter(item => item.id !== stored.event_id);
       if (stored.event_type === "compaction") {
         liveEvents = liveEvents.filter((item) => !(item.kind === "compaction" && item.compaction_event_id === stored.event_id));
       }
@@ -1359,6 +1442,14 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       if (!selectionPinned || !allEvents().some((item) => item.id === selectedId)) {
         selectedId = projectedTool?.id || projectedMessage?.id || stored.event_id;
       }
+      scheduleRender();
+      return;
+    }
+    if (type === "output") {
+      if (!payload.output_id || historyEvents.some(item => item.id === payload.output_id)) return;
+      const existing = liveEvents.find(item => item.id === payload.output_id);
+      const projected = projectOutputAttempt({ event_id: payload.output_id, sequence: payload.sequence, turn_id: payload.turn_id, run_id: payload.run_id, event_type: "output/attempt", created_at: new Date().toISOString(), payload }, Math.max(trajectoryStats(allEvents()).inputs, 1), history.items || []);
+      if (existing) Object.assign(existing, projected); else liveEvents.push(projected);
       scheduleRender();
       return;
     }

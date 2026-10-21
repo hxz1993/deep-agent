@@ -1,14 +1,44 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.db.models import Agent, LlmModel, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
+from deep_agent.db.models import Agent, AgentOutputConfig, LlmModel, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
 from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
-from deep_agent.schemas.agent import AgentCreate, AgentUpdate
+from deep_agent.schemas.agent import AgentCreate, AgentUpdate, AgentOutputConfig as OutputConfig
+
+
+class InvalidAgentOutputConfig(ValueError):
+    """The merged Agent/output state is invalid, rather than a name conflict."""
+
+
+def trusted_updater(user_id: str | None) -> str | None:
+    if user_id is None:
+        return None
+    if not user_id.strip() or len(user_id.strip()) > 128:
+        raise InvalidAgentOutputConfig("authenticated operator id must contain 1 to 128 characters")
+    return user_id.strip()
+
+
+async def save_output_config(db: AsyncSession, agent_id: str, config: OutputConfig | None) -> None:
+    """Caller holds the parent Agent lock/configuration write barrier."""
+    current = await db.get(AgentOutputConfig, agent_id)
+    if config is None:
+        if current is not None:
+            await db.delete(current)
+        return
+    values = config.model_dump()
+    if current is None:
+        db.add(AgentOutputConfig(agent_id=agent_id, **values))
+    else:
+        for key, value in values.items():
+            setattr(current, key, value)
+        current.updated_at = datetime.now(UTC)
 
 
 class AgentStoreBase(SessionBoundMixin):
@@ -24,7 +54,19 @@ class AgentStoreBase(SessionBoundMixin):
         async with self._read() as db:
             return await self._list_all(db)
 
-    async def create_unique(self, data: AgentCreate) -> Agent:
+    async def get_output_config(self, agent_id: str) -> AgentOutputConfig | None:
+        async with self._read() as db:
+            return await db.get(AgentOutputConfig, agent_id)
+
+    async def get_output_configuration(self, agent_id: str) -> tuple[Agent | None, AgentOutputConfig | None]:
+        """One statement gives management a consistent switch/definition pair."""
+        async with self._read() as db:
+            result = (await db.execute(select(Agent, AgentOutputConfig).outerjoin(
+                AgentOutputConfig, AgentOutputConfig.agent_id == Agent.id,
+            ).where(Agent.id == agent_id))).first()
+            return (result[0], result[1]) if result is not None else (None, None)
+
+    async def create_unique(self, data: AgentCreate, *, user_id: str | None = None) -> Agent:
         try:
             async with self._write() as db:
                 if data.model_id is not None:
@@ -40,9 +82,14 @@ class AgentStoreBase(SessionBoundMixin):
                     ui_tool_selection={},
                     skills=data.skills,
                     prompt=data.prompt,
+                    structured_output_enabled=data.structured_output_enabled,
+                    updated_by=trusted_updater(user_id),
                 )
                 db.add(row)
                 await db.flush()
+                if data.output_config is not None:
+                    await save_output_config(db, row.id, data.output_config)
+                    await db.flush()
                 await db.refresh(row)
                 return row
         except IntegrityError as exc:
@@ -50,7 +97,7 @@ class AgentStoreBase(SessionBoundMixin):
                 raise
             raise ValueError(f"Agent write conflict: {data.name}") from exc
 
-    async def update_unique(self, agent_id: str, data: AgentUpdate) -> Agent | None:
+    async def update_unique(self, agent_id: str, data: AgentUpdate, *, user_id: str | None = None) -> Agent | None:
         try:
             async with self._write() as db:
                 row = await self._get_by_id(db, agent_id)
@@ -72,11 +119,30 @@ class AgentStoreBase(SessionBoundMixin):
                     conflict = await self._get_by_name(db, data.name)
                     if conflict is not None:
                         raise ValueError(f"Agent already exists: {data.name}")
-                updates = data.model_dump(exclude_unset=True)
+                enabled = (data.structured_output_enabled if "structured_output_enabled" in data.model_fields_set
+                           else row.structured_output_enabled)
+                if "output_config" in data.model_fields_set:
+                    config = data.output_config
+                elif enabled:
+                    existing_config = await db.get(AgentOutputConfig, agent_id)
+                    try:
+                        config = OutputConfig.model_validate(existing_config) if existing_config is not None else None
+                    except ValueError as exc:
+                        raise InvalidAgentOutputConfig("saved output_config is invalid") from exc
+                else:
+                    config = None
+                if enabled and config is None:
+                    raise InvalidAgentOutputConfig("output_config is required when structured output is enabled")
+                updates = data.model_dump(exclude_unset=True, exclude={"output_config"})
                 # Keep the legacy column for existing databases, but never use its old per-tool scope.
                 updates["ui_tool_selection"] = {}
                 for field, value in updates.items():
                     setattr(row, field, value)
+                if user_id is not None:
+                    row.updated_by = trusted_updater(user_id)
+                row.updated_at = datetime.now(UTC)
+                if "output_config" in data.model_fields_set:
+                    await save_output_config(db, agent_id, config)
                 await db.flush()
                 await db.refresh(row)
                 return row
@@ -120,6 +186,7 @@ class AgentStoreBase(SessionBoundMixin):
             await db.execute(update(ChannelSessionBinding).where(ChannelSessionBinding.session_id.in_(sessions)).values(session_id=None))
             await db.execute(delete(ChatSessionEvent).where(ChatSessionEvent.session_id.in_(sessions)))
             await db.execute(delete(ChatSession).where(ChatSession.agent_id == agent_id))
+            await db.execute(delete(AgentOutputConfig).where(AgentOutputConfig.agent_id == agent_id))
             result = await db.execute(delete(Agent).where(Agent.id == agent_id))
             await db.flush()
             return result.rowcount > 0

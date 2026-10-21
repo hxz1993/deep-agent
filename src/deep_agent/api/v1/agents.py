@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.models.provider_registry import (
@@ -14,9 +14,11 @@ from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.services.resource_deletion import DeleteConfirmation, delete_resource
 from deep_agent.core.context import AppContextDep
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.db.deps import get_agent_store, get_llm_model_store
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.stores.agent import AgentStoreBase
+from deep_agent.db.stores.agent.base import InvalidAgentOutputConfig
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
 from deep_agent.schemas.agent import (
     AgentCreate,
@@ -24,7 +26,11 @@ from deep_agent.schemas.agent import (
     AgentPromptEstimateResponse,
     AgentResponse,
     AgentUpdate,
+    AgentOutputConfig,
+    AgentOutputConfigResponse,
+    AgentUpdater,
 )
+from deep_agent.security.diagnostic_users import DiagnosticUserAuthenticationError, resolve_diagnostic_users
 from deep_agent.skills.runtime import validate_skill_codes
 
 router = APIRouter()
@@ -104,16 +110,47 @@ async def _validate_skills(
         )
 
 
+async def _validate_output_name(config, capabilities, ctx) -> None:
+    if config is None:
+        return
+    # Only existing catalogs are consulted here. Dynamic MCP disclosure is
+    # checked again against the actual assembled tool definitions at Run time.
+    capabilities = canonical_tool_package_codes(capabilities)
+    selected = ctx.registry.selected(capabilities)
+    known = {tool.name for package in selected for tool in package.tools}
+    from deep_agent.capabilities.ui.builtin import builtin_ui_records
+    known.update(tool.name for tool in builtin_ui_records() if tool.package_code in capabilities)
+    for tool in await ctx.stores.ui_tool.list_all():
+        if tool.package_code in capabilities:
+            known.add(tool.name)
+    if config.name in known:
+        raise HTTPException(status_code=422, detail="output_config.name conflicts with an enabled tool")
+
+
 @router.get(
     "/agents",
     response_model=list[AgentResponse],
     dependencies=CONSOLE_ADMIN_DEPENDENCIES,
 )
 async def list_agents(
+    request: Request,
+    user: RequestUserDep,
     store: AgentStoreBase = Depends(get_agent_store),
 ) -> list[AgentResponse]:
     rows = await store.list_all()
-    return [_agent_response(row) for row in rows]
+    try:
+        profiles = await resolve_diagnostic_users(request, user, (row.updated_by for row in rows if row.updated_by))
+    except DiagnosticUserAuthenticationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail="Platform account authorization rejected") from exc
+    responses = [_agent_response(row) for row in rows]
+    for response in responses:
+        if response.updated_by:
+            profile = profiles.get(response.updated_by, {})
+            response.updated_by_user = AgentUpdater(
+                id=response.updated_by, username=profile.get("username"),
+                resolution=profile.get("resolution", "unavailable"),
+            )
+    return responses
 
 
 @router.post(
@@ -170,11 +207,14 @@ async def get_agent(
 async def create_agent(
     body: AgentCreate,
     ctx: AppContextDep,
+    user: RequestUserDep,
     store: AgentStoreBase = Depends(get_agent_store),
     model_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> AgentResponse:
     await _validate_tool_packages(body.capabilities, ctx)
     await _validate_skills(body.skills, ctx)
+    if body.output_config is not None:
+        await _validate_output_name(body.output_config, body.capabilities, ctx)
     normalized_model_id = None
     if body.model_id is not None:
         normalized_model_id = await _ensure_model_selectable(model_store, body.model_id, ctx)
@@ -183,7 +223,9 @@ async def create_agent(
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Agent already exists: {body.name}")
     try:
-        row = await store.create_unique(body)
+        row = await store.create_unique(body, user_id=user)
+    except InvalidAgentOutputConfig as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return _agent_response(row)
@@ -198,6 +240,7 @@ async def update_agent(
     agent_id: str,
     body: AgentUpdate,
     ctx: AppContextDep,
+    user: RequestUserDep,
     store: AgentStoreBase = Depends(get_agent_store),
     model_store: LlmModelStoreBase = Depends(get_llm_model_store),
 ) -> AgentResponse:
@@ -209,6 +252,12 @@ async def update_agent(
         await _validate_tool_packages(body.capabilities, ctx)
     if "skills" in body.model_fields_set:
         await _validate_skills(body.skills or [], ctx)
+    output_config = body.output_config
+    enabled = body.structured_output_enabled if "structured_output_enabled" in body.model_fields_set else current.structured_output_enabled
+    if enabled and "output_config" not in body.model_fields_set:
+        output_config = await store.get_output_config(normalized_id)
+    if output_config is not None:
+        await _validate_output_name(output_config, body.capabilities if body.capabilities is not None else current.capabilities, ctx)
     if body.model_id is not None and body.model_id != current.model_id:
         normalized_model_id = await _ensure_model_selectable(
             model_store,
@@ -217,12 +266,33 @@ async def update_agent(
         )
         body = body.model_copy(update={"model_id": normalized_model_id})
     try:
-        row = await store.update_unique(normalized_id, body)
+        row = await store.update_unique(normalized_id, body, user_id=user)
+    except InvalidAgentOutputConfig as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")
     return _agent_response(row)
+
+
+@router.get(
+    "/agents/{agent_id}/output-config",
+    response_model=AgentOutputConfigResponse,
+    dependencies=CONSOLE_ADMIN_DEPENDENCIES,
+)
+async def get_agent_output_config(
+    agent_id: str,
+    store: AgentStoreBase = Depends(get_agent_store),
+) -> AgentOutputConfigResponse:
+    normalized_id = _parse_agent_id(agent_id)
+    row, config = await store.get_output_configuration(normalized_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")
+    return AgentOutputConfigResponse(
+        structured_output_enabled=row.structured_output_enabled,
+        output_config=AgentOutputConfig.model_validate(config) if config is not None else None,
+    )
 
 
 @router.delete(

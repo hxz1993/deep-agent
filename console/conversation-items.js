@@ -1,4 +1,4 @@
-import { assistantActionsFromHistoryItems } from "./assistant-presentation.js?v=20261002-console-audit";
+import { assistantActionsFromHistoryItems } from "./assistant-presentation.js?v=20261022-release0140";
 
 function itemOrder(item) {
   return [Number(item?.order?.sequence || 0), Number(item?.order?.part_offset || 0), String(item?.item_id || "")];
@@ -56,7 +56,7 @@ export function projectConversationItems(items = []) {
         attachments: Array.isArray(item.attachments) ? item.attachments : [],
         contextRefs: Array.isArray(item.context_refs) ? item.context_refs : [],
       });
-    } else if (["assistant_message", "tool"].includes(item.kind) && item.status !== "removed") {
+    } else if (["assistant_message", "tool", "structured_output"].includes(item.kind) && item.status !== "removed") {
       assistantItems.push(item);
     }
   }

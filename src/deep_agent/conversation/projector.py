@@ -18,6 +18,7 @@ from deep_agent.conversation.models import (
     PlanConversationItem,
     ToolConversationItem,
     UserConversationItem,
+    StructuredOutputConversationItem,
 )
 from deep_agent.db.event_codec import EVENT_SCHEMA_VERSION, MESSAGE_EVENT_TYPES, group_message_events
 from deep_agent.time import ensure_utc
@@ -48,9 +49,27 @@ def project_session_events(
     items: list[ConversationItem] = []
     tool_by_call: dict[str, ToolConversationItem | PlanConversationItem] = {}
     terminal_by_run: dict[str, str] = {}
+    output_names = {}
+    for raw in ordered:
+        metadata = ((_message(raw) or {}).get("metadata") or {})
+        name = (metadata.get("deepagent_output") or {}).get("name")
+        if name:
+            output_names[_get(raw, "run_id")] = name
 
     for event in group_message_events(ordered):
         event_type = str(_get(event, "event_type", ""))
+        if event_type == "output/attempt":
+            payload = _get(event, "payload", {})
+            if payload.get("accepted") is True and _get(event, "status") == "completed":
+                event_id = str(_get(event, "event_id"))
+                items.append(StructuredOutputConversationItem(
+                    item_id=event_id, name=payload["name"], tool_call_id=payload["tool_call_id"],
+                    attempt=payload["attempt"], output=payload["output"], status="completed",
+                    turn_id=_get(event, "turn_id"), run_id=_get(event, "run_id"),
+                    order=ConversationOrder(sequence=int(_get(event, "sequence"))),
+                    source_event_ids=[event_id, *(payload.get("source", {}).get("event_ids") or [])],
+                    created_at=_event_datetime(event, "created_at"), updated_at=_event_datetime(event, "updated_at")))
+            continue
         if event_type == "execution/error":
             run_id = _optional_str(_get(event, "run_id"))
             if run_id:
@@ -66,6 +85,10 @@ def project_session_events(
         message = _message(event)
         if message is None:
             continue
+        metadata = message.get("metadata") or {}
+        output_call_ids = {part.get("tool_call_id") for part in _parts(message)
+                          if part.get("tool_name") == (metadata.get("deepagent_output") or {}).get("name")}
+        rejected_dispatch = (metadata.get("deepagent_dispatch") or {}).get("rejected")
         if event_type == "user/message":
             item = _user_item(event, message)
             if item is not None:
@@ -76,10 +99,13 @@ def project_session_events(
             assistant_terminal = _assistant_terminal_status(event, message)
             if run_id and assistant_terminal:
                 terminal_by_run[run_id] = assistant_terminal
-            items.extend(_assistant_items(event, message))
+            if not rejected_dispatch and not metadata.get("deepagent_output"):
+                items.extend(_assistant_items(event, message))
             for part_offset, part in enumerate(_parts(message)):
                 part_kind = str(part.get("part_kind") or "")
                 call_id = _optional_str(part.get("tool_call_id"))
+                if rejected_dispatch or call_id in output_call_ids:
+                    continue
                 if not call_id:
                     continue
                 if part_kind in _TOOL_CALL_KINDS:
@@ -98,6 +124,10 @@ def project_session_events(
             continue
         if event_type in {"tool/results", "model/request"}:
             for part_offset, part in enumerate(_parts(message)):
+                if metadata.get("deepagent_output_budget") and part.get("part_kind") == "retry-prompt":
+                    continue
+                if part.get("tool_name") and part.get("tool_name") == output_names.get(_get(event, "run_id")):
+                    continue
                 if str(part.get("part_kind") or "") not in _TOOL_RESULT_KINDS:
                     continue
                 call_id = _optional_str(part.get("tool_call_id"))

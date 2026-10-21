@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import select
@@ -16,9 +17,10 @@ from deep_agent.agent_packages.runtime_transaction import RuntimeCheckpoint
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.db.ids import new_agent_id
 from deep_agent.db.models import (
-    Agent, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolDefinition, UiToolPackage,
+    Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolDefinition, UiToolPackage,
 )
 from deep_agent.db.reference_integrity import is_unique_conflict
+from deep_agent.db.stores.agent.base import save_output_config, trusted_updater
 from deep_agent.models.provider_registry import model_unavailable_reason
 from deep_agent.schemas.agent import AgentResponse
 from deep_agent.schemas.ui_tools import UiToolCreate
@@ -40,7 +42,7 @@ def ui_payload(package, tools):
 
 async def snapshot(db):
     result = {}
-    for cls in (Agent, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolPackage, UiToolDefinition):
+    for cls in (Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolPackage, UiToolDefinition):
         result[cls] = list((await db.execute(select(cls).options(lazyload('*')).execution_options(populate_existing=True))).scalars())
     return result
 
@@ -78,6 +80,18 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     builtin_names = {t.name for t in builtin_ui_records()}
     available = set(ctx.registry.codes()) | builtin_ui
     resources, blocked = [], []
+    if package.agent.output_config is not None:
+        output_name = package.agent.output_config.name
+        known_names = {tool.name for incoming in package.ui for tool in incoming.tools}
+        known_names.update(tool.name for tool in builtin_ui_records()
+                           if tool.package_code in package.agent.capabilities)
+        known_names.update(tool.name for tool in data[UiToolDefinition]
+                           if tool.package_code in package.agent.capabilities)
+        selected = getattr(ctx.registry, 'selected', None)
+        if selected is not None:
+            known_names.update(tool.name for resource in selected(package.agent.capabilities) for tool in resource.tools)
+        if output_name in known_names:
+            blocked.append('输出编码与已关联工具名称冲突')
     def add(kind, code, label, status, **extra):
         refs = []
         if status == 'update':
@@ -146,6 +160,12 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
                              'builtin': sorted(available | builtin_skills), 'mode': mode, 'target_agent_id': target_agent_id}),
             'manifest': package.manifest.model_dump(), 'agent': package.agent.model_dump(),
             'mode': mode, 'target_agent': {'id': target.id, 'name': target.name} if target else None,
+            'structured_output': {
+                'enabled': package.agent.structured_output_enabled,
+                'name': package.agent.output_config.name if package.agent.output_config else None,
+                'target_enabled': bool(target.structured_output_enabled) if target else False,
+                'action': 'replace' if package.agent.structured_output_enabled else 'disable',
+            },
             'resources': resources, 'references': refs, 'models': models, 'mcps': mcps,
             'removed_associations': removed, 'blocked': blocked}
 
@@ -181,7 +201,12 @@ async def export_package(ctx, agent_id, headers):
             raise PackageError('Agent 引用的模型或 Provider 已缺失')
         agent = PackageAgent(name=row.name, prompt=row.prompt,
                              capabilities=row.capabilities, skills=row.skills,
-                             model_reference={'name': model.name, 'provider_type': provider.provider_type} if model else None)
+                             model_reference={'name': model.name, 'provider_type': provider.provider_type} if model else None,
+                             structured_output_enabled=bool(row.structured_output_enabled),
+                             output_config=(next(({
+                                 'name': c.name, 'description': c.description, 'json_schema': c.json_schema,
+                             } for c in data[AgentOutputConfig] if c.agent_id == row.id), None)
+                                            if row.structured_output_enabled else None))
         custom_ui = []
         builtin_ui = {t.package_code for t in builtin_ui_records()}
         for code in agent.capabilities:
@@ -201,8 +226,13 @@ async def export_package(ctx, agent_id, headers):
             if code not in uploaded:
                 raise PackageError('Agent 引用的 Skill 原包已缺失')
             needed.append(uploaded[code])
+    # A disabled Agent must produce an actual old-format ZIP, with no new false
+    # or null keys; retained administrative drafts are never portable resources.
+    exported_agent = agent.model_dump(exclude=(
+        {'structured_output_enabled', 'output_config'} if not agent.structured_output_enabled else set()
+    ))
     files = {'manifest.json': canonical({'format': 'deepagent-agent-package', 'schema_version': 1, 'exported_from': __version__}),
-             'agent.json': canonical(agent.model_dump()), 'ui-tools.json': canonical(custom_ui)}
+             'agent.json': canonical(exported_agent), 'ui-tools.json': canonical(custom_ui)}
     for skill in needed:
         try:
             payload = await ctx.skill_runtime.download_package(skill, request_headers=headers)
@@ -229,7 +259,7 @@ def agent_state(row):
     if row is None:
         return None
     return digest({k: getattr(row, k) for k in
-                   ('id', 'name', 'prompt', 'model_id', 'capabilities', 'skills')})
+                   ('id', 'name', 'prompt', 'model_id', 'capabilities', 'skills', 'structured_output_enabled', 'updated_by')})
 
 
 def installation_results(preview, agent):
@@ -243,7 +273,7 @@ def installation_results(preview, agent):
             'missing': [r for r in results if r['status'] == 'missing']}
 
 
-async def _install(ctx, package, options, headers):
+async def _install(ctx, package, options, headers, *, user_id=None):
     preview = await preview_package(ctx, package, options.mode, options.target_agent_id)
     validate_options(preview, options)
     model_id = options.model_id if 'model_id' in options.model_fields_set else preview['references']['model']['matched_id']
@@ -334,8 +364,13 @@ async def _install(ctx, package, options, headers):
                 row.name, row.prompt, row.model_id = options.name, package.agent.prompt, model_id
                 row.capabilities, row.skills = list(dict.fromkeys(caps)), list(dict.fromkeys(skills))
                 row.ui_tool_selection = {}
+                row.structured_output_enabled = package.agent.structured_output_enabled
+                row.updated_by = trusted_updater(user_id)
+                row.updated_at = datetime.now(UTC)
                 if options.mode == 'create':
                     db.add(row)
+                await db.flush()
+                await save_output_config(db, agent_id, package.agent.output_config)
                 await db.flush()
                 await db.refresh(row)
                 desired_agent = agent_state(row)
@@ -394,9 +429,9 @@ async def _install(ctx, package, options, headers):
                 logger.warning('Agent package temporary cleanup deferred error_type={}', type(cleanup_error).__name__)
 
 
-async def install_package(ctx, package, options, headers):
+async def install_package(ctx, package, options, headers, *, user_id=None):
     # An HTTP disconnect is not a request to cancel a partly committed installation.
-    task = asyncio.create_task(_install(ctx, package, options, headers))
+    task = asyncio.create_task(_install(ctx, package, options, headers, user_id=user_id))
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError:

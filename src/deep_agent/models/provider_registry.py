@@ -356,6 +356,9 @@ def deepseek_chat_profile(model_name: str) -> dict[str, Any]:
     return {
         **(DeepSeekProvider.model_profile(model_name) or {}),
         "openai_chat_supports_max_completion_tokens": False,
+        **({"openai_reasoning_enabled_by_default": True,
+             "openai_supports_forced_tool_choice_with_thinking": False}
+           if model_name.startswith("deepseek-v4-") or model_name == "deepseek-flash" else {}),
     }
 
 
@@ -383,7 +386,11 @@ def resolve_provider_model(
         model = model_class(
             model_name,
             provider=runtime_provider,
-            **({"profile": deepseek_chat_profile(model_name)} if provider.provider_type == "deepseek" else {}),
+            **({"profile": deepseek_chat_profile(model_name)} if provider.provider_type == "deepseek" else
+               {"profile": {**(MoonshotAIProvider.model_profile(model_name) or {}),
+                            "openai_reasoning_enabled_by_default": True,
+                            "openai_supports_forced_tool_choice_with_thinking": False}}
+               if provider.provider_type == "moonshotai" and model_name.startswith(("kimi-k2.5", "kimi-k2.6", "kimi-k2.7", "kimi-k3", "kimi-k2-thinking")) else {}),
         )
         # Custom endpoints use OpenAIProvider and report system="openai".
         # Preserve the configured identity for auxiliary request adapters without

@@ -42,6 +42,7 @@ EVENTS = {
     "agent_cancel_api_received": "收到停止请求",
     "agent_stream_closed": "会话发送连接已结束",
     "agent_run_pending": "执行等待人工操作", "message_persistence_failed": "会话内容保存失败",
+    "output_post_accept_failed": "输出已保存，辅助收尾失败",
     "manual_compaction_started": "上下文压缩开始", "manual_compaction_completed": "上下文压缩结束",
     "context_compaction_progress": "上下文压缩阶段变化", "context_compaction_completed": "上下文压缩结束",
     "context_compaction_phase": "上下文压缩阶段变化",

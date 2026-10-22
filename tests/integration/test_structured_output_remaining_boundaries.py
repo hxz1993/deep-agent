@@ -23,7 +23,9 @@ from pydantic_ai.usage import UsageLimits
 from deep_agent.agent.deferred import DeferredResultConflict
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.request_budget import BUDGET_METADATA, restored_request_count
-from deep_agent.agent.structured_output import BUDGET, CONTRACT
+from deep_agent.agent.structured_output import BUDGET
+
+CONTRACT = "deepagent_output_contract"
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.conversation.projector import project_session_events
 from deep_agent.db.models import ChatSession
@@ -329,7 +331,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 history = project_session_events(await self.rows(sid))
                 self.assertFalse([i for i in history.items if i.kind in {"tool", "plan"}])
 
-    async def test_two_ui_pauses_with_query_between_share_turn_and_freeze_contract(self):
+    async def test_two_ui_pauses_with_query_between_share_turn_and_reload_once_per_run(self):
         """DFR-02: three SDK Runs, one Turn, a real ordinary query between pauses."""
         for streaming in (False, True):
             with self.subTest(streaming=streaming):
@@ -346,14 +348,18 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 sid = uuid4().hex
                 first, _ = await self.execute(runner, sid, stream=streaming)
                 self.assertEqual(first["status"], "pending")
-                runner._output_config_loader = AsyncMock(side_effect=AssertionError("resume must freeze config"))
+                runner._output_config_loader.assert_awaited_once()
+                runner._output_config_loader = AsyncMock(return_value=fixture.CONTRACT_DATA)
                 second, _ = await self.execute(runner, sid, stream=streaming, message="",
                     results=DeferredToolResults(calls={"step-1": {"confirmed": True}}))
                 self.assertEqual(second["status"], "pending")
+                runner._output_config_loader.assert_awaited_once()
+                runner._output_config_loader.reset_mock()
                 final, _ = await self.execute(runner, sid, stream=streaming, message="",
                     results=DeferredToolResults(calls={"step-3": {"confirmed": True}}))
                 self.assertEqual(final["output"], {"ok": True})
                 self.assertEqual(len(queries), 1)
+                runner._output_config_loader.assert_awaited_once()
                 self.assertTrue(all(call.output_tools == calls[0].output_tools for call in calls))
                 rows = await self.rows(sid)
                 model_rows = [r for r in rows if r.event_type == "assistant/message"]
@@ -470,7 +476,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse([r for r in rows if r.event_type == "execution/error"])
         self.assertEqual(runner._active_runs.active_count(), 0)
 
-    async def test_precreated_empty_session_places_snapshot_on_first_real_user_with_attachment_and_title(self):
+    async def test_precreated_empty_session_keeps_real_user_attachment_and_title_without_config_snapshot(self):
         """DFR-18: no fake user event is required for pre-created sessions."""
         for streaming in (False, True):
             with self.subTest(streaming=streaming):
@@ -497,11 +503,12 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(final["output"], {"ok": True})
                 rows = await self.rows(sid)
                 snapshots = [r for r in rows if CONTRACT in (((r.payload.get("message") or {}).get("metadata")) or {})]
-                self.assertEqual(len(snapshots), 1)
-                self.assertEqual(snapshots[0].event_type, "user/message")
+                self.assertEqual(snapshots, [])
+                users = [r for r in rows if r.event_type == "user/message"]
+                self.assertEqual(len(users), 1)
                 self.assertEqual(await self.stores.coordinator.get_session_title(sid, agent_id=self.agent_id), "Explicit fixture title")
                 self.assertIn("synthetic-file", deps.attachment_by_id)
-                self.assertIn("fixture.txt", str(snapshots[0].payload))
+                self.assertIn("fixture.txt", str(users[0].payload))
 
 
 class StructuredOutputDeferredOwnershipTests(unittest.IsolatedAsyncioTestCase):

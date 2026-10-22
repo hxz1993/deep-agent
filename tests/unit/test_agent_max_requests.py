@@ -182,6 +182,13 @@ class AgentRunnerGlobalRequestLimitTests(unittest.IsolatedAsyncioTestCase):
 
 
 class UsageLimitErrorTests(unittest.TestCase):
+    def test_model_decode_failure_is_not_a_schema_rejection(self) -> None:
+        from httpx2 import DecodingError
+        self.assertEqual(
+            format_stream_error(DecodingError("zstd decompressor error: Unknown frame descriptor")),
+            "模型响应传输解码失败，本轮已停止。这不是结构化输出格式校验错误，请重试。",
+        )
+
     def test_format_stream_error_request_limit(self) -> None:
         exc = UsageLimitExceeded("The next request would exceed the request_limit of 30")
         self.assertEqual(

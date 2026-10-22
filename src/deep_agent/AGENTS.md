@@ -31,9 +31,9 @@
 ### 0.14.0 结构化输出
 
 Agent 开关默认关闭；配置由 `agent_output_configs` 保存，`structured_output_enabled`、定义与可信 `updated_by` 原子写入。完整定义只走管理员 `GET /agents/{id}/output-config`，普通详情不依赖管理或账号查询。
-`agent/structured_output.py` 管理同 Turn 冻结契约、完整响应分发前检查及两次共享修正额度；`structured_output/` 提供有界 Schema 准入和可 kill/reap 的独立 jsonschema 子进程，不新增依赖。
-原始 SDK call/ack 与不可变 `output/attempt` 共用现有事件表，接受事实最后提交；只接受项进入 `structured_output` History，item_id 等于 output_id。失败候选不成为业务工具、审批或普通正文。恢复必须读原始事件快照，不能套用当前 Agent 定义。
-关闭 Agent ZIP 完全省略新配置及草稿，开启 inline 导出；旧包覆盖清空输出配置。全量配置备份保留关闭草稿，013/012/011备份按各自物理字段投影，同 Revision 才恢复。013新增agent_output_configs.allow_text_output非空false：开启结构化输出后才可允许普通文字，关闭保留草稿；Turn冻结策略，旧快照缺省false，普通文字不写接受事实，结构化字符串按真实调用/output_info识别。关闭ZIP省略该字段，开启仅true导出；旧包覆盖重置false。参见[正式指南](../../docs/guides/structured-output.md)和[完整验收计划](../../docs/design/09-structured-output/structured-output-test-plan.md)。
+`agent/structured_output.py` 管理每 Run 内存输出配置、完整响应分发前检查及两次共享修正额度；`structured_output/` 提供有界 Schema 准入和可 kill/reap 的独立 jsonschema 子进程，不新增依赖。
+原始 SDK call/ack 与不可变 `output/attempt` 共用现有事件表，接受事实最后提交；只接受项进入 `structured_output` History，item_id 等于 output_id。失败候选不成为业务工具、审批或普通正文。正常 Run 与 Deferred 续跑都读取当前 Agent 定义；同对话约定配置一致，事件不存完整Schema/配置引用。续跑只从真实事件恢复额度与尝试，接受事务不回查用户配置，根参数解包方式仅通过内存参数传递。历史数据不重写，schema_digest协议字段保留。
+关闭 Agent ZIP 完全省略新配置及草稿，开启 inline 导出；旧包覆盖清空输出配置。全量配置备份保留关闭草稿，013/012/011备份按各自物理字段投影，同 Revision 才恢复。013新增agent_output_configs.allow_text_output非空false：开启结构化输出后才可允许普通文字，关闭保留草稿；每Run读取策略，历史配置快照不参与恢复，普通文字不写接受事实，结构化字符串按真实调用/output_info识别。关闭ZIP省略该字段，开启仅true导出；旧包覆盖重置false。参见[正式指南](../../docs/guides/structured-output.md)和[完整验收计划](../../docs/design/09-structured-output/structured-output-test-plan.md)。
 
 ### 诊断日志边界
 
@@ -86,6 +86,9 @@ Deferred 续跑可能把用户输入单独先入库，再写工具结果；不�
 完整助手阶段、已接受调用及每个已完成结果及时提交，以来源消息和部分身份去重并归组读取。
 半段流式文本仅保留在当前 SSE；正常取消/异常时尽力保存 SDK 已返回的部分内容，强杀不承诺半段恢复。
 异常终止只记一次有原因的 `execution/error`，工具可恢复失败只记录自身结果，主动停止不新增异常。
+流式失败保存的部分助手和终态状态更新必须通过原 `session_event_*` 队列在 `error` 前发布；
+不能只有 Event Store 保存、实时客户端缺帧。取消状态收口同样镜像已有事实；
+回归须覆盖首轮半段失败后下一轮成功，以及 SSE 与独立 Events/History 回读的一致性。
 已发布旧 RUN 数据原样保留，不增加解析/恢复兼容；Deferred 仅正式待操作状态可交互。详见
 [`真实事件保存说明`](../../docs/guides/message-event-persistence.md)。
 
@@ -218,6 +221,12 @@ Provider运行可用性只从类型、地址、凭据等真实配置派生，不
 非空、默认开启的`enabled`：只有模型启用且Provider有效时才可由Agent或请求级`model_id`选用；
 既有Agent引用不自动改写，但实际运行必须失败关闭。Skill、MCP、UI工具包和UI工具是否参与Run仍只看
 Agent显式关联，不恢复资源自身的启停字段。
+
+模型HTTP请求统一通过`models/http_transport.py`协商`Accept-Encoding: identity`，覆盖主调用、首轮标题、
+摘要和模型连接测试，保留SDK/Provider原有客户端所有权。原因是当前httpx2 2.7在Python<3.14的zstd适配器
+共享底层解压上下文，并发合法响应可触发`DecodingError`；这与结构化输出文本策略无关。
+不能全局修改依赖解码器、吞错转文字或重放部分执行；升级依赖后须用真实分块并发解码回归确认再移除此约束。
+回归入口为`tests/unit/test_model_http_transport.py`，包括主流与标题并发、各协议默认设置和Google/Anthropic真实SDK请求头。
 
 ### 正式取消（v0.3.10）
 

@@ -119,7 +119,8 @@ class AllowTextOutputPublicProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([bool(item["payload"]["accepted"]) for item in attempts], [False] * failed + [True] * int(structured))
         self.assertFalse([item for item in raw if item["event_type"] == "execution/error"])
         snapshots = [(item.get("payload", {}).get("message", {}).get("metadata") or {}).get("deepagent_output_contract") for item in raw]
-        self.assertTrue(any(snapshot and snapshot.get("allow_text_output") is True for snapshot in snapshots))
+        self.assertFalse(any(snapshots))
+        self.assertNotIn("deepagent_output_contract_ref", json.dumps(raw))
         if structured:
             self.assertEqual(outputs[0]["item_id"], final["output_info"]["output_id"])
             self.assertEqual(outputs[0]["output"], value)

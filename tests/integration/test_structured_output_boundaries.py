@@ -22,7 +22,11 @@ from sqlalchemy import select
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
-from deep_agent.agent.structured_output import CONTRACT, CONTRACT_REF, DISPATCH
+from deep_agent.agent.structured_output import DISPATCH
+
+# Historical fields are intentionally no longer exported by runtime code.
+CONTRACT = "deepagent_output_contract"
+CONTRACT_REF = "deepagent_output_contract_ref"
 from deep_agent.conversation.projector import project_session_events
 from deep_agent.db.models import ChatSessionEvent
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
@@ -195,7 +199,7 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertFalse([item for item in project_session_events(rows).items if item.kind in {"tool", "structured_output"}])
                     self.assertFalse([item for item in project_session_events(rows).items if item.kind == "assistant_message"])
 
-    async def test_legacy_pending_ignores_newly_enabled_current_configuration(self):
+    async def test_legacy_pending_reloads_current_configuration_without_snapshot(self):
         count = 0
         def respond(messages, info):
             nonlocal count
@@ -208,77 +212,72 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
         sid = uuid4().hex
         pending, _ = await self.execute(runner, sid)
         self.assertEqual(pending["status"], "pending")
-        runner._output_config_loader = AsyncMock(side_effect=AssertionError("legacy Pending must not load today's output configuration"))
+        runner._output_config_loader = AsyncMock(return_value=None)
         result, _ = await self.execute(runner, sid, message="", results=DeferredToolResults(calls={"legacy-confirm": True}))
         self.assertEqual(result["output"], "legacy final text")
         self.assertNotIn("output_info", result)
+        runner._output_config_loader.assert_awaited_once()
         rows = await self.stores.coordinator.list_all_events(sid)
         self.assertFalse([row for row in rows if row.event_type == "output/attempt"])
 
-    async def test_corrupt_snapshot_reference_does_not_consume_ui_answer(self):
-        count = 0
-        def respond(messages, info):
-            nonlocal count
-            count += 1
-            if count == 1:
-                return ModelResponse(parts=[ToolCallPart("lease_result", {}, "bad-before-confirm")])
-            return ModelResponse(parts=[ToolCallPart("confirm", {}, "pending-confirm")])
-        runner, _ = self.runner(respond, toolsets=[ExternalToolset([CONFIRM])])
-        sid = uuid4().hex
-        pending, _ = await self.execute(runner, sid)
-        self.assertEqual(pending["status"], "pending")
-        async with self.stores.agent._write() as db:
-            rows = list((await db.execute(select(ChatSessionEvent).where(ChatSessionEvent.session_id == sid))).scalars())
-            changed = False
-            for row in rows:
-                payload = json.loads(json.dumps(row.payload))
-                metadata = ((payload.get("message") or {}).get("metadata") or {})
-                if CONTRACT_REF in metadata:
-                    metadata[CONTRACT_REF]["event_id"] = "missing-snapshot"
-                    row.payload = json.loads(json.dumps(payload))
-                    changed = True
-            self.assertTrue(changed)
-        with self.assertRaisesRegex(ValueError, "reference is inconsistent"):
-            await self.execute(runner, sid, message="", results=DeferredToolResults(calls={"pending-confirm": True}))
-        self.assertEqual(count, 2)
-        from deep_agent.agent.deferred import validate_deferred_results
-        await validate_deferred_results(self.stores.coordinator, sid, DeferredToolResults(calls={"pending-confirm": True}))
-        self.assertTrue([item for item in project_session_events(await self.stores.coordinator.list_all_events(sid)).items
-                         if item.kind == "tool" and item.status == "awaiting_input"])
-
-    async def test_missing_snapshot_and_corrupt_digest_keep_pending(self):
-        from deep_agent.agent.deferred import validate_deferred_results
-        for corruption in ("missing", "digest"):
-            with self.subTest(corruption=corruption):
+    async def test_legacy_snapshot_and_reference_are_ignored_on_fresh_runner_resume(self):
+        """Missing, invalid and stale old config cannot block a valid UI answer."""
+        from deep_agent.structured_output.schema import schema_digest
+        for legacy in ("missing", "valid", "invalid_schema", "wrong_digest", "missing_reference"):
+            with self.subTest(legacy=legacy):
                 count = 0
                 def respond(messages, info):
                     nonlocal count
                     count += 1
                     if count == 1:
                         return ModelResponse(parts=[ToolCallPart("lease_result", {}, "invalid-before-confirm")])
-                    return ModelResponse(parts=[ToolCallPart("confirm", {}, "pending-confirm")])
+                    if count == 2:
+                        return ModelResponse(parts=[ToolCallPart("confirm", {}, "pending-confirm")])
+                    self.assertEqual(info.output_tools[0].name, "lease_result")
+                    return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "after-confirm")])
                 runner, _ = self.runner(respond, toolsets=[ExternalToolset([CONFIRM])])
                 sid = uuid4().hex
                 pending, _ = await self.execute(runner, sid)
                 self.assertEqual(pending["status"], "pending")
-                async with self.stores.agent._write() as db:
-                    rows = list((await db.execute(select(ChatSessionEvent).where(ChatSessionEvent.session_id == sid))).scalars())
-                    changed = False
-                    for row in rows:
+                runner._output_config_loader.assert_awaited_once()
+                before = await self.stores.coordinator.list_all_events(sid)
+                self.assertFalse(any(CONTRACT in str(row.payload) or CONTRACT_REF in str(row.payload) for row in before))
+                legacy_payloads = {}
+                if legacy != "missing":
+                    async with self.stores.agent._write() as db:
+                        rows = list((await db.execute(select(ChatSessionEvent).where(
+                            ChatSessionEvent.session_id == sid, ChatSessionEvent.event_type == "user/message"))).scalars())
+                        self.assertTrue(rows)
+                        row = rows[0]
                         payload = json.loads(json.dumps(row.payload))
-                        metadata = ((payload.get("message") or {}).get("metadata") or {})
-                        if CONTRACT in metadata:
-                            if corruption == "missing":
-                                metadata.pop(CONTRACT)
-                            else:
-                                metadata[CONTRACT]["schema_digest"] = "0" * 64
-                            row.payload = payload
-                            changed = True
-                    self.assertTrue(changed)
-                with self.assertRaisesRegex(ValueError, "snapshot is missing|snapshot digest does not match"):
-                    await self.execute(runner, sid, message="", results=DeferredToolResults(calls={"pending-confirm": True}))
-                self.assertEqual(count, 2)
-                await validate_deferred_results(self.stores.coordinator, sid, DeferredToolResults(calls={"pending-confirm": True}))
+                        metadata = dict(payload["message"].get("metadata") or {})
+                        payload["message"]["metadata"] = metadata
+                        contract = {**CONTRACT_DATA, "schema_digest": schema_digest(CONTRACT_DATA["json_schema"])}
+                        if legacy == "invalid_schema":
+                            contract["json_schema"] = {"type": "not-a-json-schema-type"}
+                        if legacy == "wrong_digest":
+                            contract["schema_digest"] = "0" * 64
+                        metadata[CONTRACT] = contract
+                        if legacy == "missing_reference":
+                            metadata[CONTRACT_REF] = {"event_id": "does-not-exist", "schema_digest": "wrong"}
+                        row.payload = payload
+                        legacy_payloads[row.event_id] = payload
+                fresh, _ = self.runner(respond, toolsets=[ExternalToolset([CONFIRM])])
+                final, _ = await self.execute(fresh, sid, message="",
+                    results=DeferredToolResults(calls={"pending-confirm": True}))
+                self.assertEqual(final["output"], {"ok": True})
+                self.assertEqual(final["output_info"]["attempt"], 2)
+                self.assertEqual(count, 3)
+                fresh._output_config_loader.assert_awaited_once()
+                rows = await self.stores.coordinator.list_all_events(sid)
+                self.assertEqual([r.payload["accepted"] for r in rows if r.event_type == "output/attempt"], [False, True])
+                self.assertFalse([i for i in project_session_events(rows).items if i.kind == "tool" and i.status == "awaiting_input"])
+                for row in rows:
+                    if row.event_id in legacy_payloads:
+                        self.assertEqual(row.payload, legacy_payloads[row.event_id], "old config evidence must not be rewritten")
+                    elif row.event_id not in {r.event_id for r in before}:
+                        self.assertNotIn(CONTRACT, str(row.payload))
+                        self.assertNotIn(CONTRACT_REF, str(row.payload))
 
     async def test_compacted_pending_resumes_in_fresh_process_with_original_budget(self):
         from deep_agent.agent.context.handoff import extract_protected_context, render_handoff_anchor
@@ -320,6 +319,7 @@ class StructuredOutputBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 line = next(line for line in completed.stdout.splitlines() if line.startswith("BOUNDARY_RESUME_JSON:"))
                 resumed = json.loads(line.removeprefix("BOUNDARY_RESUME_JSON:"))
                 self.assertEqual(resumed["model_requests"], 1)
+                self.assertEqual(resumed["loader_reads"], 1)
                 self.assertEqual(resumed["output_schema"], calls[0].output_tools[0].parameters_json_schema)
                 if invalid_after_resume:
                     self.assertIn("output_retry_exhausted", resumed["error"])
@@ -343,7 +343,7 @@ async def _resume_in_fresh_process(path, agent_id, session_id, invalid):
         return ModelResponse(parts=[ToolCallPart("lease_result", {} if invalid else {"ok": True}, "resumed-output")])
     agent = Agent(FunctionModel(response), deps_type=AgentDeps, toolsets=[ExternalToolset([CONFIRM])], retries=2)
     runner = AgentRunner(agent, stores.coordinator, UsageLimits(request_limit=20))
-    runner._output_config_loader = AsyncMock(side_effect=AssertionError("resume cannot read today's Agent config"))
+    runner._output_config_loader = AsyncMock(return_value=CONTRACT_DATA)
     result = None
     error = None
     try:
@@ -355,7 +355,7 @@ async def _resume_in_fresh_process(path, agent_id, session_id, invalid):
     finally:
         await engine.dispose()
     print("BOUNDARY_RESUME_JSON:" + json.dumps({"model_requests": count, "output_schema": schema,
-                                               "result": result, "error": error}))
+                                               "result": result, "error": error, "loader_reads": runner._output_config_loader.await_count}))
 
 
 if __name__ == "__main__":

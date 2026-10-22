@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from httpx2 import DecodingError
 from pydantic_ai import Agent, FunctionToolset, ModelRetry
 from pydantic_ai.messages import BinaryContent, ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturn, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
@@ -403,6 +404,56 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["event_type"] for row in rows if row["event_type"] != "session/title"],
                          ["user/message", "execution/error"])
         self.assertEqual(_kind(await self._history("first-provider-error"), "assistant_message"), [])
+
+    async def test_partial_decode_failure_then_success_mirrors_durable_facts_before_terminal(self):
+        session = "partial-decoding-error-then-success"
+
+        async def broken_stream(messages, info):
+            yield "SYNTHETIC_PARTIAL"
+            raise DecodingError("synthetic compressed response failure")
+
+        observed = []
+
+        async def observe(event):
+            if event["type"] == "error":
+                # The client must have the same failed response/status by the
+                # time it sees the terminal error, without a refresh or flush.
+                rows = await self._events(session)
+                saved = next(row for row in rows if row["event_type"] == "assistant/message")
+                observed.append(saved)
+
+        task, failed = self._start(self._runner(broken_stream), session, on_event=observe)
+        await self._finish(task)
+        saved = observed[0]
+        live = {frame["event"]["event_id"]: frame["event"] for frame in failed
+                if frame["type"] in {"session_event_appended", "session_event_updated"}}
+        self.assertEqual({key: live[saved["event_id"]][key] for key in saved}, saved)
+        self.assertEqual(saved["status"], "failed")
+        self.assertEqual(failed[-1]["type"], "error")
+        failure = next(row for row in await self._events(session) if row["event_type"] == "execution/error")
+        self.assertEqual(failure["payload"]["message"], failed[-1]["message"])
+        self.assertEqual(saved["payload"]["message"]["metadata"]["deepagent_error"]["message"], failed[-1]["message"])
+
+        async def good_stream(messages, info):
+            yield "SYNTHETIC_RECOVERY"
+
+        task, recovered = self._start(self._runner(good_stream), session)
+        await self._finish(task)
+        self.assertEqual(recovered[-1]["type"], "final")
+        rows = await self._events(session)
+        for frame in recovered:
+            if frame["type"] in {"session_event_appended", "session_event_updated"}:
+                live[frame["event"]["event_id"]] = frame["event"]
+        self.assertEqual(set(live), {row["event_id"] for row in rows})
+        self.assertEqual([
+            {key: frame[key] for key in rows[index]}
+            for index, frame in enumerate(sorted(live.values(), key=lambda row: row["sequence"]))
+        ], rows)
+        self.assertEqual(len([row for row in rows if row["event_type"] == "execution/error"]), 1)
+        assistants = _kind(await self._history(session), "assistant_message")
+        self.assertEqual([item["text"] for item in assistants], ["SYNTHETIC_PARTIAL", "SYNTHETIC_RECOVERY"])
+        self.assertEqual([item["status"] for item in assistants], ["interrupted", "completed"])
+        self.assertEqual(self.ctx.active_runs.active_count(), 0)
 
     async def test_recoverable_tool_failure_does_not_create_execution_error(self):
         requests = executions = 0

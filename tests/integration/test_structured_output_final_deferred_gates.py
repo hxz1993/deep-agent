@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from deep_agent.agent.structured_output import StructuredOutputState
@@ -96,7 +96,7 @@ class StructuredOutputPendingConfigurationDeletionTests(unittest.IsolatedAsyncio
     asyncSetUp = fixture.StructuredOutputDeferredOwnershipTests.asyncSetUp
     asyncTearDown = fixture.StructuredOutputDeferredOwnershipTests.asyncTearDown
 
-    async def test_admin_api_disable_or_delete_while_pending_resumes_original_snapshot(self):
+    async def test_admin_api_disable_or_delete_while_pending_resume_uses_current_configuration(self):
         """DFR-05: actual management PATCH false/null, then actual SSE resume."""
         from httpx import AsyncClient
         from deep_agent.schemas.agent import AgentUpdate
@@ -117,11 +117,15 @@ class StructuredOutputPendingConfigurationDeletionTests(unittest.IsolatedAsyncio
                         return ModelResponse(parts=[ToolCallPart("public_result", {}, "invalid-first")])
                     if len(calls) == 2:
                         return ModelResponse(parts=[ToolCallPart("builtin__confirm", {"message": "confirm fixture"}, "pending")])
-                    self.assertEqual(info.output_tools, calls[0].output_tools)
-                    return ModelResponse(parts=[ToolCallPart("public_result", {"ok": True}, "frozen-final")])
+                    self.assertFalse(info.output_tools)
+                    self.assertTrue(info.allow_text_output)
+                    return ModelResponse(parts=[TextPart("current configuration text")])
                 async def stream(messages, info):
                     for i, part in enumerate(respond(messages, info).parts):
-                        yield {i: DeltaToolCall(name=part.tool_name, json_args=json.dumps(part.args), tool_call_id=part.tool_call_id)}
+                        if isinstance(part, TextPart):
+                            yield part.content
+                        else:
+                            yield {i: DeltaToolCall(name=part.tool_name, json_args=json.dumps(part.args), tool_call_id=part.tool_call_id)}
                 model = FunctionModel(respond, stream_function=stream)
                 with patch("deep_agent.agent.factory._resolve_model", return_value=model), mock_request_disconnect():
                     async with AsyncClient(transport=self._transport, base_url="http://test") as http:
@@ -146,9 +150,10 @@ class StructuredOutputPendingConfigurationDeletionTests(unittest.IsolatedAsyncio
                             "deferred_tool_results": [{"tool_call_id": "pending", "result": {"confirmed": True}}]})
                         self.assertEqual(resumed.status_code, 200, resumed.text)
                         final = next(f for f in reversed(parse_sse_events(resumed.text)) if f["type"] == "final")
-                        self.assertEqual(final["output"], {"ok": True})
-                        self.assertEqual(final["output_info"]["attempt"], 2)
+                        self.assertEqual(final["output"], "current configuration text")
+                        self.assertNotIn("output_info", final)
                         self.assertEqual(len(calls), 3)
-                        output = next(i for i in project_session_events(await self.ctx.stores.coordinator.list_all_events(sid)).items
-                                      if i.kind == "structured_output")
-                        self.assertEqual(output.item_id, final["output_info"]["output_id"])
+                        rows = await self.ctx.stores.coordinator.list_all_events(sid)
+                        self.assertFalse([i for i in project_session_events(rows).items if i.kind == "structured_output"])
+                        self.assertEqual([r.payload["accepted"] for r in rows if r.event_type == "output/attempt"], [False])
+                        self.assertNotIn("deepagent_output_contract", json.dumps([r.payload for r in rows]))

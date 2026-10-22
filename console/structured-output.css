@@ -1,18 +1,15 @@
-/* Generic output content. Business layouts belong to clients. */
-.structured-output { margin: 8px 0; min-width: 0; font-size: var(--ui-font-body); }
-.structured-output-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-.structured-output-toolbar > code { margin-right: auto; color: var(--text); }
-.structured-output .output-view-switch { display: inline-flex; border: 1px solid var(--border); border-radius: var(--ui-radius-inner); padding: 2px; background: var(--bg-soft); }
-.structured-output .output-view-switch button { border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); font-size: var(--ui-font-meta); padding: 4px 8px; cursor: pointer; }
-.structured-output .output-view-switch button.active { background: var(--bg); color: var(--accent); }
-.structured-output-json { border: 1px solid var(--border); border-radius: var(--ui-radius); overflow: hidden; margin-bottom: 8px; }
-.structured-output-json header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-soft); border-bottom: 1px solid var(--border); font-size: var(--ui-font-meta); }
-.structured-output-json header code { margin-right: auto; }
-.structured-output-json pre { margin: 0 !important; padding: 12px !important; overflow: auto; white-space: pre; background: var(--bg) !important; font-size: 12px; line-height: 20px; border-radius: 0 !important; }
-.structured-output-json.collapsed pre { max-height: 300px; overflow-y: hidden; }
-.structured-output-fold { display: block; width: 100%; padding: 6px 12px; border: 0; border-top: 1px solid var(--border); background: var(--bg-soft); color: var(--text-muted); font-size: var(--ui-font-meta); cursor: pointer; }
-.structured-output-text { margin: 12px 0; }
-.structured-output-text > code { display: block; color: var(--text-muted); font-size: var(--ui-font-meta); margin-bottom: 6px; }
-.structured-output-text > div { white-space: pre-wrap; overflow-wrap: anywhere; }
-.structured-output-failed { color: var(--danger, #d14343); font-size: var(--ui-font-helper); margin-bottom: 12px; }
+/* One accepted output card; its groups reuse the shared fenced-code controls. */
+.structured-output { margin: 8px 0; min-width: 0; border: 1px solid var(--border); border-radius: var(--ui-radius); overflow: hidden; font-size: var(--ui-font-body); }
+.structured-output-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-soft); }
+.structured-output-title { min-width: 0; margin-right: auto; overflow-wrap: anywhere; color: var(--text); font-size: var(--ui-font-body); font-weight: 600; }
+.structured-output .output-view-switch { --ui-control-height: var(--ui-control-compact); }
+.structured-output-body { min-width: 0; padding: 4px 0; }
+.structured-output .markdown-body { color: var(--text); background: transparent; }
+.structured-output .markdown-code-block { margin: 0; border: 0; border-radius: 0; background: transparent; }
+.structured-output .markdown-code-block > pre { margin: 0; padding: 8px 12px 12px; font-size: var(--ui-font-helper); line-height: 1.65; }
+.structured-output-body > section + section { border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
+.structured-output-text summary { padding: 8px 12px; color: var(--text-dim); font-size: var(--ui-font-helper); cursor: pointer; }
+.structured-output-text summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.structured-output-text details > div { padding: 0 12px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.structured-output-failed { color: var(--danger); font-size: var(--ui-font-helper); margin: 12px; }
 .trajectory-kind.output { color: var(--accent); background: var(--accent-soft, var(--bg-soft)); }

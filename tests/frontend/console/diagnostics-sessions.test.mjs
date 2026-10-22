@@ -590,7 +590,7 @@ test("overview matches image workbench: separate metrics, question feed, usernam
   assert.match(h.root.innerHTML, /diagnostic-question-icon/);
   assert.match(h.root.innerHTML, /diagnostic-question-meta/);
   assert.equal((h.root.innerHTML.match(/data-stat=/g) || []).length, 4);
-  assert.match(h.root.innerHTML, /<h2>平台活跃用户<\/h2>/);
+  assert.match(h.root.innerHTML, /<h2>平台活跃用户\(提问\)<\/h2>/);
   assert.match(h.root.innerHTML, /diagnostic-ranking-identity"><span class="diagnostic-identity-icon">/);
   assert.doesNotMatch(h.root.innerHTML, /diagnostic-avatar|owner@example.test|diagnostic-question-columns/);
   assert.doesNotMatch(h.root.innerHTML, /diagnostic-eyebrow|DIAGNOSTICS/);

@@ -111,7 +111,7 @@ class StructuredOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_last_request_retains_output_tool(self):
         await self.exercise({"ok": True}, {"type": "object"}, request_limit=1)
 
-    async def test_deferred_resume_freezes_contract_and_budget(self):
+    async def test_deferred_resume_reloads_config_once_and_preserves_budget(self):
         calls = []
         def response(messages, info):
             calls.append(info)
@@ -131,11 +131,13 @@ class StructuredOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
         pending = await runner.run(sid, "synthetic", AgentDeps(session_id=sid, agent_id=self.agent_id, user="test-user"))
         self.assertEqual(pending["status"], "pending")
         self.assertNotIn("output_info", pending)
-        runner._output_config_loader = AsyncMock(side_effect=AssertionError("resume must not load current config"))
+        runner._output_config_loader.assert_awaited_once()
+        runner._output_config_loader = AsyncMock(return_value=contract)
         result = await runner.run(sid, "", AgentDeps(session_id=sid, agent_id=self.agent_id, user="test-user"),
             deferred_tool_results=DeferredToolResults(calls={"confirm-1": True}))
         self.assertEqual(result["output"], {"ok": True})
         self.assertEqual(result["output_info"]["attempt"], 3)
+        runner._output_config_loader.assert_awaited_once()
         self.assertEqual(calls[0].output_tools, calls[-1].output_tools)
         rows = await self.stores.coordinator.list_all_events(sid)
         self.assertEqual(len([row for row in rows if row.event_type == "output/attempt"]), 3)

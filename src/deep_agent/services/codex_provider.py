@@ -27,6 +27,7 @@ from sqlalchemy import update
 
 from deep_agent.db.models import LlmProvider
 from deep_agent.db.stores._session import serialized_sqlite_session
+from deep_agent.models.http_transport import model_http_settings
 
 
 SUBSCRIPTION_PROVIDER_ENV = "DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER"
@@ -221,7 +222,7 @@ def codex_model(model_name: str, provider_id: str, revision: int) -> OpenAICodex
     key = (provider_id, model_name)
     model = bucket["models"].get(key)
     if model is None:
-        model = OpenAICodexModel(model_name, provider=provider)
+        model = OpenAICodexModel(model_name, provider=provider, settings=model_http_settings())
         bucket["models"][key] = model
     return model
 

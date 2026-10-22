@@ -22,6 +22,7 @@ from deep_agent.files.storage import FileStore
 from deep_agent.agent.observability import log_event
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
+from deep_agent.models.http_transport import model_http_settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +49,15 @@ def _title_model_settings(model: Model | str, provider_type: str | None) -> Mode
     provider = provider_type or getattr(model, "system", None)
     while isinstance(model, WrapperModel):
         model = model.wrapped
+    if isinstance(model, Model) and model.settings:
+        settings["extra_headers"] = dict(model.settings.get("extra_headers", {}))
     # New aliases may not yet have an SDK thinking profile. Use the provider's
     # native off switch without mutating the model shared with the main run.
     if provider == "deepseek" and isinstance(model, OpenAIResponsesModel):
         settings["openai_reasoning_effort"] = "none"
     elif provider in {"deepseek", "moonshotai"} and isinstance(model, OpenAIChatModel):
         settings["extra_body"] = {"thinking": {"type": "disabled"}}
-    return settings
+    return model_http_settings(settings)
 
 
 @dataclass(frozen=True)

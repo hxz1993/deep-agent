@@ -37,7 +37,7 @@ Agent 开启结构化输出后，可再勾选 allow_text_output（默认 false�
 
 混合模式的文字需等完整模型响应通过分发检查并保存后再按既有text事件发布，防止稍后非法调用使已直播正文与History不一致；首个正文可晚于供应商首Token，关闭路径的增量不变。客户端必须完整处理流，不在首个 text 事件时提前完成：之后可能出现普通工具、Deferred 或输出调用。文字伴随合法输出调用时文字作为过程说明，JSON 为最终结果；History 也保留该说明并仅有一个 structured_output。按 output_info／kind 区分分支，按 output_id 对 output/final/Live/History 去重，不从正文内容猜测 JSON。失败候选只在轨迹，不能作为业务结果采用。允许的文本结束不消耗或重置已有格式纠错及请求额度。
 
-该策略随当前 Turn 冻结，恢复不读新配置；历史快照缺省 false。关闭结构化输出时，即使草稿 allow_text_output:true，仍沿用旧协议。BOM 默认保持 false；平台支持普通文本并不授权业务保存。
+每个 Run（含 Deferred 续跑）从当前 Agent 配置装配该策略，Run 内不反复读取；同一对话约定配置一致。事件不再写完整 Schema 或配置引用，历史快照不驱动续跑。schema_digest 仍保留为当次 Schema 指纹，不用于配置恢复。关闭结构化输出时，即使草稿 allow_text_output:true，仍沿用旧协议。BOM 默认保持 false；平台支持普通文本并不授权业务保存。
 
 History 外壳继续 `schema_version:1`，已接受结果新增：
 

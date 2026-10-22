@@ -1,4 +1,4 @@
-"""Turn-frozen output contracts. Final JSON is a result, never a UI approval."""
+"""Run-local output configuration. Final JSON is a result, never a UI approval."""
 from __future__ import annotations
 
 import json
@@ -13,8 +13,6 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart
 
-CONTRACT = "deepagent_output_contract"
-CONTRACT_REF = "deepagent_output_contract_ref"
 BUDGET = "deepagent_output_budget"
 DISPATCH = "deepagent_dispatch"
 
@@ -40,8 +38,7 @@ def _output_type(serialized: str):
 
 
 class StructuredOutputState(AbstractCapability):
-    def __init__(self, contract: dict[str, Any], *, source_event_id: str | None = None,
-                 rejected_keys: list[str] | None = None, attempts: int = 0):
+    def __init__(self, contract: dict[str, Any], *, rejected_keys: list[str] | None = None, attempts: int = 0):
         from deep_agent.structured_output.schema import normalize_schema, schema_digest, validate_output_name
         schema = normalize_schema(contract["json_schema"])
         validate_output_name(contract["name"])
@@ -50,13 +47,9 @@ class StructuredOutputState(AbstractCapability):
             raise ValueError("Output contract allow_text_output must be a boolean")
         self.contract = {"name": contract["name"], "description": contract.get("description"),
                          "json_schema": schema, "schema_digest": schema_digest(schema)}
-        # Missing on historical snapshots means strict output. Keep those
-        # snapshots' shape intact; the policy is independent of Schema identity.
+        # Policy is read once from Agent configuration for this Run.
         if allow_text:
             self.contract["allow_text_output"] = True
-        if contract.get("schema_digest") not in (None, self.contract["schema_digest"]):
-            raise ValueError("Output contract snapshot digest does not match")
-        self.source_event_id = source_event_id
         self.rejected_keys = list(dict.fromkeys(rejected_keys or []))
         self.attempt = attempts
         self.progress = None
@@ -83,9 +76,6 @@ class StructuredOutputState(AbstractCapability):
 
     def prepare_request(self, request: ModelRequest):
         metadata = dict(request.metadata or {})
-        if self.source_event_id:
-            metadata[CONTRACT_REF] = {"event_id": self.source_event_id,
-                                      "schema_digest": self.contract["schema_digest"]}
         if self.rejected_keys:
             metadata[BUDGET] = self.budget
         request.metadata = metadata or None
@@ -223,7 +213,7 @@ class StructuredOutputState(AbstractCapability):
         call = output_context.tool_call
         if call is None:
             if not self.allow_text_output:
-                raise UnexpectedModelBehavior("Text output is not allowed by the frozen contract")
+                raise UnexpectedModelBehavior("Text output is not allowed by the output configuration")
             self.result_kind = "text"
             self.pending = None
             return output
@@ -241,6 +231,7 @@ class StructuredOutputState(AbstractCapability):
         row = await deps.output_store.append_output_attempt(
             deps.session_id, agent_id=deps.agent_id, user_id=deps.user,
             turn_id=deps.turn_id, run_id=deps.run_id, payload=payload,
+            output_root_is_object=self.contract["json_schema"].get("type") == "object",
         )
         if accepted:
             # Acceptance is a committed database fact. Set it before optional

@@ -21,7 +21,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCall
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.usage import UsageLimits
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, event, insert, select
+from sqlalchemy import delete, event, insert, select, update
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
@@ -65,7 +65,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def prepare(self, *, acknowledgement=True, ack_first=False, rejected=False, ordinal=1, run_id=None, turn_id=None, sid=None):
         run_id, turn_id, sid = run_id or self.run, turn_id or self.turn, sid or self.sid
-        user = ModelRequest(parts=[UserPromptPart("synthetic input")], metadata={"deepagent_message_ordinal": 0, "deepagent_output_contract": CONTRACT})
+        user = ModelRequest(parts=[UserPromptPart("synthetic input")], metadata={"deepagent_message_ordinal": 0})
         metadata = {"deepagent_message_ordinal": ordinal, "deepagent_output": {
             "name": "lease_result", "schema_digest": DIGEST, "part_indices": [0]}}
         if rejected:
@@ -82,7 +82,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 "accepted": True, "output": {"ok": True}, **changes}
 
     async def append(self, payload=None, **changes):
-        args = dict(agent_id=self.agent_id, user_id="owner", turn_id=self.turn, run_id=self.run)
+        args = dict(agent_id=self.agent_id, user_id="owner", turn_id=self.turn, run_id=self.run, output_root_is_object=True)
         args.update(changes)
         return await self.store.append_output_attempt(self.sid, payload=payload or self.payload(), **args)
 
@@ -102,6 +102,58 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(outputs), 1)
         self.assertEqual(outputs[0].item_id, accepted.event_id)
         self.assertFalse([item for item in history.items if item.kind == "tool"])
+
+    async def test_old_snapshot_shapes_do_not_reinterpret_accepted_history(self):
+        await self.prepare()
+        accepted = await self.append()
+        initial = project_session_events(await self.store.list_all_events(self.sid)).model_dump(mode="json")
+        for historical in (CONTRACT, {"json_schema": {"type": "string"}, "schema_digest": "wrong"},
+                           {"json_schema": "corrupt", "allow_text_output": None}, "invalid"):
+            with self.subTest(historical=historical):
+                async with self.stores.agent._write() as db:
+                    row = (await db.execute(select(ChatSessionEvent).where(
+                        ChatSessionEvent.session_id == self.sid, ChatSessionEvent.event_type == "user/message"))).scalars().first()
+                    payload = copy.deepcopy(row.payload)
+                    metadata = dict(payload["message"].get("metadata") or {})
+                    payload["message"]["metadata"] = metadata
+                    metadata["deepagent_output_contract"] = historical
+                    metadata["deepagent_output_contract_ref"] = {"event_id": "missing", "schema_digest": "wrong"}
+                    await db.execute(update(ChatSessionEvent).where(ChatSessionEvent.event_id == row.event_id)
+                        .values(payload=payload, updated_at=row.updated_at))
+                rows = await self.store.list_all_events(self.sid)
+                self.assertEqual(project_session_events(rows).model_dump(mode="json"), initial)
+                reread = next(r for r in rows if r.event_id == accepted.event_id)
+                self.assertEqual(reread.payload["output"], {"ok": True})
+
+    async def test_acceptance_requires_explicit_run_local_root_shape(self):
+        await self.prepare()
+        for invalid in (None, 0, 1, "object"):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "Run-local root shape"):
+                await self.append(output_root_is_object=invalid)
+        self.assertFalse([r for r in await self.store.list_all_events(self.sid) if r.event_type == "output/attempt"])
+        accepted = await self.append()
+        self.assertNotIn("output_root_is_object", json.dumps(accepted.payload))
+        self.assertEqual(accepted.payload["output"], {"ok": True})
+
+    async def test_native_wrapped_values_accept_without_user_schema_and_keep_exact_types(self):
+        values = ["plain", "{\"looks\":\"json\"}", "", False, 0, 1.25, None, [], [1, False], {"response": "business value"}]
+        for value in values:
+            with self.subTest(value=value):
+                self.sid, self.turn, self.run = uuid4().hex, uuid4().hex, uuid4().hex
+                messages = [ModelRequest(parts=[UserPromptPart("synthetic input")], metadata={"deepagent_message_ordinal": 0}),
+                    ModelResponse(parts=[ToolCallPart("lease_result", {"response": value}, "same-call-id")], metadata={
+                        "deepagent_message_ordinal": 1, "deepagent_output": {"name": "lease_result", "schema_digest": DIGEST, "part_indices": [0]}}),
+                    ModelRequest(parts=[ToolReturnPart("lease_result", "Final result processed.", "same-call-id")], metadata={"deepagent_message_ordinal": 2})]
+                await self.store.append_message_parts(self.sid, messages=messages, agent_id=self.agent_id,
+                    user_id="owner", turn_id=self.turn, run_id=self.run, first_message_ordinal=0, terminal_status="completed")
+                accepted = await self.append(self.payload(output=value), output_root_is_object=False)
+                self.assertEqual(accepted.payload["output"], value)
+                self.assertIs(type(accepted.payload["output"]), type(value))
+                rows = await self.store.list_all_events(self.sid)
+                projected = [i for i in project_session_events(rows).items if i.kind == "structured_output"]
+                self.assertEqual([(i.item_id, i.output) for i in projected], [(accepted.event_id, value)])
+                self.assertNotIn("deepagent_output_contract", json.dumps([r.payload for r in rows]))
+                self.assertNotIn("output_root_is_object", json.dumps([r.payload for r in rows]))
 
     async def test_deterministic_id_is_immutable_and_idempotent(self):
         await self.prepare()
@@ -286,7 +338,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
         reread = await self.stores.agent.get_by_id(self.agent_id)
         self.assertEqual((reread.updated_by, reread.updated_at), baseline)
 
-    async def test_snapshot_and_near_limit_output_storage_growth_stays_in_event_store_without_schema_index(self):
+    async def test_near_limit_output_storage_does_not_duplicate_schema_or_add_schema_index(self):
         schema = normalize_schema({"type": "object", "description": "SYNTHETIC_PRIVATE_SCHEMA_" + "s" * 62000,
             "properties": {"blob": {"type": "string"}}, "required": ["blob"]})
         output = {"blob": "x" * (1024 * 1024 - 20)}
@@ -294,7 +346,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await validate_output(schema, output), [])
         metadata = {"deepagent_message_ordinal": 1, "deepagent_output": {
             "name": contract["name"], "schema_digest": contract["schema_digest"], "part_indices": [0]}}
-        messages = [ModelRequest(parts=[UserPromptPart("synthetic")], metadata={"deepagent_message_ordinal": 0, "deepagent_output_contract": contract}),
+        messages = [ModelRequest(parts=[UserPromptPart("synthetic")], metadata={"deepagent_message_ordinal": 0}),
             ModelResponse(parts=[ToolCallPart("large_result", output, "large-call")], metadata=metadata),
             ModelRequest(parts=[ToolReturnPart("large_result", "Final result processed.", "large-call")], metadata={"deepagent_message_ordinal": 2})]
         await self.store.append_message_parts(self.sid, messages=messages, agent_id=self.agent_id,
@@ -310,7 +362,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(growth, len(json_bytes(fact.payload)))
         self.assertGreater(growth, 1024 * 1024 - 20)
         self.assertLess(growth, 1024 * 1024 + 2048)
-        self.assertEqual(sum("SYNTHETIC_PRIVATE_SCHEMA_" in json.dumps(row.payload) for row in after), 1)
+        self.assertEqual(sum("SYNTHETIC_PRIVATE_SCHEMA_" in json.dumps(row.payload) for row in after), 0)
         async with self.factory() as db:
             indexed = (await db.execute(select(ChatSessionEvent.event_id, ChatSessionEvent.search_text)
                 .where(ChatSessionEvent.session_id == self.sid))).all()
@@ -577,7 +629,7 @@ asyncio.run(main())'''
                     stdout, stderr = await asyncio.wait_for(process.communicate(), 10)
                     self.assertEqual(process.returncode, 0, stderr.decode()[-1000:])
                     restored = json.loads(stdout)
-                    self.assertEqual(restored, {"outputs": [[accepted.event_id, {"ok": True}]], "compactions": 2, "snapshots": 1})
+                    self.assertEqual(restored, {"outputs": [[accepted.event_id, {"ok": True}]], "compactions": 2, "snapshots": 0})
                 finally:
                     if process.returncode is None:
                         process.kill()

@@ -309,7 +309,7 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.doesNotMatch(trajectorySource, /标识与模型信息|renderTechnicalDetails/);
   assert.match(trajectorySource, /\["summary", "Summary"\]/);
   assert.match(trajectorySource, /tabs\.push\(\["message", "Message"\], \["preview", "Preview"\]\)/);
-  assert.match(trajectorySource, /const tabs = \[\["summary", "Summary"\]\];\s*if \(trajectoryUsage\(event\)\) tabs.push\(\["usage", "Usage"\]\)/);
+  assert.match(trajectorySource, /if \(trajectoryUsage\(event\)\) tabs.push\(\["usage", "Usage"\]\)/);
   assert.match(trajectorySource, /tabs.push\(\["raw", "Raw"\]\)/);
   assert.match(trajectorySource, /\["Thinking", event\.payload\?\.thinking\][\s\S]*\["Text", event\.payload\?\.content\]/);
   assert.match(trajectorySource, /completed: "Completed"/);

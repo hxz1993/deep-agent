@@ -8,6 +8,10 @@ import { assistantActionsFromSse, assistantActionsFromHistoryItems, applyAssista
 import { projectConversationItems } from "../../../console/conversation-items.js";
 import { buildTrajectory, trajectoryStats } from "../../../console/trajectory.js";
 
+const markdownRuntime = { window: {}, console: { warn() {} } };
+vm.runInNewContext(await readFile(new URL("../../../console/markdown.js", import.meta.url), "utf8"), markdownRuntime);
+globalThis.DeepAgentMarkdown = markdownRuntime.window.DeepAgentMarkdown;
+
 const editorSource = await readFile(new URL("../../../console/configuration/agent-output.js", import.meta.url), "utf8");
 const agentSource = await readFile(new URL("../../../console/configuration/agents.js", import.meta.url), "utf8");
 function editor() {
@@ -98,8 +102,11 @@ test("long generic outputs fold at 15 lines while the serialized result stays co
   const value = { rows: Array.from({ length: 18 }, (_, index) => index) };
   const text = serializeStructuredOutput(value);
   const html = renderStructuredOutput({ name: "lease_result", output: value });
-  assert.match(html, /structured-output-json collapsed/);
-  assert.match(html, /展开全部/);
+  assert.match(html, /markdown-code-toggle" aria-expanded="false"/);
+  assert.match(html, /<pre[^>]* hidden>/);
+  assert.doesNotMatch(html, /data-output-fold|展开全部/);
+  assert.match(html, /markdown-code-wrap/);
+  assert.match(html, /markdown-code-copy/);
   assert.match(html, /17/);
   assert.match(renderStructuredOutput({ name: "lease_result", output: value, expanded: true }), /aria-expanded="true"/);
   assert.deepEqual(JSON.parse(text), value);
@@ -143,6 +150,24 @@ test("failed and successful output attempts share an output type, keep their own
   assert.deepEqual(outputs[1].candidate, { contract: { id: "42" } });
   assert.equal(rows.some(row => row.kind === "tool"), false);
   assert.equal(trajectoryStats(rows).calls, 0);
+});
+
+test("output trajectory needs no saved schema and preserves native values and raw failed arguments", () => {
+  const wrapped = { response: [1, 2] };
+  for (const args of [wrapped, JSON.stringify(wrapped), '{"response":']) {
+    const bad = source("bad-response", 2, "assistant/message", [{ part_kind: "tool-call", tool_name: "lease_result", tool_call_id: "call-2", args }]);
+    const rows = buildTrajectory({ items: [bad, attempt("bad", 3, "bad-response", 2, false)] });
+    const output = rows.find(row => row.kind === "output");
+    assert.deepEqual(output.candidate, args);
+    assert.equal(output.candidate_found, true);
+    assert.equal(Object.hasOwn(output.native, "contract"), false);
+  }
+  for (const output of [false, 0, null, "", [], [1, 2], { response: [1, 2] }]) {
+    const row = buildTrajectory({ items: [attempt("good", 1, "source", 1, true, output)] })[0];
+    assert.deepEqual(row.candidate, output);
+    assert.equal(row.candidate_found, true);
+    assert.equal(Object.hasOwn(row.native, "contract"), false);
+  }
 });
 
 test("mixed-response calls remain visible as not dispatched and do not inflate execution counts", () => {

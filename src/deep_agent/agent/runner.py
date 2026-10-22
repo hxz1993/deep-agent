@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator
 
 import anyio
+from httpx2 import DecodingError
 
 from pydantic_ai import (
     Agent,
@@ -69,7 +70,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
 from deep_agent.diagnostics.persistence import persistence_failure_fields
 from deep_agent.agent.message_persistence import MessagePersistenceCapability, StreamMessagePersistenceCapability, MessagePersistenceError
-from deep_agent.agent.structured_output import StructuredOutputState, CONTRACT, CONTRACT_REF, BUDGET
+from deep_agent.agent.structured_output import StructuredOutputState, BUDGET
 from deep_agent.structured_output.validation import OutputValidationServiceError
 from deep_agent.db.run_ownership import live_run
 from deep_agent.agent.limits import format_stream_error
@@ -127,6 +128,8 @@ def _safe_run_failure(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, MessagePersistenceError):
         diagnostic.update(code="message_persistence_failed", phase="persistence",
                           message="已完成内容写入失败，本轮已停止；不能确认本次写入已保存。")
+    elif isinstance(exc, DecodingError):
+        diagnostic["message"] = format_stream_error(exc)
     elif isinstance(exc, TimeoutError):
         diagnostic.update(code="execution_timeout", phase="execution",
                           message="执行等待超时，本轮已停止。")
@@ -297,50 +300,29 @@ class AgentRunner:
     async def _prepare_output_contract(self, session_id, deps):
         deps.output_state = None
         deps.output_store = self.store
+        if self._output_config_loader is None:
+            return
+        config = await self._output_config_loader()
+        if config is None:
+            return
+        rejected = []
+        attempts = 0
         if deps.resume_from_run_id:
-            rows = []
             after = 0
             while True:
                 page = await self.store.list_events(session_id, turn_id=deps.turn_id,
                                                     after_sequence=after, limit=500)
-                rows.extend(page)
+                for row in page:
+                    payload = row.payload or {}
+                    message = payload.get("message") or {}
+                    metadata = message.get("metadata") or {} if isinstance(message, dict) else {}
+                    rejected.extend((metadata.get(BUDGET) or {}).get("rejected_response_keys") or [])
+                    rejected.extend((payload.get(BUDGET) or {}).get("rejected_response_keys") or [])
+                    attempts += int(row.event_type == "output/attempt")
                 if len(page) < 500:
                     break
                 after = page[-1].sequence
-            contract = None
-            event_id = None
-            rejected = []
-            attempts = 0
-            referenced = False
-            references = []
-            for row in rows:
-                message = (row.payload or {}).get("message") or {}
-                if not isinstance(message, dict):
-                    message = {}
-                metadata = message.get("metadata") or {}
-                if CONTRACT in metadata:
-                    if contract is not None and contract != metadata[CONTRACT]:
-                        raise ValueError("Conflicting output contract snapshots")
-                    contract, event_id = metadata[CONTRACT], row.event_id
-                referenced = referenced or bool(metadata.get(CONTRACT_REF))
-                if metadata.get(CONTRACT_REF):
-                    references.append(metadata[CONTRACT_REF])
-                rejected.extend((metadata.get(BUDGET) or {}).get("rejected_response_keys") or [])
-                rejected.extend(((row.payload or {}).get(BUDGET) or {}).get("rejected_response_keys") or [])
-                attempts += int(row.event_type == "output/attempt")
-            if contract is None:
-                if referenced:
-                    raise ValueError("Output contract snapshot is missing")
-                return  # A legacy Pending never inherits today's Agent setting.
-            deps.output_state = StructuredOutputState(contract, source_event_id=event_id,
-                rejected_keys=rejected, attempts=attempts)
-            if any(ref != {"event_id": event_id, "schema_digest": deps.output_state.contract["schema_digest"]}
-                   for ref in references):
-                raise ValueError("Output contract reference is inconsistent")
-        elif self._output_config_loader is not None:
-            config = await self._output_config_loader()
-            if config is not None:
-                deps.output_state = StructuredOutputState(config)
+        deps.output_state = StructuredOutputState(config, rejected_keys=rejected, attempts=attempts)
 
     @staticmethod
     def _output_types(deps):
@@ -973,8 +955,6 @@ class AgentRunner:
         if has_user_turn(message, attachments, context_refs):
             content = refs_from_attachments(message, attachments, context_refs)
             user_request = ModelRequest(parts=[UserPromptPart(content=content)])
-            if deps.output_state is not None:
-                user_request.metadata = {CONTRACT: deepcopy(deps.output_state.contract)}
             rows = await self.store.append(
                 session_id,
                 [user_request],
@@ -996,8 +976,6 @@ class AgentRunner:
                     )
             if rows:
                 user_event_id = rows[0].event_id
-                if deps.output_state is not None:
-                    deps.output_state.source_event_id = user_event_id
             if user_event_id is not None and session_title is not None:
                 title_event = await self.store.apply_initial_session_title(
                     session_id, agent_id=deps.agent_id, user_id=deps.user,
@@ -1535,18 +1513,27 @@ class AgentRunner:
                 })
         return True
 
-    async def _close_saved_messages(self, session_id: str, deps: AgentDeps, *, status: str) -> bool:
+    async def _close_saved_messages(
+        self, session_id: str, deps: AgentDeps, *, status: str,
+        result_queue: asyncio.Queue[dict[str, Any]] | None = None,
+    ) -> bool:
         """Close statuses on real persisted messages without snapshots or replay."""
         append = getattr(self.store, "append_message_parts", None)
         if not callable(append):
             return False
         try:
             async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
-                await append(
+                rows = await append(
                     session_id, agent_id=deps.agent_id, user_id=deps.user,
                     turn_id=deps.turn_id, run_id=deps.run_id, messages=[],
                     terminal_status=status,
                 )
+            if result_queue is not None:
+                for row in rows or []:
+                    result_queue.put_nowait({
+                        "type": "session_event_updated", "persisted": True,
+                        "event": row.public_dict(),
+                    })
             return True
         except Exception as exc:
             log_event("message_persistence_failed", session_id=session_id,
@@ -2590,6 +2577,7 @@ class AgentRunner:
                             repair_dangling_tool_calls=True,
                             dangling_tool_message=failure_diagnostic["message"],
                             terminal_status="failed",
+                            result_queue=session_events,
                         ) or history_persisted
                     except Exception as persistence_exc:
                         history_persisted = False
@@ -2598,16 +2586,24 @@ class AgentRunner:
                             session_id,
                             persistence_exc,
                         )
-                        await self._close_saved_messages(session_id, deps, status="failed")
+                        await self._close_saved_messages(
+                            session_id, deps, status="failed", result_queue=session_events,
+                        )
                 else:
                     history_persisted = await self._close_saved_messages(
-                        session_id, deps, status="failed",
+                        session_id, deps, status="failed", result_queue=session_events,
                     ) and history_persisted
                 failed_run_event = await self._finish_run_event(
                     run_event, status="failed", started_at=started_at,
                     usage=stream_snapshot.usage or model_usage,
                     error=type(exc).__name__, exception=exc,
                 )
+                # Commit the failure before yielding: disconnecting while its
+                # partial response is mirrored must not erase the error fact.
+                # Clients receive message/status checkpoints before the error
+                # so they can replace provisional rows just as History does.
+                while not session_events.empty():
+                    yield session_events.get_nowait()
                 if failed_run_event is not None:
                     yield {
                         "type": "session_event_updated",
@@ -2676,11 +2672,15 @@ class AgentRunner:
                                         terminal_status="interrupted", result_queue=session_events,
                                     )
                                 else:
-                                    await self._close_saved_messages(session_id, deps, status="interrupted")
+                                    await self._close_saved_messages(
+                                        session_id, deps, status="interrupted", result_queue=session_events,
+                                    )
                             except Exception:
                                 cancel_persistence_failed = True
                                 logger.exception("Cancelled message finalization failed")
-                                await self._close_saved_messages(session_id, deps, status="interrupted")
+                                await self._close_saved_messages(
+                                    session_id, deps, status="interrupted", result_queue=session_events,
+                                )
                         else:
                             self._publish_run_cancelled(
                                 persister, session_id, deps,

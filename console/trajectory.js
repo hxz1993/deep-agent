@@ -1,4 +1,4 @@
-import { mountStructuredOutput } from "./structured-output.js?v=20261022-release0140";
+import { mountStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
 import { cacheMessageSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 import { tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderPlanSnapshot } from "./plan-view.js?v=20261022-release0140";
@@ -143,10 +143,20 @@ function assistantLoopPayload(parts = []) {
   return { thinking, content, tool_calls: toolCalls };
 }
 
-function assistantLoopSummary(payload = {}) {
+function assistantLoopSummary(payload = {}, status = "running") {
   if (payload.content) return valuePreview(payload.content);
   if (payload.tool_calls?.length) return `调用 ${payload.tool_calls.length} 个工具`;
-  return payload.thinking ? "模型处理中" : "模型响应";
+  if (!payload.thinking) return "模型响应";
+  if (status === "failed") return "模型响应失败";
+  if (status === "interrupted") return "已停止";
+  if (status === "completed") return "模型思考";
+  return "模型处理中";
+}
+
+function assistantMessageKey(event) {
+  const ordinal = event.payload?.source?.message_ordinal;
+  return event.run_id && Number.isInteger(ordinal)
+    ? `${event.run_id}:${ordinal}` : event.event_id;
 }
 
 function userPayload(content) {
@@ -311,15 +321,6 @@ function projectExecutionError(event, inputSequence) {
   return projected;
 }
 
-function outputContract(items, turnId) {
-  for (const event of items) {
-    if (event.turn_id !== turnId) continue;
-    const contract = storedMessage(event)?.metadata?.deepagent_output_contract;
-    if (contract?.enabled === true || contract?.name) return contract;
-  }
-  return null;
-}
-
 function outputSourceMatches(fact, event, part, offset) {
   const source = fact.payload?.source || {};
   const sourceIds = source.event_ids || [];
@@ -332,7 +333,6 @@ function outputSourceMatches(fact, event, part, offset) {
 
 function projectOutputAttempt(event, inputSequence, items) {
   const payload = event.payload || {};
-  const contract = outputContract(items, event.turn_id);
   let candidate, candidateFound = Object.hasOwn(payload, "output");
   if (candidateFound) candidate = payload.output;
   else {
@@ -341,8 +341,6 @@ function projectOutputAttempt(event, inputSequence, items) {
       const index = parts.findIndex((part, offset) => toolRole(part) === "call" && outputSourceMatches(event, source, part, offset));
       if (index < 0) continue;
       candidate = parts[index].args;
-      if (typeof candidate === "string") { try { candidate = JSON.parse(candidate); } catch { /* Invalid raw arguments remain visible as text. */ } }
-      if (candidate && typeof candidate === "object" && !Array.isArray(candidate) && contract?.json_schema && contract.json_schema.type !== "object" && Object.hasOwn(candidate, "response")) candidate = candidate.response;
       candidateFound = true;
       break;
     }
@@ -350,7 +348,7 @@ function projectOutputAttempt(event, inputSequence, items) {
   return {
     ...newEvent({ id: event.event_id, kind: "output", inputSequence: Math.max(inputSequence, 1), runId: event.run_id,
       timestamp: event.created_at, status: payload.accepted ? "completed" : "failed", part: payload, payload,
-      native: { event_ids: [event.event_id], source_event_ids: payload.source?.event_ids || [], contract },
+      native: { event_ids: [event.event_id], source_event_ids: payload.source?.event_ids || [] },
     }),
     sequence: Number(event.sequence || 0), turn_id: event.turn_id, event_type: "output/attempt",
     tool_call_id: payload.tool_call_id, candidate, candidate_found: candidateFound,
@@ -428,8 +426,7 @@ export function buildTrajectory(history = {}) {
 
     if (event.event_type === "assistant/message") {
       const source = event.payload?.source;
-      const messageKey = event.run_id && Number.isInteger(source?.message_ordinal)
-        ? `${event.run_id}:${source.message_ordinal}` : event.event_id;
+      const messageKey = assistantMessageKey(event);
       let group = assistantMessages.get(messageKey);
       if (!group) {
         group = { event, parts: new Map(), eventIds: [], row: null };
@@ -467,7 +464,7 @@ export function buildTrajectory(history = {}) {
         payload: assistantPayload,
         native: { ...messageMeta(message), event_ids: [...group.eventIds] },
       });
-      assistant.summary = assistantLoopSummary(assistantPayload);
+      assistant.summary = assistantLoopSummary(assistantPayload, assistant.status);
       assistant.sequence = Number(group.event.sequence || 0);
       assistant.turn_id = event.turn_id || null;
       assistant.event_type = event.event_type;
@@ -795,11 +792,11 @@ function renderMeta(event) {
   const usage = trajectoryUsage(event);
   const items = [
     ["clock-3", event.timestamp ? formatTime(event.timestamp) : null],
-    ["timer", duration == null && (event.kind === "assistant" || event.tool_call_id) ? "耗时未知" : durationLabel(duration)],
+    ["timer", duration == null && (event.kind === "assistant" || event.tool_call_id) ? "Duration unknown" : durationLabel(duration)],
     ["coins", usage?.total != null ? `${usage.total.toLocaleString("zh-CN")} Token` : null],
   ].filter(([, value]) => value);
   if (!items.length) return "";
-  return `<div class="trajectory-summary-meta">${items.map(([name, value]) => `<span title="${escapeHtml(name === "coins" ? "本次模型请求的 Token 合计" : name === "timer" ? event.duration_description || "缺少服务端执行起止记录；事件创建或更新时间不能作为执行耗时。" : "事件时间")}">${icon(name)}${escapeHtml(value)}</span>`).join("")}</div>`;
+  return `<div class="trajectory-summary-meta">${items.map(([name, value]) => `<span title="${escapeHtml(name === "coins" ? "Total tokens for this model request" : name === "timer" ? event.duration_description || "Execution timestamps unavailable; event creation or update time is not execution duration." : "Event time")}">${icon(name)}${escapeHtml(value)}</span>`).join("")}</div>`;
 }
 
 function renderSummarySection(title, body, { targetTab = null, className = "" } = {}) {
@@ -857,14 +854,16 @@ function renderAssistantTools(event, events) {
   const calls = Array.isArray(event.payload?.tool_calls) ? event.payload.tool_calls : [];
   if (!calls.length) return "";
   return `<div class="trajectory-summary-links">${calls.map((call) => {
-    const target = [...events].reverse().find((item) => TOOL_KINDS.has(item.kind)
+    const target = [...events].reverse().find((item) => (TOOL_KINDS.has(item.kind) || item.kind === "output")
       && item.tool_call_id === call?.tool_call_id
       && (event.source === "sse"
         ? item.run_id === event.run_id
-        : (event.native?.event_ids || [event.id]).includes(item.native?.call_event_id)));
+        : item.kind === "output"
+          ? (item.native?.source_event_ids || []).some(id => (event.native?.event_ids || [event.id]).includes(id))
+          : (event.native?.event_ids || [event.id]).includes(item.native?.call_event_id)));
     return renderJumpLink({
       eventId: target?.id || null,
-      iconName: "wrench",
+      iconName: target?.kind === "output" ? "braces" : "wrench",
       text: call?.tool || "Unnamed tool",
       detail: valuePreview(call?.args, 120),
     });
@@ -1035,7 +1034,11 @@ const SUMMARY_RENDERERS = Object.freeze({
 });
 
 function renderOutputSummary(event) {
-  return renderSummarySection("输出信息", `${renderFact("输出编码", event.payload?.name, { mono: true })}${renderFact("调用 ID", event.tool_call_id, { mono: true })}${renderFact("尝试", event.payload?.attempt)}${renderFact("状态", event.payload?.accepted ? "Completed" : "Error")}${event.payload?.errors?.length ? `<pre class="trajectory-raw">${escapeHtml(JSON.stringify(event.payload.errors, null, 2))}</pre>` : ""}<button type="button" class="btn-link" data-trajectory-detail-tab="output">查看输出</button>`);
+  const preview = event.candidate_found
+    ? `<p class="trajectory-summary-code">${escapeHtml(valuePreview(formatJson(event.candidate), 360))}</p>`
+    : '<p class="trajectory-summary-empty">Original candidate unavailable.</p>';
+  return renderSummarySection("Output", preview, { targetTab: "output", className: "trajectory-summary-preview is-scroll" })
+    + (event.payload?.errors?.length ? renderSummarySection("Validation", renderJsonBlock(event.payload.errors)) : "");
 }
 
 function renderSummary(event, events, attachmentUrl) {
@@ -1101,8 +1104,8 @@ function renderRunCode(event, line = null, callName = null, compact = false) {
 // Tabs describe semantic projections, not HTTP bodies or database columns.
 function detailTabs(event) {
   const tabs = [["summary", "Summary"]];
+  if (event.kind === "output") return [...tabs, ["output", "Output"], ["raw", "Raw"]];
   if (trajectoryUsage(event)) tabs.push(["usage", "Usage"]);
-  if (event.kind === "output") return [...tabs, ["output", "输出"], ...(event.native?.contract?.json_schema ? [["schema", "Schema"]] : []), ["event", "原始记录"]];
   if (isPythonCodeEvent(event)) tabs.push(["code", "Code"]);
   if (isRunCodeEvent(event)) tabs.push(["execution", "Calls"]);
   if (TOOL_KINDS.has(event.kind)) {
@@ -1157,8 +1160,7 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, 
   }
   if (activeTab === "result") content = renderJsonBlock(event.result);
   if (activeTab === "output" && event.kind === "output") content = event.candidate_found
-    ? '<div data-structured-output-detail></div>' : '<p class="trajectory-summary-empty">原始候选不可用。</p>';
-  if (activeTab === "schema" && event.kind === "output") content = renderJsonBlock(event.native?.contract?.json_schema);
+    ? '<div data-structured-output-detail></div>' : '<p class="trajectory-summary-empty">Original candidate unavailable.</p>';
   if (activeTab === "preview") content = renderPreview(event);
   if (activeTab === "raw") content = renderRaw(event);
   if (activeTab === "usage") content = renderTrajectoryUsage(event);
@@ -1397,7 +1399,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       if (existing) Object.assign(existing, next);
       else calls.push(next);
     }
-    assistant.summary = assistantLoopSummary(assistant.payload);
+    assistant.summary = assistantLoopSummary(assistant.payload, assistant.status);
     assistant.timestamp_end = timestamp;
     return assistant;
   }
@@ -1413,6 +1415,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         ? [...liveEvents].reverse().find((item) => item.kind === "input")
         : null;
       const rawItems = Array.isArray(history.items) ? history.items : [];
+      const newAssistantMessage = stored.event_type === "assistant/message"
+        && !rawItems.some(item => item.event_type === "assistant/message"
+          && assistantMessageKey(item) === assistantMessageKey(stored));
       const rawIndex = rawItems.findIndex((item) => item.event_id === stored.event_id);
       if (rawIndex >= 0) rawItems[rawIndex] = stored;
       else rawItems.push(stored);
@@ -1430,9 +1435,16 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       if (storedCallIds.size) {
         liveEvents = liveEvents.filter((item) => !storedCallIds.has(item.tool_call_id));
       }
-      if (stored.event_type === "assistant/message" && stored.run_id) {
-        liveEvents = liveEvents.filter((item) => item !== activeAssistantLoop || item.run_id !== stored.run_id);
-        if (activeAssistantLoop?.run_id === stored.run_id) activeAssistantLoop = null;
+      if (newAssistantMessage && stored.run_id) {
+        // A terminal frame may already have closed this Run's live loop. Its
+        // first persisted fact still replaces that loop, including its receipt
+        // timestamp. Later parts/updates belong to the same persisted message
+        // and must not consume the next loop that is already streaming.
+        const liveAssistant = liveEvents.find(item => item.kind === "assistant" && item.run_id === stored.run_id);
+        if (liveAssistant) {
+          liveEvents = liveEvents.filter(item => item !== liveAssistant);
+          if (activeAssistantLoop === liveAssistant) activeAssistantLoop = null;
+        }
       }
       const projectedMessage = historyEvents.find((item) => item.native?.event_ids?.includes(stored.event_id));
       const projectedTool = historyEvents.find((item) => TOOL_KINDS.has(item.kind)
@@ -1513,6 +1525,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         applyExecutionTiming(call, payload.timing, "tool_execution");
         if (activeAssistantLoop?.run_id === currentRunId) {
           activeAssistantLoop.status = "completed";
+          activeAssistantLoop.summary = assistantLoopSummary(activeAssistantLoop.payload, activeAssistantLoop.status);
           activeAssistantLoop = null;
         }
         scheduleRender();
@@ -1527,6 +1540,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         call.timestamp_end = timestamp;
         if (activeAssistantLoop?.run_id === currentRunId) {
           activeAssistantLoop.status = "interrupted";
+          activeAssistantLoop.summary = assistantLoopSummary(activeAssistantLoop.payload, activeAssistantLoop.status);
           activeAssistantLoop = null;
         }
         scheduleRender();
@@ -1535,14 +1549,20 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     }
         if (type === "final") {
           liveEvents.filter((item) => item.run_id === currentRunId && item.status === "running")
-            .forEach((item) => { item.status = "completed"; item.timestamp_end = timestamp; });
+            .forEach((item) => {
+              item.status = "completed"; item.timestamp_end = timestamp;
+              if (item.kind === "assistant") item.summary = assistantLoopSummary(item.payload, item.status);
+            });
           activeAssistantLoop = null;
           scheduleRender();
           return;
     }
     if (["cancelled", "error"].includes(type)) {
       liveEvents.filter((item) => item.run_id === currentRunId && ["running", "pending"].includes(item.status))
-        .forEach((item) => { item.status = type === "error" ? "failed" : "interrupted"; item.timestamp_end = timestamp; });
+        .forEach((item) => {
+          item.status = type === "error" ? "failed" : "interrupted"; item.timestamp_end = timestamp;
+          if (item.kind === "assistant") item.summary = assistantLoopSummary(item.payload, item.status);
+        });
       activeAssistantLoop = null;
       // Transport termination closes live content; only a persisted execution
       // error is a separate trajectory fact. Cancellation adds no receipt.

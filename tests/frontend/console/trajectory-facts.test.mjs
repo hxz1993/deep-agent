@@ -136,6 +136,65 @@ test("cancellation closes live content without adding any terminal receipt", () 
   });
 });
 
+test("late failed assistant facts replace closed live content before the next successful run", () => {
+  withController(controller => {
+    const failed = { ...fact("failed-thinking", 1, 1, 0, { part_kind: "thinking", content: "部分思考" }), status: "failed" };
+    failed.payload.message.timestamp = "2026-10-22T14:01:59.920349Z";
+    const failure = { event_id: "failure", sequence: 2, run_id: "run-1", event_type: "execution/error", status: "failed",
+      created_at: "2026-10-22T14:02:01.255650Z", payload: { code: "agent_run_failed", message: "本轮已停止" } };
+    const success = { ...fact("successful-text", 3, 1, 0, { part_kind: "text", content: "成功回复" }), run_id: "run-2" };
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    controller.ingest({ event: "thinking", data: { delta: "部分思考" } });
+    controller.ingest({ event: "session_event_updated", data: { event: failure } });
+    controller.ingest({ event: "error", data: { message: "本轮已停止" } });
+    // The terminal presentation frame can close the live row before its fact
+    // arrives. A later checkpoint must still replace that same Run's row.
+    controller.ingest({ event: "session_event_appended", data: { event: failed } });
+    controller.ingest({ event: "session", data: { run_id: "run-2" } });
+    controller.ingest({ event: "text", data: { delta: "成功回复" } });
+    controller.ingest({ event: "session_event_appended", data: { event: success } });
+    controller.ingest({ event: "final", data: { status: "completed" } });
+    const liveRows = controller.events();
+    assert.deepEqual(liveRows.map(row => [row.id, row.status]), [["failed-thinking", "failed"], ["failure", "failed"], ["successful-text", "completed"]]);
+    controller.setHistory({ items: [failed, failure, success] });
+    assert.deepEqual(controller.events(), liveRows, "refresh keeps the same rows, status, ordering and persisted timestamps");
+  });
+});
+
+test("thinking-only assistant summaries reflect the same terminal state live and after refresh", () => {
+  for (const [terminal, status, summary] of [["error", "failed", "模型响应失败"], ["cancelled", "interrupted", "已停止"], ["final", "completed", "模型思考"]]) {
+    withController(controller => {
+      controller.ingest({ event: "session", data: { run_id: "run-1" } });
+      controller.ingest({ event: "thinking", data: { delta: "保留思考正文" } });
+      assert.equal(controller.events()[0].summary, "模型处理中");
+      controller.ingest({ event: terminal, data: {} });
+      assert.equal(controller.events()[0].summary, summary);
+      assert.equal(controller.events()[0].status, status);
+      controller.setHistory({ items: [{ ...fact("thinking-only", 1, 1, 0, { part_kind: "thinking", content: "保留思考正文" }), status }] });
+      assert.equal(controller.events()[0].summary, summary);
+      assert.equal(controller.events()[0].payload.thinking, "保留思考正文");
+    });
+  }
+});
+
+test("updates and later parts of a persisted assistant loop keep the next live loop", () => {
+  withController(controller => {
+    const first = fact("first-thinking", 1, 1, 0, { part_kind: "thinking", content: "第一轮" });
+    const laterPart = fact("first-text", 2, 1, 1, { part_kind: "text", content: "第一轮正文" });
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    controller.ingest({ event: "thinking", data: { delta: "第一轮" } });
+    controller.ingest({ event: "session_event_appended", data: { event: first } });
+    controller.ingest({ event: "thinking", data: { delta: "第二轮直播" } });
+    controller.ingest({ event: "session_event_appended", data: { event: laterPart } });
+    controller.ingest({ event: "session_event_updated", data: { event: { ...first, status: "completed" } } });
+    const assistants = controller.events().filter(row => row.kind === "assistant");
+    assert.equal(assistants.length, 2);
+    assert.equal(assistants[0].payload.content, "第一轮正文");
+    assert.equal(assistants[1].payload.thinking, "第二轮直播");
+    assert.equal(assistants[1].status, "running");
+  });
+});
+
 test("an allowed text final stays an assistant trajectory row after a rejected output and History refresh", () => {
   withController(controller => {
     const rejected = { output_id: "rejected-json", name: "lease_result", accepted: false, status: "error", output: {}, run_id: "run-1", turn_id: "turn-1" };
@@ -375,7 +434,7 @@ test("missing or invalid timing stays unknown instead of becoming zero or a data
   assert.equal(buildTrajectory({items:[row]})[0].duration_ms,undefined);
   withController((controller,elements)=>{
     controller.setHistory({session_id:"unknown",items:[row]});
-    assert.match(elements.get("inspectorContent").innerHTML,/耗时未知/);
+    assert.match(elements.get("inspectorContent").innerHTML,/Duration unknown/);
   });
 });
 
@@ -421,5 +480,45 @@ test("duration toggle preserves selection/order and classifies timing boundaries
     controller.restore(snapshot);
     assert.equal(controller.snapshot().clockMode,"duration");
     assert.match(list.innerHTML,/trajectory-duration slow/);
+  });
+});
+
+
+test("assistant output links follow the source response when call IDs are reused", () => {
+  withController((controller, elements) => {
+    const response = (id, seq, ordinal) => fact(id, seq, ordinal, 0,
+      { part_kind: "tool-call", tool_name: "decision", tool_call_id: "reused-call", args: { score: ordinal } });
+    const output = (id, seq, sourceId, ordinal) => ({
+      event_id: id, sequence: seq, turn_id: "turn-1", run_id: "run-1", event_type: "output/attempt", status: "completed",
+      payload: { name: "decision", tool_call_id: "reused-call", attempt: ordinal, accepted: true, output: { score: ordinal },
+        source: { event_ids: [sourceId], message_ordinal: ordinal, part_index: 0 } },
+    });
+    controller.setHistory({ items: [response("response-1", 1, 1), output("output-1", 2, "response-1", 1),
+      response("response-2", 3, 2), output("output-2", 4, "response-2", 2)] });
+    controller.restore({ selectedId: "response-1", detailTab: "summary" });
+    const detail = () => elements.get("inspectorContent").innerHTML;
+    assert.match(detail(), /data-trajectory-event-target="output-1"/);
+    assert.doesNotMatch(detail(), /data-trajectory-event-target="output-2"/);
+    controller.restore({ selectedId: "output-1", detailTab: "summary" });
+    assert.match(detail(), /data-trajectory-detail-tab-target="output"/);
+    assert.match(detail(), /score/);
+    assert.match(detail(), />Output</);
+    assert.match(detail(), />Raw</);
+    assert.doesNotMatch(detail(), />Schema<|>Event</);
+    assert.doesNotMatch(detail(), /查看输出|输出信息|原始记录/);
+  });
+});
+
+test("output details have only Summary, Output and Raw and show the attempt payload as Raw", () => {
+  withController((controller, elements) => {
+    const payload = { name: "decision", attempt: 1, accepted: true, output: false, source: { event_ids: [] } };
+    controller.setHistory({ items: [{ event_id: "output", sequence: 1, event_type: "output/attempt", payload }] });
+    controller.restore({ selectedId: "output", detailTab: "raw" });
+    const markup = elements.get("inspectorContent").innerHTML;
+    assert.deepEqual([...markup.matchAll(/data-trajectory-detail-tab="([^"]+)"/g)].map(match => match[1]), ["summary", "output", "raw"]);
+    assert.match(markup, /&quot;accepted&quot;: true/);
+    assert.match(markup, /&quot;output&quot;: false/);
+    assert.match(markup, /&quot;attempt&quot;: 1/);
+    assert.doesNotMatch(markup, /json_schema|historical snapshot|current Agent configuration/);
   });
 });

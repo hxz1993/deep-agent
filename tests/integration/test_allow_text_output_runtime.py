@@ -10,7 +10,9 @@ from pydantic_ai import DeferredToolResults, ExternalToolset
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.tools import Tool, ToolDefinition
 
-from deep_agent.agent.structured_output import CONTRACT, StructuredOutputState
+from deep_agent.agent.structured_output import StructuredOutputState
+
+CONTRACT = "deepagent_output_contract"
 from deep_agent.conversation.projector import project_session_events
 from tests.integration import test_structured_output_remaining_boundaries as fixture
 
@@ -152,7 +154,7 @@ class AllowTextOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([t.name for t in calls[0].output_tools], ["lease_result"])
             self.assertFalse(calls[0].function_tools)
 
-    async def test_deferred_resume_uses_frozen_mixed_policy_and_keeps_correction_budget(self):
+    async def test_deferred_resume_loads_current_mixed_policy_once_and_keeps_correction_budget(self):
         for streaming in (False, True):
             respond, calls = self.sequence([[ToolCallPart("lease_result", {}, "bad-1")],
                 [TextPart("请确认。"), ToolCallPart("confirm", {}, "confirm-1")], [TextPart("已确认。")]])
@@ -161,7 +163,8 @@ class AllowTextOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
             sid = uuid4().hex
             pending, _ = await self.execute(runner, sid, stream=streaming)
             self.assertEqual(pending["status"], "pending")
-            runner._output_config_loader = AsyncMock(side_effect=AssertionError("must use frozen policy"))
+            runner._output_config_loader.assert_awaited_once()
+            runner._output_config_loader = AsyncMock(return_value=deepcopy(BASE))
             final, _ = await self.execute(runner, sid, stream=streaming, message="", results=DeferredToolResults(calls={"confirm-1": True}))
             self.assertEqual(final["output"], "已确认。")
             self.assertNotIn("output_info", final)
@@ -169,7 +172,8 @@ class AllowTextOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
             attempts = [r for r in await self.rows(sid) if r.event_type == "output/attempt"]
             self.assertEqual(len(attempts), 1)
             snapshots = [(r.payload.get("message", {}).get("metadata") or {}).get(CONTRACT) for r in await self.rows(sid)]
-            self.assertTrue(next(s for s in snapshots if s)["allow_text_output"])
+            self.assertFalse(any(snapshots))
+            runner._output_config_loader.assert_awaited_once()
 
     async def test_missing_policy_is_strict_and_invalid_policy_rejected(self):
         state = StructuredOutputState({k: v for k, v in BASE.items() if k != "allow_text_output"})

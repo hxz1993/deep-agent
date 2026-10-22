@@ -1,4 +1,4 @@
-import { mountStructuredOutput, serializeStructuredOutput } from "./structured-output.js?v=20261022-release0140";
+import { mountStructuredOutput, serializeStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20260922-trajectory-8";

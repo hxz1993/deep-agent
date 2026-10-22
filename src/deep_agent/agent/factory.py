@@ -17,6 +17,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.models import OpenAICompatibleVideoChatModel
+from deep_agent.models.http_transport import model_http_settings
 from deep_agent.agent.planning import build_planning_capability
 from deep_agent.agent.diagnostics import RuntimeDiagnostics
 from deep_agent.models.provider_registry import deepseek_chat_profile, resolve_provider_model
@@ -63,15 +64,16 @@ def _normalize_url(url: str | None) -> str | None:
 def _resolve_openai_compatible(spec: AgentSpec, model_name: str) -> Model:
     provider = OpenAIProvider(base_url=spec.base_url, api_key=spec.api_key)
     if "video" in (spec.input_modalities or []) or "video_url" in (spec.tags or []):
-        return OpenAICompatibleVideoChatModel(model_name, provider=provider)
-    return OpenAIChatModel(model_name, provider=provider)
+        return OpenAICompatibleVideoChatModel(model_name, provider=provider, settings=model_http_settings())
+    return OpenAIChatModel(model_name, provider=provider, settings=model_http_settings())
 
 
 def _resolve_official_deepseek(spec: AgentSpec, model_name: str) -> OpenAIChatModel | None:
     """Use the native profile when a catalog row points at DeepSeek's API."""
     provider = DeepSeekProvider(api_key=spec.api_key)
     if _normalize_url(spec.base_url) == _normalize_url(provider.base_url):
-        return OpenAIChatModel(model_name, provider=provider, profile=deepseek_chat_profile(model_name))
+        return OpenAIChatModel(model_name, provider=provider, profile=deepseek_chat_profile(model_name),
+                               settings=model_http_settings())
     return None
 
 
@@ -80,7 +82,7 @@ def _resolve_anthropic(spec: AgentSpec, model_name: str) -> AnthropicModel:
         api_key=spec.api_key or None,
         base_url=_normalize_url(spec.base_url),
     )
-    return AnthropicModel(model_name, provider=provider)
+    return AnthropicModel(model_name, provider=provider, settings=model_http_settings())
 
 
 def _gemini_http_client(proxy: str) -> httpx2.AsyncClient:
@@ -100,7 +102,7 @@ def _resolve_google(spec: AgentSpec, model_name: str) -> GoogleModel:
         base_url=_normalize_url(spec.base_url),
         http_client=_gemini_http_client(proxy) if proxy else None,
     )
-    return GoogleModel(model_name, provider=provider)
+    return GoogleModel(model_name, provider=provider, settings=model_http_settings())
 
 
 def resolve_model(spec: AgentSpec) -> str | Model:
@@ -163,6 +165,7 @@ def resolve_model(spec: AgentSpec) -> str | Model:
                 model_name,
                 provider=DeepSeekProvider(api_key=spec.api_key),
                 profile=deepseek_chat_profile(model_name),
+                settings=model_http_settings(),
             )
         deepseek_model = _resolve_official_deepseek(spec, model_name)
         if deepseek_model is not None:
@@ -349,6 +352,7 @@ def build_agent(
     instructions.append(context_reference_instructions)
     return Agent(
         model,
+        model_settings=model_http_settings() if isinstance(model, str) else None,
         deps_type=AgentDeps,
         instructions=instructions,
         toolsets=toolsets,

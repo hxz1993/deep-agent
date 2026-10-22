@@ -28,6 +28,7 @@ from pydantic_ai.providers.zai import ZaiProvider
 
 from deep_agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.models.compatible_providers import MiniMaxProvider, StepFunProvider
+from deep_agent.models.http_transport import model_http_settings
 from deep_agent.core.exceptions import DeepAgentError
 from deep_agent.options import OPTION
 
@@ -386,6 +387,7 @@ def resolve_provider_model(
         model = model_class(
             model_name,
             provider=runtime_provider,
+            settings=model_http_settings(),
             **({"profile": deepseek_chat_profile(model_name)} if provider.provider_type == "deepseek" else
                {"profile": {**(MoonshotAIProvider.model_profile(model_name) or {}),
                             "openai_reasoning_enabled_by_default": True,
@@ -407,7 +409,7 @@ def resolve_provider_model(
             api_key=provider.api_key,
             base_url=effective_base_url(provider),
         )
-        model = AnthropicModel(model_name, provider=runtime_provider)
+        model = AnthropicModel(model_name, provider=runtime_provider, settings=model_http_settings())
         model.deepagent_provider_type = provider.provider_type
         return model
     if definition.model_protocol == "google":
@@ -422,7 +424,7 @@ def resolve_provider_model(
                 else {"base_url": effective_base_url(provider)}
             ),
         )
-        return GoogleModel(model_name, provider=runtime_provider)
+        return GoogleModel(model_name, provider=runtime_provider, settings=model_http_settings())
     raise ProviderConfigurationError(
         f"Unsupported model protocol for {provider.provider_type}: {definition.model_protocol}"
     )

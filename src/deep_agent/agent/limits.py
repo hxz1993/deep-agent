@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from httpx2 import DecodingError
 from pydantic_ai.exceptions import UsageLimitExceeded
 from deep_agent.agent.context.compaction import ContextWindowExceededError
 
@@ -31,6 +32,8 @@ _LIMIT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 def format_stream_error(exc: Exception) -> str:
     """Map pydantic_ai usage-limit errors to user-facing Chinese messages."""
+    if isinstance(exc, DecodingError):
+        return "模型响应传输解码失败，本轮已停止。这不是结构化输出格式校验错误，请重试。"
     if isinstance(exc, UsageLimitExceeded):
         text = str(exc)
         for pattern, template in _LIMIT_PATTERNS:

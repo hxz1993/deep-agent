@@ -172,12 +172,12 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await validate_output(schema, value), [])
             validated = perf_counter()
             metadata = {"deepagent_message_ordinal": 1, "deepagent_output": {"name": "resource_result", "schema_digest": digest, "part_indices": [0]}}
-            messages = [ModelRequest(parts=[UserPromptPart("Synthetic resource input")], metadata={"deepagent_message_ordinal": 0, "deepagent_output_contract": {"name": "resource_result", "json_schema": schema, "schema_digest": digest}}),
+            messages = [ModelRequest(parts=[UserPromptPart("Synthetic resource input")], metadata={"deepagent_message_ordinal": 0}),
                         ModelResponse(parts=[ToolCallPart("resource_result", value, f"call-{index}")], metadata=metadata),
                         ModelRequest(parts=[ToolReturnPart("resource_result", "Final result processed.", f"call-{index}")], metadata={"deepagent_message_ordinal": 2})]
             await self.stores.coordinator.append_message_parts(sid, messages=messages, agent_id=aid,
                 user_id="resource-owner", turn_id=run, run_id=run, first_message_ordinal=0, terminal_status="completed")
-            row = await self.stores.coordinator.append_output_attempt(sid, agent_id=aid, user_id="resource-owner", turn_id=run, run_id=run,
+            row = await self.stores.coordinator.append_output_attempt(sid, agent_id=aid, user_id="resource-owner", turn_id=run, run_id=run, output_root_is_object=True,
                 payload={"name": "resource_result", "tool_call_id": f"call-{index}", "attempt": 1, "accepted": True, "schema_digest": digest,
                          "source": {"message_ordinal": 1, "part_index": 0}, "output": value})
             self.assertEqual(len(json_bytes(row.payload["output"])), len(json_bytes(value)))

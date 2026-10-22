@@ -170,6 +170,17 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(assistant.status, "failed")
         self.assertFalse(any(item.event_type == "run/terminal" for item in persisted))
+        mirrored = [
+            event["event"] for event in events_out
+            if event["type"] in {"session_event_appended", "session_event_updated"}
+        ]
+        assistant_frame = next(
+            (event for event in mirrored if event["event_id"] == assistant.event_id), None,
+        )
+        self.assertIsNotNone(assistant_frame, "Failed partial responses must reach live clients before error")
+        self.assertEqual(assistant_frame["status"], "failed")
+        self.assertEqual(assistant_frame["sequence"], assistant.sequence)
+        self.assertEqual(mirrored[-1]["event_type"], "execution/error")
 
     async def test_run_stream_no_duplicate_user_on_success(self) -> None:
         agent = Agent(TestModel(), deps_type=AgentDeps)
@@ -184,6 +195,29 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         history = await self.store.get_history("sess-ok", agent_id=self.db_agent.id)
         user_messages = [m for m in history if is_user_only_request(m)]
         self.assertEqual(len(user_messages), 1)
+
+    async def test_disconnect_during_failed_partial_mirror_keeps_committed_error(self) -> None:
+        async def broken(_messages, _info):
+            yield "synthetic partial response"
+            raise httpx2.DecodingError("synthetic decode failure")
+
+        runner = AgentRunner(Agent(FunctionModel(stream_function=broken), deps_type=AgentDeps),
+                             self.store, UsageLimits(request_limit=10))
+        sid = "disconnect-during-error-mirror"
+        stream = runner.run_stream(sid, "fixture", self._deps(sid), persister=self.persister)
+        try:
+            async for frame in stream:
+                event = frame.get("event", {})
+                if event.get("event_type") == "assistant/message" and event.get("status") == "failed":
+                    break
+            else:
+                self.fail("No failed partial response mirror")
+        finally:
+            await stream.aclose()
+        rows = await self.store.list_events(sid, limit=100)
+        self.assertEqual(len([row for row in rows if row.event_type == "execution/error"]), 1)
+        self.assertEqual(next(row.status for row in rows if row.event_type == "assistant/message"), "failed")
+        self.assertEqual(runner._active_runs.active_count(), 0)
 
     async def test_stream_provider_overflow_compacts_once_then_retries(self) -> None:
         await self.store.append(

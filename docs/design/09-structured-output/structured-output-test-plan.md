@@ -173,28 +173,28 @@ Schema 与正文均用合成非客户数据。相同测试夹具用于普通和�
 | RUN-25 | SDK解析错误、自定义Schema错误、混调连续发生 | 共用2次修正，按响应去重，不从不同重试层额外获得额度 | P0 |
 | RUN-26 | 耗尽最后响应不生成SDK RetryPrompt | 最后失败及预算检查点仍随execution/error落库，可独立恢复诊断 | P0 |
 
-## 7. Deferred、快照、续聊与取消
+## 7. Deferred、Run内存配置、历史兼容与取消（2026-10-23更新）
 
 | **ID** | **场景 / 步骤** | **必须断言** | **级别** |
 | --- | --- | --- | --- |
 | DFR-01 | A3先UI再输出 | 正常Pending，原tool_call_id恢复，最终JSON接受 | P0 |
 | DFR-02 | UI→普通查询→第二次UI→输出 | 多次等待链完整，Turn相同，Run按原规则变化 | P0 |
 | DFR-03 | UI拒绝/取消答案 | 模型收到真实语义，不伪造用户同意 | P0 |
-| DFR-04 | Pending期间改编码/说明/Schema | 恢复仍原快照，历史名称不变，新用户Turn才用新定义 | P0 |
-| DFR-05 | Pending期间关闭或删除定义 | 原Turn仍按有效快照；不被早期最新配置校验阻断 | P0 |
-| DFR-06 | 旧Pending无快照，后来开启 | 继续旧普通模式，不强接新Schema | P0 |
+| DFR-04 | 新Runner续跑并统计配置加载 | 当前配置每Run只加载一次，历史结果不重解释，不再恢复旧Schema | P0 |
+| DFR-05 | 当前关闭输出或删除定义后续跑 | 使用当前普通模式，旧配置快照不强制恢复结构化输出；产品约定修改配置应新建对话 | P0 |
+| DFR-06 | 旧Pending无快照、当前启用 | 当前配置正常装配，不要求存在历史配置证据 | P0 |
 | DFR-07 | 已失败一次输出，再UI等待再恢复 | 纠错预算从原事实恢复，不重新获得2次机会 | P0 |
 | DFR-08 | 重复回传同一UI答案 | 按既有冲突/幂等规则，不能重复执行或接受 | P0 |
 | DFR-09 | 过期/错误call ID/跨用户答案 | 归属正确拒绝，原Pending及结果不改变 | P0 |
 | DFR-10 | 进程重启后恢复 | 不依赖内存Schema和预算缓存 | P0 |
-| DFR-11 | 压缩后恢复 | 从原始首条用户事件读快照，不从摘要metadata取 | P0 |
-| DFR-12 | 已有启用引用但快照损坏/丢失/指纹不符 | 明确失败保留Pending；与完全无启用证据的旧Pending分开，不换最新配置继续 | P0 |
+| DFR-11 | 压缩后恢复 | 当前配置装配，原始事件仅恢复执行额度，不从摘要或用户metadata取Schema | P0 |
+| DFR-12 | 历史快照损坏/丢失/指纹或引用不符 | 忽略历史配置，无原数据重写；正确恢复真实Pending与预算 | P0 |
 | DFR-13 | 模型流中取消 | 原取消完成，半截JSON不accepted | P0 |
 | DFR-14 | 校验中/校验后提交前取消 | 真正终止、无accepted，已有失败事实保留 | P0 |
 | DFR-15 | accepted提交后final前断开/取消 | History显示已完成，同ID同JSON，不改interrupted | P0 |
 | DFR-16 | 输出里的clarification数组 | 只是业务数据，不自动创建Deferred或阻断final | P0 |
 | DFR-17 | 续聊新用户消息 | 新Turn读取当前模式，不把上一轮结果再投递一次 | P0 |
-| DFR-18 | 空会话预建后首条请求 | 快照放真实首条用户事件，首轮标题和附件正常 | P0 |
+| DFR-18 | 空会话预建后首条请求 | 新事件无Schema或配置引用，首轮标题和附件正常 | P0 |
 | DFR-19 | 纯文本缺输出→纠正→UI Pending→重启恢复 | 纯文本已耗纠错被恢复，不能只扫描output调用后重置额度 | P0 |
 
 ## 8. 公共协议、History、轨迹和观察
@@ -212,10 +212,10 @@ Schema 与正文均用合成非客户数据。相同测试夹具用于普通和�
 | PUB-09 | Live回放与History交错 | baseline边界正确，输出/尝试/工具不重复 | P0 |
 | PUB-10 | Live缓冲超限/断线 | reset后History恢复完整对象，不拼残缺参数 | P0 |
 | PUB-11 | 刷新/重开会话 | History返回同name/JSON/output_id；失败不进正式回复 | P0 |
-| PUB-12 | 旧工具名字等于输出编码 | 没有快照/语义事实仍是普通工具 | P0 |
-| PUB-13 | 改配置/重命名/覆盖安装后读旧输出 | 不查最新配置改写旧结果或旧Schema | P0 |
+| PUB-12 | 旧工具名字等于结果名称 | 没有输出接受语义事实仍是普通工具，不从名称或文字内容猜测 | P0 |
+| PUB-13 | 改配置/重命名/覆盖安装后读旧输出 | 不按最新配置或Schema重新解释已保存结果 | P0 |
 | PUB-14 | 轨迹失败与成功详情 | 都是输出标签，分别Error/Completed，候选不误显示成功值 | P1 |
-| PUB-15 | Schema页和原始事件 | 当时快照，正确来源Part，不显示虚构版本 | P1 |
+| PUB-15 | Output和Raw详情 | 仅Summary/Output/Raw，无Schema页；成功原生值，失败真实源参数 | P1 |
 | PUB-16 | Event API分页跨output事实 | 顺序稳定、source可定位、没有白名单漏行 | P0 |
 | PUB-17 | 越权history/events/live/cancel | 现有所有者/管理员/Agent/Run边界保持 | P0 |
 | PUB-18 | 文本过程含旧围栏 | 不按过程围栏提前接受或应用业务状态 | P0 |
@@ -243,7 +243,7 @@ Schema 与正文均用合成非客户数据。相同测试夹具用于普通和�
 | PST-15 | 诊断最近异常 | 单次校验失败后成功不计异常；最终失败仅现有一条真实异常 | P0 |
 | PST-16 | 现有Plan/Context/附件混合历史 | 不丢或重复原项目，输出不污染Plan恢复 | P0 |
 | PST-17 | 日志捕获 | 无完整Schema/候选/合同内容/凭据；安全字段足够关联错误 | P0 |
-| PST-18 | 授权备份和恢复会话事实 | 快照/来源/attempt/接受值共同保留，旧包导入不涉及会话 | P0 |
+| PST-18 | 授权备份和恢复会话事实 | 旧记录原样保留，新记录无配置快照；来源/attempt/接受值完整，旧包导入不涉及会话 | P0 |
 | PST-19 | SDK ack/预算checkpoint/必要终态保存失败 | accepted不能先提交；重开模型上下文调用配对闭合，无悬空调用 | P0 |
 | PST-20 | accepted已提交，之后metrics/日志/连接发送失败 | 不反转完成，不再写相矛盾的execution/error/interrupted；History仍恢复同一结果 | P0 |
 
@@ -393,7 +393,7 @@ Schema 与正文均用合成非客户数据。相同测试夹具用于普通和�
 | PERF-05 | 多轮请求Prompt预算和缓存 | SchemaToken计入，上下文指纹变化后旧基准失效 | P0 |
 | PERF-06 | 恶意pattern/ref/嵌套与取消 | 真正回收验证资源，无网络请求/文件访问/残留高CPU | P0 |
 | PERF-07 | 运行中慢账号资料服务 | 不影响模型执行或普通Agent初始化；管理列表有界失败 | P0 |
-| PERF-08 | 快照与输出事件体积 | 记录存储增长；不向日志/搜索索引写完整Schema，不做额外结果表 | P1 |
+| PERF-08 | Run配置与输出事件体积 | 新事件不含完整Schema/配置引用；记录输出存储增长，不做额外结果表 | P1 |
 | PERF-09 | SSE慢消费者/观察溢出 | 原有有界队列生效，不阻塞源执行 | P0 |
 | PERF-10 | 原型/测试浏览器/校验worker结束 | finally清理，无Chrome/Playwright/临时worker残留 | P1 |
 
@@ -478,7 +478,7 @@ tests/frontend/console/history-follower.test.mjs
 | JNT-23 | accepted后业务校验失败进行有界repair | 关联被拒output_id和当前业务基准，保留原用户提交和有效状态，不能混入别会话/旧基准 | P0 两客户端 |
 | JNT-24 | 同结果经SSE output/final/Live/History重复或乱序到达 | structured_output.item_id恒等于output_id，业务采用一次，仍单独验证patch/提交幂等 | P0 公共协议+两端 |
 | JNT-25 | accepted已提交但final未送达；同会话混合旧围栏/新结构历史 | 只读恢复同对象；按历史项类型重放，不按当前Agent开关改写旧语义，不自动保存 | P0 两客户端+历史 |
-| JNT-26 | 当前普通final澄清与未来显式Deferred分别测试 | 普通问题不创建Pending；旧租赁挂起保持只读；真正Deferred跨Run按平台Turn/原调用ID/冻结Schema和预算恢复 | P0 两客户端+UI |
+| JNT-26 | 当前普通final澄清与未来显式Deferred分别测试 | 普通问题不创建Pending；旧租赁挂起保持只读；真正Deferred跨Run按平台Turn/原调用ID/当前配置和真实执行预算恢复 | P0 两客户端+UI |
 | JNT-27 | 两项目完整真实Schema编译/展开/Provider线包 | 测量64KiB与展开深度/节点/字段等边界，optional/互斥/条件不被改写；超限明确失败，不能拿样例Schema冒充通过 | P0 启用门禁 |
 | JNT-28 | 租赁填充→保存→生成→完整读回→复核；BOM批准→不可变计划→执行→回执 | 真实人审、权限、失败停点和成功项不重发保持；平台accepted不代替任何业务动作完成证明 | P0 业务端到端 |
 
@@ -504,10 +504,14 @@ tests/frontend/console/history-follower.test.mjs
 | TXT-DB | 真012→013默认；历史011/012备份投影；013备份；safe downgrade及true草稿/冻结快照拒绝 | test_allow_text_output_databases +真实MySQL/PG完整集 |
 | TXT-RUN | 三组合；文本/对象/结构化字符串/null/false；工具前缀；文本+JSON；最后请求 | test_allow_text_output_runtime |
 | TXT-RETRY | 非法JSON→文本；无无限重试；混调/多output零执行；失败候选文字SSE/History均不可见 | runtime、extra_boundaries |
-| TXT-RESUME | 真Deferred，旧快照false、新混合快照true；新Runner恢复、Agent切换不覆盖冻结；预算不重置 | runtime、extra_boundaries及既有structured remaining/boundaries |
+| TXT-RESUME | 真Deferred，当前严格/混合配置；新Runner恢复不依赖旧完整或损坏快照；配置每Run加载一次，预算不重置 | runtime、extra_boundaries及既有structured remaining/boundaries |
 | TXT-PROTO | HTTP/SSE/Live/History/Events、原生字符串身份、断观察重连、双通道ID、owner404、渠道 | test_allow_text_output_public_protocol |
 | TXT-ZIP | 真实旧包→新；正式off含草稿ZIP→旧完整安装/覆盖/回读；strict/mixed→旧拒绝零写；新版往返 | test_allow_text_output_cross_version |
 | TXT-RACE | 策略单变预检失效、换包、并发覆盖、rollback/ACK丢失、导出下载期间变化 | storage +原agent export竞态 |
 | TXT-UI | 默认false显隐、保存/取消/刷新、required独立、两种JSON视图、复制下载、失败/成功轨迹；紧凑滚动不破坏 | Console905 +浏览器 |
 | TXT-REAL | 隔离DeepSeek/Kimi文本、JSON、普通工具及Deferred；不使用共享业务Agent | Provider私有摘要与报告 |
 | TXT-REL | Python/Console最终全量、版本唯一源、无新增依赖、源码归档、私有产物不入Git、远端Tag一致 | 0.14.3报告及发布回读 |
+
+## 2026-10-23 本地收敛验收补充
+
+本轮只移除结构化输出配置快照、引用与回查，保留其他历史/SDK/计划/文本展示/预算/迁移行为。正式结果协议含schema_digest保持；发布另行安排，不提交。验收包含Python与Console全量、三方言实际数据库、安装导出/复制/备份及真实旧版HTTP、真实Provider、浏览器和原会话不变核对。具体结果见本轮测试报告，未执行不得记为通过。

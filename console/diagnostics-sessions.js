@@ -6,7 +6,7 @@ import { diagnosticTime } from "./diagnostics.js?v=20261019-release0138";
 import { diagnosticTarget, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261019-release0138";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261022-release0140";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261023-output-no-snapshot1";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PAGE_SIZE = 50;
@@ -131,7 +131,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
         </section>
         <div class="diagnostic-dashboard-side">
           <section><header><h2>最近异常</h2></header>${errors.map((error, index) => `<button type="button" class="diagnostic-error-item" data-error-index="${index}"><span class="diagnostic-error-icon">${icon("triangle-alert")}</span><span class="diagnostic-error-copy"><strong>${e(error.message || error.summary || error.code || "执行异常")}</strong><small><span title="${e(error.agent_name || error.agent_id)}">${e(error.agent_name || error.agent_id)}</span><time title="${e(diagnosticTime(error.created_at))}">${e(shortQuestionTime(error.created_at))}</time></small></span></button>`).join("") || empty("当前范围没有执行异常")}</section>
-          <section id="diagnosticActiveUsers" tabindex="-1"><header><h2>平台活跃用户</h2>${users.length > 5 ? button(state.showUsers ? "收起" : `展开${icon("arrow-right")}`, "users", "", "text") : ""}</header>${users.slice(0, state.showUsers ? 20 : 5).map((user, index) => `<button type="button" class="diagnostic-active-user" data-user-drill="${e(user.user_id)}"><span class="diagnostic-user-rank">${index + 1}</span><span class="diagnostic-ranking-identity"><span class="diagnostic-identity-icon">${icon("user-round")}</span>${renderUserIdentity(state.users[user.user_id] || {}, {userId:user.user_id, compact:true, copyable:false})}</span><span class="diagnostic-user-count" title="范围内提问数">${Number(user.question_count)}</span></button>`).join("") || empty("暂无活跃账号")}</section>
+          <section id="diagnosticActiveUsers" tabindex="-1"><header><h2>平台活跃用户(提问)</h2>${users.length > 5 ? button(state.showUsers ? "收起" : `展开${icon("arrow-right")}`, "users", "", "text") : ""}</header>${users.slice(0, state.showUsers ? 20 : 5).map((user, index) => `<button type="button" class="diagnostic-active-user" data-user-drill="${e(user.user_id)}"><span class="diagnostic-user-rank">${index + 1}</span><span class="diagnostic-ranking-identity"><span class="diagnostic-identity-icon">${icon("user-round")}</span>${renderUserIdentity(state.users[user.user_id] || {}, {userId:user.user_id, compact:true, copyable:false})}</span><span class="diagnostic-user-count" title="范围内提问数">${Number(user.question_count)}</span></button>`).join("") || empty("暂无活跃账号")}</section>
         </div>
       </div>`;
   }

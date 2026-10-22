@@ -20,7 +20,7 @@ from pydantic_ai.usage import UsageLimits
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.request_budget import restored_request_count
-from deep_agent.agent.structured_output import CONTRACT
+CONTRACT = "deepagent_output_contract"
 from deep_agent.conversation.projector import project_session_events
 from tests.helpers.sqlite_stores import make_sqlite_stores
 from tests.integration.test_structured_output_boundaries import CONFIRM
@@ -127,7 +127,7 @@ class AllowTextOutputExtraBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(result["requests"], 1, result)
                     self.assertEqual(result["allow_text"], allow_text)
                     self.assertFalse(result["function_tools"])
-                    self.assertEqual(result["loader_reads"], 0)
+                    self.assertEqual(result["loader_reads"], 1)
                     if invalid:
                         self.assertIn("output_retry_exhausted", result["error"])
                     else:
@@ -147,7 +147,7 @@ async def _resume_extra(path, agent_id, sid, allow_text, invalid):
         raise AssertionError("the final budget request must not expose ordinary tools")
     runner = AgentRunner(Agent(FunctionModel(respond), deps_type=AgentDeps, tools=[ordinary_probe],
         toolsets=[ExternalToolset([CONFIRM])], retries=2), stores.coordinator, UsageLimits(request_limit=5))
-    loader = AsyncMock(return_value={**deepcopy(fixture.BASE), "allow_text_output": not allow_text})
+    loader = AsyncMock(return_value={**deepcopy(fixture.BASE), "allow_text_output": allow_text})
     runner._output_config_loader = loader
     final, error = None, None
     try:

@@ -303,6 +303,7 @@ class SqlConversationCoordinator:
     async def append_output_attempt(
         self, session_id: str, *, agent_id: str, user_id: str,
         turn_id: str, run_id: str, payload: dict[str, Any],
+        output_root_is_object: bool | None = None,
     ) -> SessionEventSnapshot:
         """Immutable acceptance, after the complete SDK call/ack are durable.
 
@@ -322,6 +323,8 @@ class SqlConversationCoordinator:
             raise ValueError("Output attempt identity is invalid")
         if not isinstance(payload.get("schema_digest"), str) or len(payload["schema_digest"]) != 64:
             raise ValueError("Output attempt Schema digest is invalid")
+        if payload["accepted"] and type(output_root_is_object) is not bool:
+            raise ValueError("Accepted output requires its Run-local root shape")
         if payload["accepted"] and ("output" not in payload or "errors" in payload):
             raise ValueError("Accepted output must contain its value and no errors")
         if not payload["accepted"] and ("output" in payload or not payload.get("errors")):
@@ -383,22 +386,13 @@ class SqlConversationCoordinator:
                            and (row.payload.get("source") or {}).get("message_ordinal", -1) > ordinal
                            for part in message_parts(row)):
                     raise ValueError("Accepted output has no durable SDK acknowledgement")
-                snapshot_rows = list((await db.execute(select(ChatSessionEvent).where(
-                    ChatSessionEvent.session_id == session_id, ChatSessionEvent.turn_id == turn_id,
-                    ChatSessionEvent.event_type == "user/message",
-                ))).scalars())
-                contracts = [((item.payload.get("message") or {}).get("metadata") or {}).get("deepagent_output_contract")
-                             for item in snapshot_rows]
-                contract = next((item for item in contracts if item), None)
-                if not contract or contract.get("schema_digest") != payload["schema_digest"] or contract.get("name") != payload["name"]:
-                    raise ValueError("Accepted output has no matching frozen contract")
                 args = matching_parts[0].get("args")
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
                     except (ValueError, TypeError) as exc:
                         raise ValueError("Accepted output source has invalid JSON") from exc
-                if (contract.get("json_schema") or {}).get("type") != "object":
+                if not output_root_is_object:
                     if not isinstance(args, dict) or "response" not in args:
                         raise ValueError("Accepted output source has no native value")
                     args = args["response"]

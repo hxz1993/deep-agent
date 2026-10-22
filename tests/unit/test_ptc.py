@@ -87,7 +87,9 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             descriptions = {tool.name: tool.description or "" for tool in info.function_tools}
             self.assertIn("Default to ordinary native MCP calls", descriptions["run_code"])
             if "search_tools" in descriptions:
-                self.assertIn("Default to ordinary native MCP calls", descriptions["search_tools"])
+                self.assertIn("directly callable with their native schemas", descriptions["search_tools"])
+                self.assertIn("discovery does not require run_code", descriptions["search_tools"])
+                self.assertNotIn("Default to ordinary native MCP calls", descriptions["search_tools"])
                 self.assertNotIn("Note: discovered tools become callable", descriptions["search_tools"])
             if steps == 1:
                 self.assertNotIn("demo_lookup", descriptions)
@@ -111,8 +113,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "done")
         self.assertEqual(called, [True])
         self.assertEqual(len(announcements), 1)
-        self.assertIn("Default to ordinary native MCP calls", announcements[0])
-        self.assertIn("opaque file/binary relay", announcements[0])
+        self.assertEqual(announcements[0], "<system>New tool schemas are available: `demo_lookup`.</system>")
 
     def test_discovery_announcement_preserves_seen_tool_deduplication(self) -> None:
         capability = HybridCodeMode(tools=[], dynamic_catalog=True)

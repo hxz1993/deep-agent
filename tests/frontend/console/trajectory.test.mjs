@@ -424,16 +424,16 @@ test("Console正文不低于12px，只有明确的辅助标签使用紧凑字号
 
 
 test("前端工具回传后助手 Pending 解除，部分返回与无关联返回不解除", () => {
-  const call = (id, run, ids, sequence) => ({ event_id: id, event_type: "assistant/message", status: "pending", sequence, run_id: run,
-    payload: { message: { kind: "response", parts: ids.map(tool_call_id => ({ part_kind: "tool-call", tool_name: "builtin__choice", tool_call_id, args: {} })) } } });
-  const result = (id, callId, sequence) => ({ event_id: id, event_type: "tool/results", sequence, run_id: "resumed-run",
+  const call = (id, run, ids, sequence, turn_id = "turn-1") => ({ event_id: id, event_type: "assistant/message", status: "pending", sequence, run_id: run, turn_id,
+    payload: { message: { kind: "response", parts: ids.map(tool_call_id => ({ part_kind: "tool-call", tool_name: "builtin__choice", tool_call_id, args: {}, metadata: { widget: "builtin.choice" } })) } } });
+  const result = (id, callId, sequence) => ({ event_id: id, event_type: "tool/results", sequence, run_id: "resumed-run", turn_id: "turn-1",
     payload: { message: { kind: "request", parts: [{ part_kind: "tool-return", tool_name: "builtin__choice", tool_call_id: callId, content: "chosen" }] } } });
   const first = call("pending-first", "run-1", ["call-a", "call-b"], 1);
   assert.equal(buildTrajectory({ items: [first, result("result-a", "call-a", 2)] })[0].status, "pending");
   const completed = buildTrajectory({ items: [first, result("result-a", "call-a", 2), result("result-b", "call-b", 3)] });
   assert.equal(completed[0].status, "completed");
   assert.equal(first.status, "pending", "原始持久记录不改写");
-  const reused = buildTrajectory({ items: [call("old", "run-old", ["reused"], 1), call("new", "run-new", ["reused"], 2), result("later", "reused", 3)] });
+  const reused = buildTrajectory({ items: [call("old", "run-old", ["reused"], 1, "old-turn"), call("new", "run-new", ["reused"], 2), result("later", "reused", 3)] });
   assert.equal(reused.find(e => e.id === "old").status, "pending");
   assert.equal(reused.find(e => e.id === "new").status, "completed");
 });

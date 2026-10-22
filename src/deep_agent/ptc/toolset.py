@@ -30,11 +30,9 @@ from deep_agent.ptc.file_payload import (
 _RUN_CODE_NAME = "run_code"
 _INVALID_IDENTIFIER = re.compile(r"\W")
 _LONG_BASE64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{256,}={0,2}(?![A-Za-z0-9+/])")
-DISCOVERY_POLICY = (
-    "Default to ordinary native MCP calls. Discovery makes the ordinary tool schemas "
-    "available; it does not request PTC. Reserve run_code for opaque file/binary relay "
-    "or bounded intermediate-data processing that does not need model interpretation. "
-    "Tool discovery, schema inspection, pairing and snapshots must stay native."
+_DISCOVERY_HINT = (
+    "Discovered tools are directly callable with their native schemas; "
+    "discovery does not require run_code."
 )
 
 _USAGE_RULES = """
@@ -200,7 +198,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                     result[name],
                     tool_def=replace(
                         result[name].tool_def,
-                        description=(original.tool_def.description or "") + "\n\n" + DISCOVERY_POLICY,
+                        description=(original.tool_def.description or "") + "\n\n" + _DISCOVERY_HINT,
                     ),
                 )
 
@@ -226,7 +224,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                 run_code,
                 tool_def=replace(
                     run_code.tool_def,
-                    description=DISCOVERY_POLICY + "\n\n" + (run_code.tool_def.description or "") + _USAGE_RULES,
+                    description=(run_code.tool_def.description or "") + _USAGE_RULES,
                 ),
             )
         return result

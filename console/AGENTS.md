@@ -679,6 +679,10 @@ Agent 更新人由服务端批量返回 `updated_by_user.username`，缺失时�
 
 持久化助手按 `run_id + source.message_ordinal` 标识响应；首个事实替换同 Run 最早未替换的直播助手，即使 error/cancelled 已关闭其 active 指针。该响应后续 Part 或状态更新只更新原行，不能删除下一 Loop。失败、停止及完成的纯思考响应分别显示“模型响应失败／已停止／模型思考”，仅运行中显示“模型处理中”；原思考与状态事实保持。行为回归见 `trajectory-facts.test.mjs`。
 
+### UI 续跑工具配对（2026-10-23）
+
+UI Call 与 Resume Result 可以属于不同 Run。轨迹优先使用持久结果的源事件关联；尚无结果事实时，跨 Run 只允许同 turn_id、同工具名及调用 ID 的唯一 Pending Deferred：依据原始 `assistant/message.status=pending` 且该 Call 尚无真实结果识别，不能要求持久 Part 存在 widget 或按工具名前缀猜测；已完成的同响应普通调用排除在候选外。普通工具仍限同 Run。跨 Run 由持久 pending 来源确认的续跑工具，即使没有 widget，也不把调用至结果之间的人工等待估算为执行耗时；有真实 deepagent_timing 时仍优先使用。来源缺失或存在多个候选时保留有界待配对帧，等待真实事实，不生成额外的已执行工具行。结果事实仍可独立审计，孤立结果不增加调用次数。持久 Call 替换直播行需 run/turn、名称、ID、参数、序号范围及双向唯一匹配，不能按全会话 call_id 清理；刷新、换会话及销毁清理临时配对状态。相关回归统一在 `trajectory-facts.test.mjs`。
+
 ## 复杂输出字段编辑
 
 `output-schema-fields.js` 只负责字段投影和本地引用的展示解析，随 `configuration.js` 导入并暴露给惰性 classic 编辑器。只改根 properties/required，不展开、扁平化或重新生成复杂规则。按用户确认，卡片保留可直接修改的“必须”，只维护根 required；不因复杂规则禁用必须/编辑/改名/删除；原 required、条件和 defs 在未主动修改时保留，复杂规则由配置者在原生 Schema 中维护，服务端原校验继续生效。输出列撑满高度，只有字段列表内部滚动；卡片无边框、带底色、紧凑两行。

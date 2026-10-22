@@ -159,6 +159,39 @@ function assistantMessageKey(event) {
     ? `${event.run_id}:${ordinal}` : event.event_id;
 }
 
+function sameTool(row, callId, name) {
+  return TOOL_KINDS.has(row.kind) && row.tool_call_id === callId && (!name || row.label === name);
+}
+
+function callIdentity(row) {
+  return row.native?.call_event_id ? `${row.native.call_event_id}:${row.native.call_part_offset || 0}` : row.id;
+}
+
+function pendingToolCall(rows, runId, turnId, isDeferred = () => false) {
+  const sameRun = rows.filter(row => row.run_id === runId && (!turnId || !row.turn_id || row.turn_id === turnId));
+  if (sameRun.length) return sameRun.length === 1 ? sameRun[0] : null;
+  // Deferred answers start a new Run. An ID alone is not enough to identify
+  // their original call; use a durable pending assistant source, not a widget
+  // (widgets are SSE display hints and need not exist in persisted Parts).
+  const deferred = rows.filter(row => isDeferred(row) && row.status === "pending"
+    && turnId && row.turn_id === turnId);
+  return deferred.length === 1 ? deferred[0] : null;
+}
+
+function sameToolValue(left, right) {
+  const normalized = value => JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
+  return normalized(left) === normalized(right);
+}
+
+function sameToolArgs(left, right) {
+  const parsed = value => {
+    if (typeof value === "string") { try { return JSON.parse(value); } catch { /* Keep non-JSON arguments. */ } }
+    return value;
+  };
+  return sameToolValue(parsed(left), parsed(right));
+}
+
 function userPayload(content) {
   if (typeof content === "string") return { content, attachments: [], context_refs: [] };
   if (!Array.isArray(content)) return { content: null, attachments: [], context_refs: [] };
@@ -359,6 +392,8 @@ function projectOutputAttempt(event, inputSequence, items) {
 export function buildTrajectory(history = {}) {
   const items = [...(Array.isArray(history?.items) ? history.items : [])]
     .sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
+  const deferredSources = new Set(items.filter(event => event.event_type === "assistant/message"
+    && event.status === "pending").map(event => event.event_id));
   let inputSequence = 0;
   const projected = [];
   const tools = new Map();
@@ -497,10 +532,12 @@ export function buildTrajectory(history = {}) {
       // in this Run, rather than creating a normal tool or guessing by its name.
       if (outputCallsByRun.get(outputCallKey)) return;
       const toolName = part.tool_name || null;
-      let tool = tools.get(callId);
-      const repeatedCall = role === "call" && tool?.native?.call_event_id
-        && (tool.native.call_event_id !== event.event_id || tool.native.call_part_offset !== offset);
-      if (repeatedCall) tool = null;
+      const sameId = tools.get(callId) || [];
+      const matching = sameId.filter(row => sameTool(row, callId, toolName));
+      let tool = role === "result" ? pendingToolCall(matching.filter(row => row.native?.call_event_id
+        && !row.native?.result_event_id), event.run_id, event.turn_id,
+        row => Boolean(toolName) && deferredSources.has(row.native.call_event_id)) : null;
+      const repeatedCall = sameId.length > 0;
       if (!tool) {
         const pseudoPart = {
           type: role === "call" ? "tool_call" : "tool_result",
@@ -532,7 +569,8 @@ export function buildTrajectory(history = {}) {
         tool.dispatched = !(dispatch?.rejected === true && (dispatch.not_dispatched_part_indices || []).includes(partIndex));
         if (!tool.dispatched) { tool.status = "failed"; tool.summary = "未分发：模型响应被拒绝"; }
         tool.timestamp_end = event.updated_at || tool.timestamp;
-        tools.set(callId, tool);
+        sameId.push(tool);
+        tools.set(callId, sameId);
         projected.push(tool);
       }
       if (role === "call") {
@@ -552,8 +590,9 @@ export function buildTrajectory(history = {}) {
         }));
         tool.native = { ...(tool.native || {}), result_event_id: event.event_id, result_part_offset: offset };
         tool.timestamp_end = null;
+        const isDeferredResume = tool.run_id !== event.run_id && deferredSources.has(tool.native.call_event_id);
         if (!applyExecutionTiming(tool, metadata.deepagent_timing, "tool_execution")
-          && tool.kind !== "deferred") {
+          && tool.kind !== "deferred" && !isDeferredResume) {
           applyLegacyInterval(tool, tool.timestamp, part.timestamp,
             "旧记录估算：工具调用入库至结果产生，包含调度等待，不是精确执行耗时。未使用更新时间。");
         }
@@ -587,6 +626,7 @@ export function trajectoryStats(events = []) {
     calls: events.filter((event) => (
       TOOL_KINDS.has(event.kind)
       && event.event_type === "tool/interaction"
+      && event.native?.call_event_id
       && event.dispatched !== false
     )).length,
     runs: new Set(events.map((event) => event.run_id).filter(Boolean)).size,
@@ -1213,6 +1253,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let historyEvents = [];
   let liveEvents = [];
   let currentRunId = null;
+  const runTurns = new Map();
+  let pendingResults = [];
+  let liveCalls = new WeakMap();
   let activeAssistantLoop = null;
   let assistantLoopSequence = 0;
   let selectedId = null;
@@ -1329,6 +1372,10 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     history = nextHistory || { items: [] };
     historyEvents = buildTrajectory(history);
     liveEvents = [];
+    pendingResults = [];
+    liveCalls = new WeakMap();
+    runTurns.clear();
+    for (const event of history.items || []) if (event.run_id && event.turn_id) runTurns.set(event.run_id, event.turn_id);
     currentRunId = null;
     activeAssistantLoop = null;
     if (!preserveView || sessionChanged || !historyEvents.some((event) => event.id === selectedId)) {
@@ -1404,6 +1451,63 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     return assistant;
   }
 
+  function resultTarget(frame) {
+    const rows = [...historyEvents, ...liveEvents].filter(row => sameTool(row, frame.payload.tool_call_id, frame.payload.tool));
+    // A result fact carries its actual Run and source event. Its paired call
+    // can belong to the earlier UI Run, even when the tool is now completed.
+    const facts = new Map((history.items || []).map(event => [event.event_id, event]));
+    const durable = rows.filter(row => {
+      const result = facts.get(row.native?.result_event_id);
+      const part = storedMessage(result)?.parts?.[row.native?.result_part_offset || 0];
+      return result?.run_id === frame.runId && part && sameToolValue(part.content, frame.payload.result)
+        && (!frame.turnId || result.turn_id === frame.turnId);
+    });
+    if (durable.length) return { row: durable.length === 1 ? durable[0] : null, durable: true };
+    const bound = rows.find(row => frame.callKey && callIdentity(row) === frame.callKey && !row.native?.result_event_id);
+    if (bound) return { row: bound };
+    return { row: pendingToolCall(rows.filter(row => (row.native?.call_event_id || liveCalls.has(row))
+      && !row.native?.result_event_id && ["pending", "running"].includes(row.status)), frame.runId, frame.turnId || runTurns.get(frame.runId),
+      row => Boolean(frame.payload.tool) && facts.get(row.native?.call_event_id)?.status === "pending") };
+  }
+
+  function reconcileResults() {
+    pendingResults = pendingResults.filter(frame => {
+      const { row, durable } = resultTarget(frame);
+      if (durable) return false; // Persisted result owns content, timing and status.
+      if (!row) return true; // Wait for actual turn_id/call evidence instead of making a second tool row.
+      frame.callKey = callIdentity(row);
+      const payload = frame.payload;
+      row.result = redactTrajectoryValue(jsonClone({ result: payload.result, outcome: payload.outcome || null,
+        artifacts: payload.artifacts || null, plan: payload.plan || null,
+        metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics } }));
+      row.summary = liveSummary("tool_result", payload);
+      row.status = toolResultPresentation(payload).status;
+      if (row.duration_source !== "execution") row.timestamp_end = frame.timestamp;
+      applyExecutionTiming(row, payload.timing, "tool_execution");
+      return true;
+    });
+  }
+
+  function replaceLiveCalls(stored) {
+    const calls = historyEvents.filter(row => row.native?.call_event_id === stored.event_id);
+    const candidates = new Map(liveEvents.filter(row => liveCalls.has(row)).map(row => [row, calls.filter(call => {
+      const source = storedMessage(stored)?.parts?.[call.native.call_part_offset || 0];
+      return row.run_id === call.run_id && (!row.turn_id || row.turn_id === call.turn_id)
+        && Number(stored.sequence) > liveCalls.get(row).baseline
+        && sameTool(row, call.tool_call_id, call.label) && sameToolArgs(liveCalls.get(row).args, source?.args);
+    })]));
+    for (const call of calls) {
+      // Both directions must be unique. One live frame cannot arbitrarily
+      // choose one of two identical calls inside a complete Message fact.
+      const matches = [...candidates].filter(([, targets]) => targets.length === 1 && targets[0] === call).map(([row]) => row);
+      if (matches.length !== 1) continue;
+      const live = matches[0];
+      for (const frame of pendingResults) if (frame.callKey === live.id) frame.callKey = callIdentity(call);
+      if (selectedId === live.id) selectedId = call.id;
+      liveEvents = liveEvents.filter(row => row !== live);
+    }
+  }
+
   function ingest({ event, data }) {
     const type = event || data?.type;
     const payload = data || {};
@@ -1423,6 +1527,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       else rawItems.push(stored);
       history.items = rawItems.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
       historyEvents = buildTrajectory(history);
+      if (stored.run_id && stored.turn_id) runTurns.set(stored.run_id, stored.turn_id);
       if (stored.event_type === "user/message") {
         if (liveInput) liveEvents = liveEvents.filter((item) => item !== liveInput);
       }
@@ -1430,11 +1535,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       if (stored.event_type === "compaction") {
         liveEvents = liveEvents.filter((item) => !(item.kind === "compaction" && item.compaction_event_id === stored.event_id));
       }
-      const storedParts = storedMessage(stored)?.parts || [];
-      const storedCallIds = new Set(storedParts.map((part) => part?.tool_call_id).filter(Boolean));
-      if (storedCallIds.size) {
-        liveEvents = liveEvents.filter((item) => !storedCallIds.has(item.tool_call_id));
-      }
+      if (rawIndex < 0) replaceLiveCalls(stored);
+      reconcileResults();
       if (newAssistantMessage && stored.run_id) {
         // A terminal frame may already have closed this Run's live loop. Its
         // first persisted fact still replaces that loop, including its receipt
@@ -1492,6 +1594,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     }
     if (type === "session") {
       currentRunId = payload.run_id || currentRunId;
+      if (currentRunId && payload.turn_id) runTurns.set(currentRunId, payload.turn_id);
       const currentUser = [...liveEvents].reverse().find((item) => item.kind === "input" && !item.run_id);
       if (currentUser && currentRunId) currentUser.run_id = currentRunId;
       scheduleRender();
@@ -1505,35 +1608,32 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       scheduleRender();
       return;
     }
-    if (type === "tool_call" && payload.tool_call_id
-      && [...historyEvents].reverse().find((item) => item.tool_call_id === payload.tool_call_id
-        && item.run_id === currentRunId)?.status === "pending") {
-      // Accepted calls are committed before their presentation frame arrives.
-      // Keep the persisted row instead of adding the same call a second time.
+    if (type === "tool_call" && payload.tool_call_id) {
+      const facts = new Map((history.items || []).map(item => [item.event_id, item]));
+      const known = [...historyEvents, ...liveEvents].filter(row => (row.native?.call_event_id || liveCalls.has(row))
+        && row.run_id === (payload.run_id || currentRunId) && sameTool(row, payload.tool_call_id, payload.tool)
+        && sameToolArgs(liveCalls.has(row) ? liveCalls.get(row).args
+          : storedMessage(facts.get(row.native.call_event_id))?.parts?.[row.native.call_part_offset || 0]?.args, payload.args));
+      if (known.length) return; // Fact/replay frames already describe this call; never merge distinct fact rows.
+    }
+    if (type === "tool_result" && payload.tool_call_id) {
+      const frame = { payload, runId: payload.run_id || currentRunId, turnId: payload.turn_id || runTurns.get(payload.run_id || currentRunId), timestamp };
+      if (!pendingResults.some(existing => existing.runId === frame.runId && sameToolValue(existing.payload, payload))) {
+        pendingResults.push(frame);
+        pendingResults = pendingResults.slice(-256);
+      }
+      reconcileResults();
+      if (activeAssistantLoop?.run_id === currentRunId) {
+        activeAssistantLoop.status = "completed";
+        activeAssistantLoop.summary = assistantLoopSummary(activeAssistantLoop.payload, activeAssistantLoop.status);
+        activeAssistantLoop = null;
+      }
+      scheduleRender();
       return;
     }
-        if (type === "tool_result" && payload.tool_call_id) {
-      const call = [...historyEvents, ...liveEvents].reverse().find((item) => (
-        item.tool_call_id === payload.tool_call_id && item.run_id === currentRunId
-      ));
-      if (call) {
-        call.result = redactTrajectoryValue(jsonClone({ result: payload.result, outcome: payload.outcome || null, artifacts: payload.artifacts || null, plan: payload.plan || null,
-          metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics } }));
-        call.summary = liveSummary(type, payload);
-        call.status = toolResultPresentation(payload).status;
-        if (call.duration_source !== "execution") call.timestamp_end = timestamp;
-        applyExecutionTiming(call, payload.timing, "tool_execution");
-        if (activeAssistantLoop?.run_id === currentRunId) {
-          activeAssistantLoop.status = "completed";
-          activeAssistantLoop.summary = assistantLoopSummary(activeAssistantLoop.payload, activeAssistantLoop.status);
-          activeAssistantLoop = null;
-        }
-        scheduleRender();
-        return;
-      }
-    }
     if (type === "tool_call_removed" && payload.tool_call_id) {
-      const call = [...liveEvents].reverse().find((item) => item.tool_call_id === payload.tool_call_id);
+      const call = [...liveEvents].reverse().find(item => item.run_id === (payload.run_id || currentRunId)
+        && sameTool(item, payload.tool_call_id, payload.tool));
       if (call) {
         call.status = "interrupted";
         call.summary = liveSummary(type, payload);
@@ -1573,11 +1673,12 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     const kind = liveEventKind(type, payload);
     const status = type === "tool_result" ? toolResultPresentation(payload).status
       : type === "tool_call" ? "pending" : "running";
-    liveEvents.push({
+    const live = {
       id: `live-${type}-${payload.tool_call_id || Date.now()}-${liveEvents.length}`,
       kind,
       input_sequence: inputSequence,
       run_id: payload.run_id || currentRunId,
+      turn_id: payload.turn_id || runTurns.get(payload.run_id || currentRunId) || null,
       timestamp,
       status,
       label: liveLabel(type, payload),
@@ -1587,7 +1688,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       payload: redactTrajectoryValue(jsonClone(type === "tool_result" ? null : payload)),
       result: redactTrajectoryValue(jsonClone(type === "tool_result" ? payload : null)),
       native: null,
-    });
+    };
+    liveEvents.push(live);
+    if (type === "tool_call") {
+      liveCalls.set(live, { args: jsonClone(payload.args),
+        baseline: (history.items || []).reduce((max, item) => Math.max(max, Number(item.sequence) || 0), 0) });
+      reconcileResults();
+    }
     scheduleRender();
   }
 
@@ -1736,6 +1843,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   function destroy() {
     disposed = true; if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
     bindings.splice(0).forEach((remove) => remove()); historyEvents = []; liveEvents = []; history = {};
+    pendingResults = []; runTurns.clear(); liveCalls = new WeakMap();
   }
   return { setHistory, setExportReady, reset, addUser, ingest, selectView, focus, snapshot, restore, destroy, events: allEvents };
 }

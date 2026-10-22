@@ -7,7 +7,7 @@ from pydantic_ai.messages import SystemPromptPart
 from pydantic_ai_harness import CodeMode
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.ptc.toolset import DISCOVERY_POLICY, HybridCodeModeToolset
+from deep_agent.ptc.toolset import HybridCodeModeToolset
 
 
 class HybridCodeMode(CodeMode[AgentDeps]):
@@ -22,7 +22,7 @@ class HybridCodeMode(CodeMode[AgentDeps]):
             return
         self._announced_tools.update(fresh)
         listing = ", ".join(f"`{name}`" for name in fresh)
-        ctx.enqueue(SystemPromptPart(content=f"New tool schemas are available: {listing}. {DISCOVERY_POLICY}"))
+        ctx.enqueue(SystemPromptPart(content=f"New tool schemas are available: {listing}."))
 
     def get_wrapper_toolset(
         self,

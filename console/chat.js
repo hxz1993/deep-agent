@@ -2,7 +2,7 @@ import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-usage-tab-2";
 import { renderPlanItems } from "./plan-view.js?v=20261022-release0140";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
-import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20261023-output-no-snapshot1";
+import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20261023-deferred-trajectory3";
 import { cacheTrajectorySummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 import { createConversationPresenter } from "./conversation-presenter.js?v=20261022-output-inspector3";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
@@ -22,7 +22,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20261022-release0140";
-import { createTrajectoryController } from "./trajectory.js?v=20261023-output-no-snapshot1";
+import { createTrajectoryController } from "./trajectory.js?v=20261023-deferred-trajectory3";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20260922-trajectory-8";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";

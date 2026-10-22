@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTrajectory, createTrajectoryController } from "../../../console/trajectory.js";
+import { buildTrajectory, createTrajectoryController, trajectoryStats } from "../../../console/trajectory.js";
 
 const fact = (id, sequence, ordinal, index, part, eventType = "assistant/message") => ({
   event_id: id, sequence, run_id: "run-1", turn_id: "turn-1", event_type: eventType,
@@ -53,6 +53,281 @@ function withController(check) {
   try { check(createTrajectoryController({ state: {} }), elements); }
   finally { globalThis.document = oldDocument; globalThis.window = oldWindow; }
 }
+
+const deferredCall = (id, sequence, run = "call-run", turn = "resume-turn", callId = "confirm-id") => ({
+  ...fact(id, sequence, 1, 1, { part_kind: "tool-call", tool_name: "builtin__confirm", tool_call_id: callId,
+    args: { message: id }, tool_kind: null }),
+  run_id: run, turn_id: turn, status: "pending", created_at: "2026-10-22T16:51:20.375370Z",
+});
+const deferredResult = (id, sequence, run = "resume-run", turn = "resume-turn", callId = "confirm-id") => ({
+  ...fact(id, sequence, 0, 0, { part_kind: "tool-return", tool_name: "builtin__confirm", tool_call_id: callId,
+    content: { confirmed: true }, outcome: "success" }, "tool/results"),
+  run_id: run, turn_id: turn, created_at: "2026-10-22T16:51:43.426271Z",
+});
+const appendFact = (controller, event) => controller.ingest({ event: "session_event_appended", data: { event } });
+const resultFrame = (controller, callId = "confirm-id") => controller.ingest({ event: "tool_result", data: {
+  tool: "builtin__confirm", tool_call_id: callId, result: { confirmed: true },
+} });
+
+test("real Deferred cross-Run fact order merges result SSE and keeps selection, count and refresh identity", () => {
+  for (const factsFirst of [true, false]) withController((controller, elements) => {
+    const call = deferredCall("confirm-call", 5), result = deferredResult("confirm-result", 6);
+    controller.setHistory({ session_id: "resume-session", items: [call] });
+    const id = controller.events().find(row => row.tool_call_id === "confirm-id").id;
+    controller.restore({ selectedId: id, selectionPinned: true });
+    controller.ingest({ event: "session", data: { run_id: "resume-run" } });
+    if (factsFirst) appendFact(controller, result);
+    resultFrame(controller); resultFrame(controller);
+    if (!factsFirst) appendFact(controller, result);
+    const output = { event_id: "accepted-output", sequence: 10, run_id: "resume-run", turn_id: "resume-turn",
+      event_type: "output/attempt", payload: { name: "browser_result", accepted: true, output: { ok: true } } };
+    appendFact(controller, output);
+    controller.ingest({ event: "final", data: { status: "completed" } });
+    assert.equal(controller.events().filter(row => row.tool_call_id === "confirm-id").length, 1);
+    assert.equal(trajectoryStats(controller.events()).calls, 1);
+    assert.deepEqual(controller.events().map(row => row.id), ["confirm-call", id, "accepted-output"]);
+    assert.equal(controller.snapshot().selectedId, id);
+    assert.equal(controller.snapshot().selectionPinned, true);
+    assert.match(elements.get("inspectorContent").innerHTML, /confirmed/);
+    const live = controller.events();
+    controller.setHistory({ session_id: "resume-session", items: [call, result, output] }, { preserveView: true });
+    assert.deepEqual(controller.events(), live);
+    // A Live replay after reloading persisted facts must not append a result row.
+    controller.ingest({ event: "session", data: { run_id: "resume-run" } });
+    resultFrame(controller);
+    assert.equal(controller.events().filter(row => row.tool_call_id === "confirm-id").length, 1);
+    assert.equal(controller.snapshot().selectedId, id);
+  });
+});
+
+test("cross-Run result waits for Turn evidence and does not guess from the latest pending call", () => {
+  withController(controller => {
+    const call = deferredCall("confirm", 1);
+    controller.setHistory({ items: [call] });
+    controller.ingest({ event: "session", data: { run_id: "resume-run" } });
+    resultFrame(controller);
+    assert.equal(controller.events().length, 2, "an unresolved SSE is not another executed tool");
+    assert.equal(controller.events().find(row => row.tool_call_id).status, "pending");
+    appendFact(controller, deferredResult("result", 2));
+    assert.equal(controller.events().filter(row => row.tool_call_id).length, 1);
+    assert.equal(controller.events().find(row => row.tool_call_id).status, "completed");
+  });
+});
+
+test("unique same-Turn pending Deferred can complete before its durable result arrives", () => {
+  withController(controller => {
+    const a = deferredCall("confirm-a", 1, "call-run", "resume-turn", "a");
+    const b = deferredCall("confirm-b", 2, "call-run", "resume-turn", "b");
+    controller.setHistory({ items: [a, b] });
+    controller.ingest({ event: "session", data: { run_id: "resume-run", turn_id: "resume-turn" } });
+    resultFrame(controller, "a"); resultFrame(controller, "a");
+    assert.deepEqual(controller.events().filter(row => row.tool_call_id).map(row => row.status), ["completed", "pending"]);
+    appendFact(controller, { ...fact("resume-thinking", 3, 1, 0, { part_kind: "thinking", content: "继续" }), run_id: "resume-run", turn_id: "resume-turn" });
+    assert.equal(controller.events().find(row => row.tool_call_id === "a").status, "completed", "other facts do not erase a proven live result");
+    appendFact(controller, deferredResult("result-a", 4, "resume-run", "resume-turn", "a"));
+    resultFrame(controller, "b");
+    appendFact(controller, deferredResult("result-b", 5, "resume-run", "resume-turn", "b"));
+    assert.deepEqual(controller.events().filter(row => row.tool_call_id).map(row => row.status), ["completed", "completed"]);
+    assert.equal(trajectoryStats(controller.events()).calls, 2);
+  });
+});
+
+test("ambiguous Deferred IDs and different Turns never merge cross-Run", () => {
+  for (const otherTurn of [false, true]) withController(controller => {
+    const a = deferredCall("first", 1, "first-run", "first-turn");
+    const b = deferredCall("second", 2, "second-run", otherTurn ? "second-turn" : "first-turn");
+    controller.setHistory({ items: [a, b] });
+    controller.ingest({ event: "session", data: { run_id: "answer-run", turn_id: otherTurn ? "unrelated-turn" : "first-turn" } });
+    resultFrame(controller);
+    assert.deepEqual(controller.events().filter(row => row.tool_call_id).map(row => row.status), ["pending", "pending"]);
+    assert.equal(controller.events().filter(row => row.tool_call_id).length, 2);
+    appendFact(controller, deferredResult("unrelated-result", 3, "answer-run", otherTurn ? "unrelated-turn" : "first-turn"));
+    assert.deepEqual(controller.events().filter(row => row.native?.call_event_id).map(row => row.status), ["pending", "pending"]);
+  });
+});
+
+test("a late fact does not remove another Run's same-ID live call", () => {
+  withController(controller => {
+    const old = fact("old-call", 1, 0, 0, { part_kind: "tool-call", tool_name: "lookup", tool_call_id: "reused", args: { scope: "old" } });
+    controller.setHistory({ items: [old] });
+    controller.ingest({ event: "session", data: { run_id: "run-2" } });
+    controller.ingest({ event: "tool_call", data: { tool: "lookup", tool_call_id: "reused", args: { scope: "new" } } });
+    const live = controller.events().find(row => row.source === "sse" && row.tool_call_id === "reused");
+    appendFact(controller, fact("old-result", 2, 1, 0, { part_kind: "tool-return", tool_name: "lookup", tool_call_id: "reused", content: "old" }, "tool/results"));
+    assert.ok(controller.events().includes(live));
+    assert.equal(live.status, "pending");
+    const call = { ...fact("new-call", 3, 0, 0, { part_kind: "tool-call", tool_name: "lookup", tool_call_id: "reused", args: { scope: "new" } }), run_id: "run-2", turn_id: "turn-2" };
+    appendFact(controller, call);
+    assert.equal(controller.events().some(row => row === live), false);
+    assert.equal(controller.events().filter(row => row.tool_call_id === "reused").length, 2);
+  });
+});
+
+test("ordinary live calls keep their own arguments and selection through delayed Call/Result facts", () => {
+  for (const resultFactFirst of [false, true]) withController(controller => {
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    const payload = { tool: "lookup", tool_call_id: "ordinary", args: { a: 1, b: 2 } };
+    controller.ingest({ event: "tool_call", data: payload });
+    controller.ingest({ event: "tool_call", data: payload });
+    const liveId = controller.events().find(row => row.tool_call_id).id;
+    controller.restore({ selectedId: liveId, selectionPinned: true });
+    controller.ingest({ event: "tool_result", data: { tool: "lookup", tool_call_id: "ordinary", result: "ordinary-result" } });
+    const call = fact("ordinary-call", 1, 1, 0, { part_kind: "tool-call", tool_name: "lookup", tool_call_id: "ordinary", args: '{"b":2,"a":1}' });
+    const result = fact("ordinary-result", 2, 2, 0, { part_kind: "tool-return", tool_name: "lookup", tool_call_id: "ordinary", content: "ordinary-result" }, "tool/results");
+    if (resultFactFirst) appendFact(controller, result);
+    appendFact(controller, call);
+    if (!resultFactFirst) appendFact(controller, result);
+    controller.ingest({ event: "tool_call", data: payload });
+    const tools = controller.events().filter(row => row.tool_call_id);
+    assert.equal(tools.length, 1);
+    assert.equal(tools[0].result.result, "ordinary-result");
+    assert.equal(tools[0].payload.args, '{"b":2,"a":1}');
+    assert.equal(controller.snapshot().selectedId, tools[0].id);
+    assert.equal(controller.snapshot().selectionPinned, true);
+    assert.equal(trajectoryStats(controller.events()).calls, 1);
+  });
+});
+
+test("cross-Run results never close ordinary calls or Deferred calls with missing scope or tool name", () => {
+  for (const missing of ["ordinary", "turn", "name", "pending-source"]) withController(controller => {
+    const call = deferredCall("source-call", 1);
+    if (missing === "ordinary") call.status = null;
+    if (missing === "pending-source") {
+      call.status = "completed";
+      call.payload.message.parts[0].metadata = { widget: "builtin.confirm" };
+    }
+    if (missing === "turn") delete call.turn_id;
+    controller.setHistory({ items: [call] });
+    controller.ingest({ event: "session", data: { run_id: "resume-run", turn_id: "resume-turn" } });
+    controller.ingest({ event: "tool_result", data: { ...(missing === "name" ? {} : { tool: "builtin__confirm" }), tool_call_id: "confirm-id", result: { confirmed: true } } });
+    assert.equal(controller.events().find(row => row.native?.call_event_id).status, "pending");
+    assert.equal(controller.events().filter(row => row.tool_call_id).length, 1);
+    if (missing !== "name") {
+      appendFact(controller, deferredResult("unmatched-result", 2));
+      assert.equal(controller.events().find(row => row.native?.call_event_id).status, "pending");
+      assert.equal(trajectoryStats(controller.events()).calls, 1, "an unpaired result is not another execution");
+    }
+  });
+});
+
+test("persisted result provenance resolves only its own named call when IDs repeat across runs and Turns", () => {
+  withController(controller => {
+    const old = deferredCall("old-confirm", 1, "old-run", "old-turn");
+    const current = deferredCall("new-confirm", 2, "new-run", "new-turn");
+    const other = deferredCall("other-tool", 3, "new-run", "new-turn");
+    other.payload.message.parts[0].tool_name = "builtin__choice";
+    const done = deferredResult("new-result", 4, "answer-run", "new-turn");
+    controller.setHistory({ items: [old, current, other, done] });
+    controller.ingest({ event: "session", data: { run_id: "answer-run" } });
+    resultFrame(controller); resultFrame(controller);
+    const tools = controller.events().filter(row => row.native?.call_event_id);
+    assert.deepEqual(tools.map(row => row.status), ["pending", "completed", "pending"]);
+    assert.deepEqual(tools.map(row => row.native.result_event_id), [null, "new-result", null]);
+    assert.equal(trajectoryStats(controller.events()).calls, 3);
+  });
+});
+
+test("an old same-Run checkpoint cannot consume a new loop with a reused ID", () => {
+  withController(controller => {
+    const old = fact("old", 1, 1, 0, { part_kind: "tool-call", tool_name: "lookup", tool_call_id: "reused", args: { loop: 1 } });
+    controller.setHistory({ items: [old] });
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    controller.ingest({ event: "tool_call", data: { tool: "lookup", tool_call_id: "reused", args: { loop: 2 } } });
+    controller.ingest({ event: "session_event_updated", data: { event: old } });
+    assert.equal(controller.events().filter(row => row.tool_call_id).length, 2);
+    assert.deepEqual(controller.events().find(row => row.source === "sse").payload.args, { loop: 2 });
+  });
+});
+
+test("one live call cannot choose between two identical persisted calls in the same Message", () => {
+  withController(controller => {
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    controller.ingest({ event: "tool_call", data: { tool: "lookup", tool_call_id: "repeated", args: {} } });
+    const liveId = controller.events().find(row => row.tool_call_id).id;
+    controller.restore({ selectedId: liveId, selectionPinned: true });
+    const event = fact("two-identical", 1, 1, 0, { part_kind: "tool-call", tool_name: "lookup", tool_call_id: "repeated", args: {} });
+    event.payload.message.parts.push({ ...event.payload.message.parts[0] });
+    appendFact(controller, event);
+    assert.equal(controller.events().filter(row => row.native?.call_event_id === "two-identical").length, 2);
+    assert.equal(controller.snapshot().selectedId, liveId, "ambiguous source does not move a pinned selection");
+    assert.equal(controller.events().some(row => row.id === liveId), true);
+    assert.equal(trajectoryStats(controller.events()).calls, 2);
+  });
+});
+
+test("unmatched failed result remains auditable when its actual fact arrives", () => {
+  withController(controller => {
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    controller.ingest({ event: "tool_result", data: { tool: "lookup", tool_call_id: "missing", result: "failed result", outcome: "failed" } });
+    assert.equal(controller.events().length, 0, "unproven SSE does not invent an executed call");
+    appendFact(controller, fact("orphan-result", 1, 1, 0, { part_kind: "tool-return", tool_name: "lookup", tool_call_id: "missing", content: "failed result", outcome: "failed" }, "tool/results"));
+    const result = controller.events().find(row => row.native?.result_event_id === "orphan-result");
+    assert.equal(result.status, "failed");
+    assert.equal(result.result.result, "failed result");
+    assert.equal(trajectoryStats(controller.events()).calls, 0);
+  });
+});
+
+test("session replacement and reset discard old unresolved frames and scope evidence", () => {
+  withController(controller => {
+    controller.setHistory({ session_id: "old", items: [deferredCall("old", 1)] });
+    controller.ingest({ event: "session", data: { run_id: "resume-run", turn_id: "resume-turn" } });
+    resultFrame(controller);
+    controller.setHistory({ session_id: "new", items: [deferredCall("new", 1)] });
+    appendFact(controller, { ...fact("new-thinking", 2, 1, 0, { part_kind: "thinking", content: "still pending" }), run_id: "resume-run", turn_id: "resume-turn" });
+    assert.equal(controller.events().find(row => row.tool_call_id).status, "pending");
+    controller.reset();
+    appendFact(controller, deferredCall("after-reset", 1));
+    assert.equal(controller.events().find(row => row.tool_call_id).status, "pending");
+  });
+});
+
+test("Call replay compares raw arguments while preserving display redaction", () => {
+  withController(controller => {
+    const event = fact("private-args", 1, 1, 0, { part_kind: "tool-call", tool_name: "lookup", tool_call_id: "private", args: { access_token: "synthetic-only", value: 1 } });
+    controller.setHistory({ items: [event] });
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    controller.ingest({ event: "tool_call", data: { tool: "lookup", tool_call_id: "private", args: { value: 1, access_token: "synthetic-only" } } });
+    assert.equal(controller.events().filter(row => row.tool_call_id).length, 1);
+    assert.equal(controller.events().find(row => row.tool_call_id).payload.args.access_token, "[已隐藏]");
+  });
+});
+
+test("same-Run planning facts retain their single row and plan payload after result replay", () => {
+  withController(controller => {
+    const plan = { items: [{ id: "step", content: "保留计划", status: "completed" }] };
+    const call = fact("plan-source", 1, 1, 0, { part_kind: "tool-call", tool_name: "write_plan", tool_call_id: "plan", args: plan });
+    const result = fact("plan-result", 2, 2, 0, { part_kind: "tool-return", tool_name: "write_plan", tool_call_id: "plan", content: "Plan updated", metadata: { deepagent_plan: plan } }, "tool/results");
+    controller.setHistory({ items: [call, result] });
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    controller.ingest({ event: "tool_result", data: { tool: "write_plan", tool_call_id: "plan", result: "Plan updated", source: "planning", plan } });
+    const rows = controller.events().filter(row => row.kind === "planning");
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].result.plan, plan);
+    assert.equal(trajectoryStats(controller.events()).calls, 1);
+  });
+});
+
+test("durable pending response proves Deferred without widgets and excludes its already completed ordinary call", () => {
+  withController(controller => {
+    const ordinary = { ...fact("ordinary-source", 19, 11, 0, { part_kind: "tool-call", tool_name: "lookup", tool_call_id: "lookup", args: {} }),
+      run_id: "original-run", turn_id: "original-turn", status: "pending" };
+    const call = deferredCall("3d75acf89af35cdab80a574b46ccff51", 21, "original-run", "original-turn", "confirm");
+    const returned = { ...fact("ordinary-return", 20, 12, 0, { part_kind: "tool-return", tool_name: "lookup", tool_call_id: "lookup", content: "already done" }, "tool/results"),
+      run_id: "original-run", turn_id: "original-turn" };
+    const result = deferredResult("c938c9b7de3059b78497618790dc000c", 22, "resumed-run", "original-turn", "confirm");
+    assert.equal(call.payload.message.parts[0].metadata, undefined, "real persisted Calls do not carry the SSE widget");
+    controller.setHistory({ items: [ordinary, returned, call] });
+    controller.ingest({ event: "session", data: { run_id: "resumed-run" } });
+    appendFact(controller, result);
+    resultFrame(controller, "confirm");
+    const rows = controller.events().filter(row => row.tool_call_id);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map(row => row.status), ["completed", "completed"]);
+    assert.equal(rows.find(row => row.tool_call_id === "confirm").native.result_event_id, result.event_id);
+    assert.equal(trajectoryStats(controller.events()).calls, 2);
+  });
+});
 
 test("manual history selection survives appended facts, checkpoints and history refresh", () => {
   withController((controller, elements) => {
@@ -445,6 +720,32 @@ test("legacy tool intervals use result production time and never count deferred 
   assert.equal(buildTrajectory({items:[call,result]}).find(x=>x.tool_call_id==="a").duration_ms,2000);
   call.payload.message.parts[0].metadata = {widget:"builtin.confirm"};
   assert.equal(buildTrajectory({items:[call,result]}).find(x=>x.tool_call_id==="a").duration_ms,undefined);
+});
+
+test("persisted Deferred without widget excludes human waiting and preserves measured execution timing", () => {
+  // Public shape of the real seq21/22 Confirm: pending Call has no widget;
+  // its Result belongs to the Resume Run and arrives after user interaction.
+  const call = deferredCall("confirm-call", 21);
+  call.created_at = "2026-10-22T18:03:37.667459Z";
+  const result = deferredResult("confirm-result", 22);
+  result.payload.message.parts[0].timestamp = "2026-10-22T18:03:57.538397Z";
+  const tool = items => buildTrajectory({ items }).find(row => row.native?.call_event_id === call.event_id);
+  assert.equal(tool([call]).status, "pending");
+  assert.equal(tool([call]).duration_ms, undefined);
+  assert.equal(tool([call, result]).status, "completed");
+  assert.equal(tool([call, result]).duration_ms, undefined, "19.871 seconds includes human waiting, not tool execution");
+  assert.equal(tool([call, result]).duration_source, undefined);
+
+  const sameRunResult = structuredClone(result);
+  sameRunResult.run_id = call.run_id;
+  assert.equal(tool([call, sameRunResult]).duration_ms, 19871, "ordinary same-Run result retains legacy interval");
+
+  result.payload.message.parts[0].metadata = { deepagent_timing: {
+    version: 1, kind: "tool_execution", duration_ms: 12,
+    started_at: "2026-10-22T18:03:57.526397Z", completed_at: "2026-10-22T18:03:57.538397Z",
+  } };
+  assert.equal(tool([call, result]).duration_ms, 12);
+  assert.equal(tool([call, result]).duration_source, "execution");
 });
 
 test("duration toggle preserves selection/order and classifies timing boundaries without treating unknown as fast", () => {

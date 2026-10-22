@@ -43,6 +43,11 @@ test('live PTC trajectory retains failed/interrupted outcome and bounded audit m
       assert.equal(event.result.metadata.nested_calls[0].tool_name, 'safe_tool');
     }
     trajectory.ingest({ event: 'tool_result', data: { tool: 'run_code', tool_call_id: 'orphan', outcome: 'failed', result: 'safe' } });
+    assert.equal(trajectory.events().some((item) => item.tool_call_id === 'orphan'), false, 'a result without Call provenance waits for durable evidence');
+    trajectory.ingest({ event: 'session_event_appended', data: { event: {
+      event_id: 'orphan-result', event_type: 'tool/results', sequence: 1, run_id: 'run',
+      payload: { message: { kind: 'request', parts: [{ part_kind: 'tool-return', tool_name: 'run_code', tool_call_id: 'orphan', content: 'safe', outcome: 'failed' }] } },
+    } } });
     assert.equal(trajectory.events().find((item) => item.tool_call_id === 'orphan').status, 'failed');
   } finally {
     globalThis.document = previousDocument;

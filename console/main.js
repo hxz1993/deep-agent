@@ -9,8 +9,8 @@ import {
   rememberConfigurationTab,
 } from "./configuration.js?v=20261022-output-compact4";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261023-output-no-snapshot1";
-import { initWorkspace } from "./workspace.js?v=20261023-output-no-snapshot1";
+import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261023-deferred-trajectory3";
+import { initWorkspace } from "./workspace.js?v=20261023-deferred-trajectory3";
 import "./time.js?v=20260913-49";
 import "./configuration-directory.js?v=20261019-release0137";
 

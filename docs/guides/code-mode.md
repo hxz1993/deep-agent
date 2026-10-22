@@ -53,6 +53,8 @@ sorted({row["id"]: row for group in items for row in group}.values(), key=lambda
 
 ## 运行边界
 
+完整使用约束集中在 `run_code` 工具说明中；工具搜索只提示发现后的工具可按原生 Schema 直接调用，发现通知只列出本次新增的名称。发现工具不要求进入 PTC。此安排不改变授权、调用参数、结果或暂停恢复协议，也不重写已有历史通知。
+
 `run_code(code: str, restart: bool=false)` 使用 Monty Python 子集。支持 `await`、条件、循环、容器处理
 和 `asyncio.gather`，但没有宿主文件、环境变量、网络Socket、Shell、pip或第三方包。URL下载只
 能经`load_file_data`这一受控code-only函数完成。工具参数和业务说明仍以外层普通MCP Tool Schema

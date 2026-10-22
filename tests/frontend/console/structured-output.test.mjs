@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import * as OutputSchema from "../../../console/output-schema-fields.js";
 import { renderStructuredOutput, structuredOutputSections, serializeStructuredOutput, readOutputViewPreference, writeOutputViewPreference } from "../../../console/structured-output.js";
 import { assistantActionsFromSse, assistantActionsFromHistoryItems, applyAssistantPresentationActions } from "../../../console/assistant-presentation.js";
 import { projectConversationItems } from "../../../console/conversation-items.js";
@@ -10,7 +11,7 @@ import { buildTrajectory, trajectoryStats } from "../../../console/trajectory.js
 const editorSource = await readFile(new URL("../../../console/configuration/agent-output.js", import.meta.url), "utf8");
 const agentSource = await readFile(new URL("../../../console/configuration/agents.js", import.meta.url), "utf8");
 function editor() {
-  const window = {};
+  const window = { DeepAgentOutputSchema: OutputSchema };
   vm.runInNewContext(editorSource, { window, document: { addEventListener() {} } });
   return window.DeepAgentOutputDraft;
 }
@@ -154,7 +155,7 @@ test("mixed-response calls remain visible as not dispatched and do not inflate e
 });
 
 test("updater uses username, then trusted ID, and has no fabricated historical creator", () => {
-  const window = {};
+  const window = { DeepAgentOutputSchema: OutputSchema };
   vm.runInNewContext(agentSource, { window, document: { addEventListener() {} } });
   assert.equal(window.__AgentAdminUI.agentUpdaterName({ updated_by: "id-42", updated_by_user: { username: "alice" } }), "alice");
   assert.equal(window.__AgentAdminUI.agentUpdaterName({ updated_by: "id-42" }), "id-42");
@@ -185,7 +186,7 @@ test("Schema property names and updater names cannot escape HTML attributes", ()
   assert.equal(escaped.includes("<"), false);
   assert.match(escaped, /&quot;/);
   assert.match(escaped, /&#39;/);
-  const window = {};
+  const window = { DeepAgentOutputSchema: OutputSchema };
   vm.runInNewContext(agentSource, { window, document: { addEventListener() {} }, escapeHtml: value => String(value).replaceAll("<", "&lt;").replaceAll(">", "&gt;"), formatDate: () => "now" });
   const html = window.__AgentAdminUI.renderAgentUpdater({ updated_by_user: { username: attack } });
   assert.doesNotMatch(html, /title="[^>]*" onclick="/);

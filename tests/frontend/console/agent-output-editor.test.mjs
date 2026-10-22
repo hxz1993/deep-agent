@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import * as OutputSchema from "../../../console/output-schema-fields.js";
 import * as JsonInput from "../../../console/json-input.js";
 
 const source = await readFile(new URL("../../../console/configuration/agent-output.js", import.meta.url), "utf8");
@@ -23,7 +24,7 @@ function editor(config = {}) {
     }
     return elements.get(id);
   }
-  const window = { DeepAgentJsonInput: JsonInput };
+  const window = { DeepAgentJsonInput: JsonInput, DeepAgentOutputSchema: OutputSchema };
   let dirty = 0;
   element("agentForm").addEventListener("input", () => dirty++);
   vm.runInNewContext(source, { window, Event, showToast() {}, document: { getElementById: element, addEventListener() {} } });
@@ -132,4 +133,96 @@ test("shared JSON highlighter handles unsafe, partial source and scroll without 
   for (const kind of ["key", "string", "boolean", "null", "number"]) assert.match(highlight.innerHTML, new RegExp(`json-${kind}`));
   assert.equal(highlight.parentElement.scrollTop, 50);
   assert.equal(highlight.parentElement.scrollLeft, 19);
+});
+
+const complexConfig = () => {
+  const value = native(config);
+  value.output_config.description = null;
+  value.output_config.json_schema = {
+    type: "object", additionalProperties: false, required: ["revision", "review"],
+    properties: { revision: { type: "integer", minimum: 1 }, review: { $ref: "#/$defs/review" }, note: { type: "string" } },
+    $defs: { review: { type: "object", title: "审核", properties: { approved: { type: "boolean" } }, required: ["approved"] } },
+    allOf: [{ if: { properties: { revision: { const: 1 } } }, then: { properties: { review: { properties: { approved: { const: false } } } } } }],
+    "x-client": { preserve: true },
+  };
+  return value;
+};
+
+test("complex direct properties render as cards; switching modes and viewing refs preserves the entire definition", () => {
+  const value = complexConfig();
+  const ui = editor(value);
+  assert.equal(ui.element("agentOutputFieldsTab").disabled, false);
+  assert.match(ui.element("agentOutputFields").innerHTML, /审核/);
+  assert.match(ui.element("agentOutputFields").innerHTML, /1 个字段/);
+  ui.click("agentOutputSchemaTab"); ui.click("agentOutputFieldsTab");
+  assert.deepEqual(native(ui.controller.payload()), value);
+  assert.equal(ui.dirty(), 0);
+  ui.edit("review");
+  assert.equal(ui.element("agentOutputFieldKey").readOnly, true);
+  assert.match(ui.element("agentOutputFieldRuleHint").textContent, /allOf/);
+  assert.deepEqual(JSON.parse(ui.element("agentOutputFieldSchema").value), { $ref: "#/$defs/review" });
+  ui.input("agentOutputFieldSchema", '{"$ref":"#/$defs/review","title":"审核结果","description":"保留规则"}');
+  ui.click("agentOutputDetailConfirm");
+  const expected = native(value);
+  expected.output_config.json_schema.properties.review = { $ref: "#/$defs/review", title: "审核结果", description: "保留规则" };
+  assert.deepEqual(native(ui.controller.payload()), expected);
+});
+
+test("controller rejects protected rename, delete and required even if disabled UI is bypassed", () => {
+  const value = complexConfig(); const ui = editor(value);
+  ui.edit("revision"); ui.input("agentOutputFieldKey", "renamed"); ui.click("agentOutputDetailConfirm");
+  assert.equal(ui.element("agentOutputDetail").open, true);
+  assert.match(ui.element("agentOutputDetailError").textContent, /复杂规则/);
+  ui.click("agentOutputDetailCancel");
+  ui.element("agentOutputFields").dispatchEvent({ type: "click", target: { closest: selector => selector === "[data-output-delete]" ? { dataset: { outputDelete: "revision" } } : null } });
+  assert.match(ui.element("agentOutputError").textContent, /复杂规则/);
+  const checkbox = { matches: () => true, dataset: { outputRequired: "revision" }, checked: false };
+  ui.element("agentOutputFields").dispatchEvent({ type: "change", target: checkbox });
+  assert.equal(checkbox.checked, true);
+  assert.deepEqual(native(ui.controller.payload()), value);
+  assert.equal(ui.dirty(), 0);
+});
+
+test("failed detail confirmation then cancellation leaves the page draft clean", () => {
+  const ui = editor(complexConfig()); const before = native(ui.controller.payload());
+  ui.edit("review"); ui.input("agentOutputFieldSchema", '{"type":'); ui.click("agentOutputDetailConfirm");
+  assert.match(ui.element("agentOutputDetailError").textContent, /无效/);
+  ui.click("agentOutputDetailCancel");
+  assert.deepEqual(native(ui.controller.payload()), before);
+  assert.equal(ui.dirty(), 0);
+});
+
+test("new and renamed fields cannot activate pre-existing complex constraints", () => {
+  const value = complexConfig();
+  value.output_config.json_schema.allOf.push({ properties: { reserved: { type: "integer" } } });
+  const ui = editor(value);
+  ui.click("agentOutputAdd"); ui.input("agentOutputFieldKey", "reserved"); ui.click("agentOutputDetailConfirm");
+  assert.match(ui.element("agentOutputDetailError").textContent, /复杂规则/);
+  ui.click("agentOutputDetailCancel");
+  ui.edit("note"); ui.input("agentOutputFieldKey", "reserved"); ui.click("agentOutputDetailConfirm");
+  assert.match(ui.element("agentOutputDetailError").textContent, /复杂规则/);
+  ui.click("agentOutputDetailCancel");
+  assert.deepEqual(native(ui.controller.payload()), value);
+  assert.equal(ui.dirty(), 0);
+  ui.edit("note"); ui.input("agentOutputFieldKey", "comment"); ui.click("agentOutputDetailConfirm");
+  assert.equal(ui.controller.payload().output_config.json_schema.properties.comment.type, "string");
+  assert.deepEqual(native(ui.controller.payload().output_config.json_schema.allOf), value.output_config.json_schema.allOf);
+});
+
+test("a protected suggested name does not prevent choosing a safe new field name", () => {
+  const value = complexConfig();
+  value.output_config.json_schema.allOf.push({ properties: { field_1: { type: "integer" } } });
+  const ui = editor(value);
+  ui.click("agentOutputAdd");
+  assert.equal(ui.element("agentOutputDetail").open, true);
+  ui.input("agentOutputFieldKey", "free_note"); ui.click("agentOutputDetailConfirm");
+  assert.equal(ui.controller.payload().output_config.json_schema.properties.free_note.type, "string");
+});
+
+test("a malformed native property remains editable as source without crashing card rendering", () => {
+  const value = complexConfig(); value.output_config.json_schema.properties.review = null;
+  const ui = editor(value);
+  assert.equal(ui.element("agentOutputFieldsTab").disabled, true);
+  assert.equal(ui.element("agentOutputSchemaEditor").classList.contains("hidden"), false);
+  assert.deepEqual(native(ui.controller.payload()), value);
 });

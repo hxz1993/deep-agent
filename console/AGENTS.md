@@ -671,3 +671,7 @@ MCP Header 与两处输出 Schema 复用 `json-input.js` 和 `console.css` 的 `
 Agent 更新人由服务端批量返回 `updated_by_user.username`，缺失时回退 `updated_by`，历史空值显示“—”。前端不提交账号字段，不使用昵称伪装 Username。安装预检 `structured_output` 摘要应显示旧包覆盖将关闭原输出并移除定义；关闭草稿不随 Agent ZIP 导出。
 
 输出双视图只持久化 `da_console_output_view_v1` 的 `full` / `grouped` 枚举，跨刷新和新会话恢复。禁止在该偏好里保存业务值、Schema、用户或输出 ID；storage 不可用或值无效时退回完整 JSON。
+
+## 复杂输出字段编辑（0.14.2）
+
+`output-schema-fields.js` 是纯投影/保护层，随 `configuration.js` 导入并暴露给惰性 classic 编辑器。只改根 properties/required，不展开、扁平化或重新生成复杂规则；改名/删除/必须/新增的保护必须放在 OutputDraft mutation 层，不能只禁按钮。详情同名内容编辑保留完整原树；$ref 仅作显示元数据解析。行为回归见 `output-schema-fields.test.mjs` 与 `agent-output-editor.test.mjs`。

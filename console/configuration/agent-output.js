@@ -8,10 +8,12 @@
     if (!schema || typeof schema !== "object" || Array.isArray(schema)) throw new Error("JSON Schema 必须是对象");
     return schema;
   };
-  const canUseCards = schema => schema?.type === "object"
-    && (!schema.properties || (typeof schema.properties === "object" && !Array.isArray(schema.properties) && Object.values(schema.properties).every(value => typeof value === "boolean" || (value !== null && typeof value === "object" && !Array.isArray(value)))))
-    && (!schema.required || (Array.isArray(schema.required) && schema.required.every(value => typeof value === "string")))
-    && !["allOf", "anyOf", "oneOf", "$ref", "if", "then", "else"].some(key => key in schema);
+  const { canUseFieldCards: canUseCards, fieldProtection, resolveFieldDisplay } = window.DeepAgentOutputSchema;
+  const protectionMessage = paths => `此结构受复杂规则约束（${paths.slice(0, 3).join("、")}），请在 JSON Schema 中同步修改编码、必须设置及相关规则。`;
+  const assertFieldChange = (schema, ...keys) => {
+    const paths = [...new Set(keys.flatMap(key => fieldProtection(schema, key)))];
+    if (paths.length) throw new Error(protectionMessage(paths));
+  };
   const schemaType = schema => Array.isArray(schema?.type) ? schema.type.join(" | ") : schema?.type || (schema?.$ref ? "$ref" : "—");
   const schemaSummary = schema => schema?.type === "object" ? `${Object.keys(schema.properties || {}).length} 个字段` : schema?.type === "array" ? `${Object.keys(schema.items?.properties || {}).length} 个字段 / 项` : "";
 
@@ -35,35 +37,43 @@
     }
     required(key, enabled) {
       this.mutateSchema(schema => {
+        assertFieldChange(schema, key);
         const required = new Set(schema.required || []);
         if (enabled) required.add(key); else required.delete(key);
         if (required.size) schema.required = [...required]; else delete schema.required;
       });
     }
     remove(key) {
-      this.invalidDetails.delete(key);
       this.mutateSchema(schema => {
+        assertFieldChange(schema, key);
         delete schema.properties?.[key];
         if (schema.required) { schema.required = schema.required.filter(item => item !== key); if (!schema.required.length) delete schema.required; }
       });
+      this.invalidDetails.delete(key);
     }
-    detail(key, value) {
-      const pending = { ...value };
-      try {
-        const field = parseSchema(value.text, true);
-        this.mutateSchema(schema => {
-          schema.properties ||= {};
-          if (key !== value.key && Object.hasOwn(schema.properties, value.key)) throw new Error("结构编码已存在");
-          const properties = Object.entries(schema.properties).map(([name, child]) => name === key ? [value.key, field] : [name, child]);
-          schema.properties = Object.fromEntries(properties);
-          if (schema.required) schema.required = schema.required.map(name => name === key ? value.key : name);
-        });
-        this.invalidDetails.delete(key);
-        return value.key;
-      } catch (error) {
-        this.invalidDetails.set(key, pending);
-        throw error;
-      }
+    add(key, text) {
+      const field = parseSchema(text, true);
+      this.mutateSchema(schema => {
+        if (Object.hasOwn(schema.properties || {}, key)) throw new Error("结构编码已存在，请使用其他编码");
+        assertFieldChange(schema, key);
+        schema.properties = Object.fromEntries([...Object.entries(schema.properties || {}), [key, field]]);
+      });
+    }
+    detail(key, value, { rememberInvalid = true } = {}) {
+      let field;
+      try { field = parseSchema(value.text, true); }
+      catch (error) { if (rememberInvalid) this.invalidDetails.set(key, { ...value }); throw error; }
+      this.mutateSchema(schema => {
+        schema.properties ||= {};
+        if (key !== value.key) {
+          if (Object.hasOwn(schema.properties, value.key)) throw new Error("结构编码已存在");
+          assertFieldChange(schema, key, value.key);
+        }
+        schema.properties = Object.fromEntries(Object.entries(schema.properties).map(([name, child]) => name === key ? [value.key, field] : [name, child]));
+        if (schema.required) schema.required = schema.required.map(name => name === key ? value.key : name);
+      });
+      this.invalidDetails.delete(key);
+      return value.key;
     }
     payload() {
       if (this.invalidDetails.size) throw new Error("结构详情中仍有无效的 JSON Schema，请修正后保存");
@@ -114,9 +124,16 @@
     element("agentOutputSchemaEditor").classList.toggle("hidden", mode !== "schema");
     element("agentOutputFieldsTab").classList.toggle("active", mode === "fields");
     element("agentOutputSchemaTab").classList.toggle("active", mode === "schema");
-    target.innerHTML = Object.entries(schema.properties || {}).map(([key, field]) => `<article class="output-field-card${draft.invalidDetails.has(key) ? " invalid" : ""}">
-      <button type="button" class="output-field-body" data-output-edit="${escapeOutputHtml(key)}" aria-label="编辑结构 ${escapeOutputHtml(key)}"><span class="output-field-line"><code>${escapeOutputHtml(key)}</code><span class="output-field-type">${escapeOutputHtml(schemaType(field))}</span><span>${escapeOutputHtml(schemaSummary(field))}</span>${draft.invalidDetails.has(key) ? '<span class="output-field-invalid">定义无效</span>' : ""}</span><span class="output-field-description"><strong>${escapeOutputHtml(field.title || "未命名结构")}</strong><span>${escapeOutputHtml(field.description || "")}</span></span></button>
-      <div class="output-field-actions"><label><input type="checkbox" data-output-required="${escapeOutputHtml(key)}" ${(schema.required || []).includes(key) ? "checked" : ""}>必须</label><button type="button" class="icon-action danger" data-output-delete="${escapeOutputHtml(key)}" title="删除结构" aria-label="删除结构 ${escapeOutputHtml(key)}"><i data-lucide="trash-2"></i></button></div></article>`).join("") || '<div class="agent-output-empty"><span>尚未添加结构</span><span>点击 <button type="button" class="btn text compact" data-output-add>添加结构</button> 开始配置</span><span>也可保存空对象定义。</span></div>';
+    if (!cardsAllowed) { target.innerHTML = ""; return; }
+    target.innerHTML = Object.entries(schema.properties || {}).map(([key, field]) => {
+      const display = resolveFieldDisplay(schema, field);
+      const paths = fieldProtection(schema, key);
+      const hint = paths.length ? protectionMessage(paths) : "根级必须；条件及组合规则仍独立生效";
+      const disabled = paths.length ? "disabled" : "";
+      return `<article class="output-field-card${draft.invalidDetails.has(key) ? " invalid" : ""}">
+      <button type="button" class="output-field-body" data-output-edit="${escapeOutputHtml(key)}" aria-label="编辑结构 ${escapeOutputHtml(key)}"><span class="output-field-line"><code>${escapeOutputHtml(key)}</code><span class="output-field-type">${escapeOutputHtml(schemaType(display))}</span><span>${escapeOutputHtml(schemaSummary(display))}</span>${draft.invalidDetails.has(key) ? '<span class="output-field-invalid">定义无效</span>' : ""}</span><span class="output-field-description"><strong>${escapeOutputHtml(display.title || "未命名结构")}</strong><span>${escapeOutputHtml(display.description || "")}</span></span></button>
+      <div class="output-field-actions"><label title="${escapeOutputHtml(hint)}"><input type="checkbox" data-output-required="${escapeOutputHtml(key)}" ${(schema.required || []).includes(key) ? "checked" : ""} ${disabled}>必须</label><button type="button" class="icon-action danger" data-output-delete="${escapeOutputHtml(key)}" title="${escapeOutputHtml(paths.length ? hint : "删除结构")}" aria-label="删除结构 ${escapeOutputHtml(key)}" ${disabled}><i data-lucide="trash-2"></i></button></div></article>`;
+    }).join("") || '<div class="agent-output-empty"><span>尚未添加结构</span><span>点击 <button type="button" class="btn text compact" data-output-add>添加结构</button> 开始配置</span><span>也可保存空对象定义。</span></div>';
     window.lucide?.createIcons();
   }
 
@@ -142,16 +159,9 @@
     try {
       const key = element("agentOutputFieldKey").value.trim();
       if (!key) throw new Error("请填写结构编码");
-      const field = parseSchema(element("agentOutputFieldSchema").value, true);
-      draft.mutateSchema(schema => {
-        schema.properties ||= {};
-        if ((newDetail || key !== detailKey) && Object.hasOwn(schema.properties, key)) throw new Error("结构编码已存在，请使用其他编码");
-        schema.properties = Object.fromEntries(newDetail
-          ? [...Object.entries(schema.properties), [key, field]]
-          : Object.entries(schema.properties).map(([name, child]) => name === detailKey ? [key, field] : [name, child]));
-        if (!newDetail && schema.required) schema.required = schema.required.map(name => name === detailKey ? key : name);
-      });
-      draft.invalidDetails.delete(detailKey);
+      const text = element("agentOutputFieldSchema").value;
+      if (newDetail) draft.add(key, text);
+      else draft.detail(detailKey, { key, text }, { rememberInvalid: false });
       closeDetail();
       element("agentOutputDetail").close();
       notify(); render();
@@ -180,9 +190,9 @@
         const remove = event.target.closest("[data-output-delete]");
         if (event.target.closest("[data-output-add]")) addDetail();
         if (edit) openDetail(edit.dataset.outputEdit);
-        if (remove) { draft.remove(remove.dataset.outputDelete); notify(); render(); }
+        if (remove) { try { draft.remove(remove.dataset.outputDelete); notify(); render(); } catch (error) { showError(error); } }
       });
-      element("agentOutputFields").addEventListener("change", event => { if (event.target.matches("[data-output-required]")) { draft.required(event.target.dataset.outputRequired, event.target.checked); notify(); element("agentOutputSchema").value = draft.schemaText; syncSchema(); } });
+      element("agentOutputFields").addEventListener("change", event => { if (event.target.matches("[data-output-required]")) { try { draft.required(event.target.dataset.outputRequired, event.target.checked); notify(); element("agentOutputSchema").value = draft.schemaText; syncSchema(); } catch (error) { event.target.checked = (draft.schema().required || []).includes(event.target.dataset.outputRequired); showError(error); } } });
       element("agentOutputDetailClose").addEventListener("click", () => element("agentOutputDetail").close());
       element("agentOutputDetailCancel").addEventListener("click", () => element("agentOutputDetail").close());
       element("agentOutputDetailConfirm").addEventListener("click", confirmDetail);
@@ -194,11 +204,13 @@
     },
   };
   function addDetail() {
-    let key = "field_1";
-    const schema = draft.schema();
-    let index = 1;
-    while (Object.hasOwn(schema.properties || {}, key)) key = `field_${++index}`;
-    openDetail(key, true);
+    try {
+      let key = "field_1";
+      const schema = draft.schema();
+      let index = 1;
+      while (Object.hasOwn(schema.properties || {}, key)) key = `field_${++index}`;
+      openDetail(key, true);
+    } catch (error) { showError(error); }
   }
   function openDetail(key, creating = false) {
     detailKey = key;
@@ -206,6 +218,11 @@
     showDetailError("");
     const pending = draft.invalidDetails.get(key);
     element("agentOutputFieldKey").value = pending?.key ?? key;
+    const paths = creating ? [] : fieldProtection(draft.schema(), key);
+    element("agentOutputFieldKey").readOnly = paths.length > 0;
+    const hint = element("agentOutputFieldRuleHint");
+    hint.textContent = paths.length ? `${protectionMessage(paths)} 当前可编辑本字段内容；其他规则继续生效。` : "";
+    hint.classList.toggle("hidden", !paths.length);
     element("agentOutputFieldSchema").value = pending?.text ?? JSON.stringify(creating ? { type: "string", title: "新结构" } : draft.schema().properties[key], null, 2);
     syncDetail();
     element("agentOutputDetail").showModal();

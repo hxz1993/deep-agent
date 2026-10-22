@@ -483,3 +483,14 @@ tests/frontend/console/history-follower.test.mjs
 | JNT-28 | 租赁填充→保存→生成→完整读回→复核；BOM批准→不可变计划→执行→回执 | 真实人审、权限、失败停点和成功项不重发保持；平台accepted不代替任何业务动作完成证明 | P0 业务端到端 |
 
 执行责任：平台保证公共协议与事实一致，BOM/租赁各自验证业务采用、授权和写入。客户端的改造、真实业务回归及启用开关由用户分别安排，不因本次设计确认自动开始。
+
+## 0.14.2 补丁：复杂约束字段编辑专项
+
+原 286 项需求矩阵与 28 项联合回归责任边界保留；以下是本次配置 UI 补丁新增的行为验收，不替代安装/Runner/协议全链路矩阵。结果见 [0.14.2 验收报告](<../../reports/Report DeepAgent 0.14.2 复杂约束编辑验收/验收报告.md>)。
+
+- 有直接 properties 的对象，即使含 allOf/anyOf/oneOf/not/if/then/else、本地 ref 也能切换字段模式；仅继承字段的复杂定义保持原生，空对象不回归。
+- 模式切换、详情取消/关闭不改任何节点。确认同名详情只改该字段，根条件、内部 required、defs、注解均深度相等；原始 ref 不展开写回。
+- 同实例依赖的字段改名、删除、必须、新增编码统一保护；新旧名称都查，绕过 disabled 控件仍拒绝且零修改。保护范围含 dependentRequired 键和值、dependentSchemas、根 const/enum、propertyNames/patternProperties/unevaluatedProperties、未知规则和无法解析 ref。
+- 作用域边界：嵌套子字段同名、未使用 defs、default/examples/x-* 不当作根依赖；prototype/JSON Pointer 转义、深度超限失败保护，无网络解析。
+- 本地 ref 解析仅用于卡片类型/字段数；同名编辑内容不等于覆盖条件或兄弟约束。无效详情确认后取消，不留下阻断整页保存的隐形错误。
+- 浏览器完成保存、刷新和 API 全对象比对；真实定义以合成合法/非法输出逐项执行原验证器，校验结果及约束路径前后一致。只读源环境，业务 Schema 不入 Git。

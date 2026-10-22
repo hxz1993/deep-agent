@@ -34,7 +34,7 @@ skills/<skill-code>.zip
 
 不包含温度、来源 Agent ID、平台文件 ID、会话、日志、Provider 凭据或 MCP 认证配置。
 
-压缩上限 50 MiB，累计解压上限 200 MiB，文件数上限 2048；嵌套 Skill 同时执行单包校验。拒绝损坏、重复、越界、链接、加密或校验失败的文件，以及不识别的字段和内容。
+压缩上限 50 MiB，累计解压上限 200 MiB，文件数上限 2048；嵌套 Skill 同时执行单包校验。拒绝损坏、重复、越界、链接、加密或校验失败的文件，以及已知字段的错误类型；安全的未知扩展忽略但计入摘要。
 
 ## 预制目录
 
@@ -68,3 +68,10 @@ skills/<skill-code>.zip
 本次本地按用户要求不新增备份，清理指定验收数据、保留原有 6 个 Agent。全组合使用独立 SQLite/FileStore/运行目录。`DEEP_AGENT_SKILL_RUNTIME_ROOT` 可指定实例 Skill 目录，隔离验收不得共用日常实例缓存。
 
 此功能随产品版本 0.10.0 发布。全组合回归入口为 `tests/run_agent_package_matrix.py`，默认报告输出到 `output/TMP_to_delete-agent-package-matrix`；历史验收报告可从 Git 恢复。
+
+
+## 0.14.3 文本策略与旧版兼容
+
+schema_version 继续整数1，只有一种导出：关闭结构化输出时省略 structured_output_enabled、output_config、allow_text_output，连保留的 true 草稿也不导出；开启携带完整定义，仅允许文本时增加 allow_text_output:true，缺省 false。旧包新建／覆盖安装均关闭结构化输出和文本策略，不继承目标旧值。开启包只能由支持结构化输出的新版本安装，0.14前旧版拒绝且不得产生写入。
+
+allow_text_output 纳入预检摘要、目标状态和事务，只有此值改变也使旧预检失效；正式导出下载期间修改策略会返回冲突。复制和同 Revision 全量配置备份保留关闭草稿。兼容专项只区分552b7b2的0.14前旧版和本次最终新版，不增加0.14内部兼容分支；必须由正式新版导出接口生成ZIP送真实旧版完整预检、安装、覆盖及回读，不能手工拼包替代。

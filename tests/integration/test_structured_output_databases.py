@@ -1,4 +1,4 @@
-"""012 acceptance on isolated SQLite, real MySQL and real PostgreSQL.
+"""Historical 012 SQL contract and current ORM on isolated real databases.
 
 The two server URLs are credentials for disposable localhost servers only. Each
 case creates and drops separate source and restore databases in finally blocks.
@@ -93,6 +93,10 @@ class StructuredOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(next(c for c in inspected if c["name"] == "updated_by")["type"].length, 128)
                 self.assertEqual(await db.run_sync(lambda conn: sa.inspect(conn).get_foreign_keys("agent_output_configs")), [])
                 self.assertEqual(await db.run_sync(lambda conn: sum(len(sa.inspect(conn).get_foreign_keys(t)) for t in sa.inspect(conn).get_table_names())), 0)
+            # Preserve the deployed 011->012 checks above. Current ORM CRUD
+            # requires the separately authorized 013 config column, so only this next
+            # phase advances to 013 rather than querying new columns at 012.
+            await self._migrate(url, "013")
             factory = async_sessionmaker(source, expire_on_commit=False)
             stores = create_data_stores(resolve_dialect(url), factory)
             row = await stores.agent.create_unique(AgentCreate(name="新 Agent 🧪", prompt="内容 👋📊🙂", output_config=CONFIG), user_id="trusted-user")
@@ -108,8 +112,8 @@ class StructuredOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
             # Real transactional rollback after the child row is flushed.
             from deep_agent.db.stores.agent import base
             save_original = base.save_output_config
-            async def fail_after_write(db, agent_id, config):
-                await save_original(db, agent_id, config)
+            async def fail_after_write(db, agent_id, config, **kwargs):
+                await save_original(db, agent_id, config, **kwargs)
                 await db.flush()
                 raise RuntimeError("injected output config transaction failure")
             changed = copy.deepcopy(CONFIG); changed["description"] = "不应提交"
@@ -163,11 +167,11 @@ class StructuredOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
             # restoration uses the real production import transaction boundary.
             with tempfile.TemporaryDirectory(prefix="TMP_to_delete_output_backup_") as temp:
                 backup = await export_backup(url, environment="fixture", output_root=Path(temp), git_commit="fixture")
-                self.assertEqual(backup.revision, "012")
+                self.assertEqual(backup.revision, "013")
                 self.assertEqual(backup.row_counts["agent_output_configs"], 2)
                 self.assertEqual(backup.row_counts["chat_sessions"], 0)
                 self.assertEqual(backup.row_counts["chat_session_events"], 0)
-                await self._migrate(restore_url, "012")
+                await self._migrate(restore_url, "013")
                 restored = create_async_engine(restore_url)
                 plan = await build_configuration_import_plan(backup.path, target_engine=restored)
                 self.assertEqual(next(item for item in plan.rows["agent_output_configs"] if item["agent_id"] == row.id)["json_schema"], CONFIG["json_schema"])
@@ -184,6 +188,16 @@ class StructuredOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
             # only this test's rows are cleared between the disposable fixtures.
             with self.assertRaisesRegex(RuntimeError, "output_configs=2"):
                 await self._migrate(url, "011", downgrade=True)
+            async with source.connect() as db:
+                # MySQL commits ALTER TABLE independently. A refusal in the
+                # following 012 step must be checked before dropping 013, or
+                # the revision stamp and real columns disagree on retry.
+                self.assertEqual(await db.scalar(sa.text("SELECT version_num FROM alembic_version")), "013")
+                self.assertNotIn("allow_text_output", await db.run_sync(
+                    lambda conn: {column["name"] for column in sa.inspect(conn).get_columns("agents")}))
+                self.assertIn("allow_text_output", await db.run_sync(
+                    lambda conn: {column["name"] for column in sa.inspect(conn).get_columns("agent_output_configs")}))
+                self.assertEqual(await db.scalar(sa.text("SELECT COUNT(*) FROM agent_output_configs")), 2)
             async with source.begin() as db:
                 await db.execute(sa.delete(AgentOutputConfig))
                 await db.execute(sa.update(Agent).values(updated_by=None, structured_output_enabled=True))
@@ -211,7 +225,7 @@ class StructuredOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await db.scalar(sa.text("SELECT prompt FROM agents WHERE id='legacy'")), "原正文 📊")
                 self.assertEqual(await db.scalar(sa.text("SELECT payload FROM chat_session_events WHERE event_id='legacy-event'")), "原消息 🧪")
                 self.assertNotIn("agent_output_configs", await db.run_sync(lambda conn: sa.inspect(conn).get_table_names()))
-            await self._migrate(url, "012")
+            await self._migrate(url, "013")
             async with source.connect() as db:
                 await db.run_sync(assert_logical_references)
         finally:

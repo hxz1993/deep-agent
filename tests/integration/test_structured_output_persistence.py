@@ -31,7 +31,7 @@ from deep_agent.agent.structured_output import StructuredOutputState
 from deep_agent.conversation.projector import project_session_events
 from deep_agent.core.session_live import SessionLiveHub
 from deep_agent.db.event_codec import MESSAGE_EVENT_TYPES
-from deep_agent.db.models import Agent as AgentRow, ChatSessionEvent
+from deep_agent.db.models import Agent as AgentRow, AgentOutputConfig, ChatSessionEvent
 from deep_agent.diagnostics.sessions import DiagnosticSessionQueries, SessionFilters, detail_event_metadata
 from deep_agent.diagnostics.usage import UsageQueries
 from deep_agent.structured_output.schema import json_bytes, normalize_schema, schema_digest
@@ -668,10 +668,23 @@ class AgentOutputListScaleTests(unittest.IsolatedAsyncioTestCase):
     async def test_ten_hundred_thousand_agents_use_one_list_query_and_one_batch_resolver(self):
         for count in (10, 100, 1000):
             with self.subTest(count=count):
+                agents, configs, expected_flags = [], [], {}
+                for index in range(count):
+                    aid, mode = str(uuid4()), index % 3
+                    agents.append({"id": aid, "name": f"scale-{index}", "prompt": "synthetic",
+                        "updated_by": f"operator-{index % 25}",
+                        "structured_output_enabled": mode == 1 or (mode == 2 and bool(index % 2))})
+                    expected_flags[aid] = mode == 2
+                    if mode:
+                        configs.append({"agent_id": aid, "name": f"result_{index}",
+                            "description": "must not load full definitions for this list",
+                            "json_schema": {"type": "object", "description": "schema payload " * 64},
+                            "allow_text_output": mode == 2})
                 async with self.engine.begin() as db:
+                    await db.execute(delete(AgentOutputConfig))
                     await db.execute(delete(AgentRow))
-                    await db.execute(insert(AgentRow), [{"id": str(uuid4()), "name": f"scale-{index}",
-                        "prompt": "synthetic", "updated_by": f"operator-{index % 25}"} for index in range(count)])
+                    await db.execute(insert(AgentRow), agents)
+                    await db.execute(insert(AgentOutputConfig), configs)
                 statements, actor_ids = [], []
                 def capture(conn, cursor, statement, parameters, context, executemany):
                     if statement.lstrip().upper().startswith("SELECT"):
@@ -692,7 +705,11 @@ class AgentOutputListScaleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(resolver.await_count, 1)
                 self.assertEqual(len(set(actor_ids)), min(count, 25))
                 self.assertEqual(len(statements), 1, statements)
-                self.assertFalse(any("agent_output_configs" in sql for sql in statements))
+                self.assertEqual({row["id"]: row["allow_text_output"] for row in response.json()}, expected_flags)
+                self.assertEqual(sum(row["allow_text_output"] for row in response.json()), count // 3)
+                self.assertIn("agent_output_configs.allow_text_output", statements[0].lower())
+                for column in ("json_schema", "agent_output_configs.name", "agent_output_configs.description"):
+                    self.assertNotIn(column, statements[0].lower())
                 self.assertTrue(all("output_config" not in row and row["updated_by_user"]["username"].startswith("operator-") for row in response.json()))
                 self.assertLess(time.perf_counter() - started, 5, "bounded list fixture unexpectedly stalled")
 

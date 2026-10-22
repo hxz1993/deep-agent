@@ -56,7 +56,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self._tmp.name)
         source = root / "source.db"
-        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="012")
+        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="013")
         with sqlite3.connect(source) as connection:
             connection.execute("UPDATE agents SET skills='[]'")
             connection.execute("DELETE FROM skill_packages")
@@ -78,7 +78,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await connection.execute(
-                text("INSERT INTO alembic_version (version_num) VALUES ('012')")
+                text("INSERT INTO alembic_version (version_num) VALUES ('013')")
             )
         self.app = FastAPI()
         self.app.include_router(api_router)

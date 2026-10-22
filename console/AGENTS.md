@@ -664,6 +664,8 @@ MCP Header 与两处输出 Schema 复用 `json-input.js` 和 `console.css` 的 `
 
 输出配置左栏只标“说明”；说明框和右侧原生 Schema 随资源区域向下撑满、底边对齐，不再使用固定的默认短框。空结构用弱色虚线占位，说明内的“添加结构”文字按钮与顶部入口共用新增逻辑，取消详情仍保留空态。
 
+右侧定义栏顶部展示“允许文本输出”和可聚焦的共享 `.field-help` 问号提示，仅在总开关开启时显示；关闭总开关仍保留该布尔草稿，字段“必须”只约束 JSON。下方统一为“结构设置”标题和“查看 JSON／添加结构／检查定义”操作，不再使用分段控件。JSON 按钮切换为“返回结构”，模式切换不改草稿也不标记未保存；原生编辑时新增按钮禁用，数组或纯引用等不可投影的根定义保留原生编辑兜底。无效 JSON 点击返回时保留原文并就地报错，不恢复旧定义。
+
 `structured-output.js` 是回复与轨迹共用的通用 JSON/正文展示器，视图切换不请求模型。只有明确 `accepted` 的 SSE output 或 History `kind: structured_output` 进入普通回复，使用 `output_id/item_id` 去重；final 的 `output_info` 同样复用这个身份。不要按当前 Agent 输出名称猜测历史工具类别。长 JSON 折叠后复制/下载仍使用完整原值。
 
 轨迹从 `output/attempt` 和其真实源事件展示失败/成功，统一“输出”标签。SDK 输出重试可能没有工具名且生成新 call ID；有输出预算标记的全局 RetryPrompt 不是已执行普通工具，不能增加调用数。冻结 Schema 取原 Turn 用户事件，显示未知耗时为“耗时未知”。
@@ -672,6 +674,6 @@ Agent 更新人由服务端批量返回 `updated_by_user.username`，缺失时�
 
 输出双视图只持久化 `da_console_output_view_v1` 的 `full` / `grouped` 枚举，跨刷新和新会话恢复。禁止在该偏好里保存业务值、Schema、用户或输出 ID；storage 不可用或值无效时退回完整 JSON。
 
-## 复杂输出字段编辑（0.14.2）
+## 复杂输出字段编辑
 
-`output-schema-fields.js` 是纯投影/保护层，随 `configuration.js` 导入并暴露给惰性 classic 编辑器。只改根 properties/required，不展开、扁平化或重新生成复杂规则；改名/删除/必须/新增的保护必须放在 OutputDraft mutation 层，不能只禁按钮。详情同名内容编辑保留完整原树；$ref 仅作显示元数据解析。行为回归见 `output-schema-fields.test.mjs` 与 `agent-output-editor.test.mjs`。
+`output-schema-fields.js` 只负责字段投影和本地引用的展示解析，随 `configuration.js` 导入并暴露给惰性 classic 编辑器。只改根 properties/required，不展开、扁平化或重新生成复杂规则。按用户确认，卡片保留可直接修改的“必须”，只维护根 required；不因复杂规则禁用必须/编辑/改名/删除；原 required、条件和 defs 在未主动修改时保留，复杂规则由配置者在原生 Schema 中维护，服务端原校验继续生效。输出列撑满高度，只有字段列表内部滚动；卡片无边框、带底色、紧凑两行。

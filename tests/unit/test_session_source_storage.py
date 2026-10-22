@@ -29,7 +29,7 @@ class SessionSourceMigrationTests(unittest.TestCase):
             command.upgrade(cfg, "head")
             engine = create_engine(f"sqlite:///{path}")
             with engine.connect() as db:
-                self.assertEqual(db.scalar(text("SELECT version_num FROM alembic_version")), "012")
+                self.assertEqual(db.scalar(text("SELECT version_num FROM alembic_version")), "013")
                 self.assertIn("source_id", {c["name"] for c in inspect(db).get_columns("chat_sessions")})
             engine.dispose()
 

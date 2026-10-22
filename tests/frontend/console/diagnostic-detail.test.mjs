@@ -133,6 +133,85 @@ class Element {
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
+function outputPresentation() {
+  const host = new Element();
+  const factory = createConversationPresenter({ messages: host, readOnly: true,
+    document: { createElement: tag => new Element(tag), createComment: () => new Element("#comment") },
+    window: { requestAnimationFrame: fn => fn() },
+  });
+  const assistant = factory.createAssistantMessage("2026-10-22T00:00:00Z", 1);
+  return { host, assistant, sse(type, data) { applyAssistantPresentationActions(assistant, assistantActionsFromSse(type, data)); } };
+}
+
+function outputSurface(host) {
+  const unescape = source => source.replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+  return {
+    finals: host.querySelectorAll(".assistant-final").length,
+    text: host.querySelector(".structured-output") ? null : unescape(host.querySelector(".assistant-final")?.textContent || ""),
+    output: host.querySelectorAll(".structured-output-json").map(block => JSON.parse(unescape(block.querySelector(".language-json").textContent))),
+    process: host.querySelectorAll(".assistant-process-text").map(block => unescape(block.textContent)),
+  };
+}
+
+test("allowed plain text SSE and final produce one reply matching refreshed assistant_message history", () => {
+  for (const text of ["合同待确认", '{"looks":"json"}']) {
+    const live = outputPresentation();
+    live.sse("text", { delta: text.slice(0, 2) });
+    live.sse("text", { delta: text.slice(2) });
+    live.sse("final", { status: "completed", output: text });
+    const saved = outputPresentation();
+    applyAssistantPresentationActions(saved.assistant, assistantActionsFromHistoryItems([
+      { item_id: "text-final", kind: "assistant_message", status: "completed", phase: "final", text },
+    ]));
+    assert.deepEqual(outputSurface(live.host), { finals: 1, text, output: [], process: [] });
+    assert.deepEqual(outputSurface(live.host), outputSurface(saved.host));
+  }
+});
+
+test("output_info distinguishes a structured string from the same ordinary text and deduplicates output/final", () => {
+  const output = "plain string";
+  const live = outputPresentation();
+  const frame = { output_id: "string-output", name: "lease_result", output, accepted: true, status: "completed" };
+  live.sse("output", frame);
+  const acceptedNode = live.host.querySelector(".assistant-final");
+  live.sse("output", frame);
+  live.sse("final", { status: "completed", output, output_info: { name: frame.name, output_id: frame.output_id } });
+  assert.equal(live.host.querySelector(".assistant-final"), acceptedNode);
+  assert.deepEqual(outputSurface(live.host), { finals: 1, text: null, output: [output], process: [] });
+  const saved = outputPresentation();
+  applyAssistantPresentationActions(saved.assistant, assistantActionsFromHistoryItems([
+    { item_id: frame.output_id, kind: "structured_output", status: "completed", name: frame.name, output },
+  ]));
+  assert.deepEqual(outputSurface(saved.host), outputSurface(live.host));
+  const plain = outputPresentation(); plain.sse("final", { status: "completed", output });
+  assert.deepEqual(outputSurface(plain.host), { finals: 1, text: output, output: [], process: [] });
+});
+
+test("a JSON final keeps streamed explanation in process once, matching History without two final replies", () => {
+  const live = outputPresentation();
+  live.sse("text", { delta: "先核对合同内容。" });
+  const output = { contract: { amount: 0 }, approved: false, optional: null };
+  const info = { name: "lease_result", output_id: "json-output" };
+  live.sse("output", { ...info, output, accepted: true, status: "completed" });
+  live.sse("final", { status: "completed", output, output_info: info });
+  const saved = outputPresentation();
+  applyAssistantPresentationActions(saved.assistant, assistantActionsFromHistoryItems([
+    { item_id: "explanation", kind: "assistant_message", status: "completed", phase: "process", text: "先核对合同内容。" },
+    { item_id: info.output_id, kind: "structured_output", status: "completed", name: info.name, output },
+  ]));
+  assert.deepEqual(outputSurface(live.host), { finals: 1, text: null, output: [output], process: ["先核对合同内容。"] });
+  assert.deepEqual(outputSurface(live.host), outputSurface(saved.host));
+});
+
+test("a rejected JSON attempt followed by allowed text never leaks the candidate into a reply", () => {
+  const live = outputPresentation();
+  live.sse("output", { output_id: "rejected", name: "lease_result", status: "error", accepted: false, output: { secret_candidate: true } });
+  live.sse("text", { delta: "请补充合同附件。" });
+  live.sse("final", { status: "completed", output: "请补充合同附件。" });
+  assert.deepEqual(outputSurface(live.host), { finals: 1, text: "请补充合同附件。", output: [], process: [] });
+  assert.doesNotMatch(live.host.textContent, /secret_candidate/);
+});
+
 test("readonly pending tool renders saved request without initializing widgets, timers or callbacks", () => {
   const host = new Element(); let mutations = 0; let intervals = 0;
   const presenter = createConversationPresenter({ messages: host, readOnly: true,

@@ -136,6 +136,28 @@ test("cancellation closes live content without adding any terminal receipt", () 
   });
 });
 
+test("an allowed text final stays an assistant trajectory row after a rejected output and History refresh", () => {
+  withController(controller => {
+    const rejected = { output_id: "rejected-json", name: "lease_result", accepted: false, status: "error", output: {}, run_id: "run-1", turn_id: "turn-1" };
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    controller.ingest({ event: "output", data: rejected });
+    controller.ingest({ event: "text", data: { delta: "请补充合同附件。" } });
+    controller.ingest({ event: "final", data: { status: "completed", output: "请补充合同附件。" } });
+    let rows = controller.events();
+    assert.deepEqual(rows.filter(row => row.kind === "output").map(row => row.status), ["failed"]);
+    assert.equal(rows.filter(row => row.kind === "assistant").length, 1);
+    assert.equal(rows.find(row => row.kind === "assistant").payload.content, "请补充合同附件。");
+    controller.setHistory({ items: [
+      { event_id: rejected.output_id, event_type: "output/attempt", sequence: 1, run_id: "run-1", turn_id: "turn-1", payload: rejected },
+      fact("text-final", 2, 1, 0, { part_kind: "text", content: "请补充合同附件。" }),
+    ] });
+    rows = controller.events();
+    assert.deepEqual(rows.filter(row => row.kind === "output").map(row => row.status), ["failed"]);
+    assert.equal(rows.filter(row => row.kind === "assistant").length, 1);
+    assert.equal(rows.find(row => row.kind === "assistant").payload.content, "请补充合同附件。");
+  });
+});
+
 test("persisted tool facts and their following SSE presentation frames produce one row", () => {
   withController((controller) => {
     controller.ingest({ event: "session", data: { run_id: "run-1" } });

@@ -636,6 +636,7 @@ const agentsAdmin = {
           capabilities: [...(agent.capabilities || [])],
           skills: [...(agent.skills || [])],
           structured_output_enabled: output.structured_output_enabled,
+          allow_text_output: output.allow_text_output === true,
           ...(output.output_config ? { output_config: output.output_config } : {}),
         }),
       });

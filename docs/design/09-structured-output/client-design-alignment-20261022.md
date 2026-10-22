@@ -60,6 +60,8 @@ accepted不替代2或3；`operation_advice.fill.allowed`也不代表填写、保
 
 ### 3.1 根包与阶段
 
+**后续修订：用户已明确要求改为单一一级 `bom_result`，本表保留最初确认记录；新接入以第 9 节为准，旧历史仍按原声明解释。**
+
 | **项目** | **确认后的映射** |
 | --- | --- |
 | 输出编码 | `bom_turn_v3` |
@@ -200,3 +202,42 @@ BOM审批与租赁业务证据读取必须只采用实际成功执行、归属�
 联合用例在[测试计划JNT组](structured-output-test-plan.md#19-三方设计对齐后的联合回归)集中维护；所有用例仍为待执行。普通接口/底层回归仍保留原矩阵，不用业务联合用例替代安装、迁移和持久化故障测试。
 
 后续若用户进入计划模式并启动开发，本平台按完整设计落地；两个客户端由用户分别交接，不默认在本会话串联开发或自动切换线上开关。最终停止点是三方设计确认和文档核对完成，**不是业务功能已经实现或发布**。
+
+
+## 9. 后续修订：BOM 单一一级业务对象
+
+2026-10-22，用户再次授权直接与「峰梅｜智能填报BOM」会话协商，并要求把完整 BOM 结果收进一个一级对象，同时评估将重复字段说明从 Skill 迁入 Schema。本节替代第 3.1 节对新输出“不增加包裹层”的决定；租赁映射不变，不要求租赁采用 BOM 的外壳。BOM 基线为客户端 0.1.37、Prompt V17.2、Skill 2.0.2，平台为 0.14.1。
+
+### 9.1 已对齐的结构与兼容
+
+- 新输出为 `{"bom_result": 原BomTurnV3对象}`，唯一一级字段 title 为“BOM处理结果”，配有 description，内部保留原 16 字段及 required/条件/引用规则；内字段也补齐中文 title/description。外层 required 包含 bom_result，禁止额外根字段、空值、字符串及双重外壳。
+- `output_info.name` 继续 `bom_turn_v3`，内层业务 schema_version 继续 3，revision/hash/source_signature/patch_id、rules 及批准/执行语义不变。单独版本化传输外壳，不因包裹升级业务版本。
+- 新请求的持久 `bom.state.output_transport` 为 `native_json_bom_result_v1`；原 `native_json_v1` 仍解释扁平原生 JSON。按照对应用户轮次/Run 及持久声明选择解码，不凭输出键猜版本；新请求不静默接受旧扁平或围栏。旧围栏仅按原有历史契约读取。
+- 原始完整外壳及 output_id 用于 SSE/History 一致性、冲突去重及新批准证据；只在 BOM 业务边界统一解包给原 reducer。同一会话可包含旧轮扁平和新轮包裹；旧 hash、事件及回执不重写。平台公共 SSE/Live/History 不增加 BOM 解包特例。
+
+### 9.2 Schema 容量与已执行验证
+
+直接包裹会把原定义的深度 15 推至 17，超过平台 16。两边已确认等价改写：按内容定位唯一 next=ready 的 if/then，从原业务 allOf 提升到 bom_result 对象同级；另一段 base_revision 条件继续在业务 allOf，仍共同约束同一实例。$defs 保持根部，本地引用不悬空，不提高平台预算。为给直接属性添加说明又避免 ref 兄弟注解展开产生额外 allOf，候选对 hash/review 直接属性采用等价内联，其余引用保留。
+
+最终带说明的候选：原树 12827 bytes / 800 nodes / 深度 15，真实展开 11065 bytes / 676 nodes / 深度 16。平台侧已独立读取 BOM 候选，实际 normalize_output_config、expand_schema 和 StructuredOutputState.output_types 均通过；该后端路径相对 v0.14.1 无改动。新最外层没有复杂条件，因此 0.14.1 Console 也可展示单张字段卡片，不依赖 0.14.2 的 UI 修复。
+
+平台先以 14 组合成合法/非法输出对比原 Schema 和包裹等价候选，接受/拒绝及错误 constraint 顺序一致。BOM 会话进一步以其当前测试构造验证最终候选，报告 106 组内层等价对比及 10 组外层非法形状通过。真实 Provider、SSE/History/批准链、业务保存和独立回读尚未因此计为通过。
+
+### 9.3 Skill 与 Schema 的职责
+
+字段中文名、用途、固定值/空值、动作枚举、首轮快照/续轮补丁和 next 含义适合迁到 title/description；可表达的类型、required、enum、静态条件继续为硬约束。仅删已经迁走的重复字段字典，避免说明重复与预算膨胀。
+
+动态 revision=base+1、来源/hash/目标相等、COUNT/完整分页、候选身份、原始值保真、用户确认/撤回、父依赖、权限、人审、保存与幂等仍由 Skill 和代码负责；description 不能代替业务校验或授权。
+
+### 9.4 交接与实施边界
+
+已回传 BOM 会话，同意持久传输声明及原始外壳取证方案，并按用户本轮指令交由该会话落实其本地客户端、Prompt/Skill/Schema 资产及回归。详见 BOM 项目的 `docs/BOM单对象结构化输出调整方案.md`。当前本节记录方案及候选验证，不表示客户端实现或部署完成。
+
+切换前客户端须具备双历史读取能力，并仍按当前 Agent 契约发送旧声明；正式 Agent Prompt/Schema/开关切换须与客户端新声明启用协调，避免新客户端强制外壳而主 Agent 仍返回扁平对象。Skill 预置新资产后再切引用，不宣称多个独立资源天然原子。在途 Turn 使用已冻结 Schema 和自身持久声明，不按新 Agent 改写。
+
+本次协调不授权写 AlphaPG 主 Agent/Skill、部署发布、真实导入，亦不覆盖原有 931 侧边测试。应先隔离 Agent 验证，再按用户后续授权切环境。平台无必须新增的接口或预算缺口。
+
+
+## 0.14.3平台增补（不改变客户端业务默认）
+
+平台新增Agent层allow_text_output二级选项，默认false；只有structured_output_enabled:true且allow_text_output:true时可以普通文字结束。required只约束JSON；JSON分支仍完整Schema校验和接受事实，文本没有output_info／structured_output History。按真实output_info和kind识别，不从字符串内容猜测。BOM仍保持false且须按业务校验采用，租赁可由负责人另行决定。该平台扩展不自动调整任一业务Schema、Skill或保存行为；平台发布后仅向BOM会话说明，等待用户AlphaPG部署后安排，不提前修改客户端代码。

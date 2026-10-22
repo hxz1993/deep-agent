@@ -214,7 +214,7 @@ class AgentPackageCrossVersionHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history_before.status_code, 200, history_before.text)
         await self.install(self.new, off_raw, "new now disabled", target=on_copy["id"])
         cleared = await self.new.get(f'/api/v1/agents/{on_copy["id"]}/output-config')
-        self.assertEqual(cleared.json(), {"structured_output_enabled": False, "output_config": None})
+        self.assertEqual(cleared.json(), {"structured_output_enabled": False, "allow_text_output": False, "output_config": None})
         history_after = await self.new.get(f"/api/v1/sessions/{session_id}/history")
         self.assertEqual(history_after.json(), history_before.json())
         self.record("PK-X09", off_raw, definition_removed=True, existing_output_history="unchanged")

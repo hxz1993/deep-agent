@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from uuid import uuid4
 
-from sqlalchemy import inspect, select, text
+from sqlalchemy import MetaData, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from pydantic_ai import Agent as ModelAgent
@@ -64,8 +64,13 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                                              output_root=root / "backup", git_commit="fixture")
                 plan = await build_configuration_import_plan(backup.path, target_engine=target)
                 async with target.connect() as db:
+                    # This phase intentionally verifies a historical physical
+                    # 012 database. Current ORM columns may belong to later
+                    # revisions, so snapshot the actual deployed tables.
+                    physical = MetaData()
+                    await db.run_sync(physical.reflect)
                     before = {name: [dict(r) for r in (await db.execute(select(table))).mappings()]
-                              for name, table in Base.metadata.tables.items()}
+                              for name, table in physical.tables.items()}
                 bad_rows = {name: [dict(row) for row in rows] for name, rows in plan.rows.items()}
                 bad_rows["channel_accounts"][0]["agent_id"] = "missing-agent"
                 with self.assertRaisesRegex(ConfigurationImportError, "channel_accounts.agent_id"):
@@ -73,7 +78,7 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                                                      file_store=_RejectingFileStore(), request_headers={})
                 async with target.connect() as db:
                     after = {name: [dict(r) for r in (await db.execute(select(table))).mappings()]
-                             for name, table in Base.metadata.tables.items()}
+                             for name, table in physical.tables.items()}
                 self.assertEqual(before, after, "failed import must roll back every table")
 
                 # An actual shared database row lock held by another connection
@@ -98,8 +103,7 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(await db.scalar(text("SELECT version_num FROM alembic_version")), "012")
                     self.assertEqual(await db.run_sync(lambda c: sum(len(inspect(c).get_foreign_keys(t))
                                                                      for t in Base.metadata.tables)), 0)
-                await self._verify_imported_agent_chat(target, target_url)
-                # Chat cleanup restores the no-conversation import precondition.
+                # Remain on 012 through the complete import/locking contract.
                 await build_configuration_import_plan(backup.path, target_engine=target)
                 # Reverse direction: the importer blocks ordinary writers too.
                 async with target.connect() as importer, target.connect() as writer:
@@ -116,6 +120,11 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                             pending.cancel()
                         await asyncio.gather(pending, return_exceptions=True)
                         await writer.rollback()
+                # Only current runtime CRUD requires the new ORM columns. Do
+                # not weaken the historical backup/restore assertions above by
+                # replacing their 012 source or target with current metadata.
+                await asyncio.to_thread(_upgrade_target_schema, target_url, "013")
+                await self._verify_imported_agent_chat(target, target_url)
         finally:
             if target is not None:
                 await target.dispose()

@@ -26,7 +26,7 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.structured_output import StructuredOutputState
 from deep_agent.capabilities import build_registry
-from deep_agent.db.models import Agent
+from deep_agent.db.models import Agent, AgentOutputConfig
 from deep_agent.schemas.agent import AgentUpdate
 from deep_agent.security import diagnostic_users
 from deep_agent.structured_output.schema import MAX_OUTPUT_BYTES, MAX_SCHEMA_BYTES, json_bytes, normalize_schema, schema_digest
@@ -45,6 +45,7 @@ def tearDownModule():
         target.write_text("# 结构化输出资源专项验收\n\n"
             "本机隔离进程实测，SDK FunctionModel、真实文件 SQLite；不作为容量 SLA 或真实 Provider 性能结论。"
             "SQL 计数只记录对应操作窗口，用户批量测试保留真实 resolver，仅替换无网络 fetcher。"
+            "配置的布尔值读取与完整 Schema 定义读取分别计数。"
             "并发测试测量父 Python 的 tracemalloc 峰值，RSS 是进程累计高水位；子进程 RSS 单列。\n\n"
             "```json\n" + json.dumps(_METRICS, ensure_ascii=False, indent=2) + "\n```\n\n"
             "缓存上限另由 tests.unit.test_structured_output_schema 的128项边界回归验证；"
@@ -64,11 +65,15 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_zero_config_reads_enabled_one(self):
         self.ctx.registry = build_registry()
         aid = await seed_default_agent(self.stores)
+        # A retained true draft must not activate or load the definition while
+        # the Agent's master switch is off.
+        await self.stores.agent.update_unique(aid, AgentUpdate(structured_output_enabled=False,
+            allow_text_output=True, output_config={"name": "resource_result", "json_schema": {"type": "object"}}),
+            user_id="resource-operator")
         measurements = []
         for enabled in (False, True):
             if enabled:
-                await self.stores.agent.update_unique(aid, AgentUpdate(structured_output_enabled=True,
-                    output_config={"name": "resource_result", "json_schema": {"type": "object"}}), user_id="resource-operator")
+                await self.stores.agent.update_unique(aid, AgentUpdate(structured_output_enabled=True), user_id="resource-operator")
             def response(messages, info):
                 return ModelResponse(parts=[ToolCallPart("resource_result", {"ok": True}, "resource-output")] if enabled else [TextPart("ordinary")])
             statements, capture = self.sql_capture()
@@ -82,16 +87,41 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
             self.assertEqual(result.status_code, 200, result.text)
-            reads = sum("agent_output_configs" in statement.lower() and statement.lstrip().lower().startswith("select") for statement in statements)
+            self.assertEqual(result.json()["output"], {"ok": True} if enabled else "ordinary")
+            self.assertEqual("output_info" in result.json(), enabled)
+            config_selects = [statement.lower() for statement in statements
+                if "agent_output_configs" in statement.lower() and statement.lstrip().lower().startswith("select")]
+            reads = sum("agent_output_configs.json_schema" in statement for statement in config_selects)
             self.assertEqual(reads, int(enabled))
-            measurements.append({"enabled": enabled, "output_config_selects": reads, "total_sql": len(statements), "elapsed_ms": round((perf_counter()-started)*1000, 2)})
+            boolean_only = [statement for statement in config_selects if "agent_output_configs.json_schema" not in statement]
+            self.assertGreater(len(boolean_only), 0)
+            for statement in boolean_only:
+                self.assertIn("agent_output_configs.allow_text_output", statement)
+                self.assertNotIn("agent_output_configs.name", statement)
+                self.assertNotIn("agent_output_configs.description", statement)
+            measurements.append({"enabled": enabled, "output_config_selects": reads,
+                "boolean_only_config_selects": len(boolean_only), "total_sql": len(statements),
+                "elapsed_ms": round((perf_counter()-started)*1000, 2)})
         _METRICS["runtime_configuration_reads"] = measurements
 
     async def test_agent_list_10_100_1000_has_constant_sql_and_real_username_batches(self):
-        measurements, seeded = [], 0
+        measurements, seeded, expected_flags = [], 0, {}
         for count in (10, 100, 1000):
             async with self.ctx.db_session_factory() as db:
-                await db.execute(insert(Agent), [{"id": str(uuid4()), "name": f"resource-{index:04}", "prompt": "fixture", "capabilities": [], "skills": [], "ui_tool_selection": {}, "updated_by": f"user-{index:04}", "structured_output_enabled": bool(index % 2)} for index in range(seeded, count)])
+                new_agents, new_configs = [], []
+                for index in range(seeded, count):
+                    aid, mode = str(uuid4()), index % 3
+                    new_agents.append({"id": aid, "name": f"resource-{index:04}", "prompt": "fixture",
+                        "capabilities": [], "skills": [], "ui_tool_selection": {}, "updated_by": f"user-{index:04}",
+                        "structured_output_enabled": mode == 1 or (mode == 2 and bool(index % 2))})
+                    expected_flags[aid] = mode == 2
+                    if mode:
+                        new_configs.append({"agent_id": aid, "name": f"result_{index}",
+                            "description": "definition must not be loaded by the list",
+                            "json_schema": {"type": "object", "description": "schema payload " * 64},
+                            "allow_text_output": mode == 2})
+                await db.execute(insert(Agent), new_agents)
+                await db.execute(insert(AgentOutputConfig), new_configs)
                 await db.commit()
             seeded = count
             batches = []
@@ -113,9 +143,16 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(batches), math.ceil(count / 100))
             self.assertTrue(all(len(batch) <= 100 for batch in batches))
             self.assertTrue(all(row["updated_by_user"]["username"] == "username-"+row["updated_by"] for row in rows))
-            self.assertFalse(any("agent_output_configs" in statement.lower() for statement in statements))
             self.assertEqual(len(statements), 1)
-            measurements.append({"agents": count, "sql": len(statements), "output_config_selects": 0, "username_fetch_batches": [len(batch) for batch in batches], "elapsed_ms": round((perf_counter()-started)*1000, 2)})
+            self.assertEqual({row["id"]: row["allow_text_output"] for row in rows}, expected_flags)
+            self.assertEqual(sum(row["allow_text_output"] for row in rows), count // 3)
+            self.assertIn("agent_output_configs.allow_text_output", statements[0].lower())
+            for column in ("json_schema", "agent_output_configs.name", "agent_output_configs.description"):
+                self.assertNotIn(column, statements[0].lower())
+            self.assertTrue(all("output_config" not in row for row in rows))
+            measurements.append({"agents": count, "sql": len(statements), "output_config_selects": 0,
+                "boolean_only_config_selects": 1, "allow_text_output_true": count // 3,
+                "username_fetch_batches": [len(batch) for batch in batches], "elapsed_ms": round((perf_counter()-started)*1000, 2)})
         _METRICS["agent_list_scaling"] = measurements
 
     async def test_near_limits_concurrent_validation_and_immutable_event_write_measurements(self):

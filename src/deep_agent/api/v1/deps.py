@@ -170,7 +170,8 @@ async def build_runner_for_agent(
             return None
         if config is None:
             raise ValueError("Enabled structured output has no definition")
-        return {"name": config.name, "description": config.description, "json_schema": config.json_schema}
+        return {"name": config.name, "description": config.description, "json_schema": config.json_schema,
+                "allow_text_output": bool(config.allow_text_output)}
     runner._output_config_loader = load_output_config
     return runner
 

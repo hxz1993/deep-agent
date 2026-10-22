@@ -14,8 +14,9 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     func,
+    select,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
 
 from deep_agent.db.ids import (
     AGENT_ID_LENGTH,
@@ -143,6 +144,22 @@ class ModelCatalog(Base):
     )
 
 
+class AgentOutputConfig(Base):
+    __tablename__ = "agent_output_configs"
+
+    agent_id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    json_schema: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    allow_text_output: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false(),
+    )
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False,
+    )
+
+
 class Agent(Base):
     __tablename__ = "agents"
     __table_args__ = (UniqueConstraint("name", name="uq_agents_name"),)
@@ -160,6 +177,13 @@ class Agent(Base):
     structured_output_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false(),
     )
+    # Read only: ordinary Agent reads load just the policy boolean, never the
+    # full output definition. Writes belong to the atomically saved config row.
+    allow_text_output: Mapped[bool] = column_property(func.coalesce(
+        select(AgentOutputConfig.allow_text_output)
+        .where(AgentOutputConfig.agent_id == id)
+        .correlate_except(AgentOutputConfig).scalar_subquery(), false(),
+    ))
     updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -169,19 +193,6 @@ class Agent(Base):
         nullable=False,
     )
     llm_model: Mapped[LlmModel | None] = relationship("LlmModel", primaryjoin="foreign(Agent.model_id) == LlmModel.id", lazy="joined")
-
-
-class AgentOutputConfig(Base):
-    __tablename__ = "agent_output_configs"
-
-    agent_id: Mapped[str] = mapped_column(String(AGENT_ID_LENGTH), primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    json_schema: Mapped[dict] = mapped_column(JSONType, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False,
-    )
 
 
 class IntegrationSettings(Base):

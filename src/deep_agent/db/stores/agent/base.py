@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from deep_agent.db.models import Agent, AgentOutputConfig, LlmModel, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
 from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
@@ -25,14 +26,21 @@ def trusted_updater(user_id: str | None) -> str | None:
     return user_id.strip()
 
 
-async def save_output_config(db: AsyncSession, agent_id: str, config: OutputConfig | None) -> None:
+async def save_output_config(
+    db: AsyncSession, agent_id: str, config: OutputConfig | None, *,
+    allow_text_output: bool | None = None,
+) -> None:
     """Caller holds the parent Agent lock/configuration write barrier."""
     current = await db.get(AgentOutputConfig, agent_id)
     if config is None:
+        if allow_text_output:
+            raise InvalidAgentOutputConfig("output_config is required when allow_text_output is true")
         if current is not None:
             await db.delete(current)
         return
     values = config.model_dump()
+    if allow_text_output is not None:
+        values["allow_text_output"] = allow_text_output
     if current is None:
         db.add(AgentOutputConfig(agent_id=agent_id, **values))
     else:
@@ -88,7 +96,7 @@ class AgentStoreBase(SessionBoundMixin):
                 db.add(row)
                 await db.flush()
                 if data.output_config is not None:
-                    await save_output_config(db, row.id, data.output_config)
+                    await save_output_config(db, row.id, data.output_config, allow_text_output=data.allow_text_output)
                     await db.flush()
                 await db.refresh(row)
                 return row
@@ -121,19 +129,31 @@ class AgentStoreBase(SessionBoundMixin):
                         raise ValueError(f"Agent already exists: {data.name}")
                 enabled = (data.structured_output_enabled if "structured_output_enabled" in data.model_fields_set
                            else row.structured_output_enabled)
-                if "output_config" in data.model_fields_set:
+                definition_changed = "output_config" in data.model_fields_set
+                policy_changed = "allow_text_output" in data.model_fields_set
+                # MySQL's initial ordinary Agent read may have established a
+                # repeatable-read snapshot before we waited for the parent.
+                # Read current config facts after acquiring that parent lock.
+                existing_config = await lock_optional(db, AgentOutputConfig, AgentOutputConfig.agent_id, agent_id)
+                if definition_changed:
                     config = data.output_config
-                elif enabled:
-                    existing_config = await db.get(AgentOutputConfig, agent_id)
+                elif enabled or policy_changed:
                     try:
                         config = OutputConfig.model_validate(existing_config) if existing_config is not None else None
                     except ValueError as exc:
                         raise InvalidAgentOutputConfig("saved output_config is invalid") from exc
                 else:
+                    # Preserve even a disabled legacy draft during unrelated edits.
                     config = None
+                allow_text = (data.allow_text_output if policy_changed else
+                              bool(existing_config.allow_text_output) if existing_config is not None else False)
+                if definition_changed and config is None and not policy_changed:
+                    allow_text = False
                 if enabled and config is None:
                     raise InvalidAgentOutputConfig("output_config is required when structured output is enabled")
-                updates = data.model_dump(exclude_unset=True, exclude={"output_config"})
+                if allow_text and config is None and (definition_changed or policy_changed):
+                    raise InvalidAgentOutputConfig("output_config is required when allow_text_output is true")
+                updates = data.model_dump(exclude_unset=True, exclude={"output_config", "allow_text_output"})
                 # Keep the legacy column for existing databases, but never use its old per-tool scope.
                 updates["ui_tool_selection"] = {}
                 for field, value in updates.items():
@@ -141,10 +161,15 @@ class AgentStoreBase(SessionBoundMixin):
                 if user_id is not None:
                     row.updated_by = trusted_updater(user_id)
                 row.updated_at = datetime.now(UTC)
-                if "output_config" in data.model_fields_set:
-                    await save_output_config(db, agent_id, config)
+                if definition_changed or policy_changed:
+                    await save_output_config(db, agent_id, config, allow_text_output=allow_text)
                 await db.flush()
                 await db.refresh(row)
+                # The scalar property in refresh can still use MySQL's initial
+                # consistent-read view when only the parent changed. Hydrate
+                # its read-only value from the current config we locked above;
+                # this does not turn the property into an Agent write column.
+                set_committed_value(row, "allow_text_output", allow_text)
                 return row
         except IntegrityError as exc:
             if not is_unique_conflict(exc):

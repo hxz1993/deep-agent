@@ -116,8 +116,8 @@ class AgentOutputStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(current.updated_at, row.updated_at)
         from deep_agent.db.stores.agent import base
         original = base.save_output_config
-        async def fail_after_write(db, agent_id, config):
-            await original(db, agent_id, config)
+        async def fail_after_write(db, agent_id, config, **kwargs):
+            await original(db, agent_id, config, **kwargs)
             await db.flush()
             raise RuntimeError("injected transaction failure")
         with patch.object(base, "save_output_config", fail_after_write), self.assertRaises(RuntimeError):
@@ -150,8 +150,8 @@ class AgentOutputStorageTests(unittest.IsolatedAsyncioTestCase):
                 if isinstance(code, str):
                     driver.sqlstate = code
                 injected = error_type("synthetic update", {}, driver)
-                async def fail_after_write(db, agent_id, config):
-                    await original(db, agent_id, config)
+                async def fail_after_write(db, agent_id, config, **kwargs):
+                    await original(db, agent_id, config, **kwargs)
                     await db.flush()
                     raise injected
                 with patch.object(base, "save_output_config", fail_after_write), self.assertRaises(error_type) as caught:
@@ -213,7 +213,7 @@ class AgentOutputStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(actual.updated_by, "installer")
         self.assertIsNone(await self.stores.agent.get_output_config(row.id))
 
-    async def test_list_does_not_query_config_and_backup_order_includes_drafts(self):
+    async def test_list_only_queries_config_boolean_and_backup_order_includes_drafts(self):
         await self.create(output_config=OUTPUT_CONFIG)
         statements = []
         from sqlalchemy import event
@@ -224,7 +224,10 @@ class AgentOutputStorageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(await self.stores.agent.list_all()), 1)
         finally:
             event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
-        self.assertFalse(any("agent_output_configs" in statement for statement in statements))
+        self.assertEqual(len(statements), 1)
+        self.assertIn("agent_output_configs.allow_text_output", statements[0])
+        self.assertNotIn("json_schema", statements[0])
+        self.assertNotIn("agent_output_configs.description", statements[0])
         order = configuration_table_names()
         self.assertEqual(order.index("agent_output_configs"), order.index("agents") + 1)
 
@@ -275,7 +278,7 @@ class AgentOutputStorageTests(unittest.IsolatedAsyncioTestCase):
             InstallOptions(digest=preview["digest"], name="export race", model_id=None), {}, user_id="installer")
         agent_id = installed["agent"].id
         original_download = self.ctx.skill_runtime.download_package
-        for field in ("schema", "switch"):
+        for field in ("schema", "switch", "allow_text_output"):
             with self.subTest(field=field):
                 before = await self.stores.agent.get_by_id(agent_id)
                 async def change_during_download(row, **kwargs):
@@ -284,8 +287,10 @@ class AgentOutputStorageTests(unittest.IsolatedAsyncioTestCase):
                         if field == "schema":
                             config = await db.get(AgentOutputConfig, agent_id)
                             config.json_schema = {**config.json_schema, "description": "concurrent schema-only change"}
-                        else:
+                        elif field == "switch":
                             (await db.get(Agent, agent_id)).structured_output_enabled = False
+                        else:
+                            (await db.get(AgentOutputConfig, agent_id)).allow_text_output = True
                     return raw
                 with patch.object(self.ctx.skill_runtime, "download_package", side_effect=change_during_download):
                     with self.assertRaisesRegex(PackageConflict, "导出期间配置发生变化"):

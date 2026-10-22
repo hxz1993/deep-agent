@@ -33,7 +33,7 @@
 Agent 开关默认关闭；配置由 `agent_output_configs` 保存，`structured_output_enabled`、定义与可信 `updated_by` 原子写入。完整定义只走管理员 `GET /agents/{id}/output-config`，普通详情不依赖管理或账号查询。
 `agent/structured_output.py` 管理同 Turn 冻结契约、完整响应分发前检查及两次共享修正额度；`structured_output/` 提供有界 Schema 准入和可 kill/reap 的独立 jsonschema 子进程，不新增依赖。
 原始 SDK call/ack 与不可变 `output/attempt` 共用现有事件表，接受事实最后提交；只接受项进入 `structured_output` History，item_id 等于 output_id。失败候选不成为业务工具、审批或普通正文。恢复必须读原始事件快照，不能套用当前 Agent 定义。
-关闭 Agent ZIP 完全省略新配置及草稿，开启 inline 导出；旧包覆盖清空输出配置。全量配置备份保留关闭草稿，012 与真实 011 备份按各自结构识别，同 Revision 才恢复。参见[正式指南](../../docs/guides/structured-output.md)和[完整验收计划](../../docs/design/09-structured-output/structured-output-test-plan.md)。
+关闭 Agent ZIP 完全省略新配置及草稿，开启 inline 导出；旧包覆盖清空输出配置。全量配置备份保留关闭草稿，013/012/011备份按各自物理字段投影，同 Revision 才恢复。013新增agent_output_configs.allow_text_output非空false：开启结构化输出后才可允许普通文字，关闭保留草稿；Turn冻结策略，旧快照缺省false，普通文字不写接受事实，结构化字符串按真实调用/output_info识别。关闭ZIP省略该字段，开启仅true导出；旧包覆盖重置false。参见[正式指南](../../docs/guides/structured-output.md)和[完整验收计划](../../docs/design/09-structured-output/structured-output-test-plan.md)。
 
 ### 诊断日志边界
 

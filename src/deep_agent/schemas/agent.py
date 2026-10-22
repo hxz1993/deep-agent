@@ -47,6 +47,7 @@ class AgentOutputConfig(BaseModel):
 
 class AgentOutputConfigResponse(BaseModel):
     structured_output_enabled: bool
+    allow_text_output: bool = False
     output_config: AgentOutputConfig | None
 
 
@@ -79,12 +80,15 @@ class AgentCreate(_RejectRemovedAgentFields):
         description="Skill package codes explicitly associated with this agent.",
     )
     structured_output_enabled: StrictBool = False
+    allow_text_output: StrictBool = False
     output_config: AgentOutputConfig | None = None
 
     @model_validator(mode="after")
     def require_output_definition(self):
         if self.structured_output_enabled and self.output_config is None:
             raise ValueError("output_config is required when structured output is enabled")
+        if self.allow_text_output and self.output_config is None:
+            raise ValueError("output_config is required when allow_text_output is true")
         return self
 
     @field_validator(*AGENT_REQUIRED_FIELDS, "model_id")
@@ -119,6 +123,7 @@ class AgentUpdate(_RejectRemovedAgentFields):
     capabilities: list[str] | None = None
     skills: list[str] | None = None
     structured_output_enabled: StrictBool | None = None
+    allow_text_output: StrictBool | None = None
     output_config: AgentOutputConfig | None = None
 
     @model_validator(mode="before")
@@ -132,8 +137,9 @@ class AgentUpdate(_RejectRemovedAgentFields):
                 raise ValueError("skills cannot be null")
             if "capabilities" in value and value["capabilities"] is None:
                 raise ValueError("capabilities cannot be null")
-            if "structured_output_enabled" in value and value["structured_output_enabled"] is None:
-                raise ValueError("structured_output_enabled cannot be null")
+            for field in ("structured_output_enabled", "allow_text_output"):
+                if field in value and value[field] is None:
+                    raise ValueError(f"{field} cannot be null")
         return value
 
     @field_validator(*AGENT_REQUIRED_FIELDS, "model_id")
@@ -187,6 +193,7 @@ class AgentResponse(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     structured_output_enabled: bool = False
+    allow_text_output: bool = False
     updated_by: str | None = None
     updated_by_user: AgentUpdater | None = None
     created_at: UtcDatetime
@@ -203,6 +210,7 @@ class AgentResponse(BaseModel):
             capabilities=canonical_tool_package_codes(row.capabilities),
             skills=row.skills or [],
             structured_output_enabled=bool(row.structured_output_enabled),
+            allow_text_output=bool(row.allow_text_output),
             updated_by=row.updated_by,
             created_at=row.created_at,
             updated_at=row.updated_at,

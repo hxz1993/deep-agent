@@ -34,6 +34,27 @@ test('复制旧 Agent 仅复制启用的包，不发送旧工具名单', async (
   assert.equal(requests.length,1);
   assert.deepEqual(requests[0].capabilities,['ui:forms']);
   assert.equal(Object.hasOwn(requests[0],'ui_tool_selection'),false);
+  assert.equal(requests[0].allow_text_output,false);
+});
+
+test('复制 Agent 保留独立的允许文本输出开关以及关闭状态下的定义草稿', async () => {
+  for (const enabled of [false, true]) {
+    const requests=[];
+    const output={structured_output_enabled:enabled,allow_text_output:true,output_config:{name:'result',description:null,json_schema:{type:'object',properties:{},required:[]}}};
+    const agent={name:'Agent',model_id:null,prompt:'P',capabilities:[],skills:[]};
+    const ctx=vm.createContext({window:{},document:{addEventListener(){}},apiFetch:async(path,opts)=>{
+      if(opts){requests.push(JSON.parse(opts.body));return {};}
+      if(path.endsWith('/output-config'))return output;
+      return path.endsWith('/agents') ? [] : agent;
+    },requestActionFields:async()=>({name:'副本'}),showToast(){}});
+    vm.runInContext(source,ctx);
+    ctx.window.agentsAdmin.refresh=async()=>{};
+    await ctx.window.agentsAdmin.copy('source');
+    assert.equal(requests.length,1);
+    assert.equal(requests[0].structured_output_enabled,enabled);
+    assert.equal(requests[0].allow_text_output,true);
+    assert.deepEqual(requests[0].output_config,output.output_config);
+  }
 });
 
 

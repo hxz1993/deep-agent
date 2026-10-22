@@ -5,7 +5,7 @@
 ## 1. 协议原则
 
 1. 开关关闭保持当前文字、工具、Pending、Usage 和 History；不注入 output 事件、output_info 或快照空值。
-2. 开启后的接受结果是 JSON 值，不能使用 Python `str(dict/list)`，不能包装成 Markdown 后让客户端再次解析。
+2. 开启后的结构化接受结果是 JSON 值，不能使用 Python `str(dict/list)`，不能包装成 Markdown 后让客户端再次解析。
 3. 普通工具、Deferred、输出尝试和 Run 终态分别表达，不把“格式失败一次”当成运行失败，不把 Pending 当成成果完成。
 4. `final` 仍是运行完成通知；结构化结果靠已提交的接受事实确认。外部连接断开不改写数据库已经接受的结果。
 5. `name`、调用 ID、尝试身份来自冻结配置和 SDK 真实调用，不根据 JSON 键或现有 Agent 名猜测。
@@ -409,3 +409,10 @@ Event API 返回现有原始 ModelMessage 和新输出语义事实。Console 把
 - 模型压缩安全切分需要识别 output call/ack 配对，Schema 指纹进入请求上下文一致性；用户 History 不受模型摘要裁剪影响。
 - 原始响应与接受事件权限相同；文本诊断日志仅白名单元数据，不输出 Schema 或业务正文。
 - 此协议落实后再同步正式 `guides/sse-protocol.md`、Conversation 类型和客户端迁移说明；本设计不能替代发布后的真实接口检查。
+
+
+## 12. 0.14.3混合输出增补
+
+上述JSON语义继续完整适用；Agent二级allow_text_output:true时另允许普通文字结束，默认false。文本复用现有text/final与assistant_message，不产生output_info或接受事件；结构化字符串仍依真实调用携带output_info。客户端必须完整消费事件流，按output_info/kind判别、output_id去重，不能依据字符串内容或首个text提前终止。
+
+为保证失败候选不在live可见而History不可见，mixed响应文字经完整响应检查／持久化后发布，沿用text事件；JSON/工具混调、多output、非法Schema响应的文字不发布。同响应合法说明+JSON保留说明及唯一结构化结果。策略随Turn冻结，旧快照缺省false，恢复请求／纠错预算不清零；新策略不改变统计、权限或最终接受提交点。渠道文本与JSON仍分流投递。BOM等客户端未显式适配时保持false。

@@ -1,4 +1,4 @@
-# SSE 流式消息协议（v0.14.0）
+# SSE 流式消息协议（v0.14.3）
 
 `POST /api/v1/chat/stream` 使用 `text/event-stream`。实时会话和重新打开的 History 使用不同生命周期：
 
@@ -30,6 +30,14 @@ Agent 显式开启后，输出尝试使用独立 `type:"output"`；它不是 UI 
 只有来源 SDK call/ack、预算及必要状态保存后才提交不可变 `output/attempt` 接受事实，再发送成功。连接发送失败不能撤销已保存结果。
 `final.output` 与 HTTP `ChatResponse.output` 保持原生 JSON；成功附加 `output_info:{name,output_id,tool_call_id,attempt,turn_id}`。
 关闭不新增字段或 output 事件，Pending 仍只有旧 deferred 状态且没有接受结果。
+
+### 允许文本输出（0.14.3）
+
+Agent 开启结构化输出后，可再勾选 allow_text_output（默认 false）。纯文本结束沿用 text/thinking/工具/最终 final 事件和 assistant_message 历史；final.output 为正文，没有 output_info，不产生成功 output 事件或 output/attempt 接受事实。JSON 分支完全沿用上述身份、校验和提交点，包含字符串或 null 根值。
+
+混合模式的文字需等完整模型响应通过分发检查并保存后再按既有text事件发布，防止稍后非法调用使已直播正文与History不一致；首个正文可晚于供应商首Token，关闭路径的增量不变。客户端必须完整处理流，不在首个 text 事件时提前完成：之后可能出现普通工具、Deferred 或输出调用。文字伴随合法输出调用时文字作为过程说明，JSON 为最终结果；History 也保留该说明并仅有一个 structured_output。按 output_info／kind 区分分支，按 output_id 对 output/final/Live/History 去重，不从正文内容猜测 JSON。失败候选只在轨迹，不能作为业务结果采用。允许的文本结束不消耗或重置已有格式纠错及请求额度。
+
+该策略随当前 Turn 冻结，恢复不读新配置；历史快照缺省 false。关闭结构化输出时，即使草稿 allow_text_output:true，仍沿用旧协议。BOM 默认保持 false；平台支持普通文本并不授权业务保存。
 
 History 外壳继续 `schema_version:1`，已接受结果新增：
 

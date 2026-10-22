@@ -75,13 +75,15 @@ class TurnRequestBudget(AbstractCapability[AgentDeps]):
         self.final_request = used >= limit - 1
         if self.final_request:
             parameters = request_context.model_request_parameters
-            structured = getattr(getattr(ctx, "deps", None), "output_state", None) is not None
+            output_state = getattr(getattr(ctx, "deps", None), "output_state", None)
+            structured = output_state is not None
+            allow_text = not structured or output_state.allow_text_output
             request_context.model_request_parameters = replace(
                 parameters, function_tools=[], native_tools=[],
                 output_tools=parameters.output_tools if structured else [],
                 output_mode=parameters.output_mode if structured else "text",
                 output_object=parameters.output_object if structured else None,
-                allow_text_output=not structured,
+                allow_text_output=allow_text,
                 allow_image_output=False, tool_visibility=None, revealed_tool_names=set(),
                 deferred_capability_ids=set(), prompted_output_template=None,
             )
@@ -102,6 +104,8 @@ class TurnRequestBudget(AbstractCapability[AgentDeps]):
             )
             if structured:
                 instruction = "本轮已到最后一次模型请求。不得调用业务工具；请根据已有证据使用输出工具提交最终结果，未完成内容如实说明。"
+                if allow_text:
+                    instruction = "本轮已到最后一次模型请求。不得调用业务工具；请根据已有证据用普通文本或输出工具提交最终结果，未完成内容如实说明。"
         elif used >= max(1, limit * 4 // 5):
             instruction = (
                 "本轮剩余调用额度较少，请聚焦关键缺口，优先使用已有证据，准备给出阶段性结论。"

@@ -291,6 +291,7 @@ async def get_agent_output_config(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent not found: {agent_id}")
     return AgentOutputConfigResponse(
         structured_output_enabled=row.structured_output_enabled,
+        allow_text_output=bool(config.allow_text_output) if config is not None else False,
         output_config=AgentOutputConfig.model_validate(config) if config is not None else None,
     )
 

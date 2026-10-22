@@ -8,18 +8,14 @@
     if (!schema || typeof schema !== "object" || Array.isArray(schema)) throw new Error("JSON Schema 必须是对象");
     return schema;
   };
-  const { canUseFieldCards: canUseCards, fieldProtection, resolveFieldDisplay } = window.DeepAgentOutputSchema;
-  const protectionMessage = paths => `此结构受复杂规则约束（${paths.slice(0, 3).join("、")}），请在 JSON Schema 中同步修改编码、必须设置及相关规则。`;
-  const assertFieldChange = (schema, ...keys) => {
-    const paths = [...new Set(keys.flatMap(key => fieldProtection(schema, key)))];
-    if (paths.length) throw new Error(protectionMessage(paths));
-  };
+  const { canUseFieldCards: canUseCards, resolveFieldDisplay } = window.DeepAgentOutputSchema;
   const schemaType = schema => Array.isArray(schema?.type) ? schema.type.join(" | ") : schema?.type || (schema?.$ref ? "$ref" : "—");
   const schemaSummary = schema => schema?.type === "object" ? `${Object.keys(schema.properties || {}).length} 个字段` : schema?.type === "array" ? `${Object.keys(schema.items?.properties || {}).length} 个字段 / 项` : "";
 
   class OutputDraft {
     constructor(value = {}) {
       this.enabled = value.structured_output_enabled === true;
+      this.allowText = value.allow_text_output === true;
       const config = value.output_config;
       this.hasDefinition = Boolean(config);
       this.name = config?.name || "";
@@ -37,7 +33,6 @@
     }
     required(key, enabled) {
       this.mutateSchema(schema => {
-        assertFieldChange(schema, key);
         const required = new Set(schema.required || []);
         if (enabled) required.add(key); else required.delete(key);
         if (required.size) schema.required = [...required]; else delete schema.required;
@@ -45,7 +40,6 @@
     }
     remove(key) {
       this.mutateSchema(schema => {
-        assertFieldChange(schema, key);
         delete schema.properties?.[key];
         if (schema.required) { schema.required = schema.required.filter(item => item !== key); if (!schema.required.length) delete schema.required; }
       });
@@ -55,7 +49,6 @@
       const field = parseSchema(text, true);
       this.mutateSchema(schema => {
         if (Object.hasOwn(schema.properties || {}, key)) throw new Error("结构编码已存在，请使用其他编码");
-        assertFieldChange(schema, key);
         schema.properties = Object.fromEntries([...Object.entries(schema.properties || {}), [key, field]]);
       });
     }
@@ -67,7 +60,6 @@
         schema.properties ||= {};
         if (key !== value.key) {
           if (Object.hasOwn(schema.properties, value.key)) throw new Error("结构编码已存在");
-          assertFieldChange(schema, key, value.key);
         }
         schema.properties = Object.fromEntries(Object.entries(schema.properties).map(([name, child]) => name === key ? [value.key, field] : [name, child]));
         if (schema.required) schema.required = schema.required.map(name => name === key ? value.key : name);
@@ -77,13 +69,13 @@
     }
     payload() {
       if (this.invalidDetails.size) throw new Error("结构详情中仍有无效的 JSON Schema，请修正后保存");
-      if (!this.hasDefinition && !this.enabled) return { structured_output_enabled: false };
+      if (!this.hasDefinition && !this.enabled) return { structured_output_enabled: false, allow_text_output: this.allowText };
       if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(this.name)) {
         const error = new Error(this.name ? "结果名称须为 1–64 位英文、数字和下划线，且以英文字母开头" : "请先填写结果名称，例如 lease_result");
         error.field = "name";
         throw error;
       }
-      return { structured_output_enabled: this.enabled, output_config: { name: this.name, description: this.description || null, json_schema: this.schema() } };
+      return { structured_output_enabled: this.enabled, allow_text_output: this.allowText, output_config: { name: this.name, description: this.description || null, json_schema: this.schema() } };
     }
   }
 
@@ -110,29 +102,32 @@
   const syncDetail = () => window.DeepAgentJsonInput?.syncJsonInput(element("agentOutputFieldSchema"), element("agentOutputFieldSchemaHighlight"));
   const notify = () => { markDirty(); showError(""); };
 
+  function syncModeControls(cardsAllowed = true) {
+    const schemaMode = mode === "schema";
+    const toggle = element("agentOutputSchemaTab");
+    element("agentOutputSchemaLabel").textContent = schemaMode ? "返回结构" : "查看 JSON";
+    toggle.disabled = schemaMode && !cardsAllowed;
+    toggle.title = toggle.disabled ? "此定义使用原生 JSON Schema 编辑" : schemaMode ? "返回结构卡片" : "查看和编辑完整 JSON Schema";
+    element("agentOutputAdd").disabled = schemaMode;
+    element("agentOutputAdd").title = schemaMode ? "返回结构后添加" : "添加结构";
+    element("agentOutputFields").classList.toggle("hidden", schemaMode);
+    element("agentOutputSchemaEditor").classList.toggle("hidden", !schemaMode);
+  }
+
   function renderFields() {
     const target = element("agentOutputFields");
     if (!target) return;
     let schema;
-    try { schema = draft.schema(); } catch (error) { showError(error.message); return; }
+    try { schema = draft.schema(); } catch (error) { syncModeControls(); showError(error.message); return; }
     const cardsAllowed = canUseCards(schema);
-    element("agentOutputFieldsTab").disabled = !cardsAllowed;
-    element("agentOutputFieldsTab").title = cardsAllowed ? "字段配置" : "此定义使用原生 JSON Schema 编辑";
     if (!cardsAllowed) mode = "schema";
-    element("agentOutputAdd").classList.toggle("hidden", mode !== "fields");
-    element("agentOutputFields").classList.toggle("hidden", mode !== "fields");
-    element("agentOutputSchemaEditor").classList.toggle("hidden", mode !== "schema");
-    element("agentOutputFieldsTab").classList.toggle("active", mode === "fields");
-    element("agentOutputSchemaTab").classList.toggle("active", mode === "schema");
+    syncModeControls(cardsAllowed);
     if (!cardsAllowed) { target.innerHTML = ""; return; }
     target.innerHTML = Object.entries(schema.properties || {}).map(([key, field]) => {
       const display = resolveFieldDisplay(schema, field);
-      const paths = fieldProtection(schema, key);
-      const hint = paths.length ? protectionMessage(paths) : "根级必须；条件及组合规则仍独立生效";
-      const disabled = paths.length ? "disabled" : "";
       return `<article class="output-field-card${draft.invalidDetails.has(key) ? " invalid" : ""}">
       <button type="button" class="output-field-body" data-output-edit="${escapeOutputHtml(key)}" aria-label="编辑结构 ${escapeOutputHtml(key)}"><span class="output-field-line"><code>${escapeOutputHtml(key)}</code><span class="output-field-type">${escapeOutputHtml(schemaType(display))}</span><span>${escapeOutputHtml(schemaSummary(display))}</span>${draft.invalidDetails.has(key) ? '<span class="output-field-invalid">定义无效</span>' : ""}</span><span class="output-field-description"><strong>${escapeOutputHtml(display.title || "未命名结构")}</strong><span>${escapeOutputHtml(display.description || "")}</span></span></button>
-      <div class="output-field-actions"><label title="${escapeOutputHtml(hint)}"><input type="checkbox" data-output-required="${escapeOutputHtml(key)}" ${(schema.required || []).includes(key) ? "checked" : ""} ${disabled}>必须</label><button type="button" class="icon-action danger" data-output-delete="${escapeOutputHtml(key)}" title="${escapeOutputHtml(paths.length ? hint : "删除结构")}" aria-label="删除结构 ${escapeOutputHtml(key)}" ${disabled}><i data-lucide="trash-2"></i></button></div></article>`;
+      <div class="output-field-actions"><label><input type="checkbox" data-output-required="${escapeOutputHtml(key)}" ${(schema.required || []).includes(key) ? "checked" : ""}>必须</label><button type="button" class="icon-action danger" data-output-delete="${escapeOutputHtml(key)}" title="删除结构" aria-label="删除结构 ${escapeOutputHtml(key)}"><i data-lucide="trash-2"></i></button></div></article>`;
     }).join("") || '<div class="agent-output-empty"><span>尚未添加结构</span><span>点击 <button type="button" class="btn text compact" data-output-add>添加结构</button> 开始配置</span><span>也可保存空对象定义。</span></div>';
     window.lucide?.createIcons();
   }
@@ -140,7 +135,8 @@
   function render() {
     if (!element("agentOutputEnabled")) return;
     element("agentOutputEnabled").checked = draft.enabled;
-    element("agentOutputEnabledLabel").textContent = draft.enabled ? "已开启" : "已关闭";
+    element("agentOutputAllowText").checked = draft.allowText;
+    element("agentOutputAllowTextControl").classList.toggle("hidden", !draft.enabled);
     element("agentOutputSettings").classList.toggle("hidden", !draft.enabled);
     element("agentOutputName").value = draft.name;
     element("agentOutputDescription").value = draft.description;
@@ -178,11 +174,23 @@
       if (!element("agentOutputEnabled") || element("agentOutputEnabled").dataset.bound) return;
       element("agentOutputEnabled").dataset.bound = "1";
       element("agentOutputEnabled").addEventListener("change", event => { draft.enabled = event.target.checked; notify(); render(); });
+      element("agentOutputAllowText").addEventListener("change", event => { draft.allowText = event.target.checked; notify(); });
       for (const [id, key] of [["agentOutputName", "name"], ["agentOutputDescription", "description"]]) element(id).addEventListener("input", event => { draft[key] = event.target.value; draft.hasDefinition = true; notify(); });
-      element("agentOutputSchema").addEventListener("input", event => { draft.setSchemaText(event.target.value); syncSchema(); notify(); try { element("agentOutputFieldsTab").disabled = !canUseCards(draft.schema()); } catch (error) { showError(error.message); } });
+      element("agentOutputSchema").addEventListener("input", event => { draft.setSchemaText(event.target.value); syncSchema(); notify(); try { syncModeControls(canUseCards(draft.schema())); } catch (error) { syncModeControls(); showError(error.message); } });
       element("agentOutputSchema").addEventListener("scroll", syncSchema);
-      element("agentOutputFieldsTab").addEventListener("click", () => { try { draft.schema(); mode = "fields"; renderFields(); } catch (error) { showError(error.message); } });
-      element("agentOutputSchemaTab").addEventListener("click", () => { mode = "schema"; element("agentOutputSchema").value = draft.schemaText; syncSchema(); renderFields(); });
+      element("agentOutputSchemaTab").addEventListener("click", () => {
+        try {
+          if (mode === "schema") {
+            if (!canUseCards(draft.schema())) { syncModeControls(false); return; }
+            mode = "fields";
+          } else {
+            mode = "schema";
+            element("agentOutputSchema").value = draft.schemaText;
+            syncSchema();
+          }
+          renderFields();
+        } catch (error) { showError(error.message); }
+      });
       element("agentOutputCheck").addEventListener("click", () => { try { controller.payload(); showError(""); showToast("定义已检查，完整约束将在保存时由服务端校验"); } catch (error) { showError(error); } });
       element("agentOutputAdd").addEventListener("click", addDetail);
       element("agentOutputFields").addEventListener("click", event => {
@@ -192,7 +200,13 @@
         if (edit) openDetail(edit.dataset.outputEdit);
         if (remove) { try { draft.remove(remove.dataset.outputDelete); notify(); render(); } catch (error) { showError(error); } }
       });
-      element("agentOutputFields").addEventListener("change", event => { if (event.target.matches("[data-output-required]")) { try { draft.required(event.target.dataset.outputRequired, event.target.checked); notify(); element("agentOutputSchema").value = draft.schemaText; syncSchema(); } catch (error) { event.target.checked = (draft.schema().required || []).includes(event.target.dataset.outputRequired); showError(error); } } });
+      element("agentOutputFields").addEventListener("change", event => {
+        if (!event.target.matches("[data-output-required]")) return;
+        try {
+          draft.required(event.target.dataset.outputRequired, event.target.checked);
+          notify(); element("agentOutputSchema").value = draft.schemaText; syncSchema();
+        } catch (error) { showError(error); }
+      });
       element("agentOutputDetailClose").addEventListener("click", () => element("agentOutputDetail").close());
       element("agentOutputDetailCancel").addEventListener("click", () => element("agentOutputDetail").close());
       element("agentOutputDetailConfirm").addEventListener("click", confirmDetail);
@@ -218,11 +232,6 @@
     showDetailError("");
     const pending = draft.invalidDetails.get(key);
     element("agentOutputFieldKey").value = pending?.key ?? key;
-    const paths = creating ? [] : fieldProtection(draft.schema(), key);
-    element("agentOutputFieldKey").readOnly = paths.length > 0;
-    const hint = element("agentOutputFieldRuleHint");
-    hint.textContent = paths.length ? `${protectionMessage(paths)} 当前可编辑本字段内容；其他规则继续生效。` : "";
-    hint.classList.toggle("hidden", !paths.length);
     element("agentOutputFieldSchema").value = pending?.text ?? JSON.stringify(creating ? { type: "string", title: "新结构" } : draft.schema().properties[key], null, 2);
     syncDetail();
     element("agentOutputDetail").showModal();

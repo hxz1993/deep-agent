@@ -16,11 +16,11 @@ function editor() {
   return window.DeepAgentOutputDraft;
 }
 const native = value => JSON.parse(JSON.stringify(value));
-const config = schema => ({ structured_output_enabled: true, output_config: { name: "lease_result", description: "合同及澄清可以组合返回", json_schema: schema } });
+const config = schema => ({ structured_output_enabled: true, allow_text_output: false, output_config: { name: "lease_result", description: "合同及澄清可以组合返回", json_schema: schema } });
 
 test("output draft is disabled and omits a never-created definition", () => {
   const { OutputDraft } = editor();
-  assert.deepEqual(native(new OutputDraft().payload()), { structured_output_enabled: false });
+  assert.deepEqual(native(new OutputDraft().payload()), { structured_output_enabled: false, allow_text_output: false });
   const draft = new OutputDraft(config({ type: "object", properties: {}, additionalProperties: false }));
   assert.deepEqual(native(draft.payload().output_config.json_schema.properties), {});
   assert.equal(draft.payload().output_config.json_schema.minProperties, undefined);

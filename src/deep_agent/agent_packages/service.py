@@ -162,8 +162,10 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
             'mode': mode, 'target_agent': {'id': target.id, 'name': target.name} if target else None,
             'structured_output': {
                 'enabled': package.agent.structured_output_enabled,
+                'allow_text_output': package.agent.allow_text_output,
                 'name': package.agent.output_config.name if package.agent.output_config else None,
                 'target_enabled': bool(target.structured_output_enabled) if target else False,
+                'target_allow_text_output': bool(target.allow_text_output) if target else False,
                 'action': 'replace' if package.agent.structured_output_enabled else 'disable',
             },
             'resources': resources, 'references': refs, 'models': models, 'mcps': mcps,
@@ -199,10 +201,12 @@ async def export_package(ctx, agent_id, headers):
         provider = providers.get(model.provider_id) if model else None
         if row.model_id and (not model or not provider):
             raise PackageError('Agent 引用的模型或 Provider 已缺失')
+        output_config = next((c for c in data[AgentOutputConfig] if c.agent_id == row.id), None)
         agent = PackageAgent(name=row.name, prompt=row.prompt,
                              capabilities=row.capabilities, skills=row.skills,
                              model_reference={'name': model.name, 'provider_type': provider.provider_type} if model else None,
                              structured_output_enabled=bool(row.structured_output_enabled),
+                             allow_text_output=bool(output_config.allow_text_output) if row.structured_output_enabled and output_config is not None else False,
                              output_config=(next(({
                                  'name': c.name, 'description': c.description, 'json_schema': c.json_schema,
                              } for c in data[AgentOutputConfig] if c.agent_id == row.id), None)
@@ -228,9 +232,10 @@ async def export_package(ctx, agent_id, headers):
             needed.append(uploaded[code])
     # A disabled Agent must produce an actual old-format ZIP, with no new false
     # or null keys; retained administrative drafts are never portable resources.
-    exported_agent = agent.model_dump(exclude=(
-        {'structured_output_enabled', 'output_config'} if not agent.structured_output_enabled else set()
-    ))
+    excluded_output_fields = ({'structured_output_enabled', 'output_config', 'allow_text_output'}
+                              if not agent.structured_output_enabled else
+                              ({'allow_text_output'} if not agent.allow_text_output else set()))
+    exported_agent = agent.model_dump(exclude=excluded_output_fields)
     files = {'manifest.json': canonical({'format': 'deepagent-agent-package', 'schema_version': 1, 'exported_from': __version__}),
              'agent.json': canonical(exported_agent), 'ui-tools.json': canonical(custom_ui)}
     for skill in needed:
@@ -259,7 +264,7 @@ def agent_state(row):
     if row is None:
         return None
     return digest({k: getattr(row, k) for k in
-                   ('id', 'name', 'prompt', 'model_id', 'capabilities', 'skills', 'structured_output_enabled', 'updated_by')})
+                   ('id', 'name', 'prompt', 'model_id', 'capabilities', 'skills', 'structured_output_enabled', 'allow_text_output', 'updated_by')})
 
 
 def installation_results(preview, agent):
@@ -370,7 +375,8 @@ async def _install(ctx, package, options, headers, *, user_id=None):
                 if options.mode == 'create':
                     db.add(row)
                 await db.flush()
-                await save_output_config(db, agent_id, package.agent.output_config)
+                await save_output_config(db, agent_id, package.agent.output_config,
+                                         allow_text_output=package.agent.allow_text_output)
                 await db.flush()
                 await db.refresh(row)
                 desired_agent = agent_state(row)

@@ -37,13 +37,18 @@ _IMPORT_LOCK = asyncio.Lock()
 _MYSQL_LOCK_NAME = "deep-agent-configuration-import"
 _POSTGRES_LOCK_KEY = 2_024_070_230_001
 
-# 011 is the real pre-output release schema. Keep its backup contract explicit:
-# a same-011 restore must not require 012's table or inject 012 ORM defaults.
+# Historical backups use their actual table shapes, never the latest ORM defaults.
+# Same-011/012 restores must not select or insert the new 013 column.
 # This does not perform cross-revision import or alter an Alembic revision.
 _AGENT_011 = Table("agents", MetaData(), *(
     Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
     for column in Base.metadata.tables["agents"].columns
     if column.name not in {"structured_output_enabled", "updated_by"}
+))
+_OUTPUT_CONFIG_012 = Table("agent_output_configs", MetaData(), *(
+    Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
+    for column in Base.metadata.tables["agent_output_configs"].columns
+    if column.name != "allow_text_output"
 ))
 
 
@@ -53,7 +58,11 @@ def _configuration_tables(revision: str) -> tuple[str, ...]:
 
 
 def _contract_table(table_name: str, revision: str):
-    return _AGENT_011 if table_name == "agents" and revision == "011" else Base.metadata.tables[table_name]
+    if table_name == "agents" and revision == "011":
+        return _AGENT_011
+    if table_name == "agent_output_configs" and revision == "012":
+        return _OUTPUT_CONFIG_012
+    return Base.metadata.tables[table_name]
 
 
 class ConfigurationImportError(ValueError):

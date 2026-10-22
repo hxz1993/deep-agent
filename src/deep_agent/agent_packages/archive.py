@@ -65,12 +65,15 @@ class PackageAgent(ExtensiblePackageModel):
     capabilities: list[str] = Field(default_factory=list, max_length=256)
     skills: list[str] = Field(default_factory=list, max_length=256)
     structured_output_enabled: bool = Field(default=False, strict=True)
+    allow_text_output: bool = Field(default=False, strict=True)
     output_config: PackageOutputConfig | None = None
 
     @model_validator(mode='after')
     def consistent_output(self):
         if self.structured_output_enabled != (self.output_config is not None):
             raise ValueError('开启输出必须携带定义，关闭输出的安装包不得携带定义草稿')
+        if self.allow_text_output and not self.structured_output_enabled:
+            raise ValueError('关闭输出的安装包不得携带纯文本输出草稿')
         return self
 
     @model_validator(mode='before')

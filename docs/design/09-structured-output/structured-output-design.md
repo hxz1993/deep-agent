@@ -4,6 +4,8 @@
 >
 > 状态：**0.14.0 已实施，按 286 项清单验收**。本文替代本文件原有的“多个互斥 Output Tool＋可选/严格模式”方案。历史正文通过 Git 查看，不作为本次实施依据。
 >
+> **0.14.3 增补优先**：本文原0.14.0实施记录保留，下方“允许文本输出”章节覆盖早期一律JSON的决定；当前Head013，发布目标0.14.3。
+>
 > 核对基线：`test@552b7b25291e85a23b22244d5178823f1c60570e`，产品 `0.13.9`，数据库 Head `011`；实际安装和 requirements 均为 Pydantic AI `2.46.0` / Harness `0.32.0`。本次数据库版本为 **012**，迁移已在隔离 SQLite/MySQL/PostgreSQL 验证；生产发布仍须运维配套执行。本文说明设计契约，实际证据见验收报告。
 
 ## 1. 阅读入口与交付边界
@@ -52,7 +54,7 @@ SQLite、隔离 MySQL/PostgreSQL、平台协议、Console 和安装门禁全部�
 - 组合字段可以用同一份Schema的静态互斥/条件约束表达合法搭配，例如租赁的完整合同与合同patch互斥；不因此变成多个输出工具或每轮动态Schema。text/contract等只是示例键，BOM可直接保留自己的v3根包。
 - 不新增普通/严格两个模式，不新增请求级 Schema、跨 Agent 输出库、输出契约组或可执行输出脚本。
 - 输出定义不进入 `agents.capabilities`，不加入 `/tools` 的执行工具目录。
-- 开启 Agent 的普通说明也可以通过 `text` 等字符串字段交付；不再额外允许独立 `str` 作为最终结果。
+- 开启 Agent 默认严格 JSON；0.14.3 增加二级 allow_text_output，显式开启才额外允许独立 str。字段 required 不控制这一分支。
 - `NativeOutput`、`PromptedOutput`、Harness Guardrail 和 38 号课题依赖升级均不随本次接入。
 
 ### 2.3 与其他数据的分工
@@ -70,7 +72,7 @@ SQLite、隔离 MySQL/PostgreSQL、平台协议、Console 和安装门禁全部�
 
 字段模式仅投影根 `properties`，允许同时存在 `allOf/anyOf/oneOf/not/if/then/else` 等完整规则；切换模式不修改定义。本地 `$ref` 仅解析用于展示类型和字段数，详情仍编辑原始引用及兄弟关键字，不展开覆盖 `$defs`。数组/标量和仅从分支或引用继承字段、没有直接根字段的定义继续用原生编辑器；空对象仍可在字段模式添加结构。
 
-“必须”只维护根 `required`。同一实例上的条件、组合、依赖、引用或名称规则关联某字段时，改名、删除、必须切换和新增受影响编码会被阻止，需在 JSON Schema 中一并修改；未知同实例规则保守保护。保护不递归误判嵌套字段、未使用的 `$defs` 或说明性注解。已有字段可保持编码编辑内容，根复杂规则原样保留，类型与其他约束仍同时生效，并非覆盖原规则。详情“取消”、关闭和 Esc 不把失败草稿带入整页保存。
+字段卡片保留可直接修改的“必须”控件，只维护根 `required`；原条件规则仍独立生效，不因条件关联禁用勾选。浏览、切换及同名编辑保留原 required。卡片允许新增、改名、删除，不因复杂条件、依赖或名称规则额外禁用操作；原条件及 `$defs` 不自动跟随改写，由配置者维护规则一致性。保留 JSON 语法、重复编码和服务端完整 Schema 校验。类型与其他约束仍同时生效，并非覆盖原规则。详情“取消”、关闭和 Esc 不把失败草稿带入整页保存。
 
 ### 3.1 一份可直接使用的合同定义
 
@@ -711,3 +713,50 @@ Streaming 不在收到首段输出参数时提早结束。使用完整运行事�
 - [Pydantic AI Capabilities](https://ai.pydantic.dev/capabilities/)：公开生命周期扩展；具体签名以本仓安装的 2.46.0 源码和隔离验证为准。
 - [现行安装指南](../../guides/agent-packages.md)、[现行 SSE 指南](../../guides/sse-protocol.md)、[现行 History 迁移指南](../../guides/session-event-client-migration.md)：描述当前系统，开发完成后再按本设计升级。
 - 跨课题排期只维护在 [TODO](../TODO.md)，本课题章节是功能拆分和验收设计，不另建平行研发台账。
+
+
+## 20. 0.14.3：允许文本与结构化输出并存
+
+### 20.1 已确认范围与存储
+
+开启 structured_output_enabled 后增加 allow_text_output 二级开关，数据库／应用默认false。关闭父开关保留此值和完整定义草稿，不参与运行。迁移013→012仅给agent_output_configs新增allow_text_output Boolean NOT NULL DEFAULT false，不重写012，也不新增结果表。原有开关、定义、更新时间、可信updated_by与新字段在同一事务保存；保存失败全部回滚。
+
+创建、PATCH、普通详情及管理员output-config回读均有顶层allow_text_output。PATCH省略保持，显式null、数字、字符串拒绝；普通详情不携带管理Schema，列表不加载全部定义。删除定义按合并后的最终状态校验，不能留下开启无定义。Console右侧结构设置上方只在开启时显示勾选，并提供普通Markdown或JSON二选一的解释，页头统一保存，取消撤销；JSON required完全独立。继续保留紧凑卡片、内部滚动及可编辑“必须”，不增加复杂规则的前端锁。
+
+用户最终确认配置表仍与Agent逻辑1:1，agent_id为主键。name、description、allow_text_output是配置表独立列，json_schema是字段定义JSON；总开关只在agents。无配置记录按false，没有定义单独提交true拒绝；删除定义清策略，关闭父开关保留草稿。接口保留顶层allow_text_output，不额外对业务客户端改字段层级。原本“在agents新增allow_text_output列”和后续“整份config JSON列”的讨论均不作为最终实现。
+
+### 20.2 执行与判别
+
+| 配置 | output_type |
+| --- | --- |
+| 关闭 | str + DeferredToolRequests |
+| 开启／false | ToolOutput(Schema) + DeferredToolRequests |
+| 开启／true | str + ToolOutput(Schema) + DeferredToolRequests |
+
+实际分支必须根据真实输出调用识别，不能根据Python值是不是str。原生字符串／null／false／0等JSON都能有output_info。SDK无包装str可能不经过after_output_validate，因此完整响应检查也标记无工具的文本分支，防止接受上一失败候选。文本分支不调用append accepted，也不伪造输出工具或output_info。
+
+同Turn首个真实用户事件冻结Schema和文本策略；只存true扩展，缺省为false，历史严格快照保持原状。schema_digest继续只描述Schema，文本策略另随冻结快照保存。恢复从原始Event Store读取，不用当前Agent覆盖。请求预算及格式修正记录不重置；合法文本结束不消耗格式额度。最后请求保留输出工具并按冻结策略允许／拒绝文字，不退回无限制路径。
+
+完整响应在host dispatch前继续拒绝普通／MCP／UI混调和多个输出。JSON分支仍按完整Schema在隔离worker校验，不转换类型、不补默认值；2秒执行、2秒排队、2并行／16等待及有界缓存保持。容量／系统错误直接失败，模型不能通过普通文字逃避已发生的系统错误。
+
+### 20.3 SSE、History与失败隔离
+
+使用既有text／final和output事件，不新增协议版本。合法文本最终只进入assistant_message；JSON仍须SDK call/ack、预算和必要持久化后提交唯一output/attempt接受事实，所有跨通道ID保持一致。
+
+同响应的说明文字与合法输出调用都保留，但JSON是唯一结构化结果。为防“前面文字已直播、后面非法调用被拒”的泄漏，混合模式文字必须待完整模型响应通过分发检查并保存后，才按既有type:text发布；其可见时间可能晚于供应商首个文本Token。失败响应的候选文字和JSON都不进入普通回复／History；仅在原始轨迹可查。关闭结构化输出的实时增量不变。客户端不得看到第一个text就提前结束完整流。
+
+Console按output_info／History kind区分两分支，按output_id去重；JSON完整／按结构分组、15行折叠、完整复制下载保持。失败／成功轨迹统一“输出”、Error／Completed区分。渠道普通文字原样，接受JSON确定性序列化为代码块；不按字符串内容猜测。
+
+### 20.4 安装、复制、备份和回退
+
+包仍schema_version整数1、一个导出入口。关闭父开关完全省略三项输出字段及草稿；即使allow_text_output:true也不带出。开启带完整定义，仅true额外导出文本策略，缺省false。旧包新建／覆盖都重置两个开关false，并清目标旧定义。新版严格／混合包完整往返保留required及复杂规则；safe unknown扩展忽略但计摘要，已知错误类型和ZIP安全检查保留。
+
+新策略进入preview摘要、目标快照、并发变更检测及安装事务，只有该值变化也让旧预检失效。正式下载期间变化返回冲突；失败回滚和提交ACK丢失仍按既有原子／补偿规则。复制、全量备份保留关闭草稿，历史011/012配置投影只读对应实际列，同Revision恢复。
+
+兼容只分552b7b2的0.14前旧版与0.14.3最终新版。关闭正式ZIP在真实旧端完整安装／覆盖／回读；开启严格／混合包旧版拒绝且全表零写入。013降级发现true草稿或已冻结混合策略则拒绝，防止静默丢语义；不要仅关开关就回旧二进制。
+
+### 20.5 发布、业务边界与证据
+
+交付0.14.3，中文提交推送test并创建带说明Tag。无生产依赖升级。共享AlphaPG由用户单独发布，本轮不执行共享DDL或业务保存。BOM默认继续严格false，普通文字不能作为业务结果。提交、推送及Tag后，通知BOM负责人先理解变更，评估是否需要勾选允许文本及是否需协调提示词／Skill；仅反馈判断，不改代码或配置，不提前启用，等待用户确认AlphaPG部署。
+
+新增回归补充原286项计划，不把历史已通过结果重复宣称为本轮实测；全量测试、真实SQLite/MySQL/PG、旧端正式ZIP、实际Provider及浏览器的证据在[0.14.3验收报告](../../reports/Report%20DeepAgent%200.14.3%20允许文本输出验收/验收报告.md)。未实测客户端采用／共享上线继续单列。

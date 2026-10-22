@@ -99,7 +99,8 @@ def project_session_events(
             assistant_terminal = _assistant_terminal_status(event, message)
             if run_id and assistant_terminal:
                 terminal_by_run[run_id] = assistant_terminal
-            if not rejected_dispatch and not metadata.get("deepagent_output"):
+            output_metadata = metadata.get("deepagent_output") or {}
+            if not rejected_dispatch and (not output_metadata or output_metadata.get("allow_text_output") is True):
                 items.extend(_assistant_items(event, message))
             for part_offset, part in enumerate(_parts(message)):
                 part_kind = str(part.get("part_kind") or "")

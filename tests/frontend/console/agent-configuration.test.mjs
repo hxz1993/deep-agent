@@ -12,6 +12,24 @@ const template = await readFile(
   "utf8",
 );
 
+test("允许文本输出位于右侧定义栏顶部，共用可聚焦说明与页头保存", () => {
+  const heading = template.match(/<div class="agent-output-heading">[^]*?<\/div><\/div>/)?.[0] || "";
+  assert.match(heading, /id="agentOutputEnabled"/);
+  assert.doesNotMatch(heading, /agentOutputAllowText/);
+  assert.match(template, /class="agent-output-definition"[^]*?id="agentOutputAllowTextControl"[^]*?id="agentOutputAllowText"[^]*?允许文本输出[^]*?结构设置/);
+  assert.match(template, /<\/label><span class="field-help" tabindex="0" aria-label="允许文本输出说明" aria-describedby="agentOutputAllowTextHelp"/);
+  assert.match(template, /id="agentOutputAllowTextHelp" role="tooltip">勾选后，最终结果可选择以普通 Markdown 文本返回，或按下方结构返回 JSON；不勾选则必须返回符合结构的 JSON。字段“必须”仅约束 JSON 内容。/);
+  assert.equal((template.match(/id="agentOutputAllowText"/g) || []).length, 1);
+  assert.match(template, /<form id="agentForm"[^]*?id="agentOutputAllowText"[^]*?<\/form>/);
+});
+
+test("结构设置使用标题和三个操作按钮，取消定义方式分段控件", () => {
+  const definition = template.match(/<div class="agent-output-definition">[^]*?id="agentOutputFields"/)?.[0] || "";
+  assert.match(definition, /class="agent-output-definition-title">结构设置<\/span>/);
+  assert.match(definition, /id="agentOutputSchemaTab"[^]*?查看 JSON[^]*?id="agentOutputAdd"[^]*?添加结构[^]*?id="agentOutputCheck"[^]*?检查定义/);
+  assert.doesNotMatch(definition, /agent-view-switch|agentOutputFieldsTab|字段配置/);
+});
+
 function loadAgentConfigurationUi() {
   const context = vm.createContext({
     document: { addEventListener() {} },

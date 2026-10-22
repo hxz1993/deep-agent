@@ -11,7 +11,7 @@ from pydantic import WithJsonSchema
 from pydantic_ai import DeferredToolRequests, ModelRetry, StructuredDict, ToolOutput
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import UnexpectedModelBehavior
-from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart
 
 CONTRACT = "deepagent_output_contract"
 CONTRACT_REF = "deepagent_output_contract_ref"
@@ -45,8 +45,15 @@ class StructuredOutputState(AbstractCapability):
         from deep_agent.structured_output.schema import normalize_schema, schema_digest, validate_output_name
         schema = normalize_schema(contract["json_schema"])
         validate_output_name(contract["name"])
+        allow_text = contract.get("allow_text_output", False)
+        if type(allow_text) is not bool:
+            raise ValueError("Output contract allow_text_output must be a boolean")
         self.contract = {"name": contract["name"], "description": contract.get("description"),
                          "json_schema": schema, "schema_digest": schema_digest(schema)}
+        # Missing on historical snapshots means strict output. Keep those
+        # snapshots' shape intact; the policy is independent of Schema identity.
+        if allow_text:
+            self.contract["allow_text_output"] = True
         if contract.get("schema_digest") not in (None, self.contract["schema_digest"]):
             raise ValueError("Output contract snapshot digest does not match")
         self.source_event_id = source_event_id
@@ -56,11 +63,17 @@ class StructuredOutputState(AbstractCapability):
         self.queue = None
         self.pending: dict[str, Any] | None = None
         self.accepted: dict[str, Any] | None = None
+        self.result_kind: str | None = None
         self._checked: set[int] = set()
 
     @property
     def output_types(self):
-        return [_output_type(_json(self.contract)), DeferredToolRequests]
+        return [*([str] if self.allow_text_output else []),
+                _output_type(_json(self.contract)), DeferredToolRequests]
+
+    @property
+    def allow_text_output(self) -> bool:
+        return self.contract.get("allow_text_output", False)
 
     @property
     def budget(self):
@@ -94,6 +107,9 @@ class StructuredOutputState(AbstractCapability):
         if id(response) in self._checked:
             return
         self._checked.add(id(response))
+        # A later text response must not accept a previous failed candidate.
+        self.pending = None
+        self.result_kind = None
         calls = [(i, part) for i, part in enumerate(response.parts) if isinstance(part, ToolCallPart)]
         outputs = [(i, part) for i, part in calls if part.tool_name == self.contract["name"]]
         if outputs:
@@ -110,7 +126,9 @@ class StructuredOutputState(AbstractCapability):
             reason = "multiple_output_calls"
         elif outputs and (len(calls) != 1 or native):
             reason = "mixed_output_calls"
-        elif not calls and not native:
+        elif not calls and not native and not (
+            self.allow_text_output and any(isinstance(part, TextPart) and part.content for part in response.parts)
+        ):
             reason = "missing_output"
         elif outputs:
             try:
@@ -148,6 +166,7 @@ class StructuredOutputState(AbstractCapability):
             response.metadata = {**(response.metadata or {}), "deepagent_output": {
                 "name": self.contract["name"], "part_indices": [i for i, _ in outputs],
                 "schema_digest": self.contract["schema_digest"],
+                **({"allow_text_output": True} if self.allow_text_output else {}),
             }}
         if reason:
             ordinal = self._ordinal(response, progress)
@@ -174,6 +193,21 @@ class StructuredOutputState(AbstractCapability):
             if len(self.rejected_keys) > 2:
                 raise UnexpectedModelBehavior("output_retry_exhausted: output correction limit reached")
             raise ModelRetry(_json({"code": reason, "errors": errors})[:6000])
+        if (not calls and self.allow_text_output
+                and any(isinstance(part, TextPart) and part.content for part in response.parts)):
+            # The SDK's unadorned str processor can bypass output-validation
+            # hooks. Classify from the complete response's call provenance,
+            # never from the Python value (a valid Schema can return str too).
+            self.result_kind = "text"
+        if self.allow_text_output and self.queue is not None:
+            # A later output call can invalidate the entire response. Publish
+            # its prose only after this complete-response guard and durable
+            # message save, so failed candidates never leak into live replies
+            # while being absent from History. Reuse the normal text protocol.
+            for part in response.parts:
+                if isinstance(part, TextPart) and part.content:
+                    self.queue.put_nowait({"type": "text", "delta": part.content,
+                                           "item_id": f"live:{ctx.deps.run_id}:assistant"})
 
     @staticmethod
     def _ordinal(response, progress):
@@ -186,6 +220,16 @@ class StructuredOutputState(AbstractCapability):
     async def after_output_validate(self, ctx, *, output_context, output):
         if ctx.partial_output:
             return output
+        call = output_context.tool_call
+        if call is None:
+            if not self.allow_text_output:
+                raise UnexpectedModelBehavior("Text output is not allowed by the frozen contract")
+            self.result_kind = "text"
+            self.pending = None
+            return output
+        if call.tool_name != self.contract["name"] or not self.pending or "output" not in self.pending:
+            raise UnexpectedModelBehavior("Output does not match a validated output call")
+        self.result_kind = "structured"
         # The raw JSON already passed full validation before dispatch. Preserve
         # it exactly rather than inheriting any SDK field/default conversion.
         return deepcopy(self.pending["output"]) if self.pending and "output" in self.pending else output
@@ -220,4 +264,6 @@ class StructuredOutputState(AbstractCapability):
         return row
 
     async def accept(self, deps):
+        if self.result_kind == "text":
+            return None
         return await self._append_attempt(deps, accepted=True)

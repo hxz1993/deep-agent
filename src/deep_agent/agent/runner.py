@@ -2415,6 +2415,8 @@ class AgentRunner:
                             async for source, event in stream_events:
                                 if source == "status":
                                     status_event = event
+                                    if status_event.get("type") == "text":
+                                        provider_retry_safe = False
                                     if status_event.get("type") == "context_compaction_progress":
                                         log_event(
                                             "context_compaction_phase",
@@ -2434,8 +2436,9 @@ class AgentRunner:
                                 mapped = events.map_event(event)
                                 if (deps.output_state is not None and mapped is not None
                                         and mapped.get("type") == "text"):
-                                    # A text-only response may still be rejected.
-                                    # Structured values publish only after acceptance.
+                                    # Mixed-mode prose is released via the status
+                                    # queue after the complete-response guard.
+                                    # Strict output never publishes ordinary prose.
                                     continue
                                 if mapped is not None:
                                     if not _should_publish_tool_call(event, mapped):

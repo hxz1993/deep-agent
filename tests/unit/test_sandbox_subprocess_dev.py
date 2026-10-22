@@ -411,16 +411,20 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
             ExecuteRequest(
                 request_id="public-net",
                 code=(
-                    "import urllib.request\n"
+                    "import socket\n"
                     # A public numeric address keeps this network-policy test
                     # independent of workstation proxy fake-IP DNS (198.18/15).
-                    "urllib.request.urlopen('https://1.1.1.1/cdn-cgi/trace', timeout=10).status"
+                    # Assert a real successful public connection, independent
+                    # of the remote HTTP service's response or TLS handshake.
+                    "with socket.create_connection(('1.1.1.1', 80), timeout=10) as connection:\n"
+                    "    peer = connection.getpeername()\n"
+                    "peer[0]"
                 ),
                 timeout_ms=15_000,
             )
         )
-        self.assertEqual(public.status, "ok")
-        self.assertEqual(public.result, 200)
+        self.assertEqual(public.status, "ok", public.error)
+        self.assertEqual(public.result, "1.1.1.1")
 
         private = await self.backend.execute(
             ExecuteRequest(

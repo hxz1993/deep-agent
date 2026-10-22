@@ -484,13 +484,30 @@ tests/frontend/console/history-follower.test.mjs
 
 执行责任：平台保证公共协议与事实一致，BOM/租赁各自验证业务采用、授权和写入。客户端的改造、真实业务回归及启用开关由用户分别安排，不因本次设计确认自动开始。
 
-## 0.14.2 补丁：复杂约束字段编辑专项
+## 复杂约束字段编辑：后续 UI 简化验收
 
-原 286 项需求矩阵与 28 项联合回归责任边界保留；以下是本次配置 UI 补丁新增的行为验收，不替代安装/Runner/协议全链路矩阵。结果见 [0.14.2 验收报告](<../../reports/Report DeepAgent 0.14.2 复杂约束编辑验收/验收报告.md>)。
+0.14.2 发布报告保留历史执行结果；用户后续确认取消保守的字段编辑限制。当前验收要求如下：
 
-- 有直接 properties 的对象，即使含 allOf/anyOf/oneOf/not/if/then/else、本地 ref 也能切换字段模式；仅继承字段的复杂定义保持原生，空对象不回归。
-- 模式切换、详情取消/关闭不改任何节点。确认同名详情只改该字段，根条件、内部 required、defs、注解均深度相等；原始 ref 不展开写回。
-- 同实例依赖的字段改名、删除、必须、新增编码统一保护；新旧名称都查，绕过 disabled 控件仍拒绝且零修改。保护范围含 dependentRequired 键和值、dependentSchemas、根 const/enum、propertyNames/patternProperties/unevaluatedProperties、未知规则和无法解析 ref。
-- 作用域边界：嵌套子字段同名、未使用 defs、default/examples/x-* 不当作根依赖；prototype/JSON Pointer 转义、深度超限失败保护，无网络解析。
-- 本地 ref 解析仅用于卡片类型/字段数；同名编辑内容不等于覆盖条件或兄弟约束。无效详情确认后取消，不留下阻断整页保存的隐形错误。
-- 浏览器完成保存、刷新和 API 全对象比对；真实定义以合成合法/非法输出逐项执行原验证器，校验结果及约束路径前后一致。只读源环境，业务 Schema 不入 Git。
+- 含复杂规则的直接 properties 对象可以查看和编辑；原生/字段切换不丢条件、defs、引用与注解。
+- 字段卡片保留可修改的必须选项（只维护根 required），不因复杂规则锁定必须、编辑、改名或删除，浏览及同名内容编辑保留原 required；结构操作只更新自身根字段及对应 required，不自动重写复杂规则。配置者在原生 Schema 维护一致性，服务端完整校验继续生效。
+- 详情确定/取消和无效 JSON 草稿按既有流程处理，重复编码仍拒绝；不额外解释或推断业务规则。
+- 输出左右列撑满剩余高度，长字段列表在内部滚动，页头和编辑工具栏保持可见。开关不显示开启/关闭文字，字段卡片无边框、带底色、紧凑间距，第二行较小。
+
+
+## 0.14.3增补验收（允许文本输出）
+
+保留原286项ID及归属；本轮重新执行平台相关全量，不将后续客户端业务保存标为通过。安装仅比较0.14前552b7b2和最终新版。
+
+| 新增组 | 必测回归 | 对应证据 |
+| --- | --- | --- |
+| TXT-CONF | strict bool/null422/省略保持；关闭草稿；事务失败；创建/详情/管理回读/复制/取消 | test_allow_text_output_storage、configuration_api及浏览器 |
+| TXT-DB | 真012→013默认；历史011/012备份投影；013备份；safe downgrade及true草稿/冻结快照拒绝 | test_allow_text_output_databases +真实MySQL/PG完整集 |
+| TXT-RUN | 三组合；文本/对象/结构化字符串/null/false；工具前缀；文本+JSON；最后请求 | test_allow_text_output_runtime |
+| TXT-RETRY | 非法JSON→文本；无无限重试；混调/多output零执行；失败候选文字SSE/History均不可见 | runtime、extra_boundaries |
+| TXT-RESUME | 真Deferred，旧快照false、新混合快照true；新Runner恢复、Agent切换不覆盖冻结；预算不重置 | runtime、extra_boundaries及既有structured remaining/boundaries |
+| TXT-PROTO | HTTP/SSE/Live/History/Events、原生字符串身份、断观察重连、双通道ID、owner404、渠道 | test_allow_text_output_public_protocol |
+| TXT-ZIP | 真实旧包→新；正式off含草稿ZIP→旧完整安装/覆盖/回读；strict/mixed→旧拒绝零写；新版往返 | test_allow_text_output_cross_version |
+| TXT-RACE | 策略单变预检失效、换包、并发覆盖、rollback/ACK丢失、导出下载期间变化 | storage +原agent export竞态 |
+| TXT-UI | 默认false显隐、保存/取消/刷新、required独立、两种JSON视图、复制下载、失败/成功轨迹；紧凑滚动不破坏 | Console905 +浏览器 |
+| TXT-REAL | 隔离DeepSeek/Kimi文本、JSON、普通工具及Deferred；不使用共享业务Agent | Provider私有摘要与报告 |
+| TXT-REL | Python/Console最终全量、版本唯一源、无新增依赖、源码归档、私有产物不入Git、远端Tag一致 | 0.14.3报告及发布回读 |

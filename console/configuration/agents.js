@@ -22,8 +22,35 @@ let agentEditorDirty = false;
 let agentsLoadedOnce = false;
 let agentListRecords = [];
 let agentEditorRequestId = 0;
+let agentsRefreshRequestId = 0;
+let agentEditorCatalogs = null;
 let agentChannelNames = new Map();
 const agentDeletesInFlight = new Set();
+
+function loadAgentEditorCatalogs() {
+  if (!agentEditorCatalogs) {
+    // An editor must never interpret a failed directory request as an empty selection.
+    // Publish all three catalogs together, after every response has succeeded.
+    agentEditorCatalogs = Promise.all([
+      apiFetch("/api/v1/llm-models?selectable_only=false"),
+      apiFetch("/api/v1/tools"),
+      apiFetch("/api/v1/skills"),
+    ]).then(([models, capabilities, skills]) => {
+      if (![models, capabilities, skills].every(Array.isArray)) throw new Error("Agent 编辑目录响应格式错误");
+      state.llmModels = models;
+      state.capabilities = capabilities;
+      state.skills = skills;
+    })
+      .finally(() => { agentEditorCatalogs = null; });
+  }
+  return agentEditorCatalogs;
+}
+
+function currentAgentEditorRequest(requestId) {
+  if (requestId !== agentEditorRequestId) return false;
+  if (document.body?.dataset.consolePage && document.body.dataset.consolePage !== "configuration") return false;
+  return !document.body?.dataset.consolePage || Boolean(document.getElementById("panel-agents")?.classList.contains("active"));
+}
 
 function agentUpdaterName(agent) {
   return agent.updated_by_user?.username || agent.updated_by_username || agent.updated_by || "—";
@@ -308,6 +335,7 @@ const agentsAdmin = {
     const tbody = document.getElementById("agentsTableBody");
     const cardGrid = document.getElementById("agentsCardGrid");
     if (!tbody || !cardGrid) return;
+    const requestId = ++agentsRefreshRequestId;
     const panel = document.getElementById("panel-agents");
     panel?.setAttribute("aria-busy", "true");
     if (!agentsLoadedOnce) {
@@ -315,17 +343,19 @@ const agentsAdmin = {
       cardGrid.innerHTML = `<div class="agent-list-state"><span class="loading-spinner"></span><span>正在加载 Agent…</span></div>`;
     }
     try {
-      const [agents, accounts] = await Promise.all([
-        apiFetch("/api/v1/agents"),
-        // This optional management annotation must not block the Agent directory.
-        apiFetch("/api/v1/channel-accounts").catch(() => null),
-      ]);
-      this.setChannelAccounts(accounts, false);
+      // Optional annotations are fetched alongside the directory, but never gate it.
+      const accounts = apiFetch("/api/v1/channel-accounts").catch(() => null);
+      const agents = await apiFetch("/api/v1/agents");
+      if (requestId !== agentsRefreshRequestId) return;
       showDbBanner(false);
       this.renderList(agents);
       agentsLoadedOnce = true;
       this.setListView(agentListView);
+      void accounts.then((rows) => {
+        if (requestId === agentsRefreshRequestId) this.setChannelAccounts(rows);
+      });
     } catch (err) {
+      if (requestId !== agentsRefreshRequestId) return;
       if (!agentsLoadedOnce) {
         tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">${escapeHtml(err.message)}</td></tr>`;
         cardGrid.innerHTML = `<div class="agent-list-state error"><i data-lucide="circle-alert"></i><strong>Agent 加载失败</strong><span>${escapeHtml(err.message)}</span></div>`;
@@ -334,7 +364,7 @@ const agentsAdmin = {
         showToast(`Agent 刷新失败：${err.message}`, true);
       }
     } finally {
-      panel?.setAttribute("aria-busy", "false");
+      if (requestId === agentsRefreshRequestId) panel?.setAttribute("aria-busy", "false");
     }
   },
 
@@ -557,23 +587,33 @@ const agentsAdmin = {
     if (title) title.textContent = name || (state.editingAgentId ? "Agent" : "新建 Agent");
   },
 
-  openCreate() {
-    agentEditorRequestId += 1;
-    window.DeepAgentOutputEditor?.reset();
-    state.editingAgentId = null;
-    document.getElementById("agentModalTitle").textContent = "新建 Agent";
-    document.getElementById("agentModalId").textContent = "";
-    document.getElementById("agentModalId").classList.add("hidden");
-    document.getElementById("agentName").disabled = false;
-    document.getElementById("agentName").value = "";
-    populateAgentModelSelect(window.DeepAgentModelOptions.firstSelectableModelId(state.llmModels));
-    document.getElementById("agentPrompt").value =
-      "You are a helpful assistant. Use available tools when they help answer accurately.";
-    this.renderCapabilityCheckboxes([]);
-    this.renderSkillChoices([]);
-    document.getElementById("testAgentBtn")?.classList.add("hidden");
-    this.openEditor();
-    this.schedulePromptEstimate(true);
+  async openCreate() {
+    const requestId = ++agentEditorRequestId;
+    const createButton = document.getElementById("newAgentBtn");
+    if (createButton) createButton.disabled = true;
+    try {
+      await loadAgentEditorCatalogs();
+      if (!currentAgentEditorRequest(requestId)) return;
+      window.DeepAgentOutputEditor?.reset();
+      state.editingAgentId = null;
+      document.getElementById("agentModalTitle").textContent = "新建 Agent";
+      document.getElementById("agentModalId").textContent = "";
+      document.getElementById("agentModalId").classList.add("hidden");
+      document.getElementById("agentName").disabled = false;
+      document.getElementById("agentName").value = "";
+      populateAgentModelSelect(window.DeepAgentModelOptions.firstSelectableModelId(state.llmModels));
+      document.getElementById("agentPrompt").value =
+        "You are a helpful assistant. Use available tools when they help answer accurately.";
+      this.renderCapabilityCheckboxes([]);
+      this.renderSkillChoices([]);
+      document.getElementById("testAgentBtn")?.classList.add("hidden");
+      this.openEditor();
+      this.schedulePromptEstimate(true);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      if (createButton) createButton.disabled = false;
+    }
   },
 
   async openEdit(agentId) {
@@ -582,8 +622,9 @@ const agentsAdmin = {
       const [agent, output] = await Promise.all([
         apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}`),
         apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/output-config`),
+        loadAgentEditorCatalogs(),
       ]);
-      if (requestId !== agentEditorRequestId) return;
+      if (!currentAgentEditorRequest(requestId)) return;
       window.DeepAgentOutputEditor?.reset(output);
       state.editingAgentId = agentId;
       document.getElementById("agentModalId").textContent = `Agent ID：${agent.id || agentId}`;
@@ -803,8 +844,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("testAgentBtn")?.addEventListener("click", async () => {
     if (!state.editingAgentId) return;
     if (!(await agentsAdmin.requestCloseEditor())) return;
-    window.DeepAgentConsoleChat?.selectAgent(state.editingAgentId);
-    window.DeepAgentConsole?.showPage("workspace");
+    const agentId = state.editingAgentId;
+    if (await window.DeepAgentConsole?.showPage("workspace") === false) return;
+    if (await window.DeepAgentConsoleChat?.selectAgent(agentId) === false) {
+      showToast("Agent 已不可用，请刷新列表后重试", true);
+    }
   });
-  agentsAdmin.refresh();
 });

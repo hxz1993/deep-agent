@@ -683,7 +683,7 @@ function init() {
   };
   window.addEventListener("focus", revalidateDirectory);
   document.addEventListener("visibilitychange", revalidateDirectory);
-  loadAgents().then(async () => {
+  window.DeepAgentConsoleChat.ready = loadAgents().then(async () => {
     loadUiTools(state.agentId);
     if (agentFromUrl) newChat(agentFromUrl);
     else updateAgentSelectState();

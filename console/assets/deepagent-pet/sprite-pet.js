@@ -1,7 +1,17 @@
 // Generated sprite poses + non-periodic playback. No runtime dependencies.
 const ROOT = new URL('./final/', import.meta.url);
 const ROWS = { 'standing-blink': 6, 'sitting-blink': 6, daydream: 8, collapse: 8, sway: 8, walk: 8, 'sitting-look': 8, 'sitting-shake': 8, 'sitting-updown': 8, 'sitting-sleep': 8, 'standing-updown': 8, 'standing-rest': 8 };
-const READY = Promise.all(Object.keys(ROWS).map(row => new Promise((resolve,reject) => {const img=new Image();img.onload=resolve;img.onerror=()=>reject(new Error('Cannot load pet sprite: '+row));img.src=new URL(row+'.webp?v=motions-5',ROOT).href;})));
+const sprites = new Map();
+const loaded = new Set();
+function loadSprite(row) {
+  if (!sprites.has(row)) sprites.set(row, new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => { loaded.add(row); resolve(); };
+    image.onerror = () => { sprites.delete(row); reject(new Error('Cannot load pet sprite: '+row)); };
+    image.src = new URL(row+'.webp?v=motions-5',ROOT).href;
+  }));
+  return sprites.get(row);
+}
 const random = (min,max) => min + Math.random()*(max-min);
 export class DeepAgentSpritePet extends HTMLElement {
   static observedAttributes = ['collapsed', 'paused'];
@@ -19,6 +29,7 @@ export class DeepAgentSpritePet extends HTMLElement {
   get collapsed(){return this.hasAttribute('collapsed')}
   set collapsed(v){this.toggleAttribute('collapsed',Boolean(v))}
   connectedCallback(){
+    const connection = this.connectionRevision = (this.connectionRevision || 0) + 1;
     this.controller?.abort();this.controller=new AbortController();
     this.reduced=matchMedia('(prefers-reduced-motion: reduce)');
     const opts={signal:this.controller.signal};
@@ -26,9 +37,27 @@ export class DeepAgentSpritePet extends HTMLElement {
     document.addEventListener('visibilitychange',()=>this.reset(),opts);
     this.addEventListener('pointerenter',()=>{if(!this.busy && performance.now()-(this.hoverAt||0)>2000){this.hoverAt=performance.now();this.blink()}},opts);
     this.ready=false;this.reset();
-    READY.then(()=>{if(this.isConnected){this.ready=true;this.dataset.ready='true';this.reset()}}).catch(error=>{this.dataset.error='assets';this.dispatchEvent(new CustomEvent('pet-error',{detail:error}))});
+    this.loadNeutral(connection);
   }
-  disconnectedCallback(){this.controller?.abort();clearTimeout(this.timer);this.token=(this.token||0)+1}
+  loadNeutral(connection){
+    const row=this.collapsed?'sitting-blink':'standing-blink';
+    loadSprite(row).then(()=>{
+      if(!this.isConnected || connection!==this.connectionRevision)return;
+      if(row!==(this.collapsed?'sitting-blink':'standing-blink')){this.loadNeutral(connection);return}
+      this.ready=true;this.dataset.ready='true';this.reset();
+    }).catch(error=>{if(this.isConnected && connection===this.connectionRevision)this.assetError(error)});
+  }
+  assetError(error){
+    this.stop();this.ready=false;delete this.dataset.ready;this.dataset.error='assets';
+    this.dispatchEvent(new CustomEvent('pet-error',{detail:error}));
+  }
+  waitForSprite(row, next){
+    if(loaded.has(row))return false;
+    const token=this.token;this.busy=true;
+    loadSprite(row).then(()=>{if(this.isConnected && token===this.token)next()}).catch(error=>{if(this.isConnected && token===this.token)this.assetError(error)});
+    return true;
+  }
+  disconnectedCallback(){this.connectionRevision=(this.connectionRevision || 0)+1;this.controller?.abort();clearTimeout(this.timer);this.token=(this.token||0)+1}
   attributeChangedCallback(name,oldValue,newValue){
     if(oldValue===newValue || !this.isConnected)return;
     if(name==='collapsed')this.changePose();else this.reset();
@@ -36,6 +65,11 @@ export class DeepAgentSpritePet extends HTMLElement {
   get inactive(){return !this.isConnected || !this.ready || document.hidden || this.hasAttribute('paused') || this.reduced?.matches}
   stop(){clearTimeout(this.timer);this.token=(this.token||0)+1;this.busy=false}
   draw(row,index,offset=0){
+    if(!loaded.has(row)){
+      const token=this.token, connection=this.connectionRevision;
+      loadSprite(row).then(()=>{if(this.isConnected && token===this.token && connection===this.connectionRevision)this.draw(row,index,offset)}).catch(error=>{if(this.isConnected && token===this.token && connection===this.connectionRevision)this.assetError(error)});
+      return;
+    }
     this.travel.setAttribute('transform',`translate(${offset} 0)`);
     this.cell.setAttribute("href",new URL(row+'.webp?v=motions-5',ROOT).href);
     this.cell.setAttribute("width",String(ROWS[row]*192));
@@ -43,7 +77,7 @@ export class DeepAgentSpritePet extends HTMLElement {
     this.restIndex=row==='standing-rest'?Math.min(index,4):null;
     this.dataset.action=row;this.dataset.frame=String(index);
   }
-  neutral(){this.draw(this.collapsed?'sitting-blink':'standing-blink',0)}
+  neutral(){if(this.ready)this.draw(this.collapsed?'sitting-blink':'standing-blink',0)}
   reset(){this.stop();this.transitionIndex=null;this.neutral();this.schedule()}
   schedule(){
     if(this.inactive)return;
@@ -62,6 +96,7 @@ export class DeepAgentSpritePet extends HTMLElement {
     },random(2300,6800));
   }
   sequence(row,indices,durations,done,offsets=[]){
+    if(this.waitForSprite(row,()=>this.sequence(row,indices,durations,done,offsets)))return;
     const token=this.token;let cursor=0;this.busy=true;
     const tick=()=>{
       if(token!==this.token)return;
@@ -149,6 +184,7 @@ export class DeepAgentSpritePet extends HTMLElement {
     const previous=this.transitionIndex;
     this.stop();
     if(this.inactive){this.reset();return}
+    if(this.waitForSprite('collapse',()=>this.changePose()))return;
     this.busy=true;
     this.transitionIndex=previous===null?(this.collapsed?0:7):previous;
     const token=this.token;

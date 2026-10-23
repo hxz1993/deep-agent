@@ -8,6 +8,7 @@ const WEB_SEARCH_PROVIDERS = {
 };
 let webSearchTestRunId = 0;
 let webSearchOperation = null;
+const globalSettingsLoads = new Map();
 
 function globalSettingSourceLabel(source) {
   return source === "environment" ? "环境配置" : "代码默认值";
@@ -630,39 +631,97 @@ const globalSettingsAdmin = {
   selectedGroup: "",
   webSearch: null,
   documentParsing: null,
-  async refresh() {
-    if (this.page === "models") return window.modelCatalogAdmin?.refresh();
-    void window.databaseConnectionAdmin?.refresh();
-    const runtimeTarget = document.getElementById("globalSettingsGroups");
-    if (runtimeTarget) runtimeTarget.innerHTML = `<div class="global-settings-state">正在加载运行设置…</div>`;
+  webSearchReady: false,
+  documentParsingReady: false,
+  refresh() {
+    const page = this.page;
+    // General's independent reads must not retain each other after one response
+    // was discarded on another page. Reuse only the child request still pending.
+    if (page === "general") return this.refreshPage(page, {
+      reuseCompleted: globalSettingsLoads.has("general:webSearch") || globalSettingsLoads.has("general:documentParsing"),
+    });
+    if (globalSettingsLoads.has(page)) return globalSettingsLoads.get(page);
+    const pending = this.refreshPage(page);
+    globalSettingsLoads.set(page, pending);
+    const cleanup = () => globalSettingsLoads.delete(page);
+    pending.then(cleanup, cleanup);
+    return pending;
+  },
+  async refreshPage(page, { reuseCompleted = false } = {}) {
+    if (page === "models") return window.modelCatalogAdmin?.refresh();
     try {
-      const [runtime, webSearch, documentParsing] = await Promise.all([
-        apiFetch("/api/v1/global-settings"),
-        apiFetch("/api/v1/global-settings/web-search").catch((error) => {
-          if (error.status !== 409) throw error;
-          return { invalid: true };
-        }),
-        apiFetch("/api/v1/global-settings/document-parsing").catch(error => ({ value: { configuration_error: error.message }, providers: [], invalid: true })),
-        loadLlmProviders(),
+      if (page === "operations") {
+        const runtimeTarget = document.getElementById("globalSettingsGroups");
+        if (runtimeTarget) runtimeTarget.innerHTML = `<div class="global-settings-state">正在加载运行设置…</div>`;
+        const [runtime] = await Promise.all([
+          apiFetch("/api/v1/global-settings"),
+          window.databaseConnectionAdmin?.refresh(),
+        ]);
+        this.groups = Array.isArray(runtime?.groups) ? runtime.groups : [];
+        this.selectedGroup = renderGlobalSettings(this.groups, this.query, this.selectedGroup);
+        return;
+      }
+      await Promise.all([
+        this.refreshGeneralSetting("webSearch", { reuseCompleted }),
+        this.refreshGeneralSetting("documentParsing", { reuseCompleted }),
       ]);
-      this.groups = Array.isArray(runtime?.groups) ? runtime.groups : [];
-      this.webSearch = webSearch?.invalid ? null : webSearch;
-      this.documentParsing = documentParsing;
-      renderDocumentParsingSummary(documentParsing);
-      const documentEdit = document.getElementById("openDocumentParsingSettingsBtn");
-      if (documentEdit) documentEdit.disabled = Boolean(documentParsing?.invalid);
-      if (documentParsing?.invalid) {
-        const summary = document.getElementById("documentParsingSummaryValue");
-        if (summary) summary.textContent = "配置加载失败，请重新加载";
-      }
-      this.selectedGroup = renderGlobalSettings(this.groups, this.query, this.selectedGroup);
-      renderWebSearchSettings(this.webSearch);
-      if (webSearch?.invalid) {
-        const summary = document.getElementById("webSearchSummaryValue");
-        if (summary) summary.textContent = "配置不可用，请重新配置";
-      }
     } catch (error) {
-      renderGlobalSettingsError(error);
+      if (page === "operations") renderGlobalSettingsError(error);
+      else {
+        for (const id of ["webSearchSummaryValue", "documentParsingSummaryValue"]) {
+          const summary = document.getElementById(id);
+          if (summary) summary.textContent = "配置加载失败，请重新加载";
+        }
+      }
+      showToast(error?.message || "全局配置加载失败", true);
+    }
+  },
+  refreshGeneralSetting(kind, { reuseCompleted = false } = {}) {
+    const key = `general:${kind}`;
+    if (globalSettingsLoads.has(key)) return globalSettingsLoads.get(key);
+    if (reuseCompleted && this[`${kind}Ready`]) return Promise.resolve();
+    const pending = this.loadGeneralSetting(kind);
+    globalSettingsLoads.set(key, pending);
+    const cleanup = () => globalSettingsLoads.delete(key);
+    pending.then(cleanup, cleanup);
+    return pending;
+  },
+  async loadGeneralSetting(kind) {
+    const search = kind === "webSearch";
+    const dialog = document.getElementById(search ? "webSearchSettingsDialog" : "documentParsingSettingsDialog");
+    // A modal owns its draft and base config until save/cancel. Summary refreshes
+    // must not change either the fields or that base while it is being edited.
+    const editing = () => Boolean(dialog?.open || (search ? webSearchOperation : documentParsingOperation));
+    if (editing()) return;
+    const readyKey = `${kind}Ready`;
+    const button = document.getElementById(search ? "openWebSearchSettingsBtn" : "openDocumentParsingSettingsBtn");
+    const summary = document.getElementById(search ? "webSearchSummaryValue" : "documentParsingSummaryValue");
+    this[readyKey] = false;
+    if (button) button.disabled = true;
+    if (summary) summary.textContent = "正在加载…";
+    const active = () => this.page === "general"
+      && (!document.body?.dataset.consolePage || (document.body.dataset.consolePage === "configuration"
+        && document.getElementById("panel-global-settings")?.classList.contains("active")))
+      && !editing();
+    try {
+      let settings;
+      try {
+        settings = await apiFetch(`/api/v1/global-settings/${search ? "web-search" : "document-parsing"}`);
+      } catch (error) {
+        if (!search || error.status !== 409) throw error;
+        settings = { invalid: true };
+      }
+      if (!active()) return;
+      this[kind] = search && settings?.invalid ? null : settings;
+      this[readyKey] = search || !settings?.invalid;
+      if (button) button.disabled = !this[readyKey];
+      // Only a modal open operation initializes editable controls.
+      if (search) renderWebSearchSummary(this.webSearch);
+      else renderDocumentParsingSummary(this.documentParsing);
+      if (settings?.invalid && summary) summary.textContent = search ? "配置不可用，请重新配置" : "配置加载失败，请重新加载";
+    } catch (error) {
+      if (!active()) return;
+      if (summary) summary.textContent = "配置加载失败，请重新加载";
       showToast(error?.message || "全局配置加载失败", true);
     }
   },
@@ -753,7 +812,9 @@ window.__GlobalSettingsUI = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("openDocumentParsingSettingsBtn")?.addEventListener("click", openDocumentParsingSettings);
+  document.getElementById("openDocumentParsingSettingsBtn")?.addEventListener("click", () => {
+    if (globalSettingsAdmin.documentParsingReady) openDocumentParsingSettings();
+  });
   ["closeDocumentParsingSettingsBtn", "cancelDocumentParsingBtn"].forEach(id => document.getElementById(id)?.addEventListener("click", closeDocumentParsingSettings));
   document.getElementById("documentParsingSettingsForm")?.addEventListener("change", event => {
     if (event.target.name === "documentParsingProvider") selectDocumentParsingProvider(event.target.value);
@@ -777,7 +838,21 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("globalSettingsGroups")?.addEventListener("click", (event) => {
     if (event.target.closest("[data-retry-global-settings]")) globalSettingsAdmin.refresh();
   });
-  document.getElementById("openWebSearchSettingsBtn")?.addEventListener("click", openWebSearchSettings);
+  document.getElementById("openWebSearchSettingsBtn")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    if (button.disabled || !globalSettingsAdmin.webSearchReady) return;
+    button.disabled = true;
+    try {
+      const providers = await apiFetch("/api/v1/llm-providers");
+      if (!Array.isArray(providers)) throw new Error("Provider 目录响应格式错误");
+      state.llmProviders = providers;
+      if (globalSettingsAdmin.webSearchReady && document.body.dataset.consolePage === "configuration"
+        && document.getElementById("panel-global-settings")?.classList.contains("active")
+        && globalSettingsAdmin.page === "general") openWebSearchSettings();
+    } catch (error) {
+      showToast(error.message || "Provider 目录加载失败", true);
+    } finally { button.disabled = !globalSettingsAdmin.webSearchReady; }
+  });
   document.getElementById("closeWebSearchSettingsBtn")?.addEventListener("click", closeWebSearchSettings);
   bindConsoleSelect("webSearchProvider");
   bindConsoleSelect("webSearchLlmProvider");

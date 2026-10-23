@@ -51,8 +51,8 @@ test("成功切换目录后才通知主导航更新选中态与面包屑", async
 test("全局目录跨页先加载配置，且未授权点击不进入管理处理", () => {
   assert.match(main, /resourceNav\.append\(template\.content\)/);
   assert.match(main, /if \(!consoleAllowed\) \{ event\.stopImmediatePropagation\(\); return; \}/);
-  assert.match(main, /await showPage\("configuration", \{ restoreTab: false \}\);\s*tab\.click\(\)/);
-  assert.match(main, /rememberConfigurationTab\(event\.detail\.name\);\s*syncNavigation\(\)/);
+  assert.match(main, /if \(await showPage\("configuration", \{ restoreTab: false \}\)\) tab\.click\(\)/);
+  assert.match(main, /configurationModule\?\.rememberConfigurationTab\(event\.detail\.name\);\s*syncNavigation\(\)/);
 });
 
 test("导航宽度连续拖动，文字渐隐且宽度限制为56至200px", () => {
@@ -80,6 +80,6 @@ test("导航宽度连续拖动，文字渐隐且宽度限制为56至200px", () =
 test("Agent对话链接在捕获阶段接管，避免行操作阻止冒泡而新开页面", async () => {
   const config = await readFile(new URL("../../../console/configuration.js", import.meta.url), "utf8");
   const agents = await readFile(new URL("../../../console/configuration/agents.js", import.meta.url), "utf8");
-  assert.match(config, /addEventListener\("click", async \(event\) => \{[\s\S]*?event.preventDefault\(\);[\s\S]*?await window.DeepAgentConsole\?\.showPage\("workspace"\);[\s\S]*?await window.DeepAgentConsoleChat\?\.selectAgent\(agentId\);[\s\S]*?\}, true\)/);
+  assert.match(config, /addEventListener\("click", async \(event\) => \{[\s\S]*?event.preventDefault\(\);[\s\S]*?await window.DeepAgentConsole\?\.showPage\("workspace"\) === false\) return;[\s\S]*?await window.DeepAgentConsoleChat\?\.selectAgent\(agentId\) === false[\s\S]*?\}, true\)/);
   assert.doesNotMatch(agents, /data-agent-chat[^>]*target="_blank"/);
 });

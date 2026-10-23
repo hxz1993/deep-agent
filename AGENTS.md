@@ -31,7 +31,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.14.5`，数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.14.6`，数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -40,6 +40,8 @@
 `http://system-server` 是平台逻辑服务配置，须先归一化再走服务发现；禁止仅凭 URL 协议直接绕过 Eureka。
 新增平台身份适配必须复用 `deepfos_platform.discovery.target.normalize_service_target`，
 保留显式 IP/端口、真实域名及网关路径的直连语义。
+
+Console 加载和资源缓存见[加载说明](docs/guides/console-loading.md)：身份／权限校验后仅初始化当前页；配置脚本并行下载、有序执行。静态 UI 资源使用内容 ETag 每次校验，入口／错误／下载不缓存；不要恢复无条件预热或长期 immutable。数据库摘要可用 `include_charset=false` 跳过字符集 SQL，完整字符集检查由运维页按钮主动触发。此处属于当前本地实现，部署状态仍以目标环境核验为准。
 
 诊断中心依次为「会话 / 用量 / 日志」：见[会话指南](docs/guides/diagnostic-sessions.md)、[用量指南](docs/guides/diagnostic-usage.md)和[日志指南](docs/guides/diagnostic-logs.md)。
 会话概览、列表和跨用户只读详情统一使用管理员 `/diagnostics/sessions` 接口；统计只读取现有会话与真实事件，

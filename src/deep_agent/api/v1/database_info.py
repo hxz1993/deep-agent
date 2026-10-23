@@ -81,13 +81,17 @@ def build_database_info(
 async def get_database_info(
     _user: RequestUserDep,
     ctx: AppContextDep,
+    include_charset: bool = True,
 ) -> DatabaseInfoResponse:
-    """Return the live schema revision and credential-free connection summary."""
+    """Return the live revision; optionally skip the separate charset SQL checks."""
     try:
         async with ctx.db_session_factory() as session:
             result = await session.execute(text("SELECT version_num FROM alembic_version"))
             version = result.scalar_one_or_none()
-            charset = await read_database_charset(session, session.bind.dialect.name)
+            charset = (
+                await read_database_charset(session, session.bind.dialect.name)
+                if include_charset else None
+            )
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

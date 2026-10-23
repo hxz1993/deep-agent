@@ -5,14 +5,14 @@ import { channelOriginPresentation } from "./session-display.js?v=20260929-relea
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
 
-const WORKSPACE_ASSET_VERSION = "20261023-deferred-trajectory3";
+const WORKSPACE_ASSET_VERSION = "20261023-console-load1";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },
   inspector: { min: 260, max: 720, initial: 320, variable: "--console-inspector-width" },
 };
 
-let initialized = false;
+let initializationPromise = null;
 let lastRenderKey = "";
 let selectedContextReference = null;
 let inspectorActiveTab = "session";
@@ -621,21 +621,31 @@ window.DeepAgentConsoleWorkspace = {
 };
 
 export async function initWorkspace() {
-  if (initialized) return;
-  initialized = true;
-  const source = await fetchLegacyPage();
-  installLegacyDom(source);
-  window.DeepAgentConsoleContext?.render?.();
-  await import(`./chat.js?v=${WORKSPACE_ASSET_VERSION}`);
-  bindWorkspaceControls();
-  bindWorkspaceResizers();
-  window.addEventListener("resize", syncWorkspaceLayout);
-  renderAgentSwitcher();
-  renderInspector();
-  startStateMonitor();
-  void refreshChannelAccounts();
-  document.getElementById("workspaceLoading")?.classList.add("hidden");
-  document.getElementById("workspaceGrid")?.classList.remove("hidden");
-  syncWorkspaceLayout();
-  window.lucide?.createIcons();
+  if (initializationPromise) return initializationPromise;
+  let structureStarted = false;
+  initializationPromise = (async () => {
+    const source = await fetchLegacyPage();
+    structureStarted = true;
+    installLegacyDom(source);
+    window.DeepAgentConsoleContext?.render?.();
+    await import(`./chat.js?v=${WORKSPACE_ASSET_VERSION}`);
+    bindWorkspaceControls();
+    bindWorkspaceResizers();
+    window.addEventListener("resize", syncWorkspaceLayout);
+    renderAgentSwitcher();
+    renderInspector();
+    startStateMonitor();
+    void refreshChannelAccounts();
+    document.getElementById("workspaceLoading")?.classList.add("hidden");
+    document.getElementById("workspaceGrid")?.classList.remove("hidden");
+    syncWorkspaceLayout();
+    window.lucide?.createIcons();
+    // A cross-page Agent selection must wait for the existing startup directory chain.
+    await window.DeepAgentConsoleChat?.ready;
+  })().catch(error => {
+    // Retrying a template fetch is safe; partially initialized DOM needs a reload.
+    if (!structureStarted) initializationPromise = null;
+    throw error;
+  });
+  return initializationPromise;
 }

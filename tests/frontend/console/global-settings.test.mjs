@@ -151,7 +151,7 @@ test("保存期间阻止关闭和重复提交，失败后保留编辑器并解�
 });
 
 test("旧搜索配置失效不阻止展示运行设置和打开修复草稿", async () => {
-  const summary = {}, window = {};
+  const summary = { classList: { toggle() {} } }, window = {};
   const context = vm.createContext({
     window,
     document: { addEventListener() {}, getElementById: id => id === 'webSearchSummaryValue' ? summary : null },
@@ -167,8 +167,9 @@ test("旧搜索配置失效不阻止展示运行设置和打开修复草稿", as
   context.renderWebSearchSettings = value => assert.equal(value, null);
   window.globalSettingsAdmin.webSearch = { value: { mode: 'provider', api_key_set: true } };
   await window.globalSettingsAdmin.refresh();
-  assert.equal(window.globalSettingsAdmin.groups.length, 1);
+  assert.equal(window.globalSettingsAdmin.groups.length, 0, "常规页不预取运维运行设置");
   assert.equal(window.globalSettingsAdmin.webSearch, null);
+  assert.equal(window.globalSettingsAdmin.webSearchReady, true, "409 旧配置仍允许主动打开修复草稿");
   assert.equal(summary.textContent, '配置不可用，请重新配置');
 });
 

@@ -4,6 +4,29 @@ const api = window.DeepAgentConsoleAPI;
 let inheritedContext = { app: null, space: null, language: null };
 let effectiveContext = { app: null, space: null, language: null };
 let identity = null;
+let databaseVersionLoaded = false;
+let databaseVersionPromise = null;
+
+function loadUserDatabaseVersion() {
+  if (databaseVersionLoaded || databaseVersionPromise) return databaseVersionPromise;
+  const target = document.getElementById("databaseSchemaVersion");
+  if (!target) return null;
+  databaseVersionPromise = (async () => {
+    try {
+      const response = await window.daFetch(api.serviceUrl("/api/v1/database-info?include_charset=false"));
+      if (!response.ok) throw new Error(`数据库版本读取失败：HTTP ${response.status}`);
+      const info = await response.json();
+      const revision = String(info?.schema_version ?? "").trim();
+      target.textContent = revision ? `V${/^\d+$/.test(revision) ? Number.parseInt(revision, 10) : revision}` : "—";
+      target.removeAttribute("title");
+      databaseVersionLoaded = true;
+    } catch (error) {
+      target.textContent = "—";
+      target.title = error.message || "数据库版本读取失败";
+    } finally { databaseVersionPromise = null; }
+  })();
+  return databaseVersionPromise;
+}
 
 function valueOrNull(value) {
   const normalized = String(value ?? "").trim();
@@ -179,6 +202,7 @@ function toggleUserPopover() {
   button.setAttribute("aria-expanded", String(open));
   const popover = document.getElementById("currentUserPopover");
   if (popover) popover.hidden = !open;
+  if (open) void loadUserDatabaseVersion();
 }
 
 function currentFormContext() {

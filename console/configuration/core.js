@@ -260,19 +260,6 @@ function formatDatabaseSchemaVersion(value) {
   return `V${displayRevision}`;
 }
 
-async function loadDatabaseSchemaVersion() {
-  const target = document.getElementById("databaseSchemaVersion");
-  if (!target) return;
-  try {
-    const info = await apiFetch("/api/v1/database-info");
-    target.textContent = formatDatabaseSchemaVersion(info?.schema_version);
-    target.removeAttribute("title");
-  } catch (error) {
-    target.textContent = "—";
-    target.title = error instanceof Error ? error.message : String(error);
-  }
-}
-
 async function loadCapabilities() {
   state.capabilities = await apiFetch("/api/v1/tools");
   return state.capabilities;
@@ -329,8 +316,9 @@ function populateAgentModelSelect(selectedId = null) {
 
 function initTabs() {
   const tabs = document.querySelectorAll(".tab");
+  window.configurationTabsAdmin = { pending: null };
   tabs.forEach((tab) => {
-    tab.addEventListener("click", async () => {
+    const activate = async () => {
       if (window.agentsAdmin?.isEditorOpen?.() && !(await window.agentsAdmin.requestCloseEditor())) return;
       if (window.mcpAdmin?.isEditorOpen?.() && !(await window.mcpAdmin.requestCloseEditor())) return;
       if (tab.dataset.tab !== "integrations" && window.integrationsAdmin?.deactivate() === false) return;
@@ -345,20 +333,26 @@ function initTabs() {
       document.getElementById(`panel-${name}`)?.classList.add("active");
       document.dispatchEvent(new CustomEvent("deep-agent-configuration-tab", { detail: { name } }));
       if (name === "global-settings" && window.globalSettingsAdmin) {
-        window.globalSettingsAdmin.refresh();
+        return window.globalSettingsAdmin.refresh();
       }
       if (name === "agents" && window.agentsAdmin) {
-        Promise.all([loadLlmModels(), loadCapabilities(), loadSkills()]).then(() => window.agentsAdmin.refresh());
+        return window.agentsAdmin.refresh();
       }
-      if (name === "llm-providers" && window.llmProvidersAdmin) window.llmProvidersAdmin.refresh();
-      if (name === "tools") window.toolsAdmin?.refresh();
+      if (name === "llm-providers" && window.llmProvidersAdmin) return window.llmProvidersAdmin.refresh();
+      if (name === "tools") return window.toolsAdmin?.refresh();
       if (name === "skills" && window.skillsAdmin) {
         window.skillsAdmin.selectedCode = null;
-        window.skillsAdmin.refresh();
+        return window.skillsAdmin.refresh();
       }
-      if (name === "mcp" && window.mcpAdmin) window.mcpAdmin.refresh();
-      if (name === "integrations") window.integrationsAdmin?.refresh();
-      if (name === "channels" && window.channelsAdmin) window.channelsAdmin.refresh();
+      if (name === "mcp" && window.mcpAdmin) return window.mcpAdmin.refresh();
+      if (name === "integrations") return window.integrationsAdmin?.refresh();
+      if (name === "channels" && window.channelsAdmin) return window.channelsAdmin.refresh();
+    };
+    tab.addEventListener("click", () => {
+      const pending = activate();
+      window.configurationTabsAdmin.pending = pending;
+      pending.catch((error) => showToast(error.message || "配置加载失败", true));
+      return pending;
     });
   });
 }
@@ -383,10 +377,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   initTabs();
-  loadDatabaseSchemaVersion();
-  loadCapabilities().catch(() => {});
-  loadLlmModels().catch(() => {});
-  loadSkills().catch(() => {});
 });
 
 window.__DatabaseSchemaVersionUI = {

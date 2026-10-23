@@ -1,16 +1,10 @@
 import { initSecretInputs } from "./ui-secret-input.js?v=20260929-component-webhook";
-import "./assets/deepagent-pet/sprite-pet.js?v=20260922-pet-1";
+import "./assets/deepagent-pet/sprite-pet.js?v=20261023-console-load1";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
 import { initConsoleSelects } from "./ui-select.js?v=20260929-component-webhook";
-import {
-  initConfiguration,
-  restoreConfigurationTab,
-  rememberConfigurationTab,
-} from "./configuration.js?v=20261022-output-compact4";
-import { bindContextControls, refreshIdentity } from "./context.js?v=20260917-release01010";
-import { initDiagnostics, setDiagnosticsActive, openDiagnostics } from "./diagnostics-center.js?v=20261023-deferred-trajectory3";
-import { initWorkspace } from "./workspace.js?v=20261023-deferred-trajectory3";
+import { bindContextControls, refreshIdentity } from "./context.js?v=20261023-console-load1";
+import { createPageLoader } from "./page-loader.js?v=20261023-console-load1";
 import "./time.js?v=20260913-49";
 import "./configuration-directory.js?v=20261019-release0137";
 
@@ -24,6 +18,43 @@ const PAGE_LABELS = {
 };
 let consoleAllowed = false;
 let toastTimer = null;
+let navigationGeneration = 0;
+let configurationModule = null;
+let workspaceModule = null;
+let diagnosticsModule = null;
+const loadPage = createPageLoader({
+  configuration: async () => {
+    const module = await import("./configuration.js?v=20261023-console-load1");
+    await module.initConfiguration();
+    configurationModule = module;
+    return module;
+  },
+  workspace: async () => {
+    const module = await import("./workspace.js?v=20261023-console-load1");
+    await module.initWorkspace();
+    workspaceModule = module;
+    return module;
+  },
+  diagnostics: async () => {
+    const module = await import("./diagnostics-center.js?v=20261023-console-load1");
+    module.initDiagnostics();
+    diagnosticsModule = module;
+    return module;
+  },
+});
+
+function setDiagnosticsActive(active) { diagnosticsModule?.setDiagnosticsActive(active); }
+async function openDiagnostics(kind) {
+  if (!consoleAllowed) return;
+  try {
+    if (!diagnosticsModule) {
+      const target = kind === "sessions" ? "#/diagnostics/sessions/overview" : kind === "usage" ? "#/diagnostics/usage" : "#/diagnostics/logs";
+      return await showPage("diagnostics", { diagnosticTarget: target });
+    }
+    return await diagnosticsModule.openDiagnostics(kind);
+  } catch (error) { toast(error.message, true); }
+}
+
 
 async function loadProductVersion() {
   const target = document.getElementById("productVersion");
@@ -74,15 +105,17 @@ function syncNavigation() {
 
 async function showPage(page, { updateHash = true, restoreTab = true, diagnosticTarget = null } = {}) {
   const next = VALID_PAGES.has(page) ? page : "workspace";
+  const generation = ++navigationGeneration;
   const current = document.querySelector("[data-page-panel].active")?.dataset.pagePanel;
   if (current === "configuration" && next !== "configuration" && window.agentsAdmin?.isEditorOpen?.()) {
-    if (!(await window.agentsAdmin.requestCloseEditor())) return;
+    if (!(await window.agentsAdmin.requestCloseEditor())) return false;
   }
   if (current === "configuration" && next !== "configuration" && window.mcpAdmin?.isEditorOpen?.()) {
-    if (!(await window.mcpAdmin.requestCloseEditor())) return;
+    if (!(await window.mcpAdmin.requestCloseEditor())) return false;
   }
-  if (next !== "configuration" && window.integrationsAdmin?.deactivate() === false) return;
-  if (next !== "configuration" && window.wecomApplicationsAdmin?.deactivate() === false) return;
+  if (next !== "configuration" && window.integrationsAdmin?.deactivate() === false) return false;
+  if (next !== "configuration" && window.wecomApplicationsAdmin?.deactivate() === false) return false;
+  if (generation !== navigationGeneration) return false;
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);
   });
@@ -98,19 +131,34 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
       else history.replaceState(null, "", target);
     }
   }
-  setDiagnosticsActive(consoleAllowed && next === "diagnostics");
-  if (consoleAllowed && next === "configuration") {
-    await initConfiguration().catch((error) => toast(error.message, true));
-    if (restoreTab) restoreConfigurationTab();
-    if (restoreTab && current !== "configuration" && document.querySelector('[data-tab="integrations"]')?.classList.contains("active")) {
-      void window.integrationsAdmin?.refresh();
+  if (next !== "diagnostics") setDiagnosticsActive(false);
+  if (!consoleAllowed) return false;
+  const workspaceWasReady = Boolean(workspaceModule);
+  try {
+    await loadPage(next);
+    if (generation !== navigationGeneration || !consoleAllowed) return false;
+    setDiagnosticsActive(consoleAllowed && next === "diagnostics");
+    if (next === "configuration") {
+      if (restoreTab) await configurationModule.restoreConfigurationTab();
     }
+    if (next === "workspace" && current !== "workspace" && workspaceWasReady) {
+      void window.DeepAgentConsoleWorkspace?.refreshChannelAccounts();
+      void window.DeepAgentConsoleChat?.refreshConfiguration({ force: true });
+    }
+  } catch (error) {
+    if (generation !== navigationGeneration) return false;
+    if (next === "workspace") showWorkspaceLoadError(error);
+    else if (next === "configuration") {
+      if (!document.getElementById("configurationLoading")?.querySelector(".configuration-error")) showPageLoadError("configurationLoading", error);
+    }
+    else showPageLoadError("diagnosticsLoading", error);
+    toast(error.message, true);
+    return false;
   }
-  if (consoleAllowed && next === "workspace" && current !== "workspace") {
-    void window.DeepAgentConsoleWorkspace?.refreshChannelAccounts();
-    void window.DeepAgentConsoleChat?.refreshConfiguration({ force: true });
-  }
+  if (generation !== navigationGeneration || !consoleAllowed) return false;
+  document.getElementById("diagnosticsLoading")?.classList.toggle("hidden", true);
   window.lucide?.createIcons();
+  return true;
 }
 
 let expandedNavigationWidth = 200;
@@ -222,13 +270,12 @@ function bindNavigation() {
     const tab = event.target.closest("[data-tab]");
     if (!tab) return;
     if (!consoleAllowed) { event.stopImmediatePropagation(); return; }
-    if (document.body.dataset.consolePage === "configuration") return;
+    if (document.body.dataset.consolePage === "configuration" && configurationModule) return;
     event.stopImmediatePropagation();
-    await showPage("configuration", { restoreTab: false });
-    tab.click();
+    if (await showPage("configuration", { restoreTab: false })) tab.click();
   }, true);
   document.addEventListener("deep-agent-configuration-tab", (event) => {
-    rememberConfigurationTab(event.detail.name);
+    configurationModule?.rememberConfigurationTab(event.detail.name);
     syncNavigation();
   });
   document.querySelectorAll("[data-page]").forEach((button) => {
@@ -298,19 +345,23 @@ function showApiBanner(status, reason) {
   banner.className = `console-banner status-${status}`;
 }
 
-function showWorkspaceLoadError(error) {
-  const loading = document.getElementById("workspaceLoading");
+function showPageLoadError(id, error) {
+  const loading = document.getElementById(id);
   if (!loading) return;
+  loading.classList.remove("hidden");
   loading.replaceChildren();
   const message = document.createElement("span");
   message.className = "configuration-error";
-  message.textContent = error?.message || "测试工作台加载失败";
+  message.textContent = error?.message || "页面加载失败";
   const retry = document.createElement("button");
   retry.type = "button";
-  retry.textContent = "重新加载";
+  retry.className = "btn";
+  retry.textContent = "重新加载页面";
   retry.addEventListener("click", () => location.reload());
   loading.append(message, retry);
 }
+
+function showWorkspaceLoadError(error) { showPageLoadError("workspaceLoading", error); }
 
 function showAccessLock({ title, message, icon = "shield-alert" }) {
   const lock = document.getElementById("authLock");
@@ -390,18 +441,7 @@ async function boot() {
     return;
   }
 
-  initDiagnostics();
-  await initWorkspace().catch((error) => {
-    showWorkspaceLoadError(error);
-    toast(error.message, true);
-  });
   await showPage(pageFromLocation(), { updateHash: true });
-  const prewarmConfiguration = () => initConfiguration().catch(() => {});
-  if ("requestIdleCallback" in window) {
-    window.requestIdleCallback(prewarmConfiguration, { timeout: 1800 });
-  } else {
-    window.setTimeout(prewarmConfiguration, 450);
-  }
 }
 
 window.__ProductVersionUI = { loadProductVersion };

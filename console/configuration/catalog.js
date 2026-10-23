@@ -476,7 +476,6 @@ function initCatalog() {
     catalogState.offset += PAGE_SIZE;
     loadCatalog();
   });
-  loadCatalog();
 }
 
 window.modelCatalogAdmin = {

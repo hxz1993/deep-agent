@@ -6,12 +6,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 from deep_agent import __version__
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities.catalog import selectable_tool_package_codes
 from deep_agent.core.context import AppContext, AppContextDep, reset_context
+from deep_agent.core.console_static import ConsoleStaticFiles
 from deep_agent.core.exceptions import AgentNotFoundError, DeepAgentError
 from deep_agent.core.logging import configure_logging
 from deep_agent.db.reference_integrity import ReferenceConflict
@@ -60,10 +60,16 @@ app.include_router(api_router)
 
 
 @app.middleware("http")
-async def disable_console_cache(request: Request, call_next):
+async def prevent_static_error_cache(request: Request, call_next):
+    # Mounted applications may update root_path while dispatching the request.
+    # Classify it against the service prefix before invoking StaticFiles.
+    path = request.scope["path"]
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    if root_path and path.startswith(root_path + "/"):
+        path = path[len(root_path):]
+    is_static = path in ("/console", "/vendor") or path.startswith(("/console/", "/vendor/"))
     response = await call_next(request)
-    path = request.url.path
-    if path == "/console" or path.startswith("/console/"):
+    if is_static and response.status_code not in (200, 304):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -179,9 +185,9 @@ async def console_trailing_slash_redirect() -> RedirectResponse:
 _console_dir = CONSOLE_ROOT
 _vendor_dir = CONSOLE_ROOT / "vendor"
 if (_console_dir / "index.html").is_file():
-    app.mount("/console", StaticFiles(directory=str(_console_dir), html=True), name="console")
+    app.mount("/console", ConsoleStaticFiles(directory=str(_console_dir), html=True), name="console")
 if _vendor_dir.is_dir():
-    app.mount("/vendor", StaticFiles(directory=str(_vendor_dir)), name="vendor")
+    app.mount("/vendor", ConsoleStaticFiles(directory=str(_vendor_dir)), name="vendor")
 
 
 if __name__ == "__main__":

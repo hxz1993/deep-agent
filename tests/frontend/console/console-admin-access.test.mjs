@@ -14,13 +14,14 @@ const indexHtml = await readFile(
 test("Console先验证平台身份和企业管理员权限再加载管理页面", () => {
   const identityIndex = mainSource.indexOf("await refreshIdentity()");
   const accessIndex = mainSource.indexOf("await window.DeepAgentConsoleAPI.adminAccess()");
-  const diagnosticsIndex = mainSource.indexOf("initDiagnostics();");
-  const workspaceIndex = mainSource.indexOf("await initWorkspace()");
+  const showPageIndex = mainSource.lastIndexOf("await showPage(pageFromLocation(), { updateHash: true });");
+  const loadPageIndex = mainSource.indexOf("await loadPage(next)");
 
   assert.ok(identityIndex >= 0);
   assert.ok(accessIndex > identityIndex);
-  assert.ok(diagnosticsIndex > accessIndex);
-  assert.ok(workspaceIndex > accessIndex);
+  assert.ok(showPageIndex > accessIndex);
+  assert.ok(mainSource.indexOf("if (!consoleAllowed) return false;") < loadPageIndex);
+  assert.doesNotMatch(mainSource, /^import .*from "\.\/(?:workspace|configuration|diagnostics-center)\.js/m);
   assert.match(mainSource, /!access\?\.allowed \|\| !access\?\.roles\?\.includes\("enterprise_admin"\)/);
 });
 
@@ -32,7 +33,7 @@ test("无权限、401和503都使用整页门禁且提前结束初始化", () =>
 });
 
 test("直接Hash访问配置页时未授权不会加载配置数据", () => {
-  assert.match(mainSource, /if \(consoleAllowed && next === "configuration"\)/);
+  assert.match(mainSource, /if \(!consoleAllowed\) return false;[\s\S]*await loadPage\(next\)/);
   assert.match(mainSource, /const page = location\.hash/);
   assert.match(mainSource, /await showPage\(pageFromLocation\(\), \{ updateHash: true \}\);\s*return;/);
 });

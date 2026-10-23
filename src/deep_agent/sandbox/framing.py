@@ -6,7 +6,7 @@ import json
 import struct
 from typing import Any
 
-MAX_FRAME_BYTES = 4 * 1024 * 1024
+MAX_FRAME_BYTES = 64 * 1024 * 1024
 _HEADER_SIZE = 4
 
 

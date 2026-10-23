@@ -62,6 +62,19 @@ def make_package(**kwargs):
 
 
 class AgentPackageArchiveTests(unittest.TestCase):
+    def test_legacy_ptc_alias_normalizes_and_only_alias_duplicates_collapse(self):
+        for capabilities in (
+            ['builtin:code-mode'],
+            ['builtin:code-mode', 'builtin:ptc'],
+            ['builtin:ptc', 'builtin:code-mode'],
+        ):
+            with self.subTest(capabilities=capabilities):
+                package = make_package(agent_changes={'capabilities': capabilities})
+                self.assertEqual(package.agent.capabilities, ['builtin:ptc'])
+        for capabilities in (['builtin:general', 'builtin:general'], ['builtin:ptc', 'builtin:ptc']):
+            with self.subTest(capabilities=capabilities), self.assertRaises(ValueError):
+                make_package(agent_changes={'capabilities': capabilities})
+
     def test_prompt_version_only_reads_explicit_title_version(self):
         self.assertEqual(archive.prompt_version('# 电子表格智能助手 · deeptable-unified-agent-v85\n正文'), 'V85')
         self.assertEqual(archive.prompt_version('# DeepCube 助手系统提示词 V34\n正文'), 'V34')
@@ -255,6 +268,31 @@ class AgentPackageServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runtime.state('example-skill').status, RUNTIME_READY)
         self.assertTrue((self.runtime.root / 'example-skill/scripts/run.py').is_file())
         self.assertEqual(len(await self.rows(UiToolDefinition)), 1)
+
+    async def test_legacy_ptc_alias_preview_install_and_export_preserve_capability(self):
+        from deep_agent.capabilities import build_registry
+
+        self.ctx.registry = build_registry()
+        package = make_package(agent_changes={'capabilities': ['builtin:code-mode', 'builtin:general']})
+        preview = await preview_package(self.ctx, package)
+        self.assertEqual({row['code'] for row in preview['resources']}, {'builtin:ptc', 'builtin:general'})
+        self.assertEqual({row['status'] for row in preview['resources']}, {'reuse'})
+        installed = await install_package(self.ctx, package, InstallOptions(
+            digest=preview['digest'], name='Legacy PTC installed', model_id=None,
+        ), {})
+        self.assertEqual(set(installed.capabilities), {'builtin:ptc', 'builtin:general'})
+        exported = archive.parse_package(await export_package(self.ctx, installed.id, {}))
+        self.assertEqual(set(exported.agent.capabilities), {'builtin:ptc', 'builtin:general'})
+
+        # Already-persisted legacy references export canonically without rewriting
+        # the source row or introducing a second compatibility representation.
+        async with self.stores.agent._write() as db:
+            row = await db.get(Agent, installed.id)
+            row.capabilities = ['builtin:code-mode', 'builtin:general']
+        raw = await export_package(self.ctx, installed.id, {})
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            self.assertEqual(json.loads(z.read('agent.json'))['capabilities'], ['builtin:ptc', 'builtin:general'])
+        self.assertEqual((await self.rows(Agent))[0].capabilities, ['builtin:code-mode', 'builtin:general'])
 
     async def test_empty_ui_package_exports_and_reinstalls_without_losing_metadata(self):
         files = package_files(resources=True)

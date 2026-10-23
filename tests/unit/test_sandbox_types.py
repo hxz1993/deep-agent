@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from deep_agent.sandbox.backend import PythonExecutionBackend
@@ -18,6 +19,24 @@ from deep_agent.sandbox.types import (
 
 
 class SandboxTypesTests(unittest.TestCase):
+    def test_expression_and_script_accept_sixteen_mib_json_with_utf8_boundary(self) -> None:
+        # The cap applies to the serialized UTF-8 object, including JSON syntax.
+        cap = 16 * 1024 * 1024
+        overhead = len(json.dumps({"payload": ""}, separators=(",", ":")).encode())
+        value = "汉" + "x" * (cap - overhead - len("汉".encode()))
+        for mode in ("expression", "script"):
+            with self.subTest(mode=mode):
+                request = ExecuteRequest(
+                    request_id=f"large-{mode}", mode=mode, code="pass",
+                    inputs={"payload": value},
+                )
+                self.assertEqual(request.inputs["payload"], value)
+                with self.assertRaisesRegex(ValueError, "inputs JSON exceeds"):
+                    ExecuteRequest(
+                        request_id=f"oversized-{mode}", mode=mode, code="pass",
+                        inputs={"payload": value + "x"},
+                    )
+
     def test_execute_request_rejects_oversized_code(self) -> None:
         with self.assertRaises(ValueError):
             ExecuteRequest(

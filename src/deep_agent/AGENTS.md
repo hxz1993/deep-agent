@@ -315,15 +315,29 @@ URL 与 Builtin MCP 的运行态不同：URL MCP 在管理员检测时保存 Too
 v0.6.2起的 Hybrid Code Mode 实现位于 `ptc/`；v0.6.3增加可信返回Schema、
 总量受限的嵌套审计和更明确的SDK作用域说明。产品配置单位仍是
 `builtin:ptc` ToolPackage，运行时由 `HybridCodeMode` Capability 在最外层包装
-ToolSearch。只有已授权 MCP Toolset 会被标记为 Hybrid；已披露工具保留原生 Schema，
-又可在 Monty 中组合调用。`load_file_data` 是 code-only 文件原语，不出现在普通工具列表；
-其 Run Token、Base64 和大中间结果必须在进入 Event、History、SSE、轨迹、检索或日志前脱敏。
+ToolSearch。v0.14.7实现：已授权且已披露MCP，以及当前已装配的
+`execute_python`、`execute_skill_script`、`web_search`、`web_fetch`、`export_file_to_download_center`
+可同时原生调用和在Monty中编排。`ptc/builtin.py`只在受信装配位置为准确名称添加
+`deepagent_ptc_builtin`标记，MCP Wrapper剥离外部伪造标记；不按全局同名工具扩权。
+原工具参数校验、prepare、授权及分发保持；新增builtin返回不推断复杂类型，MCP可信Schema白名单不变。
+`load_file_data`仍为code-only原语；不新增`save_file_data`，不接入`read_file`、`parse_document`、
+`web_image_view`、UI/Deferred、发现、计划、历史或任意Shell。Run Token、Base64和全量内部返回不进入历史审计。
+
+当前通过`ptc/async_runtime.py`使用已安装Monty的官方`AsyncMontySession.feed_run`，
+复用Harness的ToolManager、调用预算、类型签名和返回转换；不实现第二套工具分发。
+`ptc/limits.py`固定256MiB Monty内存、32MiB单个内部返回、120秒同Run Session执行预算、
+每段120秒总截止（含工具等待）、每段100次内部调用。超时/取消清理worker并取消、等待宿主回调，
+正常同Run复用REPL；restart清变量，不回滚已发生副作用。无新增配置、依赖、数据库结构或协议类型。
+可信Python与下载中心导出成功产物汇总到外层既有`generated_files` metadata，后续失败或取消仍保留；
+仅引用授权成果，不把内部参数/结果复制为完整嵌套消息。详见
+[PTC当前设计](../../docs/design/20-code-mode/ptc-data-transfer-design.md)，完整验收另列报告。
 
 v0.6.5起的公开Web实现位于`web/`。`builtin:web`提供`web_search/web_fetch`，v0.6.6另向
 图片输入模型注入外层普通工具`web_image_view`；该工具返回Pydantic AI原生`ImageUrl`且不进入Monty。
 `web_fetch`的HTML薄适配只负责过滤脚本/样式并在原位置保留绝对图片URL，不自动发送图片。全局唯一
-`global_settings.web_search`选择独立搜索Provider，但不能替代Agent显式授权。v0.6.7起
-Web工具不进入PTC。不得因此开放PTC内部Socket、平台凭据、任意Header或
+`global_settings.web_search`选择独立搜索Provider，但不能替代Agent显式授权。
+v0.14.7实现：已装配Search/Fetch同时进入PTC，Image View仍仅外层。
+不得因此开放PTC内部Socket、平台凭据、任意Header或
 Internal HTTP。显式HTTP CONNECT代理下，`web/proxy_compat.py`只修正fake-IP
 公共解析与TLS SNI传递，并覆盖Pydantic AI组装下一次请求时的`ImageUrl(force_download=true)`延迟
 下载；SSRF地址校验、固定IP、重定向复检和正文解析仍由Pydantic AI负责。完整边界见
@@ -331,7 +345,8 @@ Internal HTTP。显式HTTP CONNECT代理下，`web/proxy_compat.py`只修正fake
 
 Web图片在当前`agent.run()`内部保持原生视觉结果；写入Event Store时只允许URL、MIME、
 `force_download`和无敏感审计，下一次独立Run必须投影成轻量URL说明，禁止重复携带旧图片或Base64。
-直接`web_fetch`二进制图片仍走原有`BinaryContent`与ToolOutputLimits，本版本不得修改大工具治理。
+原生`web_fetch`二进制图片仍走原有`BinaryContent`与ToolOutputLimits；PTC仅绕过面向模型的
+结果包装，不改变图片来源、下载安全与原生图片类型。
 
 流式Run在模型或工具链最终异常时，必须从Pydantic AI `AgentRunEvents`实时句柄保存已经产生的
 `new_messages/all_messages/usage`；仅保存尚未入库的真实内容并标记必要失败状态，已完成内容不得回滚。
@@ -514,7 +529,8 @@ Revision转换，并必须原样保留Agent、Provider、Model等业务主键。
 ### 内置工具包
 
 `builtin:general` 只提供当前时间；`builtin:sandbox` 提供 Python 计算和条件式 Skill 脚本执行；
-`builtin:ptc`仅在Agent显式关联时注入`run_code`，用于编排当前已授权MCP；旧
+`builtin:ptc`仅在Agent显式关联时注入`run_code`。v0.14.7实现的范围为
+已披露MCP与当前已装配Python/Skill、Search/Fetch和下载中心导出，均保留原生入口；旧
 `builtin:code-mode`只作运行和配置导入兼容。
 这些包都只在Agent的`capabilities`显式关联后进入Run。每个包严格包装一个 Toolset。内置包由代码随版本发布，
 不在数据库注册；配置中心只读展示，Agent 仍按整包选择。
@@ -621,10 +637,15 @@ Unicode字符位置，部分项不向后跳号、不加省略标记。不能用r
 ### 大工具结果
 
 正文大小治理前不得使用审计摘要替换正式结果：PTC最终返回使用完整递归脱敏投影，
-仅nested audit保留4K字符串/32项/4层和32,768字符总预览限制。Web Fetch取消50K字符提前截断，
+`ptc_diagnostics`只保留有界审计，单步输入/输出各8KiB、字符串2KiB、总JSON128KiB。
+Web Fetch取消50K字符提前截断，
 保留5MiB下载安全上限，完整正文交给以下Token治理与回读，不创建第二套网页Store。
 XLSX单元格不按4K字符截断；全工作簿解析正文最多8,000,000字符，超出明确失败，
 防止sharedStrings重复展开；sheet/header目录预览受8K字符限制，完整首行仍按游标读取；当前批次正文引用的格式字典计入完整Token预算，不重复返回整表定义。合并范围保留本批匹配总数，最多预览128项并明确truncated，不能让辅助信息阻断正文读取。
+
+v0.14.7实现：内部调用由当前执行对象的真实父子关联识别，不按Call ID前缀判断；
+PTC内所有开放函数返回统一绕过给模型使用的Token外置、截断与分页包装，按32MiB硬限完整传给程序。
+普通调用及外层`run_code`继续执行下述保护；数据源正式分页、Web安全限制和原工具输入输出限制不变。
 
 普通Function、MCP、Sandbox和MCP Resource工具的返回在进入模型历史前经过Harness
 `ToolOutputLimits`。阈值为模型配置窗口减去最大输出后的20%，并限制在4K～48K Token；没有有效窗口时使用
@@ -660,6 +681,10 @@ single-flight。Spill失败时Event保存完整`inline_fallback`并标记失败�
 `publish_path()`登记的零到多个产物只在成功执行后上传FileStore，模型与Event只获得文件引用。
 两者都通过当前`SubprocessBackend`启动全新的`.venv-sandbox`Python子进程；结束后销毁进程和
 临时目录，不跨调用保留状态。脚本工具的额外权限来自Agent选择的Skill。
+v0.14.7实现：两者紧凑UTF-8 JSON inputs共用16MiB上限，进程通信帧为64MiB；
+代码64KiB、正式结果512KiB、日志、文件、超时和内存限制不因此增加。
+Skill工具仅增加PTC调用入口，不增加会话文件输入或发布参数；JSON计算结果可经原inputs传给固定脚本。
+Python原有files/input_path/publish_path继续使用，不表示已实现共享工作区或任意宿主目录访问。
 
 沙箱中文绘图使用随源码发布的完整 Noto Sans CJK SC 2.004 字体及 OFL 许可证。
 `plotting.py` 仅在首次导入 Matplotlib 时注册并设置 Agg/默认中文 sans-serif，

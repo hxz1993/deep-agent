@@ -223,7 +223,7 @@ def _looks_like_platform_error_json(data: bytes) -> bool:
         return False
     try:
         payload = json.loads(data[: min(len(data), 4096)])
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return False
     return isinstance(payload, dict) and payload.get("status") is False
 

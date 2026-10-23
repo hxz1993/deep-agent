@@ -78,3 +78,4 @@ class AgentDeps:
     document_cache: "DocumentRunCache | None" = field(default=None, repr=False)
     code_mode_file_payloads: dict[str, Any] = field(default_factory=dict, repr=False)
     ptc_diagnostics: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
+    ptc_generated_files: dict[str, list[dict[str, Any]]] = field(default_factory=dict, repr=False)

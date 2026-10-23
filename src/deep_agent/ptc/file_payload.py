@@ -605,6 +605,8 @@ class FilePayloadResolvingToolset(WrapperToolset[AgentDeps]):
             )
 
             metadata = dict(tool.tool_def.metadata or {})
+            # Upstream MCP metadata cannot identify a trusted host builtin.
+            metadata.pop("deepagent_ptc_builtin", None)
             metadata[CODE_MODE_METADATA_KEY] = CODE_MODE_HYBRID
             metadata[CODE_MODE_ORIGINAL_NAME_KEY] = name
             original_name = mcp_original_tool_name(name, self.server_names)

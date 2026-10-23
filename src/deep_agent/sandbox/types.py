@@ -31,7 +31,7 @@ StateScope = Literal["request"]
 ExecuteMode = Literal["expression", "script"]
 
 MAX_CODE_BYTES = 64 * 1024
-MAX_INPUTS_JSON_BYTES = 2 * 1024 * 1024
+MAX_INPUTS_JSON_BYTES = 16 * 1024 * 1024
 MAX_SCRIPT_RESOURCE_FILES = 16
 # FileStore attachments and generated files share the product's default 20 MiB
 # per-file ceiling. The tool layer additionally applies the current runtime

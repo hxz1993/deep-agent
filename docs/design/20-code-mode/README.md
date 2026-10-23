@@ -1,20 +1,33 @@
 # 20 · PTC 程序编排
 
-> 当前状态：DeepAgent v0.6.7 已实现；数据库结构为 Alembic 001生产基线，PTC本身不增加表或字段。
+> 2026-10-24：v0.14.7增量实现。依赖不变，数据库保持013；实现状态不代替回归报告。
 
-PTC是显式Agent能力包`builtin:ptc`，Console展示名为“程序编排”。启用后，模型获得Harness官方
-`run_code(code, restart=false)`，并可在受限 Monty Python 子集中编排该 Agent 已授权且当前已经
-披露的 MCP 工具。MCP 原生 Tool Schema 同时保留，因此一次简单调用仍可直接使用普通工具。
-旧编码`builtin:code-mode`只作为运行与导入兼容入口；新保存和导出统一使用`builtin:ptc`。
+PTC是需要显式关联、默认关闭的Agent能力包`builtin:ptc`，Console名称为“程序编排”。
+模型使用`run_code(code, restart=false)`在Monty Python子集中编排工具；旧编码`builtin:code-mode`
+仅作兼容，新保存和导出使用`builtin:ptc`。
 
-文件原样中转使用PTC专属`load_file_data`：来源可以是当前会话已授权File ID，也可以是公开
-HTTP(S) URL。宿主只向Monty返回当前Run内的不透明载荷，真实Base64仅在MCP调用边界延迟生成，
-不进入模型、Event、History、SSE、搜索、轨迹或日志。需要解析、转换或生成新文件时，应改用
-`execute_python`及`deepagent_files.publish_path()`，再把生成的File ID交给PTC。
+当前实现的工具范围：
 
-PTC目录只包含已授权MCP与`load_file_data`，不包含Web Search、Web Fetch、Web Image View或
-Python沙箱。这条边界避免同一网络能力出现多套含义相近的代码入口。
+- 已授权、已披露MCP保留普通Schema与PTC双入口。
+- 当前已装配的`execute_python`、`execute_skill_script`、`web_search`、`web_fetch`和
+  `export_file_to_download_center`增加PTC入口，保留原生调用、参数校验和权限过滤。
+- `load_file_data`仍仅在PTC中使用，支持授权File ID与公开HTTP(S)文件原样中转。
+- 不接入`read_file`、`parse_document`、`web_image_view`、UI/Deferred、发现、计划、历史、
+  Resource或任意Shell；不增加`save_file_data`、Skill参数、共享工作区或历史结果引用机制。
 
-- [`hybrid-code-mode-design.md`](hybrid-code-mode-design.md)：架构、权限、文件变量、审计和失败边界。
-- [`monty-diagnostics-design.md`](monty-diagnostics-design.md)：2026-09-24 C12 执行诊断方案，待实现；增强现有 PTC 详情，数据库继续 007，不增加表或列。
-- [`../../guides/code-mode.md`](../../guides/code-mode.md)：配置、选择策略、示例和排障。
+内部工具返回完整变量，绕过面向模型的Token外置、截断和分页包装；普通工具及外层`run_code`
+继续使用原有保护。数据源正式分页和原工具限制不变，不自动翻页，也不把已有预览当作全量。
+JSON通过现有`inputs`直接交给Python或Skill；Python仍使用原`files/input_path/publish_path`。
+可信Python/导出产物的安全引用汇总到外层既有`generated_files` metadata，后续失败或取消保留
+已完成成果，不保存全量嵌套参数和结果。UI、SSE、History类型与安装格式不变。
+
+当前固定限制：Monty内存256MiB、单个内部返回32MiB、同Run REPL Session执行预算120秒、
+每段总截止120秒（包含工具等待）、每段100次内部调用。Python/Skill inputs为16MiB紧凑UTF-8 JSON，
+通信帧64MiB；其他沙箱限制不变，不新增配置项。官方AsyncMonty提供异步worker桥，继续复用SDK
+工具管理、参数校验、类型签名、预算和返回转换。
+
+- [`ptc-data-transfer-design.md`](ptc-data-transfer-design.md)：本轮最终范围、两条链路、文件授权与验收门禁。
+- [`hybrid-code-mode-design.md`](hybrid-code-mode-design.md)：当前架构、权限、原语和失败边界。
+- [`monty-diagnostics-design.md`](monty-diagnostics-design.md)：历史诊断设计；本轮沿用现有Calls UI，不扩大界面改造。
+- [`../../guides/code-mode.md`](../../guides/code-mode.md)：配置、使用示例、限额与排障。
+- [`../07-python-sandbox/session-sandbox-design.md`](../07-python-sandbox/session-sandbox-design.md)：独立的后续工作区课题，不属于本轮已实现能力。

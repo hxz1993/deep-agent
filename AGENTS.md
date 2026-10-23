@@ -31,7 +31,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；当前`0.14.6`，数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；`0.14.7`（PTC工具扩展与输入传输调整），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -247,12 +247,18 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
   不建Plan表。同一Turn的Deferred新Run从最近成功快照恢复InMemoryPlanStore，新用户Turn从空计划开始。
 - v0.6.1将运行基线固定升级到`pydantic-ai-slim 2.35.1`与`pydantic-ai-harness 0.26.0`。OpenAI 3.5、aiohttp 3.14、deepfos SDK 1.1.97和Google Provider的`httpx2`客户端必须联合升级。
 - v0.6.7将该能力的产品编码规范化为`builtin:ptc`，Console名称为“程序编排”，模型协议仍为Harness
-  `run_code`；旧`builtin:code-mode`只作运行、读取和导入兼容。PTC只编排已授权且已披露MCP，
-  不可调用Sandbox、Web、History、Planning、UI/HITL、Deferred/Approval、导出、Resource或自身等
-  内部工具。Code-only`load_file_data`可把当前会话授权File ID或公开HTTP(S)文件转为Run内不透明
-  载荷，真实Base64只在MCP调用边界生成。
+  `run_code`；旧`builtin:code-mode`只作运行、读取和导入兼容。v0.14.7实现：
+  已授权且已披露MCP、当前已装配的`execute_python`、`execute_skill_script`、`web_search`、
+  `web_fetch`和`export_file_to_download_center`保留普通与PTC双入口；不扩大Agent权限。
+  `read_file`、`parse_document`、`web_image_view`、History、Planning、UI/Deferred、发现和Resource仍在外层。
+  Code-only`load_file_data`继续把授权File ID或公开HTTP(S)文件转为Run内不透明载荷，真实Base64只在MCP边界生成。
+  内部返回绕过模型Token外置/截断包装，普通调用与外层`run_code`保持原保护；固定256MiB内存、32MiB单返回、
+  120秒Session执行预算与每段120秒总截止、每段100次调用。Python/Skill JSON inputs为16MiB、通信帧64MiB，
+  其他沙箱限制及Skill原参数不变。复用官方AsyncMonty与SDK工具桥；可信成果引用沿外层`generated_files`
+  metadata保存，失败/取消不丢已完成成果。无`save_file_data`、共享工作区或新事件类型；详情见
+  [PTC设计](docs/design/20-code-mode/ptc-data-transfer-design.md)。
 - v0.6.3只让证据白名单中的稳定MCP返回Schema进入Monty类型信息，未知Schema退化为通用JSON；嵌套审计有总大小上限。DeepSeek v4 Vision当前轮图片按像素尺寸估算上下文Token，其他路由保守回退。Console用`CODE`标签和Code页签展示`run_code`，附件与Context Reference在输入详情中分区。
-- v0.6.5新增默认不关联的`builtin:web`，固定包含`web_search`和`web_fetch`。Search全局配置明确选择当前模型或一个固定Provider，失败不隐式降级；Fetch复用Pydantic AI SSRF-safe实现并禁止私网、云元数据和URL凭据。v0.6.7起Web工具不再进入PTC；PTC的URL原样中转只经`load_file_data`完成。`global_settings`已进入当前Alembic`001`生产基线和配置备份。
+- v0.6.5新增默认不关联的`builtin:web`，固定包含`web_search`和`web_fetch`。Search全局配置明确选择当前模型或一个固定Provider，失败不隐式降级；Fetch复用Pydantic AI SSRF-safe实现并禁止私网、云元数据和URL凭据。v0.6.7曾将Web工具移出PTC；v0.14.7实现Search/Fetch双入口，Image View仍在外层。文件URL原样中转继续使用`load_file_data`。`global_settings`已进入当前Alembic`001`生产基线和配置备份。
 - v0.6.6为图片输入模型增加外层普通工具`web_image_view`，不进入Monty。`web_fetch`在原位置保留
   安全图片Markdown引用，但不自动读图；同一Run使用原生`ImageUrl`，Event/History/SSE/轨迹只保存
   URL、MIME和下载模式，Console按URL预览。不得把图片引用加入ToolOutputLimits排除名单，也不得保存Base64。

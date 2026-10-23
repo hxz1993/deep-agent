@@ -131,6 +131,14 @@ def _generated_file_refs(metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
     return artifacts
 
 
+def _with_generated_file_refs(value: Any, refs: list[dict[str, Any]]) -> Any:
+    if isinstance(value, Mapping):
+        return {**value, "files": refs}
+    if isinstance(value, list) and all(item in value for item in refs):
+        return value
+    return {"result": value, "files": refs}
+
+
 def _generated_file_artifacts(metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
     artifacts: list[dict[str, Any]] = []
     for file_ref in _generated_file_refs(metadata):
@@ -448,6 +456,31 @@ class DeepAgentToolOutputLimits(ToolOutputLimits[AgentDeps]):
         args: dict[str, Any],
         result: Any,
     ) -> Any:
+        from deep_agent.ptc.limits import nested_collector
+
+        # A registered CodeMode child returns to the program, not to the model.
+        # Native calls and the outer run_code return retain the usual protection.
+        if nested_collector(ctx, call) is not None:
+            return result
+        files_prepared = False
+        if (
+            call.tool_name == "run_code"
+            and call.tool_call_id in getattr(ctx.deps, "ptc_diagnostics", {})
+            and isinstance(result, ToolReturn)
+            and isinstance(result.metadata, Mapping)
+            and result.metadata.get("code_mode") is True
+        ):
+            # An outer PTC result can aggregate many completed tools' artifacts.
+            # Count those model-visible references before reducing the result;
+            # keep the complete authorized list in metadata, even after a spill.
+            refs = _generated_file_refs(result.metadata)
+            if refs:
+                result = ToolReturn(
+                    return_value=_with_generated_file_refs(result.return_value, refs),
+                    content=result.content,
+                    metadata=result.metadata,
+                )
+                files_prepared = True
         reduced = await super().after_tool_execute(
             ctx,
             call=call,
@@ -466,17 +499,8 @@ class DeepAgentToolOutputLimits(ToolOutputLimits[AgentDeps]):
             if generated_files:
                 reduced_metadata["generated_files"] = generated_files
                 return_value = reduced.return_value
-                if isinstance(return_value, Mapping):
-                    return_value = dict(return_value)
-                    return_value["files"] = generated_files
-                elif not (
-                    isinstance(return_value, list)
-                    and all(item in return_value for item in generated_files)
-                ):
-                    return_value = {
-                        "result": return_value,
-                        "files": generated_files,
-                    }
+                if not files_prepared:
+                    return_value = _with_generated_file_refs(return_value, generated_files)
                 reduced = ToolReturn(
                     return_value=return_value,
                     content=reduced.content,

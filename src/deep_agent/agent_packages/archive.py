@@ -14,6 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolPackageCreate
 from deep_agent.schemas.agent import AgentOutputConfig
 from deep_agent.skills.package import parse_skill_zip
@@ -96,6 +97,13 @@ class PackageAgent(ExtensiblePackageModel):
         if len(set(values)) != len(values) or any(not x or len(x) > 191 for x in values):
             raise ValueError('resource codes must be unique and non-empty')
         return values
+
+    @field_validator('capabilities')
+    @classmethod
+    def canonical_capabilities(cls, values):
+        # Validate raw duplicates first; only aliases of the same capability
+        # collapse. Use the same boundary for package input and export models.
+        return canonical_tool_package_codes(values)
 
 
 class PackageUiTool(UiToolCreate):

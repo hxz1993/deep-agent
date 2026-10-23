@@ -1474,7 +1474,11 @@ class AgentRunner:
                 else {}
             )
             ptc_return_metadata = {
-                call_id: {"code_mode": True, "ptc_diagnostics": diagnostic}
+                call_id: {
+                    "code_mode": True, "ptc_diagnostics": diagnostic,
+                    **({"generated_files": deps.ptc_generated_files[call_id]}
+                       if deps.ptc_generated_files.get(call_id) else {}),
+                }
                 for call_id, diagnostic in deps.ptc_diagnostics.items()
             }
             to_append = repair_unprocessed_tool_calls(to_append, **repair_kwargs, tool_return_metadata=ptc_return_metadata, diagnostic_fields={

@@ -15,6 +15,7 @@ from pydantic_ai_harness.code_mode import CodeModeToolset
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.ptc.diagnostics import Collector, current_collector
+from deep_agent.ptc.limits import PTC_WALL_TIMEOUT_SECONDS
 from deep_agent.ptc.file_payload import (
     CODE_MODE_CODE_ONLY,
     CODE_MODE_HYBRID,
@@ -68,11 +69,27 @@ DeepAgent PTC rules:
   next tool. Never inspect, measure, print, or return the `content` value.
 - Return only the compact result needed for the task. Do not print file payloads,
   Base64, or large intermediate values.
+- Authorized MCP, web_search, web_fetch, execute_python, execute_skill_script and
+  export_file_to_download_center retain their ordinary native entry points. Only
+  functions actually listed in this catalog can also be used here. Call Python
+  with code and JSON inputs; call a Skill with its exact authorized script path.
+  No save_file_data, read_file, parse_document, UI confirmation or Shell function
+  is added to this catalog. Python executions still have separate temporary dirs.
+- Internal returns go to the program without model-display pagination, up to
+  32 MiB per return. Tool/source limits and incomplete-result markers still apply.
+  Python/Skill inputs allow 16 MiB JSON. Monty memory is 256 MiB, its shared session
+  execution allowance is 120 seconds, and each run_code also has a 120-second total
+  deadline including tool waits and at most 100 calls. Reduce/aggregate over-limit
+  data; do not assume the platform automatically pages the source or saves it.
+- A Skill may return complete HTML/text for export_file_to_download_center with
+  source.type='content'. A Python-generated authorized file may use 'platform_file'.
+  Publish final deliverables only; return their genuine receipt, not the document.
 - Execute side-effecting tools sequentially. After an uncertain failure, inspect the
   target state instead of blindly repeating the write. Never retry the same media send
   with the same uploaded id and unchanged arguments. If an image upload succeeds but
-  the destination rejects a nonstandard format such as WebP, stop the PTC chain and use
-  the outer Python sandbox to convert it to PNG before one new relay attempt.
+  the destination rejects a nonstandard format such as WebP, convert it with an
+  available execute_python tool before one new relay attempt; otherwise use its
+  ordinary native entry point. Do not repeat the rejected upload/send unchanged.
 - `run_code` cannot directly access host files, environment variables, network sockets,
   Shell, pip, or third-party packages. It can call only catalog functions; public-file
   relay is available exclusively through `load_file_data(url=...)`.
@@ -158,6 +175,26 @@ def _scrub_error_text(value: str, *, sensitive_values: frozenset[str]) -> str:
 
 class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
     """Official CodeMode plus native MCP visibility and private diagnostics."""
+
+    async def __aexit__(self, *args):
+        from deep_agent.ptc.async_runtime import close_runtime
+        try:
+            await close_runtime(self)
+        finally:
+            await super().__aexit__(*args)
+
+    @staticmethod
+    def _return_metadata(ctx, collector):
+        diagnostic = collector.safe_document()
+        ctx.deps.ptc_diagnostics[collector.parent_id] = diagnostic
+        metadata = {"code_mode": True, "ptc_diagnostics": diagnostic}
+        if collector.generated_files:
+            refs = list(collector.generated_files.values())
+            ctx.deps.ptc_generated_files[collector.parent_id] = refs
+            metadata["generated_files"] = refs
+        else:
+            ctx.deps.ptc_generated_files.pop(collector.parent_id, None)
+        return metadata
 
     async def get_tools(
         self,
@@ -291,13 +328,17 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         )
         token = current_collector.set(collector)
         try:
-            result = await super().call_tool(name, tool_args, ctx, tool)
-        except ModelRetry as exc:
+            if tool_args.get("restart"):
+                from deep_agent.ptc.async_runtime import reset_runtime
+                await reset_runtime(self)
+            async with asyncio.timeout(PTC_WALL_TIMEOUT_SECONDS):
+                result = await super().call_tool(name, tool_args, ctx, tool)
+        except (ModelRetry, TimeoutError) as exc:
             collector.finish("failed")
-            diagnostic = collector.safe_document()
-            ctx.deps.ptc_diagnostics[collector.parent_id] = diagnostic
+            metadata = self._return_metadata(ctx, collector)
             safe_message = _scrub_error_text(
-                str(exc),
+                (f"PTC exceeded its {PTC_WALL_TIMEOUT_SECONDS}-second total time limit"
+                 if isinstance(exc, TimeoutError) else str(exc)),
                 sensitive_values=secrets,
             )
             # Preserve a real failed ToolReturnPart (including bounded audit) rather
@@ -317,27 +358,23 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                     ),
                 },
                 outcome="failed",
-                metadata={
-                    "code_mode": True,
-                    "ptc_diagnostics": diagnostic,
-                },
+                metadata=metadata,
             )) from exc
         except asyncio.CancelledError:
             collector.finish("interrupted")
-            ctx.deps.ptc_diagnostics[collector.parent_id] = collector.safe_document()
+            self._return_metadata(ctx, collector)
             raise
         except Exception:
             collector.finish("failed")
-            ctx.deps.ptc_diagnostics[collector.parent_id] = collector.safe_document()
+            self._return_metadata(ctx, collector)
             raise
         else:
             collector.finish("completed")
-            diagnostic = collector.safe_document()
-            ctx.deps.ptc_diagnostics[collector.parent_id] = diagnostic
+            metadata = self._return_metadata(ctx, collector)
             if isinstance(result, ToolReturn):
                 return ToolReturn(
                     return_value=safe_result_value(result.return_value, sensitive_values=secrets),
-                    metadata={"code_mode": True, "ptc_diagnostics": diagnostic},
+                    metadata=metadata,
                 )
             return safe_result_value(result, sensitive_values=secrets)
         finally:
@@ -347,4 +384,5 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         collector = current_collector.get()
         if collector is not None:
             collector.execution = execution
-        return await super()._execute_code(code, ctx, run_code_tool, execution)
+        from deep_agent.ptc.async_runtime import execute_code
+        return await execute_code(self, code, ctx, run_code_tool, execution)

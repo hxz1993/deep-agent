@@ -158,6 +158,7 @@ class Collector:
     final_status: str = "running"
     ended: float | None = None
     capture_error: bool = False
+    generated_files: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def add_sensitive_text(self, value: str) -> None:
         if value:
@@ -170,8 +171,9 @@ class Collector:
             return
         try:
             step = self.steps.setdefault(call_id, Step(call_id, tool_name))
-            step.started = time.perf_counter()
-            step.input = summary(args, sensitive_values=self.sensitive_values)
+            if step.started is None:
+                step.started = time.perf_counter()
+                step.input = summary(args, sensitive_values=self.sensitive_values)
         except Exception:
             self.capture_error = True
 

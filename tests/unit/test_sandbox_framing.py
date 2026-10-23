@@ -29,6 +29,12 @@ class _MockStreamWriter:
 
 
 class SandboxFramingTests(unittest.TestCase):
+    def test_json_larger_than_four_mib_round_trips_without_truncation(self) -> None:
+        payload = {"inputs": {"payload": "x" * (5 * 1024 * 1024) + "完整末尾"}}
+        frame = encode_frame(payload)
+        self.assertGreater(len(frame), 4 * 1024 * 1024)
+        self.assertEqual(read_frame(io.BytesIO(frame)), payload)
+
     def test_encode_decode_round_trip(self) -> None:
         payload = {"request_id": "call-1", "code": "print(1)", "inputs": {"x": 1}}
         frame = encode_frame(payload)
@@ -106,6 +112,22 @@ class SandboxFramingTests(unittest.TestCase):
 
 
 class SandboxFramingAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_large_json_async_writer_and_reader_preserve_unicode_tail(self) -> None:
+        payload = {"inputs": {"payload": "x" * (5 * 1024 * 1024) + "完整末尾"}}
+        writer = _MockStreamWriter()
+        await write_frame_async(writer, payload)
+        reader = asyncio.StreamReader()
+        reader.feed_data(bytes(writer.data))
+        reader.feed_eof()
+        self.assertEqual(await read_frame_async(reader), payload)
+
+    async def test_async_reader_rejects_declared_frame_above_sixty_four_mib(self) -> None:
+        reader = asyncio.StreamReader()
+        reader.feed_data(struct.pack(">I", 64 * 1024 * 1024 + 1))
+        # No body and no EOF: it must reject the length before waiting for bytes.
+        with self.assertRaisesRegex(FramingError, "exceeds maximum"):
+            await asyncio.wait_for(read_frame_async(reader), timeout=1)
+
     async def test_read_frame_async_round_trip(self) -> None:
         payload = {"request_id": "async-1", "code": "1 + 1"}
         reader = asyncio.StreamReader()

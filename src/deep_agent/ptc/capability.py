@@ -8,10 +8,71 @@ from pydantic_ai_harness import CodeMode
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.ptc.toolset import HybridCodeModeToolset
+from deep_agent.ptc.limits import (
+    PTC_BUILTIN_METADATA_KEY, check_result_size, nested_collector,
+)
 
 
 class HybridCodeMode(CodeMode[AgentDeps]):
     """Keep authorized MCP tools native while also exposing them to Monty."""
+
+    async def wrap_tool_execute(self, ctx, *, call, tool_def, args, handler):
+        collector = nested_collector(ctx, call)
+        if collector is None:
+            return await handler(args)
+        import asyncio
+        from pydantic_ai import ToolDenied
+
+        collector.begin(call.tool_call_id, call.tool_name, args)
+        try:
+            result = await handler(args)
+            self._collect_files(ctx, tool_def, result, collector)
+            check_result_size(result)
+        except asyncio.CancelledError:
+            collector.end(call.tool_call_id, "interrupted", error="CancelledError")
+            raise
+        except Exception as exc:
+            # Never persist arbitrary exception reprs or internal payloads.
+            collector.end(call.tool_call_id, "failed", error={
+                "type": type(exc).__name__, "message": str(exc)[:4096],
+            })
+            raise
+        else:
+            if isinstance(result, ToolDenied):
+                collector.end(call.tool_call_id, "denied", error=result.message)
+            else:
+                from pydantic_ai.messages import ToolReturn
+                value = result.return_value if isinstance(result, ToolReturn) else result
+                collector.end(call.tool_call_id, "completed", value)
+            return result
+
+    @staticmethod
+    def _collect_files(ctx, tool_def, result, collector):
+        # This bit is set only by our builtin assembly wrapper. MCP wrappers
+        # explicitly remove it, even if an upstream server forges metadata.
+        if (tool_def.metadata or {}).get(PTC_BUILTIN_METADATA_KEY) is not True:
+            return
+        from pydantic_ai.messages import ToolReturn
+        from deep_agent.agent.tool_output_limits import _generated_file_refs
+        from deep_agent.files.export_schema import ExportFileResult
+
+        refs = []
+        if tool_def.name == "execute_python" and isinstance(result, ToolReturn):
+            for ref in _generated_file_refs(result.metadata or {}):
+                known = ctx.deps.session_file_artifacts.get(ref["file_id"])
+                if known is not None:
+                    refs.append(dict(known))
+        elif tool_def.name == "export_file_to_download_center" and isinstance(result, ExportFileResult):
+            # The trusted tool has already authorized/uploaded/registered this
+            # exact file. Don't grant access from arbitrary MCP dictionaries.
+            ref = {
+                "file_id": result.file_id, "file_name": result.file_name,
+                "byte_size": result.byte_size, "kind": "sandbox_output",
+            }
+            ctx.deps.session_file_artifacts[result.file_id] = ref
+            refs.append(ref)
+        for ref in refs:
+            collector.generated_files[ref["file_id"]] = ref
 
     def _announce_newly_discovered(self, ctx: RunContext[AgentDeps], names: Sequence[str]) -> None:
         # Harness 0.26's local/native search hooks both route through this method.

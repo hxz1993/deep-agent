@@ -268,7 +268,7 @@ Agent选择目标Skill + builtin:sandbox
 ```
 
 请求不接受任意宿主路径、跨Skill资源、Shell脚本、依赖安装、网络配置或持久化目录。Script最大
-64 KiB，JSON inputs最大2 MiB，资源合计最大2 MiB。没有结果文件时仍返回受限stdout/stderr和
+64 KiB，JSON inputs最大16 MiB（v0.14.7起与execute_python共用），资源合计最大2 MiB。没有结果文件时仍返回受限stdout/stderr和
 退出状态；其他输出文件不保留或返回。`execute_python(code, inputs)`的模型参数和返回结构不变。
 
 `subprocess-dev`实现统一的 `expression | script`协议。`execute_python`和 `execute_skill_script`

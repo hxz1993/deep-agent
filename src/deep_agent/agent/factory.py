@@ -35,6 +35,8 @@ from deep_agent.agent.tool_discovery import (
 from deep_agent.capabilities.codes import is_ptc_selected
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
+from deep_agent.ptc.builtin import BuiltinPtcToolset
+from deep_agent.ptc.limits import PTC_EXECUTION_SECONDS, PTC_MAX_MEMORY_BYTES, PTC_MAX_TOOL_CALLS
 from deep_agent.options import OPTION
 from deep_agent.skills.instructions import SKILL_SELECTION_INSTRUCTIONS
 
@@ -202,18 +204,25 @@ def _toolsets_for_spec(
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
     toolsets: list[Any] = []
+    ptc_enabled = is_ptc_selected(spec.capabilities)
+
+    def builtin_ptc(toolset: Any, *names: str) -> Any:
+        return BuiltinPtcToolset(toolset, names=frozenset(names)) if ptc_enabled else toolset
 
     def add_package(package: ToolPackage) -> None:
         if package.code not in spec.capabilities:
             return
-        toolsets.append(package.toolset)
+        if package.code == "builtin:sandbox" and package.category == "builtin":
+            toolsets.append(builtin_ptc(package.toolset, "execute_python"))
+        else:
+            toolsets.append(package.toolset)
 
     for package in registry.selected(spec.capabilities):
         if package.code in {"builtin:web", "builtin:document"}:
             continue
         add_package(package)
     if web_toolset is not None:
-        toolsets.append(web_toolset)
+        toolsets.append(builtin_ptc(web_toolset, "web_search", "web_fetch"))
     if document_toolset is not None and "builtin:document" in spec.capabilities:
         toolsets.append(document_toolset)
     if mcp_toolsets:
@@ -238,11 +247,11 @@ def _toolsets_for_spec(
     if file_toolset is not None:
         toolsets.append(file_toolset)
     if file_export_toolset is not None:
-        toolsets.append(file_export_toolset)
+        toolsets.append(builtin_ptc(file_export_toolset, "export_file_to_download_center"))
     if skill_resource_toolset is not None:
         toolsets.append(skill_resource_toolset)
     if skill_script_toolset is not None:
-        toolsets.append(skill_script_toolset)
+        toolsets.append(builtin_ptc(skill_script_toolset, "execute_skill_script"))
     if history_toolset is not None:
         toolsets.append(history_toolset)
     if channel_toolset is not None:
@@ -336,10 +345,10 @@ def build_agent(
             HybridCodeMode(
                 tools=[],
                 dynamic_catalog=True,
-                max_tool_calls=100,
+                max_tool_calls=PTC_MAX_TOOL_CALLS,
                 resource_limits={
-                    "max_duration_secs": 30,
-                    "max_memory": 256 * 1024 * 1024,
+                    "max_duration_secs": PTC_EXECUTION_SECONDS,
+                    "max_memory": PTC_MAX_MEMORY_BYTES,
                 },
             )
         )

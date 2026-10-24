@@ -6,7 +6,8 @@ import { diagnosticTime } from "./diagnostics.js?v=20261019-release0138";
 import { diagnosticTarget, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261019-release0138";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261023-deferred-trajectory3";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261025-readonly-load2";
+import { ensureSessionViewTemplate } from "./session-view-shell.js?v=20261025-readonly-load2";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PAGE_SIZE = 50;
@@ -43,6 +44,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   const reader = createSessionReader(diagnosticRequest), contextReader = createSessionReader(diagnosticRequest), eventsReader = createSessionReader(diagnosticRequest);
   const state = { active: false, route: null, filters: {}, data: null, listTotal: null, busy: false, error: "", users: {}, agents: new Map(), channelAgents: new Set(), showUsers: false, showAgents: false };
   let detail = null, detailData = null, selectBinding = null, scrollToUsers = false, eventsLoading = false, trendObserver = null;
+  let detailMountGeneration = 0;
   let releaseColumns = () => {}, columnWidths = null, listFilters = {};
   const disconnectTrend = () => { trendObserver?.disconnect(); trendObserver = null; };
   function observeTrend() {
@@ -201,11 +203,23 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   }
   const openSession = (id, focus = {}) => navigate(diagnosticTarget("detail", focus, id));
   const drill = extra => navigate(diagnosticTarget("list", sessionDrilldown(state.filters, extra)));
-  function mountDetail(saved) {
-    detail?.destroy(); selectBinding?.dispose(); detailData = saved?.detailData || null;
-    detail = createReadonlySessionView({ root, onBack, onRefresh: () => void loadDetail(), onViewChange: view => { state.route.filters.view = view; replace(diagnosticTarget("detail", state.route.filters, state.route.id)); if (view === "trajectory") void loadEvents(); } });
-    if (detailData && (detailData.history != null || detailData.historyError)) void restoreDetail(saved);
-    else void loadDetail();
+  async function mountDetail(saved) {
+    const generation = ++detailMountGeneration, route = state.route;
+    detail?.destroy(); detail = null; selectBinding?.dispose(); detailData = saved?.detailData || null;
+    root.innerHTML = empty("正在加载会话结构…");
+    try {
+      await ensureSessionViewTemplate();
+      if (!state.active || state.route !== route || generation !== detailMountGeneration) return;
+      detail = createReadonlySessionView({ root, onBack, onRefresh: () => void loadDetail(), onViewChange: view => { state.route.filters.view = view; replace(diagnosticTarget("detail", state.route.filters, state.route.id)); if (view === "trajectory") void loadEvents(); } });
+      if (detailData && (detailData.history != null || detailData.historyError)) void restoreDetail(saved);
+      else void loadDetail();
+    } catch (error) {
+      if (state.active && state.route === route && generation === detailMountGeneration) {
+        detail?.destroy(); detail = null;
+        root.classList.remove("diagnostic-session-detail");
+        root.innerHTML = empty(error?.message || "无法加载会话结构") + button("重试", "retry-detail");
+      }
+    }
   }
   async function restoreDetail(saved) {
     const view = detail;
@@ -286,7 +300,9 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     Object.assign(state.filters, values, { offset: 0 }); void loadCurrent();
   }
   async function click(event) {
-    const target = event.target.closest("button,[data-session-id],[data-day-index]"); if (!target || !root.contains(target) || state.route?.view === "detail") return;
+    const target = event.target.closest("button,[data-session-id],[data-day-index]"); if (!target || !root.contains(target)) return;
+    if (target.dataset.sessionAction === "retry-detail" && state.active && state.route?.view === "detail" && !detail) { void mountDetail(null); return; }
+    if (state.route?.view === "detail") return;
     if (target.dataset.copySession) {
       event.stopPropagation();
       if (target.disabled) return;
@@ -416,6 +432,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   document.addEventListener("click", event => { if (!event.target.closest(".diagnostic-user-combobox")) { clearTimeout(userTimer); userReader.cancel(); root.querySelector("#diagnosticLoadedUsers")?.classList.add("hidden"); root.querySelector('input[name="user_id"]')?.setAttribute("aria-expanded", "false"); } });
   return {
     activate(route, saved = null) {
+      detailMountGeneration += 1;
       cancelReaders(); state.active = true; state.route = route; detail?.destroy(); detail = null; state.busy = false; state.error = "";
       if (route.view === "detail") return mountDetail(saved);
       state.filters = { offset: 0, ...route.filters, limit: PAGE_SIZE }; state.data = saved?.data || null; state.listTotal = null;
@@ -428,8 +445,8 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       try { state.filters = sessionRange(state.filters); } catch (error) { state.error = error.message; render(); return; }
       if (state.data) { rememberProfiles(state.data); render(); restoreScroll(saved); } else void loadCurrent();
     },
-    deactivate() { state.active = false; cancelReaders(); selectBinding?.close(); detail?.destroy(); detail = null; },
+    deactivate() { detailMountGeneration += 1; state.active = false; cancelReaders(); selectBinding?.close(); detail?.destroy(); detail = null; },
     snapshot() { return state.route?.view === "detail" ? { detailData, detailSnapshot: detail?.snapshot?.() } : { filters: { ...state.filters }, data: state.data, showUsers: state.showUsers, showAgents: state.showAgents, ...captureScroll() }; },
-    clear() { state.active = false; cancelReaders(); detail?.destroy(); detail = null; detailData = null; state.data = null; state.users = {}; listFilters = {}; columnWidths = null; state.agents.clear(); state.channelAgents.clear(); root.replaceChildren(); },
+    clear() { detailMountGeneration += 1; state.active = false; cancelReaders(); detail?.destroy(); detail = null; detailData = null; state.data = null; state.users = {}; listFilters = {}; columnWidths = null; state.agents.clear(); state.channelAgents.clear(); root.replaceChildren(); },
   };
 }

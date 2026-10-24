@@ -255,7 +255,7 @@ def _toolsets_for_spec(
     if history_toolset is not None:
         toolsets.append(history_toolset)
     if channel_toolset is not None:
-        toolsets.append(channel_toolset)
+        toolsets.append(builtin_ptc(channel_toolset, "channel_message"))
 
     if dynamic_ui_packages:
         for package in dynamic_ui_packages:

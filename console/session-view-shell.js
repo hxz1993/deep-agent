@@ -1,6 +1,29 @@
 // Keep one pristine, non-interactive copy of the actual workspace markup.
 // Never clone the live chat DOM: it contains another session's state and widgets.
 let workspaceSource = null;
+let templateRequest = null;
+const TEMPLATE_VERSION = "20261023-console-load1";
+
+// Readonly details need only the shared markup, never chat startup or its APIs.
+// Cache the pristine document and give workspace its own copy before it mutates it.
+export async function loadSessionViewTemplate() {
+  if (!templateRequest) {
+    templateRequest = (async () => {
+      const url = new URL("./workspace-template.html", import.meta.url);
+      url.searchParams.set("v", TEMPLATE_VERSION);
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`无法加载会话结构：HTTP ${response.status}`);
+      const source = new DOMParser().parseFromString(await response.text(), "text/html");
+      registerSessionViewTemplate(source);
+      return source;
+    })().catch(error => { templateRequest = null; throw error; });
+  }
+  return (await templateRequest).cloneNode(true);
+}
+
+export async function ensureSessionViewTemplate() {
+  if (!workspaceSource) await loadSessionViewTemplate();
+}
 
 export function registerSessionViewTemplate(source) {
   const chat = source.querySelector(".app > .chat");

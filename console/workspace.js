@@ -3,7 +3,7 @@ import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentatio
 import { renderSessionInspector } from "./session-inspector.js?v=20261013-providers";
 import { channelOriginPresentation } from "./session-display.js?v=20260929-release0124";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
-import { registerSessionViewTemplate } from "./session-view-shell.js?v=20260912-21";
+import { registerSessionViewTemplate, loadSessionViewTemplate } from "./session-view-shell.js?v=20261025-readonly-load2";
 
 const WORKSPACE_ASSET_VERSION = "20261023-console-load1";
 
@@ -49,11 +49,7 @@ function escapeHtml(value) {
 }
 
 async function fetchLegacyPage() {
-  const url = new URL("./workspace-template.html", import.meta.url);
-  url.searchParams.set("v", WORKSPACE_ASSET_VERSION);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`无法加载工作台结构：HTTP ${response.status}`);
-  return new DOMParser().parseFromString(await response.text(), "text/html");
+  return loadSessionViewTemplate();
 }
 
 function installLegacyDom(source) {

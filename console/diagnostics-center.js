@@ -1,8 +1,8 @@
 import { initDiagnosticLogs } from "./diagnostics.js?v=20261019-release0138";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20261023-deferred-trajectory3";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20261025-readonly-load2";
 import { createDiagnosticNavigation, diagnosticHash, diagnosticTarget, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20261019-release0138";
 
-import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20261023-deferred-trajectory3";
+import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20261025-readonly-load2";
 import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20261019-release0138";
 
 let center = null;

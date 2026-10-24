@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import ssl
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx2
+from PIL import Image
 from pydantic_ai import ModelRetry, Tool, ToolFailed
-from pydantic_ai.messages import ImageUrl, ToolReturn
+from pydantic_ai.messages import BinaryContent, ToolReturn
 from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
 from deep_agent.ptc.file_payload import CODE_MODE_METADATA_KEY
@@ -441,52 +443,55 @@ class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WebImageViewTests(unittest.IsolatedAsyncioTestCase):
-    async def test_returns_small_native_image_url_reference(self) -> None:
+    @staticmethod
+    def image_data(fmt="PNG"):
+        stream = io.BytesIO()
+        Image.new("RGB", (2, 2), "blue").save(stream, format=fmt)
+        return stream.getvalue()
+
+    async def test_returns_verified_native_image_and_source_reference(self) -> None:
+        data = self.image_data()
         with patch(
-            "deep_agent.web.runtime.validate_and_resolve_url",
-            new=AsyncMock(return_value=SimpleNamespace()),
-        ):
+            "deep_agent.web.runtime.load_public_file",
+            new=AsyncMock(return_value=(data, "chart.png", "image/png", "https://cdn.example.com/chart.png")),
+        ) as download:
             result = await _web_image_view_tool().function(
                 "https://cdn.example.com/chart.png"
             )
 
+        download.assert_awaited_once_with("https://cdn.example.com/chart.png")
         self.assertIsInstance(result, ToolReturn)
-        self.assertIsInstance(result.return_value, ImageUrl)
-        self.assertEqual(result.return_value.url, "https://cdn.example.com/chart.png")
+        self.assertIsInstance(result.return_value, BinaryContent)
+        self.assertEqual(result.return_value.data, data)
         self.assertEqual(result.return_value.media_type, "image/png")
-        self.assertFalse(result.return_value.force_download)
-        self.assertNotIn("data:", str(result.return_value))
+        self.assertEqual(result.metadata["sources"][0]["url"], "https://cdn.example.com/chart.png")
+        self.assertFalse(result.metadata["web_image_view"]["force_download"])
         self.assertEqual(result.metadata["web_image_view"]["media_type"], "image/png")
 
-    async def test_force_download_is_deferred_to_model_request_mapping(self) -> None:
+    async def test_force_download_flag_is_accepted_and_audited_without_deferral(self) -> None:
         with patch(
-            "deep_agent.web.runtime.validate_and_resolve_url",
-            new=AsyncMock(return_value=SimpleNamespace()),
-        ):
+            "deep_agent.web.runtime.load_public_file",
+            new=AsyncMock(return_value=(self.image_data("WEBP"), "chart.webp", "image/webp", "https://cdn.example.com/chart.webp")),
+        ) as download:
             result = await _web_image_view_tool().function(
                 "https://cdn.example.com/chart.webp",
                 force_download=True,
             )
 
-        self.assertTrue(result.return_value.force_download)
+        download.assert_awaited_once()
+        self.assertTrue(result.metadata["web_image_view"]["force_download"])
         self.assertEqual(result.return_value.media_type, "image/webp")
 
     async def test_extensionless_image_uses_bounded_content_probe(self) -> None:
-        with (
-            patch(
-                "deep_agent.web.runtime.validate_and_resolve_url",
-                new=AsyncMock(return_value=SimpleNamespace()),
-            ),
-            patch(
-                "deep_agent.web.runtime._probe_image_media_type",
-                new=AsyncMock(return_value="image/jpeg"),
-            ) as probe,
-        ):
+        with patch(
+            "deep_agent.web.runtime.load_public_file",
+            new=AsyncMock(return_value=(self.image_data("JPEG"), "render", "application/octet-stream", "https://images.example.com/render?id=42")),
+        ) as download:
             result = await _web_image_view_tool().function(
                 "https://images.example.com/render?id=42"
             )
 
-        probe.assert_awaited_once_with("https://images.example.com/render?id=42")
+        download.assert_awaited_once_with("https://images.example.com/render?id=42")
         self.assertEqual(result.return_value.media_type, "image/jpeg")
 
     async def test_rejects_non_image_credentials_and_private_urls(self) -> None:
@@ -496,17 +501,17 @@ class WebImageViewTests(unittest.IsolatedAsyncioTestCase):
             )
 
         with patch(
-            "deep_agent.web.runtime.validate_and_resolve_url",
-            new=AsyncMock(side_effect=ValueError("private/internal address")),
+            "deep_agent.web.runtime.load_public_file",
+            new=AsyncMock(side_effect=ModelRetry("private/internal address")),
         ):
-            with self.assertRaisesRegex(ModelRetry, "private/internal"):
+            with self.assertRaisesRegex(ToolFailed, "private/internal"):
                 await _web_image_view_tool().function("http://127.0.0.1/chart.png")
 
         with patch(
-            "deep_agent.web.runtime.validate_and_resolve_url",
-            new=AsyncMock(return_value=SimpleNamespace()),
+            "deep_agent.web.runtime.load_public_file",
+            new=AsyncMock(return_value=(b"<html>error</html>", "error", "text/html", "https://example.com/not-an-image.html")),
         ):
-            with self.assertRaisesRegex(ModelRetry, "text/html"):
+            with self.assertRaisesRegex(ToolFailed, "valid supported image"):
                 await _web_image_view_tool().function(
                     "https://example.com/not-an-image.html"
                 )

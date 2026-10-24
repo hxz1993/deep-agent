@@ -30,13 +30,13 @@ const loadPage = createPageLoader({
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=20261023-console-load1");
+    const module = await import("./workspace.js?v=20261025-readonly-load2");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261023-console-load1");
+    const module = await import("./diagnostics-center.js?v=20261025-readonly-load2");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

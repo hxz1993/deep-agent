@@ -262,7 +262,9 @@ ExpectedError 的 HTTP 200 包装状态分开；不从附件格式清单推断�
 `CancellationToken` 传入 Runner。否则客户端刚拿到 `session_id` 就停止时，会在用户消息尚未
 持久化的窗口内误报 `404 Session not found`。
 
-PTC 默认不用于普通 MCP 调用或工具发现；仅在中间二进制/批量数据无需模型阅读时推荐使用。
+独立的一次工具调用、小结果直接用于回答时使用原生工具；工具发现仍保持外层。
+工具结果要直接交给下一工具、批量查询、循环或JSON／文本处理时推荐PTC，减少模型转抄中间值。
+需要模型理解或选择时返回少量候选，再继续执行；不要求所有调用都经PTC，也不固定唯一编排次数。
 PTC 执行错误用官方 `ToolFailedError + ToolReturnPart(outcome=failed)` 保留脱敏嵌套调用审计，
 不转为消耗重试预算的 `ModelRetry`。取消与系统异常仍传播给 Runner 收尾，不能吞掉。
 
@@ -333,7 +335,9 @@ ToolSearch。v0.14.7实现：已授权且已披露MCP，以及当前已装配的
 [PTC当前设计](../../docs/design/20-code-mode/ptc-data-transfer-design.md)，完整验收另列报告。
 
 v0.6.5起的公开Web实现位于`web/`。`builtin:web`提供`web_search/web_fetch`，v0.6.6另向
-图片输入模型注入外层普通工具`web_image_view`；该工具返回Pydantic AI原生`ImageUrl`且不进入Monty。
+图片输入模型注入外层普通工具`web_image_view`。v0.14.8实现先在工具内安全下载并验证图片，
+通过Pydantic AI原生`BinaryContent`仅交给当前Run的模型；持久化及公共投影保留URL引用，不保存图片字节，
+下一Run不自动重读旧图。该工具仍不进入Monty。
 `web_fetch`的HTML薄适配只负责过滤脚本/样式并在原位置保留绝对图片URL，不自动发送图片。全局唯一
 `global_settings.web_search`选择独立搜索Provider，但不能替代Agent显式授权。
 v0.14.7实现：已装配Search/Fetch同时进入PTC，Image View仍仅外层。
@@ -554,6 +558,12 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 context_refs 授权。每次执行重新检查账号、Agent、会话、Run 与文件权限，只发本轮群或私聊。
 普通 Console 和历史浏览不加载；首轮不必有附件，沙箱新生成的授权 file_id 也可发送。
 
+v0.14.8：可信装配位只把准确`channel_message`加入PTC双入口，其他同名来源不扩权。
+媒体来源允许授权`file_id`或公开HTTP(S)`url`二选一；`files/public_download.py`复用原PTC公开读取的
+SSRF／代理／重试与20MiB硬限，并进一步限制到渠道和剩余批次额度。URL字节只留调用内存，不登记FileID，
+不新增保存工具或历史机制。所有组件预检后才分发，同一Run工具集串行发送；PTC截止不代表网关回滚，
+必须保留unknown／中断事实，禁止原生或PTC盲补发。已安装Agent提示词不随本项自动修改。
+
 公共消息服务负责预校验和文件授权，网关持有操作生命周期；各操作适配器负责格式、上传、
 平台发送及安全错误。保持已有入站／流式接口，新增渠道通过注册可选操作适配器接入。
 首版仅 send，有序文字／图片／文件／已有音频视频；飞书支持当前消息引用，企微不伪造引用。
@@ -640,6 +650,10 @@ Unicode字符位置，部分项不向后跳号、不加省略标记。不能用r
 `ptc_diagnostics`只保留有界审计，单步输入/输出各8KiB、字符串2KiB、总JSON128KiB。
 Web Fetch取消50K字符提前截断，
 保留5MiB下载安全上限，完整正文交给以下Token治理与回读，不创建第二套网页Store。
+v0.14.8：`web_image_view`在工具内复用公网文件下载（20MiB上限、逐跳SSRF检查、有界超时），
+验证实际图片后仅向当前Run返回`BinaryContent`；坏链接/损坏图片为可恢复的工具失败。
+图片不走文字大结果外置，不上传平台；持久化副本及SSE/History保留原URL引用，不保存字节/Base64，
+也不改写旧事件。`force_download`两种值均提前下载，不能重新延后到下一次模型请求再校验。
 XLSX单元格不按4K字符截断；全工作簿解析正文最多8,000,000字符，超出明确失败，
 防止sharedStrings重复展开；sheet/header目录预览受8K字符限制，完整首行仍按游标读取；当前批次正文引用的格式字典计入完整Token预算，不重复返回整表定义。合并范围保留本批匹配总数，最多预览128项并明确truncated，不能让辅助信息阻断正文读取。
 

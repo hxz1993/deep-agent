@@ -11,7 +11,7 @@
 | `04` | [`模型目录`](04-model-catalog/README.md)            | 2026-07 | 数据库目录与手工刷新已落地，结构并入 v0.3.0 基线 001 |
 | `05` | [`工具优化`](05-tool-optimization/README.md)        | 2026-07 | 工具体系映射、错误语义、Return Schema与v0.4.0大工具结果外置已落地；大型 MCP 检索见 13 课题 |
 | `06` | [`附件解析`](06-attachment-parsing/README.md)       | 2026-07 | 第一版按需读取与压缩协同已落地 |
-| `07` | [`Python Sandbox 与会话运行环境`](07-python-sandbox/README.md) | 2026-07 起 | 无状态子进程已落地；2026-09-16 收敛活跃会话复用、可过期清理与 Shell 方向，长期持久化及快照非硬要求，尚未开发 |
+| `07` | [`Python Sandbox 与会话运行环境`](07-python-sandbox/README.md) | 2026-07 起 | 无状态子进程已落地；2026-10-24补充官方Workspace方向、PTC与共享执行、附件导入／输出目录收集／平台保存边界；不新增平台save_file_data，收集时序及后端待定，会话级方案未合入test |
 | `08` | [`Artifact 与出站产物`](08-artifact-export/README.md) | 2026-08 | v0.4.0实现会话内大工具结果Artifact；v0.4.18支持主动发布文件到下载中心 |
 | `09` | [`结构化输出与 Agent 更新人`](09-structured-output/README.md) | 2026-10-22完整修订 | 默认关闭、单一组合Schema；012一配置表＋Agent开关/更新人；与BOM/租赁两轮确认可接入；0.14.0正式实现及012迁移已完成，安装矩阵/286项逐项验收见课题入口 |
 | `10` | [`上下文引用`](10-context-reference/README.md) | 2026-08 | v0.3.5 已完成公共协议；DeepCube/DeepTable业务前端已迁移并验证 |
@@ -24,7 +24,7 @@
 | `17` | [`Console UI`](17-console-ui/README.md) | 2026-08 | 轻量企业控制台视觉体系持续落地；保留真实功能、分栏交互和四主题边界 |
 | `18` | [`会话事件与轨迹`](18-session-trajectory/README.md) | 2026-08 | v0.6.0统一Event Store、Event API、持久化SSE、Plan与Console轨迹 |
 | `19` | [`Provider与模型分层`](19-model-provider-architecture/README.md) | 2026-08 | v0.5.6已完成两层归一化、007迁移与统一运行门禁 |
-| `20` | [`PTC程序编排`](20-code-mode/README.md) | 2026-08 | v0.6.7规范化`builtin:ptc`，保留MCP原生+`run_code`双通道，并支持URL/File ID不透明中转 |
+| `20` | [`PTC程序编排`](20-code-mode/README.md) | 2026-08 | v0.14.7已接入现有Python／Skill／Web／下载中心双入口，内部完整数据交接与普通大结果保护分开；固定256 MiB／32 MiB／120秒／100次，不加配置项或会话工作区 |
 | `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | 2026-09-19独立搜索服务、空态兼容及非终止失败结果纳入 v0.10.14；DeepSeek/Kimi管理草稿实测通过 |
 | `22` | [`渠道网关与企微 Channel`](22-wecom-channel/README.md) | 2026-09 | v0.7.0公共Gateway/官方SDK Adapter、三表、五个渠道命令与来源标题；002不变 |
 | `23` | [`诊断中心与日志`](23-diagnostics-and-logs/README.md) | 2026-09 | 日志、管理员会话查询与统计已发布；保留设计与实施说明，原型已清理 |

@@ -50,6 +50,7 @@ function sessionHarness(request = async () => overview()) {
   const scroll = { scrollTop: 0 }, tableScroll = { scrollTop: 0 }, questionsScroll = { scrollTop: 0 }, activeUsers = { scrollTop: 0, scrolled: false, focused: false, scrollIntoView() { this.scrolled = true; }, focus() { this.focused = true; } };
   const root = {
     innerHTML: "", contains: () => true, attributes: {},
+    classList: { values: new Set(), add(value) { this.values.add(value); }, remove(value) { this.values.delete(value); }, contains(value) { return this.values.has(value); } },
     addEventListener(name, handler) { const items = listeners.get(name) || []; items.push(handler); listeners.set(name, items); },
     querySelector(selector) { if (selector === ".diagnostic-session-scroll") return scroll; if (selector === ".diagnostic-session-table-scroll") return tableScroll; if (selector === ".diagnostic-question-list") return questionsScroll; if (selector === "#diagnosticActiveUsers") return activeUsers; return null; },
     setAttribute(name, value) { this.attributes[name] = value; },
@@ -69,6 +70,7 @@ function sessionHarness(request = async () => overview()) {
     COLUMN_BOUNDS, bindDiagnosticColumns: () => () => {},
     buildSessionQuery, sessionQueryError, createSessionReader,
     diagnosticRequest: (path, signal) => { requests.push({ path, signal }); return request(path, signal); },
+    ensureSessionViewTemplate: async () => {},
     createReadonlySessionView(options) {
       const view = { options, loads: [], errors: [], loading: [], destroyed: false,
         load(data) { this.loads.push(plain(data)); }, setLoading(value) { this.loading.push(value); },
@@ -88,6 +90,88 @@ function sessionHarness(request = async () => overview()) {
     select(key, value) { selectCallback(key, value); },
   };
 }
+
+test("direct detail waits for its readonly template without starting workspace requests", async () => {
+  const gate = deferred(), h = sessionHarness(async () => session());
+  h.context.ensureSessionViewTemplate = () => gate.promise;
+  h.activate("detail", { view: "trajectory" });
+  await settle();
+  assert.equal(h.views.length, 0);
+  assert.equal(h.requests.length, 0);
+  gate.resolve(); await settle();
+  assert.equal(h.views.length, 1);
+  assert.ok(h.requests.every(item => item.path.startsWith("api/v1/diagnostics/sessions/")));
+});
+
+test("late readonly template cannot mount a detail over a newer page or session", async () => {
+  const gate = deferred(), h = sessionHarness(async () => session());
+  h.context.ensureSessionViewTemplate = () => gate.promise;
+  h.activate("detail");
+  h.controller.deactivate();
+  gate.resolve(); await settle();
+  assert.equal(h.views.length, 0);
+  assert.equal(h.requests.length, 0);
+
+  const gates = [deferred(), deferred()], newer = sessionHarness(async () => session());
+  let index = 0; newer.context.ensureSessionViewTemplate = () => gates[index++].promise;
+  newer.controller.activate({ view: "detail", id: "old-session", filters: {} });
+  newer.controller.activate({ view: "detail", id: "new-session", filters: {} });
+  gates[0].resolve(); await settle(); assert.equal(newer.views.length, 0);
+  gates[1].resolve(); await settle(); assert.equal(newer.views.length, 1);
+  assert.ok(newer.requests.every(item => !item.path.includes("old-session")));
+});
+
+test("readonly template failure offers an explicit retry and overview never loads it", async () => {
+  const h = sessionHarness(async () => session()); let attempts = 0;
+  h.context.ensureSessionViewTemplate = async () => { if (++attempts === 1) throw Error("template unavailable"); };
+  h.activate("overview"); await settle(); assert.equal(attempts, 0);
+  h.activate("detail"); await settle();
+  assert.match(h.root.innerHTML, /template unavailable/);
+  assert.match(h.root.innerHTML, /data-session-action="retry-detail"/);
+  assert.equal(h.views.length, 0);
+  await h.click({ sessionAction: "retry-detail" }); await settle();
+  assert.equal(attempts, 2); assert.equal(h.views.length, 1);
+});
+
+test("readonly view construction failure clears partial markup and offers a working retry", async () => {
+  const h = sessionHarness(async () => session());
+  const construct = h.context.createReadonlySessionView;
+  let attempts = 0;
+  h.context.createReadonlySessionView = options => {
+    if (++attempts === 1) {
+      options.root.classList.add("diagnostic-session-detail");
+      options.root.innerHTML = '<div data-incomplete-readonly-view>partial view</div>';
+      throw Error("broken readonly shell <unsafe>");
+    }
+    return construct(options);
+  };
+  await assert.doesNotReject(h.controller.activate({ view: "detail", id: "session-full-id", filters: {} }));
+  await settle();
+  assert.equal(h.views.length, 0);
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.root.classList.contains("diagnostic-session-detail"), false);
+  assert.doesNotMatch(h.root.innerHTML, /data-incomplete-readonly-view|<unsafe>/);
+  assert.match(h.root.innerHTML, /broken readonly shell &lt;unsafe&gt;/);
+  assert.match(h.root.innerHTML, /data-session-action="retry-detail"/);
+  await h.click({ sessionAction: "retry-detail" }); await settle();
+  assert.equal(attempts, 2);
+  assert.equal(h.views.length, 1);
+  assert.ok(h.requests.length > 0);
+  assert.equal(h.views[0].loads.at(-1).session.session_id, "session-full-id");
+});
+
+test("clearing diagnostics while its readonly template is pending prevents all late mounting", async () => {
+  const gate = deferred(), h = sessionHarness(async () => session());
+  h.context.ensureSessionViewTemplate = () => gate.promise;
+  const pending = h.controller.activate({ view: "detail", id: "session-full-id", filters: {} });
+  await settle();
+  h.controller.clear();
+  assert.equal(h.root.innerHTML, "");
+  gate.resolve(); await pending; await settle();
+  assert.equal(h.root.innerHTML, "");
+  assert.equal(h.views.length, 0);
+  assert.equal(h.requests.length, 0);
+});
 
 function navigationHarness(initialHash = diagnosticTarget("list", filters), initialState = null) {
   const entries = [{ hash: initialHash, state: initialState }]; let index = 0, snapshot = { scroll: 100 }, restored;
@@ -563,7 +647,7 @@ test("context response retains current tab even after switching away from a load
 test("switching detail session ignores old metadata and never cancels actual Agent execution", async () => {
   const old = deferred();
   const h = sessionHarness(path => path.includes("session-full-id") ? old.promise : Promise.resolve(path.includes("/events") ? { items: [], next_after_sequence: null } : path.includes("/history") ? { items: [] } : { ...session(), session_id: "new-session" }));
-  h.activate("detail", {}); h.controller.activate({ view: "detail", id: "new-session", filters: {} });
+  h.activate("detail", {}); await settle(); h.controller.activate({ view: "detail", id: "new-session", filters: {} });
   old.resolve(session()); await settle();
   assert.equal(h.views[0].destroyed, true); assert.equal(h.views[0].loads.length, 0);
   assert.equal(h.views[1].loads.at(-1).session.session_id, "new-session");

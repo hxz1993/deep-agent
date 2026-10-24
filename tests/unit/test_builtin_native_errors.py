@@ -78,7 +78,7 @@ class BuiltinNativeErrorTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("fixture-secret", str(raised.exception))
 
     async def test_public_file_rejection_keeps_retry_semantics_and_native_detail(self):
-        with patch("deep_agent.ptc.file_payload.safe_download", new=AsyncMock(side_effect=ValueError("private/internal IP address"))):
+        with patch("deep_agent.files.public_download.safe_download", new=AsyncMock(side_effect=ValueError("private/internal IP address"))):
             with self.assertRaises(ModelRetry) as raised:
                 await _load_public_url("https://example.com/file")
         self.assertIn("private/internal IP address", str(raised.exception))

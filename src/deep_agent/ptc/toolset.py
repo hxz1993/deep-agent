@@ -33,18 +33,31 @@ _INVALID_IDENTIFIER = re.compile(r"\W")
 _LONG_BASE64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{256,}={0,2}(?![A-Za-z0-9+/])")
 _DISCOVERY_HINT = (
     "Discovered tools are directly callable with their native schemas; "
-    "discovery does not require run_code."
+    "discovery does not require run_code. For dependent calls or bulk result "
+    "processing, use their listed run_code aliases to pass values directly."
 )
+
+_ROUTING_GUIDANCE = """Use `run_code` for bounded tool orchestration and data processing: keep tool results
+in program variables when they feed the next tool, or batch/filter/aggregate data.
+A query -> computation/Skill
+-> file/export chain can run here without returning the intermediate rows or HTML
+to the model. Choose the steps from the actual task; no fixed recipe is required.
+For one independent call with a small result used directly in the answer, use its
+native tool. For libraries or file creation, call execute_python/execute_skill_script,
+either natively or as a step here.
+Python syntax alone does not require execute_python; strings, lists, loops and
+conditions can process JSON/text values here.
+"""
 
 _USAGE_RULES = """
 
 DeepAgent PTC rules:
-- Default to ordinary native MCP calls. Having multiple dependent tools does not
-  justify PTC: use native calls whenever the model must read, understand, validate,
-  or choose based on the intermediate result.
-- Reserve `run_code` for opaque file/binary relay or bounded data processing where
-  intermediate rows/bytes do not need model interpretation (for example filtering,
-  aggregation, or a known batch operation returning a compact summary).
+- Use ordinary native calls for an independent small lookup/action, tool discovery, or a stage
+  that needs fresh model interpretation or semantic judgment (such as choosing an
+  image after viewing it). Return compact candidates first when judgment is needed;
+  do not hide that judgment in a program or repeat completed calls. When a result
+  will be input to the next tool, pass it directly here and check success/integrity
+  in code; do not split the chain merely to inspect every intermediate value.
 - Tool discovery, schema inspection, connection/pairing, and canvas snapshots belong
   in ordinary native calls. Never use `run_code` to discover or probe available tools.
   `search_tools` is native-only: call it outside `run_code`, then read the disclosed
@@ -55,12 +68,13 @@ DeepAgent PTC rules:
   same protocol name is separately present in the ordinary tool list with its own schema.
 - Every function listed in the Code Mode catalog is async. Call it with top-level
   `await function_name(...)`; never wrap it with `asyncio.run()`.
-- Use a normal tool call when one call is enough and its arguments are already known.
 - For file relay, discover the required schemas and select/verify the destination
   through native calls first. Only then use PTC to relay the opaque bytes between
   the known upload/send functions without exposing bytes to the model.
 - A failed PTC snippet is a completed failed tool call, not a request to keep probing
-  the sandbox. Prefer the available native tools next. Check already-started writes
+  the sandbox. Choose corrected code or a native call based on the actual error.
+  Correct read-only code only after identifying the cause; do not replay completed
+  calls or use another path to repeat an uncertain write. Check already-started writes
   before any retry; a script error does not roll back earlier nested side effects.
 - Use `load_file_data` only inside `run_code` when an authorized session file or a
   public HTTP(S) file must be passed unchanged to an MCP string argument. Provide
@@ -69,12 +83,21 @@ DeepAgent PTC rules:
   next tool. Never inspect, measure, print, or return the `content` value.
 - Return only the compact result needed for the task. Do not print file payloads,
   Base64, or large intermediate values.
+- For HTML/text pages, web_fetch returns an object with url, title and content;
+  content is Markdown and may contain image links. Extract candidate links or
+  relevant lines here without starting Python or refetching the page with requests.
+  Binary documents/images use their dedicated outer tools when interpretation is needed.
 - Authorized MCP, web_search, web_fetch, execute_python, execute_skill_script and
   export_file_to_download_center retain their ordinary native entry points. Only
   functions actually listed in this catalog can also be used here. Call Python
   with code and JSON inputs; call a Skill with its exact authorized script path.
   No save_file_data, read_file, parse_document, UI confirmation or Shell function
   is added to this catalog. Python executions still have separate temporary dirs.
+- In a trusted channel run, channel_message is also available natively and here.
+  Forward a known public media URL directly with components=[{'type': 'image',
+  'url': public_url}], or use an authorized file_id. No Python or platform upload
+  is needed for unchanged media. Do not retry a send with an unknown outcome;
+  the PTC deadline may expire after gateway dispatch, without undoing delivery.
 - Internal returns go to the program without model-display pagination, up to
   32 MiB per return. Tool/source limits and incomplete-result markers still apply.
   Python/Skill inputs allow 16 MiB JSON. Monty memory is 256 MiB, its shared session
@@ -92,7 +115,7 @@ DeepAgent PTC rules:
   ordinary native entry point. Do not repeat the rejected upload/send unchanged.
 - `run_code` cannot directly access host files, environment variables, network sockets,
   Shell, pip, or third-party packages. It can call only catalog functions; public-file
-  relay is available exclusively through `load_file_data(url=...)`.
+  relay uses `load_file_data(url=...)`, or the trusted channel_message URL input.
 
 Generic authorized-file relay shape:
 ```python
@@ -261,7 +284,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                 run_code,
                 tool_def=replace(
                     run_code.tool_def,
-                    description=(run_code.tool_def.description or "") + _USAGE_RULES,
+                    description=_ROUTING_GUIDANCE + "\n" + (run_code.tool_def.description or "") + _USAGE_RULES,
                 ),
             )
         return result
@@ -341,6 +364,19 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                  if isinstance(exc, TimeoutError) else str(exc)),
                 sensitive_values=secrets,
             )
+            guidance = (
+                "PTC execution failed. Inspect the error and completed calls before continuing. "
+                "Correct read-only code only after identifying the cause; search_tools, "
+                "schema discovery, pairing and snapshots must stay native. "
+                "Earlier nested writes may have succeeded: inspect target state "
+                "before retrying; do not repeat the same failed snippet or switch "
+                "paths to repeat an uncertain write."
+            )
+            if collector.execution is not None and any(
+                call.tool_name == "channel_message" for call in collector.execution.nested_calls.values()
+            ):
+                guidance += (" If channel delivery reached the gateway, its outcome may be unknown. "
+                             "Do not resend through either native tools or PTC without confirming delivery.")
             # Preserve a real failed ToolReturnPart (including bounded audit) rather
             # than asking the model to retry code until the whole Agent run aborts.
             # This is the framework's native failure signal, not a successful result
@@ -350,12 +386,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                 tool_call_id=ctx.tool_call_id or "",
                 content={
                     "error": safe_audit_value(safe_message, sensitive_values=secrets),
-                    "guidance": (
-                        "PTC execution failed. Prefer ordinary native tools; search_tools, "
-                        "schema discovery, pairing and snapshots must stay native. "
-                        "Earlier nested writes may have succeeded: inspect target state "
-                        "before retrying; do not repeat the same failed snippet."
-                    ),
+                    "guidance": guidance,
                 },
                 outcome="failed",
                 metadata=metadata,

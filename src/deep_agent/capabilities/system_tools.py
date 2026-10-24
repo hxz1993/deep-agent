@@ -12,7 +12,7 @@ _SYSTEM_TOOL_DOMAINS = (
         tools=(SystemToolDescription(
             name="channel_message", display_name="渠道消息", source="DeepAgent",
             injection_condition="来自已启用飞书或企微渠道的可信当前会话Run",
-            description="按顺序发送文字、图片、文件和已有音视频；飞书支持引用当前消息。",
+            description="按顺序发送文字、图片、文件和已有音视频；媒体使用授权File ID或公开URL，飞书支持引用当前消息。",
         ),),
     ),
     SystemToolDomain(

@@ -1,6 +1,6 @@
 # PTC 程序编排使用指南
 
-> 2026-10-24：以下工具扩展与资源限制为v0.14.7实现行为；测试结果另列。
+> 2026-10-25：工具扩展与资源限制自v0.14.7实现，v0.14.8补充渠道双入口及数据交接引导；测试结果另列。
 
 ## 启用
 
@@ -12,6 +12,19 @@
 `load_file_data`仍为代码内原语；`read_file`、`parse_document`、`web_image_view`、UI/Deferred、
 发现、计划、历史和Resource保持外层。没有MCP时，可编排其他已装配白名单工具；仅选PTC不会生成这些工具。
 不增加`save_file_data`或共享工作区。
+
+v0.14.8：可信渠道Run的`channel_message`也保留原生与PTC两个入口。已确认的公开媒体URL
+可直接转发，不必用Python下载或先上传平台；下载仅留在调用内存中，沿用SSRF、20MiB及渠道大小上限。
+例如在`run_code`内调用：
+
+```python
+receipt = await channel_message(components=[{"type": "image", "url": "https://example.com/poster.jpg"}])
+receipt
+```
+
+媒体`file_id`和`url`必须二选一；已有File ID继续按会话授权发送。一次发送也可直接原生调用同一工具；
+仅在需要串联工具时编排。裁剪、转码仍使用Python。PTC超时或取消不保证Gateway回滚，结果未知时
+不得转原生补发同一内容；本次不新增持久回执或跨请求幂等机制。
 
 同一工具的两个入口使用相同参数。例如，小数据直接原生调用`execute_python`，提交：
 
@@ -37,8 +50,14 @@ computed["result"]
 
 ## 何时使用
 
-- 一次调用、参数已知：直接调用普通 MCP。
+- 独立的一次调用、小结果直接用于回答：使用普通工具，不必为此编排。
 - A 的结果直接给 B、需要并发只读查询、分页循环、过滤/排序/聚合或附件载荷中转：使用 `run_code`。
+- 工具说明按数据交接选择路径：查询结果交计算/Skill、完整HTML交发布工具时，优先通过PTC变量直传，
+  不为逐步查看中间值拆开依赖链；成功、截断和完整性检查可在程序内完成。无需在Agent或Skill中
+  固定完整代码、唯一PTC次数或内外层发布位置。需要模型理解或选择的阶段返回少量候选，再继续执行。
+- 字符串／JSON提取、列表去重和简单汇总直接用PTC的Python语法处理，不必再调用`execute_python`。
+  内置`web_fetch`读取HTML/文本时返回`url/title/content`，可在PTC中从Markdown提取图片链接或相关行，
+  再将少量候选交模型判断；需要查看图片时仍在外层使用`web_image_view`。单张已知URL直接渠道发送即可。
 - pandas/numpy计算或固定Skill脚本：使用已关联Sandbox的`execute_python` / `execute_skill_script`；可原生调用，也可在PTC里直接传代码字符串和JSON inputs。Skill仍只接受原有参数与已索引脚本，不新增文件输入或发布参数。
 - 读取给模型看的附件正文：使用外层系统工具`read_file`；`load_file_data`只在代码内原样中转。
 - 解析、转换或生成文件：使用`execute_python(files=...)`读取授权文件，`publish_path()`登记产物，返回的File ID可交给下一次Python或下载中心导出；无需让模型转抄文件内容。

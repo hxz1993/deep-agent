@@ -178,7 +178,13 @@ def build_python_sandbox_tool_package(
         inputs: dict[str, JsonValue] | None = None,
         files: list[SandboxFileInput] | None = None,
     ) -> ToolReturn:
-        """执行 Python 计算、解析或文件转换，可读取会话文件并发布转换产物。
+        """使用第三方库进行计算、文件解析或转换，可读取会话文件并发布产物。
+
+        已关联 PTC 时，内存中的字符串／JSON提取、列表过滤去重和简单汇总直接在
+        run_code 中完成，不必为这些处理启动本工具。网页检索与正文抓取使用已提供的
+        web_search／web_fetch，勿仅为提取网页链接而用 Python 重做同一请求。
+        需要本工具的库或文件能力时，可把它作为 PTC 中的一步，直接传入前一工具的
+        JSON 变量，再将本工具结果交给下一工具，无需模型转抄中间数据。
 
         公网文件无需修改、只需原样传给 MCP 时，不要用本工具重复抓取或探测网络；
         应在 PTC 中使用 load_file_data(url=...) 直接完成读取、上传和发送依赖链。

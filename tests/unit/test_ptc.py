@@ -66,7 +66,7 @@ class _MemoryFileStore:
 
 
 class CodeModeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_discovery_announcement_and_schemas_keep_native_as_default(self) -> None:
+    async def test_discovery_announcement_and_schemas_preserve_both_call_routes(self) -> None:
         from pydantic_ai.capabilities import ToolSearch
         from pydantic_ai.messages import SystemPromptPart, UserPromptPart
 
@@ -85,11 +85,11 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             nonlocal steps
             steps += 1
             descriptions = {tool.name: tool.description or "" for tool in info.function_tools}
-            self.assertIn("Default to ordinary native MCP calls", descriptions["run_code"])
+            self.assertIn("Use `run_code` for bounded tool orchestration", descriptions["run_code"])
             if "search_tools" in descriptions:
                 self.assertIn("directly callable with their native schemas", descriptions["search_tools"])
                 self.assertIn("discovery does not require run_code", descriptions["search_tools"])
-                self.assertNotIn("Default to ordinary native MCP calls", descriptions["search_tools"])
+                self.assertNotIn("Use `run_code` for bounded tool orchestration", descriptions["search_tools"])
                 self.assertNotIn("Note: discovered tools become callable", descriptions["search_tools"])
             if steps == 1:
                 self.assertNotIn("demo_lookup", descriptions)
@@ -645,8 +645,11 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("never wrap it with `asyncio.run()`", descriptions[0])
         self.assertIn("exist only inside `run_code`", descriptions[0])
         self.assertIn("separately present in the ordinary tool list", descriptions[0])
-        self.assertIn("Default to ordinary native MCP calls", descriptions[0])
-        self.assertIn("intermediate rows/bytes do not need model interpretation", descriptions[0])
+        self.assertIn("Use `run_code` for bounded tool orchestration", descriptions[0])
+        self.assertIn("independent small lookup/action", descriptions[0])
+        self.assertIn("fresh model interpretation or semantic judgment", descriptions[0])
+        self.assertIn("Python syntax alone does not require execute_python", descriptions[0])
+        self.assertIn("web_fetch returns an object with url, title and content", descriptions[0])
         self.assertIn("`search_tools` is native-only", descriptions[0])
         self.assertIn("connection/pairing, and canvas snapshots", descriptions[0])
         self.assertNotIn("one tool's result feeds another", descriptions[0])
@@ -774,7 +777,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         with mock.patch(
-            "deep_agent.ptc.file_payload.safe_download",
+            "deep_agent.files.public_download.safe_download",
             new=mock.AsyncMock(return_value=response),
         ) as downloader:
             data, name, mime, final_url = await _load_public_url(
@@ -790,7 +793,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_url_rejects_credentials_before_download(self) -> None:
         with mock.patch(
-            "deep_agent.ptc.file_payload.safe_download",
+            "deep_agent.files.public_download.safe_download",
             new=mock.AsyncMock(),
         ) as downloader:
             with self.assertRaisesRegex(ModelRetry, "用户名或密码"):
@@ -799,7 +802,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_url_preserves_safe_download_ssrf_rejection(self) -> None:
         with mock.patch(
-            "deep_agent.ptc.file_payload.safe_download",
+            "deep_agent.files.public_download.safe_download",
             new=mock.AsyncMock(side_effect=ValueError("private/internal IP address")),
         ) as downloader:
             with self.assertRaisesRegex(ModelRetry, "地址不安全"):

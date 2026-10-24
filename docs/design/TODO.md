@@ -49,10 +49,11 @@ D2本地沙盒并入下方既有`SANDBOX-001`，补充Smol/Bubblewrap/SSH候选�
 
 | ID | 事项 | 当前边界 | 启动条件 |
 | --- | --- | --- | --- |
+| `PTC-DATA-TRANSFER-001` | [PTC工具扩展与Python／Skill数据交接](20-code-mode/ptc-data-transfer-design.md) | v0.14.7已实现：MCP／Web／Python及Skill／下载中心保留普通与PTC双入口，内部开放函数绕过模型展示外置；不新增平台save_file_data，不加ReadFile／ParseDocument；工作区交接另归07课题。固定256 MiB内存、32 MiB单次返回、120秒执行预算及单段总超时、100次调用，不做配置项 | 已实现范围与使用方式见[指南](../guides/code-mode.md)，实际验收范围以独立测试报告为准；不依赖38课题升级，未合并同事结果引用分支或沙盒分支 |
 | `WEB-DEEPSEEK-TOOLS-001` | [DeepSeek独立Search / Fetch部署核验](21-web-tools/deepseek-search-fetch-20261016-research.md) | 已实现并纳入0.13.6：DS独立Search去model，DS/Kimi Fetch跟随；历史默认系统内置、保存清model；两家真实接口及Agent/图片链路已测 | [验收报告](21-web-tools/web-search-fetch-20261016-validation.md)。Alpha部署后核验，代码推送不等于已部署。其他三家云Fetch本轮不接入，保持系统内置 |
 | `CLIENT-EVENTS-001` | 电子表格助手与DeepCube助手适配Event API | 本仓只审计和交接，不跨仓修改 | 客户端维护方按v0.6.0契约排期 |
 | `SCHEDULE-001` | [平台自动化 Agent 任务](26-scheduled-tasks/README.md) | 2026-09-16 调整为平台触发＋后台身份＋Agent 执行＋业务投递；会话为执行记录，新建/复用按场景评估，跨周期去重与聊天记忆分开；未开发 | 以工单清单发群为候选核验触发、凭据与主动发送链路，再决定独立定时入口及任务状态范围 |
-| `SANDBOX-001` | [会话级 Sandbox](07-python-sandbox/session-sandbox-design.md) | 活跃会话复用工作目录，支持 Python/Shell；允许到期清理并明确告知；长期目录保留、内存恢复非硬要求；尚未开发。2026-09-25 用户明确以本地／自托管沙盒为方向，不接 Modal 云服务 | 2026-10-16补充[38课题D2](38-pydantic-ai-harness-upgrade/upstream-review-20261016.md)的Smol/Bubblewrap/SSH候选；验证目标部署权限、隔离、网络、持久文件、取消和回收成本。Bubblewrap不是完整多租户强隔离；不要求预先锁定永久存储方案 |
+| `SANDBOX-001` | [会话级 Sandbox](07-python-sandbox/session-sandbox-design.md) | 2026-10-24更新：本地／自托管方向，以新版Pydantic AI Workspace规范接入；Python／Skill／Shell共用环境，PTC按需编排。附件导入、输出目录收集由服务端统一负责；中间文件留工作区，明确成果存FileStore，下载中心登记独立；不新增平台save_file_data。候选分支未合入test及验收 | 结合[38课题D2](38-pydantic-ai-harness-upgrade/upstream-review-20261016.md)验证后端和依赖组合；确定执行／PTC收集边界、旧入口兼容、授权、过期、取消和资源成本；长期目录及内存恢复非硬要求，不接Modal云服务，本轮只更新文档 |
 | `OPS-SSE-001` | 部署核对：反向代理不要提前断开或缓冲聊天 SSE | 源于 2026-08-26 / 1f0e9e1（v0.6.0）。应用侧已有约 10 秒压缩进度心跳，摘要默认超时 300 秒；历史建议网关读取超时 330～360 秒并关闭流式缓冲。不是企微 Channel Gateway，也不是新增功能 | 2026-09-22 核对：本仓不含线上生效的反向代理配置，尚不能独立确认部署状态；确认入口网关的超时与流式转发已处理后移除此项 |
 
 ## Pydantic AI C 组接入顺序（2026-09-22）

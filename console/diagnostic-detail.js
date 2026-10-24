@@ -10,7 +10,7 @@ import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-di
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { bindAttachmentImagePreviews, attachmentDownloadUrl } from "./attachment-preview.js?v=20260922-trajectory-8";
-import { createReadonlySessionShell } from "./session-view-shell.js?v=20260912-21";
+import { createReadonlySessionShell } from "./session-view-shell.js?v=20261025-readonly-load2";
 
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const icon = (name) => `<i data-lucide="${name}" aria-hidden="true"></i>`;

@@ -24,7 +24,7 @@ from pydantic_ai.messages import (
 )
 from deep_agent.agent.tool_output_limits import tool_result_artifacts
 from deep_agent.agent.planning import is_planning_tool, plan_snapshot_from_part
-from deep_agent.web.images import safe_web_image_value
+from deep_agent.web.images import safe_web_image_value, web_image_tool_value
 
 
 def text_delta(delta: str) -> dict[str, Any]:
@@ -189,9 +189,11 @@ def _map_tool_call_part(part: ToolCallPart) -> dict[str, Any] | None:
 
 @map_part.register(ToolReturnPart)
 def _map_tool_return_part(part: ToolReturnPart) -> dict[str, Any] | None:
+    value = (web_image_tool_value(part.content, part.metadata)
+             if part.tool_name == "web_image_view" else part.content)
     payload = tool_result(
         part.tool_name,
-        _to_jsonable(part.content),
+        _to_jsonable(value),
         part.tool_call_id,
         artifacts=tool_result_artifacts(part),
         plan=plan_snapshot_from_part(part),

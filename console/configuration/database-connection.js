@@ -17,11 +17,10 @@ function databaseInfoHtml(info, checkState = {}) {
 }
 
 function databaseCharsetHtml(info, { checking = false, checkedAt = null, error = "" } = {}) {
-  const button = `<button class="btn" type="button" data-check-database-charset${checking ? " disabled" : ""}>${checking ? "检查中…" : "检查字符集"}</button>`;
   const timestamp = checkedAt ? `<span class="database-charset-note">检查时间：${escapeHtml(new Date(checkedAt).toLocaleString("zh-CN"))}</span>` : "";
   if (checking || error || info.charset === null) {
     const note = checking ? "字符集检查中…" : error ? `字符集检查失败：${error}` : "字符集尚未检查";
-    return `<div class="database-charset-row" data-state="unknown" role="status"><span class="database-charset-note">${escapeHtml(note)}</span>${button}${timestamp}</div>`;
+    return `<div class="database-charset-row" data-state="unknown" role="status"><span class="database-charset-note">${escapeHtml(note)}</span>${timestamp}</div>`;
   }
   const charset = info.charset || {};
   const states = { ok: ["字符集正常", "circle-check"], warning: ["字符集需处理", "triangle-alert"], unknown: ["字符集未确认", "circle-help"], not_applicable: ["字符集未检查", "circle-help"] };
@@ -38,7 +37,7 @@ function databaseCharsetHtml(info, { checking = false, checkedAt = null, error =
     <dl class="database-inline-facts">${facts.map(([key, value]) => `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(databaseInfoValue(value))}</dd></div>`).join("")}</dl>
     <span class="database-charset-note">${escapeHtml(note)}</span>
     ${issues.length ? `<details class="database-charset-issues"><summary>查看 ${issues.length} 项检查结果</summary><ul>${issues.map((issue) => `<li>${escapeHtml(String(issue))}</li>`).join("")}</ul></details>` : ""}
-    ${button}${timestamp}
+    ${timestamp}
   </div>`;
 }
 
@@ -63,6 +62,11 @@ const databaseConnectionAdmin = {
     target.innerHTML = databaseInfoHtml({ ...this.info, charset: this.charset }, {
       checking: this.checking, checkedAt: this.checkedAt, error: this.checkError,
     });
+    const checkButton = document.getElementById("checkDatabaseCharsetBtn");
+    if (checkButton) {
+      checkButton.disabled = this.checking;
+      checkButton.innerHTML = `<i data-lucide="list-checks"></i>${this.checking ? "检查中…" : "检查字符集"}`;
+    }
     const schemaBadge = document.getElementById("databaseSchemaBadge");
     if (schemaBadge) schemaBadge.textContent = schemaBadgeText(this.info);
     const version = document.getElementById("databaseSchemaVersion");
@@ -120,7 +124,7 @@ window.databaseConnectionAdmin = databaseConnectionAdmin;
 window.__DatabaseConnectionUI = { databaseInfoHtml, databaseInfoValue, databaseCharsetHtml, schemaBadgeText };
 
 document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("databaseConnectionContent")?.addEventListener("click", (event) => {
+  document.getElementById("globalSettingsDatabase")?.addEventListener("click", (event) => {
     if (event.target.closest("[data-retry-database-connection]")) {
       databaseConnectionAdmin.refresh();
     }

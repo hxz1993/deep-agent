@@ -86,22 +86,28 @@ async def capture_ptc_rule_sequence():
 
 class PTCRulePlacementTests(unittest.IsolatedAsyncioTestCase):
     async def test_rules_live_only_in_run_code_across_discovery_failure_and_fresh_resume(self):
-        from deep_agent.ptc.toolset import _USAGE_RULES
+        from deep_agent.ptc.toolset import _ROUTING_GUIDANCE, _USAGE_RULES
         captured = await capture_ptc_rule_sequence()
         self.assertEqual(len(captured["requests"]), 10)
         self.assertEqual(captured["native_calls"], ["alpha", "beta", "beta", "alpha"])
         self.assertEqual([part["outcome"] for part in captured["ptc"]], ["success", "failed"])
         self.assertEqual(captured["ptc"][0]["content"], 6)
-        self.assertIn("Prefer ordinary native tools", str(captured["ptc"][1]["content"]))
+        self.assertIn("Inspect the error and completed calls", str(captured["ptc"][1]["content"]))
+        self.assertIn("repeat an uncertain write", str(captured["ptc"][1]["content"]))
         self.assertEqual(captured["notices"], ["New tool schemas are available: `demo_alpha`.",
                                               "New tool schemas are available: `demo_beta`."])
         for request in captured["requests"]:
             with self.subTest(step=request["step"]):
                 descriptions = request["descriptions"]
                 run_code = descriptions["run_code"]
+                self.assertTrue(run_code.startswith(_ROUTING_GUIDANCE))
+                self.assertEqual(run_code.count(_ROUTING_GUIDANCE), 1)
+                self.assertIn("one independent call with a small result", run_code)
+                self.assertIn("pass it directly here and check success/integrity", run_code)
                 self.assertIn(_USAGE_RULES, run_code)
                 self.assertEqual(run_code.count("DeepAgent PTC rules:"), 1)
-                for marker in ("Default to ordinary native MCP calls", "Never use `run_code` to discover",
+                for marker in ("Use `run_code` for bounded tool orchestration", "fresh model interpretation or semantic judgment",
+                    "Python syntax alone does not require execute_python", "Never use `run_code` to discover",
                     "only inside `run_code`", "authorized session file", "does not roll back earlier nested side effects",
                     "Execute side-effecting tools sequentially", "instead of blindly repeating the write",
                     "Never inspect, measure, print, or return", "cannot directly access host files",
@@ -110,9 +116,11 @@ class PTCRulePlacementTests(unittest.IsolatedAsyncioTestCase):
                 search = descriptions.get("search_tools", "")
                 self.assertIn("native", search)
                 self.assertIn("does not require", search)
-                self.assertNotIn("Default to ordinary native MCP calls", search)
+                self.assertIn("pass values directly", search)
+                self.assertNotIn("Use `run_code` for bounded tool orchestration", search)
                 self.assertNotIn("DeepAgent PTC rules:", search)
                 self.assertNotIn("DeepAgent PTC rules:", request["instructions"] or "")
+                self.assertNotIn(_ROUTING_GUIDANCE, request["instructions"] or "")
                 self.assertTrue(all("DeepAgent PTC rules:" not in notice for notice in request["announcements"]))
         self.assertNotIn("demo_alpha", captured["requests"][0]["descriptions"])
         self.assertIn("demo_alpha", captured["requests"][1]["descriptions"])

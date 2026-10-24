@@ -17,6 +17,7 @@ from deep_agent.channels.message_payloads import TextCardPayload, NewsPayload, v
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.files.storage import FileStoreError
+from deep_agent.files.public_download import load_public_file
 from deep_agent.channels.outbound import (
     ChannelRunContext, DeliveryError, MessageCapabilities, PreparedComponent, resolve_run_context,
 )
@@ -27,6 +28,7 @@ class MessageComponent(BaseModel):
     type: Literal["text", "image", "file", "audio", "video", "textcard", "news"]
     text: str | None = Field(default=None, max_length=20000)
     file_id: str | None = Field(default=None, max_length=256)
+    url: str | None = Field(default=None, max_length=8192)
     display_name: str | None = Field(default=None, max_length=200)
 
     payload: TextCardPayload | NewsPayload | None = None
@@ -34,17 +36,19 @@ class MessageComponent(BaseModel):
     @model_validator(mode="after")
     def valid_content(self):
         if self.type in {"textcard", "news"}:
-            if self.text is not None or self.file_id is not None or self.display_name is not None:
+            if self.text is not None or self.file_id is not None or self.url is not None or self.display_name is not None:
                 raise ValueError("卡片组件仅填写payload")
             validate_message_payload(self.type, self.payload)
             return self
         if self.payload is not None:
             raise ValueError("此消息类型不支持payload")
         if self.type == "text":
-            if not self.text or not self.text.strip() or self.file_id or self.display_name:
+            if not self.text or not self.text.strip() or self.file_id is not None or self.url is not None or self.display_name:
                 raise ValueError("text组件仅填写非空text")
-        elif not self.file_id or not self.file_id.strip() or self.text is not None:
-            raise ValueError("媒体组件填写当前会话file_id，文字使用独立text组件")
+        elif self.text is not None or ((self.file_id is None) == (self.url is None)):
+            raise ValueError("媒体组件填写当前会话file_id或公开url，二选一；文字使用独立text组件")
+        elif not (self.file_id if self.file_id is not None else self.url).strip():
+            raise ValueError("媒体来源不能为空")
         return self
 
 
@@ -126,6 +130,20 @@ async def prepare_components(deps: AgentDeps, components: list[MessageComponent]
                                      payload=validate_message_payload(component.type, component.payload))
         elif component.type == "text":
             item = PreparedComponent("text", text=component.text or "", requested_kind="text")
+        elif component.url is not None:
+            native_limit = getattr(caps, f"{component.type}_limit", 0) if component.type in caps.kinds else 0
+            fallback_limit = caps.file_limit if caps.media_fallback_to_file and "file" in caps.kinds else 0
+            data, filename, mime, _ = await load_public_file(
+                component.url, max_bytes=min(max(native_limit, fallback_limit), max_upload_bytes() - total_bytes),
+            )
+            total_bytes += len(data)
+            if total_bytes > max_upload_bytes():
+                raise DeliveryError("batch_too_large", "本次附件总大小超过上传上限，请分次发送")
+            filename = PurePosixPath((component.display_name or filename).replace("\\", "/")).name
+            if not filename or filename in {".", ".."} or any(ord(c) < 32 for c in filename):
+                raise DeliveryError("invalid_filename", "文件名无效")
+            item = PreparedComponent(component.type, data=data, filename=filename[:200],
+                                     mime=mime, requested_kind=component.type)
         else:
             file_id = component.file_id or ""
             attachment = deps.attachment_by_id.get(file_id)
@@ -158,7 +176,15 @@ async def prepare_components(deps: AgentDeps, components: list[MessageComponent]
 
 
 def build_channel_message_toolset(store, gateway, source: ChannelRunContext, caps: MessageCapabilities):
+    send_lock = asyncio.Lock()
+
     async def send(ctx: RunContext[AgentDeps], components: list[MessageComponent], reply: bool):
+        # Serialize sends from native batches and PTC gather alike. This lock is
+        # local to the trusted run's toolset, not a global receipt/dedup store.
+        async with send_lock:
+            return await send_ordered(ctx, components, reply)
+
+    async def send_ordered(ctx: RunContext[AgentDeps], components: list[MessageComponent], reply: bool):
         deps = ctx.deps
         if deps.cancellation_token is not None and deps.cancellation_token.cancelled:
             raise asyncio.CancelledError
@@ -171,6 +197,8 @@ def build_channel_message_toolset(store, gateway, source: ChannelRunContext, cap
             if current != source:
                 raise DeliveryError("source_changed", "渠道目标已变更")
             items = await prepare_components(deps, components, caps)
+            if deps.cancellation_token is not None and deps.cancellation_token.cancelled:
+                raise asyncio.CancelledError
             if not deps.run_id:
                 raise DeliveryError("run_unavailable", "缺少有效运行标识")
             return await gateway.send_message(source, deps.run_id, items, reply=reply)
@@ -180,6 +208,8 @@ def build_channel_message_toolset(store, gateway, source: ChannelRunContext, cap
             if exc.unknown:
                 return {"status": "unknown", "error": str(exc)}
             raise ModelRetry(str(exc)) from None
+        except ModelRetry:
+            raise
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -188,11 +218,11 @@ def build_channel_message_toolset(store, gateway, source: ChannelRunContext, cap
     if caps.supports_reply:
         async def channel_message(ctx: RunContext[AgentDeps], components: list[MessageComponent],
                                   action: Literal["send"] = "send", reply_to: Literal["current"] | None = None) -> dict:
-            """Send ordered text/image/file/audio/video or supported textcard/news to this conversation only. Cards use payload, not file_id; textcard needs title/description/url and optional btntxt; news needs 1-8 articles with title/url and optional description/picurl. URLs must be http(s) without credentials. Media requires an authorized file_id. Use reply_to=current to quote this turn's incoming message. Unsupported native media is sent as a file. Normal answers are delivered automatically; do not repeat successfully sent content."""
+            """Send ordered content to this conversation only. Media accepts exactly one authorized file_id or public HTTP(S) url; known URLs need no Python or platform upload. Downloads stay in call-local memory. Cards use payload: textcard needs title/description/url, news needs 1-8 articles. Use reply_to=current to quote this turn. Unsupported native media is sent as a file. Do not repeat successful or unconfirmed sends; interruption after dispatch may leave delivery unknown. Normal answers are delivered automatically."""
             return await send(ctx, components, reply_to == "current")
     else:
         async def channel_message(ctx: RunContext[AgentDeps], components: list[MessageComponent],
                                   action: Literal["send"] = "send") -> dict:
-            """Send ordered text/image/file/audio/video or supported textcard/news to this conversation only. Cards use payload, not file_id; textcard needs title/description/url and optional btntxt; news needs 1-8 articles with title/url and optional description/picurl. URLs must be http(s) without credentials. Media requires an authorized file_id. Unsupported native media is sent as a file. This channel does not support native message quotes. Normal answers are delivered automatically; do not repeat successfully sent content."""
+            """Send ordered content to this conversation only. Media accepts exactly one authorized file_id or public HTTP(S) url; known URLs need no Python or platform upload. Downloads stay in call-local memory. Cards use payload: textcard needs title/description/url, news needs 1-8 articles. This channel does not support native message quotes. Unsupported native media is sent as a file. Do not repeat successful or unconfirmed sends; interruption after dispatch may leave delivery unknown. Normal answers are delivered automatically."""
             return await send(ctx, components, False)
     return FunctionToolset([channel_message], id="runtime:channel")

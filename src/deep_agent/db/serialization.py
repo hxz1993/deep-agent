@@ -8,6 +8,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, ModelRequestPart, U
 
 from deep_agent.agent.attachments import is_attachment_ref
 from deep_agent.agent.context_references import is_context_reference
+from deep_agent.web.images import persistent_web_image_part
 
 _message_adapter: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 _request_part_adapter: TypeAdapter[ModelRequestPart] = TypeAdapter(ModelRequestPart)
@@ -92,6 +93,10 @@ def _serialize_request_with_deep_agent_refs(message: ModelRequest) -> dict[str, 
 
 def serialize_message(message: ModelMessage) -> dict:
     """JSON-compatible dict for DB persistence."""
+    if isinstance(message, ModelRequest):
+        # Native image bytes are for the current model request only. Both full
+        # message and incremental Part persistence use this same projection.
+        message = replace(message, parts=[persistent_web_image_part(part) for part in message.parts])
     if isinstance(message, ModelRequest) and _request_has_deep_agent_ref(message):
         return _serialize_request_with_deep_agent_refs(message)
     return _message_adapter.dump_python(message, mode="json")

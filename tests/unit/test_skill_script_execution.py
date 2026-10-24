@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from pydantic_ai import ModelRetry, RunContext
+from pydantic import ValidationError
+from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai.messages import ModelResponse, RetryPromptPart, TextPart, ToolCallPart
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
@@ -18,6 +22,7 @@ from deep_agent.sandbox.types import (
     BackendHealth,
     ExecuteRequest,
     ExecuteResult,
+    MAX_INPUTS_JSON_BYTES,
     SandboxInputFile,
     TruncationMetadata,
 )
@@ -64,6 +69,92 @@ def _context(*, user: str | None = "user") -> RunContext[AgentDeps]:
         model=TestModel(),
         usage=RunUsage(),
     )
+
+
+class SkillScriptValidationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-validation-")
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / "scripts").mkdir()
+        (root / "scripts/check.py").write_text("pass", encoding="utf-8")
+        item = ResolvedSkill(
+            code="demo", source="upload", package_root=root, library_root=root.parent,
+            resource_index=[{"path": "scripts/check.py", "category": "script"}],
+        )
+        self.backend = RecordingBackend()
+        self.toolset = build_skill_script_toolset({"demo": item}, backend=self.backend, timeout_sec=5)
+        assert self.toolset is not None
+
+    def _safe_errors(self, message: str, *, field: str, marker: str) -> None:
+        self.assertNotIn(marker, message)
+        self.assertNotIn("'input':", message)
+        self.assertNotIn("'ctx':", message)
+        self.assertNotIn("'url':", message)
+        self.assertNotIn("https://errors.pydantic.dev", message)
+        prefix = "Invalid Skill script execution request: "
+        self.assertTrue(message.startswith(prefix))
+        errors = ast.literal_eval(message[len(prefix):])
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(set(errors[0]), {"type", "loc", "msg"})
+        self.assertEqual(errors[0]["type"], "value_error")
+        self.assertEqual(errors[0]["loc"], (field,))
+        self.assertTrue(errors[0]["msg"].startswith("Value error, "))
+
+    async def test_oversized_inputs_and_arguments_retry_without_echoing_private_values(self) -> None:
+        marker = "SECRET123"
+        tool = (await self.toolset.get_tools(_context()))["execute_skill_script"]
+        self.assertEqual(MAX_INPUTS_JSON_BYTES, 16 * 1024 * 1024)
+        for field, params in (
+            ("inputs", {"inputs": {"x": marker + "x" * MAX_INPUTS_JSON_BYTES + marker}}),
+            ("arguments", {"arguments": [marker * 1_000]}),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(ModelRetry) as caught:
+                    await tool.call_func({"skill_code": "demo", "script_path": "scripts/check.py", **params}, _context())
+                self.assertEqual(self.backend.requests, [])
+                self.assertIsInstance(caught.exception.__cause__, ValidationError)
+                self._safe_errors(str(caught.exception), field=field, marker=marker)
+                expected = (f"inputs JSON exceeds {MAX_INPUTS_JSON_BYTES} bytes" if field == "inputs"
+                            else "script argument is invalid or too large")
+                self.assertIn(expected, str(caught.exception))
+
+    async def test_sdk_retry_is_safe_while_original_call_and_corrected_input_are_preserved(self) -> None:
+        marker = "SECRET123"
+        bad_args = {"skill_code": "demo", "script_path": "scripts/check.py", "arguments": [marker * 1_000]}
+        corrected = {"skill_code": "demo", "script_path": "scripts/check.py", "arguments": ["--check"],
+                     "inputs": {"customer": marker, "values": [0, False, None, "甲\\乙\n"]}}
+        step = 0
+
+        def respond(messages, info):
+            nonlocal step
+            step += 1
+            self.assertEqual(set(info.function_tools[0].parameters_json_schema["properties"]),
+                             {"skill_code", "script_path", "arguments", "inputs", "resource_paths"})
+            if step == 1:
+                return ModelResponse(parts=[ToolCallPart("execute_skill_script", bad_args, "invalid")])
+            if step == 2:
+                self.assertEqual(self.backend.requests, [])
+                retries = [part for message in messages for part in message.parts if isinstance(part, RetryPromptPart)]
+                self.assertEqual(len(retries), 1)
+                self.assertEqual(retries[0].tool_call_id, "invalid")
+                self._safe_errors(retries[0].content, field="arguments", marker=marker)
+                original = next(part for message in messages for part in message.parts
+                                if isinstance(part, ToolCallPart) and part.tool_call_id == "invalid")
+                self.assertEqual(original.args_as_dict(), bad_args)
+                return ModelResponse(parts=[ToolCallPart("execute_skill_script", corrected, "valid")])
+            self.assertEqual(len(self.backend.requests), 1)
+            return ModelResponse(parts=[TextPart("done")])
+
+        agent = Agent(FunctionModel(respond), deps_type=AgentDeps, toolsets=[self.toolset])
+        result = await agent.run("Validate and correct the synthetic request.", deps=_context().deps)
+        self.assertEqual(result.output, "done")
+        self.assertEqual(step, 3)
+        self.assertEqual(self.backend.requests[0].inputs, corrected["inputs"])
+        self.assertEqual(self.backend.requests[0].arguments, ("--check",))
+        original = next(part for message in result.new_messages() for part in message.parts
+                        if isinstance(part, ToolCallPart) and part.tool_call_id == "invalid")
+        self.assertEqual(original.args_as_dict(), bad_args)
 
 
 class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):

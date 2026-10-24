@@ -3,19 +3,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
-import mimetypes
 import re
-import time
 import uuid
 from dataclasses import dataclass, replace
-from email.message import Message
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
-from urllib.parse import unquote, urlsplit, urlunsplit
 
-import httpx2
 from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
-from pydantic_ai._ssrf import safe_download
 from pydantic_ai.toolsets import WrapperToolset
 from pydantic_ai.toolsets.abstract import ToolsetTool
 
@@ -25,7 +18,7 @@ from deep_agent.ptc.diagnostics import current_collector
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.capabilities.codes import PTC_PACKAGE_CODE
 from deep_agent.files.storage import FileStore, PlatformFileStore
-from deep_agent.web.proxy_compat import proxy_compatible_web_fetch
+from deep_agent.files.public_download import load_public_file
 
 if TYPE_CHECKING:
     from deep_agent.capabilities.registry import ToolPackage
@@ -168,103 +161,8 @@ async def _load_authorized_file(
     return data, name, mime
 
 
-def _safe_download_name(url: str, response: httpx2.Response, mime: str) -> str:
-    disposition = response.headers.get("content-disposition")
-    candidate: str | None = None
-    if disposition:
-        message = Message()
-        message["content-disposition"] = disposition
-        candidate = message.get_filename()
-    if not candidate:
-        candidate = PurePosixPath(unquote(urlsplit(url).path)).name
-    candidate = (candidate or "").replace("\\", "/").rsplit("/", 1)[-1]
-    candidate = "".join(char for char in candidate if ord(char) >= 32).strip(" .")
-    if candidate:
-        return candidate[:255]
-    extension = mimetypes.guess_extension(mime, strict=False) or ".bin"
-    return f"download{extension}"
-
-
-def _public_response_url(response: httpx2.Response, fallback: str) -> str:
-    request = response.request
-    parsed = urlsplit(str(request.url))
-    host = request.headers.get("host")
-    if not host:
-        return fallback
-    return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, ""))
-
-
 async def _load_public_url(url: str) -> tuple[bytes, str, str, str]:
-    parsed = urlsplit(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ModelRetry("url 只接受绝对 HTTP(S) 公网地址")
-    if parsed.username is not None or parsed.password is not None:
-        raise ModelRetry("url 不允许包含用户名或密码")
-
-    # Keep the relay aligned with Web Fetch: every redirect is SSRF checked by
-    # Pydantic AI, while DeepAgent's proxy shim preserves hostname DNS/SNI.
-    from deep_agent.web.runtime import (
-        _WEB_FETCH_ATTEMPT_TIMEOUT_SECONDS,
-        _WEB_FETCH_MAX_ATTEMPTS,
-        _WEB_FETCH_RETRY_DELAY_SECONDS,
-        _WEB_FETCH_TOTAL_TIMEOUT_SECONDS,
-        _fetch_retry_decision,
-    )
-
-    deadline = time.monotonic() + _WEB_FETCH_TOTAL_TIMEOUT_SECONDS
-    attempts = 0
-    while True:
-        attempts += 1
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise ModelRetry("公网文件下载超时")
-        try:
-            async with asyncio.timeout(
-                min(_WEB_FETCH_ATTEMPT_TIMEOUT_SECONDS, remaining)
-            ):
-                async with proxy_compatible_web_fetch():
-                    response = await safe_download(
-                        url,
-                        allow_local=False,
-                        timeout=int(_WEB_FETCH_ATTEMPT_TIMEOUT_SECONDS),
-                        headers={"Accept": "*/*"},
-                        max_bytes=MAX_FILE_BYTES,
-                    )
-            break
-        except asyncio.CancelledError:
-            raise
-        except (ValueError, httpx2.HTTPError, TimeoutError) as exc:
-            decision = _fetch_retry_decision(exc)
-            remaining = deadline - time.monotonic()
-            if (
-                decision is not None
-                and attempts < _WEB_FETCH_MAX_ATTEMPTS
-                and remaining > decision.delay_seconds
-            ):
-                await asyncio.sleep(decision.delay_seconds)
-                continue
-            if decision is None and attempts < _WEB_FETCH_MAX_ATTEMPTS:
-                # Pydantic AI deliberately collapses some transport subclasses;
-                # keep the same one short delay used by Web Fetch for request errors.
-                if (
-                    isinstance(exc, httpx2.RequestError)
-                    and remaining > _WEB_FETCH_RETRY_DELAY_SECONDS
-                ):
-                    await asyncio.sleep(_WEB_FETCH_RETRY_DELAY_SECONDS)
-                    continue
-            raise ModelRetry(tool_error_message("公网文件下载失败或地址不安全", exc)) from exc
-
-    data = response.content
-    if len(data) > MAX_FILE_BYTES:
-        raise ModelRetry(f"文件超过程序编排固定 {MAX_FILE_BYTES} 字节上限")
-    raw_mime = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-    mime = (
-        raw_mime
-        if re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", raw_mime)
-        else "application/octet-stream"
-    )
-    final_url = _public_response_url(response, url)
-    return data, _safe_download_name(final_url, response, mime), mime, final_url
+    return await load_public_file(url, max_bytes=MAX_FILE_BYTES)
 
 
 def build_code_mode_tool_package() -> "ToolPackage":

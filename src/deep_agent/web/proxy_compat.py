@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-import os
+import ipaddress
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 from urllib.parse import urlsplit
+from urllib.request import getproxies
 
 import dns.asyncresolver
 import pydantic_ai._ssrf as pydantic_ssrf
@@ -13,6 +14,7 @@ from httpcore2._async.http11 import AsyncHTTP11UpgradeStream
 
 
 _PUBLIC_DNS_SERVERS = ("1.1.1.1", "8.8.8.8")
+_FAKE_DNS_NETWORKS = (ipaddress.ip_network("198.18.0.0/15"), ipaddress.ip_network("2001:2::/48"))
 _PROXY_FETCH_ACTIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "deepagent_web_fetch_proxy_active",
     default=False,
@@ -28,16 +30,22 @@ _PATCHED = False
 
 
 def _http_tunnel_proxy_configured() -> bool:
-    for key in (
-        "HTTPS_PROXY",
-        "https_proxy",
-        "ALL_PROXY",
-        "all_proxy",
-        "HTTP_PROXY",
-        "http_proxy",
-    ):
-        value = str(os.environ.get(key) or "").strip()
-        if value and urlsplit(value).scheme.casefold() in {"http", "https"}:
+    # Match httpx2's default proxy discovery, including the OS fallback on
+    # macOS/Windows when no proxy environment variables are present.
+    proxies = getproxies()
+    if "*" in {host.strip() for host in proxies.get("no", "").split(",")}:
+        return False
+    for scheme in ("http", "https", "all"):
+        value = str(proxies.get(scheme) or "").strip()
+        if not value:
+            continue
+        # httpx2 treats a bare host:port value as an HTTP proxy as well.
+        value = value if "://" in value else f"http://{value}"
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            continue
+        if parsed.scheme.casefold() in {"http", "https"} and parsed.hostname:
             return True
     return False
 
@@ -71,7 +79,12 @@ async def _public_resolve_hostname(hostname: str) -> list[str]:
 
     ipv4, ipv6 = await asyncio.gather(query("A"), query("AAAA"))
     resolved = list(dict.fromkeys([*ipv4, *ipv6]))
-    if resolved:
+    # A transparent proxy can intercept even queries to public UDP resolvers.
+    # In that case use the OS answer instead; the caller still applies the
+    # unchanged SSRF checks to every returned address and pins the connection.
+    fake_answer = any(ipaddress.ip_address(address) in network
+                      for address in resolved for network in _FAKE_DNS_NETWORKS)
+    if resolved and not fake_answer:
         return resolved
     return await _ORIGINAL_RESOLVE_HOSTNAME(hostname)
 

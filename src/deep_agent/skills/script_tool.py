@@ -116,7 +116,14 @@ def build_skill_script_toolset(
         inputs: dict[str, JsonValue] | None = None,
         resource_paths: list[str] | None = None,
     ) -> dict[str, object]:
-        """Execute one authorized stored Python Skill script in the isolated Sandbox."""
+        """Execute one authorized stored Python Skill script in the isolated Sandbox.
+
+        Returns an execution envelope with status, result and truncated. The
+        script's business fields are inside result, not at the envelope root.
+        Check status == 'ok' and each truncated flag before using that result.
+        With PTC, pass upstream JSON directly in inputs and keep the returned
+        result in a variable for the next tool instead of transcribing it.
+        """
         if ctx.deps.user is None:
             raise ModelRetry("Skill脚本执行需要已认证用户")
         item = scripts.get(skill_code)
@@ -141,7 +148,8 @@ def build_skill_script_toolset(
                 timeout_ms=timeout_ms,
             )
         except ValidationError as exc:
-            raise ModelRetry(f"Invalid Skill script execution request: {exc}") from exc
+            errors = exc.errors(include_input=False, include_context=False, include_url=False)
+            raise ModelRetry(f"Invalid Skill script execution request: {errors}") from exc
         result = await backend.execute(request)
         return result.model_dump(mode="json")
 

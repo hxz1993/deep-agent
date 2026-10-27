@@ -24,19 +24,19 @@ let workspaceModule = null;
 let diagnosticsModule = null;
 const loadPage = createPageLoader({
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261023-console-load1");
+    const module = await import("./configuration.js?v=20261027-attachment-upload1");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=20261025-readonly-load2");
+    const module = await import("./workspace.js?v=20261027-attachment-upload1");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261025-readonly-load2");
+    const module = await import("./diagnostics-center.js?v=20261027-usage-average1");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

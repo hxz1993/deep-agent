@@ -193,3 +193,31 @@ class UsageLedgerTests(unittest.IsolatedAsyncioTestCase):
         empty = await UsageQueries(self.factory).report(SessionFilters(start=base.start, end=base.end,
             agent_id="absent", timezone=base.timezone))
         self.assertEqual(empty["summary"]["requests"], 0)
+
+    async def test_average_coverage_excludes_partial_usage_and_keeps_explicit_zero(self):
+        for index, usage in enumerate([
+            RequestUsage(input_tokens=100, output_tokens=20),
+            RequestUsage(input_tokens=0, output_tokens=0),
+            RequestUsage(input_tokens=30),
+            RequestUsage(),
+        ]):
+            run = f"coverage-{index}"
+            await self.store.append_message_parts("coverage-session",
+                messages=[ModelResponse(parts=[TextPart("reply")], usage=usage, run_id=run)],
+                agent_id=self.agent_id, user_id="owner", turn_id=run, run_id=run,
+                usage_model_id=self.model_id, usage_provider_id=self.provider_id)
+        query = UsageQueries(self.factory)
+        report = await query.report(self.filters())
+        sessions, total = await query.sessions(self.filters(), dimension="agent", key=self.agent_id)
+        self.assertEqual(total, 1)
+        rows = [report["summary"], sessions[0]]
+        rows.extend(row for group in report["groups"].values() for row in group)
+        rows.extend(row for group in report["trend"].values() for row in group)
+        for row in rows:
+            with self.subTest(row=row):
+                self.assertEqual(row["requests"], 4)
+                self.assertEqual(row["missing_requests"], 2)
+                self.assertEqual(row["total_tokens"], 150)
+                self.assertEqual(row["complete_requests"], 2)
+                self.assertEqual(row["complete_tokens"], 120)
+        self.assertEqual(report["summary"]["complete_tokens"] / report["summary"]["complete_requests"], 60)

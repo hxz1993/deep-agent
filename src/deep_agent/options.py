@@ -217,18 +217,6 @@ class Agent(Category):
         bind_env="LOCAL_FILE_ROOT",
         convertor=_resolve_repo_path,
     )
-    upload_max_size_mb = Option(
-        20,
-        val_type=int,
-        bind_env="UPLOAD_MAX_SIZE_MB",
-        extra_check=_ensure_positive_int,
-    )
-    upload_max_count = Option(
-        10,
-        val_type=int,
-        bind_env="UPLOAD_MAX_COUNT",
-        extra_check=_ensure_positive_int,
-    )
     upload_allowed_mimes = Option(
         "",
         val_type=str,
@@ -328,8 +316,6 @@ OPTION = DeepAgentOptions()
 def validate_runtime_options(options: DeepAgentOptions = OPTION) -> None:
     """Resolve startup-critical options so invalid environment values fail fast."""
     _ = options.agent.max_requests
-    _ = options.agent.upload_max_size_mb
-    _ = options.agent.upload_max_count
     _ = options.agent.file_backend
     _ = options.agent.local_file_root
     if options.agent.file_backend == "local":

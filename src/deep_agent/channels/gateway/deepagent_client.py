@@ -12,6 +12,9 @@ import aiohttp
 from deep_agent.channels.gateway.config import GatewayConfig
 from deep_agent.channels.contracts import InboundMedia
 from deep_agent.core.exceptions import AgentModelNotConfiguredError
+from deep_agent.files.upload_settings import DefaultUploadSettingsStore, load_upload_settings
+
+_UNSET_SETTINGS_STORE = object()
 
 
 @dataclass(frozen=True)
@@ -21,8 +24,12 @@ class StreamEvent:
 
 
 class DeepAgentChannelClient:
-    def __init__(self, config: GatewayConfig) -> None:
+    def __init__(self, config: GatewayConfig, *, global_setting_store=_UNSET_SETTINGS_STORE) -> None:
         self.config = config
+        self.global_setting_store = (
+            DefaultUploadSettingsStore()
+            if global_setting_store is _UNSET_SETTINGS_STORE else global_setting_store
+        )
         self._session: aiohttp.ClientSession | None = None
 
     async def start(self) -> None:
@@ -49,6 +56,7 @@ class DeepAgentChannelClient:
         return headers
 
     async def _wecom_app_request(self, account, action, payload=None):
+        policy = await load_upload_settings(self.global_setting_store) if action == "media" else None
         await self.start()
         assert self._session is not None
         async with self._session.request(
@@ -60,11 +68,10 @@ class DeepAgentChannelClient:
             if response.status >= 400:
                 raise RuntimeError(f"Application bridge rejected {action}: HTTP {response.status}")
             if action == "media":
-                from deep_agent.agent.media_pipeline import max_upload_bytes
                 chunks, size = [], 0
                 async for chunk in response.content.iter_chunked(65536):
                     size += len(chunk)
-                    if size > max_upload_bytes():
+                    if size > policy.max_bytes:
                         raise ValueError("Application media exceeds upload limit")
                     chunks.append(chunk)
                 disposition = response.content_disposition

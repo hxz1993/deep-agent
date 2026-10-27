@@ -13,7 +13,7 @@ from typing import Any
 
 from deep_agent.agent.media_pipeline import allowed_mimes
 from deep_agent.agent.spec import AgentSpec
-from deep_agent.options import OPTION
+from deep_agent.files.upload_settings import UploadSettings
 from deep_agent.documents.models import ProviderCapability
 from deep_agent.documents.providers import PROVIDERS
 from deep_agent.documents.settings import DocumentParsingRuntimeConfig
@@ -84,7 +84,7 @@ def upload_capability_kinds(additional_mimes: frozenset[str] = frozenset()) -> l
     return kinds
 
 
-def upload_capabilities_payload(document_config: DocumentParsingRuntimeConfig | None = None) -> dict[str, Any]:
+def upload_capabilities_payload(document_config: DocumentParsingRuntimeConfig | None = None, *, upload_settings: UploadSettings = UploadSettings()) -> dict[str, Any]:
     extra = document_upload_mimes(document_config)
     provider = document_upload_provider(document_config)
     effective = allowed_mimes(extra)
@@ -95,8 +95,8 @@ def upload_capabilities_payload(document_config: DocumentParsingRuntimeConfig | 
         "allowed_mimes": sorted(effective),
         "document_parsing": provider.describe() if provider else None,
         "blocked_document_mimes": sorted(extra - effective),
-        "max_size_mb": int(OPTION.agent.upload_max_size_mb),
-        "max_count": int(OPTION.agent.upload_max_count),
+        "max_size_mb": upload_settings.max_size_mb,
+        "max_count": upload_settings.max_count,
     }
 
 

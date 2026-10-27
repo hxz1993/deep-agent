@@ -138,7 +138,7 @@ def _image_result(code: str, *, provided: bool = True) -> dict:
 
 
 async def _build_evidence_bundle(
-    value: dict, parsed: ParsedDocument, *, context: dict | None = None, client=None,
+    value: dict, parsed: ParsedDocument, *, context: dict | None = None, client=None, max_bytes: int | None = None,
 ) -> tuple[bytes, int, int]:
     """Create one bounded ZIP; image failures remain explicit in its JSON.
 
@@ -146,7 +146,7 @@ async def _build_evidence_bundle(
     native responses never enter the ZIP. Page pairing is by evidence ordinal,
     never physical page number (which may be unknown or repeated).
     """
-    maximum = max_upload_bytes()
+    maximum = max_bytes if max_bytes is not None else max_upload_bytes()
     raw_pages = value.get("pages")
     if not isinstance(raw_pages, list) or len(raw_pages) != len(parsed.pages):
         raise DocumentParsingError("bundle_page_mismatch", "证据页面与解析缓存不一致，未导出。")
@@ -261,13 +261,13 @@ async def _build_evidence_bundle(
 
 
 async def build_evidence_bundle(
-    value: dict, parsed: ParsedDocument, *, context: dict | None = None, client=None,
+    value: dict, parsed: ParsedDocument, *, context: dict | None = None, client=None, max_bytes: int | None = None,
 ) -> bytes:
     """Export safe evidence and available native coordinate-plane images as one ZIP."""
     started = time.monotonic()
     status, saved, missing, size = "failed", 0, 0, 0
     try:
-        data, saved, missing = await _build_evidence_bundle(value, parsed, context=context, client=client)
+        data, saved, missing = await _build_evidence_bundle(value, parsed, context=context, client=client, max_bytes=max_bytes)
         status, size = "saved", len(data)
         return data
     except asyncio.CancelledError:

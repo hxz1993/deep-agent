@@ -17,6 +17,33 @@ const seriesName = (report, group, key) => key === "__other__" ? "其他" : grou
 const fmt = value => Number(value || 0).toLocaleString("zh-CN");
 const short = value => value >= 1e6 ? `${(value / 1e6).toFixed(2)}M` : value >= 1e3 ? `${(value / 1e3).toFixed(1)}K` : fmt(value);
 
+export function usageAveragePresentation(row = {}) {
+  const count = value => Number.isSafeInteger(value) && value >= 0;
+  const requests = row.requests || 0, missing = row.missing_requests || 0;
+  if (!requests) return { value: "—", partial: false, hint: "当前范围没有模型请求。" };
+  if (!missing && count(requests) && count(row.total_tokens)) {
+    return { value: short(row.total_tokens / requests), partial: false, hint: "合计 Token / 模型请求次数。" };
+  }
+  let complete = row.complete_requests, tokens = row.complete_tokens;
+  // Older services can prove this fallback only when every reported input and
+  // output belongs to the same fully measured requests; partial calls must not
+  // contribute their known half to this average.
+  if (complete === undefined && tokens === undefined && count(requests) && count(missing)
+      && missing <= requests && row.input_reported_requests === requests - missing
+      && row.output_reported_requests === requests - missing) {
+    complete = requests - missing;
+    tokens = row.total_tokens;
+  }
+  if (count(requests) && count(missing) && count(complete) && complete > 0
+      && complete === requests - missing && count(tokens)) {
+    return { value: short(tokens / complete), partial: true,
+      hint: `按完整记录 ${fmt(complete)}/${fmt(requests)} 次计算，${fmt(missing)} 次用量缺失未计入。` };
+  }
+  return { value: "—", partial: false, hint: missing === requests
+    ? `共 ${fmt(requests)} 次请求，均缺少完整 Token 数据，暂无法计算单次平均。`
+    : "请求用量不完整，当前数据无法确定完整记录的平均值。" };
+}
+
 export function usageRange(period, now = new Date(), custom = {}) {
   if (period === "custom") {
     const start = new Date(custom.start), end = new Date(custom.end);
@@ -85,6 +112,10 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
   const params = () => Object.fromEntries(["start", "end", "timezone", "agent_id"].map(key => [key, state.filters?.[key]]));
   const label = (key, dimension = state.dimension) => key === "__other__" ? "其他" : dimension === "purpose" ? PURPOSES[key] || key : dimension === "model" ? modelName(state.report?.models?.[key] || state.report?.model_snapshots?.[key]) : dimension === "agent" ? state.report?.agents?.[key] || key : dimension === "user" ? state.report?.users?.[key]?.username || key : key;
   const title = value => e(String(value || ""));
+  const averageHtml = row => {
+    const average = usageAveragePresentation(row);
+    return `<span title="${title(average.hint)}" aria-label="${title(`${average.value}${average.partial ? "，" : "。"}${average.hint}`)}">${average.value}${average.partial ? "*" : ""}</span>`;
+  };
   const measured = (row, field) => {
     const source = field === "total_tokens" ? (row.input_reported_requests || row.output_reported_requests) : row[field.replace("_tokens", "_reported_requests")];
     return source ? fmt(row[field]) : "—";
@@ -130,7 +161,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
       <div class="usage-view-toolbar">${dimensionSwitchHtml()}<button type="button" class="diagnostics-button" data-usage-action="export">${icon("download")}导出</button></div>
       <div class="usage-overview">
         <section class="usage-surface usage-trend"><div class="usage-panel-head"><div><h2>用量趋势</h2><small>按日期查看 Token 与模型请求次数</small></div><div class="usage-chart-tools">${chartSwitchHtml("metric", "统计指标", METRICS)}<div class="agent-view-switch diagnostic-view-switch usage-chart-types" role="group" aria-label="图表类型">${[["line","折线图","chart-line"],["stack","堆叠图","chart-column-stacked"]].map(([key,name,glyph]) => `<button type="button" class="${state.chartType === key ? "active" : ""}" data-usage-chart-field="chartType" data-usage-chart-value="${key}" aria-label="${name}" title="${name}" aria-pressed="${state.chartType === key}">${icon(glyph)}</button>`).join("")}</div></div></div><div class="usage-chart-body"><div class="usage-chart">${usageChartSvg(data, state.dimension, state.metric, state.chartType, state.focused)}</div><div class="usage-legend">${legendHtml(data)}</div></div></section>
-        <div class="usage-summary"><div class="usage-stats">${stat("累计 Token", measured(summary, "total_tokens"), "layers-3", "purple", "", summary.missing_requests ? `有 ${fmt(summary.missing_requests)} 次请求缺少 Token 数据，总量仅包含已记录部分。` : "")}${stat("日均 Token", (summary.input_reported_requests || summary.output_reported_requests) && data?.dates?.length ? short(summary.total_tokens/data.dates.length) : "—", "calendar-days", "blue")}${stat("单次平均 Token", summary.requests && !summary.missing_requests ? short(summary.total_tokens/summary.requests) : "—", "chart-no-axes-combined", "green")}${stat("峰值日期", peakUsage(data)?.[1] ? `${title(peakUsage(data)[0].slice(5))} <span class="usage-peak-secondary">${short(peakUsage(data)[1])}</span>` : "—", "calendar-check", "orange")}</div>${insightsHtml(data)}</div>
+        <div class="usage-summary"><div class="usage-stats">${stat("累计 Token", measured(summary, "total_tokens"), "layers-3", "purple", "", summary.missing_requests ? `有 ${fmt(summary.missing_requests)} 次请求缺少 Token 数据，总量仅包含已记录部分。` : "")}${stat("日均 Token", (summary.input_reported_requests || summary.output_reported_requests) && data?.dates?.length ? short(summary.total_tokens/data.dates.length) : "—", "calendar-days", "blue")}${stat("单次平均 Token", averageHtml(summary), "chart-no-axes-combined", "green", "", usageAveragePresentation(summary).hint)}${stat("峰值日期", peakUsage(data)?.[1] ? `${title(peakUsage(data)[0].slice(5))} <span class="usage-peak-secondary">${short(peakUsage(data)[1])}</span>` : "—", "calendar-check", "orange")}</div>${insightsHtml(data)}</div>
       </div>
       <section class="usage-details"><div class="usage-workbench"><div class="usage-table-area"><div class="usage-table-frame"><div id="usageDetailRows"></div></div><div id="usageDetailFooter"></div></div><div class="channel-resizer usage-resizer" role="separator" aria-label="调整贡献会话宽度" aria-orientation="vertical" tabindex="0"></div><aside class="usage-contributions diagnostic-channels-page" aria-label="贡献会话"><div id="usageContributionRows"></div><div id="usageContributionFooter"></div></aside></div></section>
       ${state.busy ? '<p class="usage-loading" role="status">正在查询用量…</p>' : ""}${exportDialog()}</div>`;
@@ -175,13 +206,13 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
       contributionFooter.innerHTML = "";
     }
     const rows = state.details?.items || [], total = state.details?.total || 0;
-    const headers = `<div class="usage-detail-row usage-detail-head"><span>明细</span><button data-usage-sort="total_tokens">Token</button><button data-usage-sort="requests">请求</button><span title="合计 Token / 模型请求次数">单次平均</span><span title="占当前筛选范围总 Token 的比例">用量占比</span></div>`;
+    const headers = `<div class="usage-detail-row usage-detail-head"><span>明细</span><button data-usage-sort="total_tokens">Token</button><button data-usage-sort="requests">请求</button><span title="完整记录的 Token / 完整记录请求数；* 表示有缺失请求未计入">单次平均</span><span title="占当前筛选范围总 Token 的比例">用量占比</span></div>`;
     const names = row => {
       if (state.dimension === "user") { const user = state.details?.users?.[row.key] || {}; return `<span title="${title(user.email || row.key)}">${title(user.username || user.display_name || row.key)}</span>`; }
       if (state.dimension === "model") { const model = row.model || {}; const badge = modelBadge(model, row.key); return `<span title="${title(model.provider_name || "")}">${title(modelName(model))}</span>${badge ? `<small class="usage-model-badge">${badge}</small>` : ""}`; }
       return title(row.name || row.key);
     };
-    host.innerHTML = `${headers}${rows.map(row => `<button type="button" class="usage-detail-row ${state.contributing?.key === row.key && state.contributing?.dimension === state.dimension ? "is-selected" : ""}" data-usage-key="${title(row.key)}"><span class="usage-detail-identity">${rowIcon(row)}<span class="usage-detail-name">${names(row)}</span></span><strong>${measured(row, "total_tokens")}</strong><span>${fmt(row.requests)}</span><span>${row.requests && !row.missing_requests ? short(row.total_tokens/row.requests) : "—"}</span><span>${state.details?.summary?.total_tokens ? (row.total_tokens/state.details.summary.total_tokens*100).toFixed(1)+"%" : "—"}</span></button>`).join("") || `<p class="diagnostics-empty">${state.busy ? "正在加载…" : "当前条件暂无用量"}</p>`}`;
+    host.innerHTML = `${headers}${rows.map(row => `<button type="button" class="usage-detail-row ${state.contributing?.key === row.key && state.contributing?.dimension === state.dimension ? "is-selected" : ""}" data-usage-key="${title(row.key)}"><span class="usage-detail-identity">${rowIcon(row)}<span class="usage-detail-name">${names(row)}</span></span><strong>${measured(row, "total_tokens")}</strong><span>${fmt(row.requests)}</span><span>${averageHtml(row)}</span><span>${state.details?.summary?.total_tokens ? (row.total_tokens/state.details.summary.total_tokens*100).toFixed(1)+"%" : "—"}</span></button>`).join("") || `<p class="diagnostics-empty">${state.busy ? "正在加载…" : "当前条件暂无用量"}</p>`}`;
     footer.innerHTML = (total > 10 ? pagination(total, state.offset, "previous", "next") : "");
     restoreScroll(scroll);
   }

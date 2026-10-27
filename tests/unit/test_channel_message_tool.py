@@ -127,7 +127,7 @@ class MessageToolTests(unittest.IsolatedAsyncioTestCase):
         deps = context().deps; deps.session_file_artifacts={"a": {}, "b": {}}
         deps.attachment_by_id = {key: AttachmentRef(id=key, name="test.txt") for key in ("a", "b")}
         deps.file_store = SimpleNamespace(download_bounded=AsyncMock(return_value=b"1"*60))
-        with patch("deep_agent.channels.message_tool.max_upload_bytes", return_value=100):
+        with patch("deep_agent.channels.message_tool.load_upload_settings_for_tool", AsyncMock(return_value=SimpleNamespace(max_bytes=100))):
             with self.assertRaises(DeliveryError) as caught:
                 await prepare_components(deps, [MessageComponent(type="file", file_id=k) for k in ("a", "b")], caps())
         self.assertEqual(caught.exception.code, "batch_too_large")

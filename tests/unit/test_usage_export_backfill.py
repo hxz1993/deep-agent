@@ -16,6 +16,24 @@ from maintenance.usage_backfill import backfill
 
 
 class UsageExportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_export_averages_only_complete_requests_when_usage_is_partial(self):
+        items = [
+            {"key": "mixed", "requests": 4, "total_tokens": 150, "missing_requests": 2,
+             "complete_requests": 2, "complete_tokens": 120},
+            {"key": "zero", "requests": 2, "total_tokens": 30, "missing_requests": 1,
+             "complete_requests": 1, "complete_tokens": 0},
+            {"key": "unknown", "requests": 1, "total_tokens": 30, "missing_requests": 1,
+             "complete_requests": 0, "complete_tokens": 0},
+            {"key": "complete", "requests": 2, "total_tokens": 100, "missing_requests": 0,
+             "complete_requests": 2, "complete_tokens": 100},
+        ]
+        detail = {"items": items, "users": {}, "summary": {"total_tokens": 310}}
+        with patch("deep_agent.api.v1.diagnostic_usage.detail_data", AsyncMock(return_value=detail)):
+            response = await export_details(None, None, None, None, group_by="agent")
+        rows = list(csv.reader(StringIO(response.body.decode("utf-8-sig"))))
+        self.assertEqual([row[7] for row in rows[1:]], ["60.0", "0.0", "", "50.0"])
+        self.assertEqual([row[9] for row in rows[1:]], ["2", "1", "1", "0"])
+
     async def test_export_neutralizes_formulas_and_preserves_missing_average(self):
         detail = {"items": [{"key": "=ID()", "requests": 2, "total_tokens": 20,
             "missing_requests": 1}], "users": {"=ID()": {

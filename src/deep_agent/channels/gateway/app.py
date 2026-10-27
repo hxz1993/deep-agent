@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hmac
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
@@ -20,7 +20,7 @@ from deep_agent.db.factory import close_db, create_engine
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.url import get_database_url
 from deep_agent.diagnostics.runtime import observe_lifespan
-from deep_agent.agent.media_pipeline import max_upload_bytes
+from deep_agent.files.upload_settings import DefaultUploadSettingsStore, load_upload_settings
 from deep_agent.channels.operations import MessageOperationRequest
 from deep_agent.channels.outbound import DeliveryError, PreparedComponent
 
@@ -37,6 +37,7 @@ class GatewayContext:
     runtime: ChannelRuntime
     engine: object
     database_revision: str | None
+    global_setting_store: object | None = field(default_factory=DefaultUploadSettingsStore)
 
 
 def create_gateway_app() -> FastAPI:
@@ -52,10 +53,10 @@ def create_gateway_app() -> FastAPI:
                 ).scalar_one_or_none()
             stores = create_data_stores(resolve_dialect(database_url), session_factory)
             assert stores.channel is not None
-            runtime = ChannelRuntime(stores.channel, config)
+            runtime = ChannelRuntime(stores.channel, config, global_setting_store=stores.global_setting)
             # API owns migrations; the revision is diagnostic metadata, not a
             # gateway-maintained version allowlist.
-            app.state.gateway = GatewayContext(config, runtime, engine, revision)
+            app.state.gateway = GatewayContext(config, runtime, engine, revision, stores.global_setting)
             await runtime.start()
             yield
         finally:
@@ -124,7 +125,11 @@ def create_gateway_app() -> FastAPI:
     @app.post("/messages/send")
     async def send_message(request: Request, context: GatewayContext = Depends(authorize)):
         # Enforce the limit while receiving, before multipart spools files.
-        limit = max_upload_bytes() + 128 * 1024
+        try:
+            policy = await load_upload_settings(context.global_setting_store)
+        except Exception:
+            raise HTTPException(status_code=503, detail="附件上传配置暂不可用") from None
+        limit = policy.max_bytes + 128 * 1024
         received = 0
         exceeded = False
         original_receive = request.receive
@@ -154,9 +159,9 @@ def create_gateway_app() -> FastAPI:
                         uploaded = form.get(f"media_{index}")
                         if not isinstance(uploaded, UploadFile):
                             raise ValueError("Missing media")
-                        data = await uploaded.read(max_upload_bytes() + 1)
+                        data = await uploaded.read(policy.max_bytes + 1)
                         total += len(data)
-                        if total > max_upload_bytes():
+                        if total > policy.max_bytes:
                             raise HTTPException(status_code=413, detail="附件总大小超过上限")
                     prepared.append(PreparedComponent(**component.model_dump(), data=data))
                 return await context.runtime.operations.send(command, prepared)

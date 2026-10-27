@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+import csv
 from datetime import UTC, datetime, timedelta
+from io import StringIO
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 import httpx
 from fastapi import FastAPI
-from pydantic_ai.messages import ModelRequest, UserPromptPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.usage import RequestUsage
 from sqlalchemy import event
 
 from deep_agent.agent.active_runs import ActiveRunRegistry
@@ -45,6 +48,7 @@ class DiagnosticJsonApiTests(unittest.IsolatedAsyncioTestCase):
         async def profiles(_request, _caller, ids):
             return {uid: {"user_id": uid, "display_name": uid, "resolution": "resolved"} for uid in ids}
         self.mocks.enter_context(patch("deep_agent.security.diagnostic_users.resolve_diagnostic_users", profiles))
+        self.mocks.enter_context(patch("deep_agent.api.v1.diagnostic_usage.resolve_diagnostic_users", profiles))
         self.mocks.enter_context(patch("deep_agent.api.v1.diagnostics._runtime", return_value=(None, None)))
         self.mocks.enter_context(patch("deep_agent.api.v1.diagnostics.query_logs", side_effect=lambda _config, **kw: {"selected": kw}))
 
@@ -97,6 +101,54 @@ class DiagnosticJsonApiTests(unittest.IsolatedAsyncioTestCase):
             event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
         self.assertTrue(statements)
         self.assertTrue(all(sql.lstrip().upper().startswith("SELECT") for sql in statements), statements)
+
+    async def test_usage_fallback_is_read_only_and_consistent_across_json_and_csv(self):
+        await self.stores.coordinator.append_message_parts("session", messages=[
+            ModelResponse(parts=[TextPart("first"), TextPart("second")],
+                usage=RequestUsage(input_tokens=100, output_tokens=20)),
+            ModelResponse(parts=[TextPart("zero")], usage=RequestUsage(input_tokens=0, output_tokens=0)),
+            ModelResponse(parts=[TextPart("partial")], usage=RequestUsage(input_tokens=30)),
+            ModelResponse(parts=[TextPart("unknown")], usage=RequestUsage()),
+        ], agent_id=self.agent_id, user_id="owner", run_id="usage-run", turn_id="usage-turn")
+        def snapshot(rows):
+            return [(row.event_id, row.updated_at, row.usage, row.payload) for row in rows]
+        before = snapshot(await self.stores.coordinator.list_events("session"))
+        statements = []
+        def capture(_conn, _cursor, sql, *_args):
+            statements.append(sql)
+        event.listen(self.engine.sync_engine, "before_cursor_execute", capture)
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://test") as client:
+                for path, extra, selector in [
+                    ("usage", {}, lambda body: body["summary"]),
+                    ("usage/details", {"group_by": "agent"}, lambda body: body["items"][0]),
+                    ("usage/sessions", {"group_by": "agent", "key": self.agent_id}, lambda body: body["items"][0]),
+                ]:
+                    for method in ("GET", "POST"):
+                        body = {**self.bounds, **extra}
+                        response = await client.request(method, "/api/v1/diagnostics/" + path,
+                            headers=self.headers, **({"params": body} if method == "GET" else {"json": body}))
+                        self.assertEqual(response.status_code, 200, response.text)
+                        row = selector(response.json())
+                        self.assertEqual([row[key] for key in (
+                            "requests", "total_tokens", "missing_requests", "complete_requests", "complete_tokens")],
+                            [4, 150, 2, 2, 120])
+                for method in ("GET", "POST"):
+                    body = {**self.bounds, "group_by": "agent"}
+                    response = await client.request(method, "/api/v1/diagnostics/usage/export",
+                        headers=self.headers, **({"params": body} if method == "GET" else {"json": body}))
+                    self.assertEqual(response.status_code, 200, response.text)
+                    rows = list(csv.reader(StringIO(response.content.decode("utf-8-sig"))))
+                    self.assertEqual(rows[1][5:8], ["4", "150", "60.0"])
+                    self.assertEqual(rows[1][9], "2")
+        finally:
+            event.remove(self.engine.sync_engine, "before_cursor_execute", capture)
+        self.assertTrue(statements)
+        self.assertTrue(all(sql.lstrip().upper().startswith("SELECT") for sql in statements), statements)
+        after = await self.stores.coordinator.list_events("session")
+        self.assertEqual(snapshot(after), before)
+        self.assertTrue(all("complete_tokens" not in call and "complete_requests" not in call
+            for row in after for call in (row.usage or {}).get("calls", [])))
 
     async def test_all_json_queries_keep_admin_gate_and_reject_anonymous(self):
         for route in self.app.routes:

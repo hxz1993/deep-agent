@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 from pydantic_ai import CancellationToken
 
 from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.files.upload_settings import DefaultUploadSettingsStore
 
 if TYPE_CHECKING:
     from deep_agent.agent.request_budget import TurnRequestBudget
@@ -42,6 +43,7 @@ class AgentDeps:
     space_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
     file_store: "FileStore | None" = field(default=None, repr=False)
+    upload_settings_store: Any = field(default_factory=DefaultUploadSettingsStore, repr=False)
     context_state: "ContextRunState | None" = None
     request_budget: "TurnRequestBudget | None" = None
     output_state: Any = field(default=None, repr=False)

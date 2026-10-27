@@ -664,6 +664,7 @@ const globalSettingsAdmin = {
       await Promise.all([
         this.refreshGeneralSetting("webSearch", { reuseCompleted }),
         this.refreshGeneralSetting("documentParsing", { reuseCompleted }),
+        window.attachmentUploadAdmin?.refresh({ reuseCompleted }),
       ]);
     } catch (error) {
       if (page === "operations") renderGlobalSettingsError(error);

@@ -14,6 +14,7 @@ from deep_agent.agent.attachment_extractors import AttachmentParseError, Documen
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import max_upload_bytes
+from deep_agent.files.upload_settings import load_upload_settings_for_tool
 from deep_agent.diagnostics import emit
 from deep_agent.files.reading_budget import ReadingBudget, paginate_items
 from deep_agent.files.storage import LocalFileStore, PlatformFileStore
@@ -234,7 +235,7 @@ def build_document_toolset(
                                      expected_hash=resolved.content_hash, tool_name="parse_document")
         source_hash = hashlib.sha256(data).hexdigest()
         if len(data) > capability.max_bytes or (resolved.source == "attachment" and len(data) > max_upload_bytes()):
-            raise ModelRetry("文件超过当前上传或供应商大小限制")
+            raise ModelRetry("文件超过读取安全上限或供应商大小限制")
         if resolved.content_hash and source_hash != resolved.content_hash:
             raise ToolFailed("Skill 资源内容 Hash 与已安装索引不一致")
         hit = record is not None
@@ -289,6 +290,7 @@ def build_document_toolset(
         if ctx.deps.user:
             export_headers.setdefault("user", ctx.deps.user)
         if export_file:
+            upload_settings = await load_upload_settings_for_tool(ctx)
             store = ctx.deps.file_store or PlatformFileStore()
             if ctx.deps.file_store is None:
                 ctx.deps.file_store = store
@@ -318,12 +320,12 @@ def build_document_toolset(
                     if not worker.cancelled():
                         worker.exception()
                     raise
-                return await build_evidence_bundle(value, record.parsed, context=context)
+                return await build_evidence_bundle(value, record.parsed, context=context, max_bytes=upload_settings.max_bytes)
 
             export_hit = cache.exports.peek(record.document_id).status != "not_requested"
             export_started = time.monotonic()
             exported = await cache.exports.ensure(record.document_id, payload, file_store=store,
-                                                   request_headers=export_headers, schema_version=SCHEMA_VERSION)
+                                                   request_headers=export_headers, schema_version=SCHEMA_VERSION, max_bytes=upload_settings.max_bytes)
             emit("document_export_completed", provider_name=config.provider, phase="export",
                  status=exported.status, cache_hit=export_hit,
                  error_code=exported.error.code if exported.error else None,

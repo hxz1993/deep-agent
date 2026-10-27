@@ -59,7 +59,7 @@ class ChannelURLTests(unittest.IsolatedAsyncioTestCase):
     async def test_url_download_obeys_remaining_batch_capacity_and_sanitizes_name(self):
         async def download(url, *, max_bytes):
             return b"x" * 60, "../remote.txt", "text/plain", url
-        with patch("deep_agent.channels.message_tool.max_upload_bytes", return_value=100), \
+        with patch("deep_agent.channels.message_tool.load_upload_settings_for_tool", AsyncMock(return_value=SimpleNamespace(max_bytes=100))), \
                 patch("deep_agent.channels.message_tool.load_public_file", AsyncMock(side_effect=download)) as load:
             # A compliant downloader rejects the second response at its 40-byte
             # bound. Deliberately exercise the preflight's independent guard too.

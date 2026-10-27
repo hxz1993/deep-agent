@@ -558,7 +558,7 @@ function init() {
   el.attachmentImageDialogClose?.addEventListener("click", closeAttachmentImagePreview);
   bindAttachmentImagePreviews({ root: document.getElementById("workspaceGrid"), openImage: openAttachmentImagePreview });
   el.attachmentImageDialog?.addEventListener("click", (event) => {
-    if (event.target === el.attachmentImageDialog || event.target.classList.contains("attachment-image-dialog-content")) closeAttachmentImagePreview();
+    if (event.target === el.attachmentImageDialog || !event.target.closest("img, button, a")) closeAttachmentImagePreview();
   });
   el.attachmentImageDialogPrevious?.addEventListener("click", () => moveAttachmentImagePreview(-1));
   el.attachmentImageDialogNext?.addEventListener("click", () => moveAttachmentImagePreview(1));
@@ -587,7 +587,12 @@ function init() {
     }
   });
   el.input.addEventListener("input", autoGrow);
-  el.attachBtn?.addEventListener("click", () => el.fileInput?.click());
+  el.attachBtn?.addEventListener("click", () => {
+    // Keep the native picker in the user gesture; refresh limits before selection
+    // validation without delaying the click until transient activation expires.
+    void loadUploadCapabilities();
+    el.fileInput?.click();
+  });
   el.fileInput?.addEventListener("change", onFilesSelected);
   el.input?.addEventListener("paste", onPaste);
   el.messages?.addEventListener("scroll", () => {
@@ -669,7 +674,8 @@ function init() {
   checkHealth();
   loadCapabilities();
   loadUploadCapabilities();
-  window.addEventListener("document-parsing-settings-changed", () => { void loadUploadCapabilities(); });
+  window.addEventListener("document-parsing-settings-changed", () => { void loadUploadCapabilities({ force: true }); });
+  window.addEventListener("attachment-upload-settings-changed", () => { void loadUploadCapabilities({ force: true }); });
   let directoryTimer;
   const scheduleDirectoryRefresh = () => {
     clearTimeout(directoryTimer);
@@ -2141,30 +2147,40 @@ function uploadCapabilityText() {
 }
 
 let uploadCapabilitiesRequestId = 0;
+let uploadCapabilitiesRequest = null;
 
-async function loadUploadCapabilities() {
+async function loadUploadCapabilities({ force = false } = {}) {
+  if (uploadCapabilitiesRequest && !force) return uploadCapabilitiesRequest;
   const requestId = ++uploadCapabilitiesRequestId;
-  try {
-    const r = await daFetch(serviceUrl("api/v1/uploads/capabilities"));
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const capabilities = await r.json();
-    if (requestId !== uploadCapabilitiesRequestId) return;
-    state.uploadCapabilities = capabilities;
-    const allowed = Array.isArray(state.uploadCapabilities?.allowed_mimes)
-      ? state.uploadCapabilities.allowed_mimes
-      : [];
-    if (el.fileInput) {
-      const accept = [...allowed];
-      if (allowed.includes("text/plain")) accept.push(".log");
-      el.fileInput.accept = accept.join(",");
+  const pending = (async () => {
+    try {
+      const r = await daFetch(serviceUrl("api/v1/uploads/capabilities"));
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const capabilities = await r.json();
+      if (!Number.isInteger(capabilities?.max_size_mb) || capabilities.max_size_mb < 1
+        || !Number.isInteger(capabilities?.max_count) || capabilities.max_count < 1
+        || !Array.isArray(capabilities?.allowed_mimes)) throw new Error("上传能力响应格式错误");
+      if (requestId !== uploadCapabilitiesRequestId) return false;
+      state.uploadCapabilities = capabilities;
+      if (el.fileInput) {
+        const accept = [...capabilities.allowed_mimes];
+        if (accept.includes("text/plain")) accept.push(".log");
+        el.fileInput.accept = accept.join(",");
+      }
+      updateComposerModelInfo();
+      return true;
+    } catch (e) {
+      if (requestId !== uploadCapabilitiesRequestId) return false;
+      // A failed read is not an unconfigured policy. Keep any last known display,
+      // but stop this upload interaction instead of accepting with stale defaults.
+      console.warn("[deep-agent] 加载上传能力失败", e);
+      return false;
+    } finally {
+      if (requestId === uploadCapabilitiesRequestId) uploadCapabilitiesRequest = null;
     }
-  } catch (e) {
-    if (requestId !== uploadCapabilitiesRequestId) return;
-    state.uploadCapabilities = { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 };
-    if (el.fileInput) el.fileInput.accept = "";
-    console.warn("[deep-agent] 加载上传能力失败", e);
-  }
-  updateComposerModelInfo();
+  })();
+  uploadCapabilitiesRequest = pending;
+  return pending;
 }
 
 function updateComposerModelInfo() {
@@ -2800,18 +2816,14 @@ function renderMessageAttachments(...args) { return getConversationPresenter().r
 async function onFilesSelected(e) {
   const files = Array.from(e.target.files || []);
   e.target.value = "";
-  for (const file of files) {
-    await uploadAttachment(file);
-  }
+  await uploadAttachmentBatch(files);
 }
 
 async function onPaste(e) {
   const files = Array.from(e.clipboardData?.files || []);
   if (!files.length) return;
   e.preventDefault();
-  for (const file of files) {
-    await uploadAttachment(file);
-  }
+  await uploadAttachmentBatch(files);
 }
 
 function setComposerDragging(active) {
@@ -2842,9 +2854,16 @@ async function onComposerDrop(event) {
   event.preventDefault();
   state.composerDragDepth = 0;
   setComposerDragging(false);
-  for (const file of Array.from(event.dataTransfer?.files || [])) {
-    await uploadAttachment(file);
+  await uploadAttachmentBatch(Array.from(event.dataTransfer?.files || []));
+}
+
+async function uploadAttachmentBatch(files) {
+  if (!files.length) return;
+  if (!await loadUploadCapabilities()) {
+    addSystemNote("上传限制获取失败，请重试上传。");
+    return;
   }
+  for (const file of files) await uploadAttachment(file);
 }
 
 async function uploadAttachment(file) {

@@ -98,6 +98,7 @@ async def compact_session_context(
         run_id=new_run_id(),
         request_headers=request_headers,
         file_store=ctx.file_store,
+        upload_settings_store=getattr(ctx.stores, "global_setting", None),
         app_id=request_headers.get("app"),
         space_id=request_headers.get("space"),
     )

@@ -20,6 +20,7 @@ from deep_agent.api.v1.uploads import router
 from deep_agent.core.context import get_app_context
 from deep_agent.documents.settings import DocumentParsingRuntimeConfig
 from deep_agent.files.storage import StoredFile
+from deep_agent.files.upload_settings import UploadSettings, UPLOAD_SETTING_KEY
 
 PDF = "application/pdf"
 PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -37,7 +38,7 @@ def office_bytes(path="ppt/slides/slide1.xml", content=b"<slide>123.45</slide>",
 class DocumentUploadTests(unittest.TestCase):
     def setUp(self):
         self.options = SimpleNamespace(agent=SimpleNamespace(upload_allowed_mimes="", upload_max_size_mb=20, upload_max_count=10))
-        self.patches = [patch("deep_agent.agent.media_pipeline.OPTION", self.options), patch("deep_agent.agent.input_capabilities.OPTION", self.options)]
+        self.patches = [patch("deep_agent.agent.media_pipeline.OPTION", self.options)]
         for target in self.patches:
             target.start()
             self.addCleanup(target.stop)
@@ -113,9 +114,8 @@ class DocumentUploadTests(unittest.TestCase):
                 process_upload(data=office_bytes(), mime=DOCX, filename="large.docx", additional_mimes=extra)
 
     def test_global_upload_size_limit_is_not_raised_by_provider_200mb_limit(self):
-        self.options.agent.upload_max_size_mb = 1
         with self.assertRaisesRegex(MediaPipelineError, "1MB limit"):
-            process_upload(data=b"%PDF" + b"x" * (1024 * 1024), mime=PDF, filename="large.pdf", additional_mimes=document_upload_mimes(self.config()))
+            process_upload(data=b"%PDF" + b"x" * (1024 * 1024), mime=PDF, filename="large.pdf", additional_mimes=document_upload_mimes(self.config()), upload_settings=UploadSettings(max_size_mb=1))
 
     def test_runtime_instruction_mentions_document_only_when_loaded(self):
         spec = AgentSpec(name="test", model="test", instructions="", capabilities=[])
@@ -133,6 +133,8 @@ class DocumentUploadTests(unittest.TestCase):
     def api_client(self, provider="paddle"):
         row = SimpleNamespace(version=1, value={"mode": "provider", "provider": provider, "api_key": "fake-unit-key"})
         self.settings = SimpleNamespace(get=AsyncMock(return_value=row))
+        self.upload_config = None
+        self.settings.get.side_effect = lambda key: self.upload_config if key == UPLOAD_SETTING_KEY else self.settings.get.return_value
         self.upload = AsyncMock(side_effect=lambda **kwargs: StoredFile("file-unit", kwargs["file_name"], len(kwargs["data"]), kwargs["file_type"], kwargs["mime"]))
         self.authorizer = SimpleNamespace(access_for=AsyncMock(return_value=SimpleNamespace(allowed=False)))
         ctx = SimpleNamespace(stores=SimpleNamespace(global_setting=self.settings), file_store=SimpleNamespace(upload=self.upload), console_admin_authorizer=self.authorizer)
@@ -176,7 +178,7 @@ class DocumentUploadTests(unittest.TestCase):
         result = client.post("/api/v1/uploads", files={"file": ("contract.pdf", b"%PDF-1.7", PDF)})
         self.assertEqual(result.status_code, 422)
         self.options.agent.upload_allowed_mimes = ""
-        self.options.agent.upload_max_size_mb = 1
+        self.upload_config = SimpleNamespace(version=1, value={"max_size_mb": 1, "max_count": 10})
         result = client.post("/api/v1/uploads", files={"file": ("contract.pdf", b"x" * (1024 * 1024 + 1), PDF)})
         self.assertEqual(result.status_code, 422)
         self.assertIn("1MB", result.json()["detail"])

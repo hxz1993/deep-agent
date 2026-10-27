@@ -10,7 +10,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20261023-console-load1";
+const CONFIGURATION_ASSET_VERSION = "20261027-attachment-upload1";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -98,6 +98,7 @@ async function loadAdminScripts() {
     "./configuration/core.js",
     "./configuration/form-feedback.js",
     "./configuration/global-settings.js",
+    "./configuration/attachment-upload.js",
     "./configuration/database-connection.js",
     "./configuration/llm-providers.js",
     "./configuration/llm-models.js",

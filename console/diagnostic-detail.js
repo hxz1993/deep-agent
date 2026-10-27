@@ -350,7 +350,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   } });
   listen(find("[data-detail-image]"), "error", () => find("[data-detail-image-error]").classList.remove("hidden"));
   listen(imageDialog, "close", () => find("[data-detail-image]").removeAttribute("src"));
-  listen(imageDialog, "click", (event) => { if (event.target === imageDialog) closeImage(); });
+  listen(imageDialog, "click", (event) => { if (event.target === imageDialog || !event.target.closest("img, button, a")) closeImage(); });
   listen(root, "error", (event) => event.target.closest?.(".web-image-preview")?.classList.add("load-failed"), true);
 
   const grid = find(".diagnostic-detail-grid");

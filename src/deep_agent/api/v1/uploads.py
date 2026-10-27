@@ -9,6 +9,7 @@ from deep_agent.api.v1.channel_auth import ChannelAccountDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.documents.settings import load_document_parsing_config
 from deep_agent.schemas.attachment import UploadResponse
+from deep_agent.files.upload_settings import load_upload_settings
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 router = APIRouter()
@@ -18,7 +19,8 @@ router = APIRouter()
 async def list_upload_capabilities(ctx: AppContextDep) -> dict:
     """MIME types and upload kinds enabled by the platform upload pipeline."""
     config = await load_document_parsing_config(getattr(ctx.stores, "global_setting", None))
-    return upload_capabilities_payload(config)
+    settings = await load_upload_settings(getattr(ctx.stores, "global_setting", None))
+    return upload_capabilities_payload(config, upload_settings=settings)
 
 
 @router.post("/uploads", response_model=UploadResponse)
@@ -28,12 +30,14 @@ async def upload_file(
     channel_account: ChannelAccountDep,
     file: UploadFile = File(...),
 ) -> UploadResponse:
-    raw = await file.read()
+    settings = await load_upload_settings(getattr(ctx.stores, "global_setting", None))
+    # Bounded read: Content-Length and MIME headers cannot authorize excess bytes.
+    raw = await file.read(settings.max_bytes + 1)
     filename = file.filename or "upload.bin"
     mime = file.content_type or "application/octet-stream"
     config = await load_document_parsing_config(getattr(ctx.stores, "global_setting", None))
     try:
-        processed = process_upload(data=raw, mime=mime, filename=filename, additional_mimes=document_upload_mimes(config))
+        processed = process_upload(data=raw, mime=mime, filename=filename, additional_mimes=document_upload_mimes(config), upload_settings=settings)
     except MediaPipelineError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 

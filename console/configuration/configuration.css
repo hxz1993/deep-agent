@@ -608,6 +608,39 @@ dialog.web-search-settings-dialog.console-detail-dialog.modal {
   height: min(460px, calc(100vh - 28px));
   overflow: visible;
 }
+/* Attachment upload reuses the General settings card and shared dialog controls. */
+.attachment-upload-heading { margin-top: var(--ui-group-gap); }
+.attachment-upload-summary { display: flex; align-items: center; gap: 20px; margin: 0; }
+.attachment-upload-summary > div { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.attachment-upload-summary dt { color: var(--text-dim); font-size: var(--ui-font-helper); }
+.attachment-upload-summary dd { margin: 0; }
+.attachment-upload-load-error { color: var(--danger-text); font-size: var(--ui-font-helper); }
+dialog#attachmentUploadSettingsDialog { width: min(600px, calc(100vw - 28px)); height: fit-content; }
+#attachmentUploadSettingsForm { display: flex; flex-direction: column; max-height: calc(100vh - 28px); }
+#attachmentUploadSettingsForm .modal-body { min-height: 0; flex: 1; }
+.attachment-upload-unit-input { position: relative; }
+.attachment-upload-unit-input input { width: 100%; padding-right: 44px; appearance: textfield; -moz-appearance: textfield; }
+.attachment-upload-unit-input input::-webkit-inner-spin-button,
+.attachment-upload-unit-input input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.attachment-upload-unit-input > span { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.attachment-upload-hint,
+.attachment-upload-field-label small,
+.attachment-upload-allowed-heading > span { color: var(--text-faint); font-size: var(--ui-font-helper); font-weight: 400; }
+.attachment-upload-hint { margin: 0; line-height: 1.7; }
+.attachment-upload-allowed-heading { display: flex; align-items: center; gap: 8px; margin-top: 24px; font-size: var(--ui-font-body); font-weight: 500; }
+.attachment-upload-allowed-list { display: grid; gap: 10px; margin: 12px 0; font-size: var(--ui-font-body); }
+.attachment-upload-allowed-list > div { display: grid; grid-template-columns: 40px 1fr; gap: 12px; line-height: 1.6; }
+.attachment-upload-allowed-list dt { color: var(--text-dim); }
+.attachment-upload-allowed-list dd { margin: 0; overflow-wrap: anywhere; }
+.attachment-upload-platform-note { display: flex; align-items: flex-start; gap: 7px; padding: 10px 12px; margin: 18px 0 0; background: var(--accent-soft); border-radius: var(--ui-radius); color: var(--text-dim); font-size: var(--ui-font-helper); line-height: 1.7; }
+.attachment-upload-platform-note svg { flex-shrink: 0; width: var(--ui-icon); height: var(--ui-icon); margin-top: 3px; color: var(--accent); }
+.attachment-upload-form-error { margin: 12px 0 0; color: var(--danger-text); font-size: var(--ui-font-helper); }
+.attachment-upload-footer-spacer { flex: 1; }
+@media (max-width: 1000px) {
+  .attachment-upload-card .global-settings-section-heading { flex-wrap: wrap; gap: 12px; }
+  .attachment-upload-card .global-settings-section-actions { margin-left: auto; }
+}
+
 /* Document parsing reuses the Web Search editor controls; only its content layout differs. */
 dialog#documentParsingSettingsDialog {
   height: min(540px, calc(100vh - 28px));

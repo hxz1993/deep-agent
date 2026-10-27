@@ -10,7 +10,7 @@ from pydantic_ai.toolsets import PreparedToolset
 
 from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.media_pipeline import max_upload_bytes
+from deep_agent.files.upload_settings import load_upload_settings_for_tool
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.files.export_schema import (
     ExistingPlatformFileSource,
@@ -194,10 +194,11 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
             )
 
         assert isinstance(source, GeneratedTextFileSource)
+        upload_settings = await load_upload_settings_for_tool(ctx)
         data = source.content.encode("utf-8")
-        if len(data) > max_upload_bytes():
+        if len(data) > upload_settings.max_bytes:
             raise ModelRetry(
-                f"新文件内容超过当前 {max_upload_bytes()} 字节上传上限；"
+                f"新文件内容超过当前 {upload_settings.max_bytes} 字节上传上限；"
                 "请缩小内容或先通过其他工具生成平台文件"
             )
         try:

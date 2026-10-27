@@ -52,7 +52,7 @@ test("配置 classic 脚本一起发起下载，按插入顺序执行，完成�
   });
   vm.runInContext(moduleSource(configuration), sandbox);
   const loading = sandbox.loadAdminScripts();
-  assert.equal(scripts.length, 22, "下载不能等前一个 onload 才开始");
+  assert.equal(scripts.length, 23, "下载不能等前一个 onload 才开始");
   assert.ok(scripts.every(script => script.async === false));
   assert.match(scripts[0].src, /\/proxy\/console\/configuration\/core\.js\?v=/);
   assert.match(scripts.at(-1).src, /integrations\.js\?v=/);
@@ -92,14 +92,14 @@ test("快速重复进入共用配置初始化 Promise，DOM 和绑定均只有�
   h.resolveTemplates(h.requests);
   await tick();
   assert.equal(h.counts.structure, 1);
-  assert.equal(h.scripts.length, 22);
+  assert.equal(h.scripts.length, 23);
   h.scripts.forEach(script => script.onload());
   await one;
   assert.equal(h.counts.decorated, 1);
   assert.deepEqual(h.events, ["DOMContentLoaded"]);
   await h.sandbox.initConfiguration();
   assert.equal(h.requests.length, 2);
-  assert.equal(h.scripts.length, 22);
+  assert.equal(h.scripts.length, 23);
 });
 
 test("模板下载失败可安全重试，部分脚本失败只提供重载且不能重复绑定", async () => {
@@ -113,7 +113,7 @@ test("模板下载失败可安全重试，部分脚本失败只提供重载且�
   const retry = h.sandbox.initConfiguration();
   h.resolveTemplates(h.requests.slice(2));
   await tick();
-  assert.equal(h.scripts.length, 22);
+  assert.equal(h.scripts.length, 23);
   h.scripts[5].onerror();
   await assert.rejects(retry, /脚本加载失败/);
   assert.equal(h.loading.children[1].textContent, "重新加载页面");
@@ -124,7 +124,7 @@ test("模板下载失败可安全重试，部分脚本失败只提供重载且�
   await tick();
   assert.deepEqual(h.events, []);
   assert.equal(h.counts.structure, 1);
-  assert.equal(h.scripts.length, 22);
+  assert.equal(h.scripts.length, 23);
 });
 
 test("配置脚本运行时异常进入重载状态，不误报加载成功，也不拦截无关脚本错误", async () => {

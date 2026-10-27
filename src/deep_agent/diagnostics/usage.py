@@ -21,6 +21,7 @@ METRICS = ("input_tokens", "output_tokens")
 def _empty():
     return {"requests": 0, "input_tokens": 0, "output_tokens": 0,
             "total_tokens": 0, "missing_requests": 0,
+            "complete_requests": 0, "complete_tokens": 0,
             "input_reported_requests": 0, "output_reported_requests": 0}
 
 
@@ -36,6 +37,19 @@ def _add(target, call):
             missing = True
     target["total_tokens"] = target["input_tokens"] + target["output_tokens"]
     target["missing_requests"] += int(missing)
+    if not missing:
+        target["complete_requests"] += 1
+        target["complete_tokens"] += sum(call[field] for field in METRICS)
+
+
+def average_tokens(row):
+    """Average only complete requests; partial counters stay in the known total."""
+    if not row["requests"]:
+        return None
+    if not row["missing_requests"]:
+        return row["total_tokens"] / row["requests"]
+    count = row.get("complete_requests", 0)
+    return row["complete_tokens"] / count if count else None
 
 
 def _key(dimension, call, event):

@@ -150,6 +150,7 @@ class DocumentExportManager:
         file_store: FileStore | None,
         request_headers: Mapping[str, str],
         schema_version: str = "document-evidence-v2",
+        max_bytes: int | None = None,
     ) -> ExportResult:
         if self._closed:
             raise RuntimeError("Document export cache is closed")
@@ -168,13 +169,14 @@ class DocumentExportManager:
             task = asyncio.create_task(self._export(
                 document_id, payload, file_store=file_store,
                 request_headers=headers, schema_version=schema_version,
+                max_bytes=max_bytes if max_bytes is not None else max_upload_bytes(),
             ))
             self._tasks[document_id] = task
         return await asyncio.shield(task)
 
     async def _export(
         self, document_id: str, payload: EvidencePayload, *, file_store: FileStore | None,
-        request_headers: Mapping[str, str], schema_version: str,
+        request_headers: Mapping[str, str], schema_version: str, max_bytes: int,
     ) -> ExportResult:
         def finish(result: ExportResult) -> ExportResult:
             self._results[document_id] = result
@@ -209,7 +211,7 @@ class DocumentExportManager:
             return finish(_failure("serialization_failed", "证据包生成失败，解析正文仍可读取。"))
         except Exception:
             return finish(_failure("serialization_failed", "证据文件序列化失败，解析正文仍可读取。"))
-        if len(data) > max_upload_bytes():
+        if len(data) > max_bytes:
             return finish(_failure("file_too_large", "证据文件超过当前文件上传大小上限，解析正文仍可读取。"))
         upload = file_store.upload_once if isinstance(file_store, PlatformFileStore) else file_store.upload
         upload_task = asyncio.create_task(upload(

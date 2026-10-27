@@ -17,7 +17,7 @@ from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.capabilities.registry import ToolInfo, ToolPackage
 from deep_agent.files.storage import FileStore, PlatformFileStore
-from deep_agent.options import OPTION
+from deep_agent.files.upload_settings import load_upload_settings_for_tool
 from deep_agent.sandbox.backend import PythonExecutionBackend
 from deep_agent.sandbox.profile import (
     ResolvedSandboxProfile,
@@ -135,7 +135,7 @@ async def _authorized_input(
         ctx.deps.file_bytes[cache_key] = data
     if len(data) > max_upload_bytes():
         raise ModelRetry(
-            f"输入文件超过当前 {max_upload_bytes()} 字节上传上限"
+            f"输入文件超过 {max_upload_bytes()} 字节读取安全上限"
         )
 
     path = item.path
@@ -195,13 +195,14 @@ def build_python_sandbox_tool_package(
         if ctx.deps.user is None:
             raise ModelRetry("python-sandbox 需要已认证用户，无法在无用户身份时执行")
 
+        upload_settings = await load_upload_settings_for_tool(ctx)
         requested_files = [
             item if isinstance(item, SandboxFileInput) else SandboxFileInput.model_validate(item)
             for item in (files or [])
         ]
-        if len(requested_files) > int(OPTION.agent.upload_max_count):
+        if len(requested_files) > upload_settings.max_count:
             raise ModelRetry(
-                f"files 最多允许 {OPTION.agent.upload_max_count} 个文件"
+                f"files 最多允许 {upload_settings.max_count} 个文件"
             )
         ids = [item.file_id.strip() for item in requested_files]
         if len(ids) != len(set(ids)):
@@ -236,14 +237,14 @@ def build_python_sandbox_tool_package(
                 metadata={"generated_files": []},
             )
 
-        if len(result.published_files) > int(OPTION.agent.upload_max_count):
+        if len(result.published_files) > upload_settings.max_count:
             raise ModelRetry(
-                f"publish_path 最多允许 {OPTION.agent.upload_max_count} 个输出文件"
+                f"publish_path 最多允许 {upload_settings.max_count} 个输出文件"
             )
         for output in result.published_files:
-            if output.byte_size > max_upload_bytes():
+            if output.byte_size > upload_settings.max_bytes:
                 raise ModelRetry(
-                    f"生成文件 {output.file_name} 超过当前 {max_upload_bytes()} 字节上传上限"
+                    f"生成文件 {output.file_name} 超过当前 {upload_settings.max_bytes} 字节上传上限"
                 )
 
         store = _file_store(ctx)

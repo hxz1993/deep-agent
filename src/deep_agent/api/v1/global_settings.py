@@ -112,8 +112,6 @@ _SETTING_GROUPS = (
         _SettingDefinition("sandbox_cpu_seconds", "CPU 时间上限", "DEEP_AGENT_SANDBOX_CPU_SECONDS", "agent", "sandbox_cpu_seconds", "单次执行消耗 CPU 时间的上限，与等待超时分别生效。", "秒"),
     )),
     _SettingGroupDefinition("uploads", "文件上传", (
-        _SettingDefinition("upload_max_size_mb", "单文件大小上限", "DEEP_AGENT_UPLOAD_MAX_SIZE_MB", "agent", "upload_max_size_mb", "单个上传文件允许的最大体积。", "MB"),
-        _SettingDefinition("upload_max_count", "单次文件数量", "DEEP_AGENT_UPLOAD_MAX_COUNT", "agent", "upload_max_count", "一次请求允许上传的最大文件数量。", "个"),
         _SettingDefinition("upload_allowed_mimes", "允许的 MIME", "DEEP_AGENT_UPLOAD_ALLOWED_MIMES", "agent", "upload_allowed_mimes", "允许上传的 MIME 类型；留空使用内置白名单。", empty_display="使用内置白名单"),
     )),
     _SettingGroupDefinition("images", "图片输入", (

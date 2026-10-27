@@ -49,6 +49,20 @@
                 </div>
               </section>
             </div>
+            <div class="global-settings-group-heading attachment-upload-heading"><h2 class="global-settings-detail-title settings-group-title"><i data-lucide="paperclip"></i>附件上传</h2></div>
+            <div class="global-settings-tool-card attachment-upload-card">
+              <section class="global-settings-section" id="globalSettingsAttachmentUpload">
+                <div class="global-settings-section-heading">
+                  <div class="global-settings-section-title"><h3>上传限制</h3><span class="global-settings-section-copy">设置对话附件的单文件大小和单次上传数量。</span></div>
+                  <div class="global-settings-section-actions">
+                    <dl class="attachment-upload-summary" id="attachmentUploadSummary" aria-label="附件上传限制"><div><dt>单文件</dt><dd class="global-settings-summary-value" id="attachmentUploadSizeSummary">—</dd></div><div><dt>单次最多</dt><dd class="global-settings-summary-value" id="attachmentUploadCountSummary">—</dd></div></dl>
+                    <span class="attachment-upload-load-error hidden" id="attachmentUploadLoadError" role="status">配置加载失败</span>
+                    <button class="btn hidden" id="retryAttachmentUploadSettingsBtn" type="button"><i data-lucide="refresh-cw"></i>重试</button>
+                    <button class="btn" id="openAttachmentUploadSettingsBtn" type="button" aria-haspopup="dialog" disabled><i data-lucide="pencil"></i>编辑</button>
+                  </div>
+                </div>
+              </section>
+            </div>
           </section>
           <section class="global-settings-page catalog-panel" id="settings-models" aria-label="模型" hidden></section>
           <section class="global-settings-page" id="settings-operations" aria-label="运维" hidden>
@@ -323,6 +337,24 @@
       </div>
     </section>
   </div>
+
+  <dialog class="modal" id="attachmentUploadSettingsDialog" aria-labelledby="attachmentUploadSettingsTitle">
+    <form id="attachmentUploadSettingsForm" novalidate>
+      <header class="modal-header"><h3 id="attachmentUploadSettingsTitle">附件上传</h3><button class="btn icon-btn" id="closeAttachmentUploadSettingsBtn" type="button" aria-label="关闭"><i data-lucide="x"></i></button></header>
+      <div class="modal-body">
+        <div class="dialog-field-grid">
+          <label class="field" for="attachmentUploadMaxSize"><span class="attachment-upload-field-label">单文件大小上限 <small>（1～200 MB）</small></span><div class="attachment-upload-unit-input"><input id="attachmentUploadMaxSize" class="console-input" type="number" min="1" max="200" step="1" placeholder="20" inputmode="numeric" aria-describedby="attachmentUploadFormError" /><span>MB</span></div></label>
+          <label class="field" for="attachmentUploadMaxCount"><span class="attachment-upload-field-label">单次文件数量上限 <small>（1～20 个）</small></span><div class="attachment-upload-unit-input"><input id="attachmentUploadMaxCount" class="console-input" type="number" min="1" max="20" step="1" placeholder="10" inputmode="numeric" aria-describedby="attachmentUploadFormError" /><span>个</span></div></label>
+        </div>
+        <p class="attachment-upload-hint">保存后对后续上传生效，不影响已上传的附件。</p>
+        <div class="attachment-upload-allowed-heading">允许类型 <span>通过环境变量设置</span></div>
+        <dl class="attachment-upload-allowed-list" id="attachmentUploadAllowedTypes"></dl>
+        <p class="attachment-upload-platform-note"><i data-lucide="info"></i><span>平台文件服务可能有额外的大小和类型限制，实际上传需同时满足。</span></p>
+        <p class="attachment-upload-form-error hidden" id="attachmentUploadFormError" role="alert"></p>
+      </div>
+      <footer class="modal-footer"><button class="btn text" id="resetAttachmentUploadSettingsBtn" type="button">恢复默认</button><span class="attachment-upload-footer-spacer"></span><button class="btn" id="cancelAttachmentUploadSettingsBtn" type="button">取消</button><button class="btn primary" id="saveAttachmentUploadSettingsBtn" type="submit">保存</button></footer>
+    </form>
+  </dialog>
 
   <dialog class="modal console-detail-dialog web-search-settings-dialog" id="webSearchSettingsDialog" aria-labelledby="webSearchSettingsTitle">
     <form class="web-search-settings-form" id="webSearchSettingsForm" novalidate>

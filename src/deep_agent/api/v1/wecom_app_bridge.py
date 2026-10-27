@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from deep_agent.agent.media_pipeline import max_upload_bytes
+from deep_agent.files.upload_settings import load_upload_settings
 from deep_agent.agent.observability import log_event
 from deep_agent.api.v1.channel_auth import ChannelAccountDep, ChannelControlAccountDep
 from deep_agent.api.v1.wecom_applications import WecomRoute
@@ -102,10 +102,11 @@ async def media(body: MediaRequest, ctx: AppContextDep, account: ChannelAccountD
     metadata = run.source_metadata or {}
     if metadata.get('wecom_app_media_id') != body.media_id:
         raise HTTPException(403, 'Media does not belong to this channel message')
+    policy = await load_upload_settings(ctx.stores.global_setting)
     fields = dict(account_id=account.id, channel_run_id=run.id,
                   request_id=metadata.get('wecom_app_request_id'), phase='media')
     try:
-        data, filename, mime = await ctx.get_wecom_profiles().client.media(app, body.media_id, limit=max_upload_bytes())
+        data, filename, mime = await ctx.get_wecom_profiles().client.media(app, body.media_id, limit=policy.max_bytes)
         # Recheck the current account/app snapshot after the network operation.
         current = await ctx.stores.channel.get_account(account.id)
         if current is None or not current.enabled:
@@ -147,8 +148,13 @@ async def send_component(body: ComponentRequest, ctx: AppContextDep, account: Ch
     app, run = await _run(ctx, account, body.channel_run_id)
     data = None
     if body.data_base64 is not None:
+        policy = await load_upload_settings(ctx.stores.global_setting)
+        if len(body.data_base64) > 4 * ((policy.max_bytes + 2) // 3):
+            raise HTTPException(422, 'Media exceeds current upload size limit')
         try:
             data = base64.b64decode(body.data_base64, validate=True)
+            if len(data) > policy.max_bytes:
+                raise ValueError("Media exceeds upload size limit")
             validate_outbound_media(body.kind, data)
         except (ValueError, binascii.Error, WecomError):
             raise HTTPException(422, 'Invalid media format or size') from None

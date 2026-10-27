@@ -28,8 +28,8 @@ test("附件上传不再要求可配置的附件工具包", () => {
 });
 
 test("控制台从后端读取 MIME、数量与大小限制", () => {
-  assert.match(chatSource, /state\.uploadCapabilities\.allowed_mimes/);
-  assert.match(chatSource, /allowed\.includes\("text\/plain"\)/);
+  assert.match(chatSource, /capabilities\.allowed_mimes/);
+  assert.match(chatSource, /accept\.includes\("text\/plain"\)/);
   assert.match(chatSource, /accept\.push\("\.log"\)/);
   assert.match(chatSource, /el\.fileInput\.accept = accept\.join\(","\)/);
   assert.match(chatSource, /state\.uploadCapabilities\?\.max_count/);
@@ -55,42 +55,42 @@ test("附件能力说明区分解析供应商支持与既定上传白名单阻�
 });
 
 test("文档解析热切换刷新上传能力，空白名单清除旧 accept", async () => {
-  const definition = chatSource.match(/async function loadUploadCapabilities\(\) \{[\s\S]*?\n\}/)?.[0];
+  const definition = chatSource.match(/async function loadUploadCapabilities\([^\n]*\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(definition);
-  assert.match(chatSource, /window\.addEventListener\("document-parsing-settings-changed", \(\) => \{ void loadUploadCapabilities\(\); \}\)/);
-  let payload = { kinds: ["pdf"], allowed_mimes: ["application/pdf", "text/plain"], document_parsing: { provider: "paddle" } };
+  assert.match(chatSource, /window\.addEventListener\("document-parsing-settings-changed", \(\) => \{ void loadUploadCapabilities\(\{ force: true \}\); \}\)/);
+  let payload = { max_count: 10, max_size_mb: 20, kinds: ["pdf"], allowed_mimes: ["application/pdf", "text/plain"], document_parsing: { provider: "paddle" } };
   const input = { accept: ".old" };
   const context = vm.createContext({
-    state: {}, el: { fileInput: input }, console, uploadCapabilitiesRequestId: 0, updateComposerModelInfo() {}, serviceUrl: value => value,
+    state: {}, el: { fileInput: input }, console, uploadCapabilitiesRequestId: 0, uploadCapabilitiesRequest: null, updateComposerModelInfo() {}, serviceUrl: value => value,
     daFetch: async () => ({ ok: true, json: async () => payload }),
   });
   vm.runInContext(definition, context);
   await context.loadUploadCapabilities();
   assert.equal(input.accept, "application/pdf,text/plain,.log");
   assert.equal(context.state.uploadCapabilities.document_parsing.provider, "paddle");
-  payload = { kinds: ["text_file"], allowed_mimes: ["text/plain"], document_parsing: null };
+  payload = { max_count: 10, max_size_mb: 20, kinds: ["text_file"], allowed_mimes: ["text/plain"], document_parsing: null };
   await context.loadUploadCapabilities();
   assert.equal(input.accept, "text/plain,.log");
   assert.equal(context.state.uploadCapabilities.document_parsing, null);
-  payload = { kinds: [], allowed_mimes: [] };
+  payload = { max_count: 10, max_size_mb: 20, kinds: [], allowed_mimes: [] };
   await context.loadUploadCapabilities();
   assert.equal(input.accept, "");
 });
 
 test("热切换后的迟到上传能力响应不能恢复旧供应商类型", async () => {
-  const definition = chatSource.match(/async function loadUploadCapabilities\(\) \{[\s\S]*?\n\}/)?.[0];
+  const definition = chatSource.match(/async function loadUploadCapabilities\([^\n]*\) \{[\s\S]*?\n\}/)?.[0];
   const requests = [], input = { accept: "" };
   const context = vm.createContext({
-    state: {}, el: { fileInput: input }, console, uploadCapabilitiesRequestId: 0,
+    state: {}, el: { fileInput: input }, console, uploadCapabilitiesRequestId: 0, uploadCapabilitiesRequest: null,
     updateComposerModelInfo() {}, serviceUrl: value => value,
     daFetch: () => new Promise(resolve => requests.push(resolve)),
   });
   vm.runInContext(definition, context);
   const old = context.loadUploadCapabilities();
-  const current = context.loadUploadCapabilities();
-  requests[1]({ ok: true, json: async () => ({ kinds: [], allowed_mimes: [] }) });
+  const current = context.loadUploadCapabilities({ force: true });
+  requests[1]({ ok: true, json: async () => ({ max_count: 10, max_size_mb: 20, kinds: [], allowed_mimes: [] }) });
   await current;
-  requests[0]({ ok: true, json: async () => ({ kinds: ["pdf"], allowed_mimes: ["application/pdf"] }) });
+  requests[0]({ ok: true, json: async () => ({ max_count: 10, max_size_mb: 20, kinds: ["pdf"], allowed_mimes: ["application/pdf"] }) });
   await old;
   assert.equal(input.accept, "");
   assert.deepEqual(Array.from(context.state.uploadCapabilities.kinds), []);
@@ -134,4 +134,50 @@ test("新附件请求不再把前端抽取文本写入聊天载荷", () => {
   assert.match(template, /\.xlsx/);
   assert.match(template, /\.log/);
   assert.match(template, /\.mp4/);
+});
+
+test("上传能力同批刷新合并请求，热保存可强制新读并丢弃旧响应", async () => {
+  const definition = chatSource.match(/async function loadUploadCapabilities\([^\n]*\) \{[\s\S]*?\n\}/)?.[0];
+  const requests = [], input = { accept: ".before" };
+  const context = vm.createContext({
+    state: { uploadCapabilities: { max_count: 10, max_size_mb: 20 } }, el: { fileInput: input }, console,
+    uploadCapabilitiesRequestId: 0, uploadCapabilitiesRequest: null,
+    updateComposerModelInfo() {}, serviceUrl: value => value,
+    daFetch: () => new Promise(resolve => requests.push(resolve)),
+  });
+  vm.runInContext(definition, context);
+  const first = context.loadUploadCapabilities(), same = context.loadUploadCapabilities();
+  assert.equal(requests.length, 1);
+  const latest = context.loadUploadCapabilities({ force: true }); assert.equal(requests.length, 2);
+  requests[1]({ ok: true, json: async () => ({ max_count: 20, max_size_mb: 50, allowed_mimes: ["text/plain"] }) });
+  assert.equal(await latest, true);
+  requests[0]({ ok: true, json: async () => ({ max_count: 10, max_size_mb: 20, allowed_mimes: ["image/png"] }) });
+  assert.equal(await first, false); assert.equal(await same, false);
+  assert.equal(context.state.uploadCapabilities.max_size_mb, 50); assert.equal(input.accept, "text/plain,.log");
+});
+
+test("上传限制读取失败不伪装成默认策略，也不上传该批文件", async () => {
+  const definition = chatSource.match(/async function loadUploadCapabilities\([^\n]*\) \{[\s\S]*?\n\}/)?.[0];
+  const batch = chatSource.match(/async function uploadAttachmentBatch\(files\) \{[\s\S]*?\n\}/)?.[0];
+  const uploaded = [], notes = [];
+  const context = vm.createContext({
+    state: { uploadCapabilities: { max_count: 15, max_size_mb: 50 } }, el: { fileInput: { accept: ".pdf" } },
+    console: { warn() {} }, uploadCapabilitiesRequestId: 0, uploadCapabilitiesRequest: null,
+    updateComposerModelInfo() {}, serviceUrl: value => value, daFetch: async () => ({ ok: false, status: 503 }),
+    uploadAttachment: file => uploaded.push(file), addSystemNote: text => notes.push(text),
+  });
+  vm.runInContext(definition + "\n" + batch, context);
+  await context.uploadAttachmentBatch([{ name: "one.pdf" }]);
+  assert.deepEqual(uploaded, []); assert.match(notes[0], /获取失败/);
+  assert.equal(context.state.uploadCapabilities.max_size_mb, 50);
+  assert.equal(context.el.fileInput.accept, ".pdf");
+});
+
+test("一批多文件先刷新一次限制，再逐个上传", async () => {
+  const batch = chatSource.match(/async function uploadAttachmentBatch\(files\) \{[\s\S]*?\n\}/)?.[0];
+  const calls = [];
+  const context = vm.createContext({ loadUploadCapabilities: async () => { calls.push("limits"); return true; }, uploadAttachment: async file => calls.push(file.name) });
+  vm.runInContext(batch, context);
+  await context.uploadAttachmentBatch([{ name: "a.pdf" }, { name: "b.pdf" }]);
+  assert.deepEqual(calls, ["limits", "a.pdf", "b.pdf"]);
 });

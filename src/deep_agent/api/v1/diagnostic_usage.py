@@ -22,7 +22,7 @@ from deep_agent.schemas.diagnostic_query import (
 )
 from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, SessionFilters, query_budget
-from deep_agent.diagnostics.usage import UsageQueries
+from deep_agent.diagnostics.usage import UsageQueries, average_tokens
 from deep_agent.security.diagnostic_users import resolve_diagnostic_users, DiagnosticUserAuthenticationError
 from deep_agent.time import UtcDatetime
 
@@ -155,9 +155,10 @@ async def export_details(request: Request, ctx: AppContextDep, caller: RequestUs
     for row in detail["items"]:
         profile = detail["users"].get(row["key"], {}) if group_by == "user" else {}
         model = row.get("model") or {}
+        average = average_tokens(row)
         writer.writerow([group_by, csv_text(row["key"]), csv_text(profile.get("username") or row.get("name") or model.get("name") or model.get("model_name")),
             csv_text(profile.get("email")), csv_text(model.get("provider_name")), row["requests"],
-            row["total_tokens"], round(row["total_tokens"] / row["requests"], 2) if row["requests"] and not row["missing_requests"] else "",
+            row["total_tokens"], round(average, 2) if average is not None else "",
             f'{row["total_tokens"] / detail["summary"]["total_tokens"]:.1%}' if detail["summary"]["total_tokens"] else "", row["missing_requests"]])
     return Response("\ufeff" + output.getvalue(), media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=deepagent-usage.csv"})

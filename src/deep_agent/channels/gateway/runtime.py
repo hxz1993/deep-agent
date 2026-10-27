@@ -15,6 +15,9 @@ from deep_agent.channels.registry import AdapterRegistry, default_registry
 from deep_agent.channels.service import ChannelService
 from deep_agent.db.stores.channel import ChannelStore
 from deep_agent.channels.operations import ChannelOperationService
+from deep_agent.files.upload_settings import DefaultUploadSettingsStore
+
+_UNSET_SETTINGS_STORE = object()
 
 
 @dataclass
@@ -28,11 +31,17 @@ class AccountRuntime:
 class ChannelRuntime:
     """Optional host process. Transport details belong to registered adapters."""
 
-    def __init__(self, store: ChannelStore, config: GatewayConfig, *, registry: AdapterRegistry | None = None, deep_agent=None) -> None:
+    def __init__(self, store: ChannelStore, config: GatewayConfig, *, registry: AdapterRegistry | None = None, deep_agent=None, global_setting_store=_UNSET_SETTINGS_STORE) -> None:
         self.store = store
         self.config = config
         self.registry = registry if registry is not None else default_registry()
-        self.deep_agent = deep_agent if deep_agent is not None else DeepAgentChannelClient(config)
+        settings_store = (
+            DefaultUploadSettingsStore()
+            if global_setting_store is _UNSET_SETTINGS_STORE else global_setting_store
+        )
+        self.deep_agent = deep_agent if deep_agent is not None else DeepAgentChannelClient(
+            config, global_setting_store=settings_store,
+        )
         self.service = ChannelService(store, self.deep_agent, stream_interval=config.stream_interval)
         self.operations = ChannelOperationService(self)
         self._accounts: dict[str, AccountRuntime] = {}

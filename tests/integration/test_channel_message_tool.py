@@ -4,7 +4,7 @@ import hashlib
 import json
 import tempfile
 import unittest
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -280,3 +280,101 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(DeliveryError) as caught:
             await self.operations.send(self.command(self.items()), self.items())
         self.assertEqual(caught.exception.code, "channel_offline")
+
+
+    async def test_gateway_reads_hot_upload_policy_from_database_per_send(self):
+        app = create_gateway_app()
+        settings = self.stores.global_setting
+        app.state.gateway = GatewayContext(SimpleNamespace(internal_token="fixture-token"), self.runtime, self.engine, "013", settings)
+        self.caps = replace(self.caps, file_limit=4 * 1024 * 1024)
+        payload = b"x" * (1024 * 1024 + 1)
+        items = [PreparedComponent("file", data=payload, filename="large.txt", requested_kind="file")]
+        form = {"metadata": (None, self.command(items).model_dump_json(), "application/json"), "media_0": ("large.txt", payload, "text/plain")}
+        headers = {"Authorization": "Bearer fixture-token"}
+        async with AsyncClient(transport=ASGITransport(app), base_url="http://fixture") as http:
+            await settings.upsert("attachment_upload", value={"max_size_mb": 2, "max_count": 10}, version=1)
+            result = await http.post("/messages/send", files=form, headers=headers)
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["status"], "completed")
+            self.assertEqual(len(self.sent), 1)
+            await settings.upsert("attachment_upload", value={"max_size_mb": 1, "max_count": 10}, version=1)
+            result = await http.post("/messages/send", files=form, headers=headers)
+            self.assertEqual(result.status_code, 413, result.text)
+            self.assertEqual(len(self.sent), 1, "rejected media must not be dispatched")
+
+    async def test_gateway_configuration_failure_does_not_use_default_or_send(self):
+        app = create_gateway_app()
+        broken = SimpleNamespace(get=AsyncMock(side_effect=RuntimeError("database unavailable")))
+        app.state.gateway = GatewayContext(SimpleNamespace(internal_token="fixture-token"), self.runtime, self.engine, "013", broken)
+        async with AsyncClient(transport=ASGITransport(app), base_url="http://fixture") as http:
+            result = await http.post("/messages/send", files={"metadata": (None, self.command(self.items()).model_dump_json(), "application/json")}, headers={"Authorization": "Bearer fixture-token"})
+        self.assertEqual(result.status_code, 503)
+        self.assertFalse(self.sent)
+        broken.get.assert_awaited_once_with("attachment_upload")
+
+    async def test_channel_preflight_reads_one_snapshot_and_next_call_sees_update(self):
+        from deep_agent.channels.message_tool import prepare_components
+        settings = self.stores.global_setting
+        deps = AgentDeps(session_id=self.session_id, user="owner", upload_settings_store=settings)
+        deps.attachment_by_id = {"old": AttachmentRef(id="old", name="old.txt")}
+        deps.file_store = SimpleNamespace(download_bounded=AsyncMock(return_value=b"x" * (1024 * 1024 + 1)))
+        configured_caps = replace(self.caps, file_limit=4 * 1024 * 1024)
+        await settings.upsert("attachment_upload", value={"max_size_mb": 2, "max_count": 10}, version=1)
+        with patch.object(settings, "get", wraps=settings.get) as reads:
+            result = await prepare_components(deps, [MessageComponent(type="file", file_id="old")], configured_caps)
+            self.assertEqual(len(result[0].data), 1024 * 1024 + 1)
+            self.assertEqual(reads.await_count, 1)
+        await settings.upsert("attachment_upload", value={"max_size_mb": 1, "max_count": 10}, version=1)
+        with self.assertRaises(DeliveryError):
+            await prepare_components(deps, [MessageComponent(type="file", file_id="old")], configured_caps)
+
+    async def test_channel_preflight_keeps_native_limit_below_global_policy(self):
+        from deep_agent.channels.message_tool import prepare_components
+        settings = self.stores.global_setting
+        await settings.upsert("attachment_upload", value={"max_size_mb": 200, "max_count": 20}, version=1)
+        deps = AgentDeps(session_id=self.session_id, user="owner", upload_settings_store=settings)
+        deps.attachment_by_id = {"old": AttachmentRef(id="old", name="old.txt")}
+        deps.file_store = SimpleNamespace(download_bounded=AsyncMock(return_value=b"x" * 10001))
+        with self.assertRaises(DeliveryError):
+            await prepare_components(deps, [MessageComponent(type="file", file_id="old")], self.caps)
+        self.assertEqual(deps.file_store.download_bounded.await_args.kwargs["max_bytes"], self.caps.file_limit)
+
+    async def test_application_bridge_download_uses_current_policy_once_per_request(self):
+        from deep_agent.api.v1 import wecom_app_bridge as bridge
+        from deep_agent.core.context import AppContext
+        settings = self.stores.global_setting
+        ctx = AppContext.for_testing(stores=self.stores, db_engine=self.engine, db_session_factory=self.factory)
+        self.addAsyncCleanup(ctx.event_persister.aclose)
+        run = SimpleNamespace(id=self.run.id, source_metadata={"wecom_app_media_id": "media-id"})
+        media_client = SimpleNamespace(media=AsyncMock(return_value=(b"content", "file.txt", "text/plain")))
+        with patch.object(bridge, "_run", AsyncMock(return_value=(SimpleNamespace(), run))), \
+             patch.object(ctx, "get_wecom_profiles", return_value=SimpleNamespace(client=media_client)):
+            for size in (2, 1):
+                await settings.upsert("attachment_upload", value={"max_size_mb": size, "max_count": 10}, version=1)
+                with patch.object(settings, "get", wraps=settings.get) as reads:
+                    response = await bridge.media(bridge.MediaRequest(channel_run_id=self.run.id, media_id="media-id"), ctx, self.account)
+                self.assertEqual(response.body, b"content")
+                self.assertEqual(reads.await_count, 1)
+                self.assertEqual(media_client.media.await_args.kwargs["limit"], size * 1024 * 1024)
+
+    async def test_application_bridge_new_upload_rejects_after_policy_is_lowered(self):
+        import base64
+        from deep_agent.api.v1 import wecom_app_bridge as bridge
+        from deep_agent.core.context import AppContext
+        from fastapi import HTTPException
+        settings = self.stores.global_setting
+        ctx = AppContext.for_testing(stores=self.stores, db_engine=self.engine, db_session_factory=self.factory)
+        self.addAsyncCleanup(ctx.event_persister.aclose)
+        run = SimpleNamespace(id=self.run.id, sender_id="member", source_metadata={})
+        media_client = SimpleNamespace(send_component=AsyncMock(return_value={"status": "sent"}))
+        body = bridge.ComponentRequest(channel_run_id=self.run.id, kind="file", data_base64=base64.b64encode(b"x" * (1024 * 1024 + 1)).decode(), filename="report.txt")
+        with patch.object(bridge, "_run", AsyncMock(return_value=(SimpleNamespace(), run))), \
+             patch.object(ctx, "get_wecom_profiles", return_value=SimpleNamespace(client=media_client)):
+            await settings.upsert("attachment_upload", value={"max_size_mb": 2, "max_count": 10}, version=1)
+            await bridge.send_component(body, ctx, self.account)
+            self.assertEqual(media_client.send_component.await_count, 1)
+            await settings.upsert("attachment_upload", value={"max_size_mb": 1, "max_count": 10}, version=1)
+            with self.assertRaises(HTTPException) as error:
+                await bridge.send_component(body, ctx, self.account)
+            self.assertEqual(error.exception.status_code, 422)
+            self.assertEqual(media_client.send_component.await_count, 1)

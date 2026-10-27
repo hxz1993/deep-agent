@@ -28,7 +28,7 @@ from deep_agent.api.v1.stream_diagnostics import DiagnosticEventSourceResponse, 
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
-from deep_agent.options import OPTION
+from deep_agent.files.upload_settings import load_upload_settings
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
 
 
@@ -78,6 +78,7 @@ def _agent_deps(
         run_id=new_run_id(),
         request_headers=dict(request_headers or {}),
         file_store=ctx.file_store,
+        upload_settings_store=getattr(ctx.stores, "global_setting", None),
         app_id=(request_headers or {}).get("app"),
         space_id=(request_headers or {}).get("space"),
     )
@@ -147,7 +148,7 @@ async def _resolve_chat_agent_id(
     return requested
 
 
-def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
+def _validate_chat_body(body: ChatRequest | StreamChatRequest, *, max_count: int = 10) -> None:
     has_message = bool(body.message and body.message.strip())
     has_attachments = bool(body.attachments)
     has_context_refs = bool(body.context_refs)
@@ -158,10 +159,10 @@ def _validate_chat_body(body: ChatRequest | StreamChatRequest) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Either message, attachments, context_refs, or deferred_tool_results is required.",
         )
-    if body.attachments and len(body.attachments) > OPTION.agent.upload_max_count:
+    if body.attachments and len(body.attachments) > max_count:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"At most {OPTION.agent.upload_max_count} attachments per message.",
+            detail=f"At most {max_count} attachments per message.",
         )
     if body.branch_from is not None:
         raise HTTPException(
@@ -244,7 +245,8 @@ async def chat(
     channel_account: ChannelAccountDep,
 ) -> ChatResponse:
     admission_generation = ctx.active_runs.generation
-    _validate_chat_body(body)
+    max_count = (await load_upload_settings(getattr(ctx.stores, "global_setting", None))).max_count if body.attachments else 10
+    _validate_chat_body(body, max_count=max_count)
     session_id = body.session_id or uuid.uuid4().hex
     request_headers = extract_forward_headers(request, channel_account=channel_account)
     request_headers["user"] = user
@@ -330,7 +332,8 @@ async def chat_stream(
     channel_account: ChannelAccountDep,
 ) -> DiagnosticEventSourceResponse:
     admission_generation = ctx.active_runs.generation
-    _validate_chat_body(body)
+    max_count = (await load_upload_settings(getattr(ctx.stores, "global_setting", None))).max_count if body.attachments else 10
+    _validate_chat_body(body, max_count=max_count)
     session_id = body.session_id or uuid.uuid4().hex
     deferred_tool_results = _deferred_results(body)
     message = body.message or ""

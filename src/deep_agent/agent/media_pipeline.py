@@ -8,6 +8,7 @@ from deep_agent.agent.attachment_extractors import (
     validate_office_archive,
 )
 from deep_agent.options import OPTION
+from deep_agent.files.upload_settings import UploadSettings, MAX_ATTACHMENT_BYTES
 
 _DEFAULT_ALLOWED_MIMES = frozenset(
     {
@@ -64,7 +65,8 @@ def allowed_mimes(additional_mimes: frozenset[str] = frozenset()) -> frozenset[s
 
 
 def max_upload_bytes() -> int:
-    return int(OPTION.agent.upload_max_size_mb) * 1024 * 1024
+    # Read safety ceiling for already-authorized files, independent of later policy changes.
+    return MAX_ATTACHMENT_BYTES
 
 
 def is_log_text_attachment(*, filename: str, mime: str | None) -> bool:
@@ -79,11 +81,11 @@ def _normalized_upload_mime(*, mime: str, filename: str) -> str:
     return normalized
 
 
-def validate_upload(*, data: bytes, mime: str, filename: str, additional_mimes: frozenset[str] = frozenset()) -> None:
+def validate_upload(*, data: bytes, mime: str, filename: str, additional_mimes: frozenset[str] = frozenset(), upload_settings: UploadSettings = UploadSettings()) -> None:
     if not data:
         raise MediaPipelineError("Empty file.")
-    if len(data) > max_upload_bytes():
-        raise MediaPipelineError(f"File exceeds {OPTION.agent.upload_max_size_mb}MB limit.")
+    if len(data) > upload_settings.max_bytes:
+        raise MediaPipelineError(f"File exceeds {upload_settings.max_size_mb}MB limit.")
     normalized = _normalized_upload_mime(mime=mime, filename=filename)
     if normalized not in allowed_mimes(additional_mimes):
         raise MediaPipelineError(f"Unsupported MIME type: {mime}；当前上传策略不允许此文件类型。")
@@ -98,8 +100,8 @@ def validate_upload(*, data: bytes, mime: str, filename: str, additional_mimes: 
             raise MediaPipelineError(str(exc)) from exc
 
 
-def process_upload(*, data: bytes, mime: str, filename: str, additional_mimes: frozenset[str] = frozenset()) -> ProcessedUpload:
-    validate_upload(data=data, mime=mime, filename=filename, additional_mimes=additional_mimes)
+def process_upload(*, data: bytes, mime: str, filename: str, additional_mimes: frozenset[str] = frozenset(), upload_settings: UploadSettings = UploadSettings()) -> ProcessedUpload:
+    validate_upload(data=data, mime=mime, filename=filename, additional_mimes=additional_mimes, upload_settings=upload_settings)
     normalized = _normalized_upload_mime(mime=mime, filename=filename)
     if normalized.startswith("image/"):
         try:

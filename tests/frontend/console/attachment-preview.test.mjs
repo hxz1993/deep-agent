@@ -2,6 +2,7 @@ import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import vm from "node:vm";
 import {
   attachmentPreviewAttributes,
   attachmentPreviewUrl,
@@ -46,12 +47,44 @@ test("图片组保持区域内顺序和点击位置，忽略普通文件", () =>
 
 test("大图支持前后按钮、方向键和内容区域空白关闭", async () => {
   const source = await readPresentationSource("chat.js");
-  assert.match(source, /event.target.classList.contains\("attachment-image-dialog-content"\)/);
   assert.match(source, /event.key === "ArrowLeft" \|\| event.key === "ArrowRight"/);
   assert.match(source, /openAttachmentImagePreview\(att, state.pendingAttachments\)/);
   const template = await readFile(new URL("../../../console/workspace-template.html", import.meta.url), "utf8");
   assert.match(template, /aria-label="上一张图片"/);
   assert.match(template, /aria-label="下一张图片"/);
+});
+
+test("工作台和诊断图片预览点击留白关闭，图片和操作控件保持打开", async () => {
+  const chat = await readPresentationSource("chat.js");
+  const diagnostic = await readFile(new URL("../../../console/diagnostic-detail.js", import.meta.url), "utf8");
+  const bindings = [
+    chat.match(/el\.attachmentImageDialog\?\.addEventListener\("click", \(event\) => \{[\s\S]*?\n  \}\);/)?.[0],
+    diagnostic.match(/listen\(imageDialog, "click", \(event\) => \{[^\n]+/)?.[0],
+  ];
+  for (const binding of bindings) {
+    assert.ok(binding);
+    let click;
+    let closes = 0;
+    const dialog = { addEventListener(name, handler) { click = handler; } };
+    vm.runInNewContext(binding, {
+      el: { attachmentImageDialog: dialog }, imageDialog: dialog,
+      listen: (target, name, handler) => target.addEventListener(name, handler),
+      closeAttachmentImagePreview: () => closes++, closeImage: () => closes++,
+    });
+    click({ target: dialog });
+    assert.equal(closes, 1, "外层遮罩关闭");
+    for (const area of ["内容区留白", "标题栏留白", "底部留白"]) {
+      click({ target: { closest: () => null } });
+      assert.equal(closes, 2 + ["内容区留白", "标题栏留白", "底部留白"].indexOf(area), area);
+    }
+    for (const control of ["img", "button", "a", "button svg path"]) {
+      click({ target: { closest: (selector) => {
+        assert.equal(selector, "img, button, a");
+        return { control };
+      } } });
+      assert.equal(closes, 4, `${control} 不关闭`);
+    }
+  }
 });
 
 test("图片识别兼容 History MIME 和 Event MIME，不把普通文件当图片", () => {

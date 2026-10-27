@@ -4,6 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 import { escapeHtml, icon, selectHtml, diagnosticRequestOptions } from '../../../console/diagnostics-ui.js';
 import { diagnosticTarget, sameDiagnosticFilters } from '../../../console/diagnostics-navigation.js';
+import { usageAveragePresentation } from '../../../console/diagnostics-usage.js';
 const source = await readFile(new URL('../../../console/diagnostics-usage.js', import.meta.url), 'utf8');
 const filters = { period:'7', start:'2026-09-16T00:00:00Z', end:'2026-09-23T00:00:00Z', timezone:'UTC' };
 const settle = () => new Promise(setImmediate);
@@ -22,8 +23,56 @@ function harness(request, extra = {}, routeFilters = filters) {
   const controller=context.initDiagnosticUsage({root,navigate(){},replace(target){replacements.push(target);}});
   const saved={filters,draft:filters,report:{},details:{items:[],total:21},...extra};
   controller.activate({filters:routeFilters},saved);
-  return {controller,requests,replacements,nodes, dispatch:event=>listeners.click(event), event(selector,dataset) { return listeners.click({target:{closest(wanted) { return wanted===selector ? {dataset} : null; }}}); }, click(action) { return listeners.click({target:{closest(selector) { return selector==='[data-usage-action]' ? {dataset:{usageAction:action}} : null; }}}); }};
+  return {controller,requests,replacements,nodes,root, dispatch:event=>listeners.click(event), event(selector,dataset) { return listeners.click({target:{closest(wanted) { return wanted===selector ? {dataset} : null; }}}); }, click(action) { return listeners.click({target:{closest(selector) { return selector==='[data-usage-action]' ? {dataset:{usageAction:action}} : null; }}}); }};
 }
+
+test('usage average uses all complete records and preserves explicitly reported zero', () => {
+  assert.deepEqual(usageAveragePresentation({requests:2,total_tokens:3000,missing_requests:0}),
+    {value:'1.5K',partial:false,hint:'合计 Token / 模型请求次数。'});
+  assert.equal(usageAveragePresentation({requests:1,total_tokens:0,missing_requests:0}).value,'0');
+});
+
+test('usage average fallback excludes both missing and partially measured calls', () => {
+  // Complete call: 100 + 20; partial call: 9000 + unknown; unreported call.
+  const row={requests:3,total_tokens:9120,input_reported_requests:2,output_reported_requests:1,
+    missing_requests:2,complete_requests:1,complete_tokens:120};
+  assert.deepEqual(usageAveragePresentation(row),
+    {value:'120',partial:true,hint:'按完整记录 1/3 次计算，2 次用量缺失未计入。'});
+  assert.equal(usageAveragePresentation({...row,complete_tokens:0}).value,'0');
+});
+
+test('usage average explains no requests and no fully measured requests without inventing zero', () => {
+  assert.deepEqual(usageAveragePresentation({requests:0,total_tokens:0,missing_requests:0}),
+    {value:'—',partial:false,hint:'当前范围没有模型请求。'});
+  const average=usageAveragePresentation({requests:2,missing_requests:2,total_tokens:9000,
+    complete_requests:0,complete_tokens:0});
+  assert.equal(average.value,'—');
+  assert.match(average.hint,/共 2 次请求，均缺少完整 Token 数据/);
+});
+
+test('older usage payload fallback requires proof that missing requests contributed neither token counter', () => {
+  const row={requests:3,missing_requests:1,total_tokens:4000,input_reported_requests:2,output_reported_requests:2};
+  assert.deepEqual(usageAveragePresentation(row),
+    {value:'2.0K',partial:true,hint:'按完整记录 2/3 次计算，1 次用量缺失未计入。'});
+  assert.equal(usageAveragePresentation({...row,input_reported_requests:3}).value,'—');
+  assert.equal(usageAveragePresentation({requests:3,missing_requests:1,total_tokens:4000}).value,'—');
+  assert.equal(usageAveragePresentation({...row,complete_requests:2}).value,'—');
+});
+
+test('summary and detail average show the same fallback value, visible marker and coverage explanation', async () => {
+  const summary={requests:3,missing_requests:2,total_tokens:9120,
+    input_reported_requests:2,output_reported_requests:1,complete_requests:1,complete_tokens:120};
+  const items=[{key:'a',name:'Agent fixture',...summary}];
+  const h=harness(()=>Promise.resolve({items,total:1,summary}),{report:{summary}});
+  await settle();
+  const detail=h.nodes.get('#usageDetailRows').innerHTML;
+  for(const html of [h.root.html,detail]) {
+    assert.match(html,/按完整记录 1\/3 次计算，2 次用量缺失未计入/);
+    assert.match(html,/aria-label="120，按完整记录 1\/3 次计算，2 次用量缺失未计入。"/);
+    assert.match(html,/>120\*<\/span>/);
+    assert.doesNotMatch(html,/>3\.0K/);
+  }
+});
 
 test('multi-channel contribution icons deduplicate and cycle without new requests', async () => {
   const items = [{key:'a',name:'A',channel_types:['feishu','wecom','feishu'],requests:1}];

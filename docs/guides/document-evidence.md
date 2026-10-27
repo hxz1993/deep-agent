@@ -181,7 +181,7 @@ doc_example-evidence.zip
 
 | 限制 | 当前规则 |
 | --- | --- |
-| 最终 ZIP | 不超过现有 `upload_max_size_mb` 对应字节数 |
+| 最终 ZIP | 不超过现有 `attachment_upload.max_size_mb` 对应字节数 |
 | 累计解压大小 | `evidence.json` 未压缩字节数 + 所有图片原字节数，同样不超过该上限 |
 | 单图 | 最多 20 MiB、3200 万像素，PNG／JPEG 单帧，验证真实解码 |
 | 下载等待 | 整个页图收集阶段最多 180 秒，取消沿用 Run 取消 |

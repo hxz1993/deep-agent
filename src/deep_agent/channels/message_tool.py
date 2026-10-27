@@ -15,7 +15,7 @@ from pydantic_ai.toolsets import FunctionToolset
 from deep_agent.channels.media_formats import is_mp4_video as _is_mp4_video
 from deep_agent.channels.message_payloads import TextCardPayload, NewsPayload, validate_message_payload
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.media_pipeline import max_upload_bytes
+from deep_agent.files.upload_settings import load_upload_settings_for_tool
 from deep_agent.files.storage import FileStoreError
 from deep_agent.files.public_download import load_public_file
 from deep_agent.channels.outbound import (
@@ -72,7 +72,7 @@ def _media_format(data: bytes, kind: str) -> str:
     return ""
 
 
-def normalize_media(component: PreparedComponent, caps: MessageCapabilities) -> PreparedComponent:
+def normalize_media(component: PreparedComponent, caps: MessageCapabilities, *, max_bytes: int | None = None) -> PreparedComponent:
     """Conservative format detection; unsupported native media remains a file."""
     from dataclasses import replace
 
@@ -104,7 +104,9 @@ def normalize_media(component: PreparedComponent, caps: MessageCapabilities) -> 
             kind = "file"
     if kind not in caps.kinds:
         raise DeliveryError("unsupported_content", "当前渠道不支持此消息类型")
-    limit = min(getattr(caps, f"{kind}_limit"), max_upload_bytes())
+    limit = getattr(caps, f"{kind}_limit")
+    if max_bytes is not None:
+        limit = min(limit, max_bytes)
     if len(data) > limit:
         raise DeliveryError("file_too_large", f"文件超过当前渠道{limit}字节上限")
     return replace(component, kind=kind)
@@ -121,6 +123,8 @@ async def prepare_components(deps: AgentDeps, components: list[MessageComponent]
                              caps: MessageCapabilities) -> list[PreparedComponent]:
     if not 1 <= len(components) <= 10:
         raise DeliveryError("invalid_components", "每次发送1至10个内容组件")
+    has_media = any(item.type in {"image", "file", "audio", "video"} for item in components)
+    policy = await load_upload_settings_for_tool(deps) if has_media else None
     prepared = []
     total_bytes = 0
     for component in components:
@@ -134,10 +138,10 @@ async def prepare_components(deps: AgentDeps, components: list[MessageComponent]
             native_limit = getattr(caps, f"{component.type}_limit", 0) if component.type in caps.kinds else 0
             fallback_limit = caps.file_limit if caps.media_fallback_to_file and "file" in caps.kinds else 0
             data, filename, mime, _ = await load_public_file(
-                component.url, max_bytes=min(max(native_limit, fallback_limit), max_upload_bytes() - total_bytes),
+                component.url, max_bytes=min(max(native_limit, fallback_limit), policy.max_bytes - total_bytes),
             )
             total_bytes += len(data)
-            if total_bytes > max_upload_bytes():
+            if total_bytes > policy.max_bytes:
                 raise DeliveryError("batch_too_large", "本次附件总大小超过上传上限，请分次发送")
             filename = PurePosixPath((component.display_name or filename).replace("\\", "/")).name
             if not filename or filename in {".", ".."} or any(ord(c) < 32 for c in filename):
@@ -162,16 +166,16 @@ async def prepare_components(deps: AgentDeps, components: list[MessageComponent]
             download_limit = max(native_limit, fallback_limit)
             try:
                 data = await deps.file_store.download_bounded(file_id, deps.request_headers,
-                    max_bytes=min(download_limit, max_upload_bytes() - total_bytes))
+                    max_bytes=min(download_limit, policy.max_bytes - total_bytes))
             except FileStoreError:
                 raise DeliveryError("file_unavailable", "文件无法读取或超过发送大小上限，本次尚未发送") from None
             total_bytes += len(data)
-            if total_bytes > max_upload_bytes():
+            if total_bytes > policy.max_bytes:
                 raise DeliveryError("batch_too_large", "本次附件总大小超过上传上限，请分次发送")
             mime = (attachment.mime if attachment else artifact.get("mime")) or mimetypes.guess_type(filename)[0]
             item = PreparedComponent(component.type, data=data, filename=filename,
                                      mime=mime or "application/octet-stream", requested_kind=component.type)
-        prepared.append(normalize_media(item, caps))
+        prepared.append(normalize_media(item, caps, max_bytes=policy.max_bytes if policy is not None else None))
     return prepared
 
 

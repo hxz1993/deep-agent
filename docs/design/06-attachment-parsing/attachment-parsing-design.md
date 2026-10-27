@@ -196,8 +196,7 @@ Skill文件必须来自当前Agent已选择、启用且运行目录就绪的Skil
 全局限制继续由环境变量控制：
 
 ```text
-DEEP_AGENT_UPLOAD_MAX_SIZE_MB=20
-DEEP_AGENT_UPLOAD_MAX_COUNT=10
+# 大小和数量改由全局配置 attachment_upload 热更新，缺省为 20 MB / 10 个。
 DEEP_AGENT_UPLOAD_ALLOWED_MIMES=
 ```
 

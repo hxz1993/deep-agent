@@ -8,6 +8,7 @@ from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from deep_agent import __version__
+from deep_agent.files.upload_settings import UploadSettingsError
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities.catalog import selectable_tool_package_codes
 from deep_agent.core.context import AppContext, AppContextDep, reset_context
@@ -188,6 +189,12 @@ if (_console_dir / "index.html").is_file():
     app.mount("/console", ConsoleStaticFiles(directory=str(_console_dir), html=True), name="console")
 if _vendor_dir.is_dir():
     app.mount("/vendor", ConsoleStaticFiles(directory=str(_vendor_dir)), name="vendor")
+
+
+
+@app.exception_handler(UploadSettingsError)
+async def upload_settings_error_handler(request: Request, exc: UploadSettingsError):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 if __name__ == "__main__":

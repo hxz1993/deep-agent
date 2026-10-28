@@ -855,12 +855,16 @@ function renderJumpLink({ eventId, iconName, text, detail = "" }) {
 function renderInputSummary(event, _events, attachmentUrl = attachmentDownloadUrl) {
   const contextRefs = Array.isArray(event.payload?.context_refs) ? event.payload.context_refs : [];
   const attachments = Array.isArray(event.payload?.attachments) ? event.payload.attachments : [];
-  const contextLinks = contextRefs.map((reference) => renderJumpLink({
-      eventId: null,
-      iconName: "braces",
-      text: reference?.label || reference?.key || reference?.type || "Unnamed context",
-      detail: reference?.type || reference?.key || "",
-    })).join("");
+  const contextLinks = contextRefs.map((reference, index) => {
+    const safe = redactTrajectoryValue(reference);
+    const label = safe?.label || safe?.key || safe?.type || "Unnamed context";
+    const identity = `${index}:${safe?.key || ""}`;
+    const type = [safe?.type, safe?.schema_version ? `v${safe.schema_version}` : null].filter(Boolean).join(" · ");
+    return `<details class="trajectory-context-reference" data-trajectory-context="${escapeHtml(identity)}">
+      <summary class="trajectory-context-heading">${icon("braces")}<span class="trajectory-context-copy"><strong><span class="trajectory-context-index">${index + 1}.</span> ${escapeHtml(label)}</strong><small>${escapeHtml(type)}</small>${safe?.key ? `<code>${escapeHtml(safe.key)}</code>` : ""}</span>${icon("chevron-right")}</summary>
+      <div class="trajectory-context-content">${renderJsonBlock(safe, { expanded: true })}</div>
+    </details>`;
+  }).join("");
   const attachmentLinks = attachments.map((attachment) => {
     const href = attachmentUrl(attachment);
     const name = attachment.name || attachment.id || "Unnamed attachment";
@@ -1089,10 +1093,11 @@ function renderSummary(event, events, attachmentUrl) {
   return `<section class="trajectory-summary">${renderMeta(event)}<div class="trajectory-summary-primary">${primary}</div></section>`;
 }
 
-function renderJsonBlock(value) {
+function renderJsonBlock(value, { expanded } = {}) {
   return globalThis.DeepAgentJson?.renderBlock?.(value, {
     className: "trajectory-json is-flat",
     ariaLabel: "Trajectory JSON",
+    expanded,
   }) || `<pre class="trajectory-json"><code>${escapeHtml(formatJson(value))}</code></pre>`;
 }
 
@@ -1347,7 +1352,10 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     renderRows(visible);
     if (query("main.chat")?.classList.contains("trajectory-active")) {
       const codeState = selectedId === renderedSelectedId && detailTab === renderedDetailTab ? globalThis.DeepAgentMarkdown?.captureCodeState?.(detail) : [];
+      const openContexts = selectedId === renderedSelectedId && detailTab === renderedDetailTab
+        ? new Set(Array.from(detail.querySelectorAll?.("details[data-trajectory-context]") || []).filter(item => item.open).map(item => item.dataset.trajectoryContext)) : new Set();
       detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl, { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab });
+      for (const item of detail.querySelectorAll?.("details[data-trajectory-context]") || []) item.open = openContexts.has(item.dataset.trajectoryContext);
       const outputHost = detail.querySelector?.("[data-structured-output-detail]");
       if (outputHost && selected?.candidate_found) mountStructuredOutput(outputHost, { id: selected.id, name: selected.payload.name, output: selected.candidate, failed: !selected.payload.accepted });
       globalThis.DeepAgentMarkdown?.restoreCodeState?.(detail, codeState);

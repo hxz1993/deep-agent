@@ -2817,7 +2817,7 @@ dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface
 #configurationHost .global-settings-tool-card { box-sizing: border-box; border: 1px solid var(--console-card-border); border-radius: 8px; }
 #configurationHost .global-settings-tool-card > .global-settings-section { margin: 0; padding: 16px 18px; }
 #configurationHost .global-settings-tool-card .global-settings-section-heading { align-items: center; }
-#configurationHost .global-settings-tool-card .global-settings-section-title { flex-direction: column; align-items: flex-start; gap: 5px; }
+#configurationHost .global-settings-tool-card .global-settings-section-title { flex-direction: column; align-items: flex-start; gap: var(--ui-group-content-gap); }
 #configurationHost .global-settings-tool-card h3 { font-size: 13px; font-weight: 500; line-height: 1.5; }
 #configurationHost .global-settings-tool-card .global-settings-section-copy { font-size: 12px; white-space: normal; line-height: 1.5; }
 #configurationHost .global-settings-tool-card .global-settings-section-actions { flex-shrink: 0; }

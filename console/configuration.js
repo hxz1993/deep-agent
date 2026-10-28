@@ -10,7 +10,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20261027-attachment-upload1";
+const CONFIGURATION_ASSET_VERSION = "20261029-mcp-optional1";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",

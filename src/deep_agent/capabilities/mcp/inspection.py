@@ -41,6 +41,43 @@ def _resource_definitions(items):
     ) for item in items]
 
 
+
+RESOURCE_INSPECTION_TIMEOUT = 3.0
+
+
+async def _inspect_resources(
+    client: Any,
+    previous: McpResourcesInspection,
+    *,
+    remaining_budget: float | None = None,
+) -> McpResourcesInspection:
+    """Probe optional static resources without probing URI templates.
+
+    Template counts are historical metadata only. Preserve previously discovered
+    template-only servers so their explicit, on-demand Resource tools still work.
+    """
+    try:
+        budget = RESOURCE_INSPECTION_TIMEOUT
+        if remaining_budget is not None:
+            # Leave time for the SDK connection to close inside the mandatory
+            # inspection deadline. Optional metadata must not consume that tail.
+            budget = min(budget, max(0.0, remaining_budget - 1.0))
+        if budget <= 0:
+            raise TimeoutError("No budget remains for optional resource inspection")
+        async with asyncio.timeout(budget):
+            items = await client.list_resources()
+        return McpResourcesInspection(
+            status="supported" if items or previous.template_count else "unsupported",
+            count=len(items),
+            template_count=previous.template_count,
+            definitions=_resource_definitions(items),
+        )
+    except Exception as exc:
+        return previous.model_copy(update={
+            "status": "error",
+            "error": _safe_error("resources/list", exc),
+        })
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -205,35 +242,7 @@ async def _inspect_builtin_mcp_server(
                     )
 
             if client.capabilities.resources:
-                resource_items: list[Any] | None = None
-                template_items: list[Any] | None = None
-                resource_error: McpInspectionError | None = None
-                template_error: McpInspectionError | None = None
-                try:
-                    resource_items = await client.list_resources()
-                except Exception as exc:
-                    resource_error = _safe_error("resources/list", exc)
-                try:
-                    template_items = await client.list_resource_templates()
-                except Exception as exc:
-                    template_error = _safe_error("resources/templates/list", exc)
-                resources = McpResourcesInspection(
-                    definitions=_resource_definitions(resource_items) if resource_items is not None else previous.resources.definitions,
-                    status="error" if resource_error or template_error else (
-                        "supported" if resource_items or template_items else "unsupported"
-                    ),
-                    count=(
-                        len(resource_items)
-                        if resource_items is not None
-                        else previous.resources.count
-                    ),
-                    template_count=(
-                        len(template_items)
-                        if template_items is not None
-                        else previous.resources.template_count
-                    ),
-                    error=resource_error or template_error,
-                )
+                resources = await _inspect_resources(client, previous.resources)
 
             current = McpInspection(
                 status="not_applicable",
@@ -385,49 +394,11 @@ async def inspect_mcp_server(
                         )
 
                 if client.capabilities.resources:
-                    resource_items: list[Any] | None = None
-                    template_items: list[Any] | None = None
-                    resource_error: McpInspectionError | None = None
-                    template_error: McpInspectionError | None = None
-                    try:
-                        resource_items = await client.list_resources()
-                    except Exception as exc:
-                        resource_error = _safe_error("resources/list", exc)
-                    try:
-                        template_items = await client.list_resource_templates()
-                    except Exception as exc:
-                        template_error = _safe_error("resources/templates/list", exc)
-
-                    if resource_error or template_error:
-                        degraded = True
-                        resources = McpResourcesInspection(
-                            definitions=_resource_definitions(resource_items) if resource_items is not None else previous.resources.definitions,
-                            status="error",
-                            count=(
-                                len(resource_items)
-                                if resource_items is not None
-                                else previous.resources.count
-                            ),
-                            template_count=(
-                                len(template_items)
-                                if template_items is not None
-                                else previous.resources.template_count
-                            ),
-                            error=resource_error or template_error,
-                        )
-                    else:
-                        resource_count = len(resource_items or [])
-                        template_count = len(template_items or [])
-                        resources = McpResourcesInspection(
-                            definitions=_resource_definitions(resource_items) if resource_items is not None else previous.resources.definitions,
-                            status=(
-                                "supported"
-                                if resource_count or template_count
-                                else "unsupported"
-                            ),
-                            count=resource_count,
-                            template_count=template_count,
-                        )
+                    resources = await _inspect_resources(
+                        client,
+                        previous.resources,
+                        remaining_budget=timeout - (perf_counter() - started),
+                    )
 
                 return McpInspection(
                     status="degraded" if degraded else "healthy",

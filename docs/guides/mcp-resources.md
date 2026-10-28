@@ -10,9 +10,17 @@ DeepAgent 使用 Pydantic AI `MCPToolset` 的 Resource API，向模型提供受�
 initialize
 ping
 tools/list
-resources/list
-resources/templates/list
+resources/list  # 服务声明资源能力时，单独限时检查
 ```
+
+从 v0.14.10 起，创建、更新、检测 URL MCP 和刷新内置 MCP 均不再主动请求
+`resources/templates/list`。模板列表工具仍保留按需调用；已有模板计数作为历史元数据保留，
+不再在检测提示中宣称刷新了模板数量，也不改写旧检测记录。
+
+资源列表属于可选能力，最多等待 3 秒，并受检测总预算的剩余时间约束，预留 SDK 关闭连接时间；
+预算不足则跳过并记录资源超时告警。资源列表格式错误、接口不支持或超时，不使已成功的工具清单
+变成失败；普通资源的展示和按需读取仍保留。Console 的资源计数独立显示告警，详情可能保留上次
+检测的资源；工具错误、初始化／鉴权／Ping 错误仍按真实失败处理。
 
 检测快照保存到 `mcp_servers.inspection`。除 Server、Resource、时间和耗时元数据外，v0.3.19
 还保存完整工具名称、说明、输入/返回 Schema、Annotations、Task Support 与 Server Instructions。
@@ -20,18 +28,20 @@ resources/templates/list
 
 | 状态 | 含义 |
 | --- | --- |
-| `healthy` | 初始化、Ping 和能力清单均正常 |
-| `degraded` | 连接成功，但某一项能力清单获取失败 |
+| `healthy` | 初始化、Ping 和工具清单正常；资源检查结果单独显示 |
+| `degraded` | 连接成功，但工具清单更新失败 |
 | `unreachable` | 连接、鉴权、初始化或 Ping 失败 |
 | `unknown` | 尚未检测 |
 | `stale` | 连接配置已修改，等待重新检测 |
-| `not_applicable` | Builtin MCP，不参与主动检测 |
+| `not_applicable` | Builtin MCP 的兼容状态值；连接／工具失败仍显示失败 |
 
 检测失败不会阻止 MCP 配置保存。Console 可点击“检测并更新”，也可调用：
 
 ```http
 POST /api/v1/mcp/{name}/inspect
 ```
+
+旧版 `degraded` 记录若仅有资源错误且工具快照有效，Console 按工具正常展示，并保留资源告警；不回写旧数据。
 
 系统不做定时检测。URL MCP 的普通工具由检测快照负责模型披露和 Tool Search，聊天 Run 不再先
 连接所有远程 MCP。只有模型真实调用某个工具时才按当前请求 Header initialize，并在该 Run 内复用

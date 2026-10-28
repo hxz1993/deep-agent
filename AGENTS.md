@@ -31,7 +31,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；`0.14.9`（附件上传热配置、用量均值兜底与图片预览关闭），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；`0.14.10`（MCP 可选资源兼容、轨迹上下文详情与配置间距），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -437,3 +437,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 ### 文档证据ZIP（v0.13.1）
 
 `export_file=true`导出`document-evidence-v2` ZIP，含完整安全JSON与可取得的供应商坐标平面图片。Paddle为干净处理图，GLM为带检测框的可视化图，两家共用协议并用`role/annotated`区分。图片缺失、下载失败或上传大小预算不足时，保留完整JSON并明确图片状态；`saved`不等于图片齐全，`matched`只表示图片与供应商坐标平面一致，不代表已配准原PDF。默认仍不导出，24K/48K正文与布局分页保持不变。新ZIP兼容前端须先支持v1 JSON与v2 ZIP，再部署后端；不得将代码推送当作Alpha已部署。
+
+### MCP 可选资源检测边界（v0.14.10）
+
+检测只自动请求静态资源列表，不探测资源模板。资源列表错误／不支持／超时独立记录，不降级已成功的工具快照；可选检查限时3秒且不得耗尽总检查预算。旧模板计数仅作历史元数据保留，按需模板和资源读取工具不删除。Console 兼容旧资源错误导致的 degraded，但不能掩盖连接、工具或内置MCP的真实失败；不重写旧记录、不改 SSE／History。

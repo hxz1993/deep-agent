@@ -250,6 +250,17 @@
   gap: 12px; min-height: var(--ui-control-height);
   margin: 0 0 var(--ui-group-content-gap);
 }
+.global-settings-tool-card + .global-settings-group-heading {
+  margin-top: var(--ui-group-gap);
+}
+.global-settings-group-heading {
+  min-height: var(--ui-line-title);
+}
+/* The 32px action row already leaves 8px below its 24px title. */
+#settings-operations .global-settings-section > .global-settings-section-heading,
+#settings-operations .global-settings-runtime-toolbar {
+  margin-bottom: 0;
+}
 .console-section-title,
 #configurationHost #panel-global-settings .settings-group-title,
 #configurationHost :is(.provider-detail-header, .skill-detail-title, .tool-catalog-detail-header, .wecom-detail-heading) h3,

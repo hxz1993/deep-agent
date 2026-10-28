@@ -63,6 +63,19 @@ function inspectionFailureLabel(error) {
     : inspectionErrorMessage(error);
 }
 
+function resourceInspectionWarning(inspection) {
+  if (inspection.resources?.status !== "error" && !inspection.resources?.error) return "";
+  return "资源清单检查失败，不影响工具调用；资源明细可能是上次检测结果";
+}
+
+function hasOnlyResourceWarning(inspection) {
+  return inspection.status === "degraded"
+    && !inspection.error && !inspection.tools?.error
+    && inspection.tools?.status === "supported"
+    && inspection.tools?.snapshot_status === "ready"
+    && !!resourceInspectionWarning(inspection);
+}
+
 function inspectionView(inspection, transport) {
   if (transport === "stdio") {
     return {
@@ -81,7 +94,10 @@ function inspectionView(inspection, transport) {
     stale: ["配置已变更", "warn"],
     not_applicable: ["正常", "on"],
   };
-  const [text, className] = labels[info.status] || labels.unknown;
+  const builtinFailure = transport === "builtin" && (info.error || info.tools?.error || info.tools?.status === "error");
+  const [text, className] = builtinFailure
+    ? ["检测失败", "off"]
+    : labels[hasOnlyResourceWarning(info) ? "healthy" : info.status] || labels.unknown;
   const toolCount = Number(info.tools?.count || 0);
   const resourceCount = Number(info.resources?.count || 0);
   const templateCount = Number(info.resources?.template_count || 0);
@@ -114,15 +130,17 @@ function inspectionView(inspection, transport) {
     text,
     className,
     counts: { tools: toolCount, resources: resourceCount, templates: templateCount },
+    resourceWarning: resourceInspectionWarning(info),
     title: details.join("\n") || (info.status === "not_applicable" ? "Builtin MCP 不参与主动检测" : "尚未检测"),
   };
 }
 
-function renderInspectionCounts(counts = {}, name = "") {
+function renderInspectionCounts(counts = {}, name = "", resourceWarning = "") {
   return [["wrench", "工具", counts.tools], ["file-text", "资源", counts.resources]]
     .map(([iconName, label, count]) => {
-      const content = `<i data-lucide="${iconName}"></i><strong>${Number(count || 0)}</strong>`;
-      return `<button type="button" data-mcp-catalog="${escapeJsonEditorHtml(name)}" data-catalog-kind="${label === "工具" ? "tools" : "resources"}" aria-label="查看${label}明细" title="${label}">${content}</button>`;
+      const warning = label === "资源" ? resourceWarning : "";
+      const content = `<i data-lucide="${warning ? "circle-alert" : iconName}"></i><strong>${Number(count || 0)}</strong>`;
+      return `<button type="button"${warning ? ' class="mcp-resource-warning"' : ""} data-mcp-catalog="${escapeJsonEditorHtml(name)}" data-catalog-kind="${label === "工具" ? "tools" : "resources"}" aria-label="查看${label}明细${warning ? '（资源检查告警）' : ''}" title="${escapeJsonEditorHtml(warning || label)}">${content}</button>`;
     }).join("");
 }
 
@@ -133,7 +151,7 @@ function renderMcpCatalog(catalog, kind = "tools", query = "") {
   const term = query.trim().toLowerCase();
   const definitions = all.filter(item => !term || [item.name, item.title, item.description, item.uri, item.mime_type].some(value => String(value || "").toLowerCase().includes(term)));
   const notice = tools.snapshot_status === "stale" ? "配置已变更，以下为上次检测结果。" : "";
-  if (!definitions.length) return `<p class="empty-cell">${term && all.length ? "没有匹配的内容" : tools.snapshot_status === "missing" && tools.count !== 0 ? `暂无${label}快照，请先检测此服务。` : `此服务暂无${label}。`}</p>`;
+  if (!definitions.length) return `<p class="empty-cell">${term && all.length ? "没有匹配的内容" : kind === "resources" && tools.snapshot_status === "missing" ? "尚未取得资源清单，请查看服务检测结果；工具仍可独立使用。" : tools.snapshot_status === "missing" && tools.count !== 0 ? `暂无${label}快照，请先检测此服务。` : `此服务暂无${label}。`}</p>`;
   return `${notice ? `<p class="mcp-catalog-notice">${notice}</p>` : ""}
     <table class="data-table mcp-catalog-table"><thead><tr><th>${label}</th><th>描述</th></tr></thead><tbody>
     ${definitions.map((tool) => `<tr><td><strong>${escapeHtml(tool.name || "")}</strong>${tool.title ? `<div class="muted">${escapeHtml(tool.title)}</div>` : ""}${tool.uri ? `<div class="muted">${escapeHtml(tool.uri)}</div>` : ""}${tool.mime_type ? `<div class="muted">${escapeHtml(tool.mime_type)}</div>` : ""}</td><td>${tool.description?.length > 220 ? `<details><summary>${escapeHtml(tool.description.slice(0, 180))}…</summary><div class="mcp-catalog-description">${escapeHtml(tool.description)}</div></details>` : escapeHtml(tool.description || "—")}</td></tr>`).join("")}
@@ -144,22 +162,22 @@ function inspectionToast(result) {
   const inspection = result.inspection || {};
   const changes = result.changes || {};
   if (inspection.status === "not_applicable") {
-    const failure = inspectionErrorMessage(inspection.error)
-      || inspectionFailureLabel(inspection.tools?.error)
-      || inspectionFailureLabel(inspection.resources?.error);
-    if (failure) return { message: `内置清单刷新失败：${failure}`, error: true };
+    const failure = inspectionFailureLabel(inspection.error)
+      || inspectionFailureLabel(inspection.tools?.error);
+    if (failure || inspection.error || inspection.tools?.status === "error") return { message: `内置清单刷新失败：${failure || "工具清单更新失败"}`, error: true };
+    const resourceWarning = resourceInspectionWarning(inspection);
+    if (resourceWarning) return { message: `内置工具清单已刷新；${resourceWarning}`, error: false };
     const changed = [];
     [
       ["工具", changes.tool_count],
       ["资源", changes.resource_count],
-      ["模板", changes.template_count],
     ].forEach(([label, item]) => {
       if (item && item.before !== item.after) changed.push(`${label} ${item.before ?? 0} → ${item.after ?? 0}`);
     });
     return {
       message: changed.length
         ? `内置清单已刷新并保存：${changed.join("，")}`
-        : `内置清单已刷新：无变化，共 ${inspection.tools?.count || 0} 个工具、${inspection.resources?.count || 0} 个资源、${inspection.resources?.template_count || 0} 个模板`,
+        : `内置清单已刷新：无变化，共 ${inspection.tools?.count || 0} 个工具、${inspection.resources?.count || 0} 个资源`,
       error: false,
     };
   }
@@ -168,6 +186,9 @@ function inspectionToast(result) {
       message: `检测失败：${inspectionFailureLabel(inspection.error) || "MCP 无法连接"}`,
       error: true,
     };
+  }
+  if ((inspection.status === "healthy" || hasOnlyResourceWarning(inspection)) && resourceInspectionWarning(inspection)) {
+    return { message: `工具清单已更新并保存（${inspection.tools?.count || 0} 个）；${resourceInspectionWarning(inspection)}`, error: false };
   }
   if (inspection.status === "degraded") {
     const detail = inspectionFailureLabel(inspection.tools?.error)
@@ -180,7 +201,6 @@ function inspectionToast(result) {
   [
     ["工具", changes.tool_count],
     ["资源", changes.resource_count],
-    ["模板", changes.template_count],
   ].forEach(([label, item]) => {
     if (item && item.before !== item.after) changed.push(`${label} ${item.before ?? 0} → ${item.after ?? 0}`);
   });
@@ -192,21 +212,28 @@ function inspectionToast(result) {
     };
   }
   return {
-    message: `检测完成并保存 ${savedCount} 个工具快照：无变化，共 ${inspection.resources?.count || 0} 个资源、${inspection.resources?.template_count || 0} 个模板`,
+    message: `检测完成并保存 ${savedCount} 个工具快照：无变化，共 ${inspection.resources?.count || 0} 个资源`,
     error: false,
   };
 }
 
 function savedInspectionToast(server, action) {
   const info = server?.inspection || {};
-  if (server?.transport === "builtin") return { message: `MCP 已${action}，已热重载`, error: false };
+  if (server?.transport === "builtin") {
+    const failure = inspectionFailureLabel(info.error) || inspectionFailureLabel(info.tools?.error);
+    if (failure || info.tools?.status === "error") return { message: `MCP 已${action}，但清单刷新失败：${failure || "工具清单更新失败"}`, error: true };
+    return { message: `MCP 已${action}，已热重载${resourceInspectionWarning(info) ? `；${resourceInspectionWarning(info)}` : ""}`, error: false };
+  }
   if (info.status === "unreachable") {
     return {
       message: `MCP 已${action}，但检测失败：${inspectionFailureLabel(info.error) || "无法连接"}`,
       error: true,
     };
   }
-  if (info.status === "degraded") return { message: `MCP 已${action}，但部分能力更新失败`, error: true };
+  if ((info.status === "healthy" || hasOnlyResourceWarning(info)) && resourceInspectionWarning(info)) {
+    return { message: `MCP 已${action}，工具清单可用；${resourceInspectionWarning(info)}`, error: false };
+  }
+  if (info.status === "degraded") return { message: `MCP 已${action}，但工具清单更新失败`, error: true };
   return { message: `MCP 已${action}并完成检测`, error: false };
 }
 
@@ -292,7 +319,7 @@ const mcpAdmin = {
           </td><td class="mcp-capabilities-cell">
             <div class="mcp-inspection" title="${escapeJsonEditorHtml(inspection.title)}">
               <span class="badge ${inspection.className}">${escapeHtml(inspection.text)}</span>
-              <span class="mcp-inspection-counts">${renderInspectionCounts(inspection.counts, s.name)}</span>
+              <span class="mcp-inspection-counts">${renderInspectionCounts(inspection.counts, s.name, inspection.resourceWarning)}</span>
             </div>
           </td>
           <td>${escapeHtml(formatDate(s.updated_at))}</td>

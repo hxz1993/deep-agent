@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTrajectory, createTrajectoryController, trajectoryStats } from "../../../console/trajectory.js";
+import { buildTrajectory, createTrajectoryController, redactTrajectoryValue, trajectoryStats } from "../../../console/trajectory.js";
 
 const fact = (id, sequence, ordinal, index, part, eventType = "assistant/message") => ({
   event_id: id, sequence, run_id: "run-1", turn_id: "turn-1", event_type: eventType,
@@ -53,6 +53,56 @@ function withController(check) {
   try { check(createTrajectoryController({ state: {} }), elements); }
   finally { globalThis.document = oldDocument; globalThis.window = oldWindow; }
 }
+
+const contextReferences = [
+  { key: "budget.range", type: "deeptable.selection", schema_version: "1.0", label: "预算选区",
+    payload: { range: "B2:D4", amount: 0, enabled: false, missing: null, notes: "<script>unsafe</script>" },
+    metadata: { sheet: "预算表", api_key: "must-hide" } },
+  { key: "actual.range", type: "deeptable.selection", schema_version: "2.0", label: "预算选区",
+    payload: { range: "F2:H4", amount: 120, labels: ["实际", "同比"] }, metadata: { sheet: "实际表" } },
+];
+
+test("multiple user contexts expose independent named details, payload and safe metadata", () => {
+  withController((controller, elements) => {
+    controller.addUser({ content: "对比两个选区", context_refs: contextReferences });
+    const html = elements.get("inspectorContent").innerHTML;
+    assert.equal((html.match(/<details\b[^>]*data-trajectory-context=/g) || []).length, 2);
+    for (const text of ["budget.range", "actual.range", "B2:D4", "F2:H4", "预算表", "实际表", "1.0", "2.0"]) {
+      assert.ok(html.includes(text), text);
+    }
+    assert.ok(html.includes("false") && html.includes("null"));
+    assert.doesNotMatch(html, /must-hide|<script>/);
+    assert.match(html, /&lt;script&gt;/);
+    assert.doesNotMatch(html, /<summary[^>]*disabled/);
+    assert.deepEqual(controller.events()[0].payload.context_refs, redactTrajectoryValue(contextReferences));
+    assert.equal(contextReferences[0].metadata.api_key, "must-hide");
+  });
+});
+
+test("trajectory download retains distinct full contexts from persisted user facts and redacts secrets", async () => {
+  let exported;
+  withController((controller, elements) => {
+    const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+    globalThis.document.createElement = () => ({ click() {} });
+    URL.createObjectURL = blob => { exported = blob; return "blob:test"; };
+    URL.revokeObjectURL = () => {};
+    try {
+      controller.setHistory({ session_id: "multi-context", items: [{ event_id: "user-context-export", sequence: 1,
+        event_type: "user/message", status: "completed", payload: { message: { kind: "request", parts: [{
+          part_kind: "user-prompt", content: [{ kind: "text-content", content: "对比" },
+            ...contextReferences.map(r => ({ kind: "context-ref", ...r }))],
+        }] } } }] });
+      elements.get("exportTrajectoryBtn").listeners.get("click")();
+    } finally { URL.createObjectURL = create; URL.revokeObjectURL = revoke; }
+  });
+  const trace = JSON.parse(await exported.text());
+  const refs = trace.events.find(e => e.kind === "input").payload.context_refs;
+  assert.equal(refs.length, 2);
+  assert.deepEqual(refs.map(r => r.key), ["budget.range", "actual.range"]);
+  assert.deepEqual(refs.map(r => r.payload), contextReferences.map(r => r.payload));
+  assert.equal(refs[0].metadata.api_key, "[已隐藏]");
+  assert.equal(refs[1].metadata.sheet, "实际表");
+});
 
 const deferredCall = (id, sequence, run = "call-run", turn = "resume-turn", callId = "confirm-id") => ({
   ...fact(id, sequence, 1, 1, { part_kind: "tool-call", tool_name: "builtin__confirm", tool_call_id: callId,

@@ -385,6 +385,19 @@ test("公共JSON视图区分键值类型并安全转义", async () => {
   assert.doesNotMatch(html, /<script>/);
 });
 
+test("上下文的外层折叠可直接展开JSON，其他JSON保留默认折叠规则", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const calls = [];
+  const context = { window: { DeepAgentMarkdown: { renderCodeBlock: (_code, _lang, options) => {
+    calls.push(options); return "<pre>JSON</pre>";
+  } } } };
+  runInNewContext(jsonViewSource, context);
+  context.window.DeepAgentJson.renderBlock({ value: 0 }, { expanded: true });
+  context.window.DeepAgentJson.renderBlock({ value: false });
+  assert.equal(calls[0].expanded, true);
+  assert.equal(calls[1].expanded, undefined);
+});
+
 test("轨迹JSON自动换行且只由详情正文承担滚动", () => {
   assert.match(consoleCss, /\.json-view\s*\{[\s\S]*?overflow-x:\s*hidden;[\s\S]*?white-space:\s*pre-wrap;/);
   assert.match(consoleCss, /\.json-view code\s*\{[^}]*min-width:\s*0;[^}]*white-space:\s*inherit;/);

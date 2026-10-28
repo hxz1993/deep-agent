@@ -17,3 +17,7 @@ v0.4.3增加单个与全部上传Skill导出；每个导出的Skill ZIP仍使用
 - [`../13-tool-discovery/README.md`](../13-tool-discovery/README.md)：MCP Tool Search，不用于替代 Skill 加载。
 - [`../11-tool-packages/tool-packages-design.md`](../11-tool-packages/tool-packages-design.md)：ToolPackage 配置与授权模型。
 - [`../TODO.md`](../TODO.md)：Revision、签名和Marketplace等后续状态。
+
+## Skill 维护界面评审
+
+- [Skill 维护与分组交互原型](<Prototype Skill维护/README.md>)：恢复此前按 Agent、用途、共享与全部查看的四视图版本；当前仅评审 Skill 管理，Agent 改版暂不推进。

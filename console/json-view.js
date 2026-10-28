@@ -57,11 +57,11 @@
     return html;
   }
 
-  function renderBlock(value, { className = "", ariaLabel = "JSON" } = {}) {
+  function renderBlock(value, { className = "", ariaLabel = "JSON", expanded } = {}) {
     const classes = ["json-view", className].filter(Boolean).join(" ");
     const highlighted = highlight(value);
     if (global.DeepAgentMarkdown?.renderCodeBlock) {
-      return `<div class="markdown-body markdown-json-block">${global.DeepAgentMarkdown.renderCodeBlock(highlighted, "json", { source: stringify(value), preClass: classes, ariaLabel, wrapped: true })}</div>`;
+      return `<div class="markdown-body markdown-json-block">${global.DeepAgentMarkdown.renderCodeBlock(highlighted, "json", { source: stringify(value), preClass: classes, ariaLabel, wrapped: true, expanded })}</div>`;
     }
     return `<pre class="${escapeHtml(classes)}" aria-label="${escapeHtml(ariaLabel)}"><code>${highlighted}</code></pre>`;
   }

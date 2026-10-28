@@ -759,6 +759,23 @@ html, body {
   overflow-y: auto;
 }
 .trajectory-summary-links { display: grid; gap: 5px; }
+.trajectory-context-reference { min-width: 0; }
+.trajectory-context-heading {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 0;
+  color: var(--text-dim); cursor: pointer; list-style: none;
+}
+.trajectory-context-heading::-webkit-details-marker { display: none; }
+.trajectory-context-heading:hover { color: var(--accent); }
+.trajectory-context-heading > svg { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--text-faint); }
+.trajectory-context-heading > svg:last-child { margin-left: auto; transition: transform .15s; }
+.trajectory-context-reference[open] > summary > svg:last-child { transform: rotate(90deg); }
+.trajectory-context-copy { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.trajectory-context-copy strong { font-size: var(--ui-font-helper); font-weight: 600; }
+.trajectory-context-copy small, .trajectory-context-copy code { color: var(--text-faint); font-size: var(--ui-font-meta); }
+.trajectory-context-copy code { font-family: var(--mono); white-space: normal; }
+.trajectory-context-index { color: var(--text-faint); font-weight: 400; }
+.trajectory-context-content { min-width: 0; padding: 0 0 8px; }
+.trajectory-context-content .trajectory-json { max-width: 100%; overflow: auto; }
 .trajectory-summary-link {
   width: 100%;
   min-width: 0;

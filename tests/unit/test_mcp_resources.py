@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from contextlib import asynccontextmanager
@@ -264,7 +265,7 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("secret-token", json.dumps(stored_value))
         self.assertEqual(result.inspection.resources.count, 1)
-        self.assertEqual(result.inspection.resources.template_count, 1)
+        self.assertEqual(result.inspection.resources.template_count, 0)
         self.assertEqual(
             build_client.call_args.kwargs["request_headers"],
             {"user": "4", "app": "app-a"},
@@ -295,7 +296,7 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.inspection.status, "healthy")
         self.assertEqual(result.inspection.resources.status, "unsupported")
 
-    async def test_resource_template_alone_marks_resources_supported(self) -> None:
+    async def test_known_template_only_server_remains_available_without_reprobing(self) -> None:
         client = _FakeInspectionClient(
             has_resources=True,
             templates=[
@@ -309,7 +310,7 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.capabilities.mcp.inspection.build_resource_client",
             return_value=client,
         ):
-            result = await inspect_mcp_server(_row(inspection=None))
+            result = await inspect_mcp_server(_row(inspection=_inspection(resource_count=0, template_count=1)))
 
         self.assertEqual(result.inspection.status, "healthy")
         self.assertEqual(result.inspection.resources.status, "supported")
@@ -358,7 +359,7 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result.inspection.tools.snapshot.definitions), 2)
         self.assertEqual(result.inspection.tools.snapshot_hash, "test-snapshot")
 
-    async def test_list_failure_is_degraded_and_preserves_previous_count(self) -> None:
+    async def test_resource_warning_preserves_previous_count_without_degrading_tools(self) -> None:
         client = _FakeInspectionClient(
             errors={"resources": RuntimeError("secret-token")},
         )
@@ -371,7 +372,7 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await inspect_mcp_server(row)
 
-        self.assertEqual(result.inspection.status, "degraded")
+        self.assertEqual(result.inspection.status, "healthy")
         self.assertEqual(result.inspection.resources.status, "error")
         self.assertEqual(result.inspection.resources.count, 3)
         self.assertEqual(result.inspection.resources.error.stage, "resources/list")
@@ -379,6 +380,80 @@ class McpInspectionTests(unittest.IsolatedAsyncioTestCase):
             "secret-token",
             result.inspection.resources.error.message,
         )
+
+    async def test_template_probe_is_never_part_of_tool_inspection(self) -> None:
+        for transport in ("url", "builtin"):
+            with self.subTest(transport=transport):
+                client = _FakeInspectionClient(
+                    tools=[Tool(name="query", inputSchema={"type": "object"})],
+                    resources=[Resource(name="guide", uri="docs://guide")],
+                )
+                client.list_resource_templates = AsyncMock(side_effect=AssertionError("must not probe"))
+                with (
+                    patch("deep_agent.capabilities.mcp.inspection.build_resource_client", return_value=client),
+                    patch("deep_agent.capabilities.mcp.inspection.build_raw_url_mcp_toolset", return_value=client),
+                    patch("deep_agent.capabilities.mcp.lease_manager.get_mcp_lease_manager", return_value=_FakeBuiltinLeaseManager()),
+                ):
+                    result = await inspect_mcp_server(_row(transport=transport, inspection=None))
+                client.list_resource_templates.assert_not_awaited()
+                self.assertEqual(result.inspection.tools.status, "supported")
+                self.assertEqual(result.inspection.resources.status, "supported")
+                self.assertEqual(result.inspection.status, "healthy" if transport == "url" else "not_applicable")
+
+    async def test_optional_resource_failure_does_not_degrade_tool_health(self) -> None:
+        client = _FakeInspectionClient(
+            tools=[Tool(name="query", inputSchema={"type": "object"})],
+            errors={"resources": ValueError("private credential")},
+        )
+        with patch("deep_agent.capabilities.mcp.inspection.build_resource_client", return_value=client):
+            result = await inspect_mcp_server(_row(inspection=None))
+        self.assertEqual(result.inspection.status, "healthy")
+        self.assertEqual(result.inspection.tools.count, 1)
+        self.assertEqual(result.inspection.tools.snapshot_status, "ready")
+        self.assertEqual(result.inspection.resources.status, "error")
+        self.assertEqual(result.inspection.resources.error.stage, "resources/list")
+        self.assertNotIn("private credential", result.inspection.to_storage_value().__str__())
+
+    async def test_resource_timeout_is_bounded_and_does_not_hide_tools(self) -> None:
+        client = _FakeInspectionClient(tools=[Tool(name="query", inputSchema={"type": "object"})])
+        async def never_returns():
+            await asyncio.Event().wait()
+        client.list_resources = never_returns
+        with (
+            patch("deep_agent.capabilities.mcp.inspection.build_resource_client", return_value=client),
+            patch("deep_agent.capabilities.mcp.inspection.RESOURCE_INSPECTION_TIMEOUT", 0.01),
+        ):
+            result = await inspect_mcp_server(_row(inspection=None))
+        self.assertEqual(result.inspection.status, "healthy")
+        self.assertEqual(result.inspection.tools.count, 1)
+        self.assertEqual(result.inspection.resources.error.type, "TimeoutError")
+
+    async def test_optional_probe_does_not_consume_mandatory_deadline(self) -> None:
+        client = _FakeInspectionClient(tools=[Tool(name="query", inputSchema={"type": "object"})])
+        original = client.list_tools
+        async def slow_tools():
+            await asyncio.sleep(0.025)
+            return await original()
+        client.list_tools = slow_tools
+        client.list_resources = AsyncMock(side_effect=AssertionError("insufficient budget"))
+        times = iter([0.0, 14.1])
+        with (
+            patch("deep_agent.capabilities.mcp.inspection.build_resource_client", return_value=client),
+            patch("deep_agent.capabilities.mcp.inspection.resolve_mcp_init_timeout", return_value=1),
+            patch("deep_agent.capabilities.mcp.inspection.perf_counter", side_effect=lambda: next(times, 14.2)),
+        ):
+            result = await inspect_mcp_server(_row(inspection=None))
+        client.list_resources.assert_not_awaited()
+        self.assertEqual(result.inspection.status, "healthy")
+        self.assertEqual(result.inspection.tools.count, 1)
+        self.assertEqual(result.inspection.resources.error.type, "TimeoutError")
+
+    async def test_resource_probe_cancellation_is_not_swallowed(self) -> None:
+        client = _FakeInspectionClient()
+        client.list_resources = AsyncMock(side_effect=asyncio.CancelledError())
+        with patch("deep_agent.capabilities.mcp.inspection.build_resource_client", return_value=client):
+            with self.assertRaises(asyncio.CancelledError):
+                await inspect_mcp_server(_row(inspection=None))
 
     async def test_initialization_failure_is_unreachable_and_keeps_snapshot(self) -> None:
         client = _FakeInspectionClient(

@@ -275,7 +275,7 @@ test("MCP 传输类型使用产品语义而不是后端枚举值", () => {
   assert.match(source, /url: "Streamable HTTP"/);
   assert.match(source, /builtin: "STDIO（Builtin）"/);
   assert.match(source, /class="mcp-inspection-counts"/);
-  assert.match(source, /data-lucide="\$\{iconName\}"/);
+  assert.match(loadInspectionUi().renderInspectionCounts({tools: 1}), /data-lucide="wrench"/);
 });
 
 test("检测结果区分变化、无变化、部分异常和无法连接", () => {
@@ -293,7 +293,7 @@ test("检测结果区分变化、无变化、部分异常和无法连接", () =>
         template_count: { before: 0, after: 1 },
       },
     }).message,
-    "检测成功并保存 12 个工具快照：工具 10 → 12，资源 0 → 2，模板 0 → 1",
+    "检测成功并保存 12 个工具快照：工具 10 → 12，资源 0 → 2",
   );
   assert.match(
     ui.inspectionToast({
@@ -358,4 +358,63 @@ test("清单搜索覆盖描述和资源 URI，保持工具顺序", () => {
   assert.doesNotMatch(ui.renderMcpCatalog(catalog, "resources", "订单"), /docs:\/\/two/);
   assert.match(ui.renderMcpCatalog(catalog, "resources", "absent"), /没有匹配/);
   assert.match(ui.renderInspectionCounts({tools: 2, resources: 1}, "demo"), /data-catalog-kind="resources"/);
+});
+
+
+test("资源检查告警与工具健康分开，兼容旧检测结果", () => {
+  const ui = loadInspectionUi();
+  for (const status of ["healthy", "degraded"]) {
+    const inspection = {
+      status,
+      tools: {status: "supported", count: 9, snapshot_status: "ready"},
+      resources: {status: "error", count: 0, error: {stage: "resources/list", type: "ValidationError"}},
+    };
+    const view = ui.inspectionView(inspection, "url");
+    assert.equal(view.text, "正常");
+    assert.match(view.resourceWarning, /资源清单.*不影响工具/);
+    const notice = ui.inspectionToast({inspection});
+    assert.equal(notice.error, false);
+    assert.match(notice.message, /工具.*资源清单/);
+    const html = ui.renderInspectionCounts(view.counts, "finance", view.resourceWarning);
+    assert.match(html, /mcp-resource-warning/);
+    assert.match(html, /data-catalog-kind="resources"/);
+  }
+});
+
+
+test("资源告警不能掩盖真正的工具、连接或失效快照错误", () => {
+  const ui = loadInspectionUi();
+  for (const override of [
+    {tools: {status: "error", snapshot_status: "ready", error: {stage: "tools/list"}}},
+    {error: {stage: "ping"}},
+    {tools: {status: "supported", snapshot_status: "stale"}},
+  ]) {
+    const inspection = {status: "degraded", tools: {status: "supported", snapshot_status: "ready"}, resources: {status: "error", error: {stage: "resources/list"}}, ...override};
+    assert.equal(ui.inspectionView(inspection, "url").text, "部分异常");
+    assert.equal(ui.inspectionToast({inspection}).error, true);
+  }
+  assert.equal(ui.inspectionView({status: "unreachable", resources: {status: "error"}}, "url").text, "无法连接");
+});
+
+
+test("内置 MCP 的真实连接和工具失败不能显示为正常", () => {
+  const ui = loadInspectionUi();
+  for (const extra of [{error: {stage: "initialize", type: "TimeoutError"}}, {tools: {status: "error", error: {stage: "tools/list", type: "MCPError"}}}]) {
+    const inspection = {status: "not_applicable", ...extra};
+    assert.equal(ui.inspectionView(inspection, "builtin").text, "检测失败");
+    assert.equal(ui.savedInspectionToast({transport: "builtin", inspection}, "更新").error, true);
+    assert.equal(ui.inspectionToast({inspection}).error, true);
+  }
+  const resourceOnly = {status: "not_applicable", tools: {status: "supported"}, resources: {status: "error", error: {stage: "resources/list"}}};
+  assert.equal(ui.inspectionView(resourceOnly, "builtin").text, "正常");
+  assert.equal(ui.savedInspectionToast({transport: "builtin", inspection: resourceOnly}, "更新").error, false);
+});
+
+
+test("未取得的资源清单不能误报为资源为空", () => {
+  const ui = loadInspectionUi();
+  const html = ui.renderMcpCatalog({resources: {count: 0, snapshot_status: "missing", definitions: []}}, "resources");
+  assert.match(html, /尚未取得资源清单/);
+  assert.doesNotMatch(html, /此服务暂无资源/);
+  assert.match(ui.renderMcpCatalog({resources: {count: 0, snapshot_status: "ready", definitions: []}}, "resources"), /此服务暂无资源/);
 });

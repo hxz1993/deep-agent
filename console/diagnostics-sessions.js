@@ -6,7 +6,7 @@ import { diagnosticTime } from "./diagnostics.js?v=20261019-release0138";
 import { diagnosticTarget, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261019-release0138";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261027-image-dismiss1";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=20261028-context-details1";
 import { ensureSessionViewTemplate } from "./session-view-shell.js?v=20261025-readonly-load2";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };

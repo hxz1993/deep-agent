@@ -26,6 +26,8 @@
 
 ---
 
+模型请求的千问 3.8 可空 Schema 兼容见 `models/qwen.py` 和 `models/provider_registry.py`：仅显式 Alibaba Provider 的已验证 Qwen 3.8 系列在 SDK 出站阶段转换简单 `type:[T,null]`；保留原 Schema／校验／历史及其他模型 Profile，不在工具执行或响应参数中强制转型。回归入口为 `tests/unit/test_qwen_schema.py`。
+
 ## 架构与数据流
 
 ### 0.14.0 结构化输出

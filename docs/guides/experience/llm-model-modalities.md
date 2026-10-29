@@ -38,6 +38,17 @@ StepFun（阶跃星辰）使用 OpenAI Chat Completions API，默认地址为 `h
 目录包含 MiniMax 国内 `minimax-cn`、国际 `minimax` 和阶跃 `stepfun` 来源；MiniMax 专用
 供应商默认使用国内目录，国内与国际来源共用同一 MiniMax 模型 Lab。刷新目录不会修改运行配置。
 
+### 千问 3.8 工具 Schema 兼容
+
+`alibaba` Provider 下的 `qwen3.8`／`qwen3.8-*` 使用请求出站适配：将简单的
+`type: [某类型, "null"]` 转成等价 `anyOf`，保留各类型约束、`enum`／`const`、默认值和注解，
+继续使用 SDK 的本地引用展开。普通工具和输出工具共用这一入口；原始工具定义、运行时校验、
+配置、`schema_digest` 和历史数据保持原样，不把返回的字符串强制转换成数组或其他类型。
+
+适配只作用于已验证的模型系列，不按财务工具名或 URL 特判；同一 Alibaba 入口的 Kimi、GLM、
+DeepSeek，以及其他 Provider 保持原有 Profile。已有联合写法、多个非空类型及同节点复杂组合
+不额外改写。实现位于 `src/deep_agent/models/qwen.py`；供应商修复或 SDK 升级后须回归再移除此兼容。
+
 ## 2. 模态与能力标签
 
 `llm_models.input_modalities` 只描述 LLM 原生输入：

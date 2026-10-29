@@ -55,6 +55,37 @@ test('表格单列引用、+N浮层入口与运行状态列；名称不含状态
   assert.ok(html.includes('skill-status-tag runtime-missing') && html.includes('未加载'));
   assert.ok(html.includes('>+1</button>') && !html.includes('>&lt;B></span>'));
   for (const title of ['References', 'Assets', '脚本']) assert.ok(html.includes(`title="${title}"`));
+  assert.ok(!html.includes('data-filter-agent'),'引用名称只展示，不增加筛选热区');
+  assert.ok(html.includes('<span class="skill-ref-chip"'));
+});
+
+test('+N点击只展开引用浮层并阻止行导航，普通行点击和键盘仍进入详情', () => {
+  const h=harness();h.state.skills=[skill('one')];h.admin.referencesState='ready';
+  const pane=h.node('skillListPane'),row=h.node('row'),more=h.node('more');
+  row.dataset={skillRow:'one'};more.dataset={skillRefs:'one'};
+  pane.querySelectorAll=selector=>selector==='[data-skill-row]'?[row]:selector==='[data-skill-refs]'?[more]:[];
+  const opened=[],shown=[];let stopped=0;
+  h.admin.openDetail=code=>opened.push(code);h.admin.showReferences=(code,anchor)=>shown.push([code,anchor]);
+  h.admin.renderList();
+  more.handlers.click({stopPropagation(){stopped+=1;}});
+  assert.equal(stopped,1);assert.equal(opened.length,0);assert.equal(shown[0][0],'one');assert.equal(shown[0][1],more);
+  assert.equal(h.admin.agentFilter,'all');
+  row.handlers.click({target:{closest:()=>more}});assert.equal(opened.length,0);
+  row.handlers.click({target:{closest:()=>null}});assert.deepEqual(opened,['one']);
+  row.handlers.keydown({target:row,key:'Enter',preventDefault(){}});assert.deepEqual(opened,['one','one']);
+});
+
+test('引用浮层仅展示其余Agent，不提供点击筛选操作', () => {
+  const h=harness();h.state.skills=[skill('one')];
+  h.admin.agentReferences=[{id:'a',name:'A',skills:['one']},{id:'b',name:'B',skills:['one']},{id:'c',name:'C',skills:['one']}];
+  h.admin.buildReferenceIndex();
+  const popover=h.node('skillAgentRefsPopover');popover.dataset={};popover.style={};popover.showPopover=()=>{};popover.getBoundingClientRect=()=>({width:240,height:80});
+  h.context.window.innerWidth=1437;h.context.window.innerHeight=1344;
+  const anchor={setAttribute(){},getBoundingClientRect:()=>({left:600,top:500,bottom:520})};
+  h.admin.showReferences('one',anchor);
+  assert.ok(popover.innerHTML.includes('>B</span>') && popover.innerHTML.includes('>C</span>'));
+  assert.ok(!popover.innerHTML.includes('<button') && !popover.innerHTML.includes('data-agent-id'));
+  assert.equal(h.admin.agentFilter,'all');
 });
 
 test('引用失败不伪装未引用，Agent筛选禁用，但关键词搜索仍然可用', async () => {

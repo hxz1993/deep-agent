@@ -344,8 +344,10 @@ const skillsAdmin = {
       row.addEventListener("keydown", event => { if (event.target === row && ["Enter", " "].includes(event.key)) { event.preventDefault(); this.openDetail(row.dataset.skillRow); } });
     });
     pane.querySelectorAll("[data-open-skill]").forEach(button => button.addEventListener("click", () => this.openDetail(button.dataset.openSkill)));
-    pane.querySelectorAll("[data-filter-agent]").forEach(button => button.addEventListener("click", () => this.filterByAgent(button.dataset.filterAgent)));
-    pane.querySelectorAll("[data-skill-refs]").forEach(button => button.addEventListener("click", () => this.showReferences(button.dataset.skillRefs, button)));
+    pane.querySelectorAll("[data-skill-refs]").forEach(button => button.addEventListener("click", event => {
+      event.stopPropagation();
+      this.showReferences(button.dataset.skillRefs, button);
+    }));
     pane.querySelector(".skill-table-wrap").scrollTop = previousScroll;
     if (focused) { const next = pane.querySelector("#skillSearch"); next.focus(); if (caret !== null) next.setSelectionRange(caret, caret); }
     window.lucide?.createIcons();
@@ -360,7 +362,7 @@ const skillsAdmin = {
     if (this.referencesState !== "ready") return `<span class="muted">${this.referencesState === "error" ? "获取失败" : "读取中…"}</span>`;
     const refs = this.orderedReferences(skill.code);
     if (!refs.length) return `<span class="skill-unreferenced"><i data-lucide="unlink" aria-hidden="true"></i>未被引用</span>`;
-    return `<div class="skill-ref-chips"><button type="button" class="skill-ref-chip" data-filter-agent="${escapeHtml(refs[0].id)}" title="${escapeHtml(refs[0].name + ' · ' + refs[0].id)}"><i data-lucide="bot"></i><span>${escapeHtml(refs[0].name)}</span></button>${refs.length > 1 ? `<button type="button" class="skill-ref-more" data-skill-refs="${escapeHtml(skill.code)}" aria-label="查看 ${escapeHtml(skill.label)} 的其他 ${refs.length - 1} 个引用 Agent" aria-expanded="false" aria-controls="skillAgentRefsPopover">+${refs.length - 1}</button>` : ""}</div>`;
+    return `<div class="skill-ref-chips"><span class="skill-ref-chip" title="${escapeHtml(refs[0].name + ' · ' + refs[0].id)}"><i data-lucide="bot"></i><span>${escapeHtml(refs[0].name)}</span></span>${refs.length > 1 ? `<button type="button" class="skill-ref-more" data-skill-refs="${escapeHtml(skill.code)}" aria-label="查看 ${escapeHtml(skill.label)} 的其他 ${refs.length - 1} 个引用 Agent" aria-expanded="false" aria-controls="skillAgentRefsPopover">+${refs.length - 1}</button>` : ""}</div>`;
   },
 
   filterByAgent(id) {
@@ -383,8 +385,7 @@ const skillsAdmin = {
     this.closeReferences();
     if (repeated) return;
     popover.dataset.code = code;
-    popover.innerHTML = this.orderedReferences(code).slice(1).map(agent => `<button type="button" class="skill-agent-popover-item" data-agent-id="${escapeHtml(agent.id)}" title="${escapeHtml(agent.id)}"><i data-lucide="bot"></i><span>${escapeHtml(agent.name)}</span></button>`).join("");
-    popover.querySelectorAll("[data-agent-id]").forEach(button => button.addEventListener("click", () => this.filterByAgent(button.dataset.agentId)));
+    popover.innerHTML = this.orderedReferences(code).slice(1).map(agent => `<div class="skill-agent-popover-item" title="${escapeHtml(agent.id)}"><i data-lucide="bot"></i><span>${escapeHtml(agent.name)}</span></div>`).join("");
     popover.showPopover();
     anchor.setAttribute("aria-expanded", "true");
     const rect = anchor.getBoundingClientRect(), box = popover.getBoundingClientRect();

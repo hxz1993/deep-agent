@@ -29,6 +29,7 @@ from pydantic_ai.providers.zai import ZaiProvider
 from deep_agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.models.compatible_providers import MiniMaxProvider, StepFunProvider
 from deep_agent.models.http_transport import model_http_settings
+from deep_agent.models.qwen import qwen38_chat_profile
 from deep_agent.core.exceptions import DeepAgentError
 from deep_agent.options import OPTION
 
@@ -379,6 +380,19 @@ def resolve_provider_model(
 
     if definition.model_protocol == "openai_chat":
         runtime_provider = _openai_style_provider(provider)
+        profile = None
+        if provider.provider_type == "deepseek":
+            profile = deepseek_chat_profile(model_name)
+        elif provider.provider_type == "moonshotai" and model_name.startswith(
+            ("kimi-k2.5", "kimi-k2.6", "kimi-k2.7", "kimi-k3", "kimi-k2-thinking")
+        ):
+            profile = {
+                **(MoonshotAIProvider.model_profile(model_name) or {}),
+                "openai_reasoning_enabled_by_default": True,
+                "openai_supports_forced_tool_choice_with_thinking": False,
+            }
+        elif provider.provider_type == "alibaba":
+            profile = qwen38_chat_profile(model_name)
         model_class = (
             OpenAICompatibleVideoChatModel
             if "video" in (input_modalities or []) or "video_url" in (tags or [])
@@ -388,11 +402,7 @@ def resolve_provider_model(
             model_name,
             provider=runtime_provider,
             settings=model_http_settings(),
-            **({"profile": deepseek_chat_profile(model_name)} if provider.provider_type == "deepseek" else
-               {"profile": {**(MoonshotAIProvider.model_profile(model_name) or {}),
-                            "openai_reasoning_enabled_by_default": True,
-                            "openai_supports_forced_tool_choice_with_thinking": False}}
-               if provider.provider_type == "moonshotai" and model_name.startswith(("kimi-k2.5", "kimi-k2.6", "kimi-k2.7", "kimi-k3", "kimi-k2-thinking")) else {}),
+            **({"profile": profile} if profile is not None else {}),
         )
         # Custom endpoints use OpenAIProvider and report system="openai".
         # Preserve the configured identity for auxiliary request adapters without

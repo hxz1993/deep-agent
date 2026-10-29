@@ -3733,7 +3733,6 @@ dialog#wecomApplicationModal { width: min(560px, calc(100vw - 40px)); }
 .skill-ref-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-ref-chip svg, .skill-agent-popover-item svg { width: 14px; height: 14px; flex-shrink: 0; }
 .skill-ref-more { flex-shrink: 0; padding: 0 4px; border: 0; background: transparent; color: var(--accent); font-size: 12px; }
-.skill-ref-chip:hover, .skill-agent-popover-item:hover { background: var(--accent-soft); color: var(--accent); }
 .skill-status-tag { display: inline-flex; white-space: nowrap; border-radius: 4px; padding: 2px 7px; line-height: 18px; font-size: 12px; }
 .skill-status-tag.runtime-ready { color: var(--success); background: color-mix(in srgb, var(--success) 9%, var(--console-surface)); }
 .skill-status-tag.runtime-syncing { color: var(--hitl-pending-border); background: color-mix(in srgb, var(--hitl-pending-border) 9%, var(--console-surface)); }

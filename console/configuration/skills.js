@@ -1,5 +1,19 @@
 const skillsAdmin = {
   selectedCode: null,
+  view: "list",
+  listLoaded: false,
+  listError: null,
+  agentFilter: "all",
+  query: "",
+  agentReferences: [],
+  referencesState: "loading",
+  referencesError: "",
+  referencesDirty: true,
+  referenceIndex: new Map(),
+  readRequests: new Map(),
+  listScroll: 0,
+  lastSkillCode: null,
+  scopeKey: null,
   selectedResourcePath: null,
   details: new Map(),
   uploadMode: "install",
@@ -116,94 +130,315 @@ const skillsAdmin = {
     if (shouldRefresh) await this.refresh();
   },
 
-  async refresh() {
-    const pane = document.getElementById("skillListPane");
-    if (!pane) return;
-    pane.innerHTML = `<div class="skill-list-state"><span class="loading-spinner"></span>正在加载 Skill…</div>`;
-    try {
-      state.skills = await apiFetch("/api/v1/skills");
-      showDbBanner(false);
-      if (!state.skills.length) {
-        pane.innerHTML = `<div class="skill-list-state">暂无 Skill，可上传 ZIP 安装。</div>`;
-        this.renderEmptyDetail();
-        return;
-      }
-      if (!state.skills.some((item) => item.code === this.selectedCode)) {
-        this.selectedCode = state.skills.find((item) => item.source !== "builtin")?.code
-          || state.skills.find((item) => item.source === "builtin")?.code
-          || null;
-      }
-      this.renderList();
-      await this.select(this.selectedCode);
-    } catch (error) {
-      pane.innerHTML = `<div class="skill-list-state is-error"><p>${escapeHtml(error.message)}</p><button class="btn" type="button" data-skill-retry>重试</button></div>`;
-      pane.querySelector("[data-skill-retry]")?.addEventListener("click", () => this.refresh());
-      this.renderEmptyDetail("Skill 列表加载失败");
+  requestScope() {
+    return JSON.stringify([window.defaultApiBaseUrl?.() || "", window.DeepAgentConsoleAPI?.loadContext?.()?.app || "", window.DeepAgentConsoleContext?.identity?.user || ""]);
+  },
+
+  startRead(kind) {
+    this.cancelReads([kind]);
+    const controller = new AbortController();
+    const scope = this.requestScope();
+    const request = { controller, scope };
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    request.current = () => this.readRequests.get(kind) === request && scope === this.requestScope();
+    request.finish = () => {
+      clearTimeout(timeout);
+      if (this.readRequests.get(kind) === request) this.readRequests.delete(kind);
+    };
+    this.readRequests.set(kind, request);
+    return request;
+  },
+
+  cancelReads(kinds = [...this.readRequests.keys()]) {
+    for (const kind of kinds) {
+      const request = this.readRequests.get(kind);
+      this.readRequests.delete(kind);
+      request?.controller.abort();
+      request?.finish();
     }
   },
 
-  renderList() {
+  isActive() {
+    return Boolean(document.querySelector('#page-configuration.active #panel-skills.active'));
+  },
+
+  setView(view) {
+    this.view = view;
+    document.getElementById("skillListView")?.classList.toggle("hidden", view !== "list");
+    document.getElementById("skillPageToolbar")?.classList.toggle("hidden", view !== "list");
+    document.getElementById("skillDetailPane")?.classList.toggle("hidden", view !== "detail");
+    this.closeReferences();
+    this.moreMenuDismissController?.abort();
+    this.moreMenuDismissController = null;
+  },
+
+  deactivate() {
+    this.cancelReads();
+    this.selectedCode = null;
+    this.selectedResourcePath = null;
+    this.setView("list");
+  },
+
+  buildReferenceIndex() {
+    const known = new Set(state.skills.map(skill => skill.code));
+    this.referenceIndex = new Map();
+    for (const agent of this.agentReferences) {
+      for (const code of new Set(agent.skills)) {
+        if (!known.has(code)) continue;
+        if (!this.referenceIndex.has(code)) this.referenceIndex.set(code, []);
+        const refs = this.referenceIndex.get(code);
+        if (!refs.some(ref => ref.id === agent.id)) refs.push(agent);
+      }
+    }
+  },
+
+  filterableAgents() {
+    const ids = new Set([...this.referenceIndex.values()].flat().map(agent => agent.id));
+    return this.agentReferences.filter(agent => ids.has(agent.id));
+  },
+
+  visibleSkills() {
+    const query = this.query.trim().toLocaleLowerCase();
+    return state.skills.filter(skill => {
+      if (this.referencesState === "ready") {
+        const refs = this.referenceIndex.get(skill.code) || [];
+        if (this.agentFilter === "unlinked" && refs.length) return false;
+        if (!["all", "unlinked"].includes(this.agentFilter) && !refs.some(agent => agent.id === this.agentFilter)) return false;
+      }
+      return `${skill.label} ${skill.code} ${skill.description || ""}`.toLocaleLowerCase().includes(query);
+    }).sort((left, right) => Number(left.source === "builtin") - Number(right.source === "builtin"));
+  },
+
+  async refreshReferences() {
+    const request = this.startRead("references");
+    this.referencesState = "loading";
+    this.referencesError = "";
+    if (this.view === "list" && this.listLoaded) this.renderList();
+    try {
+      const agents = await apiFetch("/api/v1/skills/references/agents", { signal: request.controller.signal });
+      if (!request.current()) return;
+      if (!Array.isArray(agents) || agents.some(agent => !agent.id || typeof agent.name !== "string" || !Array.isArray(agent.skills))) throw new Error("Agent 引用响应格式错误");
+      this.agentReferences = agents;
+      this.referencesState = "ready";
+      this.referencesDirty = false;
+      this.buildReferenceIndex();
+      if (!["all", "unlinked"].includes(this.agentFilter) && !this.filterableAgents().some(agent => agent.id === this.agentFilter)) this.agentFilter = "all";
+    } catch (error) {
+      if (!request.current()) return;
+      this.referencesState = "error";
+      this.agentFilter = "all";
+      this.referencesError = request.controller.signal.aborted ? "Agent 引用读取超时" : error.message;
+      this.referencesDirty = true;
+    } finally {
+      if (request.current() && this.view === "list" && this.listLoaded) this.renderList();
+      request.finish();
+    }
+  },
+
+  async refresh() {
     const pane = document.getElementById("skillListPane");
     if (!pane) return;
-    const renderCard = (skill) => {
-      const selected = skill.code === this.selectedCode;
+    const scope = this.requestScope();
+    if (this.scopeKey !== null && this.scopeKey !== scope) {
+      this.deactivate();
+      this.agentFilter = "all";
+      this.query = "";
+      this.details.clear();
+      this.agentReferences = [];
+      state.skills = [];
+    }
+    this.scopeKey = scope;
+    const detailAtStart = this.view === "detail" ? this.selectedCode : null;
+    const request = this.startRead("list");
+    this.listScroll = pane.querySelector(".skill-table-wrap")?.scrollTop ?? this.listScroll;
+    this.listLoaded = false;
+    this.listError = null;
+    this.renderList();
+    const references = this.refreshReferences();
+    try {
+      const skills = await apiFetch("/api/v1/skills", { signal: request.controller.signal });
+      if (!request.current()) return;
+      if (!Array.isArray(skills)) throw new Error("Skill 列表响应格式错误");
+      state.skills = skills;
+      this.listLoaded = true;
+      this.buildReferenceIndex();
+      showDbBanner(false);
+      this.renderList();
+      await references;
+      if (!request.current()) return;
+      this.renderList();
+      if (this.view === "detail" && this.selectedCode) {
+        if (!skills.some(skill => skill.code === this.selectedCode)) this.backToList();
+        else if (this.selectedCode === detailAtStart) await this.select(this.selectedCode);
+      }
+    } catch (error) {
+      if (!request.current()) return;
+      this.listError = request.controller.signal.aborted ? "Skill 列表读取超时" : error.message;
+      if ([401, 403].includes(error.status)) {
+        this.cancelReads(["references", "detail", "resource"]);
+        state.skills = [];
+        this.agentReferences = [];
+        this.referenceIndex.clear();
+        this.details.clear();
+      }
+      this.renderList();
+      if (this.view === "detail") this.renderEmptyDetail("Skill 列表加载失败");
+    } finally {
+      request.finish();
+    }
+  },
+
+  renderList({ scrollTop = null } = {}) {
+    const pane = document.getElementById("skillListPane");
+    if (!pane) return;
+    this.closeReferences();
+    if (!this.listLoaded) {
+      pane.innerHTML = this.listError
+        ? `<div class="skill-list-state is-error" role="alert"><p>${escapeHtml(this.listError)}</p><button class="btn" type="button" data-skill-retry>重试</button></div>`
+        : `<div class="skill-list-state"><span class="loading-spinner"></span>正在加载 Skill…</div>`;
+      pane.querySelector("[data-skill-retry]")?.addEventListener("click", () => this.refresh());
+      return;
+    }
+    const search = document.getElementById("skillSearch");
+    const focused = document.activeElement === search;
+    const caret = focused ? search.selectionStart : null;
+    const previousScroll = scrollTop ?? pane.querySelector(".skill-table-wrap")?.scrollTop ?? this.listScroll;
+    const agents = this.filterableAgents();
+    const rows = this.visibleSkills();
+    pane.innerHTML = `<div class="skill-list-toolbar">
+      <select id="skillAgentFilter" aria-label="筛选 Agent"${this.referencesState !== "ready" ? " disabled" : ""}>
+        ${[["all", "全部 Skill", "library"], ["unlinked", "未被引用", "unlink"], ...agents.map(agent => [agent.id, agent.name, "bot"])].map(([id, name, icon], index) => `<option value="${escapeHtml(id)}" data-icon="${icon}"${index === 2 ? ' data-separator-before="true"' : ""}${id === (this.referencesState === "ready" ? this.agentFilter : "all") ? " selected" : ""}>${escapeHtml(name)}</option>`).join("")}
+      </select>
+      <label class="console-search"><i data-lucide="search"></i><input id="skillSearch" type="search" aria-label="搜索 Skill" placeholder="搜索 Skill" value="${escapeHtml(this.query)}"></label>
+      <span class="skill-table-total">${rows.length} 个 Skill</span>
+    </div>
+    ${this.referencesState === "error" ? `<div class="skill-reference-error" role="status"><span>${escapeHtml(this.referencesError)}</span><button class="btn btn-sm" type="button" data-retry-references>重试引用查询</button></div>` : ""}
+    <div class="skill-table-wrap"><table class="data-table skill-table"><thead><tr><th>Skill</th><th class="skill-version-column">版本</th><th class="skill-agent-column">引用 Agent</th><th class="skill-status-column">状态</th><th class="skill-resource-column">资源</th><th class="skill-updated-column">更新时间</th><th class="skill-open-column"></th></tr></thead>
+    <tbody>${rows.length ? rows.map(skill => {
       const runtime = this.runtimeLabel(skill);
-      return `<button type="button" class="skill-list-item${selected ? " active" : ""}" data-skill-code="${escapeHtml(skill.code)}">
-        <span class="skill-list-card-head">
-          <span class="skill-list-icon"><i data-lucide="book-open-check"></i></span>
-          <span class="skill-list-copy">
-            <span class="skill-list-title"><strong>${escapeHtml(skill.label)}</strong></span>
-            <code class="skill-list-code">${escapeHtml(skill.code)}</code>
-          </span>
-          <span class="skill-list-signals">
-            <span class="skill-runtime-dot runtime-${escapeHtml(skill.runtime_status || "missing")}" title="${escapeHtml(runtime.label)}"></span>
-            <span class="skill-list-count" title="References"><i data-lucide="book-open-text"></i>${Number(skill.reference_count || 0)}</span>
-            <span class="skill-list-count" title="Assets"><i data-lucide="paperclip"></i>${Number(skill.asset_count || 0)}</span>
-          </span>
-        </span>
-      </button>`;
+      const status = ["ready", "syncing", "missing", "error"].includes(skill.runtime_status) ? skill.runtime_status : "missing";
+      const label = { ready: "已就绪", syncing: "同步中", missing: "未加载", error: "加载失败" }[status];
+      const count = (icon, value, title) => `<span title="${title}"><i data-lucide="${icon}"></i>${Number(value || 0)}</span>`;
+      return `<tr data-skill-row="${escapeHtml(skill.code)}" tabindex="0" aria-label="查看 ${escapeHtml(skill.label)}">
+        <td><div class="skill-table-name"><button class="skill-name-button" type="button" data-open-skill="${escapeHtml(skill.code)}">${escapeHtml(skill.label)}</button>${skill.source === "builtin" ? '<span class="skill-source-label">内置</span>' : ""}</div><code class="skill-table-code">${escapeHtml(skill.code)}</code></td>
+        <td class="skill-version-column">${escapeHtml(skill.version || "未声明")}</td><td>${this.renderReferences(skill)}</td>
+        <td><span class="skill-status-tag runtime-${status}" title="${escapeHtml(runtime.label + '：' + runtime.detail)}">${label}</span></td>
+        <td><div class="skill-resource-count">${count("book-open-text", skill.reference_count, "References")}${count("paperclip", skill.asset_count, "Assets")}${count("terminal-square", skill.script_count, "脚本")}</div></td>
+        <td class="skill-updated-column">${escapeHtml(formatDate(skill.updated_at))}</td><td><button class="skill-open-button" type="button" data-open-skill="${escapeHtml(skill.code)}" aria-label="查看 ${escapeHtml(skill.label)} 详情"><i data-lucide="chevron-right"></i></button></td></tr>`;
+    }).join("") : `<tr><td colspan="7" class="skill-table-empty">${state.skills.length ? "没有匹配的 Skill" : "暂无 Skill，可上传 ZIP 安装。"}</td></tr>`}</tbody></table></div>`;
+    pane.querySelector("#skillAgentFilter").addEventListener("change", event => this.filterByAgent(event.target.value));
+    const searchInput = pane.querySelector("#skillSearch");
+    let composing = false;
+    const searchSkills = event => {
+      this.query = event.target.value;
+      if (composing || event.isComposing) return;
+      this.listScroll = 0;
+      this.renderList({ scrollTop: 0 });
     };
-    const groups = [
-      ["自定义", state.skills.filter((skill) => skill.source !== "builtin")],
-      ["内置", state.skills.filter((skill) => skill.source === "builtin")],
-    ];
-    pane.innerHTML = groups
-      .map(([label, skills]) => `<section class="skill-list-group">
-        <div class="skill-list-group-title"><span>${label}</span><small>${skills.length}</small></div>
-        <div class="skill-list-group-items">${skills.length
-          ? skills.map(renderCard).join("")
-          : `<div class="configuration-group-empty">${label === "自定义" ? "暂无自定义 Skill，请先上传安装" : "暂无内置 Skill"}</div>`}</div>
-      </section>`)
-      .join("");
-    pane.querySelectorAll("[data-skill-code]").forEach((button) => {
-      button.addEventListener("click", () => this.select(button.dataset.skillCode));
+    searchInput.addEventListener("compositionstart", () => { composing = true; });
+    searchInput.addEventListener("compositionend", event => { composing = false; searchSkills(event); });
+    searchInput.addEventListener("input", searchSkills);
+    pane.querySelector("[data-retry-references]")?.addEventListener("click", () => this.refreshReferences());
+    pane.querySelectorAll("[data-skill-row]").forEach(row => {
+      row.addEventListener("click", event => { if (!event.target.closest("button")) this.openDetail(row.dataset.skillRow); });
+      row.addEventListener("keydown", event => { if (event.target === row && ["Enter", " "].includes(event.key)) { event.preventDefault(); this.openDetail(row.dataset.skillRow); } });
     });
+    pane.querySelectorAll("[data-open-skill]").forEach(button => button.addEventListener("click", () => this.openDetail(button.dataset.openSkill)));
+    pane.querySelectorAll("[data-filter-agent]").forEach(button => button.addEventListener("click", () => this.filterByAgent(button.dataset.filterAgent)));
+    pane.querySelectorAll("[data-skill-refs]").forEach(button => button.addEventListener("click", () => this.showReferences(button.dataset.skillRefs, button)));
+    pane.querySelector(".skill-table-wrap").scrollTop = previousScroll;
+    if (focused) { const next = pane.querySelector("#skillSearch"); next.focus(); if (caret !== null) next.setSelectionRange(caret, caret); }
     window.lucide?.createIcons();
+  },
+
+  orderedReferences(code) {
+    const refs = this.referenceIndex.get(code) || [];
+    return [...refs.filter(agent => agent.id === this.agentFilter), ...refs.filter(agent => agent.id !== this.agentFilter)];
+  },
+
+  renderReferences(skill) {
+    if (this.referencesState !== "ready") return `<span class="muted">${this.referencesState === "error" ? "获取失败" : "读取中…"}</span>`;
+    const refs = this.orderedReferences(skill.code);
+    if (!refs.length) return `<span class="skill-unreferenced"><i data-lucide="unlink" aria-hidden="true"></i>未被引用</span>`;
+    return `<div class="skill-ref-chips"><button type="button" class="skill-ref-chip" data-filter-agent="${escapeHtml(refs[0].id)}" title="${escapeHtml(refs[0].name + ' · ' + refs[0].id)}"><i data-lucide="bot"></i><span>${escapeHtml(refs[0].name)}</span></button>${refs.length > 1 ? `<button type="button" class="skill-ref-more" data-skill-refs="${escapeHtml(skill.code)}" aria-label="查看 ${escapeHtml(skill.label)} 的其他 ${refs.length - 1} 个引用 Agent" aria-expanded="false" aria-controls="skillAgentRefsPopover">+${refs.length - 1}</button>` : ""}</div>`;
+  },
+
+  filterByAgent(id) {
+    this.agentFilter = id;
+    this.listScroll = 0;
+    this.closeReferences();
+    this.renderList({ scrollTop: 0 });
+  },
+
+  closeReferences() {
+    const popover = document.getElementById("skillAgentRefsPopover");
+    if (popover?.matches(":popover-open")) popover.hidePopover();
+    document.querySelectorAll('[data-skill-refs][aria-expanded="true"]').forEach(button => button.setAttribute("aria-expanded", "false"));
+  },
+
+  showReferences(code, anchor) {
+    const popover = document.getElementById("skillAgentRefsPopover");
+    if (!popover) return;
+    const repeated = popover.matches(":popover-open") && popover.dataset.code === code;
+    this.closeReferences();
+    if (repeated) return;
+    popover.dataset.code = code;
+    popover.innerHTML = this.orderedReferences(code).slice(1).map(agent => `<button type="button" class="skill-agent-popover-item" data-agent-id="${escapeHtml(agent.id)}" title="${escapeHtml(agent.id)}"><i data-lucide="bot"></i><span>${escapeHtml(agent.name)}</span></button>`).join("");
+    popover.querySelectorAll("[data-agent-id]").forEach(button => button.addEventListener("click", () => this.filterByAgent(button.dataset.agentId)));
+    popover.showPopover();
+    anchor.setAttribute("aria-expanded", "true");
+    const rect = anchor.getBoundingClientRect(), box = popover.getBoundingClientRect();
+    popover.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - box.width - 8)) + "px";
+    popover.style.top = (rect.bottom + 6 + box.height <= window.innerHeight - 8 ? rect.bottom + 6 : Math.max(8, rect.top - box.height - 6)) + "px";
+    window.lucide?.createIcons();
+  },
+
+  openDetail(code) {
+    this.listScroll = document.querySelector("#skillListPane .skill-table-wrap")?.scrollTop || 0;
+    this.lastSkillCode = code;
+    return this.select(code);
+  },
+
+  backToList() {
+    this.cancelReads(["detail", "resource"]);
+    this.selectedCode = null;
+    this.setView("list");
+    this.renderList({ scrollTop: this.listScroll });
+    const row = [...document.querySelectorAll("#skillListPane [data-skill-row]")].find(row => row.dataset.skillRow === this.lastSkillCode);
+    row?.focus({ preventScroll: true });
   },
 
   renderEmptyDetail(message = "选择一个 Skill 查看说明和资源") {
     const detail = document.getElementById("skillDetailPane");
     if (!detail) return;
-    detail.innerHTML = `<div class="skill-detail-empty"><i data-lucide="book-open-check"></i><p>${escapeHtml(message)}</p></div>`;
+    detail.innerHTML = `<header class="skill-detail-header"><button class="agent-editor-back" type="button" data-skill-back><i data-lucide="arrow-left"></i>返回</button></header><div class="skill-detail-empty"><p>${escapeHtml(message)}</p></div>`;
+    detail.querySelector("[data-skill-back]").addEventListener("click", () => this.backToList());
     window.lucide?.createIcons();
   },
 
   async select(code) {
     if (!code) return;
+    this.cancelReads(["resource"]);
     if (code !== this.selectedCode) this.selectedResourcePath = null;
     this.selectedCode = code;
-    this.renderList();
+    this.setView("detail");
     const detail = document.getElementById("skillDetailPane");
     if (!detail) return;
-    detail.innerHTML = `<div class="skill-list-state"><span class="loading-spinner"></span>正在加载详情…</div>`;
+    const request = this.startRead("detail");
+    this.renderEmptyDetail("正在加载详情…");
     try {
-      const skill = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}`);
+      const skill = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}`, { signal: request.controller.signal });
+      if (!request.current() || this.view !== "detail" || this.selectedCode !== code) return;
       this.details.set(code, skill);
       this.renderDetail(skill);
     } catch (error) {
-      detail.innerHTML = `<div class="skill-list-state is-error"><p>${escapeHtml(error.message)}</p><button class="btn" type="button" data-skill-detail-retry>重试</button></div>`;
-      detail.querySelector("[data-skill-detail-retry]")?.addEventListener("click", () => this.select(code));
-    }
+      if (!request.current() || this.view !== "detail" || this.selectedCode !== code) return;
+      this.renderEmptyDetail(request.controller.signal.aborted ? "Skill 详情读取超时" : error.message);
+      const retry = document.createElement("button");
+      retry.className = "btn"; retry.type = "button"; retry.textContent = "重试";
+      retry.addEventListener("click", () => this.select(code));
+      detail.querySelector(".skill-detail-empty").appendChild(retry);
+    } finally { request.finish(); }
   },
 
   renderDetail(skill) {
@@ -246,6 +481,7 @@ const skillsAdmin = {
       : `<li class="skill-resource-empty">该 Skill 没有附加资源</li>`;
     detail.innerHTML = `
       <header class="skill-detail-header">
+        <button class="agent-editor-back" type="button" data-skill-back><i data-lucide="arrow-left"></i><span>返回</span></button>
         <div class="skill-detail-identity">
           <div class="skill-detail-title"><h3>${escapeHtml(skill.label)}</h3><span class="skill-source-label">${isBuiltin ? "内置" : "自定义"}</span><span class="skill-runtime-marker runtime-${escapeHtml(skill.runtime_status || "missing")}" title="${escapeHtml(`${runtime.label}：${runtime.detail}`)}" aria-label="${escapeHtml(runtime.label)}"><span class="skill-runtime-dot"></span></span></div>
           <code>${escapeHtml(skill.code)}</code>
@@ -289,6 +525,7 @@ const skillsAdmin = {
           </section>
         </aside>
       </div>`;
+    detail.querySelector("[data-skill-back]").addEventListener("click", () => this.backToList());
     const moreTrigger = detail.querySelector("[data-skill-more-trigger]");
     const moreMenu = detail.querySelector("[data-skill-more-menu]");
     const closeMoreMenu = () => {
@@ -393,7 +630,8 @@ const skillsAdmin = {
 
   async readResource(code, path) {
     const preview = document.getElementById("skillResourcePreview");
-    if (!preview) return;
+    if (!preview || this.view !== "detail" || this.selectedCode !== code) return;
+    const request = this.startRead("resource");
     this.selectedResourcePath = path;
     document.querySelectorAll("#skillDetailPane [data-resource-path]").forEach((row) => {
       row.classList.toggle("active", row.dataset.resourcePath === path);
@@ -401,7 +639,8 @@ const skillsAdmin = {
     preview.innerHTML = `${this.previewHeading(path)}<div class="skill-preview-loading"><span class="loading-spinner"></span>正在读取资源…</div>`;
     window.lucide?.createIcons();
     try {
-      const page = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}`);
+      const page = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}`, { signal: request.controller.signal });
+      if (!request.current() || this.view !== "detail" || this.selectedCode !== code || this.selectedResourcePath !== path) return;
       const isMarkdown = /\.md$/i.test(path) || /markdown/i.test(String(page.mime_type || page.mime || ""));
       const isJson = /\.json$/i.test(path) || /json/i.test(String(page.mime_type || page.mime || ""));
       const markdownDocument = isMarkdown
@@ -416,9 +655,10 @@ const skillsAdmin = {
       window.lucide?.createIcons();
       if (isMarkdown) void window.DeepAgentMarkdown?.renderDiagrams(preview);
     } catch (error) {
-      preview.innerHTML = `${this.previewHeading(path)}<div class="skill-preview-empty is-error">${escapeHtml(error.message)}</div>`;
+      if (!request.current() || this.view !== "detail" || this.selectedCode !== code || this.selectedResourcePath !== path) return;
+      preview.innerHTML = `${this.previewHeading(path)}<div class="skill-preview-empty is-error">${escapeHtml(request.controller.signal.aborted ? "资源读取超时" : error.message)}</div>`;
       window.lucide?.createIcons();
-    }
+    } finally { request.finish(); }
   },
 
   downloadFilename(response, fallbackName) {
@@ -507,7 +747,7 @@ const skillsAdmin = {
       }))) return;
       try {
         await apiFetch(`/api/v1/skills/${encodeURIComponent(skill.code)}`, { method: "DELETE" });
-        this.selectedCode = null;
+        if (this.view === "detail" && this.selectedCode === skill.code) this.backToList();
         showToast("Skill 已删除");
         await this.refresh();
       } catch (error) {
@@ -529,6 +769,7 @@ const skillsAdmin = {
   async upload(file) {
     if (!file) return;
     const replacing = this.uploadMode === "replace" && this.selectedCode;
+    const targetCode = this.selectedCode;
     const path = replacing
       ? `/api/v1/skills/${encodeURIComponent(this.selectedCode)}/package`
       : "/api/v1/skills";
@@ -546,7 +787,7 @@ const skillsAdmin = {
         throw new Error(window.AdminFormFeedback?.formatDetail(detail) || String(detail));
       }
       const result = await response.json();
-      this.selectedCode = result.skill.code;
+      if (replacing && this.selectedCode === targetCode && this.view === "detail") this.selectedCode = result.skill.code;
       showToast(result.status === "noop" ? "Skill 包内容没有变化" : result.status === "repaired" ? "Skill 原包与运行文件已恢复" : replacing ? "Skill 包已替换" : "Skill 已安装");
       await this.refresh();
     } catch (error) {
@@ -559,6 +800,17 @@ const skillsAdmin = {
   },
 
   init() {
+    document.addEventListener("deep-agent-configuration-tab", event => { if (event.detail?.name !== "skills") this.deactivate(); });
+    window.addEventListener("pagehide", () => this.deactivate());
+    window.addEventListener("resize", () => this.closeReferences());
+    document.getElementById("skillAgentRefsPopover")?.addEventListener("toggle", event => {
+      if (event.newState === "closed") document.querySelectorAll('[data-skill-refs][aria-expanded="true"]').forEach(button => button.setAttribute("aria-expanded", "false"));
+    });
+    window.DeepAgentConsoleDirectory?.subscribe(resources => {
+      if (!resources.includes("agents")) return;
+      this.referencesDirty = true;
+      if (this.isActive()) void this.refreshReferences();
+    });
     document.getElementById("refreshSkillsBtn")?.addEventListener("click", () => this.refresh());
     document.getElementById("exportAllSkillsBtn")?.addEventListener("click", async () => {
       try {

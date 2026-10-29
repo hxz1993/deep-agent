@@ -62,6 +62,24 @@ class AgentStoreBase(SessionBoundMixin):
         async with self._read() as db:
             return await self._list_all(db)
 
+    async def list_skill_references(self) -> list[dict]:
+        """Read the Skill reference directory without loading Agent configuration."""
+        async with self._read() as db:
+            rows = await db.execute(
+                select(Agent.id, Agent.name, Agent.skills).order_by(Agent.name, Agent.id)
+            )
+            return [
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "skills": list(dict.fromkeys(
+                        code for code in (row.skills if isinstance(row.skills, list) else [])
+                        if isinstance(code, str) and code.strip()
+                    )),
+                }
+                for row in rows
+            ]
+
     async def get_output_config(self, agent_id: str) -> AgentOutputConfig | None:
         async with self._read() as db:
             return await db.get(AgentOutputConfig, agent_id)

@@ -84,6 +84,14 @@ class SkillDetail(SkillSummary):
     resources: list[SkillResource] = Field(default_factory=list)
 
 
+class SkillAgentReference(BaseModel):
+    """Lightweight management projection; not an Agent configuration copy."""
+
+    id: str
+    name: str
+    skills: list[str]
+
+
 class SkillInstallResult(BaseModel):
     status: str
     skill: SkillDetail

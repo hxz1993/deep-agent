@@ -8,7 +8,10 @@ DeepAgent v0.3.18 将 Skill 与 ToolPackage 分离，v0.3.20 收口上传 Skill 
 
 Console 配置中心的“Skill”页面提供：
 
-- 查看代码内置与上传 Skill。
+- 使用紧凑表格查看代码内置与上传 Skill，通过 Agent 下拉和关键词筛选；共享 Skill 在全部列表只显示一条。
+- Agent 筛选包含全部、未被引用及有现存 Skill 的 Agent；引用列显示一个 Agent，其余通过 +N 浮层展开。关联配置仍在 Agent 页维护。
+- 状态列表示当前实例的运行文件是否就绪，不代表业务配置或查询验证结果。引用查询失败明确提示，不把未知关系当成未引用。
+- 点击列表进入文件详情，返回保留筛选和列表位置；首次进入不自动读取详情。
 - 上传 ZIP 安装、替换当前包、重新加载、导出和删除。
 - 单个上传Skill可直接导出原始ZIP；“导出全部”生成包含清单和全部上传Skill独立ZIP的集合包。
 - 查看 Manifest、Reference/Asset 和脚本索引。
@@ -77,6 +80,7 @@ ZIP 最大 10 MiB，解压后最大 50 MiB、最多 256 个文件、目录深度
 
 ```text
 GET    /api/v1/skills
+GET    /api/v1/skills/references/agents          管理员只读：[{id,name,skills}]
 GET    /api/v1/skills/export
 GET    /api/v1/skills/{code}
 POST   /api/v1/skills                         multipart: file=<zip>

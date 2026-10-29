@@ -2622,60 +2622,6 @@ html[data-theme="paper"] .context-budget-legend .tone-output,
 html[data-theme="paper"] .run-usage-legend .output { color: #e59a5c; }
 html[data-theme="paper"] .run-usage-legend .remaining { color: #5e9e7f; }
 
-#configurationHost #panel-skills.active {
-  display: flex;
-  height: 100%;
-  min-height: 0;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-#configurationHost #panel-skills .skill-admin-workspace {
-  min-height: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
-#configurationHost #panel-skills .skill-list-pane {
-  min-height: 0;
-  max-height: none;
-  overflow: auto;
-}
-
-#configurationHost #panel-skills .skill-detail-pane {
-  display: flex;
-  height: auto;
-  min-height: 0;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-#configurationHost #panel-skills .skill-detail-header {
-  flex: 0 0 auto;
-}
-
-#configurationHost #panel-skills .skill-detail-layout {
-  min-height: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
-#configurationHost #panel-skills .skill-detail-main,
-#configurationHost #panel-skills .skill-detail-lane,
-#configurationHost #panel-skills .skill-resource-preview {
-  min-height: 0;
-}
-
-#configurationHost #panel-skills .skill-detail-main {
-  overflow: auto;
-}
-
-#configurationHost #panel-skills .skill-detail-lane {
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
 #configurationHost #panel-agents {
   overflow: clip;
   border-radius: 0;
@@ -2702,22 +2648,6 @@ html[data-theme="paper"] .run-usage-legend .remaining { color: #5e9e7f; }
 
 .agent-editor-pane .cap-card-desc {
   -webkit-line-clamp: 1;
-}
-
-@media (max-width: 1200px) {
-  #configurationHost #panel-skills .skill-detail-layout {
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  #configurationHost #panel-skills .skill-detail-lane {
-    height: auto;
-  }
-}
-
-@media (max-width: 900px) {
-  #configurationHost #panel-skills .skill-admin-workspace {
-    grid-template-rows: minmax(150px, 220px) minmax(0, 1fr);
-  }
 }
 
 @media (max-width: 920px) {

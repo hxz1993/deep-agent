@@ -22,6 +22,7 @@ from deep_agent.core.context import AppContextDep
 from deep_agent.db.models import SkillPackage
 from deep_agent.db.reference_integrity import ReferenceConflict
 from deep_agent.schemas.skill import (
+    SkillAgentReference,
     SkillDetail,
     SkillInstallResult,
     SkillPackageRecord,
@@ -228,6 +229,11 @@ async def list_skills(ctx: AppContextDep) -> list[SkillSummary]:
         for row in await ctx.stores.skill_package.list_all()
     )
     return [_summary(item) for item in sorted(details, key=lambda value: (value.source != "builtin", value.label, value.code))]
+
+
+@router.get("/skills/references/agents", response_model=list[SkillAgentReference])
+async def list_skill_agent_references(ctx: AppContextDep) -> list[SkillAgentReference]:
+    return [SkillAgentReference.model_validate(row) for row in await ctx.stores.agent.list_skill_references()]
 
 
 @router.get("/skills/export")

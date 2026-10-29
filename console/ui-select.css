@@ -34,3 +34,9 @@ select.da-select-native { position: absolute !important; width: 1px !important; 
 .da-select-option.has-badge { flex-wrap: nowrap; gap: 6px; font-size: 11px; }
 .da-select-option.has-badge > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .da-select-option.has-badge .da-select-badge { flex: 0 1 auto; font-size: 10px; }
+
+/* Optional option metadata; undecorated selects retain the existing layout. */
+.da-select-option.has-icon { gap: 8px; }
+.da-select-option.has-icon > svg,
+.da-select-trigger > .da-select-value-icon { width: var(--ui-icon); height: var(--ui-icon); flex: 0 0 var(--ui-icon); color: inherit; }
+.da-select-separator { height: 1px; margin: 5px 4px; background: var(--border-soft, var(--border)); }

@@ -2,7 +2,7 @@ import { initSecretInputs } from "./ui-secret-input.js?v=20260929-component-webh
 import "./assets/deepagent-pet/sprite-pet.js?v=20261023-console-load1";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
-import { initConsoleSelects } from "./ui-select.js?v=20260929-component-webhook";
+import { initConsoleSelects } from "./ui-select.js?v=20261029-release01411";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20261023-console-load1";
 import { createPageLoader } from "./page-loader.js?v=20261023-console-load1";
 import "./time.js?v=20260913-49";
@@ -24,7 +24,7 @@ let workspaceModule = null;
 let diagnosticsModule = null;
 const loadPage = createPageLoader({
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261029-mcp-optional1");
+    const module = await import("./configuration.js?v=20261029-release01411");
     await module.initConfiguration();
     configurationModule = module;
     return module;
@@ -119,7 +119,10 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);
   });
-  if (next !== "configuration") window.llmProvidersAdmin?.cancelModelTests();
+  if (next !== "configuration") {
+    window.llmProvidersAdmin?.cancelModelTests();
+    window.skillsAdmin?.deactivate();
+  }
   document.querySelectorAll("[data-page]").forEach((button) => {
     if (!button.dataset.diagnosticsNav) button.classList.toggle("active", button.dataset.page === next);
   });

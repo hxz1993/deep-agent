@@ -176,13 +176,12 @@ test("配置中心提供独立 Skill 页面而不是工具包分类", () => {
   assert.match(shell, /data-tab="skills"/);
   assert.match(template, /id="panel-skills"/);
   assert.match(template, /Skill 提供任务方法与资源，不会自动授予 MCP/);
-  assert.match(source, /apiFetch\("\/api\/v1\/skills"\)/);
+  assert.match(source, /apiFetch\("\/api\/v1\/skills", \{ signal:/);
 });
 
 test("Skill 页面区分内置和上传包的可操作边界", () => {
-  const listSource = source.slice(source.indexOf("renderList()"), source.indexOf("renderEmptyDetail"));
-  assert.match(source, /\["内置", state\.skills\.filter/);
-  assert.match(source, /\["自定义", state\.skills\.filter/);
+  const listSource = source.slice(source.indexOf("  renderList("), source.indexOf("  orderedReferences("));
+  assert.match(listSource, /skill\.source === "builtin" \? '<span class="skill-source-label">内置<\/span>' : ""/);
   assert.doesNotMatch(listSource, /badge source-/);
   assert.doesNotMatch(source, /替换 ZIP/);
   assert.match(source, /data-skill-action="replace"><i data-lucide="upload"><\/i><span>上传<\/span>/);
@@ -197,9 +196,8 @@ test("Skill 页面区分内置和上传包的可操作边界", () => {
   assert.match(source, /运行文件已就绪/);
   assert.match(source, /运行文件同步失败/);
   assert.doesNotMatch(source, /script_execution_status/);
-  assert.ok(source.indexOf('["自定义", state.skills.filter') < source.indexOf('["内置", state.skills.filter'));
-  assert.match(source, /暂无自定义 Skill，请先上传安装/);
-  assert.match(source, /state\.skills\.find\(\(item\) => item\.source !== "builtin"\)/);
+  assert.match(source, /暂无 Skill，可上传 ZIP 安装/);
+  assert.doesNotMatch(source, /state\.skills\.find\(\(item\) => item\.source !== "builtin"\)/);
 });
 
 test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
@@ -244,9 +242,9 @@ test("Skill Markdown frontmatter 展示在正文预览顶部且不混入正文�
 });
 
 test("Skill 页面固定在配置视口内并把溢出交给目录和预览区", () => {
-  assert.match(consoleStyles, /#configurationHost #panel-skills\.active\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/);
-  assert.match(consoleStyles, /#configurationHost #panel-skills \.skill-detail-pane\s*\{[^}]*display: flex;[^}]*overflow: hidden;/);
-  assert.match(consoleStyles, /#configurationHost #panel-skills \.skill-detail-main\s*\{[^}]*overflow: auto;/);
+  assert.match(styles, /#configurationHost #panel-skills\.active\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/);
+  assert.match(styles, /\.skill-detail-pane\s*\{[^}]*display: flex;[^}]*overflow: hidden;/);
+  assert.match(styles, /\.skill-detail-main\s*\{[^}]*overflow: auto;/);
   assert.match(styles, /\.skill-preview-markdown\s*\{[^}]*overflow: auto;/);
 });
 
@@ -255,8 +253,8 @@ test("同内容包在平台原文件丢失后会提示恢复而不是误报无�
   assert.match(source, /Skill 原包与运行文件已恢复/);
 });
 
-test("Skill 使用左右分离的轻卡片列表与表单详情", () => {
-  assert.match(source, /skill-list-card-head/);
+test("Skill 使用紧凑表格与第二页文件详情", () => {
+  assert.match(source, /data-table skill-table/);
   assert.doesNotMatch(source, /skill-detail-eyebrow/);
   assert.match(source, /skill-source-label/);
   assert.match(source, /skill-runtime-marker/);
@@ -278,14 +276,15 @@ test("Skill 使用左右分离的轻卡片列表与表单详情", () => {
   assert.doesNotMatch(source, /skill-field-label">说明/);
   assert.ok(source.indexOf('class="skill-resource-directory"') < source.indexOf('<aside class="skill-detail-lane skill-preview-lane">'));
   assert.ok(source.indexOf('class="skill-detail-header"') < source.indexOf('class="skill-detail-layout"'));
-  assert.match(styles, /\.skill-admin-workspace[\s\S]*gap: 14px;[\s\S]*border: 0;/);
-  assert.match(styles, /\.skill-list-pane\s*\{[^}]*padding: 0;[^}]*border: 0;[^}]*background: transparent;[^}]*box-shadow: none;/);
-  assert.match(styles, /\.skill-detail-pane[\s\S]*border-radius: 14px/);
-  assert.match(styles, /\.skill-detail-layout[\s\S]*grid-template-columns: minmax\(0, 1fr\) minmax\(360px, \.82fr\)/);
+  assert.match(template, /id="skillListView"/);
+  assert.match(template, /skill-detail-pane hidden/);
+  assert.match(source, /data-skill-back/);
+  assert.match(styles, /\.skill-detail-pane\s*\{[^}]*border: 0;[^}]*border-radius: 0/);
+  assert.match(styles, /\.skill-detail-layout[\s\S]*grid-template-columns: 320px minmax\(0, 1fr\)/);
   assert.match(styles, /\.skill-detail-layout[\s\S]*align-items: stretch;[\s\S]*margin-top: 0;/);
   assert.match(styles, /\.skill-detail-lane[\s\S]*display: flex;[\s\S]*min-height: 100%;/);
   assert.match(styles, /\.skill-preview-lane\s*\{[^}]*padding: 0;[^}]*border: 0;[^}]*box-shadow: none;/);
-  assert.match(styles, /\.skill-detail-header[\s\S]*margin-bottom: 16px;[\s\S]*border-bottom: 1px solid/);
+  assert.match(styles, /\.skill-detail-header[\s\S]*margin-bottom: 20px;[\s\S]*border: 0;/);
   assert.match(styles, /\.skill-facts > div\s*\{[^}]*display: inline-flex;[^}]*border: 0;[^}]*background: transparent;/);
   assert.match(styles, /\.skill-resource-row\s*\{[^}]*border: 0;[^}]*border-radius: 9px;/);
   assert.match(styles, /\.skill-resource-row\.active\s*\{[^}]*background:[^}]*box-shadow: inset 3px 0 0 var\(--accent\)/);
@@ -301,5 +300,5 @@ test("Skill 使用左右分离的轻卡片列表与表单详情", () => {
   assert.doesNotMatch(source, /skill-detail-description/);
   assert.doesNotMatch(styles, /\.skill-manifest/);
   assert.doesNotMatch(styles, /\.skill-list-item\.active \{ box-shadow: inset 3px/);
-  assert.match(styles, /@media \(max-width: 900px\)[\s\S]*\.skill-admin-workspace \{ grid-template-columns: minmax\(0, 1fr\); \}/);
+  assert.match(styles, /@media \(max-width: 1000px\)[\s\S]*\.skill-detail-layout \{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
 });

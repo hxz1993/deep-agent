@@ -123,6 +123,12 @@ export function enhanceSelect(select) {
         heading.append(document.createTextNode(group.label)); menu.append(heading);
       }
       previousGroup = group;
+      if (option.dataset.separatorBefore === "true" && menu.children.length) {
+        const separator = document.createElement("div");
+        separator.className = "da-select-separator";
+        separator.setAttribute("role", "separator");
+        menu.append(separator);
+      }
       const row = document.createElement("div");
       row.className = "da-select-option";
       row.classList.toggle("is-grouped", Boolean(group));
@@ -139,12 +145,21 @@ export function enhanceSelect(select) {
         row.append(name, badge);
         row.classList.add("has-badge");
       }
+      if (/^[a-z][a-z0-9-]*$/.test(option.dataset.icon || "")) {
+        const icon = document.createElement("i");
+        icon.setAttribute("data-lucide", option.dataset.icon);
+        icon.setAttribute("aria-hidden", "true");
+        row.prepend(icon);
+        row.classList.add("has-icon");
+      }
       row.title = option.title || option.label;
       menu.append(row);
     });
     if (!menu.children.length) { const empty = document.createElement("div"); empty.className = "da-select-empty"; empty.textContent = "暂无选项"; menu.append(empty); }
+    view.lucide?.createIcons({ root: menu });
     markActive();
   }
+  let selectedIconName = "";
   function refresh() {
     if (disposed) return;
     const current = options();
@@ -152,6 +167,19 @@ export function enhanceSelect(select) {
     current.forEach(option => { if (!optionRestores.has(option)) optionRestores.set(option, observeSelectProperty(option, "selected", refresh)); });
     text.textContent = current.filter(option => option.selected).map(option => option.label).join("、") || (select.dataset.placeholder ?? "—");
     const selectedOption = current.find(option => option.selected);
+    const iconName = /^[a-z][a-z0-9-]*$/.test(selectedOption?.dataset.icon || "") ? selectedOption.dataset.icon : "";
+    if (selectedIconName !== iconName) {
+      trigger.querySelector(".da-select-value-icon")?.remove();
+      selectedIconName = iconName;
+      if (iconName) {
+        const icon = document.createElement("i");
+        icon.className = "da-select-value-icon";
+        icon.setAttribute("data-lucide", iconName);
+        icon.setAttribute("aria-hidden", "true");
+        trigger.insertBefore(icon, text);
+        view.lucide?.createIcons({ root: trigger });
+      }
+    }
     text.classList.toggle("da-select-placeholder", select.selectedIndex < 0
       || Boolean(selectedOption && selectedOption.value === "" && selectedOption.hidden));
     trigger.disabled = select.disabled || select.matches(":disabled");

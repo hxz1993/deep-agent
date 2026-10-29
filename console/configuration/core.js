@@ -341,7 +341,6 @@ function initTabs() {
       if (name === "llm-providers" && window.llmProvidersAdmin) return window.llmProvidersAdmin.refresh();
       if (name === "tools") return window.toolsAdmin?.refresh();
       if (name === "skills" && window.skillsAdmin) {
-        window.skillsAdmin.selectedCode = null;
         return window.skillsAdmin.refresh();
       }
       if (name === "mcp" && window.mcpAdmin) return window.mcpAdmin.refresh();

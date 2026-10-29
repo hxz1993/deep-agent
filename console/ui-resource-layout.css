@@ -1,18 +1,18 @@
 /* Shared master/detail layout for configuration resources. */
-#configurationHost :is(.provider-admin-workspace, .skill-admin-workspace, .tool-catalog-workspace, .ui-tools-workspace) {
+#configurationHost :is(.provider-admin-workspace, .tool-catalog-workspace, .ui-tools-workspace) {
   grid-template-columns: minmax(216px, 296px) minmax(0, 1fr);
   align-items: stretch;
   gap: 0;
   min-height: calc(100dvh - 118px);
 }
-#configurationHost :is(.provider-list-pane, .skill-list-pane, .ui-tool-package-pane) {
+#configurationHost :is(.provider-list-pane, .ui-tool-package-pane) {
   box-sizing: border-box;
   min-width: 0;
   padding: 1px 19px 1px 1px;
   align-content: start;
   gap: 8px;
 }
-#configurationHost :is(.provider-list-item, .skill-list-item, .ui-tool-tree-node) {
+#configurationHost :is(.provider-list-item, .ui-tool-tree-node) {
   box-sizing: border-box;
   width: 100%;
   height: 54px;
@@ -22,16 +22,15 @@
   box-shadow: none;
   transform: none;
 }
-#configurationHost :is(.provider-list-item.active, .skill-list-item.active, .ui-tool-tree-node.is-selected) {
+#configurationHost :is(.provider-list-item.active, .ui-tool-tree-node.is-selected) {
   border-color: var(--accent);
   background: var(--accent-soft);
   box-shadow: none;
 }
-#configurationHost :is(.skill-list-pane, .ui-tool-package-tree, .tool-catalog-list) { gap: 0; }
-#configurationHost :is(.skill-list-group, .ui-tool-tree-group, .tool-catalog-group) { display: grid; gap: 8px; }
-#configurationHost :is(.skill-list-group-items) { gap: 8px; }
-#configurationHost :is(.skill-list-group, .ui-tool-tree-group, .tool-catalog-group) + :is(.skill-list-group, .ui-tool-tree-group, .tool-catalog-group) { margin-top: 18px; }
-#configurationHost :is(.skill-list-group-title, .ui-tool-tree-group-title, .tool-catalog-group-heading) {
+#configurationHost :is(.ui-tool-package-tree, .tool-catalog-list) { gap: 0; }
+#configurationHost :is(.ui-tool-tree-group, .tool-catalog-group) { display: grid; gap: 8px; }
+#configurationHost :is(.ui-tool-tree-group, .tool-catalog-group) + :is(.ui-tool-tree-group, .tool-catalog-group) { margin-top: 18px; }
+#configurationHost :is(.ui-tool-tree-group-title, .tool-catalog-group-heading) {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -43,7 +42,7 @@
   font-weight: 500;
   letter-spacing: 0;
 }
-#configurationHost :is(.skill-list-group-title, .ui-tool-tree-group-title, .tool-catalog-group-heading) :is(small, span:last-child) {
+#configurationHost :is(.ui-tool-tree-group-title, .tool-catalog-group-heading) :is(small, span:last-child) {
   min-width: 0;
   height: auto;
   background: transparent;
@@ -51,7 +50,7 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-#configurationHost :is(.provider-detail-pane, .skill-detail-pane, .tool-catalog-detail, .ui-tool-content-pane) {
+#configurationHost :is(.provider-detail-pane, .tool-catalog-detail, .ui-tool-content-pane) {
   position: relative;
   box-sizing: border-box;
   border: 0;
@@ -60,7 +59,7 @@
   background: transparent;
   box-shadow: none;
 }
-#configurationHost :is(.provider-detail-pane, .skill-detail-pane, .tool-catalog-detail, .ui-tool-content-pane)::before {
+#configurationHost :is(.provider-detail-pane, .tool-catalog-detail, .ui-tool-content-pane)::before {
   content: "";
   position: absolute;
   left: 0;
@@ -73,16 +72,16 @@
 #configurationHost .ui-tool-selected-header { padding: 0 0 var(--ui-group-content-gap); min-height: 0; }
 .tool-catalog-runtime-table .badge { white-space: normal; }
 @media (max-width: 900px) {
-  #configurationHost :is(.provider-admin-workspace, .skill-admin-workspace, .tool-catalog-workspace, .ui-tools-workspace) { grid-template-columns: minmax(0, 1fr); min-height: 0; gap: 16px; }
-  #configurationHost :is(.provider-list-pane, .skill-list-pane, .ui-tool-package-pane) { padding-right: 1px; max-height: 280px; overflow: auto; }
-  #configurationHost :is(.provider-detail-pane, .skill-detail-pane, .tool-catalog-detail, .ui-tool-content-pane) { padding: 16px 0 0; }
-  #configurationHost :is(.provider-detail-pane, .skill-detail-pane, .tool-catalog-detail, .ui-tool-content-pane)::before { top: 0; bottom: auto; left: 8px; right: 8px; width: auto; height: 1px; }
+  #configurationHost :is(.provider-admin-workspace, .tool-catalog-workspace, .ui-tools-workspace) { grid-template-columns: minmax(0, 1fr); min-height: 0; gap: 16px; }
+  #configurationHost :is(.provider-list-pane, .ui-tool-package-pane) { padding-right: 1px; max-height: 280px; overflow: auto; }
+  #configurationHost :is(.provider-detail-pane, .tool-catalog-detail, .ui-tool-content-pane) { padding: 16px 0 0; }
+  #configurationHost :is(.provider-detail-pane, .tool-catalog-detail, .ui-tool-content-pane)::before { top: 0; bottom: auto; left: 8px; right: 8px; width: auto; height: 1px; }
 }
 
 #configurationHost .provider-list-item { grid-template-columns: auto minmax(0, 1fr) auto; }
 
-#configurationHost :is(.provider-list-copy strong, .skill-list-title strong, .ui-tool-tree-node-main strong) { font-size: 13px; }
-#configurationHost :is(.provider-list-copy small, .skill-list-code, .ui-tool-tree-node-main code) { font-size: 12px; }
+#configurationHost :is(.provider-list-copy strong, .ui-tool-tree-node-main strong) { font-size: 13px; }
+#configurationHost :is(.provider-list-copy small, .ui-tool-tree-node-main code) { font-size: 12px; }
 
 @media (min-width: 901px) {
   #configurationHost :is(.tool-catalog-workspace, .ui-tools-workspace) { grid-template-columns: minmax(196px, 241px) minmax(0, 1fr); }

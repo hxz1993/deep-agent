@@ -1,0 +1,235 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
+import vm from 'node:vm';
+const source = await readFile(new URL('../../../console/configuration/skills.js', import.meta.url), 'utf8');
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+const skill = (code, extra = {}) => ({ code, label: code, description: '查询与分析', source: 'upload', runtime_status: 'ready', resources: [], ...extra });
+function harness(request = async () => []) {
+  const nodes = new Map(), calls = [];
+  const node = key => {
+    if (!nodes.has(key)) nodes.set(key, { innerHTML: '', scrollTop: 0, value: '', handlers: {},
+      classList: { values: new Set(), toggle(name, force) { if (force) this.values.add(name); else this.values.delete(name); } },
+      addEventListener(name, fn) { this.handlers[name] = fn; }, appendChild() {}, focus() {}, setSelectionRange() {},
+      querySelector(selector) { return node(key + ' ' + selector); }, querySelectorAll() { return []; },
+      matches() { return false; }, hidePopover() {},
+    });
+    return nodes.get(key);
+  };
+  const state = { skills: [] };
+  const context = { state, AbortController, setTimeout, clearTimeout,
+    window: { defaultApiBaseUrl: () => 'local', DeepAgentConsoleAPI: { loadContext: () => ({app: 'one'}) }, DeepAgentConsoleContext: { identity: { user: 'alice' } } },
+    document: { activeElement: null, addEventListener() {}, getElementById: node,
+      querySelector: key => node(key), querySelectorAll: () => [], createElement: () => node('created') },
+    escapeHtml: value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'),
+    formatDate: value => value || '—', showDbBanner() {}, showToast() {},
+    apiFetch: (path, options) => { calls.push({ path, ...options }); return request(path, options); },
+  };
+  vm.runInNewContext(source, context);
+  context.window.skillsAdmin.listLoaded = true;
+  return { admin: context.window.skillsAdmin, state, node, calls, context };
+}
+
+test('引用按ID去重并与现有Skill取交集，同名Agent不混淆，筛选与搜索叠加', () => {
+  const h = harness();
+  h.state.skills = [skill('one'), skill('two'), skill('unlinked')];
+  h.admin.agentReferences = [{ id: 'a', name: '同名助手', skills: ['one', 'one', 'missing'] },
+    { id: 'b', name: '同名助手', skills: ['one', 'two'] }, { id: 'c', name: '失效引用', skills: ['missing'] }, { id: 'd', name: '空白', skills: [] }];
+  h.admin.referencesState = 'ready'; h.admin.buildReferenceIndex();
+  assert.deepEqual(Array.from(h.admin.filterableAgents(), a => a.id), ['a', 'b']);
+  assert.equal(h.admin.referenceIndex.get('one').length, 2);
+  h.admin.agentFilter = 'b'; assert.equal(h.admin.orderedReferences('one')[0].id, 'b');
+  assert.deepEqual(Array.from(h.admin.visibleSkills(), s => s.code), ['one', 'two']);
+  h.admin.query = 'TWO'; assert.deepEqual(Array.from(h.admin.visibleSkills(), s => s.code), ['two']);
+  h.admin.agentFilter = 'unlinked'; h.admin.query = ''; assert.deepEqual(Array.from(h.admin.visibleSkills(), s => s.code), ['unlinked']);
+});
+
+test('表格单列引用、+N浮层入口与运行状态列；名称不含状态点，保留三个资源数量并转义', () => {
+  const h = harness(); h.state.skills = [skill('<one>', { label: '<测试>', runtime_status: undefined, reference_count: 2, asset_count: 1, script_count: 3 })];
+  h.admin.agentReferences = [{id:'a',name:'A',skills:['<one>']},{id:'b',name:'<B>',skills:['<one>']}];
+  h.admin.referencesState = 'ready'; h.admin.buildReferenceIndex(); h.admin.renderList();
+  const html = h.node('skillListPane').innerHTML;
+  assert.ok(html.includes('筛选 Agent') && html.includes('未被引用'));
+  assert.ok(!html.includes('全部来源') && !html.includes('skill-runtime-dot'));
+  assert.ok(html.includes('&lt;测试>') && !html.includes('<测试>'));
+  assert.ok(html.includes('skill-status-tag runtime-missing') && html.includes('未加载'));
+  assert.ok(html.includes('>+1</button>') && !html.includes('>&lt;B></span>'));
+  for (const title of ['References', 'Assets', '脚本']) assert.ok(html.includes(`title="${title}"`));
+});
+
+test('引用失败不伪装未引用，Agent筛选禁用，但关键词搜索仍然可用', async () => {
+  const h = harness(async () => { throw new Error('references unavailable'); });
+  h.state.skills = [skill('one')]; h.admin.listLoaded = true; h.admin.agentFilter = 'unlinked';
+  await h.admin.refreshReferences();
+  const html = h.node('skillListPane').innerHTML;
+  assert.equal(h.admin.referencesState, 'error');
+  assert.ok(html.includes('获取失败') && html.includes('重试引用查询') && html.includes('disabled'));
+  assert.ok(!html.includes('class="muted">未被引用'));
+  assert.equal(h.admin.visibleSkills().length, 1);
+  h.admin.query = 'absent'; assert.equal(h.admin.visibleSkills().length, 0);
+});
+
+test('进入列表并行读取两个轻量接口，不自动读取任意详情、资源或完整Agent', async () => {
+  const a = deferred(), b = deferred();
+  const h = harness(path => path.endsWith('references/agents') ? a.promise : b.promise);
+  const pending = h.admin.refresh();
+  assert.equal(h.calls.length, 2);
+  assert.deepEqual(h.calls.map(x => x.path).sort(), ['/api/v1/skills', '/api/v1/skills/references/agents']);
+  b.resolve([skill('one')]); a.resolve([{id:'a',name:'A',skills:['one']}]); await pending;
+  assert.equal(h.admin.view, 'list'); assert.equal(h.admin.selectedCode, null);
+  assert.equal(h.calls.length, 2); assert.equal(h.admin.readRequests.size, 0);
+});
+
+test('重叠刷新、上下文变化与引用重试均忽略迟到数据，取消旧读请求', async () => {
+  const first = deferred(), next = deferred(); let index = 0;
+  const h = harness(() => (++index === 1 ? first.promise : next.promise));
+  const p = h.admin.refreshReferences(), q = h.admin.refreshReferences();
+  assert.equal(h.calls[0].signal.aborted, true);
+  next.resolve([{id:'new',name:'New',skills:[]}]); await q;
+  first.resolve([{id:'old',name:'Old',skills:[]}]); await p;
+  assert.equal(h.admin.agentReferences[0].id, 'new');
+  const late = deferred(); h.context.apiFetch = () => late.promise;
+  const r = h.admin.refreshReferences();
+  h.context.window.DeepAgentConsoleAPI.loadContext = () => ({app:'two'});
+  late.resolve([{id:'wrong-context',name:'Wrong',skills:[]}]); await r;
+  assert.equal(h.admin.agentReferences[0].id, 'new'); assert.equal(h.admin.readRequests.size, 0);
+});
+
+test('切换详情和返回后旧详情不能覆盖当前页面；详情与文件请求不跨选择污染', async () => {
+  const a = deferred(), b = deferred();
+  const h = harness(path => path.endsWith('/a') ? a.promise : b.promise);
+  // Keep the real select/cancellation lifecycle and observe the committed detail.
+  const rendered = []; h.admin.renderDetail = value => rendered.push(value.code);
+  const p = h.admin.select('a'), q = h.admin.select('b');
+  assert.equal(h.calls[0].signal.aborted, true);
+  b.resolve(skill('b')); await q; a.resolve(skill('a')); await p;
+  assert.deepEqual(rendered, ['b']);
+  const c = deferred(); h.context.apiFetch = () => c.promise;
+  const r = h.admin.select('c'); h.admin.backToList(); c.resolve(skill('c')); await r;
+  assert.deepEqual(rendered, ['b']); assert.equal(h.admin.view, 'list');
+});
+
+test('资源预览连续切换及离页取消后迟到内容不覆盖新的文件', async () => {
+  const a = deferred(), b = deferred(); let count=0;
+  const h = harness(() => (++count === 1 ? a.promise : b.promise));
+  h.admin.selectedCode = 'one'; h.admin.view = 'detail';
+  const p = h.admin.readResource('one', 'a.txt'), q = h.admin.readResource('one', 'b.txt');
+  b.resolve({content:'current-content',format:'text'}); await q;
+  a.resolve({content:'stale-content',format:'text'}); await p;
+  assert.ok(h.node('skillResourcePreview').innerHTML.includes('current-content'));
+  assert.ok(!h.node('skillResourcePreview').innerHTML.includes('stale-content'));
+  const c=deferred(); h.context.apiFetch=()=>c.promise;
+  const r=h.admin.readResource('one','c.txt'); h.admin.deactivate(); c.resolve({content:'after-leaving'}); await r;
+  assert.ok(!h.node('skillResourcePreview').innerHTML.includes('after-leaving'));
+  assert.equal(h.admin.readRequests.size,0);
+});
+
+test('引用维护刷新后失效Agent回到全部，列表筛选结果不再使用旧关联', async () => {
+  const h=harness(async()=>[{id:'b',name:'Renamed',skills:['one']}]);
+  h.state.skills=[skill('one')];h.admin.agentFilter='a';h.admin.listLoaded=true;
+  await h.admin.refreshReferences();
+  assert.equal(h.admin.agentFilter,'all');
+  assert.equal(h.admin.referenceIndex.get('one')[0].name,'Renamed');
+});
+
+
+test('详情刷新失败后返回保留错误与重试，权限拒绝清空旧列表而不重新展示缓存', async () => {
+  const forbidden = Object.assign(new Error('HTTP 403'), {status:403});
+  const h = harness(async path => { if (path.endsWith('references/agents')) return []; throw forbidden; });
+  h.state.skills = [skill('old-private-skill')]; h.admin.view = 'detail'; h.admin.selectedCode = 'old-private-skill';
+  await h.admin.refresh();
+  assert.equal(h.admin.listLoaded, false);
+  h.admin.backToList();
+  assert.ok(h.node('skillListPane').innerHTML.includes('HTTP 403'));
+  assert.ok(h.node('skillListPane').innerHTML.includes('data-skill-retry'));
+  assert.ok(!h.node('skillListPane').innerHTML.includes('old-private-skill'));
+  assert.equal(h.state.skills.length,0);
+  const unavailable = harness(async () => {throw new Error('HTTP 503');});
+  unavailable.state.skills=[skill('cached')]; await unavailable.admin.refresh(); unavailable.admin.backToList();
+  assert.ok(unavailable.node('skillListPane').innerHTML.includes('HTTP 503'));
+  assert.ok(!unavailable.node('skillListPane').innerHTML.includes('data-skill-row'));
+});
+
+
+test('删除A等待期间用户已打开B，迟到的删除回执不能关闭B详情', async () => {
+  const deleted=deferred(); const h=harness();
+  h.state.skills=[skill('a'),skill('b')]; h.admin.selectedCode='a'; h.admin.view='detail';
+  h.context.confirmAction=async()=>true;
+  h.context.apiFetch=async (path,options={})=>{
+    if(options.method==='DELETE') return deleted.promise;
+    if(path.endsWith('references/agents')) return [];
+    if(path==='/api/v1/skills') return [skill('b')];
+    return skill('b');
+  };
+  const rendered=[];h.admin.renderDetail=value=>rendered.push(value.code);
+  const removing=h.admin.handleAction('delete',skill('a')); await Promise.resolve();
+  h.admin.selectedCode='b';h.admin.view='detail';deleted.resolve({});await removing;
+  assert.equal(h.admin.view,'detail');assert.equal(h.admin.selectedCode,'b');assert.deepEqual(rendered,['b']);
+});
+
+
+test('引用还在读取时用户打开详情，引用完成不额外重复读取当前详情', async () => {
+  const refs=deferred();const h=harness(async path=>path.endsWith('references/agents')?refs.promise:path==='/api/v1/skills'?[skill('one')]:skill('one'));
+  const rendered=[];h.admin.renderDetail=value=>rendered.push(value.code);
+  const refreshing=h.admin.refresh();await Promise.resolve();await Promise.resolve();
+  await h.admin.select('one');refs.resolve([]);await refreshing;
+  assert.equal(h.calls.filter(call=>call.path==='/api/v1/skills/one').length,1);
+  assert.deepEqual(rendered,['one']);
+});
+
+test('进入详情后返回恢复列表滚动、筛选和查询，搜索及Agent筛选回到列表顶部', () => {
+  const h=harness();h.state.skills=[skill('one')];h.admin.referencesState='ready';h.admin.agentReferences=[{id:'a',name:'A',skills:['one']}];h.admin.buildReferenceIndex();
+  h.admin.agentFilter='a';h.admin.query='one';h.node('#skillListPane .skill-table-wrap').scrollTop=345;
+  h.admin.select=code=>{h.admin.selectedCode=code;h.admin.view='detail';};
+  h.admin.openDetail('one');h.admin.backToList();
+  assert.equal(h.admin.agentFilter,'a');assert.equal(h.admin.query,'one');
+  assert.equal(h.node('skillListPane .skill-table-wrap').scrollTop,345);
+  h.admin.filterByAgent('all');assert.equal(h.node('skillListPane .skill-table-wrap').scrollTop,0);
+});
+
+
+test('每个筛选自定义在前内置在后，保持各组原顺序且不修改服务端目录', () => {
+  const h=harness();
+  h.state.skills=[skill('builtin-a',{source:'builtin'}),skill('custom-b'),skill('builtin-c',{source:'builtin'}),skill('custom-d')];
+  h.admin.referencesState='ready';h.admin.agentReferences=[{id:'a',name:'A',skills:['builtin-a','custom-b']}];h.admin.buildReferenceIndex();
+  assert.deepEqual(Array.from(h.admin.visibleSkills(),s=>s.code),['custom-b','custom-d','builtin-a','builtin-c']);
+  assert.deepEqual(h.state.skills.map(s=>s.code),['builtin-a','custom-b','builtin-c','custom-d']);
+  h.admin.agentFilter='a';assert.deepEqual(Array.from(h.admin.visibleSkills(),s=>s.code),['custom-b','builtin-a']);
+  h.admin.agentFilter='unlinked';assert.deepEqual(Array.from(h.admin.visibleSkills(),s=>s.code),['custom-d','builtin-c']);
+  h.admin.agentFilter='all';h.admin.renderList();const html=h.node('skillListPane').innerHTML;
+  assert.ok(html.includes('全部 Skill') && !html.includes('全部 Agent'));
+  assert.ok(html.includes('data-icon="library"') && html.includes('data-icon="unlink"') && html.includes('data-icon="bot"'));
+  assert.equal((html.match(/data-separator-before="true"/g)||[]).length,1);
+  assert.ok(!html.includes('>自定义<'));
+  assert.ok(html.includes('class="skill-unreferenced"'));
+});
+
+
+test('引用读取等待和失败回退全部时，下拉显示与表格口径保持一致', async () => {
+  const pending=deferred();const h=harness(()=>pending.promise);
+  h.state.skills=[skill('linked'),skill('unlinked')];h.admin.agentReferences=[{id:'a',name:'A',skills:['linked']}];
+  h.admin.referencesState='ready';h.admin.agentFilter='a';h.admin.buildReferenceIndex();
+  const reading=h.admin.refreshReferences();
+  assert.equal(h.admin.agentFilter,'a','等待成功时保留原筛选用于恢复');
+  assert.ok(h.node('skillListPane').innerHTML.includes('value="all" data-icon="library" selected'));
+  assert.equal(h.admin.visibleSkills().length,2);
+  pending.reject(new Error('unavailable'));await reading;
+  assert.equal(h.admin.agentFilter,'all');
+  assert.ok(h.node('skillListPane').innerHTML.includes('value="all" data-icon="library" selected'));
+  assert.equal(h.admin.visibleSkills().length,2);
+});
+
+test('中文输入法组词期间不重建搜索框，确认文字后再筛选', () => {
+  const h=harness();h.state.skills=[skill('one',{label:'电子表格'})];h.admin.renderList();
+  const input=h.node('skillListPane #skillSearch');
+  const render=h.admin.renderList.bind(h.admin);let renders=0;
+  h.admin.renderList=options=>{renders+=1;render(options);};
+  input.handlers.compositionstart?.();
+  input.value='dian';input.handlers.input({target:input,isComposing:true});
+  assert.equal(renders,0,'组词过程不能替换正在输入的DOM');
+  input.value='电子';input.handlers.compositionend({target:input});
+  assert.equal(renders,1);assert.equal(h.admin.query,'电子');
+  assert.equal(h.admin.visibleSkills().length,1);
+  const next=h.node('skillListPane #skillSearch');next.value='absent';next.handlers.input({target:next,isComposing:false});
+  assert.equal(h.admin.visibleSkills().length,0);
+});

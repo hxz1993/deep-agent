@@ -26,15 +26,17 @@ class SandboxTypesTests(unittest.TestCase):
         value = "汉" + "x" * (cap - overhead - len("汉".encode()))
         for mode in ("expression", "script"):
             with self.subTest(mode=mode):
+                script_fields = ({"script_entry": "scripts/check.py", "skill_files": (
+                    SandboxInputFile.from_bytes("scripts/check.py", b"pass"),)} if mode == "script" else {})
                 request = ExecuteRequest(
-                    request_id=f"large-{mode}", mode=mode, code="pass",
-                    inputs={"payload": value},
+                    request_id=f"large-{mode}", mode=mode, code="" if mode == "script" else "pass",
+                    inputs={"payload": value}, **script_fields,
                 )
                 self.assertEqual(request.inputs["payload"], value)
                 with self.assertRaisesRegex(ValueError, "inputs JSON exceeds"):
                     ExecuteRequest(
-                        request_id=f"oversized-{mode}", mode=mode, code="pass",
-                        inputs={"payload": value + "x"},
+                        request_id=f"oversized-{mode}", mode=mode, code="" if mode == "script" else "pass",
+                        inputs={"payload": value + "x"}, **script_fields,
                     )
 
     def test_execute_request_rejects_oversized_code(self) -> None:
@@ -69,7 +71,9 @@ class SandboxTypesTests(unittest.TestCase):
         request = ExecuteRequest(
             request_id="script-1",
             mode="script",
-            code="pass",
+            code="",
+            script_entry="scripts/check.py",
+            skill_files=(SandboxInputFile.from_bytes("scripts/check.py", b"pass"),),
             arguments=("--input", "inputs.json"),
             files=(SandboxInputFile.from_bytes("assets/input.txt", b"ok"),),
         )
@@ -98,7 +102,9 @@ class SandboxTypesTests(unittest.TestCase):
             ExecuteRequest(
                 request_id="script-files",
                 mode="script",
-                code="pass",
+                code="",
+                script_entry="scripts/check.py",
+                skill_files=(SandboxInputFile.from_bytes("scripts/check.py", b"pass"),),
                 files=(
                     SandboxInputFile.from_bytes(
                         "assets/input.bin",

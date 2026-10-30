@@ -57,7 +57,7 @@ class HybridCodeMode(CodeMode[AgentDeps]):
         from deep_agent.files.export_schema import ExportFileResult
 
         refs = []
-        if tool_def.name == "execute_python" and isinstance(result, ToolReturn):
+        if tool_def.name in {"execute_python", "execute_skill_script"} and isinstance(result, ToolReturn):
             for ref in _generated_file_refs(result.metadata or {}):
                 known = ctx.deps.session_file_artifacts.get(ref["file_id"])
                 if known is not None:

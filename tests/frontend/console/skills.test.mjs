@@ -204,14 +204,13 @@ test("Skill 上传使用 multipart 且资源按安全 API 读取", () => {
   assert.match(source, /const form = new FormData\(\)/);
   assert.match(source, /form\.append\("file", file\)/);
   assert.match(source, /\/resources\/\$\{path\.split/);
-  assert.match(source, /Word 可读/);
-  assert.match(source, /Excel 可读/);
+  assert.match(source, /\["docx", "xlsx"\]\.includes\(resource\.read_format\)/);
   assert.doesNotMatch(source, /已保存，当前不可读取或执行/);
 });
 
-test("Skill 预览续读提示包含行号和行内字符位置", () => {
-  assert.match(source, /offset=\$\{escapeHtml\(page\.next_offset\)\}/);
-  assert.match(source, /char_offset=\$\{escapeHtml\(page\.next_char_offset \?\? 0\)\}/);
+test("Skill 预览续读按钮传递行号和行内字符位置", () => {
+  assert.match(source, /data-preview-next/);
+  assert.match(source, /offset: page\.next_offset, char_offset: page\.next_char_offset \?\? 0/);
 });
 
 test("Skill Markdown 资源复用对话渲染器，其他文本保持原文预览", () => {
@@ -264,9 +263,10 @@ test("Skill 使用紧凑表格与第二页文件详情", () => {
   assert.match(source, /skill-resource-preview/);
   assert.doesNotMatch(source, /skill-manifest|<h4>Manifest<\/h4>/);
   assert.match(source, /data-read-resource="SKILL\.md"/);
-  assert.match(source, /Skill 定义 · 完整正文/);
+  assert.match(source, /<code title="SKILL\.md">SKILL\.md<\/code>/);
   assert.doesNotMatch(source, /控制台索引摘要|索引摘要/);
-  assert.match(source, /apiFetch\(`\/api\/v1\/skills\/\$\{encodeURIComponent\(code\)\}\/resources/);
+  assert.match(source, /const url = `\/api\/v1\/skills\/\$\{encodeURIComponent\(code\)\}\/resources/);
+  assert.match(source, /await apiFetch\(url/);
   assert.match(source, /selectedResourcePath: null/);
   assert.match(source, /selectedResource\?\.path \|\| "SKILL\.md"/);
   assert.match(source, /data-resource-path=/);

@@ -289,10 +289,9 @@ def apply_soft_guardrails(
     *,
     work_dir: str | None,
 ) -> SoftGuardrailResult:
-    """Apply filesystem guardrails without blocking public networking.
+    """Apply filesystem guardrails without imposing a network destination policy.
 
-    Network policy is enforced at the worker socket layer so ordinary public
-    HTTP clients can be used while local/private destinations remain blocked.
+    Network access follows the deployment's routing and firewall policy.
     This function remains best-effort and never raises.
     """
     if sys.platform != "linux":

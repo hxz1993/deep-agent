@@ -594,6 +594,7 @@ channel_message_operations 及其中回执，保留已发布迁移；不改变�
   二进制只展示元数据，不经文件工具读取。历史安装包不需要为XLSX重新生成索引。
 - `scripts/`、`tools/` 可以随包保存并列出路径，但不能通过资源工具读取。Agent选择该Skill并关联
   `builtin:sandbox`时，`execute_skill_script`与 `execute_python`共用当前Python沙箱Backend。
+- 管理员Console预览与上述模型读取分开：资源接口显式使用`console_preview=True`允许脚本文本及Office预览；图片通过同一管理员路由的`raw=true`读取。管理投影不把PDF/PPTX误标成文本，图片不作为文本读；不改变Agent默认脚本拒绝、授权范围或执行规则。图片Blob URL在切资源、切页与卸载时回收。
 - 单个上传 Skill 文件缺失或同步失败时，本轮跳过该 Skill 并继续运行；不得让它阻塞其他 Skill、
   MCP 或普通回答。诊断进入 `/skills` 的派生状态与 `final.context.skills`，不写数据库状态字段。
 - 完整边界见 [`../../docs/design/12-agent-skills/skill-system-design.md`](../../docs/design/12-agent-skills/skill-system-design.md)。
@@ -699,7 +700,7 @@ single-flight。Spill失败时Event保存完整`inline_fallback`并标记失败�
 临时目录，不跨调用保留状态。脚本工具的额外权限来自Agent选择的Skill。
 v0.14.7实现：两者紧凑UTF-8 JSON inputs共用16MiB上限，进程通信帧为64MiB；
 代码64KiB、正式结果512KiB、日志、文件、超时和内存限制不因此增加。
-Skill工具仅增加PTC调用入口，不增加会话文件输入或发布参数；JSON计算结果可经原inputs传给固定脚本。
+0.15.0为Skill新增可选files，与普通Python共享sandbox/file_bridge.py的授权下载、产物上传及失败补偿；顶层files与generated_files使用既有文件引用事实，PTC只收集可信内置执行产物。
 Python原有files/input_path/publish_path继续使用，不表示已实现共享工作区或任意宿主目录访问。
 
 沙箱中文绘图使用随源码发布的完整 Noto Sans CJK SC 2.004 字体及 OFL 许可证。
@@ -707,11 +708,17 @@ Python原有files/input_path/publish_path继续使用，不表示已实现共享
 普通 Python 调用不加载绘图库，脚本可自行覆盖字体。不能用宿主已有中文字体冒充部署可用；
 回归用真实独立沙箱检查字形、PNG 和中文文件名，部署需保留 `sandbox/fonts/`。
 
-沙箱预装常用网络、网页、图片、图表、PDF和Office库，默认允许公网访问；Worker连接层尽力阻断
-回环、私网、链路本地与云元数据地址，重定向连接也重新校验。Landlock、资源限制、环境变量白名单
+沙箱预装常用网络、网页、图片、图表、PDF和Office库，不再按目标IP是否公网做Worker级拦截；
+企业内网HTTP服务可按部署网络的路由与防火墙策略访问。此变化同时适用于普通Python、Skill及PTC内调用，
+不改变WebFetch等其他工具的SSRF策略。Landlock、资源限制、环境变量白名单
 和无平台凭据边界仍保留；`security_level=none`必须如实说明这不是面向恶意代码的强隔离沙箱。
 它不是MCP，也不等同于Provider托管的 `CodeExecutionTool`。完整边界见
 [`../../docs/design/07-python-sandbox/`](../../docs/design/07-python-sandbox)。
+
+0.15.0的Skill执行副本位于一次调用的`skill/`，保留script_path原入口和标准包上下文，自动携带同Skill已索引Python模块；不再创建根main.py，也不保留旧布局兼容。cwd根inputs.json和outputs/result.json保留，非代码resource_paths显式选择。内部ExecuteRequest的script_entry/skill_files仅用于宿主到Worker，不增加公共会话字段；组装时校对资源指纹，避免版本混合。旧Skill使用根assets路径或main.py定位必须适配；已有历史事实不重写。
+
+Skill 根目录 `.env` 与 `assets/*.env` 按文本 Asset 索引、预览并沿原 `resource_paths` 显式传入脚本。
+配置随原包下载和导出；不自动解析、不注入进程变量、不存入独立配置字段。其他资产与脚本限制保持。
 
 ---
 

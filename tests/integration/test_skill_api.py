@@ -77,6 +77,113 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
         reset_context()
         await self.engine.dispose()
 
+    async def test_console_code_image_and_unsupported_document_previews(self) -> None:
+        buffer = io.BytesIO(skill_zip(wrapper=False, scripts=True, office=True))
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+        with zipfile.ZipFile(buffer, "a") as archive:
+            archive.writestr("scripts/guide.docx", archive.read("references/guide.docx"))
+            archive.writestr("scripts/template.xlsx", archive.read("assets/template.xlsx"))
+            archive.writestr("assets/chart.svg", svg)
+            archive.writestr("assets/manual.pdf", b"%PDF-1.7 mock")
+            archive.writestr("assets/slides.pptx", b"PK mock")
+        async with AsyncClient(transport=self.transport, base_url="http://test",
+                               headers=self.client_headers) as client:
+            installed = await client.post("/api/v1/skills", files={
+                "file": ("preview-skill.zip", buffer.getvalue(), "application/zip"),
+            })
+            self.assertEqual(installed.status_code, 201, installed.text)
+            row = await self.stores.skill_package.get_by_code("example-skill")
+            before = {column.name: getattr(row, column.name) for column in row.__table__.columns}
+            detail = (await client.get("/api/v1/skills/example-skill")).json()
+            resources = {entry["path"]: entry for entry in detail["resources"]}
+            self.assertTrue(resources["scripts/run.py"]["readable"])
+            self.assertEqual(resources["scripts/run.py"]["read_format"], "text")
+            for path, kind in (("scripts/guide.docx", "docx"), ("scripts/template.xlsx", "xlsx")):
+                self.assertEqual(resources[path]["read_format"], kind)
+                office = await client.get(f"/api/v1/skills/example-skill/resources/{path}")
+                self.assertEqual(office.status_code, 200, office.text)
+                self.assertEqual(office.json()["format"], kind)
+            for path in ("assets/manual.pdf", "assets/slides.pptx"):
+                self.assertFalse(resources[path]["readable"])
+                self.assertIsNone(resources[path]["read_format"])
+                response = await client.get(f"/api/v1/skills/example-skill/resources/{path}")
+                self.assertEqual(response.status_code, 422, response.text)
+            code = await client.get("/api/v1/skills/example-skill/resources/scripts/run.py")
+            self.assertEqual(code.status_code, 200, code.text)
+            self.assertEqual(code.json()["content"], "raise SystemExit('never execute')")
+            self.assertEqual(code.headers["cache-control"], "no-store")
+            for path, expected, mime in (
+                ("assets/image.png", b"\x89PNG\r\n\x1a\n", "image/png"),
+                ("assets/chart.svg", svg, "image/svg+xml"),
+            ):
+                image = await client.get(f"/api/v1/skills/example-skill/resources/{path}",
+                                         params={"raw": "true"})
+                self.assertEqual(image.status_code, 200, image.text)
+                self.assertEqual(image.content, expected)
+                self.assertEqual(image.headers["content-type"], mime)
+                self.assertEqual(image.headers["cache-control"], "no-store")
+                self.assertEqual(image.headers["x-content-type-options"], "nosniff")
+                self.assertIn("sandbox", image.headers["content-security-policy"])
+                self.assertIn("default-src 'none'", image.headers["content-security-policy"])
+            for path in ("scripts/run.py", "references/guide.md", "assets/manual.pdf"):
+                raw = await client.get(f"/api/v1/skills/example-skill/resources/{path}",
+                                       params={"raw": "true"})
+                self.assertEqual(raw.status_code, 422, raw.text)
+            paged_image = await client.get("/api/v1/skills/example-skill/resources/assets/image.png",
+                                           params={"raw": "true", "offset": 1})
+            self.assertEqual(paged_image.status_code, 422, paged_image.text)
+            missing = await client.get("/api/v1/skills/example-skill/resources/assets/missing.png",
+                                       params={"raw": "true"})
+            self.assertEqual(missing.status_code, 404, missing.text)
+            escaped = await client.get("/api/v1/skills/example-skill/resources/assets/%2E%2E/%2E%2E/private.png",
+                                       params={"raw": "true"})
+            self.assertEqual(escaped.status_code, 404, escaped.text)
+            row = await self.stores.skill_package.get_by_code("example-skill")
+            after = {column.name: getattr(row, column.name) for column in row.__table__.columns}
+            self.assertEqual(before, after)
+
+    async def test_console_previews_keep_the_admin_gate(self) -> None:
+        from fastapi import HTTPException
+        from deep_agent.api.v1.admin import require_console_admin
+
+        async def denied():
+            raise HTTPException(status_code=403, detail="not admin")
+
+        self.app.dependency_overrides[require_console_admin] = denied
+        async with AsyncClient(transport=self.transport, base_url="http://test",
+                               headers=self.client_headers) as client:
+            for path, params in (("scripts/run.py", {}), ("assets/image.png", {"raw": "true"})):
+                response = await client.get(f"/api/v1/skills/example-skill/resources/{path}", params=params)
+                self.assertEqual(response.status_code, 403, response.text)
+
+    async def test_env_install_preview_replace_and_original_package_download(self) -> None:
+        async with AsyncClient(transport=self.transport, base_url="http://test",
+                               headers=self.client_headers) as client:
+            for value, method, path in (
+                ("first", "POST", "/api/v1/skills"),
+                ("updated", "PUT", "/api/v1/skills/example-skill/package"),
+            ):
+                buffer = io.BytesIO(skill_zip(wrapper=False, scripts=True))
+                content = f"DEMO_VALUE={value}\nDEMO_URL=https://example.com\n"
+                with zipfile.ZipFile(buffer, "a") as archive:
+                    archive.writestr(".env", content)
+                raw = buffer.getvalue()
+                response = await client.request(method, path, files={
+                    "file": ("env-skill.zip", raw, "application/zip"),
+                })
+                self.assertIn(response.status_code, (200, 201), response.text)
+                detail = await client.get("/api/v1/skills/example-skill")
+                env = next(r for r in detail.json()["resources"] if r["path"] == ".env")
+                self.assertEqual(env["read_format"], "text")
+                self.assertEqual(env["category"], "asset")
+                preview = await client.get("/api/v1/skills/example-skill/resources/.env")
+                self.assertEqual(preview.status_code, 200, preview.text)
+                self.assertEqual(preview.json()["content"], content.rstrip("\n"))
+                package = await client.get("/api/v1/skills/example-skill/package")
+                self.assertEqual(package.content, raw)
+                with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+                    self.assertEqual(archive.read(".env").decode(), content)
+
     async def test_download_named_by_code_and_version_preserves_reinstallable_bytes(self) -> None:
         async with AsyncClient(transport=self.transport, base_url="http://test",
                                headers=self.client_headers) as client:
@@ -194,7 +301,8 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             by_path = {item["path"]: item for item in resources.json()}
             self.assertEqual(by_path["references/guide.docx"]["read_format"], "docx")
             self.assertEqual(by_path["assets/template.xlsx"]["read_format"], "xlsx")
-            self.assertFalse(by_path["scripts/run.py"]["readable"])
+            self.assertTrue(by_path["scripts/run.py"]["readable"])
+            self.assertEqual(by_path["scripts/run.py"]["read_format"], "text")
             definition = await client.get(
                 "/api/v1/skills/example-skill/resources/SKILL.md",
             )

@@ -33,6 +33,7 @@ ExecuteMode = Literal["expression", "script"]
 MAX_CODE_BYTES = 64 * 1024
 MAX_INPUTS_JSON_BYTES = 16 * 1024 * 1024
 MAX_SCRIPT_RESOURCE_FILES = 16
+MAX_SKILL_BUNDLE_FILES = 256
 # FileStore attachments and generated files share the product's default 20 MiB
 # per-file ceiling. The tool layer additionally applies the current runtime
 # configuration before a request reaches the backend.
@@ -98,7 +99,7 @@ class SandboxInputFile(BaseModel):
             or path.is_absolute()
             or not path.parts
             or ".." in path.parts
-            or path.parts[0]
+            or path.parts[0].casefold()
             in {"outputs", "inputs.json", "main.py", ".deepagent-files.json"}
         ):
             raise ValueError("sandbox input file path is unsafe")
@@ -141,6 +142,23 @@ class ExecuteRequest(BaseModel):
     mode: ExecuteMode = "expression"
     arguments: tuple[str, ...] = ()
     files: tuple[SandboxInputFile, ...] = ()
+    # Internal host/worker contract, never a model-supplied directory or file ID.
+    # Paths in skill_files are relative to the selected Skill root.
+    script_entry: str | None = None
+    skill_files: tuple[SandboxInputFile, ...] = ()
+
+    @field_validator("script_entry")
+    @classmethod
+    def validate_script_entry(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.replace("\\", "/").strip()
+        path = PurePosixPath(normalized)
+        if (not normalized or "\x00" in normalized or path.is_absolute()
+                or ".." in path.parts or not path.parts or ":" in path.parts[0]
+                or path.suffix.lower() != ".py"):
+            raise ValueError("Skill script entry must be a safe relative Python path")
+        return path.as_posix()
 
     @field_validator("code")
     @classmethod
@@ -170,6 +188,34 @@ class ExecuteRequest(BaseModel):
     def validate_mode_files(self) -> ExecuteRequest:
         if self.mode == "expression" and self.arguments:
             raise ValueError("expression mode does not accept arguments")
+        if self.mode == "expression" and (self.script_entry is not None or self.skill_files):
+            raise ValueError("expression mode does not accept a Skill bundle")
+        if self.mode == "script":
+            if self.script_entry is None or self.code:
+                raise ValueError("script mode requires an original entry and no inline code")
+            if any(PurePosixPath(item.path).parts[0].casefold() in {
+                "skill", "outputs", "inputs.json", "main.py", ".deepagent-files.json",
+            } for item in self.files):
+                raise ValueError("input files cannot overwrite the Skill directory")
+            if len(self.skill_files) > MAX_SKILL_BUNDLE_FILES:
+                raise ValueError(f"Skill bundle exceeds {MAX_SKILL_BUNDLE_FILES} files")
+            skill_paths = [item.path for item in self.skill_files]
+            if len(skill_paths) != len(set(skill_paths)):
+                raise ValueError("Skill bundle file paths must be unique")
+            total = 0
+            for item in self.skill_files:
+                if item.file_id is not None:
+                    raise ValueError("Skill resources cannot carry platform file identities")
+                data = item.decoded()
+                total += len(data)
+                if PurePosixPath(item.path).suffix.lower() == ".py" and len(data) > MAX_CODE_BYTES:
+                    raise ValueError(f"Skill Python module exceeds {MAX_CODE_BYTES} bytes")
+                if total > MAX_SCRIPT_RESOURCE_BYTES:
+                    raise ValueError(f"Skill bundle exceeds {MAX_SCRIPT_RESOURCE_BYTES} bytes")
+            # The prepared worker frame deliberately omits already materialized
+            # bundle bytes. The backend independently requires a present entry.
+            if self.skill_files and self.script_entry not in skill_paths:
+                raise ValueError("Skill bundle does not contain its script entry")
         if len(self.files) > MAX_SCRIPT_RESOURCE_FILES:
             raise ValueError(f"files exceed {MAX_SCRIPT_RESOURCE_FILES} items")
         paths = [item.path for item in self.files]

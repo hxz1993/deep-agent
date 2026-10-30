@@ -71,6 +71,8 @@ test('+N点击只展开引用浮层并阻止行导航，普通行点击和键盘
   assert.equal(stopped,1);assert.equal(opened.length,0);assert.equal(shown[0][0],'one');assert.equal(shown[0][1],more);
   assert.equal(h.admin.agentFilter,'all');
   row.handlers.click({target:{closest:()=>more}});assert.equal(opened.length,0);
+  row.handlers.click({target:{closest:selector=>selector.includes('.skill-ref-chips')?h.node('reference-label'):null}});
+  assert.equal(opened.length,0,'引用标签及间隙点击无操作，不进入详情或筛选');
   row.handlers.click({target:{closest:()=>null}});assert.deepEqual(opened,['one']);
   row.handlers.keydown({target:row,key:'Enter',preventDefault(){}});assert.deepEqual(opened,['one','one']);
 });
@@ -263,4 +265,108 @@ test('中文输入法组词期间不重建搜索框，确认文字后再筛选',
   assert.equal(h.admin.visibleSkills().length,1);
   const next=h.node('skillListPane #skillSearch');next.value='absent';next.handlers.input({target:next,isComposing:false});
   assert.equal(h.admin.visibleSkills().length,0);
+});
+
+test('所有文件都可选中，代码、图片、Office与占位按实际类型区分', () => {
+  const h=harness();
+  const resources=[
+    {path:'scripts/run.py',category:'script',read_format:'text'},
+    {path:'assets/chart.png',category:'asset'},
+    {path:'references/report.pdf',category:'reference',read_format:'text',readable:true},
+    {path:'assets/slides.pptx',category:'asset',read_format:'text',readable:true},
+    {path:'assets/template.docx',category:'asset',read_format:'docx'},
+    {path:'scripts/template.xlsx',category:'script',read_format:'xlsx'},
+  ];
+  assert.deepEqual(resources.map(r=>h.admin.previewMode(r)),['code','image','unsupported','unsupported','text','text']);
+  h.admin.view='detail';h.admin.selectedCode='one';h.admin.selectedResourcePath='references/report.pdf';
+  h.admin.readResource=()=>{};h.admin.renderDetail(skill('one',{resources}));
+  const html=h.node('skillDetailPane').innerHTML;
+  for(const r of resources) assert.ok(html.includes(`data-read-resource="${r.path}"`));
+  assert.ok(html.includes('data-resource-path="references/report.pdf"') && html.includes(' active'));
+  assert.ok(!html.includes('脚本不披露源码'));
+});
+
+for (const path of ['scripts/constructor', 'scripts/file.__proto__']) {
+  test(`合法未知资源 ${path} 使用通用图标且详情不崩溃`, () => {
+    const h=harness();
+    const resource={path,category:'script',read_format:null};
+    const icon=h.admin.resourceIcon(resource);
+    assert.equal(icon.icon,'file-code-2');assert.equal(icon.type,'code');
+    h.admin.view='detail';h.admin.selectedCode='one';h.admin.readResource=()=>{};
+    h.admin.renderDetail(skill('one',{resources:[resource]}));
+    const html=h.node('skillDetailPane').innerHTML;
+    assert.ok(html.includes(`data-read-resource="${path}"`));
+    assert.ok(html.includes('data-lucide="file-code-2" data-file-type="code"'));
+  });
+}
+
+test('未知脚本后缀不命中对象继承属性，不进入语法高亮器并保留转义原文', () => {
+  const h=harness(),calls=[];
+  h.context.window.hljs={getLanguage(){assert.fail('未知语言不应调用高亮器');}};
+  h.context.window.DeepAgentMarkdown={renderCodeBlock:(html,language,options)=>{calls.push({html,language,options});return html;}};
+  const content='<script>must stay text</script>\nunknown source';
+  for(const path of ['scripts/file.constructor','scripts/file.__proto__']) {
+    const html=h.admin.renderCodePreview(content,path);
+    assert.ok(html.includes('&lt;script>') && !html.includes('<script>'));
+    assert.equal(calls.at(-1).language,'');assert.equal(calls.at(-1).options.source,content);
+  }
+});
+
+test('源码使用公共代码块并转义HTML；已知语言高亮失败仍显示完整原文', () => {
+  const h=harness();const calls=[];
+  h.context.window.DeepAgentMarkdown={renderCodeBlock:(html,language,options)=>{calls.push({html,language,options});return `<pre><code>${html}</code></pre>`;}};
+  const source='print("</code><script>bad()</script>")\n中文🙂';
+  const html=h.admin.renderCodePreview(source,'scripts/REPORT.PY');
+  assert.equal(calls[0].language,'python');assert.equal(calls[0].options.source,source);assert.equal(calls[0].options.expanded,true);
+  assert.ok(html.includes('&lt;script>') && !html.includes('<script>'));
+  h.context.window.hljs={getLanguage:()=>true,highlight(){throw new Error('unsupported');}};
+  assert.ok(h.admin.renderCodePreview(source,'run.py').includes('中文🙂'));
+});
+
+test('PDF与PPTX点击显示下载占位，不请求二进制为文本，下载仍走现有Skill包入口', async () => {
+  const h=harness();h.admin.selectedCode='one';h.admin.view='detail';
+  const opened=[];h.admin.handleAction=(action,item)=>opened.push([action,item.code]);
+  for(const path of ['assets/report.pdf','assets/slides.pptx']){
+    await h.admin.readResource('one',path);
+    const html=h.node('skillResourcePreview').innerHTML;
+    assert.ok(html.includes('暂不支持在线预览') && html.includes('下载 Skill 包'));
+    assert.equal(h.calls.length,0);assert.equal(h.admin.readRequests.size,0);
+    h.node('skillResourcePreview [data-preview-download]').handlers.click();
+  }
+  assert.deepEqual(opened,[['download','one'],['download','one']]);
+});
+
+test('代码下一段保留服务端双游标，返回开头不夹带旧范围', async () => {
+  const h=harness(path=>Promise.resolve(path.includes('?')?{format:'text',content:'second',has_more:false}:{format:'text',content:'first',has_more:true,next_offset:501,next_char_offset:17}));
+  h.admin.selectedCode='one';h.admin.view='detail';
+  h.admin.details.set('one',skill('one',{resources:[{path:'scripts/run.py',category:'script',read_format:'text'}]}));
+  await h.admin.readResource('one','scripts/run.py');
+  await h.node('skillResourcePreview [data-preview-next]').handlers.click();
+  assert.ok(h.calls[1].path.endsWith('?offset=501&char_offset=17'));
+  assert.ok(h.node('skillResourcePreview').innerHTML.includes('second'));
+  await h.node('skillResourcePreview [data-preview-start]').handlers.click();
+  assert.equal(h.calls[2].path,'/api/v1/skills/one/resources/scripts/run.py');
+});
+
+test('图片经鉴权fetch读取，迟到图片不创建URL，切文件和离页回收URL', async () => {
+  const h=harness(async()=>({content:'text',format:'text'}));h.admin.selectedCode='one';h.admin.view='detail';
+  const a=deferred(),b=deferred(),requested=[],created=[],revoked=[];
+  h.context.serviceUrl=path=>'/prefix'+path;
+  h.context.daFetch=async(path,options)=>{requested.push({path,options});return{ok:true,blob:()=>path.includes('a.png')?a.promise:b.promise};};
+  h.context.URL={createObjectURL(blob){created.push(blob);return'blob:current';},revokeObjectURL(url){revoked.push(url);}};
+  const first=h.admin.readResource('one','assets/a.png'),second=h.admin.readResource('one','assets/b.png');
+  b.resolve({name:'b'});await second;a.resolve({name:'a'});await first;
+  assert.equal(requested[0].path,'/prefix/api/v1/skills/one/resources/assets/a.png?raw=true');
+  assert.equal(requested[0].options.signal.aborted,true);assert.deepEqual(created,[{name:'b'}]);
+  assert.equal(h.node('skillResourcePreview img').src,'blob:current');
+  await h.admin.readResource('one','notes.txt');assert.deepEqual(revoked,['blob:current']);
+  h.admin.previewObjectUrl='blob:again';h.admin.deactivate();assert.deepEqual(revoked,['blob:current','blob:again']);
+});
+
+test('图片请求失败显示明确失败，不制造图片URL或成功占位', async () => {
+  const h=harness();h.admin.selectedCode='one';h.admin.view='detail';
+  h.context.serviceUrl=x=>x;h.context.daFetch=async()=>({ok:false,status:403});
+  await h.admin.readResource('one','assets/denied.svg');
+  assert.ok(h.node('skillResourcePreview').innerHTML.includes('图片读取失败（HTTP 403）'));
+  assert.equal(h.admin.previewObjectUrl,null);assert.equal(h.admin.readRequests.size,0);
 });

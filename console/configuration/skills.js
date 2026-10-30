@@ -18,6 +18,8 @@ const skillsAdmin = {
   details: new Map(),
   uploadMode: "install",
   moreMenuDismissController: null,
+  previewObjectUrl: null,
+  imageDialog: null,
   installQueue: [],
   installing: false,
 
@@ -164,6 +166,7 @@ const skillsAdmin = {
 
   setView(view) {
     this.view = view;
+    if (view !== "detail") this.releasePreview();
     document.getElementById("skillListView")?.classList.toggle("hidden", view !== "list");
     document.getElementById("skillPageToolbar")?.classList.toggle("hidden", view !== "list");
     document.getElementById("skillDetailPane")?.classList.toggle("hidden", view !== "detail");
@@ -340,7 +343,7 @@ const skillsAdmin = {
     searchInput.addEventListener("input", searchSkills);
     pane.querySelector("[data-retry-references]")?.addEventListener("click", () => this.refreshReferences());
     pane.querySelectorAll("[data-skill-row]").forEach(row => {
-      row.addEventListener("click", event => { if (!event.target.closest("button")) this.openDetail(row.dataset.skillRow); });
+      row.addEventListener("click", event => { if (!event.target.closest("button, .skill-ref-chips")) this.openDetail(row.dataset.skillRow); });
       row.addEventListener("keydown", event => { if (event.target === row && ["Enter", " "].includes(event.key)) { event.preventDefault(); this.openDetail(row.dataset.skillRow); } });
     });
     pane.querySelectorAll("[data-open-skill]").forEach(button => button.addEventListener("click", () => this.openDetail(button.dataset.openSkill)));
@@ -362,7 +365,7 @@ const skillsAdmin = {
     if (this.referencesState !== "ready") return `<span class="muted">${this.referencesState === "error" ? "获取失败" : "读取中…"}</span>`;
     const refs = this.orderedReferences(skill.code);
     if (!refs.length) return `<span class="skill-unreferenced"><i data-lucide="unlink" aria-hidden="true"></i>未被引用</span>`;
-    return `<div class="skill-ref-chips"><span class="skill-ref-chip" title="${escapeHtml(refs[0].name + ' · ' + refs[0].id)}"><i data-lucide="bot"></i><span>${escapeHtml(refs[0].name)}</span></span>${refs.length > 1 ? `<button type="button" class="skill-ref-more" data-skill-refs="${escapeHtml(skill.code)}" aria-label="查看 ${escapeHtml(skill.label)} 的其他 ${refs.length - 1} 个引用 Agent" aria-expanded="false" aria-controls="skillAgentRefsPopover">+${refs.length - 1}</button>` : ""}</div>`;
+    return `<div class="skill-ref-chips"><span class="skill-ref-chip"><i data-lucide="bot"></i><span>${escapeHtml(refs[0].name)}</span></span>${refs.length > 1 ? `<button type="button" class="skill-ref-more" data-skill-refs="${escapeHtml(skill.code)}" aria-label="查看 ${escapeHtml(skill.label)} 的其他 ${refs.length - 1} 个引用 Agent" aria-expanded="false" aria-controls="skillAgentRefsPopover">+${refs.length - 1}</button>` : ""}</div>`;
   },
 
   filterByAgent(id) {
@@ -410,6 +413,7 @@ const skillsAdmin = {
   },
 
   renderEmptyDetail(message = "选择一个 Skill 查看说明和资源") {
+    this.releasePreview();
     const detail = document.getElementById("skillDetailPane");
     if (!detail) return;
     detail.innerHTML = `<header class="skill-detail-header"><button class="agent-editor-back" type="button" data-skill-back><i data-lucide="arrow-left"></i>返回</button></header><div class="skill-detail-empty"><p>${escapeHtml(message)}</p></div>`;
@@ -450,33 +454,21 @@ const skillsAdmin = {
     const isBuiltin = skill.source === "builtin";
     const runtime = this.runtimeLabel(skill);
     const resources = skill.resources || [];
-    const canPreviewResource = (resource) =>
-      ["text", "docx", "xlsx"].includes(resource.read_format) && resource.category !== "script";
-    const selectedResource = resources.find((resource) => resource.path === this.selectedResourcePath && canPreviewResource(resource));
+    const selectedResource = resources.find((resource) => resource.path === this.selectedResourcePath);
     const activeResourcePath = this.selectedResourcePath === "SKILL.md"
       ? "SKILL.md"
       : selectedResource?.path || "SKILL.md";
     this.selectedResourcePath = activeResourcePath;
     const skillDefinitionRow = `<li class="skill-resource-row${activeResourcePath === "SKILL.md" ? " active" : ""}" data-read-resource="SKILL.md" data-resource-path="SKILL.md" role="button" tabindex="0">
-      <span class="skill-resource-main"><i data-lucide="file-badge"></i><span><code>SKILL.md</code><small>Skill 定义 · 完整正文</small></span></span>
-      <i class="skill-resource-open" data-lucide="chevron-right"></i>
+      <span class="skill-resource-main"><i data-lucide="file-text" data-file-type="markdown" aria-hidden="true"></i><code title="SKILL.md">SKILL.md</code></span>
     </li>`;
     const resourceRows = resources.length
       ? resources.map((resource) => {
           const isScript = resource.category === "script";
-          const canRead = canPreviewResource(resource);
-          const category = resource.category === "reference" ? "Reference" : resource.category === "asset" ? "Asset" : "Script";
-          const readLabels = {
-            text: "文本可读",
-            docx: "Word 可读",
-            xlsx: "Excel 可读",
-          };
-          const unreadableStatus = resource.path?.toLowerCase().endsWith(".pptx")
-              ? "PPTX 暂不可读"
-              : "当前暂不可读";
-          return `<li class="skill-resource-row${isScript ? " is-script" : ""}${resource.path === activeResourcePath ? " active" : ""}" ${canRead ? `data-read-resource="${escapeHtml(resource.path)}" role="button" tabindex="0"` : ""} data-resource-path="${escapeHtml(resource.path)}">
-            <span class="skill-resource-main"><i data-lucide="${isScript ? "file-code-2" : resource.category === "reference" ? "file-text" : "file"}"></i><span><code>${escapeHtml(resource.path)}</code><small>${category} · ${escapeHtml(resource.mime)} · ${this.formatBytes(resource.size)}${canRead ? ` · ${escapeHtml(readLabels[resource.read_format] || "可读")}` : ""}</small></span></span>
-            ${canRead ? `<i class="skill-resource-open" data-lucide="chevron-right"></i>` : isScript ? `<span class="skill-resource-lock">脚本不披露源码</span>` : `<span class="skill-resource-lock">${escapeHtml(unreadableStatus)}</span>`}
+          const fileIcon = this.resourceIcon(resource);
+          return `<li class="skill-resource-row${isScript ? " is-script" : ""}${resource.path === activeResourcePath ? " active" : ""}" data-read-resource="${escapeHtml(resource.path)}" role="button" tabindex="0" data-resource-path="${escapeHtml(resource.path)}">
+            <span class="skill-resource-main"><i data-lucide="${fileIcon.icon}" data-file-type="${fileIcon.type}" aria-hidden="true"></i><code title="${escapeHtml(resource.path)}">${escapeHtml(resource.path)}</code></span>
+            <span class="skill-resource-size">${resource.size == null ? "" : this.formatBytes(resource.size)}</span>
           </li>`;
         }).join("")
       : `<li class="skill-resource-empty">该 Skill 没有附加资源</li>`;
@@ -515,7 +507,7 @@ const skillsAdmin = {
           </section>
           ${skill.runtime_status === "error" || skill.runtime_status === "missing" ? `<div class="skill-security-note"><i data-lucide="circle-alert"></i><span>${escapeHtml(runtime.detail)}</span></div>` : ""}
           <section class="skill-detail-section skill-resource-directory">
-            <div class="skill-section-heading"><div><h4>资源文件</h4><p>SKILL.md、References 与 Assets</p></div><span>${resources.length + 1} 项</span></div>
+            <div class="skill-section-heading"><h4>资源文件</h4><span>${resources.length + 1} 项</span></div>
             <ul class="skill-resource-list">${skillDefinitionRow}${resourceRows}</ul>
           </section>
         </div>
@@ -577,6 +569,27 @@ const skillsAdmin = {
     }
   },
 
+  resourceIcon(resource) {
+    const path = String(resource.path || "").toLowerCase();
+    const extension = path.split("/").pop().split(".").pop();
+    const types = {
+      py: ["file-code-2", "python"],
+      xlsx: ["file-spreadsheet", "spreadsheet"], xls: ["file-spreadsheet", "spreadsheet"], csv: ["file-spreadsheet", "spreadsheet"],
+      docx: ["file-text", "word"], doc: ["file-text", "word"],
+      pdf: ["file-text", "pdf"],
+      pptx: ["file-chart-column", "slides"], ppt: ["file-chart-column", "slides"],
+      png: ["file-image", "image"], jpg: ["file-image", "image"], jpeg: ["file-image", "image"],
+      gif: ["file-image", "image"], webp: ["file-image", "image"], svg: ["file-image", "image"],
+      md: ["file-text", "markdown"], txt: ["file-text", "text"],
+      json: ["file-json-2", "data"], yaml: ["file-cog", "config"], yml: ["file-cog", "config"], env: ["file-cog", "config"],
+      html: ["file-code-2", "code"], xml: ["file-code-2", "code"],
+    };
+    const [icon, type] = Object.hasOwn(types, extension)
+      ? types[extension]
+      : resource.category === "script" ? ["file-code-2", "code"] : ["file", "file"];
+    return { icon, type };
+  },
+
   formatBytes(value) {
     const bytes = Number(value || 0);
     if (bytes < 1024) return `${bytes} B`;
@@ -629,10 +642,71 @@ const skillsAdmin = {
     </section>`;
   },
 
-  async readResource(code, path) {
+  previewMode(resource) {
+    const path = String(resource.path || "").toLowerCase();
+    if (/\.(pdf|pptx)$/.test(path)) return "unsupported";
+    if (/\.(png|jpe?g|gif|webp|svg)$/.test(path)) return "image";
+    if (["docx", "xlsx"].includes(resource.read_format)) return "text";
+    if (resource.category === "script") return resource.read_format === "text" ? "code" : "unsupported";
+    if (["text", "docx", "xlsx"].includes(resource.read_format) || /\.(md|txt|json|ya?ml|csv|html|xml|env)$/.test(path) || path === ".env") return "text";
+    return "unsupported";
+  },
+
+  releasePreview() {
+    if (this.previewObjectUrl) URL.revokeObjectURL(this.previewObjectUrl);
+    this.previewObjectUrl = null;
+    const dialog = this.imageDialog;
+    this.imageDialog = null;
+    if (dialog?.open) dialog.close();
+    dialog?.remove();
+  },
+
+  openImagePreview(path) {
+    if (!this.previewObjectUrl) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "attachment-image-dialog";
+    dialog.setAttribute("aria-label", `${path} 图片预览`);
+    dialog.innerHTML = `<div class="attachment-image-dialog-content"><button class="attachment-image-dialog-close" type="button" aria-label="关闭图片预览"><i data-lucide="x" aria-hidden="true"></i></button><img alt="${escapeHtml(path)}"><p>${escapeHtml(path)}</p></div>`;
+    dialog.querySelector("img").src = this.previewObjectUrl;
+    dialog.querySelector("button").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("click", event => {
+      if (event.target === dialog || !event.target.closest("img, button, a")) dialog.close();
+    });
+    dialog.addEventListener("close", () => {
+      if (this.imageDialog === dialog) this.imageDialog = null;
+      dialog.remove();
+    }, { once: true });
+    this.imageDialog = dialog;
+    document.body.appendChild(dialog);
+    window.lucide?.createIcons();
+    dialog.showModal();
+  },
+
+  renderCodePreview(content, path) {
+    const extension = String(path).split(".").pop().toLowerCase();
+    const languages = { py: "python", js: "javascript", ts: "typescript", sh: "bash", bash: "bash", sql: "sql", json: "json", yaml: "yaml", yml: "yaml" };
+    const language = Object.hasOwn(languages, extension) ? languages[extension] : "";
+    let highlighted = escapeHtml(content);
+    if (language && window.hljs?.getLanguage?.(language)) {
+      try { highlighted = window.hljs.highlight(content, { language, ignoreIllegals: true }).value; } catch { /* Keep escaped source. */ }
+    }
+    const block = window.DeepAgentMarkdown?.renderCodeBlock(highlighted, language, { source: content, expanded: true, ariaLabel: `${path} 源码` })
+      || `<pre><code class="hljs">${highlighted}</code></pre>`;
+    return `<div class="skill-preview-code markdown-body">${block}</div>`;
+  },
+
+  renderUnsupportedPreview(code, path, preview) {
+    const format = /\.([^./]+)$/.exec(String(path))?.[1].toUpperCase() || "";
+    preview.innerHTML = `${this.previewHeading(path)}<div class="skill-preview-empty skill-preview-unavailable"><i data-lucide="file-down" aria-hidden="true"></i><p>${escapeHtml(format ? `${format} 文件暂不支持在线预览` : "此文件暂不支持在线预览")}</p><span>请下载 Skill 包后查看。</span><button class="btn btn-sm" type="button" data-preview-download><i data-lucide="download" aria-hidden="true"></i>下载 Skill 包</button></div>`;
+    preview.querySelector("[data-preview-download]")?.addEventListener("click", () => this.handleAction("download", this.details.get(code) || { code }));
+    window.lucide?.createIcons();
+  },
+
+  async readResource(code, path, range = {}) {
     const preview = document.getElementById("skillResourcePreview");
     if (!preview || this.view !== "detail" || this.selectedCode !== code) return;
     const request = this.startRead("resource");
+    this.releasePreview();
     this.selectedResourcePath = path;
     document.querySelectorAll("#skillDetailPane [data-resource-path]").forEach((row) => {
       row.classList.toggle("active", row.dataset.resourcePath === path);
@@ -640,19 +714,45 @@ const skillsAdmin = {
     preview.innerHTML = `${this.previewHeading(path)}<div class="skill-preview-loading"><span class="loading-spinner"></span>正在读取资源…</div>`;
     window.lucide?.createIcons();
     try {
-      const page = await apiFetch(`/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}`, { signal: request.controller.signal });
+      const resource = this.details.get(code)?.resources?.find(item => item.path === path) || { path, read_format: path === "SKILL.md" ? "text" : null };
+      const mode = this.previewMode(resource);
+      if (mode === "unsupported") {
+        this.renderUnsupportedPreview(code, path, preview);
+        return;
+      }
+      const url = `/api/v1/skills/${encodeURIComponent(code)}/resources/${path.split("/").map(encodeURIComponent).join("/")}`;
+      if (mode === "image") {
+        const response = await daFetch(serviceUrl(`${url}?raw=true`), { signal: request.controller.signal });
+        if (!response.ok) throw new Error(`图片读取失败（HTTP ${response.status}）`);
+        const blob = await response.blob();
+        if (!request.current() || this.view !== "detail" || this.selectedCode !== code || this.selectedResourcePath !== path) return;
+        this.previewObjectUrl = URL.createObjectURL(blob);
+        preview.innerHTML = `${this.previewHeading(path)}<div class="skill-preview-image"><button type="button" class="skill-preview-image-open" aria-label="放大图片 ${escapeHtml(path)}"><img alt="${escapeHtml(path)}"></button><p class="skill-preview-image-error" hidden>图片无法显示，请下载 Skill 包后查看。</p></div>`;
+        const image = preview.querySelector("img");
+        const open = preview.querySelector(".skill-preview-image-open");
+        const imageError = preview.querySelector(".skill-preview-image-error");
+        image.addEventListener("error", () => { open.hidden = true; imageError.hidden = false; });
+        image.src = this.previewObjectUrl;
+        open.addEventListener("click", () => this.openImagePreview(path));
+        return;
+      }
+      const params = Object.entries(range).filter(([,value]) => value != null).map(([key,value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
+      const page = await apiFetch(url + (params ? `?${params}` : ""), { signal: request.controller.signal });
       if (!request.current() || this.view !== "detail" || this.selectedCode !== code || this.selectedResourcePath !== path) return;
       const isMarkdown = /\.md$/i.test(path) || /markdown/i.test(String(page.mime_type || page.mime || ""));
       const isJson = /\.json$/i.test(path) || /json/i.test(String(page.mime_type || page.mime || ""));
       const markdownDocument = isMarkdown
         ? window.DeepAgentSkillFrontmatter?.parseSkillFrontmatter(page.content)
         : null;
-      const content = isMarkdown
+      const content = mode === "code" ? this.renderCodePreview(page.content, path) : isMarkdown
         ? `<div class="skill-preview-markdown">${this.renderMetadataCard(markdownDocument?.entries)}${window.DeepAgentMarkdown?.renderBody(markdownDocument?.body ?? page.content) ?? `<pre>${escapeHtml(markdownDocument?.body ?? page.content)}</pre>`}</div>`
         : isJson
           ? (window.DeepAgentJson?.renderBlock(page.content, { className: "skill-preview-json", ariaLabel: `${path} JSON` }) || `<pre>${escapeHtml(page.content)}</pre>`)
         : `<pre>${escapeHtml(page.content)}</pre>`;
-      preview.innerHTML = `${this.previewHeading(path, { format: page.format, lineCount: page.returned_count, content: page.content })}${content}${page.has_more ? `<p class="skill-preview-more">内容较长，可由 Agent 使用 offset=${escapeHtml(page.next_offset)}、char_offset=${escapeHtml(page.next_char_offset ?? 0)} 继续分页读取。</p>` : ""}`;
+      const hasStart = Number(range.offset || 1) > 1 || Number(range.char_offset || 0) > 0;
+      preview.innerHTML = `${this.previewHeading(path, { format: mode === "code" ? "code" : page.format, lineCount: page.returned_count, content: page.content })}${content}${hasStart || page.has_more ? `<div class="skill-preview-pagination">${hasStart ? '<button class="btn btn-sm" type="button" data-preview-start>返回开头</button>' : ""}${page.has_more ? '<button class="btn btn-sm" type="button" data-preview-next>下一段</button>' : ""}</div>` : ""}`;
+      preview.querySelector("[data-preview-start]")?.addEventListener("click", () => this.readResource(code, path));
+      preview.querySelector("[data-preview-next]")?.addEventListener("click", () => this.readResource(code, path, { offset: page.next_offset, char_offset: page.next_char_offset ?? 0 }));
       window.lucide?.createIcons();
       if (isMarkdown) void window.DeepAgentMarkdown?.renderDiagrams(preview);
     } catch (error) {

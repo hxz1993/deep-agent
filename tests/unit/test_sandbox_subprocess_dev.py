@@ -50,6 +50,46 @@ class BuildWorkerEnvTests(unittest.TestCase):
 
 
 class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
+    async def test_local_http_and_redirect_are_available_to_python(self) -> None:
+        async def respond(reader, writer):
+            try:
+                request = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=5)
+                if request.startswith(b"GET /start "):
+                    payload = (
+                        f"HTTP/1.1 302 Found\r\nLocation: http://localhost:{port}/result\r\n"
+                        "Content-Length: 0\r\nConnection: close\r\n\r\n"
+                    ).encode()
+                else:
+                    body = b'{"source":"local-http"}'
+                    payload = (
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+                        + body
+                    )
+                writer.write(payload)
+                await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        server = await asyncio.start_server(respond, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            result = await self.backend.execute(ExecuteRequest(
+                request_id="local-network",
+                code=(
+                    "import requests\n"
+                    f"response = requests.get('http://127.0.0.1:{port}/start', timeout=5)\n"
+                    "response.raise_for_status()\nresponse.json()"
+                ),
+                timeout_ms=10_000,
+            ))
+        finally:
+            server.close()
+            await server.wait_closed()
+        self.assertEqual(result.status, "ok", result.error)
+        self.assertEqual(result.result, {"source": "local-http"})
+
     def _mock_worker_process(self, *, stdout: bytes = b"", returncode: int = 0) -> MagicMock:
         mock_proc = MagicMock()
         mock_proc.pid = 4242
@@ -406,7 +446,7 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
         assert result.error is not None
         self.assertIn("FileNotFoundError", result.error.message)
 
-    async def test_public_network_is_allowed_and_private_network_is_blocked(self) -> None:
+    async def test_public_network_remains_available(self) -> None:
         public = await self.backend.execute(
             ExecuteRequest(
                 request_id="public-net",
@@ -425,20 +465,6 @@ class SubprocessBackendTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(public.status, "ok", public.error)
         self.assertEqual(public.result, "1.1.1.1")
-
-        private = await self.backend.execute(
-            ExecuteRequest(
-                request_id="private-net",
-                code=(
-                    "import socket\n"
-                    "socket.create_connection(('127.0.0.1', 80), timeout=1)"
-                ),
-                timeout_ms=5_000,
-            )
-        )
-        self.assertEqual(private.status, "error")
-        assert private.error is not None
-        self.assertIn("blocks non-public", private.error.message)
 
     async def test_timeout_returns_timeout_error(self) -> None:
         async with self._track_workers() as (workers, _):

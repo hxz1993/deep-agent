@@ -16,6 +16,7 @@ from deep_agent.sandbox.framing import encode_frame
 from deep_agent.sandbox.subprocess_dev.backend import SubprocessBackend
 from deep_agent.sandbox.types import ExecuteRequest
 from deep_agent.skills.runtime import ResolvedSkill
+from deep_agent.skills.package import inspect_skill_directory
 from deep_agent.skills.script_tool import build_skill_script_toolset
 from tests.helpers.sandbox import sandbox_test_python
 
@@ -71,6 +72,7 @@ class SandboxInputCapacityTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-input-capacity-") as tmp:
             root = Path(tmp)
             (root / "scripts").mkdir()
+            (root / "SKILL.md").write_text("---\nname: capacity\ndescription: Input capacity test\n---\n")
             script = root / "scripts/check.py"
             script.write_text(
                 "import hashlib, json\nfrom pathlib import Path\n"
@@ -83,7 +85,7 @@ class SandboxInputCapacityTests(unittest.IsolatedAsyncioTestCase):
             skill = ResolvedSkill(
                 code="capacity", source="upload", package_root=root,
                 library_root=root.parent,
-                resource_index=[{"path": "scripts/check.py", "category": "script"}],
+                resource_index=inspect_skill_directory(root, content_hash="capacity", require_directory_match=False).resource_index,
             )
             toolset = build_skill_script_toolset(
                 {"capacity": skill}, backend=self.backend, timeout_sec=30,
@@ -94,9 +96,9 @@ class SandboxInputCapacityTests(unittest.IsolatedAsyncioTestCase):
             returned = await tool.call_func(
                 {**args, "inputs": {"payload": self.payload}}, _context(),
             )
-            self.assertEqual(returned["status"], "ok")
-            self.assertEqual(returned["result"], self.expected)
-            self.assertFalse(returned["truncated"]["result"])
+            self.assertEqual(returned.return_value["status"], "ok")
+            self.assertEqual(returned.return_value["result"], self.expected)
+            self.assertFalse(returned.return_value["truncated"]["result"])
 
             # Oversized input must fail at the shared request boundary, without
             # launching another worker or bypassing the installed Skill scope.

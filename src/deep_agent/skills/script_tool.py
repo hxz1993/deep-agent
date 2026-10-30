@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
-from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
+from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed, ToolReturn
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_errors import tool_error_message
 from deep_agent.sandbox.backend import PythonExecutionBackend
+from deep_agent.sandbox.file_bridge import SandboxFileInput, prepare_input_files, publish_execution_result
+from deep_agent.files.upload_settings import load_upload_settings_for_tool
 from deep_agent.sandbox.types import (
     ExecuteRequest,
     JsonValue,
@@ -61,6 +64,43 @@ def _read_script(path: Path) -> str:
         raise ToolFailed(f"Skill script must be UTF-8 Python: {path.name}") from exc
 
 
+def _verify_indexed_bytes(entry: dict[str, Any], raw: bytes) -> None:
+    expected = entry.get("content_hash")
+    if not expected or hashlib.sha256(raw).hexdigest() != expected:
+        raise ToolFailed("Skill 文件与已解析版本不一致，请重新加载后再执行")
+
+
+def _execution_bundle(item: ResolvedSkill, paths: list[str]) -> tuple[SandboxInputFile, ...]:
+    # Work from the selected version's index. A runtime replacement must not mix
+    # new modules or resources into an already resolved call.
+    manifest = item.package_root / "SKILL.md"
+    try:
+        skill_text = manifest.read_bytes()
+    except OSError as exc:
+        raise ToolFailed("Skill SKILL.md 不可用") from exc
+    if item.definition_hash is None or hashlib.sha256(skill_text).hexdigest() != item.definition_hash:
+        raise ToolFailed("Skill SKILL.md 与已解析版本不一致，请重新加载后再执行")
+    files = [SandboxInputFile.from_bytes("SKILL.md", skill_text)]
+    for entry in item.resource_index:
+        path = str(entry.get("path") or "")
+        if entry.get("category") != "script" or Path(path).suffix.lower() != ".py":
+            continue
+        _, target = _indexed_entry(item, path, category="script")
+        raw = _read_script(target).encode("utf-8")
+        _verify_indexed_bytes(entry, raw)
+        files.append(SandboxInputFile.from_bytes(path, raw))
+    files.extend(_resource_files(item, paths))
+    if sum(len(file.decoded()) for file in files) > MAX_SCRIPT_RESOURCE_BYTES:
+        raise ModelRetry(f"Skill modules and resources exceed {MAX_SCRIPT_RESOURCE_BYTES} bytes")
+    try:
+        unchanged = manifest.read_bytes() == skill_text
+    except OSError:
+        unchanged = False
+    if not unchanged:
+        raise ToolFailed("Skill 在执行副本装配期间发生更新，请重新加载后再执行")
+    return tuple(files)
+
+
 def _resource_files(item: ResolvedSkill, paths: list[str]) -> tuple[SandboxInputFile, ...]:
     if len(paths) > MAX_SCRIPT_RESOURCE_FILES:
         raise ModelRetry(f"resource_paths accepts at most {MAX_SCRIPT_RESOURCE_FILES} files")
@@ -77,6 +117,7 @@ def _resource_files(item: ResolvedSkill, paths: list[str]) -> tuple[SandboxInput
             raw = target.read_bytes()
         except OSError as exc:
             raise ToolFailed(tool_error_message(f"Skill resource could not be read: {path}", exc)) from exc
+        _verify_indexed_bytes(entry, raw)
         total += len(raw)
         if total > MAX_SCRIPT_RESOURCE_BYTES:
             raise ModelRetry(
@@ -101,7 +142,12 @@ def build_skill_script_toolset(
         instructions=(
             "Stored Skill scripts execute only in the configured isolated Python Sandbox. "
             "Use an exact script path listed by list_skill_resources. Provide explicit inputs, "
-            "arguments and only the required same-Skill resources. A script returns its formal "
+            "arguments and only the required same-Skill resources. Same-Skill Python modules "
+            "are carried automatically under skill/ with the original entry path. The cwd "
+            "contains inputs.json and outputs/. Resolve Skill assets relative to __file__. "
+            "Use files for authorized session attachments and deepagent_files.input_path; "
+            "publish_path registers generated files; the completed tool returns uploaded File IDs in files. "
+            "A script returns its formal "
             "structured result through outputs/result.json. "
             f"Authorized Skills with executable scripts: {names}."
         ),
@@ -115,10 +161,11 @@ def build_skill_script_toolset(
         arguments: list[str] | None = None,
         inputs: dict[str, JsonValue] | None = None,
         resource_paths: list[str] | None = None,
-    ) -> dict[str, object]:
+        files: list[SandboxFileInput] | None = None,
+    ) -> ToolReturn:
         """Execute one authorized stored Python Skill script in the isolated Sandbox.
 
-        Returns an execution envelope with status, result and truncated. The
+        Returns an execution envelope with status, result, files and truncated. The
         script's business fields are inside result, not at the envelope root.
         Check status == 'ok' and each truncated flag before using that result.
         With PTC, pass upstream JSON directly in inputs and keep the returned
@@ -135,22 +182,29 @@ def build_skill_script_toolset(
         if Path(str(entry.get("path") or "")).suffix.lower() != ".py":
             raise ModelRetry("execute_skill_script only supports indexed UTF-8 .py scripts")
 
-        code = _read_script(target)
-        files = _resource_files(item, list(resource_paths or []))
+        bundle = _execution_bundle(item, list(resource_paths or []))
+        upload_settings = await load_upload_settings_for_tool(ctx)
+        input_files = await prepare_input_files(
+            ctx, files, upload_settings, tool_name="execute_skill_script", reserve_skill=True,
+        )
         try:
             request = ExecuteRequest(
                 request_id=uuid.uuid4().hex,
                 mode="script",
-                code=code,
+                code="",
+                script_entry=script_path,
+                skill_files=bundle,
                 arguments=tuple(arguments or ()),
                 inputs=inputs or {},
-                files=files,
+                files=input_files,
                 timeout_ms=timeout_ms,
             )
         except ValidationError as exc:
             errors = exc.errors(include_input=False, include_context=False, include_url=False)
             raise ModelRetry(f"Invalid Skill script execution request: {errors}") from exc
         result = await backend.execute(request)
-        return result.model_dump(mode="json")
+        return await publish_execution_result(
+            ctx, result, upload_settings, tool_name="execute_skill_script", input_files=input_files,
+        )
 
     return toolset

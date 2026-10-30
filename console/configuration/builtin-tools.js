@@ -11,11 +11,11 @@ function toolCatalogLabel(item) {
 }
 
 function toolCatalogCard(item, selected) {
-  return `<button type="button" class="skill-list-item${selected ? " active" : ""}" data-tool-catalog-code="${escapeHtml(item.code)}" aria-pressed="${selected}">
-    <span class="skill-list-card-head">
-      <span class="skill-list-icon"><i data-lucide="hammer" aria-hidden="true"></i></span>
-      <span class="skill-list-copy"><span class="skill-list-title"><strong>${escapeHtml(toolCatalogLabel(item))}</strong></span><code class="skill-list-code">${escapeHtml(item.code)}</code></span>
-      <span class="skill-list-signals"><span class="skill-list-count">${(item.tools || []).length}</span></span>
+  return `<button type="button" class="ui-tool-tree-node${selected ? " is-selected" : ""}" data-tool-catalog-code="${escapeHtml(item.code)}" aria-pressed="${selected}">
+    <span class="ui-tool-tree-node-head">
+      <span class="ui-tool-tree-icon"><i data-lucide="hammer" aria-hidden="true"></i></span>
+      <span class="ui-tool-tree-node-main"><strong>${escapeHtml(toolCatalogLabel(item))}</strong><code>${escapeHtml(item.code)}</code></span>
+      <span class="ui-tool-tree-node-meta"><span class="ui-tool-tree-count">${(item.tools || []).length}</span></span>
     </span>
   </button>`;
 }
@@ -55,7 +55,7 @@ function renderToolCatalog() {
   selectedToolCode = selected?.code || "";
   const selectedGroup = toolCatalogGroups.find((group) => group.items.includes(selected));
   host.innerHTML = `<div class="tool-catalog-workspace">
-    <aside class="skill-list-pane tool-catalog-list" aria-label="内置工具分组">${toolCatalogGroups.map((group) => `
+    <aside class="ui-tool-package-pane tool-catalog-list" aria-label="内置工具分组">${toolCatalogGroups.map((group) => `
       <section class="tool-catalog-group" aria-label="${group.label}">
         <h3 class="tool-catalog-group-heading">${group.label}<span>${group.items.length}</span></h3>
         ${group.items.length ? group.items.map((item) => toolCatalogCard(item, item.code === selectedToolCode)).join("") : `<div class="skill-list-state">${escapeHtml(group.status || "暂无工具")}</div>`}

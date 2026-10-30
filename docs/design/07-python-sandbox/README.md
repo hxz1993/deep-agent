@@ -1,6 +1,6 @@
 # Python Sandbox 与会话运行环境
 
-最近讨论：2026-10-24。**当前 `test` 仍为无状态 Python 子进程；会话级 Sandbox 尚未合入 `test`，未完成产品验收。** 同事分支有候选实现，本轮只更新设计，不合并、不升级、不启动部署。
+最近核对：2026-10-30。**当前 `test` 仍为无状态 Python 子进程；会话级 Sandbox 尚未合入 `test`，未完成产品验收。** 同事分支有候选实现，本轮0.15.0统一的是现有无状态执行，不合并会话沙盒、不升级依赖、不部署。
 
 本轮产品方向：优先让活跃会话中的文件、工作目录、Python 与 Shell 操作连续可用；允许按成本设置有效期并到期清理，不要求工作区永久保留，也不把内存快照恢复作为首版前提。Agent 可申请使用、主动释放，系统负责超时回收。首次调用自动创建、后续复用是当前建议，尚未锁定实现。
 
@@ -24,10 +24,10 @@ execute_python(code, inputs, files)
 → 执行模型生成的完整 Python 代码
 → 最后一行表达式作为 result，可发布零到多个FileStore文件
 
-execute_skill_script(skill_code, script_path, arguments, inputs, resource_paths)
+execute_skill_script(skill_code, script_path, arguments, inputs, resource_paths, files)
 → 执行当前 Agent 已选择 Skill 中的固定 .py 脚本
-→ 只复制显式授权的同 Skill 资源
-→ outputs/result.json 作为正式 result
+→ 按原入口在skill/执行，自动携带同Skill Python模块和显式选中资源
+→ outputs/result.json 作为正式 result，显式发布的产物上传并返回File ID
 ```
 
 `execute_python` 在 Agent 关联 `builtin:sandbox` 时披露。`execute_skill_script` 还要求 Agent
@@ -38,6 +38,16 @@ v0.6.7使用显式`builtin:ptc`提供Harness`run_code`。它不运行完整CPyth
 第三方包。所以 `run_code` 不替代 `execute_python`，也不复用这一子进程 Backend。
 详见 [`../20-code-mode/`](../20-code-mode/README.md)。
 
+## 0.15.0 执行目录变化
+
+0.15.0：普通 Python 仍执行传入代码；Skill 不再改名为临时 `main.py`，而是在一次调用的
+`skill/` 副本按原入口、原包上下文执行。同目录与包内相对模块可引用，非代码资源仍须显式选择。
+工作目录根的 `inputs.json`、`outputs/result.json` 保持；资源与 `.env` 按 `__file__` 定位。
+Skill 与普通 Python 共用授权文件输入、显式产物上传及失败补偿，PTC汇总相同文件事实。
+
+不做旧布局兼容，不改写旧历史。目录结构、限额及旧包适配见[Skill指南](../../guides/skills.md)。
+这不是会话级文件系统或沙盒分支合并，不改变单次调用后清理的生命周期。
+
 ## 当前执行边界
 
 - 每次调用启动新的 `.venv-sandbox` Python 进程，工作目录使用系统临时目录。
@@ -47,8 +57,9 @@ v0.6.7使用显式`builtin:ptc`提供Harness`run_code`。它不运行完整CPyth
 - 使用 Semaphore 限制并发，使用超时、CPU与地址空间限制和输出上限防止失控。
 - 取消 Agent Run会终止本次子进程组，并在结束时删除临时目录。
 - 只传递白名单环境变量，不继承平台凭据；Linux环境保留Landlock写目录收束。
-- 默认允许访问公网，并在Worker连接层尽力阻断回环、私网、链路本地、云元数据等地址；重定向后的
-  新连接也会重新校验。这是`subprocess-dev`的best-effort防护，不是恶意代码强隔离。
+- Python 不再按目标 IP 是否公网做代码级拦截，可请求部署网络可达的企业内网服务。
+  普通 Python、Skill 脚本以及 PTC 调用这两个工具共用此规则；网络访问范围由部署的路由、防火墙或
+  容器网络策略控制。本项不放宽 WebFetch、文件下载等独立工具的 SSRF 校验。
 - `security_level=none`是当前健康接口对执行方式的事实描述，不影响两个工具是否可用。
 
 ## 文件输入与产物

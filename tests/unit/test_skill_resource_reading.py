@@ -55,6 +55,62 @@ def _entry(path: str, *, category: str = "asset", readable: bool = False) -> dic
 
 
 class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
+    def test_console_script_preview_does_not_open_model_script_reading(self) -> None:
+        entry = _entry("scripts/client.py", category="script")
+        self.assertFalse(present_resource_entry(entry)["readable"])
+        preview = present_resource_entry(entry, console_preview=True)
+        self.assertTrue(preview["readable"])
+        self.assertEqual(preview["read_format"], "text")
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-preview-") as tmpdir:
+            path = Path(tmpdir) / "client.py"
+            path.write_text("print('<unsafe>')\n", encoding="utf-8")
+            with self.assertRaises(SkillResourceReadError):
+                read_resource_page(entry, path)
+            page = read_resource_page(entry, path, console_preview=True)
+        self.assertEqual(page.content, "print('<unsafe>')")
+        self.assertEqual(page.unit, "line")
+
+    def test_console_does_not_treat_old_binary_readable_flags_as_text(self) -> None:
+        for suffix in ("pdf", "pptx", "png", "svg"):
+            with self.subTest(suffix=suffix):
+                entry = _entry(f"assets/file.{suffix}", readable=True)
+                preview = present_resource_entry(entry, console_preview=True)
+                self.assertFalse(preview["readable"])
+                self.assertIsNone(preview["read_format"])
+                with tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-preview-") as tmpdir:
+                    path = Path(tmpdir) / f"file.{suffix}"
+                    path.write_bytes(b"binary document")
+                    with self.assertRaisesRegex(SkillResourceReadError, "not_readable"):
+                        read_resource_page(entry, path, console_preview=True)
+
+    def test_console_office_preview_uses_actual_type_inside_script_directory(self) -> None:
+        for filename, raw, expected_format, expected_content in (
+            ("scripts/guide.docx", _docx_bytes(), "docx", "第一段"),
+            ("scripts/template.xlsx", _xlsx_bytes(), "xlsx", "名称,值\n甲,1"),
+        ):
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-preview-") as tmpdir:
+                entry = _entry(filename, category="script")
+                self.assertFalse(present_resource_entry(entry)["readable"])
+                self.assertEqual(present_resource_entry(entry, console_preview=True)["read_format"], expected_format)
+                target = Path(tmpdir) / Path(filename).name
+                target.write_bytes(raw)
+                with self.assertRaises(SkillResourceReadError):
+                    read_resource_page(entry, target)
+                page = read_resource_page(entry, target, limit=2, console_preview=True)
+                self.assertEqual(page.format, expected_format)
+                self.assertTrue(page.content.startswith(expected_content))
+
+    def test_env_resource_is_text_and_preserves_literal_configuration(self) -> None:
+        for path in (".env", "assets/service.env"):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as tmpdir:
+                target = Path(tmpdir) / ".env"
+                content = "# 配置\nDEMO_VALUE=example\nURL=https://example.com?a=1&b=2\n"
+                target.write_text(content, encoding="utf-8")
+                entry = _entry(path)
+                self.assertEqual(present_resource_entry(entry)["read_format"], "text")
+                page = read_resource_page(entry, target)
+                self.assertEqual(page.content, content.rstrip("\n"))
+
     def test_long_text_resource_has_lossless_character_cursor(self) -> None:
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-cursor-") as tmpdir:
             target = Path(tmpdir) / "guide.md"
@@ -156,6 +212,9 @@ class SkillResourceReadingTests(unittest.IsolatedAsyncioTestCase):
             )
             script = next(entry for entry in listed["resources"] if entry["category"] == "script")
             self.assertEqual(script["path"], "scripts/run.py")
+            self.assertFalse(script["readable"])
+            self.assertIsNone(script["read_format"])
+            self.assertFalse(listed["scripts_readable"])
             self.assertEqual(set(tools), {"list_skill_resources"})
 
     async def test_resource_toolset_only_lists_resources(self) -> None:

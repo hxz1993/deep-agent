@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from deep_agent.sandbox.subprocess_dev.backend import SubprocessBackend
-from deep_agent.sandbox.types import ExecuteRequest
+from deep_agent.sandbox.types import ExecuteRequest, SandboxInputFile
 from tests.helpers.sandbox import sandbox_test_python
 
 
@@ -65,7 +65,9 @@ publish_path("中文图表.png")
             response = await backend.execute(ExecuteRequest(
                 request_id="chinese-skill-chart",
                 mode="script",
-                code='''
+                code="",
+                script_entry="scripts/chart.py",
+                skill_files=(SandboxInputFile.from_bytes("scripts/chart.py", '''
 import json
 import matplotlib
 from matplotlib import font_manager
@@ -74,7 +76,7 @@ assert any(f.name == "Noto Sans CJK SC" for f in font_manager.fontManager.ttflis
 matplotlib.rcParams["font.family"] = ["monospace"]
 with open("outputs/result.json", "w", encoding="utf-8") as out:
     json.dump({"字体": matplotlib.rcParams["font.family"]}, out, ensure_ascii=False)
-''',
+'''.encode("utf-8")),),
             ))
             self.assertEqual(response.status, "ok", response.model_dump())
             self.assertEqual(response.result, {"字体": ["monospace"]})

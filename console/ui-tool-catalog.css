@@ -1,4 +1,4 @@
-/* Read-only tool catalogs share the Skill card and UI tool table patterns. */
+/* Read-only tool catalogs share the UI tool tree and table patterns. */
 .tool-catalog-group { display: flex; flex-direction: column; gap: 8px; }
 .tool-catalog-group + .tool-catalog-group { margin-top: 18px; }
 .tool-catalog-group-heading { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; color: var(--text-dim); font-size: 12px; font-weight: 500; }
@@ -50,9 +50,6 @@
 /* Keep navigation still and make the selected item/detail relationship explicit. */
 .tool-catalog-workspace { align-items: stretch; gap: 0; }
 .tool-catalog-list { padding: 1px 18px 1px 1px; }
-.tool-catalog-list .skill-list-item:hover { transform: none; }
-.tool-catalog-list .skill-list-item.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
-.tool-catalog-list .skill-list-item.active .skill-list-title strong { color: var(--accent); }
 .tool-catalog-detail { padding-left: 18px; border-left: 1px solid var(--border); }
 @media (max-width: 800px) {
  .tool-catalog-list { padding-right: 1px; }

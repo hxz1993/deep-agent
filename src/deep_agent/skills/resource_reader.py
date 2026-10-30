@@ -14,7 +14,7 @@ from deep_agent.agent.attachment_extractors import (
     xlsx_workbook,
     xlsx_sheet_metadata,
 )
-from deep_agent.skills.package import READABLE_SUFFIXES
+from deep_agent.skills.package import IMAGE_SUFFIXES, MAX_MODEL_TEXT_BYTES, READABLE_SUFFIXES, is_env_resource
 
 
 SkillResourceFormat = Literal["text", "docx", "xlsx"]
@@ -46,22 +46,48 @@ class SkillResourcePage:
     next_char_offset: int | None = None
 
 
-def resource_format(entry: dict[str, Any]) -> SkillResourceFormat | None:
-    if entry.get("category") == "script":
-        return None
+def resource_format(
+    entry: dict[str, Any], *, console_preview: bool = False,
+) -> SkillResourceFormat | None:
     suffix = Path(str(entry.get("path") or "")).suffix.lower()
     mime = str(entry.get("mime") or "").split(";", 1)[0].strip().lower()
+    # Console has text/Office readers, but no PDF/PPTX or binary image reader.
+    # Legacy package indexes marked these readable for the model's separate
+    # read_file pipeline; that flag must not send binary bytes to this text path.
+    if console_preview and (
+        suffix in IMAGE_SUFFIXES | {".pdf", ".pptx"}
+        or mime.startswith("image/")
+        or mime in {"application/pdf", "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+    ):
+        return None
+    if entry.get("category") == "script" and not console_preview:
+        return None
     if suffix == ".docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         return "docx"
     if suffix == ".xlsx" or mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
         return "xlsx"
-    if bool(entry.get("readable")) or suffix in READABLE_SUFFIXES:
+    if entry.get("category") == "script":
+        if console_preview and (
+            suffix == ".py"
+            or suffix in READABLE_SUFFIXES
+            or mime.startswith("text/")
+            or mime in {"application/javascript", "application/x-sh", "application/x-shellscript"}
+        ):
+            return "text"
+        return None
+    if (
+        bool(entry.get("readable"))
+        or suffix in READABLE_SUFFIXES
+        or is_env_resource(str(entry.get("path") or ""))
+    ):
         return "text"
     return None
 
 
-def resource_unit(entry: dict[str, Any]) -> SkillResourceUnit | None:
-    kind = resource_format(entry)
+def resource_unit(
+    entry: dict[str, Any], *, console_preview: bool = False,
+) -> SkillResourceUnit | None:
+    kind = resource_format(entry, console_preview=console_preview)
     if kind == "text":
         return "line"
     if kind == "docx":
@@ -71,13 +97,15 @@ def resource_unit(entry: dict[str, Any]) -> SkillResourceUnit | None:
     return None
 
 
-def present_resource_entry(entry: dict[str, Any]) -> dict[str, Any]:
-    kind = resource_format(entry)
+def present_resource_entry(
+    entry: dict[str, Any], *, console_preview: bool = False,
+) -> dict[str, Any]:
+    kind = resource_format(entry, console_preview=console_preview)
     return {
         **entry,
         "readable": kind is not None,
         "read_format": kind,
-        "read_unit": resource_unit(entry),
+        "read_unit": resource_unit(entry, console_preview=console_preview),
     }
 
 
@@ -225,8 +253,9 @@ def read_resource_page(
     limit: int | None = None,
     sheet: str | None = None,
     char_offset: int = 0,
+    console_preview: bool = False,
 ) -> SkillResourcePage:
-    kind = resource_format(entry)
+    kind = resource_format(entry, console_preview=console_preview)
     if kind is None:
         raise SkillResourceReadError(
             f"binary_resource_not_readable: {entry.get('path')!r}",
@@ -234,6 +263,13 @@ def read_resource_page(
         )
     if sheet is not None and kind != "xlsx":
         raise SkillResourceReadError("sheet is only valid for XLSX resources", correctable=True)
+    if console_preview and entry.get("category") == "script" and kind == "text":
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            raise SkillResourceReadError("Skill script could not be read", correctable=False) from exc
+        if size > MAX_MODEL_TEXT_BYTES:
+            raise SkillResourceReadError("Skill script is too large to preview; download the Skill package to view it", correctable=True)
     try:
         if kind == "text":
             return _text_page(path, offset=offset, limit=limit, char_offset=char_offset)

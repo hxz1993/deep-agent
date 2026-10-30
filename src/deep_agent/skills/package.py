@@ -26,6 +26,11 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 TEMPLATE_SUFFIXES = {".docx", ".xlsx", ".pptx", ".pdf"}
 
 
+def is_env_resource(path: str | Path) -> bool:
+    target = Path(path)
+    return target.name == ".env" or target.suffix.lower() == ".env"
+
+
 class SkillPackageError(ValueError):
     pass
 
@@ -147,15 +152,19 @@ def _validate_member(info: zipfile.ZipInfo) -> PurePosixPath:
 def _resource_entry(path: Path, relative: str, *, category: str) -> dict[str, Any]:
     data = path.read_bytes()
     suffix = path.suffix.lower()
+    is_text = suffix in READABLE_SUFFIXES or is_env_resource(path)
     readable = category != "script" and (
-        (suffix in READABLE_SUFFIXES and len(data) <= MAX_MODEL_TEXT_BYTES)
+        (is_text and len(data) <= MAX_MODEL_TEXT_BYTES)
         or suffix in {".docx", ".xlsx", ".pptx", ".pdf"}
     )
-    if suffix in READABLE_SUFFIXES and len(data) > MAX_MODEL_TEXT_BYTES:
+    if is_text and len(data) > MAX_MODEL_TEXT_BYTES:
         raise SkillPackageError(
             f"Model-readable resource exceeds {MAX_MODEL_TEXT_BYTES} bytes: {relative}"
         )
-    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    mime = (
+        "text/plain" if is_env_resource(path)
+        else mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    )
     return {
         "path": relative,
         "category": category,
@@ -208,7 +217,9 @@ def inspect_skill_directory(
             continue
         relative = path.relative_to(package_root).as_posix()
         top = relative.split("/", 1)[0]
-        if top in {"scripts", "tools"}:
+        if relative == ".env":
+            resources.append(_resource_entry(path, relative, category="asset"))
+        elif top in {"scripts", "tools"}:
             contains_scripts = True
             resources.append(_resource_entry(path, relative, category="script"))
         elif top == "references":
@@ -217,7 +228,10 @@ def inspect_skill_directory(
             resources.append(_resource_entry(path, relative, category="reference"))
         elif top == "assets":
             suffix = path.suffix.lower()
-            if suffix not in READABLE_SUFFIXES | IMAGE_SUFFIXES | TEMPLATE_SUFFIXES:
+            if (
+                suffix not in READABLE_SUFFIXES | IMAGE_SUFFIXES | TEMPLATE_SUFFIXES
+                and not is_env_resource(path)
+            ):
                 raise SkillPackageError(f"Unsupported asset type: {relative}")
             resources.append(_resource_entry(path, relative, category="asset"))
 

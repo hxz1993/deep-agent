@@ -76,7 +76,7 @@ def _builtin_detail(item: SkillDescriptor) -> SkillDetail:
         runtime_status=RUNTIME_READY,
         manifest=item.manifest,
         resources=[
-            SkillResource.model_validate(present_resource_entry(entry))
+            SkillResource.model_validate(present_resource_entry(entry, console_preview=True))
             for entry in item.resource_index
         ],
     )
@@ -110,7 +110,7 @@ def _row_detail(
         updated_at=row.updated_at,
         manifest=dict(row.manifest or {}),
         resources=[
-            SkillResource.model_validate(present_resource_entry(entry))
+            SkillResource.model_validate(present_resource_entry(entry, console_preview=True))
             for entry in index
         ],
     )
@@ -599,13 +599,20 @@ async def read_skill_resource(
     path: str,
     request: Request,
     ctx: AppContextDep,
+    response: Response,
     offset: int | None = None,
     limit: int | None = None,
     sheet: str | None = None,
     char_offset: int = 0,
-) -> SkillResourceContent:
+    raw: bool = False,
+) -> SkillResourceContent | Response:
+    preview_headers = {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    response.headers.update(preview_headers)
     async with _resource_root(code, request, ctx) as (root, index):
-        entry = next((item for item in index if item.get("path") == path and item.get("category") != "script"), None)
+        entry = next((item for item in index if item.get("path") == path), None)
         if path == "SKILL.md":
             target = root / "SKILL.md"
             if not target.is_file():
@@ -627,6 +634,28 @@ async def read_skill_resource(
         resolved_root = root.resolve()
         if (target != resolved_root and resolved_root not in target.parents) or not target.is_file():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill resource not found")
+        if raw:
+            image_mimes = {
+                ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+            }
+            image_mime = image_mimes.get(target.suffix.lower())
+            if image_mime is None:
+                raise HTTPException(status_code=422, detail="Raw preview is only available for indexed image resources")
+            if offset is not None or limit is not None or sheet is not None or char_offset:
+                raise HTTPException(status_code=422, detail="Image previews do not accept pagination parameters")
+            try:
+                data = await asyncio.to_thread(target.read_bytes)
+            except OSError as exc:
+                raise HTTPException(status_code=404, detail="Skill resource not found") from exc
+            return Response(
+                content=data,
+                media_type=image_mime,
+                headers={
+                    **preview_headers,
+                    "Content-Security-Policy": "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+                },
+            )
         try:
             page = await asyncio.to_thread(
                 read_resource_page,
@@ -636,6 +665,7 @@ async def read_skill_resource(
                 limit=limit,
                 sheet=sheet,
                 char_offset=char_offset,
+                console_preview=True,
             )
         except SkillResourceReadError as exc:
             raise HTTPException(

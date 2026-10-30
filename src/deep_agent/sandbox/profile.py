@@ -168,7 +168,7 @@ def format_python_tool_instructions(package_names: tuple[str, ...]) -> str:
     return (
         "在全新的 Python 环境中执行数据计算和文件处理。每次调用需提供完整 code 和 inputs。"
         f"预装 {packages}，常用标准库可用，不支持 pip install。"
-        "可使用 requests/httpx 访问公网；私网、回环、链路本地和云元数据地址会被阻断。"
+        "可使用 requests/httpx 访问执行环境网络可达的 HTTP 服务，包括企业内网 API；网络权限由部署环境控制。"
         "读取 files 中的平台文件时使用 from deepagent_files import input_path；"
         "需要保留的输出必须使用 publish_path(file_name, mime=None) 取得写入路径，"
         "成功执行后宿主会上传并在 files 中返回 file_id。普通临时文件不会上传。"

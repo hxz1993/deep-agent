@@ -211,9 +211,19 @@ class SubprocessBackend:
     @staticmethod
     def _prepare_work_dir(work_dir: Path, request: ExecuteRequest) -> ExecuteRequest:
         if request.mode == "script":
-            script_path = work_dir / "main.py"
-            script_path.write_text(request.code, encoding="utf-8")
-            script_path.chmod(0o600)
+            if not request.skill_files or request.script_entry not in {item.path for item in request.skill_files}:
+                raise ValueError("Skill execution requires its original script bundle")
+            skill_root = (work_dir / "skill").resolve()
+            skill_root.mkdir(mode=0o700)
+            for item in request.skill_files:
+                target = (skill_root / item.path).resolve()
+                if skill_root not in target.parents:
+                    raise ValueError("Skill resource escaped its execution directory")
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                if target.exists():
+                    raise ValueError("Skill resource paths collide on the execution filesystem")
+                target.write_bytes(item.decoded())
+                target.chmod(0o600)
             inputs_path = work_dir / "inputs.json"
             inputs_path.write_text(
                 json.dumps(request.inputs, ensure_ascii=False, separators=(",", ":")),
@@ -231,6 +241,8 @@ class SubprocessBackend:
             if resolved_root not in target.parents:
                 raise ValueError("sandbox input file escaped the work directory")
             target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if target.exists():
+                raise ValueError("Sandbox input paths collide on the execution filesystem")
             target.write_bytes(item.decoded())
             target.chmod(0o600)
             if item.file_id:
@@ -247,7 +259,7 @@ class SubprocessBackend:
 
         # The development worker reads files from its isolated cwd. Keeping the
         # bytes out of the framed child request avoids sending binary payloads twice.
-        return request.model_copy(update={"files": ()})
+        return request.model_copy(update={"files": (), "skill_files": ()})
 
     async def _read_worker_response(
         self,

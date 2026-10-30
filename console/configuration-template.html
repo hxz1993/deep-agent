@@ -512,7 +512,7 @@
 
   <dialog class="modal" id="agentExportModal" aria-labelledby="agentExportTitle">
     <form id="agentExportForm">
-      <header class="modal-header"><div class="modal-title-copy"><h3 id="agentExportTitle"><i data-lucide="download" aria-hidden="true"></i>导出 Agent 安装包</h3><p class="agent-export-subtitle">模型与 MCP 仅作参考，密钥不导出；内置能力由目标环境提供。</p></div><button type="button" class="icon-action" id="closeAgentExportBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
+      <header class="modal-header"><div class="modal-title-copy"><h3 id="agentExportTitle"><i data-lucide="download" aria-hidden="true"></i>导出 Agent 安装包</h3><p class="agent-export-subtitle">模型与 MCP 的凭据不导出；Skill 按原包导出，包含包内配置。</p></div><button type="button" class="icon-action" id="closeAgentExportBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
       <div class="modal-body"><div id="agentExportContent"></div><p id="agentExportStatus" role="status" aria-live="polite"></p></div>
       <footer class="modal-footer"><div class="panel-toolbar-actions"><button type="button" class="btn" id="cancelAgentExportBtn">取消</button><button type="submit" class="btn primary" id="confirmAgentExportBtn" disabled><i data-lucide="download"></i>导出安装包</button></div></footer>
     </form>

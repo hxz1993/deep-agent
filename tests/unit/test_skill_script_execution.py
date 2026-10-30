@@ -27,6 +27,7 @@ from deep_agent.sandbox.types import (
     TruncationMetadata,
 )
 from deep_agent.skills.runtime import ResolvedSkill, ResolvedSkills
+from deep_agent.skills.package import inspect_skill_directory
 from deep_agent.skills.script_tool import build_skill_script_toolset
 from tests.helpers.sandbox import sandbox_test_python
 
@@ -63,6 +64,20 @@ class RecordingBackend:
         )
 
 
+def _indexed_skill(root: Path) -> ResolvedSkill:
+    (root / "SKILL.md").write_text("---\nname: demo\ndescription: Script fixture\n---\n")
+    parsed = inspect_skill_directory(root, content_hash="fixture", require_directory_match=False)
+    return ResolvedSkill(code="demo", source="upload", package_root=root,
+                         library_root=root.parent, resource_index=parsed.resource_index)
+
+
+def _script_request(**kwargs) -> ExecuteRequest:
+    code = kwargs.pop("code")
+    resources = kwargs.pop("files", ())
+    return ExecuteRequest(**kwargs, code="", script_entry="scripts/check.py",
+                          skill_files=(SandboxInputFile.from_bytes("scripts/check.py", code.encode()), *resources))
+
+
 def _context(*, user: str | None = "user") -> RunContext[AgentDeps]:
     return RunContext(
         deps=AgentDeps(session_id="skill-script", user=user),
@@ -78,10 +93,7 @@ class SkillScriptValidationTests(unittest.IsolatedAsyncioTestCase):
         root = Path(temporary.name)
         (root / "scripts").mkdir()
         (root / "scripts/check.py").write_text("pass", encoding="utf-8")
-        item = ResolvedSkill(
-            code="demo", source="upload", package_root=root, library_root=root.parent,
-            resource_index=[{"path": "scripts/check.py", "category": "script"}],
-        )
+        item = _indexed_skill(root)
         self.backend = RecordingBackend()
         self.toolset = build_skill_script_toolset({"demo": item}, backend=self.backend, timeout_sec=5)
         assert self.toolset is not None
@@ -130,7 +142,7 @@ class SkillScriptValidationTests(unittest.IsolatedAsyncioTestCase):
             nonlocal step
             step += 1
             self.assertEqual(set(info.function_tools[0].parameters_json_schema["properties"]),
-                             {"skill_code", "script_path", "arguments", "inputs", "resource_paths"})
+                             {"skill_code", "script_path", "arguments", "inputs", "resource_paths", "files"})
             if step == 1:
                 return ModelResponse(parts=[ToolCallPart("execute_skill_script", bad_args, "invalid")])
             if step == 2:
@@ -190,6 +202,35 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_skill_script_reads_explicit_env_file_without_environment_injection(self) -> None:
+        backend = SubprocessBackend(python_executable=sandbox_test_python(), max_concurrency=1)
+        try:
+            with tempfile.TemporaryDirectory(prefix="TMP_to_delete-skill-env-") as tmpdir:
+                root = Path(tmpdir)
+                (root / "scripts").mkdir()
+                (root / "SKILL.md").write_text("---\nname: demo\ndescription: ENV test\n---\n")
+                (root / ".env").write_text("DEMO_VALUE=example\n")
+                (root / "scripts/check.py").write_text(
+                    "import json, os\nfrom pathlib import Path\n"
+                    "values = dict(line.split('=', 1) for line in "
+                    "(Path(__file__).resolve().parents[1] / '.env').read_text().splitlines())\n"
+                    "Path('outputs/result.json').write_text(json.dumps({"
+                    "'configured': values['DEMO_VALUE'] == 'example', "
+                    "'injected': os.getenv('DEMO_VALUE') is not None}))\n"
+                )
+                parsed = inspect_skill_directory(root, content_hash="env-test", require_directory_match=False)
+                item = ResolvedSkill(code="demo", source="upload", package_root=root,
+                                     library_root=root.parent, resource_index=parsed.resource_index)
+                toolset = build_skill_script_toolset({"demo": item}, backend=backend, timeout_sec=10)
+                tools = await toolset.get_tools(_context())
+                response = await tools["execute_skill_script"].call_func({
+                    "skill_code": "demo", "script_path": "scripts/check.py", "resource_paths": [".env"],
+                }, _context())
+                self.assertEqual(response.return_value["status"], "ok", response.return_value.get("error"))
+                self.assertEqual(response.return_value["result"], {"configured": True, "injected": False})
+        finally:
+            await backend.aclose()
+
     async def test_subprocess_dev_supports_internal_script_protocol(self) -> None:
         backend = SubprocessBackend(
             python_executable=sandbox_test_python(),
@@ -197,14 +238,14 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
         )
         try:
             result = await backend.execute(
-                ExecuteRequest(
+                _script_request(
                     request_id="script-protocol",
                     mode="script",
                     code=(
                         "import json\n"
                         "from pathlib import Path\n"
                         "values = json.loads(Path('inputs.json').read_text())['values']\n"
-                        "label = Path('assets/label.txt').read_text()\n"
+                        "label = (Path(__file__).resolve().parents[1] / 'assets/label.txt').read_text()\n"
                         "Path('outputs/result.json').write_text("
                         "json.dumps({'label': label, 'total': sum(values)}))\n"
                         "print('validated')\n"
@@ -227,7 +268,7 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
         )
         try:
             result = await backend.execute(
-                ExecuteRequest(
+                _script_request(
                     request_id="script-invalid",
                     mode="script",
                     code=(
@@ -252,7 +293,7 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
         )
         task = asyncio.create_task(
             backend.execute(
-                ExecuteRequest(
+                _script_request(
                     request_id="script-cancel",
                     mode="script",
                     code="import time\ntime.sleep(30)\n",
@@ -275,30 +316,7 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
             (root / "assets").mkdir()
             (root / "scripts/check.py").write_text("print('ok')", encoding="utf-8")
             (root / "assets/input.json").write_text('{"x":1}', encoding="utf-8")
-            item = ResolvedSkill(
-                code="demo",
-                source="upload",
-                package_root=root,
-                library_root=root.parent,
-                resource_index=[
-                    {
-                        "path": "scripts/check.py",
-                        "category": "script",
-                        "mime": "text/x-python",
-                        "size": 11,
-                        "content_hash": "script",
-                        "readable": False,
-                    },
-                    {
-                        "path": "assets/input.json",
-                        "category": "asset",
-                        "mime": "application/json",
-                        "size": 7,
-                        "content_hash": "asset",
-                        "readable": True,
-                    },
-                ],
-            )
+            item = _indexed_skill(root)
             toolset = build_skill_script_toolset(
                 {"demo": item}, backend=backend, timeout_sec=12
             )
@@ -315,13 +333,15 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
                 _context(),
             )
 
-        self.assertEqual(response["result"], {"valid": True})
+        self.assertEqual(response.return_value["result"], {"valid": True})
         self.assertEqual(len(backend.requests), 1)
         request = backend.requests[0]
         self.assertEqual(request.mode, "script")
         self.assertEqual(request.arguments, ("--input", "inputs.json"))
         self.assertEqual(request.inputs, {"value": 3})
-        self.assertEqual(request.files[0].path, "assets/input.json")
+        self.assertEqual(request.files, ())
+        self.assertIn("assets/input.json", [file.path for file in request.skill_files])
+        self.assertEqual(request.script_entry, "scripts/check.py")
         self.assertEqual(request.timeout_ms, 12_000)
 
     async def test_cross_skill_and_script_as_resource_are_rejected(self) -> None:
@@ -330,22 +350,7 @@ class SkillScriptProtocolTests(unittest.IsolatedAsyncioTestCase):
             root = Path(tmpdir)
             (root / "scripts").mkdir()
             (root / "scripts/check.py").write_text("pass", encoding="utf-8")
-            item = ResolvedSkill(
-                code="demo",
-                source="upload",
-                package_root=root,
-                library_root=root.parent,
-                resource_index=[
-                    {
-                        "path": "scripts/check.py",
-                        "category": "script",
-                        "mime": "text/x-python",
-                        "size": 4,
-                        "content_hash": "script",
-                        "readable": False,
-                    }
-                ],
-            )
+            item = _indexed_skill(root)
             toolset = build_skill_script_toolset(
                 {"demo": item}, backend=backend, timeout_sec=5
             )

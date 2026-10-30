@@ -3,8 +3,10 @@ from __future__ import annotations
 import ast
 import contextlib
 import io
+import importlib
+import importlib.machinery
+import importlib.util
 import json
-import runpy
 import sys
 import traceback
 from pathlib import Path
@@ -13,7 +15,6 @@ from typing import Any, Iterator
 from deepagent_files import collect_published_files
 
 from deep_agent.sandbox.framing import FramingError, read_frame, write_frame
-from deep_agent.sandbox.network_guard import install_public_network_guard
 from deep_agent.sandbox.plotting import install_plotting_defaults
 from deep_agent.sandbox.serialization import serialize_result, truncate_utf8
 from deep_agent.sandbox.types import (
@@ -129,6 +130,7 @@ def execute_code(code: str, inputs: dict[str, Any]) -> tuple[str, str, Any | Non
 
 def execute_script(
     arguments: tuple[str, ...],
+    script_entry: str,
 ) -> tuple[
     str,
     str,
@@ -142,12 +144,51 @@ def execute_script(
     result: Any | None = None
     exit_code = 0
     original_argv = list(sys.argv)
+    original_path = list(sys.path)
+    original_main = sys.modules.get("__main__")
 
     with capture_stdio() as (stdout_capture, stderr_capture):
         try:
-            sys.argv = ["main.py", *arguments]
+            skill_root = Path("skill").resolve()
+            entry = (skill_root / script_entry).resolve()
+            if skill_root not in entry.parents or not entry.is_file():
+                raise ValueError("Skill execution entry is missing or outside its directory")
+            relative = entry.relative_to(skill_root)
+            package_name = ".".join(relative.parent.parts)
+            module_name = ".".join((*relative.parent.parts, entry.stem))
+            sys.path[:0] = [str(entry.parent), str(skill_root)]
+            package_entry = entry.stem == "__init__"
+            # An initializer selected as the entry must not first run as a parent import.
+            parent_package = package_name.rpartition(".")[0] if package_entry else package_name
+            if parent_package:
+                package = importlib.import_module(parent_package)
+                package_paths = getattr(package, "__path__", ())
+                expected_parent = entry.parent.parent if package_entry else entry.parent
+                if str(expected_parent) not in {str(Path(path).resolve()) for path in package_paths}:
+                    raise ValueError("Skill package resolution did not select the requested directory")
+            # Load the exact indexed file, not a guessed import name: legal
+            # entry names such as report.v2.py still retain their package.
+            if package_entry and package_name:
+                module_name = package_name
+            spec = importlib.util.spec_from_file_location(
+                module_name, entry,
+                loader=importlib.machinery.SourceFileLoader(module_name, str(entry)),
+                submodule_search_locations=[str(entry.parent)] if package_entry else None,
+            )
+            if spec is None or spec.loader is None:
+                raise ValueError("Skill execution entry could not be loaded")
+            module = importlib.util.module_from_spec(spec)
+            module.__name__ = "__main__"
+            module.__package__ = package_name
+            sys.modules["__main__"] = module
+            if package_entry and package_name:
+                sys.modules[package_name] = module
+            sys.argv = [str(entry), *arguments]
             try:
-                runpy.run_path("main.py", run_name="__main__")
+                code = spec.loader.get_code(spec.name)
+                if code is None:
+                    raise ValueError("Skill execution entry has no Python code")
+                exec(code, module.__dict__)
             except SystemExit as exc:
                 if exc.code not in (None, 0):
                     exit_code = int(exc.code) if isinstance(exc.code, int) else 1
@@ -160,6 +201,11 @@ def execute_script(
             error = _exception_payload(exc)
         finally:
             sys.argv = original_argv
+            sys.path[:] = original_path
+            if original_main is not None:
+                sys.modules["__main__"] = original_main
+            else:
+                sys.modules.pop("__main__", None)
 
         try:
             result_path = Path("outputs/result.json")
@@ -226,8 +272,10 @@ def handle_request(frame: dict[str, Any]) -> dict[str, Any]:
         )
 
     if request.mode == "script":
+        assert request.script_entry is not None
         stdout, stderr, result, error, truncated, exit_code = execute_script(
             request.arguments,
+            request.script_entry,
         )
     else:
         stdout, stderr, result, error, truncated = execute_code(
@@ -268,7 +316,6 @@ def handle_request(frame: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
-    install_public_network_guard()
     try:
         request_frame = read_frame(sys.stdin.buffer)
     except FramingError as exc:

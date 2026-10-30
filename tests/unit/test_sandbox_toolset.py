@@ -403,11 +403,15 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
                 "inputs",
                 "files",
                 "timeout_ms",
+                "script_entry",
+                "skill_files",
             },
         )
         self.assertEqual(payload["mode"], "expression")
         self.assertEqual(payload["arguments"], ())
         self.assertEqual(payload["files"], ())
+        self.assertEqual(payload["skill_files"], ())
+        self.assertIsNone(payload["script_entry"])
 
     async def test_backend_result_is_tool_return_without_binary(self) -> None:
         backend = FakeSandboxBackend()

@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.14.8`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.15.0`（测试分支）。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -14,6 +14,11 @@ v0.12.0 增加通用 `channel_message`：飞书与企微可信渠道对话自动
 不改变原有 Runs、配置、会话或文件。发送能力保留，不承诺跨请求、跨重启发送去重。
 
 各版本功能变更与迁移说明见 [`CHANGELOG.md`](CHANGELOG.md)。
+
+v0.15.0 将 Skill 脚本按原路径放入每次调用的 `skill/` 执行副本，支持同 Skill 多模块引用；
+普通 Python 与 Skill 共用授权文件输入、显式产物上传及 File ID 返回，PTC 使用相同入口。
+旧临时 `main.py` 布局不再兼容，依赖旧位置的脚本须调整；原历史事件、会话和附件不改写。
+随包 `.env` 由脚本自行读取，不注入变量，导出会原样携带。执行规则见 [Skill 指南](docs/guides/skills.md)。
 
 Console 对话测试提供独立的“对话 / 轨迹”页签。会话历史、轨迹、Plan 和持久化 SSE 统一读取
 `chat_session_events`；轨迹按 Sequence 原位展示 Run、模型 Part、工具调用/结果和 Compaction，

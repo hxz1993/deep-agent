@@ -34,8 +34,7 @@ def build_worker_env() -> dict[str, str]:
             env[key] = value
     env["PYTHONNOUSERSITE"] = "1"
     # Do not inherit macOS system/desktop proxy routes (often a loopback Clash
-    # listener). Public traffic connects directly and is checked by the worker
-    # socket guard on every connection.
+    # listener). Network clients connect directly using the deployment's routes.
     env["NO_PROXY"] = "*"
     env["no_proxy"] = "*"
     # Backend-controlled import path for the worker module; never inherit host PYTHONPATH.

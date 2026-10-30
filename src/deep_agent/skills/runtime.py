@@ -7,7 +7,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
 
 from sqlalchemy import select
@@ -70,6 +70,18 @@ class ResolvedSkill:
     package_root: Path
     library_root: Path
     resource_index: list[dict]
+    # Run-local source fingerprint, captured at resolution/construction rather
+    # than learned at execution after a package replacement could have happened.
+    definition_hash: str | None = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        try:
+            source = (self.package_root / "SKILL.md").read_bytes()
+        except OSError:
+            # Read-only resource fixtures may omit a definition. Such an item
+            # can still be inspected, but script execution must reject it.
+            return
+        object.__setattr__(self, "definition_hash", hashlib.sha256(source).hexdigest())
 
 
 @dataclass(frozen=True)
@@ -231,14 +243,21 @@ class SkillRuntimeLibrary:
         except (OSError, TypeError, ValueError):
             return None
 
-    def _resolved(self, row: SkillPackage) -> ResolvedSkill:
-        return ResolvedSkill(
+    def _resolved(self, row: SkillPackage) -> ResolvedSkill | None:
+        # The marker and definition must belong to the same row version even if
+        # another process replaces the shared runtime directory while resolving.
+        if not self._ready_from_disk(row):
+            return None
+        resolved = ResolvedSkill(
             code=row.code,
             source="upload",
             package_root=self._destination(row.code),
             library_root=self.root,
             resource_index=_row_resource_index(row),
         )
+        if resolved.definition_hash is None or not self._ready_from_disk(row):
+            return None
+        return resolved
 
     async def _download_package(
         self,
@@ -569,7 +588,7 @@ async def resolve_skills_for_run(
             unavailable.append(
                 SkillRuntimeIssue(
                     code=code,
-                    reason=state.error_code or state.status,
+                    reason=state.error_code or ("version_changed" if state.status == RUNTIME_READY else state.status),
                 )
             )
             continue

@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh-CN" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Skill 环境变量 · 设计评审</title><link rel="icon" href="/assets/favicon.svg"><link rel="stylesheet" href="/assets/themes.css"><link rel="stylesheet" href="/assets/console.css"><link rel="stylesheet" href="/assets/ui-primitives.css"><link rel="stylesheet" href="/assets/ui-select.css"><link rel="stylesheet" href="/assets/configuration.css"><link rel="stylesheet" href="prototype.css"><script src="/assets/lucide.min.js" defer></script><script src="/assets/marked.min.js" defer></script><script src="/assets/purify.min.js" defer></script><script src="prototype-data.js" defer></script><script src="/assets/skills.js" defer></script><script type="module" src="prototype.js"></script></head><body><div class="app-shell"><aside class="app-nav"><div class="brand"><img src="/assets/favicon.svg" alt=""><div><strong>DeepAgent</strong><small>设计评审</small></div></div><nav><button class="nav-button " type="button"><i data-lucide="message-square-code"></i><span>测试</span></button><button class="nav-button " type="button"><i data-lucide="bot"></i><span>Agent</span></button><button class="nav-button " type="button"><i data-lucide="puzzle"></i><span>集成</span></button><button class="nav-button " type="button"><i data-lucide="rss"></i><span>渠道</span></button><button class="nav-button " type="button"><i data-lucide="library"></i><span>模型</span></button><button class="nav-button " type="button"><i data-lucide="wrench"></i><span>工具</span></button><button class="nav-button " type="button"><i data-lucide="plug"></i><span>MCP</span></button><button class="nav-button active" type="button"><i data-lucide="book-open"></i><span>Skill</span></button><button class="nav-button " type="button"><i data-lucide="messages-square"></i><span>会话</span></button><button class="nav-button " type="button"><i data-lucide="chart-no-axes-combined"></i><span>用量</span></button><button class="nav-button " type="button"><i data-lucide="list"></i><span>日志</span></button></nav><div class="prototype-nav-bottom"><button class="nav-button" id="themeToggle"><i data-lucide="sun-moon"></i><span>切换主题</span></button><button class="nav-button" id="resetDemo"><i data-lucide="rotate-ccw"></i><span>重置示例</span></button></div></aside><main id="page-configuration" class="page active"><div class="review-stamp">设计评审，未落地 · 示例数据</div><div id="configurationHost">    <!-- Skill panel -->
+    <section class="panel skill-admin-panel active" id="panel-skills">
+      <div class="panel-toolbar" id="skillPageToolbar">
+        <div>
+          <h2>Skill</h2>
+          <p class="panel-subtitle">Skill 提供任务方法与资源，不会自动授予 MCP 或其他工具权限。</p>
+        </div>
+        <div class="panel-toolbar-actions">
+          <button class="btn" type="button" id="refreshSkillsBtn"><i data-lucide="refresh-cw"></i>重新加载</button>
+          <button class="btn" type="button" id="exportAllSkillsBtn"><i data-lucide="download"></i>导出全部</button>
+          <button class="btn primary" type="button" id="installSkillBtn"><i data-lucide="package-plus"></i>上传安装</button>
+        </div>
+      </div>
+      <input class="hidden" type="file" id="skillPackageInput" accept=".zip,application/zip" />
+      <div class="skill-list-view" id="skillListView">
+        <section class="skill-list-pane" id="skillListPane" aria-live="polite">
+          <div class="skill-list-state">正在加载 Skill…</div>
+        </section>
+      </div>
+      <section class="skill-detail-pane hidden agent-editor-page" id="skillDetailPane"></section>
+      <div class="skill-agent-ref-popover" id="skillAgentRefsPopover" popover="auto" aria-label="其他引用 Agent"></div>
+    </section>
+
+</div></main></div>
+<dialog id="environmentDialog"><form id="environmentForm"><header class="modal-header"><div><h3>环境变量</h3><p id="environmentSkill"></p></div><button type="button" class="btn icon-only" id="closeEnvironment" aria-label="关闭环境变量"><i data-lucide="x"></i></button></header><div class="modal-body"><div class="environment-toolbar"><span id="environmentScope"></span><button type="button" class="btn" id="addVariable"><i data-lucide="plus"></i>添加变量</button></div><div class="environment-grid"><div class="environment-labels"><span>变量名</span><span>变量值</span><span>敏感值</span><span></span></div><div id="variableRows"></div><div id="environmentEmpty">暂无环境变量</div></div><div class="environment-note"><i data-lucide="info"></i><span>仅在执行此 Skill 的 Python 脚本时注入，不随安装包导出。</span></div><p class="environment-error" id="environmentError" role="alert" hidden></p></div><footer class="modal-footer"><span>示例修改仅在当前页面生效</span><button type="button" class="btn" id="cancelEnvironment">取消</button><button type="submit" class="btn primary">保存</button></footer></form></dialog><div id="prototypeToast" role="status" hidden></div></body></html>

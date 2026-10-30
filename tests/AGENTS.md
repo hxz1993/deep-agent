@@ -10,6 +10,13 @@ Sandbox Worker 仍只使用受控的 `src`，禁止继承宿主的任意 `PYTHON
 
 ---
 
+## 0.15.0 Python／Skill 执行回归
+
+- `test_skill_execution_layout.py`：真实子进程验证原入口、同目录／包内相对导入、嵌套模块、入口身份、bundle边界、超时取消与临时目录清理，不保留main.py旧执行夹具。
+- `test_skill_files.py`：Skill与普通Python共用附件授权、显式上传、文件引用、版本指纹及失败补偿；输入模块、选中资源和平台附件分别计量。
+- Skill脚本返回内部ToolReturn，业务断言读取return_value；HTTP／SDK返回仍是执行信封，不据此增加History类型。PTC需用真实Monty和Python子进程验证文件事实回读，不以伪造MCP metadata代替。
+- 五接口验收使用Test只读数据；OCR为明确标注的本地PDF Mock，不算客户接口／准确率验收。通过真实8000上传、Agent普通与PTC路径、文件下载并核验摘要，保留会话。全量测试与平台不支持的skip分别记录。
+
 ## 运行命令
 
 运行中持久化回归入口：`unit/test_message_persistence.py`、`test_message_part_store.py`、
@@ -68,7 +75,7 @@ tests/
 | `test_ptc.py` | PTC新旧编码兼容、MCP双通道、Monty调用、URL/File ID文件变量与脱敏 |
 | `test_ptc_stream_failures.py` | 真实 SDK/Monty + 隔离 SQLite：PTC 连续失败后原生恢复、嵌套等待取消、Provider异常及普通工具重试耗尽的 SSE/History/Registry 闭环 |
 | `test_event_persister.py`、`test_runner_history.py` | 写入失败回执与超时释放、显式关闭 SDK 流后部分历史保存、终态写入失败不覆盖原始错误 |
-| `test_sandbox_*.py` | Python沙箱公网边界、FileStore输入、`deepagent_files`产物发布、回滚、依赖探针与子进程清理 |
+| `test_sandbox_*.py` | Python公网及内网HTTP可达性、FileStore输入、`deepagent_files`产物发布、回滚、依赖探针与子进程清理 |
 | `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、六Provider校验、Key掩码/保留和草稿测试 |
 | `test_web_tools.py`、`test_web_proxy_compat.py` | `builtin:web`目录、视觉模型条件注入、HTML图片位置与URL规范化、固定Provider无降级、SSRF-safe Fetch/Image边界及HTTP代理fake-IP/SNI兼容 |
 | `test_console_admin_auth.py` | 企业管理员放行、普通用户与固定admin拒绝、401/503、凭证缓存、管理路由审计和运行接口开放边界 |

@@ -24,7 +24,7 @@ let workspaceModule = null;
 let diagnosticsModule = null;
 const loadPage = createPageLoader({
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261030-release01412");
+    const module = await import("./configuration.js?v=20261030-skill-file-icons");
     await module.initConfiguration();
     configurationModule = module;
     return module;

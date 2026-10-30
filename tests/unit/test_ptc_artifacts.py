@@ -136,6 +136,45 @@ class PtcArtifactTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("record-4999", encoded)
         self.assertLess(len(encoded.encode()), 128 * 1024)
 
+    async def test_real_skill_file_upload_is_collected_by_outer_and_survives_history(self):
+        from deep_agent.skills.package import inspect_skill_directory
+        from deep_agent.skills.runtime import ResolvedSkill
+        from deep_agent.skills.script_tool import build_skill_script_toolset
+
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete-ptc-skill-") as temporary:
+            root = Path(temporary)
+            (root / "scripts").mkdir()
+            (root / "SKILL.md").write_text("---\nname: demo\ndescription: Report fixture\n---\n")
+            (root / "scripts/helper.py").write_text("TITLE = '真实子进程 Skill 报告'\n")
+            (root / "scripts/report.py").write_text(
+                "import json\nfrom pathlib import Path\nfrom .helper import TITLE\n"
+                "from deepagent_files import publish_path\n"
+                "Path(publish_path('skill-report.html', mime='text/html')).write_text(TITLE)\n"
+                "Path('outputs/result.json').write_text(json.dumps({'title': TITLE}))\n")
+            parsed = inspect_skill_directory(root, content_hash="fixture", require_directory_match=False)
+            item = ResolvedSkill(code="demo", source="upload", package_root=root,
+                                 library_root=root.parent, resource_index=parsed.resource_index)
+            skill = build_skill_script_toolset({"demo": item}, backend=self.backend, timeout_sec=10)
+            code = (
+                "created = await execute_skill_script(skill_code='demo', script_path='scripts/report.py')\n"
+                "assert created['status'] == 'ok'\n"
+                "{'title': created['result']['title'], 'file_id': created['files'][0]['file_id']}"
+            )
+            deps = self._deps("skill-artifacts")
+            await self._run(self._runner(code, extra_toolsets=(
+                BuiltinPtcToolset(skill, names=frozenset({"execute_skill_script"})),)), deps)
+            history = await self._history(deps)
+            outer = _outer(history)
+            file_id = next(iter(deps.session_file_artifacts))
+            self._assert_safe_metadata(outer, file_id)
+            self.assertEqual((await self.file_store.download(file_id, self.headers)).decode(),
+                             "真实子进程 Skill 报告")
+            self.assertEqual([call['tool_name'] for call in outer.metadata['ptc_diagnostics']['steps']],
+                             ['execute_skill_script'])
+            fresh = self._deps("skill-artifacts")
+            fresh.session_file_artifacts.update(session_file_metadata_from_history(history))
+            self.assertIn(file_id, fresh.session_file_artifacts)
+
     async def test_real_publish_read_export_survives_outer_history_and_new_run(self):
         read_code = (
             "from pathlib import Path\nfrom deepagent_files import input_path\n"

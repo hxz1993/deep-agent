@@ -14,7 +14,7 @@ Console 图标统一使用仓库内 `console/vendor/lucide.min.js` 的线性 SVG
 
 ## Console UI 开发分支
 
-Bundled Console 与后端统一在 `feat-ruge-0803` 主开发分支维护，不再保留独立 UI worktree。
+Bundled Console 与后端统一在当前 `test` 开发分支维护，不再保留独立 UI worktree。
 每批 UI 需求开始前先确认分支和工作区，保留已有改动；修改范围通常限定在
 `console/**`、`tests/frontend/console/**`，必要时同步前端说明。若需求实际需要后端
 API、SSE、Event Store或持久化契约变化，应先确认产品边界，再修改对应拥有层。
@@ -80,11 +80,11 @@ History 中运行工具一律只读，不能因工具目录补齐 widget 自动�
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心展示`builtin:general`、`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`、`builtin:document`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示 |
+| 内置工具目录 | 配置中心展示`builtin:general`、`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`、`builtin:document`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示；目录行复用UI工具的`ui-tool-tree-node`及公共资源布局，不依赖Skill旧卡片样式，交互仍按`data-tool-catalog-code`独立绑定 |
 | 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
 | 渠道配置 | 配置中心维护企微Account、Agent、Bot凭证和启停；顶部展示渠道网关部署/运行状态，列表展示机器人连接状态；快捷命令弹框从公共只读目录获取，与渠道 `/help` 共用定义 |
 | 任务计划 | 只识别`write_plan`完整快照；仅当前Run直播展示，任何Run终态后隐藏，重新打开History不恢复；同Turn Deferred由后端恢复PlanStore |
-| Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；文本、Word、Excel 资源可预览，脚本只列包内路径和数量，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
+| Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；资源目录复用本地Lucide文件图标，按后缀区分Excel/CSV绿色、Python蓝色、Word蓝色、PDF红色、PPT橙色、图片紫色；单行展示图标、相对路径和可用文件大小，完整路径悬停可见，不重复分类/MIME说明；所有目录项可选，文本/Word/Excel可读、脚本源码复用公共高亮代码块、图片经鉴权读取并复用图片弹框样式；PDF/PPTX等显示下载Skill包占位，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
 | 一体化控制台 | `/console/`；工作台、配置和诊断的唯一入口 |
 | 诊断日志 | `diagnostics.js`／`diagnostics-query.js`使用管理员只读`/diagnostics/logs/status`与`/diagnostics/logs`，查询当前实例API／网关的管道分隔文本日志；不读会话事件、不查询任意文件路径 |
 | 诊断会话 | `diagnostics-center.js`／`diagnostics-sessions.js`使用管理员`/diagnostics/sessions`五个GET接口，跨用户概览、列表和完整只读详情；统计按平台账号归属，含渠道会话但不解析企微发送人 |
@@ -697,4 +697,4 @@ GET /skills/references/agents 只投影 Agent.id/name/skills，管理员权限�
 
 Skill 列表筛选默认显示“全部 Skill”，第二项“未被引用”，独立分割线后为引用 Agent 默认顺序；三个口径分别使用 library/unlink/bot 图标。表格所有筛选都将自定义稳定排列在内置之前，名称旁仅保留内置标签；未被引用使用弱灰色 unlink 图标和文字。共享下拉通过可选 option.data-icon/data-separator-before 复用此展示，未标记的控件行为不变。
 
-引用 Agent 名称和浮层内容只展示，不点击回筛选；筛选只通过顶部下拉操作。整行点击进入 Skill 详情，+N 是独立的浮层热区，必须阻止事件冒泡到行导航。
+引用 Agent 名称和浮层内容只展示，不点击回筛选；筛选只通过顶部下拉操作。引用标签及标签旁间隙点击无操作，不进入详情；仅其余行区域进入 Skill 详情。+N 数字是独立浮层热区，悬停／键盘聚焦显示下划线，必须阻止事件冒泡到行导航。

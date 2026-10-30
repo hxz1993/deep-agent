@@ -10,7 +10,7 @@ from docx import Document
 from openpyxl import Workbook
 
 from deep_agent.skills.catalog import list_builtin_skills
-from deep_agent.skills.package import SkillPackageError, parse_skill_zip
+from deep_agent.skills.package import MAX_MODEL_TEXT_BYTES, SkillPackageError, parse_skill_zip
 
 
 def skill_zip(
@@ -69,6 +69,31 @@ class SkillPackageTests(unittest.TestCase):
             self.assertFalse(parsed.contains_scripts)
         finally:
             self._cleanup(parsed)
+
+    def test_env_files_are_indexed_as_text_assets_and_preserved_in_package(self) -> None:
+        buffer = io.BytesIO(skill_zip(wrapper=False))
+        with zipfile.ZipFile(buffer, "a") as archive:
+            archive.writestr(".env", "DEMO_VALUE=example\n")
+            archive.writestr("assets/service.env", "DEMO_URL=https://example.com\n")
+        parsed = parse_skill_zip(buffer.getvalue())
+        try:
+            by_path = {item["path"]: item for item in parsed.resource_index}
+            for path in (".env", "assets/service.env"):
+                self.assertEqual(by_path[path]["category"], "asset")
+                self.assertTrue(by_path[path]["readable"])
+                self.assertEqual(by_path[path]["mime"], "text/plain")
+            self.assertEqual((parsed.package_root / ".env").read_text(), "DEMO_VALUE=example\n")
+        finally:
+            self._cleanup(parsed)
+
+    def test_env_file_keeps_the_existing_text_resource_size_limit(self) -> None:
+        for path in (".env", "assets/service.env"):
+            with self.subTest(path=path):
+                buffer = io.BytesIO(skill_zip(wrapper=False))
+                with zipfile.ZipFile(buffer, "a") as archive:
+                    archive.writestr(path, "X" * (MAX_MODEL_TEXT_BYTES + 1))
+                with self.assertRaisesRegex(SkillPackageError, "Model-readable resource exceeds"):
+                    parse_skill_zip(buffer.getvalue())
 
     def test_scripts_are_stored_but_marked_non_readable(self) -> None:
         parsed = parse_skill_zip(skill_zip(scripts=True))

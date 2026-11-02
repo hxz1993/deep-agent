@@ -710,7 +710,7 @@
           <span class="field-label-row"><span>供应商</span><small class="field-subtitle">统一维护地址和凭据</small></span>
           <select id="llmModelProviderId" required></select>
         </label>
-        <div class="llm-advanced-divider" role="separator">
+        <div class="llm-advanced-divider">
           <span class="llm-advanced-label">
             模型能力配置
             <button
@@ -757,6 +757,22 @@
             <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="open_weights" /> 开放</label>
             <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="interleaved" /> 交错</label>
           </div>
+        </div>
+        <div class="llm-model-advanced-section hidden" id="llmModelAdvancedSection">
+          <details class="llm-model-compatibility" id="llmModelAdvancedSettings">
+            <summary class="llm-model-advanced-trigger">
+              <span class="llm-model-advanced-label">高级设置<i data-lucide="chevron-right" aria-hidden="true"></i></span>
+              <span class="llm-model-advanced-summary hidden" id="llmModelAdvancedSummary" aria-live="polite"></span>
+            </summary>
+            <div class="llm-model-compatibility-row">
+              <div class="llm-model-compatibility-copy">
+                <label id="llmModelMergeSystemLabel">合并开头的系统消息</label>
+                <p id="llmModelMergeSystemHelp">兼容部分开源模型的部署服务：将开头连续的 System 合为一条，保留内容和顺序。</p>
+              </div>
+              <button type="button" id="llmModelMergeSystem" class="model-enabled-switch off" role="switch" aria-checked="false" aria-labelledby="llmModelMergeSystemLabel" aria-describedby="llmModelMergeSystemHelp"><span></span></button>
+            </div>
+          </details>
+          <button type="button" class="llm-model-advanced-reset hidden" id="restoreLlmModelAdvanced">恢复默认</button>
         </div>
       </div>
       <div class="form-error hidden" data-form-error role="alert" aria-live="assertive"></div>

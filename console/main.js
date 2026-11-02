@@ -24,7 +24,7 @@ let workspaceModule = null;
 let diagnosticsModule = null;
 const loadPage = createPageLoader({
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261030-skill-file-icons");
+    const module = await import("./configuration.js?v=20261102-model-system-compatibility");
     await module.initConfiguration();
     configurationModule = module;
     return module;

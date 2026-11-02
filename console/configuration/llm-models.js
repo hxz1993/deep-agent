@@ -1,3 +1,5 @@
+const SINGLE_SYSTEM_MESSAGE_TAG = "single_system_message";
+
 function setCheckedValues(name, values) {
   const selected = new Set(Array.isArray(values) ? values : []);
   document.querySelectorAll(`input[name="${name}"]`).forEach((input) => {
@@ -133,6 +135,43 @@ function populateModelProviderSelect(selectedId = "") {
 const llmModelsAdmin = {
   catalogTargetProviderId: "",
   editorContext: { lockProvider: false, deriveName: false },
+  editorTags: [],
+  mergeLeadingSystem: false,
+
+  setCompatibilityDraft(tags = []) {
+    this.editorTags = [...tags];
+    this.mergeLeadingSystem = tags.includes(SINGLE_SYSTEM_MESSAGE_TAG);
+    document.getElementById("llmModelAdvancedSettings").open = false;
+    this.renderCompatibility();
+  },
+
+  renderCompatibility() {
+    const providerId = document.getElementById("llmModelProviderId").value;
+    const provider = state.llmProviders.find((item) => item.id === providerId);
+    const type = state.llmProviderTypes.find((item) => item.code === provider?.provider_type);
+    const supported = type?.model_protocol === "openai_chat";
+    const details = document.getElementById("llmModelAdvancedSettings");
+    document.getElementById("llmModelAdvancedSection").classList.toggle("hidden", !supported);
+    if (!supported) details.open = false;
+    const toggle = document.getElementById("llmModelMergeSystem");
+    toggle.setAttribute("aria-checked", String(this.mergeLeadingSystem));
+    toggle.classList.toggle("on", this.mergeLeadingSystem);
+    toggle.classList.toggle("off", !this.mergeLeadingSystem);
+    const summary = document.getElementById("llmModelAdvancedSummary");
+    summary.textContent = this.mergeLeadingSystem ? "已调整 1 项" : "";
+    summary.classList.toggle("hidden", !this.mergeLeadingSystem);
+    document.getElementById("restoreLlmModelAdvanced").classList.toggle("hidden", !details.open || !this.mergeLeadingSystem);
+  },
+
+  modelTags() {
+    const capabilityTags = new Set([...document.querySelectorAll('input[name="llmModelTag"]')].map((input) => input.value));
+    const otherTags = this.editorTags.filter((tag) => !capabilityTags.has(tag) && tag !== SINGLE_SYSTEM_MESSAGE_TAG);
+    return [...new Set([
+      ...readCheckedValues("llmModelTag"),
+      ...otherTags,
+      ...(this.mergeLeadingSystem ? [SINGLE_SYSTEM_MESSAGE_TAG] : []),
+    ])];
+  },
 
   setCatalogTargetProvider(providerId = "") {
     this.catalogTargetProviderId = providerId;
@@ -221,6 +260,7 @@ const llmModelsAdmin = {
     this.setCatalogFeedback();
     setCheckedValues("llmModelModality", prefill?.input_modalities || ["text"]);
     setCheckedValues("llmModelTag", prefill?.tags || []);
+    this.setCompatibilityDraft(prefill?.tags || []);
     document.getElementById("llmModelModal").showModal();
   },
 
@@ -289,6 +329,7 @@ const llmModelsAdmin = {
       const [model] = await Promise.all([
         apiFetch(`/api/v1/llm-models/${encodeURIComponent(modelId)}`),
         loadLlmProviders(),
+        loadLlmProviderTypes(),
       ]);
       this.setEditorContext(options);
       state.editingLlmModelId = modelId;
@@ -305,6 +346,7 @@ const llmModelsAdmin = {
       this.setCatalogFeedback();
       setCheckedValues("llmModelModality", model.input_modalities || []);
       setCheckedValues("llmModelTag", model.tags || []);
+      this.setCompatibilityDraft(model.tags || []);
       document.getElementById("llmModelModal").showModal();
     } catch (error) {
       showToast(error.message, true);
@@ -399,7 +441,7 @@ const llmModelsAdmin = {
         input_modalities: inputModalities,
         context_window_tokens: contextWindow,
         max_output_tokens: maxOutput,
-        tags: readCheckedValues("llmModelTag"),
+        tags: this.modelTags(),
       };
       if (!payload.provider_id) throw new Error("请选择供应商");
 
@@ -483,6 +525,16 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("cancelLlmModelBtn")?.addEventListener("click", () => {
     document.getElementById("llmModelModal").close();
+  });
+  document.getElementById("llmModelProviderId")?.addEventListener("change", () => llmModelsAdmin.renderCompatibility());
+  document.getElementById("llmModelAdvancedSettings")?.addEventListener("toggle", () => llmModelsAdmin.renderCompatibility());
+  document.getElementById("llmModelMergeSystem")?.addEventListener("click", () => {
+    llmModelsAdmin.mergeLeadingSystem = !llmModelsAdmin.mergeLeadingSystem;
+    llmModelsAdmin.renderCompatibility();
+  });
+  document.getElementById("restoreLlmModelAdvanced")?.addEventListener("click", () => {
+    llmModelsAdmin.mergeLeadingSystem = false;
+    llmModelsAdmin.renderCompatibility();
   });
 });
 

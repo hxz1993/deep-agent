@@ -224,7 +224,7 @@ test("网络搜索保留原切换样式，抓取使用左对齐Radio且不再配
   const fetchOptions = templateHtml.match(/name="webFetchMode" value="[^"]+"/g);
   assert.deepEqual(fetchOptions, ['name="webFetchMode" value="follow_search"', 'name="webFetchMode" value="system"']);
   assert.match(templateHtml, /class="web-fetch-options"/);
-  assert.doesNotMatch(templateHtml, /高级设置|第三方搜索/);
+  assert.doesNotMatch(dialog, /高级设置|第三方搜索/);
   assert.match(templateHtml, /name="webSearchCredentialSource" value="llm_provider"/);
   assert.match(templateHtml, /name="webSearchCredentialSource" value="api_key"/);
   assert.doesNotMatch(templateHtml, /webSearchTestModel|会话模型原生搜索|name="webSearchMode"/);

@@ -393,6 +393,13 @@ def resolve_provider_model(
             }
         elif provider.provider_type == "alibaba":
             profile = qwen38_chat_profile(model_name)
+        # An absent marker inherits the Provider/SDK profile, including backends
+        # that already merge by default. Only an explicit opt-in adds an override.
+        if "single_system_message" in (tags or []):
+            profile = {
+                **(profile or {}),
+                "openai_chat_supports_multiple_system_messages": False,
+            }
         model_class = (
             OpenAICompatibleVideoChatModel
             if "video" in (input_modalities or []) or "video_url" in (tags or [])

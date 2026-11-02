@@ -118,7 +118,7 @@ test("模型表单必填上下文和最大输出且模态与能力标签分开",
   assert.match(modelTemplate, /name="llmModelTag"/);
   assert.match(modelSource, /context_window_tokens: contextWindow/);
   assert.match(modelSource, /max_output_tokens: maxOutput/);
-  assert.match(modelSource, /tags: readCheckedValues\("llmModelTag"\)/);
+  assert.match(modelSource, /tags: this\.modelTags\(\)/);
   assert.match(modelSource, /provider_id: document\.getElementById\("llmModelProviderId"\)\.value/);
   assert.match(modelSource, /findCatalogProvider/);
   assert.doesNotMatch(modelTemplate, /llmModelApiKey|llmModelBaseUrl/);

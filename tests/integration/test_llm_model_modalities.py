@@ -80,6 +80,33 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             patched = patch_response.json()
             self.assertEqual(patched["input_modalities"], ["text"])
 
+    async def test_system_message_marker_round_trip_does_not_backfill_other_models(self) -> None:
+        async with AsyncClient(transport=self._transport, base_url="http://test", headers={"user": "fixture-admin"}) as client:
+            baseline = await client.post("/api/v1/llm-models", json=model_payload(
+                provider_id=self._provider_id, name="unchanged", tags=[]))
+            self.assertEqual(baseline.status_code, 201)
+            before = baseline.json()
+            before_read = await client.get(f"/api/v1/llm-models/{before['id']}")
+            self.assertEqual(before_read.status_code, 200)
+            tags = ["tool_call", "custom:existing", "single_system_message"]
+            enabled = await client.post("/api/v1/llm-models", json=model_payload(
+                provider_id=self._provider_id, name="compatibility", tags=tags))
+            self.assertEqual(enabled.status_code, 201)
+            model_id = enabled.json()["id"]
+            read = await client.get(f"/api/v1/llm-models/{model_id}")
+            self.assertEqual(read.status_code, 200)
+            self.assertEqual(read.json()["tags"], tags)
+            edited = await client.patch(f"/api/v1/llm-models/{model_id}", json={"description": "edit"})
+            self.assertEqual(edited.status_code, 200)
+            self.assertEqual(edited.json()["tags"], tags)
+            disabled = await client.patch(f"/api/v1/llm-models/{model_id}", json={"tags": tags[:-1]})
+            self.assertEqual(disabled.status_code, 200)
+            self.assertEqual(disabled.json()["tags"], tags[:-1])
+            unchanged = await client.get(f"/api/v1/llm-models/{before['id']}")
+            self.assertEqual(unchanged.json(), before_read.json())
+            stored = await get_context().stores.llm_model.get_by_id(before["id"])
+            self.assertEqual(stored.updated_at.isoformat(), before["updated_at"].replace("Z", "+00:00"))
+
     async def test_create_requires_modalities_context_and_output(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test") as client:
             response = await client.post(

@@ -14,6 +14,11 @@ Console 图标统一使用仓库内 `console/vendor/lucide.min.js` 的线性 SVG
 
 ## Console UI 开发分支
 
+模型弹框高级设置仅对 `openai_chat` 展示，默认折叠，手工开启的系统消息合并以
+`tags` 数组中的 `single_system_message` 标记保存。历史无标记保持关闭、
+不补写配置；能力目录刷新不覆盖兼容草稿，普通编辑与复制保留未知标签。恢复默认只改草稿，
+非默认摘要在收起时仍显示，恢复入口位于高级区右上角，不加入弹框底部。
+
 Bundled Console 与后端统一在当前 `test` 开发分支维护，不再保留独立 UI worktree。
 每批 UI 需求开始前先确认分支和工作区，保留已有改动；修改范围通常限定在
 `console/**`、`tests/frontend/console/**`，必要时同步前端说明。若需求实际需要后端

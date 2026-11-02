@@ -3,6 +3,14 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.15.1（测试分支）
+
+- 模型弹框增加默认折叠的高级设置，可为 OpenAI Chat 兼容模型开启“合并开头的系统消息”。配置复用模型 tags 中的 `single_system_message`，由现有 Pydantic AI Profile 执行合并；未配置或关闭时沿用框架及 Provider 默认，不补写历史模型。
+- 新建、编辑、复制、能力刷新及配置备份恢复保留兼容标记和其他模型标签；非 OpenAI Chat 协议不显示、不应用该设置。已有千问、DeepSeek、Kimi 和视频适配继续保留。
+- 更新思考强度调研，并归档三张尚未实施的 Agent／Skill 评测原型；这些资料不代表产品已新增相关功能。
+- 本版本是综合图片查看功能开发前的基线，不包含 `view_image`；现有 `web_image_view` 保持原行为。
+- 依赖变更（运维）：无；数据库保持 013，无新增或修改迁移。版本推送和 Tag 不代表已部署线上。
+
 ## v0.15.0（测试分支）
 
 - 发布审计与完整回归见[发布验收](docs/reports/2026-10-30-release-0.15.0-audit.md)，实现阶段与旧脚本适配边界见[验收记录](docs/reports/2026-10-30-python-skill-0.15.0-local-validation.md)。

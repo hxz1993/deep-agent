@@ -6,8 +6,9 @@ import vm from "node:vm";
 const source = await readFile(new URL("../../../console/configuration/llm-models.js", import.meta.url), "utf8");
 const template = await readFile(new URL("../../../console/configuration-template.html", import.meta.url), "utf8");
 const marker = "single_system_message";
+const inlineMarker = "inline_tool_schema_refs";
 
-function harness(tags = []) {
+function harness(tags = [], providerId = "private") {
   const elements = new Map(), requests = [], errors = [];
   function element(id) {
     if (!elements.has(id)) {
@@ -35,11 +36,13 @@ function harness(tags = []) {
     llmModelModality: ["text", "image", "audio", "video"],
   };
   for (const [name, values] of Object.entries(checks)) checks[name] = values.map((value) => ({ value, checked: false }));
-  const row = { id: "saved", provider_id: "qwen", name: "模型", model: "qwen3.8-flash", description: "",
+  const row = { id: "saved", provider_id: providerId, name: "模型", model: "qwen3.8-flash", description: "",
     context_window_tokens: 128000, max_output_tokens: 8192, input_modalities: ["text"], tags };
   const state = {
-    llmProviders: [{ id: "qwen", provider_type: "alibaba" }, { id: "claude", provider_type: "anthropic" }],
-    llmProviderTypes: [{ code: "alibaba", model_protocol: "openai_chat" }, { code: "anthropic", model_protocol: "anthropic" }],
+    llmProviders: [{ id: "qwen", provider_type: "alibaba" }, { id: "claude", provider_type: "anthropic" },
+      { id: "private", provider_type: "openai_compatible" }],
+    llmProviderTypes: [{ code: "alibaba", model_protocol: "openai_chat" }, { code: "anthropic", model_protocol: "anthropic" },
+      { code: "openai_compatible", model_protocol: "openai_chat" }],
   };
   let loaded;
   const context = {
@@ -81,6 +84,7 @@ test("历史空配置与新建默认关闭，打开不写配置且高级区默�
     const h = harness(tags);
     await h.admin.openEdit("saved");
     assert.equal(h.element("llmModelAdvancedSettings").open, false);
+    assert.equal(h.element("llmModelAdvancedSection").classList.contains("hidden"), false);
     assert.equal(h.element("llmModelMergeSystem").attributes["aria-checked"], "false");
     assert.equal(h.element("llmModelAdvancedSummary").classList.contains("hidden"), true);
     assert.equal(h.requests.some((r) => r.method), false);
@@ -147,7 +151,7 @@ test("复制继承设置，切换不适用协议仅隐藏设置而不删除它",
   await h.element("llmModelProviderId").fire("change");
   assert.equal(h.element("llmModelAdvancedSection").classList.contains("hidden"), true);
   assert.equal(h.admin.modelTags().includes(marker), true);
-  h.element("llmModelProviderId").value = "qwen";
+  h.element("llmModelProviderId").value = "private";
   await h.element("llmModelProviderId").fire("change");
   assert.equal(h.element("llmModelAdvancedSection").classList.contains("hidden"), false);
   assert.equal(h.element("llmModelMergeSystem").attributes["aria-checked"], "true");
@@ -160,4 +164,44 @@ test("高级开关与说明可访问，兼容标记不加入能力复选框", ()
   assert.match(template, /role="switch"[^>]*aria-checked="false"[^>]*aria-labelledby="llmModelMergeSystemLabel"/);
   assert.match(template, /aria-describedby="llmModelMergeSystemHelp"/);
   assert.doesNotMatch(template, /name="llmModelTag" value="single_system_message"/);
+  assert.match(template, /role="switch"[^>]*aria-checked="false"[^>]*aria-labelledby="llmModelInlineToolRefsLabel"/);
+  assert.doesNotMatch(template, /name="llmModelTag" value="inline_tool_schema_refs"/);
+});
+
+test("展开引用默认关闭，两个标记独立保存，复制和目录刷新继承", async () => {
+  const h = harness(["tool_call", marker], "private");
+  await h.admin.openEdit("saved");
+  assert.equal(h.element("llmModelAdvancedSection").classList.contains("hidden"), false);
+  assert.equal(h.element("llmModelInlineToolRefs").attributes["aria-checked"], "false");
+  await h.element("llmModelInlineToolRefs").fire("click");
+  assert.equal(h.element("llmModelAdvancedSummary").textContent, "已调整 2 项");
+  await h.element("llmModelMergeSystem").fire("click");
+  await h.admin.save({ preventDefault() {}, currentTarget: h.element("llmModelForm") });
+  assert.deepEqual(JSON.parse(h.requests.at(-1).body).tags, ["tool_call", inlineMarker]);
+  h.row.tags.push(inlineMarker);
+  await h.admin.openCopy("saved");
+  assert.equal(h.element("llmModelAdvancedSummary").textContent, "已调整 2 项");
+  await h.admin.openEdit("saved");
+  await h.admin.updateFromCatalog();
+  assert.equal(Number(h.element("llmModelContextWindow").value), 256000);
+  assert.equal(h.admin.modelTags().includes(inlineMarker), true);
+});
+
+test("切换到其他 Provider 隐藏整个高级区，切回后保留两项设置", async () => {
+  const h = harness([marker, inlineMarker, "custom:existing"], "private");
+  await h.admin.openEdit("saved");
+  h.element("llmModelProviderId").value = "qwen";
+  await h.element("llmModelProviderId").fire("change");
+  assert.equal(h.element("llmModelAdvancedSection").classList.contains("hidden"), true);
+  assert.equal(h.element("llmModelAdvancedSettings").open, false);
+  assert.equal(h.element("llmModelAdvancedSummary").classList.contains("hidden"), true);
+  await h.element("restoreLlmModelAdvanced").fire("click");
+  assert.deepEqual(Array.from(h.admin.modelTags()), ["custom:existing", marker, inlineMarker]);
+  h.element("llmModelProviderId").value = "private";
+  await h.element("llmModelProviderId").fire("change");
+  assert.equal(h.element("llmModelMergeSystem").attributes["aria-checked"], "true");
+  assert.equal(h.element("llmModelInlineToolRefs").attributes["aria-checked"], "true");
+  await h.element("restoreLlmModelAdvanced").fire("click");
+  assert.deepEqual(Array.from(h.admin.modelTags()), ["custom:existing"]);
+  assert.equal(h.requests.some((request) => request.method), false);
 });

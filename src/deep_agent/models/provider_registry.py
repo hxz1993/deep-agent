@@ -30,6 +30,11 @@ from deep_agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.models.compatible_providers import MiniMaxProvider, StepFunProvider
 from deep_agent.models.http_transport import model_http_settings
 from deep_agent.models.qwen import qwen38_chat_profile
+from deep_agent.models.tool_schema_refs import (
+    INLINE_TOOL_SCHEMA_REFS_TAG,
+    InlineToolRefsChatModel,
+    InlineToolRefsVideoChatModel,
+)
 from deep_agent.core.exceptions import DeepAgentError
 from deep_agent.options import OPTION
 
@@ -380,6 +385,7 @@ def resolve_provider_model(
 
     if definition.model_protocol == "openai_chat":
         runtime_provider = _openai_style_provider(provider)
+        supports_compatibility_overrides = provider.provider_type == "openai_compatible"
         profile = None
         if provider.provider_type == "deepseek":
             profile = deepseek_chat_profile(model_name)
@@ -395,16 +401,16 @@ def resolve_provider_model(
             profile = qwen38_chat_profile(model_name)
         # An absent marker inherits the Provider/SDK profile, including backends
         # that already merge by default. Only an explicit opt-in adds an override.
-        if "single_system_message" in (tags or []):
+        if supports_compatibility_overrides and "single_system_message" in (tags or []):
             profile = {
                 **(profile or {}),
                 "openai_chat_supports_multiple_system_messages": False,
             }
-        model_class = (
-            OpenAICompatibleVideoChatModel
-            if "video" in (input_modalities or []) or "video_url" in (tags or [])
-            else OpenAIChatModel
-        )
+        supports_video = "video" in (input_modalities or []) or "video_url" in (tags or [])
+        if supports_compatibility_overrides and INLINE_TOOL_SCHEMA_REFS_TAG in (tags or []):
+            model_class = InlineToolRefsVideoChatModel if supports_video else InlineToolRefsChatModel
+        else:
+            model_class = OpenAICompatibleVideoChatModel if supports_video else OpenAIChatModel
         model = model_class(
             model_name,
             provider=runtime_provider,

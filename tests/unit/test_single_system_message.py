@@ -41,20 +41,14 @@ class SystemMessageProfileTests(unittest.TestCase):
                 self.assertNotEqual(model.profile.get("openai_chat_supports_multiple_system_messages"), False)
 
     def test_override_preserves_every_existing_profile_value(self):
-        for provider, name in (("openai_compatible", "custom-model"), ("openai", "gpt-4.1"),
-                               ("alibaba", "qwen3.8-flash"), ("alibaba", "qwen3.8-max"),
-                               ("deepseek", "deepseek-v4-pro"), ("moonshotai", "kimi-k2.6"),
-                               ("openrouter", "openai/gpt-4.1"), ("zai", "glm-5.2"),
-                               ("stepfun", "step-3.5-flash")):
-            for video in (False, True):
-                with self.subTest(provider=provider, name=name, video=video):
-                    before = make_model(provider_type=provider, name=name, video=video)
-                    after = make_model(True, provider_type=provider, name=name, video=video)
-                    self.assertIs(type(before), type(after))
-                    self.assertFalse(after.profile["openai_chat_supports_multiple_system_messages"])
-                    flag = "openai_chat_supports_multiple_system_messages"
-                    self.assertEqual({k: v for k, v in before.profile.items() if k != flag},
-                                     {k: v for k, v in after.profile.items() if k != flag})
+        for video in (False, True):
+            with self.subTest(video=video):
+                before = make_model(video=video)
+                after = make_model(True, video=video)
+                self.assertIs(type(before), type(after))
+                self.assertEqual(after.profile, {
+                    **before.profile, "openai_chat_supports_multiple_system_messages": False,
+                })
 
     def test_disabled_does_not_override_a_provider_that_already_merges(self):
         with patch.object(OpenAIProvider, "model_profile", return_value={
@@ -62,11 +56,18 @@ class SystemMessageProfileTests(unittest.TestCase):
         }):
             self.assertFalse(make_model().profile["openai_chat_supports_multiple_system_messages"])
 
-    def test_other_protocols_ignore_marker(self):
-        for provider, name in (("anthropic", "claude-sonnet-4-5"), ("google", "gemini-2.5-flash")):
+    def test_other_providers_ignore_stored_marker(self):
+        for provider, name in (
+            ("openai", "gpt-4.1"), ("alibaba", "qwen3.8-flash"),
+            ("deepseek", "deepseek-v4-pro"), ("moonshotai", "kimi-k2.6"),
+            ("openrouter", "openai/gpt-4.1"), ("zai", "glm-5.2"),
+            ("stepfun", "step-3.5-flash"), ("anthropic", "claude-sonnet-4-5"),
+            ("google", "gemini-2.5-flash"),
+        ):
             with self.subTest(provider=provider):
                 before = make_model(provider_type=provider, name=name)
                 after = make_model(True, provider_type=provider, name=name)
+                self.assertIs(type(before), type(after))
                 self.assertEqual(before.profile, after.profile)
 
 

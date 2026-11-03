@@ -80,7 +80,7 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             patched = patch_response.json()
             self.assertEqual(patched["input_modalities"], ["text"])
 
-    async def test_system_message_marker_round_trip_does_not_backfill_other_models(self) -> None:
+    async def test_compatibility_markers_round_trip_does_not_backfill_other_models(self) -> None:
         async with AsyncClient(transport=self._transport, base_url="http://test", headers={"user": "fixture-admin"}) as client:
             baseline = await client.post("/api/v1/llm-models", json=model_payload(
                 provider_id=self._provider_id, name="unchanged", tags=[]))
@@ -88,7 +88,7 @@ class LlmModelRuntimeFactsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             before = baseline.json()
             before_read = await client.get(f"/api/v1/llm-models/{before['id']}")
             self.assertEqual(before_read.status_code, 200)
-            tags = ["tool_call", "custom:existing", "single_system_message"]
+            tags = ["tool_call", "custom:existing", "single_system_message", "inline_tool_schema_refs"]
             enabled = await client.post("/api/v1/llm-models", json=model_payload(
                 provider_id=self._provider_id, name="compatibility", tags=tags))
             self.assertEqual(enabled.status_code, 201)

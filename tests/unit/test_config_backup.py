@@ -148,7 +148,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "SELECT context_window_tokens, max_output_tokens, tags "
                         "FROM llm_models WHERE id = 'model-1'"
                     ).fetchone(),
-                    (128000, 8192, '["reasoning","tool_call","single_system_message"]'),
+                    (128000, 8192, '["reasoning","tool_call","single_system_message","inline_tool_schema_refs"]'),
                 )
                 self.assertNotIn(
                     "api_key",
@@ -519,7 +519,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                         "input_modalities": ["text"],
                         "context_window_tokens": 128000,
                         "max_output_tokens": 8192,
-                        "tags": ["reasoning", "tool_call", "single_system_message"],
+                        "tags": ["reasoning", "tool_call", "single_system_message", "inline_tool_schema_refs"],
                     },
                 )
                 await connection.execute(

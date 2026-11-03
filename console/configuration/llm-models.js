@@ -1,4 +1,5 @@
 const SINGLE_SYSTEM_MESSAGE_TAG = "single_system_message";
+const INLINE_TOOL_SCHEMA_REFS_TAG = "inline_tool_schema_refs";
 
 function setCheckedValues(name, values) {
   const selected = new Set(Array.isArray(values) ? values : []);
@@ -137,39 +138,60 @@ const llmModelsAdmin = {
   editorContext: { lockProvider: false, deriveName: false },
   editorTags: [],
   mergeLeadingSystem: false,
+  inlineToolSchemaRefs: false,
 
   setCompatibilityDraft(tags = []) {
     this.editorTags = [...tags];
     this.mergeLeadingSystem = tags.includes(SINGLE_SYSTEM_MESSAGE_TAG);
+    this.inlineToolSchemaRefs = tags.includes(INLINE_TOOL_SCHEMA_REFS_TAG);
     document.getElementById("llmModelAdvancedSettings").open = false;
     this.renderCompatibility();
   },
 
-  renderCompatibility() {
+  supportsCompatibilityOverrides() {
     const providerId = document.getElementById("llmModelProviderId").value;
     const provider = state.llmProviders.find((item) => item.id === providerId);
     const type = state.llmProviderTypes.find((item) => item.code === provider?.provider_type);
-    const supported = type?.model_protocol === "openai_chat";
+    return type?.code === "openai_compatible" && type.model_protocol === "openai_chat";
+  },
+
+  renderCompatibility() {
+    const supported = this.supportsCompatibilityOverrides();
     const details = document.getElementById("llmModelAdvancedSettings");
     document.getElementById("llmModelAdvancedSection").classList.toggle("hidden", !supported);
     if (!supported) details.open = false;
-    const toggle = document.getElementById("llmModelMergeSystem");
-    toggle.setAttribute("aria-checked", String(this.mergeLeadingSystem));
-    toggle.classList.toggle("on", this.mergeLeadingSystem);
-    toggle.classList.toggle("off", !this.mergeLeadingSystem);
+    for (const [id, enabled] of [
+      ["llmModelMergeSystem", this.mergeLeadingSystem],
+      ["llmModelInlineToolRefs", this.inlineToolSchemaRefs],
+    ]) {
+      const toggle = document.getElementById(id);
+      toggle.setAttribute("aria-checked", String(enabled));
+      toggle.classList.toggle("on", enabled);
+      toggle.classList.toggle("off", !enabled);
+    }
+    const count = supported ? Number(this.mergeLeadingSystem) + Number(this.inlineToolSchemaRefs) : 0;
     const summary = document.getElementById("llmModelAdvancedSummary");
-    summary.textContent = this.mergeLeadingSystem ? "已调整 1 项" : "";
-    summary.classList.toggle("hidden", !this.mergeLeadingSystem);
-    document.getElementById("restoreLlmModelAdvanced").classList.toggle("hidden", !details.open || !this.mergeLeadingSystem);
+    summary.textContent = count ? `已调整 ${count} 项` : "";
+    summary.classList.toggle("hidden", !count);
+    document.getElementById("restoreLlmModelAdvanced").classList.toggle("hidden", !details.open || !count);
+  },
+
+  restoreCompatibilityDefaults() {
+    if (!this.supportsCompatibilityOverrides()) return;
+    this.mergeLeadingSystem = false;
+    this.inlineToolSchemaRefs = false;
+    this.renderCompatibility();
   },
 
   modelTags() {
     const capabilityTags = new Set([...document.querySelectorAll('input[name="llmModelTag"]')].map((input) => input.value));
-    const otherTags = this.editorTags.filter((tag) => !capabilityTags.has(tag) && tag !== SINGLE_SYSTEM_MESSAGE_TAG);
+    const otherTags = this.editorTags.filter((tag) =>
+      !capabilityTags.has(tag) && tag !== SINGLE_SYSTEM_MESSAGE_TAG && tag !== INLINE_TOOL_SCHEMA_REFS_TAG);
     return [...new Set([
       ...readCheckedValues("llmModelTag"),
       ...otherTags,
       ...(this.mergeLeadingSystem ? [SINGLE_SYSTEM_MESSAGE_TAG] : []),
+      ...(this.inlineToolSchemaRefs ? [INLINE_TOOL_SCHEMA_REFS_TAG] : []),
     ])];
   },
 
@@ -532,10 +554,11 @@ document.addEventListener("DOMContentLoaded", () => {
     llmModelsAdmin.mergeLeadingSystem = !llmModelsAdmin.mergeLeadingSystem;
     llmModelsAdmin.renderCompatibility();
   });
-  document.getElementById("restoreLlmModelAdvanced")?.addEventListener("click", () => {
-    llmModelsAdmin.mergeLeadingSystem = false;
+  document.getElementById("llmModelInlineToolRefs")?.addEventListener("click", () => {
+    llmModelsAdmin.inlineToolSchemaRefs = !llmModelsAdmin.inlineToolSchemaRefs;
     llmModelsAdmin.renderCompatibility();
   });
+  document.getElementById("restoreLlmModelAdvanced")?.addEventListener("click", () => llmModelsAdmin.restoreCompatibilityDefaults());
 });
 
 window.__LlmModelConfigurationUI = {

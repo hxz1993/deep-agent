@@ -771,6 +771,13 @@
               </div>
               <button type="button" id="llmModelMergeSystem" class="model-enabled-switch off" role="switch" aria-checked="false" aria-labelledby="llmModelMergeSystemLabel" aria-describedby="llmModelMergeSystemHelp"><span></span></button>
             </div>
+            <div class="llm-model-compatibility-row">
+              <div class="llm-model-compatibility-copy">
+                <label id="llmModelInlineToolRefsLabel">展开工具参数引用</label>
+                <p id="llmModelInlineToolRefsHelp">兼容部分千问开源模型的部署服务：将工具参数中的引用展开为完整定义。</p>
+              </div>
+              <button type="button" id="llmModelInlineToolRefs" class="model-enabled-switch off" role="switch" aria-checked="false" aria-labelledby="llmModelInlineToolRefsLabel" aria-describedby="llmModelInlineToolRefsHelp"><span></span></button>
+            </div>
           </details>
           <button type="button" class="llm-model-advanced-reset hidden" id="restoreLlmModelAdvanced">恢复默认</button>
         </div>

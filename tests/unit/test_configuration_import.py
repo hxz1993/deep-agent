@@ -283,7 +283,9 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                     text("SELECT COUNT(*) FROM chat_sessions")
                 )
                 model_tags = await connection.scalar(text("SELECT tags FROM llm_models WHERE id='model-1'"))
-                self.assertEqual(json.loads(model_tags), ["reasoning", "tool_call", "single_system_message"])
+                self.assertEqual(json.loads(model_tags), [
+                    "reasoning", "tool_call", "single_system_message", "inline_tool_schema_refs",
+                ])
             self.assertEqual(agent_ids, ["agent-1"])
             self.assertEqual(
                 tuple(provider),

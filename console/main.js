@@ -24,7 +24,7 @@ let workspaceModule = null;
 let diagnosticsModule = null;
 const loadPage = createPageLoader({
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261102-model-system-compatibility");
+    const module = await import("./configuration.js?v=20261103-model-compatibility-scope");
     await module.initConfiguration();
     configurationModule = module;
     return module;

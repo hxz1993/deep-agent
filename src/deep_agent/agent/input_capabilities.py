@@ -122,8 +122,8 @@ def build_capability_instruction_block(spec: AgentSpec, *, document_config: Docu
                 "the Provider determines whether the selected model accepts them."
             )
         lines.append(
-            "When a current or historical session attachment is readable, the read_file system tool "
-            "is injected automatically. Use resource={type: attachment, file_id: ...}; follow "
+            "When a session attachment or a trusted tool-generated file is readable, the read_file system tool "
+            "is injected automatically. For both, use resource={type: attachment, file_id: ...}; follow "
             "next_offset and next_char_offset while has_more is true. read_file reads text, DOCX, XLSX, PPTX and PDF text layers; "
             "PDF offsets are physical pages. It does not perform image or scanned-page OCR. No extracted text does not mean the source page has no content."
         )

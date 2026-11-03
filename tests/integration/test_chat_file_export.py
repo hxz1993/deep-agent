@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
+from deep_agent.agent.tool_output_limits import session_file_metadata_from_history
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
@@ -201,6 +202,10 @@ class ChatFileExportIntegrationTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(len(returns), 1)
         self.assertEqual(returns[0].content["download_record_id"], "download-record")
+        ref = session_file_metadata_from_history(history)["generated-file"]
+        self.assertEqual(ref["file_name"], "generated-report.md")
+        self.assertEqual(ref["mime"], "text/plain")
+        self.assertEqual(ref["byte_size"], len("# 测试报告".encode()))
 
     async def test_existing_attachment_reuses_file_id_without_upload(self) -> None:
         model, _exposed = self._model(

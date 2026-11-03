@@ -195,7 +195,7 @@ def build_document_toolset(
         """解析授权文档，或从当前 Run 的固定可读内容缓存按 Token 预算读取。
 
         Args:
-            resource: 会话附件、已授权 Skill 文件或本工具返回的 document 引用。
+            resource: 当前会话附件或可信工具产物的 file_id、已授权 Skill 文件，或本工具返回的 document 引用。
             page_start: 原始页范围起点，从 1 开始；仅控制缓存展示，不减少首次供应商解析页数。
             page_end: 原始页范围终点（包含）；省略则读到范围末尾。
             limit: 最多返回的页面数；省略时按当前模型 24000/48000 Token 预算尽量返回。

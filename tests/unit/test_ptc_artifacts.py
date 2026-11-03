@@ -19,13 +19,16 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_output_limits import build_tool_output_limits, session_file_metadata_from_history
 from deep_agent.capabilities import build_registry
+from deep_agent.files.export_schema import ExportFileResult
 from deep_agent.files.export_toolset import build_file_export_toolset
 from deep_agent.files.storage import LocalFileStore
+from deep_agent.files.toolset import build_file_toolset
 from deep_agent.db.serialization import serialize_message
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.ptc.builtin import BuiltinPtcToolset
 from deep_agent.ptc.diagnostics import Collector
 from deep_agent.ptc.file_payload import build_code_mode_tool_package
+from deep_agent.ptc.limits import PTC_BUILTIN_METADATA_KEY
 from deep_agent.ptc.toolset import HybridCodeModeToolset
 from deep_agent.sandbox.subprocess_dev.backend import SubprocessBackend
 from tests.helpers.sandbox import sandbox_test_python
@@ -47,6 +50,20 @@ def _outer(messages, call_id="outer"):
 
 
 class PtcArtifactMetadataTests(unittest.TestCase):
+    def test_republishing_spilled_result_does_not_reclassify_it(self):
+        deps = AgentDeps(session_id="overflow-export", run_id="run")
+        original = {"artifact_id": "spilled", "kind": "tool_result_overflow", "content_hash": "known"}
+        deps.session_file_artifacts["spilled"] = dict(original)
+        collector = Collector(parent_id="outer", run_id=deps.run_id,
+                              session_id=deps.session_id, sensitive_values=frozenset())
+        tool_def = SimpleNamespace(name="export_file_to_download_center",
+                                   metadata={PTC_BUILTIN_METADATA_KEY: True})
+        result = ExportFileResult(source_type="platform_file", download_record_id="record",
+                                  file_id="spilled", file_name="renamed.json", byte_size=7)
+        HybridCodeMode._collect_files(SimpleNamespace(deps=deps), tool_def, result, collector)
+        self.assertEqual(deps.session_file_artifacts["spilled"], original)
+        self.assertEqual(collector.generated_files, {})
+
     def test_reused_outer_call_id_without_new_files_clears_previous_refs(self):
         deps = AgentDeps(session_id="reused-outer", run_id="run")
         ctx = SimpleNamespace(deps=deps)
@@ -174,6 +191,13 @@ class PtcArtifactTests(unittest.IsolatedAsyncioTestCase):
             fresh = self._deps("skill-artifacts")
             fresh.session_file_artifacts.update(session_file_metadata_from_history(history))
             self.assertIn(file_id, fresh.session_file_artifacts)
+            for state in (deps, fresh):
+                ctx = RunContext(deps=state, model=TestModel(), usage=RunUsage())
+                read_file = (await build_file_toolset().get_tools(ctx))["read_file"]
+                result = await read_file.call_func({
+                    "resource": {"type": "attachment", "file_id": file_id},
+                }, ctx)
+                self.assertEqual(result.content, "真实子进程 Skill 报告")
 
     async def test_real_publish_read_export_survives_outer_history_and_new_run(self):
         read_code = (
@@ -219,6 +243,7 @@ class PtcArtifactTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reused.outcome, "success")
         self.assertIn(file_id, fresh.session_file_artifacts)
         self._assert_safe_metadata(reused, file_id)
+        self.assertEqual(reused.metadata["generated_files"], outer.metadata["generated_files"])
 
     async def test_trusted_content_export_becomes_readable_by_next_python_call(self):
         read_code = (

@@ -57,20 +57,18 @@ class HybridCodeMode(CodeMode[AgentDeps]):
         from deep_agent.files.export_schema import ExportFileResult
 
         refs = []
-        if tool_def.name in {"execute_python", "execute_skill_script"} and isinstance(result, ToolReturn):
+        if tool_def.name in {
+            "execute_python", "execute_skill_script", "export_file_to_download_center",
+        } and isinstance(result, ToolReturn):
             for ref in _generated_file_refs(result.metadata or {}):
                 known = ctx.deps.session_file_artifacts.get(ref["file_id"])
                 if known is not None:
                     refs.append(dict(known))
         elif tool_def.name == "export_file_to_download_center" and isinstance(result, ExportFileResult):
-            # The trusted tool has already authorized/uploaded/registered this
-            # exact file. Don't grant access from arbitrary MCP dictionaries.
-            ref = {
-                "file_id": result.file_id, "file_name": result.file_name,
-                "byte_size": result.byte_size, "kind": "sandbox_output",
-            }
-            ctx.deps.session_file_artifacts[result.file_id] = ref
-            refs.append(ref)
+            # Republishing must preserve the original file identity and hash.
+            known = ctx.deps.session_file_artifacts.get(result.file_id)
+            if known is not None and known.get("kind") == "sandbox_output":
+                refs.append(dict(known))
         for ref in refs:
             collector.generated_files[ref["file_id"]] = ref
 

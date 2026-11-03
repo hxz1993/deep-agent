@@ -294,6 +294,19 @@ function toolResultArtifacts(metadata) {
       sha256: typeof file.sha256 === "string" ? file.sha256 : null,
     });
   });
+  const evidence = metadata.document_evidence_file;
+  if (typeof evidence?.file_id === "string" && evidence.file_id && !seen.has(evidence.file_id)) {
+    artifacts.push({
+      artifact_id: evidence.file_id,
+      file_id: evidence.file_id,
+      kind: "document_evidence",
+      role: "generated_file",
+      file_name: typeof evidence.file_name === "string" ? evidence.file_name : null,
+      mime: typeof evidence.mime === "string" ? evidence.mime : null,
+      byte_size: evidence.byte_size ?? null,
+      sha256: typeof evidence.sha256 === "string" ? evidence.sha256 : null,
+    });
+  }
   return artifacts;
 }
 
@@ -958,9 +971,9 @@ function renderLocalFileDownload(value, artifacts = [], imageOptions = {}) {
   if (findViewImageResult(value, imageOptions)) return "";
   if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
   const file = localFileDownload(value);
-  if (!file) return "";
+  if (!file || artifacts.some((item) => (item?.file_id || item?.artifact_id) === file.fileId)) return "";
   const path = `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`;
-  const href = globalThis.serviceUrl?.(path) || `/${path}`;
+  const href = imageOptions.attachmentUrl?.({ id: file.fileId, name: file.fileName }) || globalThis.serviceUrl?.(path) || `/${path}`;
   return renderSummarySection(
     "Files",
     `<a class="trajectory-summary-link local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span><strong>${escapeHtml(file.fileName)}</strong></span></a>`,
@@ -976,23 +989,29 @@ function formatFileBytes(value) {
 }
 
 function renderGeneratedFiles(artifacts, attachmentUrl) {
-  const generated = (Array.isArray(artifacts) ? artifacts : [])
-    .filter((item) => item?.kind === "sandbox_output");
-  if (!generated.length) return "";
-  const rows = generated.map((artifact) => {
-    const fileId = String(artifact.file_id || artifact.artifact_id || "");
-    const fileName = String(artifact.file_name || fileId || "Unnamed file");
+  const seen = new Set();
+  const rows = artifacts.map((artifact) => {
+    if (!["sandbox_output", "document_evidence", "tool_result_overflow"].includes(artifact?.kind)) return "";
+    const fileId = artifact.file_id || artifact.artifact_id;
+    if (typeof fileId !== "string" || !fileId || seen.has(fileId)) return "";
+    seen.add(fileId);
+    const fileName = artifact.file_name || (artifact.kind === "tool_result_overflow"
+      ? (artifact.role === "content" ? "完整工具内容" : "完整工具结果") : fileId);
     const details = [artifact.mime, formatFileBytes(artifact.byte_size)].filter(Boolean).join(" · ");
+    const file = { id: fileId, name: artifact.file_name, mime: artifact.mime };
     const path = `api/v1/local-files/${encodeURIComponent(fileId)}/download`;
-    const downloadUrl = fileId.startsWith("local_")
-      ? attachmentUrl({ id: fileId, name: fileName, mime: artifact.mime }) || globalThis.serviceUrl?.(path) || `/${path}`
-      : null;
+    const downloadUrl = attachmentUrl(file) || (fileId.startsWith("local_") ? globalThis.serviceUrl?.(path) || `/${path}` : null);
+    const preview = downloadUrl ? attachmentPreviewAttributes(file, undefined, downloadUrl) : "";
+    const copy = `<strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}`;
+    const label = preview
+      ? `<button type="button" class="trajectory-summary-link attachment-image-trigger" ${preview}>${icon("image")}<span>${copy}</span></button>`
+      : copy;
     const download = downloadUrl
-      ? `<a class="local-file-download" href="${escapeHtml(downloadUrl)}" download title="Download file">${icon("download")}</a>`
+      ? `<a class="local-file-download" href="${escapeHtml(downloadUrl)}" download aria-label="下载 ${escapeHtml(fileName)}" title="下载文件">${icon("download")}</a>`
       : "";
-    return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="Copy file ID">${icon("copy")}</button></span></div>`;
+    return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy">${label}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${icon("copy")}</button></span></div>`;
   }).join("");
-  return renderSummarySection("Generated files", `<div class="generated-file-list">${rows}</div>`);
+  return rows ? renderSummarySection("工具产物", `<div class="generated-file-list">${rows}</div>`) : "";
 }
 
 function renderPayloadResultSections({ payload, result }) {

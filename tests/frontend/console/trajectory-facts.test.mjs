@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { attachmentDownloadUrl } from "../../../console/attachment-preview.js";
 import { buildTrajectory, createTrajectoryController, redactTrajectoryValue, trajectoryStats } from "../../../console/trajectory.js";
 
 const fact = (id, sequence, ordinal, index, part, eventType = "assistant/message") => ({
@@ -916,4 +917,40 @@ test('PTC generated file cards in administrator trajectories use the session-aut
     assert.match(html, /href="\/api\/v1\/diagnostics\/sessions\/another-users-session\/files\/local_ptc-report\/download"/);
     assert.doesNotMatch(html, /href="\/api\/v1\/local-files\/local_ptc-report/);
   }, { attachmentUrl: (file) => `/api/v1/diagnostics/sessions/another-users-session/files/${encodeURIComponent(file.id)}/download` });
+});
+
+test('trajectory exposes platform downloads for every registered artifact in live and saved results', () => {
+  const files = [
+    { file_id: 'L_json', file_name: 'ocr-result.json', mime: 'application/json' },
+    { file_id: 'L_text', file_name: 'ocr-report.txt', mime: 'text/plain' },
+    { file_id: 'L_image', file_name: 'chart.png', mime: 'image/png' },
+  ];
+  const evidence = { file_id: 'L_evidence', file_name: 'evidence.zip', mime: 'application/zip' };
+  const metadata = { generated_files: [...files, files[0]], document_evidence_file: evidence, overflow_handle: 'L_spill' };
+  const tool = 'execute_skill_script';
+  const value = { files, untrusted: [{ file_id: 'L_unregistered' }, { file_id: 'local_unregistered' }] };
+  const base = 'https://console.example/gateway/deepfos-server/deep-agent-server1-0/console/';
+  withController((controller, elements) => {
+    controller.ingest({ event: 'session', data: { run_id: 'run-1', turn_id: 'turn-1' } });
+    controller.ingest({ event: 'tool_call', data: { tool, tool_call_id: 'result' } });
+    controller.ingest({ event: 'tool_result', data: { tool, tool_call_id: 'result', result: value, artifacts: [
+      ...metadata.generated_files.map(file => ({ ...file, kind: 'sandbox_output' })),
+      { ...evidence, kind: 'document_evidence' }, { artifact_id: 'L_spill', kind: 'tool_result_overflow' },
+    ] } });
+    controller.restore({ selectedId: controller.events().find(item => item.tool_call_id === 'result').id, selectionPinned: true });
+    const live = elements.get('inspectorContent').innerHTML;
+    controller.setHistory({ items: [
+      fact('call', 1, 0, 0, { part_kind: 'tool-call', tool_name: tool, tool_call_id: 'result' }),
+      fact('result', 2, 1, 0, { part_kind: 'tool-return', tool_name: tool, tool_call_id: 'result', content: value, metadata }, 'tool/results'),
+    ] });
+    controller.restore({ selectedId: controller.events().find(item => item.tool_call_id === 'result').id, selectionPinned: true });
+    const saved = elements.get('inspectorContent').innerHTML;
+    for (const html of [live, saved]) {
+      const urls = [...html.matchAll(/href="([^\"]+)" download/g)].map(match => new URL(match[1].replaceAll('&amp;', '&')));
+      assert.deepEqual(urls.map(url => url.searchParams.get('id')).sort(), ['L_evidence', 'L_image', 'L_json', 'L_spill', 'L_text']);
+      assert.ok(urls.every(url => url.pathname === '/gateway/deepfos-server/platform-file-server/files/download'));
+      assert.match(html, /data-attachment-image-url="[^"]+id=L_image/);
+      assert.doesNotMatch(html, /href="[^"]+(?:L|local)_unregistered/);
+    }
+  }, { attachmentUrl: file => attachmentDownloadUrl(file, base) });
 });

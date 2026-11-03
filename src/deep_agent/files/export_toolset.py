@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
-from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
+from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed, ToolReturn
 from pydantic_ai.toolsets import PreparedToolset
 
 from deep_agent.agent.attachments import _download_file
@@ -164,7 +165,7 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
         ctx: RunContext[AgentDeps],
         source: ExportFileSource,
         file_name: str,
-    ) -> ExportFileResult:
+    ) -> ExportFileResult | ToolReturn:
         """用户明确需要导出文件时，将新文本内容或当前会话平台文件发布到下载中心。
 
         使用 content 新建UTF-8文本文件；使用 platform_file 复用当前会话附件或工具生成文件，
@@ -236,13 +237,23 @@ def build_file_export_toolset() -> PreparedToolset[AgentDeps]:
                     "本次新文件清理失败，可能仍有残留文件", cleanup_exc, headers,
                 )) from exc
             raise
-        return ExportFileResult(
+        result = ExportFileResult(
             source_type="content",
             download_record_id=record_id,
             file_id=uploaded_id,
             file_name=normalized_name,
             byte_size=byte_size,
         )
+        ref = {
+            "kind": "sandbox_output",
+            "file_id": uploaded_id,
+            "file_name": normalized_name,
+            "mime": "text/plain",
+            "byte_size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        ctx.deps.session_file_artifacts[uploaded_id] = ref
+        return ToolReturn(return_value=result.model_dump(mode="json"), metadata={"generated_files": [ref]})
 
     async def prepare(ctx: RunContext[AgentDeps], tools: list[Any]) -> list[Any]:
         if _has_download_center_context(ctx):

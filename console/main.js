@@ -30,13 +30,13 @@ const loadPage = createPageLoader({
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=20261103-view-image3");
+    const module = await import("./workspace.js?v=20261103-trajectory-files");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261103-view-image3");
+    const module = await import("./diagnostics-center.js?v=20261103-trajectory-files");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

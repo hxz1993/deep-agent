@@ -139,9 +139,12 @@ class FileExportToolTests(unittest.IsolatedAsyncioTestCase):
                 ctx,
             )
 
-        self.assertEqual(result.source_type, "content")
-        self.assertEqual(result.file_id, "generated-file-1")
-        self.assertEqual(result.download_record_id, "download-record-1")
+        self.assertEqual(result.return_value["source_type"], "content")
+        self.assertEqual(result.return_value["file_id"], "generated-file-1")
+        self.assertEqual(result.return_value["download_record_id"], "download-record-1")
+        ref = ctx.deps.session_file_artifacts["generated-file-1"]
+        self.assertEqual(result.metadata["generated_files"], [ref])
+        self.assertEqual(ref["mime"], "text/plain")
         upload.assert_awaited_once()
         self.assertEqual(upload.await_args.kwargs["file_type"], "DL")
         self.assertEqual(upload.await_args.kwargs["file"], "<h1>报告</h1>".encode())

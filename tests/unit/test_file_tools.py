@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import random
@@ -13,12 +14,14 @@ from unittest.mock import AsyncMock, Mock, patch
 from docx import Document
 from openpyxl import Workbook
 from pydantic_ai import ModelRetry, RunContext, ToolFailed
+from pydantic_ai.messages import ModelRequest, ToolReturnPart
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.attachments import AttachmentDownloadError
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_output_limits import PlatformToolResultStore
 from deep_agent.files import build_file_toolset
 from deep_agent.files import toolset as file_tools
 from deep_agent.schemas.attachment import AttachmentRef
@@ -71,6 +74,37 @@ async def _tool(resources: dict[str, ResolvedSkill] | None = None, ctx=None, **b
 
 
 class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_read_generated_file_in_current_run_and_from_same_session_history(self) -> None:
+        data = b'{"status":false,"detail":"OCR result"}'
+        ref = {"file_id": "generated", "file_name": "ocr-result.json", "mime": "application/json",
+               "kind": "sandbox_output", "sha256": hashlib.sha256(data).hexdigest()}
+        part = ToolReturnPart(tool_name="execute_skill_script", tool_call_id="ocr",
+                              content={"files": [ref]}, metadata={"generated_files": [ref]})
+        history = [ModelRequest(parts=[part])]
+        current, resumed, other = _context(), _context(), _context()
+        other.deps.session_id = "other-session"
+        current.deps.session_file_artifacts["generated"] = ref
+        store = Mock(download=AsyncMock(return_value=data))
+        PlatformToolResultStore(request_headers={}, threshold_tokens=1024, file_store=store).bind(resumed.deps, history)
+        untrusted_part = ToolReturnPart(tool_name="external_mcp", tool_call_id="untrusted",
+                                        content={"files": [ref], "generated_files": [ref]})
+        PlatformToolResultStore(request_headers={}, threshold_tokens=1024, file_store=store).bind(
+            other.deps, [ModelRequest(parts=[untrusted_part])],
+        )
+        resource = {"type": "attachment", "file_id": "generated"}
+
+        for ctx in (current, resumed):
+            ctx.deps.file_store = store
+            tool = await _tool(ctx=ctx)
+            result = await tool.call_func({"resource": resource}, ctx)
+            self.assertEqual(result.source, "attachment")
+            self.assertEqual(result.name, "ocr-result.json")
+            self.assertEqual(json.loads(result.content), json.loads(data))
+        self.assertIsNone(await _tool(ctx=other))
+        with self.assertRaisesRegex(ModelRetry, "不属于当前会话"):
+            await file_tools.resolve_file_source(other, resource, {})
+        self.assertEqual(store.download.await_count, 2)
+
     async def test_cached_source_rechecks_each_call_size_and_hash(self) -> None:
         context = _context()
         context.deps.file_bytes["shared"] = b"cached data"

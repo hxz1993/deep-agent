@@ -143,12 +143,17 @@ class LocalFileApiTests(unittest.IsolatedAsyncioTestCase):
         from tests.helpers.sqlite_stores import seed_default_agent
 
         agent_id = await seed_default_agent(self.stores)
-        async def upload(name, owner="session-owner", file_type=FILE_TYPE_ATTACHMENT):
+        async def upload(name, owner="session-owner", file_type=FILE_TYPE_ATTACHMENT, mime="text/plain", data=None):
             return await self.file_store.upload(file_type=file_type, file_name=name,
-                data=name.encode(), mime="text/plain", request_headers={"user": owner})
+                data=name.encode() if data is None else data, mime=mime, request_headers={"user": owner})
 
         attachment = await upload("input.txt")
         generated = await upload("output.txt")
+        json_data = b'{"ok":true}'
+        generated_json = await upload("output.json", mime="application/json", data=json_data)
+        png = io.BytesIO()
+        Image.new("RGB", (2, 2)).save(png, format="PNG")
+        generated_png = await upload("output.png", mime="image/png", data=png.getvalue())
         overflow = await upload("overflow.txt")
         unrelated = await upload("unrelated.txt")
         foreign = await upload("foreign.txt", owner="another-owner")
@@ -159,7 +164,8 @@ class LocalFileApiTests(unittest.IsolatedAsyncioTestCase):
         await get_context().store.append(sid, [ModelRequest(parts=[
             UserPromptPart(["fixture", *[attachment_ref_dict(ref) for ref in refs]]),
             ToolReturnPart("execute_python", "done", tool_call_id="output-call", metadata={
-                "generated_files": [{"file_id": generated.id, "file_name": generated.file_name}],
+                "generated_files": [{"file_id": item.id, "file_name": item.file_name, "mime": item.mime}
+                                    for item in (generated, generated_json, generated_png)],
                 "overflow_handle": overflow.id,
             }),
             # Arbitrary text is not a trusted file reference.
@@ -170,10 +176,12 @@ class LocalFileApiTests(unittest.IsolatedAsyncioTestCase):
         path = f"/api/v1/diagnostics/sessions/{sid}/files"
         async with AsyncClient(transport=self.transport, base_url="http://test",
                                headers={"user": "admin-caller"}) as client:
-            for item in (attachment, generated, overflow):
+            for item, content in ((attachment, b"input.txt"), (generated, b"output.txt"),
+                                  (generated_json, json_data), (generated_png, png.getvalue()),
+                                  (overflow, b"overflow.txt")):
                 response = await client.get(f"{path}/{item.id}/download")
                 self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.content, item.file_name.encode())
+                self.assertEqual(response.content, content)
                 self.assertEqual(response.headers["cache-control"], "no-store")
                 self.assertIn("attachment;", response.headers["content-disposition"])
                 ordinary = await client.get(f"/api/v1/local-files/{item.id}/download")
@@ -293,8 +301,13 @@ class LocalFileApiTests(unittest.IsolatedAsyncioTestCase):
             },
             run_ctx,
         )
-        self.assertTrue(exported.file_id.startswith("local_"))
-        self.assertTrue(exported.download_record_id.startswith("local_record_"))
+        file_id = exported.return_value["file_id"]
+        self.assertTrue(file_id.startswith("local_"))
+        self.assertTrue(exported.return_value["download_record_id"].startswith("local_record_"))
+        read_export = await read_file.call_func({
+            "resource": {"type": "attachment", "file_id": file_id},
+        }, run_ctx)
+        self.assertEqual(read_export.content, "本地导出内容")
 
         async with AsyncClient(
             transport=self.transport,

@@ -248,6 +248,21 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
                 await tool.call_func({"resource": ref}, ctx)
         self.parse.assert_awaited_once()
 
+    async def test_generated_pdf_is_authorized_as_session_file(self):
+        ctx = self.context(refs=False)
+        ctx.deps.session_file_artifacts["generated-pdf"] = {
+            "kind": "sandbox_output", "file_name": "report.pdf", "mime": "application/pdf",
+        }
+        resource = {"type": "attachment", "file_id": "generated-pdf"}
+        tool = await self.tool(ctx)
+        result = await tool.call_func({"resource": resource}, ctx)
+        self.assertEqual([page.content for page in result.pages], ["第一页", "第二页"])
+        ctx.deps.session_file_artifacts.clear()
+        with self.assertRaisesRegex(ModelRetry, "不属于当前会话"):
+            await tool.call_func({"resource": resource}, ctx)
+        self.download.assert_awaited_once()
+        self.parse.assert_awaited_once()
+
     async def test_unknown_file_and_cross_run_document_are_not_authority(self):
         ctx = self.context()
         first = await (await self.tool(ctx)).call_func({"resource": RESOURCE}, ctx)

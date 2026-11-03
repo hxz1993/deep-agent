@@ -620,11 +620,11 @@ channel_message_operations 及其中回执，保留已发布迁移；不改变�
 
 ### 文件系统工具
 
-`read_file`是按来源条件自动注入的系统工具，不属于 Agent能力配置。附件使用
+`read_file`是按来源条件自动注入的系统工具，不属于 Agent能力配置。会话附件与可信工具产物使用
 `resource={type: attachment, file_id}`，Skill使用
 `resource={type: skill, skill_code, path}`。工具首次通常只传来源，随后根据
-`has_more/next_offset`渐进读取。合法附件ID范围必须从当前消息和当前会话完整
-原始附件Event建立，不能从摘要Evidence建立，也不能仅依赖平台下载权限。
+`has_more/next_offset`渐进读取。附件授权来自当前消息和当前会话原始附件事件，
+产物授权来自宿主登记或本会话原始工具结果元数据。摘要、工具正文和平台下载权限不能单独授予会话文件访问权。
 Skill路径必须属于当前 Agent已选择且运行目录就绪的资源索引。字节和解析结果只缓存到
 本次用户消息对应的完整 Run终态，不跨Run、进程或数据库保存。
 

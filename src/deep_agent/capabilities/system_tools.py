@@ -87,7 +87,7 @@ _SYSTEM_TOOL_DOMAINS = (
                 name="read_file",
                 display_name="读取文件",
                 source="DeepAgent",
-                injection_condition="当前会话存在可读附件，或 Agent 已配置含可读资源的 Skill",
+                injection_condition="当前会话存在可读附件或可信工具产物，或 Agent 已配置含可读资源的 Skill",
                 description="直接读取文本、DOCX、XLSX、PPTX及PDF文本层，不支持旧DOC/XLS/PPT或图片OCR；默认在当前模型的24K/48K Token预算内尽量返回全文，超限按原位置续读。PDF保留物理页，扫描件与复杂版面OCR需显式启用文档解析分组。",
             ),
             SystemToolDescription(

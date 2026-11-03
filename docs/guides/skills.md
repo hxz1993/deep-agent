@@ -223,6 +223,8 @@ Path("outputs/result.json").write_text(json.dumps({"status": "ready"}), encoding
 `publish_path()` 仅登记文件；脚本成功结束后宿主上传 FileStore。未登记文件、`.env`、代码和输入
 不会自动上传。工具返回已有执行信封的 `status`、`result`、`truncated` 等字段，并在顶层 `files`
 返回 File ID、名称、MIME、大小和 SHA-256；结果字段不会变成宿主路径或文件正文。
+同一会话内可直接用 `read_file(resource={type: attachment, file_id: ...})` 读取支持格式的产物，
+包括 JSON、TXT 和 HTML。后续轮从会话的工具结果恢复授权。支持视觉的模型可用 `view_image` 查看图片或 PDF 原页。
 上传失败与取消使用共用补偿；没有成功上传不能报告成功 File ID。
 
 PTC 可以直接调用 `execute_skill_script(...)`，检查 `status` 与截断标记后使用 `result` 和 `files`。

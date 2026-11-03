@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import mimetypes
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -36,7 +37,7 @@ from deep_agent.files.schema import (
     FileResourceRef,
     SkillFileRef,
 )
-from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.files.storage import PlatformFileStore
 from deep_agent.skills.package import READABLE_SUFFIXES
 from deep_agent.skills.runtime import ResolvedSkill
 
@@ -80,9 +81,9 @@ def _normalized_mime(value: str | None) -> str:
     return (value or "").split(";", 1)[0].strip().lower()
 
 
-def _attachment_format(ref: AttachmentRef) -> str | None:
-    mime = _normalized_mime(ref.mime)
-    if is_log_text_attachment(filename=ref.name or "", mime=mime):
+def _platform_file_format(name: str, mime: str | None) -> str | None:
+    mime = _normalized_mime(mime)
+    if is_log_text_attachment(filename=name, mime=mime):
         return "text"
     if mime in _TEXT_MIMES:
         return "text"
@@ -126,10 +127,21 @@ def has_readable_skill_resources(
     )
 
 
-def _has_readable_attachment(ctx: RunContext[AgentDeps]) -> bool:
+def _artifact_mime(artifact: dict[str, Any]) -> str | None:
+    mime = artifact.get("mime")
+    if isinstance(mime, str) and mime:
+        return mime
+    return mimetypes.guess_type(str(artifact.get("file_name") or ""))[0]
+
+
+def _has_readable_session_file(ctx: RunContext[AgentDeps]) -> bool:
     return any(
-        _attachment_format(ref) is not None
+        _platform_file_format(ref.name or "", ref.mime) is not None
         for ref in ctx.deps.attachment_by_id.values()
+    ) or any(
+        artifact.get("kind") != "tool_result_overflow"
+        and _platform_file_format(str(artifact.get("file_name") or ""), _artifact_mime(artifact)) is not None
+        for artifact in ctx.deps.session_file_artifacts.values()
     )
 
 
@@ -149,7 +161,7 @@ async def load_file_bytes(
         if max_bytes is not None and len(data) > max_bytes:
             raise ToolFailed(f"{failure_label}超过当前 {max_bytes} 字节读取上限")
         if expected_hash is not None and hashlib.sha256(data).hexdigest() != expected_hash:
-            raise ToolFailed(f"{failure_label}内容Hash与已安装Skill索引不一致")
+            raise ToolFailed(f"{failure_label}内容哈希与已登记文件不一致")
         return data
     task = ctx.deps.file_load_tasks.get(key)
     if task is None or task.cancelling() or task.cancelled():
@@ -199,7 +211,7 @@ async def load_file_bytes(
     if max_bytes is not None and len(data) > max_bytes:
         raise ToolFailed(f"{failure_label}超过当前 {max_bytes} 字节读取上限")
     if expected_hash is not None and hashlib.sha256(data).hexdigest() != expected_hash:
-        raise ToolFailed(f"{failure_label}内容Hash与已安装Skill索引不一致")
+        raise ToolFailed(f"{failure_label}内容哈希与已登记文件不一致")
     ctx.deps.file_bytes[key] = data
     return data
 
@@ -286,25 +298,42 @@ async def resolve_file_source(
         resource = _RESOURCE_ADAPTER.validate_python(resource)
     except ValidationError as exc:
         raise ModelRetry(
-            "resource 必须是附件 {type: 'attachment', file_id: ...}，"
+            "resource 必须是会话文件 {type: 'attachment', file_id: ...}，"
             "或 Skill 文件 {type: 'skill', skill_code: ..., path: ...}"
         ) from exc
     if isinstance(resource, AttachmentFileRef):
-        ref = ctx.deps.attachment_by_id.get(resource.file_id)
-        if ref is None:
+        file_id = resource.file_id
+        ref = ctx.deps.attachment_by_id.get(file_id)
+        artifact = ctx.deps.session_file_artifacts.get(file_id) if ref is None else None
+        if ref is None and artifact is None:
             raise ModelRetry(
-                "file_id 不属于当前会话附件；请只使用本轮提示或当前原始会话历史中的 file_id"
+                "file_id 不属于当前会话附件或可信工具产物；请使用当前会话提供的 file_id"
             )
+        name, mime, cache_key, content_hash = file_id, None, f"attachment:{file_id}", None
+        if ref is not None:
+            name, mime = ref.name or file_id, ref.mime
+        elif artifact is not None:
+            if artifact.get("kind") == "tool_result_overflow":
+                raise ModelRetry("请用 read_tool_result 读取当前会话已外置的工具结果")
+            name = str(artifact.get("file_name") or file_id)
+            mime = _artifact_mime(artifact)
+            cache_key = f"session-file:{file_id}"
+            content_hash = artifact.get("sha256") or artifact.get("content_hash")
 
-        async def load_attachment() -> bytes:
+        async def load_platform_file() -> bytes:
+            if content_hash:
+                # Verify against the uploaded bytes. A generated JSON file can
+                # legitimately contain status=false, like a platform error body.
+                store = ctx.deps.file_store or PlatformFileStore()
+                return await store.download(file_id, ctx.deps.request_headers)
             return await _download_file(
-                ref.id, ctx.deps.request_headers, file_store=ctx.deps.file_store,
+                file_id, ctx.deps.request_headers, file_store=ctx.deps.file_store,
             )
 
         return _ResolvedFile(
-            source="attachment", resource=resource, name=ref.name or ref.id,
-            mime=ref.mime, format="", cache_key=f"attachment:{ref.id}",
-            content_hash=None, load=load_attachment,
+            source="attachment", resource=resource, name=name,
+            mime=mime, format="", cache_key=cache_key,
+            content_hash=content_hash, load=load_platform_file,
         )
 
     _item, entry, target = _safe_skill_file(resources, resource, tool_name=tool_name)
@@ -328,11 +357,10 @@ async def _resolve_file(
 ) -> _ResolvedFile:
     resolved = await resolve_file_source(ctx, resource, resources)
     if isinstance(resolved.resource, AttachmentFileRef):
-        ref = ctx.deps.attachment_by_id[resolved.resource.file_id]
-        kind = _attachment_format(ref)
+        kind = _platform_file_format(resolved.name, resolved.mime)
         if kind is None:
             raise ModelRetry(
-                f"read_file 不支持 MIME 为 {ref.mime or 'unknown'} 的附件；"
+                f"read_file 不支持 MIME 为 {resolved.mime or 'unknown'} 的文件；"
                 "图片请使用本轮已提供的view_image查看；音频和视频使用模型原生输入。本工具不执行OCR，旧二进制DOC/XLS/PPT不支持"
             )
     else:
@@ -525,8 +553,8 @@ def build_file_toolset(
         id="file-resources",
         instructions=(
             "read_file直接读取文本、DOCX正文和补充元信息、XLSX表格、PPTX文本/表格/备注及PDF文本层。PDF保留物理页，未提取到文本不等于原件无内容；如提供view_image，可直接查看图片或PDF原页，核验图形、布局和关键字段。本工具不支持旧DOC/XLS/PPT，不执行图片或扫描件OCR。"
-            "来源限当前会话附件和已授权Skill文件。先使用来源提供的精确file_id，"
-            "或先调用list_skill_resources取得Skill路径。首次通常只传resource；若has_more=true，"
+            "当前会话附件和可信工具产物均使用 attachment 和原 file_id。"
+            "读取已授权Skill文件时，先用list_skill_resources取得路径。首次通常只传resource；若has_more=true，"
             "把next_offset和next_char_offset分别作为offset和char_offset继续读取；"
             "长行/段落可能分多页，必须同时传两个续读值。不要猜测file_id、Skill编码或路径，脚本不能作为文件正文读取。"
             + ("扫描PDF、图片或需要OCR/复杂版面时，可使用本轮已提供的parse_document，以当前供应商支持格式为准。" if document_available else "")
@@ -547,7 +575,7 @@ def build_file_toolset(
         有下一页时同时使用 next_offset/next_char_offset 续读。
 
         Args:
-            resource: 当前会话附件或已授权 Skill 文件引用。
+            resource: 当前会话附件、可信工具产物的 file_id，或已授权 Skill 文件引用。
             offset: 起始文本行、DOCX/PPTX逻辑块、XLSX物理行或PDF物理页，从 1 开始。
             limit: 最多读取的源项数；省略时按 Token 预算尽量返回全文（含包装 24000/48000 Token）。
             sheet: XLSX 工作表名，省略时读取第一个可见工作表。
@@ -579,7 +607,7 @@ def build_file_toolset(
             raise ModelRetry(str(exc)) from exc
 
     async def prepare(ctx: RunContext[AgentDeps], tools: dict[str, Any]) -> dict[str, Any]:
-        if _has_readable_attachment(ctx) or has_readable_skill_resources(authorized):
+        if _has_readable_session_file(ctx) or has_readable_skill_resources(authorized):
             return tools
         return {}
 

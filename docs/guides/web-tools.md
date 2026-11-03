@@ -19,7 +19,7 @@
 
 - `web_search(query)`：直接调用检索服务，返回来源。DeepSeek 使用独立 `/v1/tools/search`，固定请求前5条，不使用聊天模型；搜索词为1～128个Unicode字符，过长会要求调整，不截断查询。有效空结果返回“未找到结果”。Kimi 保留独立 Search API。
 - `web_fetch(url)`：系统内置直接获取公开页面；跟随模式调用 DeepSeek 或 Kimi 的 `/v1/tools/fetch`。两家统一返回请求URL、标题和Markdown正文，附来源、供应商及耗时。不提前截断正文，超大内容由现有工具结果外置与 `read_tool_result` 续读处理。
-- `web_image_view(url, force_download=false)`：仅向支持图片输入的模型提供。工具内先安全下载（最多20 MB，按1024×1024字节计）并验证实际图片格式，再将字节交给当前视觉模型；404、超时、非图片和损坏图片作为工具失败返回，模型可选择其他来源，不延后到下一次模型请求才下载。`force_download`保留入参兼容，两种取值均执行上述检查。图片字节不上传平台、不写入SSE或会话事件；既有历史与轨迹仍只保存URL引用，下一轮不自动重新下载旧图。Fetch正文含图片链接不等于模型已读图。
+- `view_image(items)`：已合并原网络图片查看，归属“文件”运行工具。支持图片及PDF选页、附件/Skill/已授权公网来源；只提供给当前视觉主模型，不进入PTC。正文图片链接不等于看过图片。详见[图像查看](image-viewing.md)。
 
 供应商失败会保留脱敏错误，不自动换供应商或退回系统内置；瞬时网络、429等错误仅在现有有界时间和次数内重试。带凭据、私网、回环及元数据URL不能作为抓取目标。云服务内部的重定向/DNS无法由本地核验，不声称与本地固定IP下载完全等价。
 
@@ -53,3 +53,5 @@
 2026-10-16 的同页实测中，Kimi保留图片Markdown占位，图片地址可被改写且替代文字未原样保留；DeepSeek没有返回该页的图片链接。两家首页抓取只包含局部正文，不能作为整站目录。Kimi对Python JSON文档返回 `403 security_risk`，而文档中心及其自身接口文档成功，需按目标站点分别判断。
 
 详细来源：[DeepSeek Fetch](https://api-docs.deepseek.com/api/fetch/)、[Kimi Fetch](https://platform.kimi.com/docs/api/tools-fetch)。验收数据见[本轮报告](../design/21-web-tools/web-search-fetch-20261016-validation.md)。
+
+旧版`web_image_view`的事件、URL引用和预览继续可读；新请求仅披露`view_image`。Web能力包现在仅包含`web_search`与`web_fetch`，公网查看仍需此包授权，不因工具迁移扩大访问权限。

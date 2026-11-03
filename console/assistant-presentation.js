@@ -99,6 +99,7 @@ export function assistantActionsFromHistoryItems(items = []) {
           tool: item.tool_name,
           display_name: item.display_name,
           result: item.output,
+          metadata: item.metadata,
           tool_call_id: item.call_id,
           source: call.source,
           artifacts: item.artifacts,

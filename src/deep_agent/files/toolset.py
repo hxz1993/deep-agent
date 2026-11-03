@@ -145,17 +145,25 @@ async def load_file_bytes(
 ) -> bytes:
     cached = ctx.deps.file_bytes.get(key)
     if cached is not None:
-        return cached
+        data = cached
+        if max_bytes is not None and len(data) > max_bytes:
+            raise ToolFailed(f"{failure_label}超过当前 {max_bytes} 字节读取上限")
+        if expected_hash is not None and hashlib.sha256(data).hexdigest() != expected_hash:
+            raise ToolFailed(f"{failure_label}内容Hash与已安装Skill索引不一致")
+        return data
     task = ctx.deps.file_load_tasks.get(key)
-    if task is None:
+    if task is None or task.cancelling() or task.cancelled():
         async def observed_load() -> bytes:
             async with observe_tool_operation(ctx, "file_read", tool=tool_name):
                 return await loader()
 
         task = asyncio.create_task(observed_load(), name=f"file-load:{key}")
         ctx.deps.file_load_tasks[key] = task
+    ctx.deps.file_load_waiters[task] = ctx.deps.file_load_waiters.get(task, 0) + 1
     try:
-        data = await task
+        # A single cancelled tool must not cancel a download another tool is
+        # still using. The final waiter owns cancellation and drains the task.
+        data = await asyncio.shield(task)
     except asyncio.CancelledError:
         raise
     except AttachmentDownloadError as exc:
@@ -165,7 +173,29 @@ async def load_file_bytes(
     except Exception as exc:
         raise ToolFailed(tool_error_message(f"{failure_label}读取失败", exc, ctx.deps.request_headers)) from exc
     finally:
-        ctx.deps.file_load_tasks.pop(key, None)
+        remaining = ctx.deps.file_load_waiters.get(task, 1) - 1
+        if remaining:
+            ctx.deps.file_load_waiters[task] = remaining
+        else:
+            ctx.deps.file_load_waiters.pop(task, None)
+            try:
+                if not task.done():
+                    task.cancel()
+                    # Repeated cancellation must not detach a still-running
+                    # source task from its final waiter or the Run's tracking.
+                    cleanup = asyncio.gather(task, return_exceptions=True)
+                    cancelled_again = False
+                    while not cleanup.done():
+                        try:
+                            await asyncio.shield(cleanup)
+                        except asyncio.CancelledError:
+                            cancelled_again = True
+                    cleanup.result()
+                    if cancelled_again:
+                        raise asyncio.CancelledError
+            finally:
+                if ctx.deps.file_load_tasks.get(key) is task:
+                    ctx.deps.file_load_tasks.pop(key, None)
     if max_bytes is not None and len(data) > max_bytes:
         raise ToolFailed(f"{failure_label}超过当前 {max_bytes} 字节读取上限")
     if expected_hash is not None and hashlib.sha256(data).hexdigest() != expected_hash:
@@ -303,7 +333,7 @@ async def _resolve_file(
         if kind is None:
             raise ModelRetry(
                 f"read_file 不支持 MIME 为 {ref.mime or 'unknown'} 的附件；"
-                "图片、音频和视频只在当前轮作为模型原生附件提交，本工具不执行OCR；旧二进制DOC/XLS/PPT不支持"
+                "图片请使用本轮已提供的view_image查看；音频和视频使用模型原生输入。本工具不执行OCR，旧二进制DOC/XLS/PPT不支持"
             )
     else:
         kind = _skill_format(resolved.resource_metadata)
@@ -494,7 +524,7 @@ def build_file_toolset(
     toolset = FunctionToolset[AgentDeps](
         id="file-resources",
         instructions=(
-            "read_file直接读取文本、DOCX正文和补充元信息、XLSX表格、PPTX文本/表格/备注及PDF文本层。PDF保留物理页，未提取到文本不等于原件无内容。本工具不支持旧DOC/XLS/PPT，不执行图片或扫描件OCR。"
+            "read_file直接读取文本、DOCX正文和补充元信息、XLSX表格、PPTX文本/表格/备注及PDF文本层。PDF保留物理页，未提取到文本不等于原件无内容；如提供view_image，可直接查看图片或PDF原页，核验图形、布局和关键字段。本工具不支持旧DOC/XLS/PPT，不执行图片或扫描件OCR。"
             "来源限当前会话附件和已授权Skill文件。先使用来源提供的精确file_id，"
             "或先调用list_skill_resources取得Skill路径。首次通常只传resource；若has_more=true，"
             "把next_offset和next_char_offset分别作为offset和char_offset继续读取；"

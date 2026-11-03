@@ -71,6 +71,75 @@ async def _tool(resources: dict[str, ResolvedSkill] | None = None, ctx=None, **b
 
 
 class UnifiedFileToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cached_source_rechecks_each_call_size_and_hash(self) -> None:
+        context = _context()
+        context.deps.file_bytes["shared"] = b"cached data"
+        with self.assertRaises(ToolFailed):
+            await file_tools.load_file_bytes(context, key="shared", loader=AsyncMock(),
+                                            failure_label="source", max_bytes=2)
+        with self.assertRaises(ToolFailed):
+            await file_tools.load_file_bytes(context, key="shared", loader=AsyncMock(),
+                                            failure_label="source", expected_hash="0" * 64)
+
+    async def test_cancelling_one_file_waiter_does_not_cancel_another(self) -> None:
+        context = _context()
+        started, release = asyncio.Event(), asyncio.Event()
+        cancelled = []
+
+        async def loader():
+            started.set()
+            try:
+                await release.wait()
+                return b"complete"
+            except asyncio.CancelledError:
+                cancelled.append(True)
+                raise
+
+        async def read():
+            return await file_tools.load_file_bytes(context, key="shared", loader=loader,
+                                                    failure_label="source")
+
+        first = asyncio.create_task(read())
+        await started.wait()
+        second = asyncio.create_task(read())
+        await asyncio.sleep(0)
+        first.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await first
+        self.assertFalse(cancelled)
+        release.set()
+        self.assertEqual(await second, b"complete")
+        self.assertFalse(context.deps.file_load_tasks)
+        self.assertFalse(context.deps.file_load_waiters)
+
+    async def test_repeated_cancel_joins_the_last_source_before_untracking_it(self) -> None:
+        context = _context()
+        started, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def loader():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+
+        call = asyncio.create_task(file_tools.load_file_bytes(
+            context, key="cancel", loader=loader, failure_label="source",
+        ))
+        await started.wait()
+        call.cancel()
+        await cleaning.wait()
+        call.cancel()
+        await asyncio.sleep(0)
+        self.assertFalse(call.done())
+        self.assertTrue(context.deps.file_load_tasks)
+        release.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await call
+        self.assertFalse(context.deps.file_load_tasks)
+        self.assertFalse(context.deps.file_load_waiters)
+
     def assert_budget(self, result, ceiling=24_000) -> None:
         self.assertLessEqual(TokenEstimator.conservative().text(result.model_dump(mode="json")), ceiling)
         self.assertIsInstance(result.limit, int)

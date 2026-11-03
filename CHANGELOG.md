@@ -3,6 +3,13 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.15.2（测试分支）
+
+- 新增“查看图片”工具 `view_image`。支持会话授权文件、已选 Skill 资源和授权公网 URL，支持批量查看图片和 PDF 指定物理页，由当前具备视觉能力的主模型读取。
+- Web 分组收敛为搜索和抓取。旧 `web_image_view` 轨迹继续可读；同一轮可连续查看多批图片，历史只保存来源、页码及摘要。程序编排产出 File ID 后可由普通查看工具核验。
+- 同步更新内置“文件读取与核验”Skill 和 Console 结果展示。验证历史兼容、PDF 渲染、PTC 产物查看和授权下载。详见[查看图片指南](docs/guides/image-viewing.md)。
+- 依赖变更（运维）：Agent 服务新增 `pypdfium2==5.14.0`，用于隔离子进程渲染 PDF。需重建配套基础镜像并核对 PDFium 运行文件与许可证。Python 沙箱依赖不变，Linux 硬内存限制未在本地实测。数据库保持 013，无新增或修改迁移。
+
 ## v0.15.1（测试分支）
 
 - 模型弹框增加默认折叠的高级设置，可为 OpenAI Chat 兼容模型开启“合并开头的系统消息”。配置复用模型 tags 中的 `single_system_message`，由现有 Pydantic AI Profile 执行合并；未配置或关闭时沿用框架及 Provider 默认，不补写历史模型。

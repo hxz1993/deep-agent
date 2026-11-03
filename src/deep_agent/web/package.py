@@ -26,10 +26,5 @@ def build_web_tool_package() -> ToolPackage:
                 display_name="获取网页内容",
                 description="按全局抓取配置获取公开 HTTP(S) 网页正文及来源；图片链接需另行查看。",
             ),
-            ToolInfo(
-                name="web_image_view",
-                display_name="查看网络图片",
-                description="让视觉模型读取公开 HTTP(S) 图片。",
-            ),
         ],
     )

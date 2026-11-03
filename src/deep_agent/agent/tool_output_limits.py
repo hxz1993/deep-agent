@@ -49,7 +49,8 @@ _EXCLUDED_TOOLS = frozenset(
         "tool_search",
         # Validated native images already have a bounded download. They are
         # visual input, not JSON/text to spill into an overflow file.
-        "web_image_view",
+        "web_image_view",  # historical compatibility
+        "view_image",
     }
 )
 

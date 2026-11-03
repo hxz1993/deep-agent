@@ -20,6 +20,42 @@ from deep_agent.files.storage import (
 
 
 class LocalFileStoreTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bounded_read_repeated_cancel_waits_for_thread_file_close(self) -> None:
+        import asyncio
+        import threading
+        from unittest.mock import patch
+
+        source = self.root / "cancel-fixture"
+        source.write_bytes(b"bounded")
+        started, release = asyncio.Event(), threading.Event()
+        loop = asyncio.get_running_loop()
+        handles = []
+
+        def blocking_read(_file_id, _headers, max_bytes):
+            with source.open("rb") as handle:
+                handles.append(handle)
+                loop.call_soon_threadsafe(started.set)
+                release.wait(5)
+                return handle.read(max_bytes + 1)
+
+        with patch.object(self.store, "_download_bounded_sync", side_effect=blocking_read):
+            call = asyncio.create_task(self.store.download_bounded("fixture", self.headers, max_bytes=8))
+            try:
+                await started.wait()
+                call.cancel()
+                await asyncio.sleep(0)
+                call.cancel()
+                await asyncio.sleep(0)
+                self.assertFalse(call.done())
+                self.assertFalse(handles[0].closed)
+                release.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await call
+                self.assertTrue(handles[0].closed)
+            finally:
+                release.set()
+                await asyncio.gather(call, return_exceptions=True)
+
     async def asyncSetUp(self) -> None:
         self.root = Path(tempfile.mkdtemp(prefix="local-file-store-TMP_to_delete-"))
         self.store = LocalFileStore(self.root)

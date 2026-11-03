@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from pydantic_ai_harness.planning import InMemoryPlanStore
     from deep_agent.files.storage import FileStore
     from deep_agent.documents.cache import DocumentRunCache
+    from deep_agent.files.image_view.runtime import ImageViewState
 
 
 @dataclass
@@ -73,11 +74,13 @@ class AgentDeps:
         default_factory=dict,
         repr=False,
     )
+    file_load_waiters: dict[asyncio.Task[bytes], int] = field(default_factory=dict, repr=False)
     file_parse_tasks: dict[str, asyncio.Task[Any]] = field(
         default_factory=dict,
         repr=False,
     )
     document_cache: "DocumentRunCache | None" = field(default=None, repr=False)
+    image_view_state: "ImageViewState | None" = field(default=None, repr=False)
     code_mode_file_payloads: dict[str, Any] = field(default_factory=dict, repr=False)
     ptc_diagnostics: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
     ptc_generated_files: dict[str, list[dict[str, Any]]] = field(default_factory=dict, repr=False)

@@ -41,6 +41,7 @@
 | `37` | [`文档解析：复杂 PDF 选型与工具化`](37-document-parsing/README.md) | 2026-09-29 | MPDocBench研究；MinerU本地/线上及Paddle官方Demo定向测试；商业API与长文档横评待补，尚未接入产品 |
 | `38` | [`Pydantic AI / Harness升级与能力采用`](38-pydantic-ai-harness-upgrade/README.md) | 2026-10-16 | Core 2.46→2.57、Harness 0.32→0.57研究；A～E分档及逐项TODO已记录，升级与新能力尚未实施 |
 | `39` | [`Agent 与 Skill 评测`](39-agent-evaluation/README.md) | 2026-11-02 | 三种图片原型已归档：列表工作台、案例与结果双栏、版本对比矩阵；布局待确认，尚未实施 |
+| `40` | [图像查看与PDF原页核验](40-image-viewing/README.md) | 2026-11-03 | 纳入 v0.15.2；v0.15.1 基线不含此功能 |
 
 ## 文档命名
 

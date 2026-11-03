@@ -43,6 +43,10 @@ class FileStoreIntegrityError(FileStoreError):
     pass
 
 
+class FileStoreSizeLimitError(FileStoreError):
+    """An internal bounded-read failure, distinct from missing/network errors."""
+
+
 @dataclass(frozen=True)
 class StoredFile:
     id: str
@@ -141,24 +145,24 @@ class _BoundedPlatformFile(File):
                 raise FileStoreError("Unsupported platform file transfer encoding")
             declared = response.content_length
             if encoding == "identity" and declared is not None and declared > self.max_bytes:
-                raise FileStoreError("File exceeds download size limit")
+                raise FileStoreSizeLimitError("File exceeds download size limit")
             # Bound the encoded body too: a gzip header may contain an
             # arbitrarily long filename/comment without producing any output.
             # Allow normal compression overhead even for an empty/tiny file.
             wire_limit = self.max_bytes + max(64 * 1024, self.max_bytes // 100)
             if declared is not None and declared > wire_limit:
-                raise FileStoreError("File exceeds download size limit")
+                raise FileStoreSizeLimitError("File exceeds download size limit")
             decoder = zlib.decompressobj(31 if encoding == "gzip" else 15) if encoding != "identity" else None
             wire_size = 0
             payload = bytearray()
             async for chunk in response.content.iter_chunked(64 * 1024):
                 wire_size += len(chunk)
                 if wire_size > wire_limit:
-                    raise FileStoreError("File exceeds download size limit")
+                    raise FileStoreSizeLimitError("File exceeds download size limit")
                 while chunk:
                     decoded = decoder.decompress(chunk, self.max_bytes - len(payload) + 1) if decoder else chunk
                     if len(payload) + len(decoded) > self.max_bytes:
-                        raise FileStoreError("File exceeds download size limit")
+                        raise FileStoreSizeLimitError("File exceeds download size limit")
                     payload.extend(decoded)
                     chunk = decoder.unconsumed_tail if decoder else b""
             if decoder and (not decoder.eof or decoder.unused_data):
@@ -566,8 +570,22 @@ class LocalFileStore:
         self, file_id: str, request_headers: Mapping[str, str], *, max_bytes: int,
     ) -> bytes:
         _validate_download_limit(max_bytes)
+        task = asyncio.create_task(asyncio.to_thread(
+            self._download_bounded_sync, file_id, dict(request_headers), max_bytes,
+        ))
         try:
-            return await asyncio.to_thread(self._download_bounded_sync, file_id, dict(request_headers), max_bytes)
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # A file-read thread cannot be killed. Repeated cancellation must
+            # wait for its bounded read and file close before returning.
+            cleanup = asyncio.gather(task, return_exceptions=True)
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    continue
+            cleanup.result()
+            raise
         except FileStoreError:
             raise
         except Exception:
@@ -578,7 +596,7 @@ class LocalFileStore:
         self._authorize(row, request_headers)
         size = int(row["byte_size"])
         if size > max_bytes:
-            raise FileStoreError("File exceeds download size limit")
+            raise FileStoreSizeLimitError("File exceeds download size limit")
         target = self._blob_path(row)
         try:
             with target.open("rb") as handle:
@@ -586,7 +604,7 @@ class LocalFileStore:
         except FileNotFoundError:
             raise FileStoreIntegrityError("Local file Blob is missing") from None
         if len(data) > max_bytes:
-            raise FileStoreError("File exceeds download size limit")
+            raise FileStoreSizeLimitError("File exceeds download size limit")
         if len(data) != size:
             raise FileStoreIntegrityError("Local file size mismatch")
         if hashlib.sha256(data).hexdigest() != row["sha256"]:

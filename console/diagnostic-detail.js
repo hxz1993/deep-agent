@@ -1,15 +1,16 @@
 import { sessionLoadingHtml, prepareSessionRender, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
-import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20261028-context-details1";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20261022-output-inspector3";
-import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20261022-release0140";
-import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261022-release0140";
-import { createTrajectoryController } from "./trajectory.js?v=20261028-context-details1";
+import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20261103-view-image3";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20261103-view-image3";
+import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20261103-view-image1";
+import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261103-view-image1";
+import { createTrajectoryController } from "./trajectory.js?v=20261103-view-image3";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { renderSessionInspector } from "./session-inspector.js?v=20261013-providers";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
-import { bindAttachmentImagePreviews, attachmentDownloadUrl } from "./attachment-preview.js?v=20260922-trajectory-8";
+import { bindAttachmentImagePreviews, attachmentDownloadUrl } from "./attachment-preview.js?v=20261103-view-image1";
+import { bindViewImagePreviews } from "./view-image.js?v=20261103-view-image3";
 import { createReadonlySessionShell } from "./session-view-shell.js?v=20261025-readonly-load2";
 
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -343,11 +344,14 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
 
   const imageDialog = find("[data-detail-image-dialog]");
   function closeImage() { imageDialog.close(); find("[data-detail-image]").removeAttribute("src"); }
-  const disposeImagePreviews = bindAttachmentImagePreviews({ root, openImage(image) {
+  function openImage(image) {
     if (!image?.previewUrl || disposed) return;
     find("[data-detail-image]").src = image.previewUrl; find("[data-detail-image-title]").textContent = image.name || "图片附件";
-    find("[data-detail-image-open]").href = image.previewUrl; find("[data-detail-image-error]").classList.add("hidden"); imageDialog.showModal();
-  } });
+    find("[data-detail-image-open]").href = image.previewUrl; find("[data-detail-image-error]").classList.add("hidden");
+    if (!imageDialog.open) imageDialog.showModal();
+  }
+  const disposeImagePreviews = bindAttachmentImagePreviews({ root, openImage });
+  const disposeViewImagePreviews = bindViewImagePreviews({ root, dialog: imageDialog, openImage });
   listen(find("[data-detail-image]"), "error", () => find("[data-detail-image-error]").classList.remove("hidden"));
   listen(imageDialog, "close", () => find("[data-detail-image]").removeAttribute("src"));
   listen(imageDialog, "click", (event) => { if (event.target === imageDialog || !event.target.closest("img, button, a")) closeImage(); });
@@ -370,7 +374,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     if (disposed) return; disposed = true;
     clearTimeout(copyFeedbackTimer);
     presenters.forEach((presenter) => presenter.dispose()); presenters = []; renderedRows = [];
-    trajectory.destroy(); disposeImagePreviews(); listeners.splice(0).forEach((remove) => remove());
+    trajectory.destroy(); disposeImagePreviews(); disposeViewImagePreviews(); listeners.splice(0).forEach((remove) => remove());
     if (imageDialog.open) imageDialog.close();
     find("[data-detail-image]").removeAttribute("src");
     data = { session: {}, history: { items: [] }, events: [], users: {} }; selectedReference = null;

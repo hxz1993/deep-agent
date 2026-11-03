@@ -129,7 +129,7 @@ def pdf_document(data: bytes) -> tuple[tuple[str, ...], dict[str, Any]]:
                 body = converted.markdown.strip()
                 if not body:
                     empty_pages.append(number)
-                    body = "[未提取到文本，不代表原页无内容；可能为空白页或需要OCR]"
+                    body = "[未提取到文本，不代表原页无内容；如提供view_image可查看原页，也可按任务使用专业解析]"
                 value = f"[PDF第{number}页]\n{body}"
                 total_chars += len(value)
                 # Parsing safety limit, not a tool-return limit. Matches the
@@ -147,7 +147,7 @@ def pdf_document(data: bytes) -> tuple[tuple[str, ...], dict[str, Any]]:
         "页数与续读完成仅表示读取范围完成，不保证原件内容全部提取；关键字段须核对原页。",
     ]
     if empty_pages:
-        warnings.append("存在未提取到文本的页面；未提取到不等于原件没有内容。")
+        warnings.append("存在未提取到文本的页面；未提取到不等于原件没有内容。如提供view_image，可按物理页查看原页图形及布局。")
     return tuple(pages), {
         "engine": "markitdown", "engine_version": "0.1.8",
         "physical_pages": len(pages), "pages_without_text": empty_pages,

@@ -169,6 +169,12 @@ async def resolve_history_for_llm(
         full_turn = idx == current_user_index
         new_parts = []
         for part in message.parts:
+            if isinstance(part, ToolReturnPart) and part.tool_name == "view_image":
+                from deep_agent.web.images import view_image_tool_value
+                # Viewer pixels are Run-local; historical sources can be viewed
+                # again without replaying every old image on the next question.
+                new_parts.append(replace(part, content=view_image_tool_value(part.content, part.metadata)))
+                continue
             if isinstance(part, ToolReturnPart) and part.tool_name == "web_image_view":
                 new_parts.append(
                     replace(

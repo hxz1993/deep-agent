@@ -7,7 +7,7 @@ from typing import Any
 from deep_agent.agent.observability import token_usage_available
 from deep_agent.agent.planning import is_planning_tool
 from deep_agent.agent.tool_output_limits import artifacts_from_metadata
-from deep_agent.web.images import safe_web_image_value, web_image_tool_value
+from deep_agent.web.images import safe_web_image_value, web_image_tool_value, view_image_tool_value
 from deep_agent.conversation.models import (
     AssistantConversationItem,
     ConversationArtifact,
@@ -407,7 +407,9 @@ def _apply_result(
         if source_id not in item.source_event_ids:
             item.source_event_ids.append(source_id)
     item.updated_at = _event_datetime(event, "updated_at")
-    item.output = (web_image_tool_value(part.get("content"), part.get("metadata"))
+    item.output = (view_image_tool_value(part.get("content"), part.get("metadata"))
+                   if part.get("tool_name") == "view_image" else
+                   web_image_tool_value(part.get("content"), part.get("metadata"))
                    if part.get("tool_name") == "web_image_view"
                    else safe_web_image_value(part.get("content")))
     outcome = _optional_str(part.get("outcome"))

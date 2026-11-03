@@ -30,6 +30,7 @@ from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
 from deep_agent.skills.script_tool import build_skill_script_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
 from deep_agent.files import build_file_export_toolset, build_file_toolset
+from deep_agent.files.image_view.runtime import build_view_image_runtime
 from deep_agent.documents.runtime import build_document_runtime
 from deep_agent.documents.settings import DOCUMENT_PACKAGE_CODE, load_document_parsing_config
 from deep_agent.core.context import AppContext
@@ -273,6 +274,12 @@ async def _build_runner_from_spec(
         document_config, resolved_skills.resources,
         context_window_tokens=spec.context_window_tokens, estimator=estimator,
     ) if document_selected else None)
+    image_view_runtime = build_view_image_runtime(
+        resolved_skills.resources,
+        image_capable="image" in {str(value).strip().lower() for value in (spec.input_modalities or [])},
+        web_authorized=WEB_PACKAGE_CODE in spec.capabilities,
+        python_available="builtin:sandbox" in spec.capabilities and ctx.sandbox_backend is not None,
+    )
     context_compaction = build_context_compaction(
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
@@ -328,6 +335,8 @@ async def _build_runner_from_spec(
         dynamic_ui_packages=dynamic_ui_packages,
         mcp_resource_toolset=mcp_resource_toolset,
         file_toolset=file_toolset,
+        image_view_toolset=(image_view_runtime.toolset if image_view_runtime else None),
+        image_view_lifecycle=(image_view_runtime.lifecycle if image_view_runtime else None),
         file_export_toolset=file_export_toolset,
         skill_resource_toolset=skill_resource_toolset,
         skill_script_toolset=skill_script_toolset,

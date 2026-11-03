@@ -269,3 +269,5 @@ Pending 续跑使用新执行器，不恢复旧布局；正式升级前应先适
 
 完整设计和安全边界见
 [`../design/12-agent-skills/skill-system-design.md`](../design/12-agent-skills/skill-system-design.md)。
+
+原图或PDF页的视觉核验可使用当前视觉主模型提供的`view_image`；它与文字读取、专业OCR按任务选择，不进入PTC。参见[图像查看指南](image-viewing.md)。

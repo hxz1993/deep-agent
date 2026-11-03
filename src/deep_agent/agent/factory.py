@@ -201,6 +201,7 @@ def _toolsets_for_spec(
     estimator: TokenEstimator | None = None,
     web_toolset: Any | None = None,
     document_toolset: Any | None = None,
+    image_view_toolset: Any | None = None,
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
     toolsets: list[Any] = []
@@ -246,6 +247,9 @@ def _toolsets_for_spec(
         toolsets.append(mcp_resource_toolset)
     if file_toolset is not None:
         toolsets.append(file_toolset)
+    if image_view_toolset is not None:
+        # Visual observations require the outer model loop, never PTC.
+        toolsets.append(image_view_toolset)
     if file_export_toolset is not None:
         toolsets.append(builtin_ptc(file_export_toolset, "export_file_to_download_center"))
     if skill_resource_toolset is not None:
@@ -284,7 +288,9 @@ def build_agent(
     estimator: TokenEstimator | None = None,
     web_toolset: Any | None = None,
     document_toolset: Any | None = None,
+    image_view_toolset: Any | None = None,
     document_lifecycle: AbstractCapability[AgentDeps] | None = None,
+    image_view_lifecycle: AbstractCapability[AgentDeps] | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
@@ -314,10 +320,13 @@ def build_agent(
         estimator=estimator,
         web_toolset=web_toolset,
         document_toolset=document_toolset,
+        image_view_toolset=image_view_toolset,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = [RuntimeDiagnostics()]
     if document_lifecycle is not None and "builtin:document" in spec.capabilities:
         capabilities.append(document_lifecycle)
+    if image_view_lifecycle is not None:
+        capabilities.append(image_view_lifecycle)
     if context_compaction is not None:
         capabilities.append(context_compaction)
     if skill_capability is not None:

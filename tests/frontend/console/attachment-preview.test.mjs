@@ -145,3 +145,21 @@ test("长附件名和上下文在窄气泡中省略，不撑出对话区域", as
   assert.match(css, /\.attachment-name \{ min-width: 0;/);
   assert.match(css, /\.msg-context-refs \.context-ref-chip \{ min-width: 0; max-width: min\(180px, 100%\); border-radius: 999px;/);
 });
+
+test('view_image click leaves gallery opening to its batch handler instead of opening twice', () => {
+  const handlers = {};
+  const root = { addEventListener: (name, handler) => { handlers[name] = handler; }, removeEventListener() {} };
+  const button = { dataset: { attachmentImageUrl: 'https://example.com/a.png', viewImagePreview: '1' } };
+  button.closest = () => button;
+  const previousWindow = globalThis.window;
+  globalThis.window = { addEventListener() {}, removeEventListener() {} };
+  let opened = 0; let dispose;
+  try {
+    dispose = bindAttachmentImagePreviews({ root, openImage: () => { opened += 1; } });
+    handlers.click({ target: button, preventDefault() {} });
+    assert.equal(opened, 0);
+  } finally {
+    dispose?.();
+    if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow;
+  }
+});

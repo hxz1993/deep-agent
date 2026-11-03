@@ -1,12 +1,38 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from copy import deepcopy
 from typing import Any, Mapping
 
 from pydantic_ai.messages import BinaryContent, ImageUrl, ToolReturnPart
 
 
 WEB_IMAGE_REFERENCE_KIND = "web-image-reference"
+VIEW_IMAGE_RESULT_KIND = "view-image-result"
+
+
+def view_image_tool_value(value: Any, metadata: Any = None) -> Any:
+    """Project trusted visual tool output without touching the live SDK content.
+
+    The SDK sees top-level BinaryContent alongside source labels. Persistence,
+    SSE and exports see only the bounded result recorded by this tool.
+    """
+    if isinstance(metadata, Mapping):
+        audit = metadata.get("view_image")
+        if isinstance(audit, Mapping) and audit.get("kind") == VIEW_IMAGE_RESULT_KIND:
+            return deepcopy(dict(audit))
+    if isinstance(value, Mapping) and value.get("kind") == VIEW_IMAGE_RESULT_KIND:
+        return deepcopy(dict(value))
+    if isinstance(value, (list, tuple)):
+        for child in value:
+            if isinstance(child, Mapping) and child.get("kind") == VIEW_IMAGE_RESULT_KIND:
+                return deepcopy(dict(child))
+        # Failed / cancelled calls may not have metadata. Never serialize media
+        # as a fallback, even if an SDK changes the successful return structure.
+        return [view_image_tool_value(child) for child in value if not isinstance(child, BinaryContent)]
+    if isinstance(value, BinaryContent):
+        return {"kind": VIEW_IMAGE_RESULT_KIND, "status": "unavailable", "items": []}
+    return safe_web_image_value(value)
 
 
 def web_image_reference(value: ImageUrl) -> dict[str, Any]:
@@ -43,6 +69,8 @@ def web_image_tool_value(value: Any, metadata: Any = None) -> Any:
 
 def persistent_web_image_part(part: Any) -> Any:
     """Make a persistence-only copy, retaining the existing SDK URL format."""
+    if isinstance(part, ToolReturnPart) and part.tool_name == "view_image":
+        return replace(part, content=view_image_tool_value(part.content, part.metadata))
     if not (isinstance(part, ToolReturnPart) and part.tool_name == "web_image_view"
             and isinstance(part.content, BinaryContent)):
         return part
@@ -82,9 +110,21 @@ def safe_web_image_value(value: Any) -> Any:
 def prior_run_web_image_value(value: Any) -> Any:
     """Replace prior-run visual content with a non-multimodal URL reference."""
     projected = safe_web_image_value(value)
-    if isinstance(value, ImageUrl) and isinstance(projected, dict):
-        return {
-            **projected,
-            "note": "Web image viewed in a previous run; call web_image_view to inspect it again.",
-        }
-    return projected
+
+    def refresh_reference(child: Any) -> Any:
+        if isinstance(child, dict):
+            result = {key: refresh_reference(item) for key, item in child.items()}
+            # Compacted history can already contain lightweight references,
+            # rather than native ImageUrl objects. Refresh only the reading
+            # projection; the persisted legacy tool name and record stay intact.
+            if child.get("kind") == WEB_IMAGE_REFERENCE_KIND:
+                result["note"] = (
+                    "Image viewed in a previous run; call view_image with resource "
+                    "{type: 'url', url: ...} to inspect it again."
+                )
+            return result
+        if isinstance(child, list):
+            return [refresh_reference(item) for item in child]
+        return child
+
+    return refresh_reference(projected)

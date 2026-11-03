@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import ssl
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx2
-from PIL import Image
 from pydantic_ai import ModelRetry, Tool, ToolFailed
-from pydantic_ai.messages import BinaryContent, ToolReturn
+from pydantic_ai.messages import ToolReturn
 from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
 from deep_agent.ptc.file_payload import CODE_MODE_METADATA_KEY
@@ -20,7 +18,6 @@ from deep_agent.web.runtime import (
     _search_tavily,
     _html_to_markdown,
     _web_fetch_tool,
-    _web_image_view_tool,
     build_web_runtime,
     execute_provider_search,
 )
@@ -28,18 +25,18 @@ from deep_agent.web.settings import WebSearchRuntimeConfig, load_web_search_conf
 
 
 class WebPackageTests(unittest.TestCase):
-    def test_builtin_package_exposes_search_fetch_and_image_view(self) -> None:
+    def test_builtin_package_exposes_search_and_fetch_only(self) -> None:
         package = build_web_tool_package()
 
         self.assertEqual(package.code, "builtin:web")
         self.assertEqual(package.label, "Web")
         self.assertEqual(
             [tool.name for tool in package.tools],
-            ["web_search", "web_fetch", "web_image_view"],
+            ["web_search", "web_fetch"],
         )
         self.assertEqual(
             [tool.display_name for tool in package.tools],
-            ["网络搜索", "获取网页内容", "查看网络图片"],
+            ["网络搜索", "获取网页内容"],
         )
 
     def test_unconfigured_search_is_still_disclosed(self) -> None:
@@ -47,11 +44,10 @@ class WebPackageTests(unittest.TestCase):
         names = {name for part in runtime.toolset.toolsets for name in part.tools}
         self.assertEqual(names, {"web_search", "web_fetch"})
 
-    def test_visual_model_gets_outer_image_tool_without_code_mode_metadata(self) -> None:
+    def test_visual_model_no_longer_registers_legacy_image_tool(self) -> None:
         runtime = build_web_runtime(WebSearchRuntimeConfig(mode="unconfigured"), image_capable=True)
-        image_tool = runtime.toolset.toolsets[1].tools["web_image_view"]
-        self.assertNotIn(CODE_MODE_METADATA_KEY, image_tool.metadata)
-        self.assertTrue(image_tool.metadata["web_content_untrusted"])
+        names = {name for part in runtime.toolset.toolsets for name in part.tools}
+        self.assertEqual(names, {"web_search", "web_fetch"})
 
     def test_provider_mode_exposes_stable_search_and_fetch_tools(self) -> None:
         runtime = build_web_runtime(
@@ -440,81 +436,6 @@ class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaisesRegex(ModelRetry, "private/internal"):
                 await _web_fetch_tool().function("https://example.com/page")
-
-
-class WebImageViewTests(unittest.IsolatedAsyncioTestCase):
-    @staticmethod
-    def image_data(fmt="PNG"):
-        stream = io.BytesIO()
-        Image.new("RGB", (2, 2), "blue").save(stream, format=fmt)
-        return stream.getvalue()
-
-    async def test_returns_verified_native_image_and_source_reference(self) -> None:
-        data = self.image_data()
-        with patch(
-            "deep_agent.web.runtime.load_public_file",
-            new=AsyncMock(return_value=(data, "chart.png", "image/png", "https://cdn.example.com/chart.png")),
-        ) as download:
-            result = await _web_image_view_tool().function(
-                "https://cdn.example.com/chart.png"
-            )
-
-        download.assert_awaited_once_with("https://cdn.example.com/chart.png")
-        self.assertIsInstance(result, ToolReturn)
-        self.assertIsInstance(result.return_value, BinaryContent)
-        self.assertEqual(result.return_value.data, data)
-        self.assertEqual(result.return_value.media_type, "image/png")
-        self.assertEqual(result.metadata["sources"][0]["url"], "https://cdn.example.com/chart.png")
-        self.assertFalse(result.metadata["web_image_view"]["force_download"])
-        self.assertEqual(result.metadata["web_image_view"]["media_type"], "image/png")
-
-    async def test_force_download_flag_is_accepted_and_audited_without_deferral(self) -> None:
-        with patch(
-            "deep_agent.web.runtime.load_public_file",
-            new=AsyncMock(return_value=(self.image_data("WEBP"), "chart.webp", "image/webp", "https://cdn.example.com/chart.webp")),
-        ) as download:
-            result = await _web_image_view_tool().function(
-                "https://cdn.example.com/chart.webp",
-                force_download=True,
-            )
-
-        download.assert_awaited_once()
-        self.assertTrue(result.metadata["web_image_view"]["force_download"])
-        self.assertEqual(result.return_value.media_type, "image/webp")
-
-    async def test_extensionless_image_uses_bounded_content_probe(self) -> None:
-        with patch(
-            "deep_agent.web.runtime.load_public_file",
-            new=AsyncMock(return_value=(self.image_data("JPEG"), "render", "application/octet-stream", "https://images.example.com/render?id=42")),
-        ) as download:
-            result = await _web_image_view_tool().function(
-                "https://images.example.com/render?id=42"
-            )
-
-        download.assert_awaited_once_with("https://images.example.com/render?id=42")
-        self.assertEqual(result.return_value.media_type, "image/jpeg")
-
-    async def test_rejects_non_image_credentials_and_private_urls(self) -> None:
-        with self.assertRaisesRegex(ModelRetry, "credentialed"):
-            await _web_image_view_tool().function(
-                "https://user:secret@example.com/chart.png"
-            )
-
-        with patch(
-            "deep_agent.web.runtime.load_public_file",
-            new=AsyncMock(side_effect=ModelRetry("private/internal address")),
-        ):
-            with self.assertRaisesRegex(ToolFailed, "private/internal"):
-                await _web_image_view_tool().function("http://127.0.0.1/chart.png")
-
-        with patch(
-            "deep_agent.web.runtime.load_public_file",
-            new=AsyncMock(return_value=(b"<html>error</html>", "error", "text/html", "https://example.com/not-an-image.html")),
-        ):
-            with self.assertRaisesRegex(ToolFailed, "valid supported image"):
-                await _web_image_view_tool().function(
-                    "https://example.com/not-an-image.html"
-                )
 
 
 class ProviderSearchRoutingTests(unittest.IsolatedAsyncioTestCase):

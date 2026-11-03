@@ -449,3 +449,47 @@ test("missing usage in one grouped response does not turn into zero or a complet
   const html = renderSessionInspector({ activeTab: "run", run: facts, usage: facts.usage });
   assert.match(html, /累计使用（部分）/);
 });
+
+test('view_image live and refreshed tool cards retain every item and avoid generated-file duplicates', () => {
+  const output = { kind: 'view-image-result', status: 'partial', items: [
+    { resource: { type: 'url', url: 'https://example.com/a.png' }, name: '图 A', format: 'png', status: 'ready', width: 10, height: 20 },
+    { resource: { type: 'url', url: 'https://example.com/b.pdf' }, name: 'PDF B', format: 'pdf', page: 6, page_count: 12, status: 'ready' },
+    { resource: { type: 'attachment', file_id: 'local_error' }, name: '图 C', status: 'error', error: '无法准备' },
+  ] };
+  for (const mode of ['live', 'history']) {
+    const view = outputPresentation();
+    if (mode === 'live') {
+      view.sse('tool_call', { tool: 'view_image', tool_call_id: 'images', args: { items: [] } });
+      view.sse('tool_result', { tool: 'view_image', tool_call_id: 'images', result: [output] });
+    } else {
+      applyAssistantPresentationActions(view.assistant, assistantActionsFromHistoryItems([
+        { kind: 'tool', tool_name: 'view_image', call_id: 'images', status: 'completed', input: { items: [] }, output: [output] },
+      ]));
+    }
+    assert.equal(view.host.querySelectorAll('.view-image-item').length, 3, mode);
+    assert.match(view.host.querySelector('.view-image-results').textContent, /第 6 页 \/ 共 12 页/);
+    assert.match(view.host.querySelector('.view-image-results').textContent, /无法准备/);
+    assert.equal(view.host.querySelectorAll('.generated-file-list').length, 0);
+    assert.equal(view.host.querySelectorAll('.local-file-download').length, 0);
+  }
+});
+
+test('generated files in administrator conversations use the session-authorized download route', () => {
+  const artifact = { kind: 'sandbox_output', file_id: 'local_ptc-report', file_name: '报告.html', mime: 'text/html' };
+  const factory = createConversationPresenter({ messages: {}, readOnly: true,
+    attachmentUrl: (file) => `/api/v1/diagnostics/sessions/another-users-session/files/${encodeURIComponent(file.id)}/download`,
+    window: { serviceUrl: (path) => `/ordinary-owner/${path}` },
+  });
+  const html = factory.renderToolResultArtifacts([artifact]);
+  assert.match(html, /href="\/api\/v1\/diagnostics\/sessions\/another-users-session\/files\/local_ptc-report\/download"/);
+  assert.doesNotMatch(html, /ordinary-owner/);
+});
+
+test('generated file download retains ordinary local fallback and platform file behavior', () => {
+  const factory = createConversationPresenter({ messages: {}, window: { serviceUrl: (path) => `/gateway/${path}` } });
+  const local = factory.renderGeneratedFileArtifact({ file_id: 'local_report', file_name: '报告.html' });
+  assert.match(local, /href="\/gateway\/api\/v1\/local-files\/local_report\/download"/);
+  const platform = factory.renderGeneratedFileArtifact({ file_id: 'platform_report', file_name: '报告.html' });
+  assert.doesNotMatch(platform, /<a\b/);
+  assert.match(platform, /data-copy-file-id="platform_report"/);
+});

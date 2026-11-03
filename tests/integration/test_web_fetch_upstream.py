@@ -181,10 +181,8 @@ class WebFetchUpstreamSafetyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ModelRetry) as caught:
             await runtime._web_fetch_tool().function("https://\uff45xample.com/")
         self.assertIsInstance(caught.exception.__cause__, httpx2.InvalidURL)
-        for factory in (runtime._web_fetch_tool, runtime._web_image_view_tool):
-            with self.subTest(factory=factory.__name__):
-                with self.assertRaisesRegex(ModelRetry, "valid absolute HTTP"):
-                    await factory().function("https://[broken/")
+        with self.assertRaisesRegex(ModelRetry, "valid absolute HTTP"):
+            await runtime._web_fetch_tool().function("https://[broken/")
 
 
 if __name__ == "__main__":

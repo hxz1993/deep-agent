@@ -1,13 +1,14 @@
 import { mountStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
 import { cacheMessageSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 import { tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
-import { renderPlanSnapshot } from "./plan-view.js?v=20261022-release0140";
+import { renderPlanSnapshot } from "./plan-view.js?v=20261103-view-image1";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
-import { attachmentPreviewAttributes, attachmentDownloadUrl } from "./attachment-preview.js?v=20260922-trajectory-8";
-import { toolResultPresentation } from "./assistant-presentation.js?v=20261022-release0140";
+import { findViewImageResult, renderViewImageResult } from "./view-image.js?v=20261103-view-image3";
+import { attachmentPreviewAttributes, attachmentDownloadUrl } from "./attachment-preview.js?v=20261103-view-image1";
+import { toolResultPresentation } from "./assistant-presentation.js?v=20261103-view-image1";
 import { renderPtcExecution } from "./ptc-execution.js?v=20260924-5";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
@@ -586,7 +587,7 @@ export function buildTrajectory(history = {}) {
           outcome: part.outcome || null,
           plan: toolName === "write_plan" ? metadata.deepagent_plan || null : null,
           artifacts: toolResultArtifacts(metadata),
-          metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls, ptc_diagnostics: metadata.ptc_diagnostics },
+          metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls, ptc_diagnostics: metadata.ptc_diagnostics, ...(toolName === "view_image" ? { view_image: metadata.view_image } : {}) },
         }));
         tool.native = { ...(tool.native || {}), result_event_id: event.event_id, result_part_offset: offset };
         tool.timestamp_end = null;
@@ -953,7 +954,8 @@ function localFileDownload(value) {
   return null;
 }
 
-function renderLocalFileDownload(value, artifacts = []) {
+function renderLocalFileDownload(value, artifacts = [], imageOptions = {}) {
+  if (findViewImageResult(value, imageOptions)) return "";
   if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
   const file = localFileDownload(value);
   if (!file) return "";
@@ -973,7 +975,7 @@ function formatFileBytes(value) {
   return `${Math.round(bytes)} B`;
 }
 
-function renderGeneratedFiles(artifacts) {
+function renderGeneratedFiles(artifacts, attachmentUrl) {
   const generated = (Array.isArray(artifacts) ? artifacts : [])
     .filter((item) => item?.kind === "sandbox_output");
   if (!generated.length) return "";
@@ -981,8 +983,12 @@ function renderGeneratedFiles(artifacts) {
     const fileId = String(artifact.file_id || artifact.artifact_id || "");
     const fileName = String(artifact.file_name || fileId || "Unnamed file");
     const details = [artifact.mime, formatFileBytes(artifact.byte_size)].filter(Boolean).join(" · ");
-    const download = fileId.startsWith("local_")
-      ? `<a class="local-file-download" href="${escapeHtml(globalThis.serviceUrl?.(`api/v1/local-files/${encodeURIComponent(fileId)}/download`) || `/api/v1/local-files/${encodeURIComponent(fileId)}/download`)}" download title="Download file">${icon("download")}</a>`
+    const path = `api/v1/local-files/${encodeURIComponent(fileId)}/download`;
+    const downloadUrl = fileId.startsWith("local_")
+      ? attachmentUrl({ id: fileId, name: fileName, mime: artifact.mime }) || globalThis.serviceUrl?.(path) || `/${path}`
+      : null;
+    const download = downloadUrl
+      ? `<a class="local-file-download" href="${escapeHtml(downloadUrl)}" download title="Download file">${icon("download")}</a>`
       : "";
     return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="Copy file ID">${icon("copy")}</button></span></div>`;
   }).join("");
@@ -996,14 +1002,17 @@ function renderPayloadResultSections({ payload, result }) {
     ${resultText ? renderSummarySection("Result", `<p class="trajectory-summary-code">${escapeHtml(resultText)}</p>`, { targetTab: "result" }) : ""}`;
 }
 
-function renderToolSummary(event) {
+function renderToolSummary(event, _events, attachmentUrl = attachmentDownloadUrl) {
   const result = toolResultValue(event);
   const artifacts = Array.isArray(event.result?.artifacts) ? event.result.artifacts : [];
-  const imagePreview = renderWebImagePreview(result, { className: "trajectory-web-image-preview" });
-  return `${imagePreview ? renderSummarySection("Web image", imagePreview) : ""}${renderGeneratedFiles(artifacts)}${renderPayloadResultSections({
+  // Tool event labels are projected from the actual tool name, never its result.
+  const imageOptions = { toolName: event.label, metadata: event.result?.metadata, attachmentUrl };
+  const imageResults = renderViewImageResult(result, imageOptions);
+  const imagePreview = imageResults ? "" : renderWebImagePreview(result, { className: "trajectory-web-image-preview" });
+  return `${imageResults ? renderSummarySection("查看图片", imageResults) : ""}${imagePreview ? renderSummarySection("Web image", imagePreview) : ""}${renderGeneratedFiles(artifacts, attachmentUrl)}${renderPayloadResultSections({
     payload: event.payload?.args ?? event.payload,
     result,
-  })}${renderLocalFileDownload(result, artifacts)}`;
+  })}${renderLocalFileDownload(result, artifacts, imageOptions)}`;
 }
 
 function planSnapshot(event) {
@@ -1487,7 +1496,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       const payload = frame.payload;
       row.result = redactTrajectoryValue(jsonClone({ result: payload.result, outcome: payload.outcome || null,
         artifacts: payload.artifacts || null, plan: payload.plan || null,
-        metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics } }));
+        metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics, ...(row.label === "view_image" ? { view_image: payload.metadata?.view_image } : {}) } }));
       row.summary = liveSummary("tool_result", payload);
       row.status = toolResultPresentation(payload).status;
       if (row.duration_source !== "execution") row.timestamp_end = frame.timestamp;

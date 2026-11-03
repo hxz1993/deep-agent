@@ -916,3 +916,8 @@ Part差异只记录固定SDK字段名，不记录内容、参数、任意metadat
 `ChatRequest.session_title`仅首次真实用户输入生效，普通/流式共用`_prepare_history`；Coordinator在Session锁和归属校验后核对首条user事件ID并追加user标题事件，自动标题沿用既有latest-title保护。渠道/new预创建的空会话可命名，渠道来源事件不改；续聊或纯deferred回传不改名。省略/null不进入新增存储路径，Console不发送，后续改名继续PATCH。
 
 0.14.0 渠道仅在成功 final 含 output_info 时，将原生 JSON 以英文编码标记、按 text_limit 的 UTF-8 字节预算分段投递；首段结束原 reply，后续复用现有 send_component 固定当前 peer 并等待确认。失败不重发已发或确认未知的段。普通文字仍沿用原 stream ID。公共 API 不转为 Markdown；Pending/error 不投递候选。
+
+
+## 图像查看增量（2026-11-03，本地待审）
+
+发布基线v0.15.1不含此增量。当前view_image位于files/image_view，runtime:file目录；Web仅search/fetch，旧web_image_view只保留历史投影。view_image不得标为PTC builtin。三来源Schema不扩原read_file协议；URL仍需Web授权，Skill ENV与脚本拒绝。SDK ToolReturn以顶层BinaryContent返回，web/images.py在持久化副本、events和History中投影为view-image-result轻量来源，不能改活跃消息。下轮不自动重放旧查看图片，用户原生图片附件路径不变。PDFium必须受控子进程、及时kill/reap，不能套用to_thread；依赖只加服务端。详见docs/guides/image-viewing.md。

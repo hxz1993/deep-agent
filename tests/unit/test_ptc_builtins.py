@@ -57,7 +57,8 @@ def _assembly(*, ptc=True, calls=None):
         skills=["fixture"],
     )
     kwargs = {
-        "web_toolset": _named_tools("web_search", "web_fetch", "web_image_view", calls=calls),
+        "web_toolset": _named_tools("web_search", "web_fetch", calls=calls),
+        "image_view_toolset": _named_tools("view_image", calls=calls),
         "file_toolset": _named_tools("read_file", calls=calls),
         "document_toolset": _named_tools("parse_document", calls=calls),
         "skill_script_toolset": _named_tools("execute_skill_script", calls=calls),
@@ -79,7 +80,7 @@ class BuiltinPtcRegistrationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(metadata["deepagent_ptc_builtin"], True)
                 self.assertEqual(metadata["source"], "kept")
                 self.assertIsNotNone(tools[name].tool_def.return_schema)
-        for name in ("get_current_time", "web_image_view", "read_file", "parse_document"):
+        for name in ("get_current_time", "view_image", "read_file", "parse_document"):
             self.assertNotIn("deepagent_ptc_builtin", tools[name].tool_def.metadata or {})
             self.assertNotIn("deepagent_code_mode", tools[name].tool_def.metadata or {})
         self.assertEqual(tools["load_file_data"].tool_def.metadata["deepagent_code_mode"], "code_only")

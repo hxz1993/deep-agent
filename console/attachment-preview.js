@@ -102,6 +102,9 @@ export function bindAttachmentImagePreviews({ root = document, openImage }) {
     if (!button) return;
     event.preventDefault();
     hide();
+    // view_image resolves the entire result (including authenticated Skill
+    // images) before opening the same dialog; keep hover cleanup shared.
+    if (button.dataset.viewImagePreview) return;
     const area = button.closest(".trajectory-summary-links") || button.closest(".msg-attachments") || button.parentElement;
     const buttons = [...area.querySelectorAll(selector)];
     const items = buttons.map((item) => ({ previewUrl: item.dataset.attachmentImageUrl, name: item.dataset.attachmentImageName }));

@@ -1382,6 +1382,20 @@ html, body {
 }
 .web-image-preview figcaption a:hover { text-decoration: underline; }
 .trajectory-web-image-preview { margin-top: 0; }
+.view-image-results { min-width: 0; font-size: 12px; }
+.view-image-result-status, .view-image-item-meta { color: var(--text-faint); }
+.view-image-results > ul { list-style: none; padding: 0; margin: 6px 0 0; }
+.view-image-item { padding: 8px 0; }
+.view-image-item + .view-image-item { border-top: 1px solid var(--border); }
+.view-image-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.view-image-preview, .view-image-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; }
+.view-image-preview:hover { color: var(--accent); }
+.view-image-preview > span, .view-image-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.view-image-item-heading > a { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--accent); text-decoration: none; }
+.view-image-item-heading > a:hover { text-decoration: underline; }
+.view-image-item svg { width: 14px; height: 14px; flex: none; }
+.view-image-item-meta { margin-top: 4px; overflow-wrap: anywhere; }
+.view-image-error { margin: 4px 0 0; color: var(--danger); overflow-wrap: anywhere; }
 
 /* Assistant 直接排版；过程统一收进一层大折叠。 */
 .assistant-process {

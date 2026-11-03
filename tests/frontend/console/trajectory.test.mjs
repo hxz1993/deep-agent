@@ -325,10 +325,10 @@ test("工作台以独立页签接入轨迹且默认对话链路不变", () => {
   assert.match(trajectorySource, /trajectory-summary-link local-file-download/);
   assert.doesNotMatch(trajectorySource, /icon\("list-checks"\)|icon\("archive-restore"\)|icon\("message-square-more"\)/);
   assert.match(trajectorySource, /fileId\.startsWith\("local_"\)/);
-  assert.match(chatSource, /renderLocalFileDownload\(data\.result, data\.artifacts\)/);
+  assert.match(chatSource, /renderLocalFileDownload\(data\.result, data\.artifacts, imageOptions\)/);
   assert.match(workspaceCss, /\.local-file-download\s*\{/);
   assert.match(chatSource, /data-copy-file-id/);
-  assert.match(trajectorySource, /renderGeneratedFiles\(artifacts\)/);
+  assert.match(trajectorySource, /renderGeneratedFiles\(artifacts, attachmentUrl\)/);
   assert.match(trajectorySource, /metadata\.generated_files/);
   assert.match(workspaceCss, /\.generated-file-list\s*\{/);
   assert.doesNotMatch(trajectorySource, /\["timing", "Timing"\]/);

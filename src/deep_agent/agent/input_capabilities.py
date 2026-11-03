@@ -130,6 +130,9 @@ def build_capability_instruction_block(spec: AgentSpec, *, document_config: Docu
     else:
         lines.append("Platform file upload pipeline: disabled or no MIME types configured.")
 
+    if "image" in (spec.input_modalities or []):
+        lines.append("When view_image is provided, inspect authorized images or selected physical PDF pages with the current model; an empty text layer is not a blank page. Visual inspection stays outside run_code; use returned File IDs after file creation.")
+
     if document_available:
         provider = document_upload_provider(document_config)
         if provider is not None:

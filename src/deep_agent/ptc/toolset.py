@@ -86,7 +86,8 @@ DeepAgent PTC rules:
 - For HTML/text pages, web_fetch returns an object with url, title and content;
   content is Markdown and may contain image links. Extract candidate links or
   relevant lines here without starting Python or refetching the page with requests.
-  Binary documents/images use their dedicated outer tools when interpretation is needed.
+  For visual inspection, finish this snippet and call outer view_image with the returned File ID or URL.
+  view_image is not a PTC function: only the primary model can interpret its images/PDF pages.
 - Authorized MCP, web_search, web_fetch, execute_python, execute_skill_script and
   export_file_to_download_center retain their ordinary native entry points. Only
   functions actually listed in this catalog can also be used here. Call Python

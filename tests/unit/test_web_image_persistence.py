@@ -152,6 +152,16 @@ class WebImagePersistenceProjectionTests(unittest.IsolatedAsyncioTestCase):
                 self.assert_no_image_payload(content)
                 self.assertIsInstance(restored.parts[0].content, ImageUrl)
 
+    async def test_compacted_legacy_reference_recommends_current_tool_without_rewriting_history(self):
+        legacy = {"kind": "web-image-reference", "url": URL,
+                  "note": "Web image viewed in a previous run; call web_image_view to inspect it again."}
+        raw = ModelRequest(parts=[ToolReturnPart("web_image_view", [legacy], "old-compacted-call")])
+        resolved = await resolve_history_for_llm([raw], current_user_index=None, request_headers={})
+        note = resolved[0].parts[0].content[0]["note"]
+        self.assertIn("call view_image", note)
+        self.assertNotIn("call web_image_view", note)
+        self.assertIn("call web_image_view", raw.parts[0].content[0]["note"])
+
     async def test_unrelated_binary_tools_and_user_attachments_keep_existing_serialization(self):
         request = ModelRequest(parts=[
             ToolReturnPart("another_image_tool", BinaryContent(b"image", media_type="image/png"),

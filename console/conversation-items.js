@@ -1,4 +1,4 @@
-import { assistantActionsFromHistoryItems } from "./assistant-presentation.js?v=20261022-release0140";
+import { assistantActionsFromHistoryItems } from "./assistant-presentation.js?v=20261103-view-image1";
 
 function itemOrder(item) {
   return [Number(item?.order?.sequence || 0), Number(item?.order?.part_offset || 0), String(item?.item_id || "")];

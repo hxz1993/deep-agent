@@ -1,9 +1,10 @@
 import { mountStructuredOutput, serializeStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
-import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20260922-trajectory-8";
+import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20261103-view-image1";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
-import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20261022-release0140";
+import { findViewImageResult, renderViewImageResult } from "./view-image.js?v=20261103-view-image3";
+import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20261103-view-image1";
 
 // No controller imports or initialization: each host owns its DOM and capabilities.
 export function createConversationPresenter({
@@ -504,6 +505,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const defaultTitle = merged.display_name || merged.tool || "tool";
       block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}${isSkillLoad ? " skill-load-block" : ""}`;
       block.dataset.toolCallId = key;
+      block.dataset.toolName = merged.tool || "";
       block.dataset.defaultTitle = defaultTitle;
       if (merged.widget) block.dataset.widget = merged.widget;
       if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
@@ -556,7 +558,8 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       previousResult?.remove();
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
-      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result)}${renderLocalFileDownload(data.result, data.artifacts)}`;
+      const imageOptions = { toolName: data.tool || block.dataset.toolName, metadata: data.metadata, attachmentUrl };
+      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result, imageOptions)}${renderLocalFileDownload(data.result, data.artifacts, imageOptions)}`;
       window.DeepAgentMarkdown?.restoreCodeState?.(res, codeState);
       body.appendChild(res);
       refreshLucideIcons();
@@ -609,7 +612,9 @@ function pretty(v) {
   try { return JSON.stringify(v, null, 2); } catch (_) { return String(v); }
 }
 
-function renderToolResult(result) {
+function renderToolResult(result, imageOptions = {}) {
+  const imageResults = renderViewImageResult(result, { attachmentUrl, ...imageOptions });
+  if (imageResults) return imageResults;
   const imagePreview = renderWebImagePreview(result, { className: "tool-web-image-preview" });
   if (imagePreview) return imagePreview;
   if (typeof result === "string") {
@@ -639,7 +644,8 @@ function findLocalFileResult(value) {
   return null;
 }
 
-function renderLocalFileDownload(result, artifacts = []) {
+function renderLocalFileDownload(result, artifacts = [], imageOptions = {}) {
+  if (findViewImageResult(result, imageOptions)) return "";
   if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
   const file = findLocalFileResult(result);
   if (!file) return "";
@@ -671,8 +677,12 @@ function renderGeneratedFileArtifact(artifact) {
   const fileId = String(artifact?.file_id || artifact?.artifact_id || "");
   const fileName = String(artifact?.file_name || fileId || "未命名文件");
   const details = [artifact?.mime, formatArtifactBytes(artifact?.byte_size)].filter(Boolean).join(" · ");
-  const download = fileId.startsWith("local_")
-    ? `<a href="${escapeHtml(window.serviceUrl(`api/v1/local-files/${encodeURIComponent(fileId)}/download`))}" download title="下载文件">${lucideIcon("download")}</a>`
+  const downloadUrl = fileId.startsWith("local_")
+    ? attachmentUrl({ id: fileId, name: fileName, mime: artifact?.mime })
+      || window.serviceUrl(`api/v1/local-files/${encodeURIComponent(fileId)}/download`)
+    : null;
+  const download = downloadUrl
+    ? `<a href="${escapeHtml(downloadUrl)}" download title="下载文件">${lucideIcon("download")}</a>`
     : "";
   return `<div class="generated-file-item"><span class="generated-file-icon">${lucideIcon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${lucideIcon("copy")}</button></span></div>`;
 }

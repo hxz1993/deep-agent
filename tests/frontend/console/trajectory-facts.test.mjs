@@ -35,7 +35,7 @@ test("part facts preserve assistant loop identity and pair independently complet
   assert.equal(final.find((row) => row.tool_call_id === "a").result.result, "A结果");
 });
 
-function withController(check) {
+function withController(check, options = {}) {
   const oldDocument = globalThis.document;
   const oldWindow = globalThis.window;
   const elements = new Map();
@@ -50,7 +50,7 @@ function withController(check) {
   };
   globalThis.document = { getElementById: element, querySelector: element, querySelectorAll: () => [] };
   globalThis.window = { requestAnimationFrame: (fn) => fn() };
-  try { check(createTrajectoryController({ state: {} }), elements); }
+  try { check(createTrajectoryController({ state: {}, ...options }), elements); }
   finally { globalThis.document = oldDocument; globalThis.window = oldWindow; }
 }
 
@@ -872,4 +872,48 @@ test("output details have only Summary, Output and Raw and show the attempt payl
     assert.match(markup, /&quot;attempt&quot;: 1/);
     assert.doesNotMatch(markup, /json_schema|historical snapshot|current Agent configuration/);
   });
+});
+
+test('view_image metadata renders all pages consistently in live and durable trajectory without first-file duplicates', () => {
+  const images = { kind: 'view-image-result', status: 'partial', items: [
+    { resource: { type: 'url', url: 'https://example.com/a.png' }, name: '页面 A', format: 'png', status: 'ready' },
+    { resource: { type: 'url', url: 'https://example.com/b.pdf' }, name: '页面 B', format: 'pdf', page: 6, page_count: 12, status: 'ready' },
+    { resource: { type: 'attachment', file_id: 'local_missing' }, name: '失败项 C', status: 'error', error: '无权读取' },
+  ] };
+  for (const tool of ['view_image', 'mcp_spoof']) withController((controller, elements) => {
+    controller.ingest({ event: 'session', data: { run_id: 'run-1', turn_id: 'turn-1' } });
+    controller.ingest({ event: 'tool_call', data: { tool, tool_call_id: 'view', args: { items: [] } } });
+    controller.ingest({ event: 'tool_result', data: { tool, tool_call_id: 'view', result: null, metadata: { view_image: images } } });
+    const row = controller.events().find(item => item.tool_call_id === 'view');
+    controller.restore({ selectedId: row.id, selectionPinned: true });
+    const live = elements.get('inspectorContent').innerHTML;
+    controller.setHistory({ items: [
+      fact('image-call', 1, 0, 0, { part_kind: 'tool-call', tool_name: tool, tool_call_id: 'view', args: { items: [] } }),
+      fact('image-result', 2, 1, 0, { part_kind: 'tool-return', tool_name: tool, tool_call_id: 'view', content: null, metadata: { view_image: images } }, 'tool/results'),
+    ] });
+    controller.restore({ selectedId: controller.events().find(item => item.tool_call_id === 'view').id, selectionPinned: true });
+    const saved = elements.get('inspectorContent').innerHTML;
+    for (const html of [live, saved]) {
+      assert.equal((html.match(/<li class="view-image-item/g) || []).length, tool === 'view_image' ? 3 : 0);
+      if (tool === 'view_image') {
+        assert.match(html, /第 6 页 \/ 共 12 页/);
+        assert.match(html, /无权读取/);
+        assert.doesNotMatch(html, /generated-file-list|local-file-download/);
+      }
+    }
+  });
+});
+
+test('PTC generated file cards in administrator trajectories use the session-authorized download route', () => {
+  const artifact = { file_id: 'local_ptc-report', file_name: 'report.html', mime: 'text/html' };
+  withController((controller, elements) => {
+    controller.setHistory({ items: [
+      fact('ptc-call', 1, 0, 0, { part_kind: 'tool-call', tool_name: 'run_code', tool_call_id: 'ptc', args: { code: 'await execute_python(...)' } }),
+      fact('ptc-result', 2, 1, 0, { part_kind: 'tool-return', tool_name: 'run_code', tool_call_id: 'ptc', content: { status: 'ready' }, metadata: { generated_files: [artifact] } }, 'tool/results'),
+    ] });
+    controller.restore({ selectedId: controller.events().find(item => item.tool_call_id === 'ptc').id, selectionPinned: true });
+    const html = elements.get('inspectorContent').innerHTML;
+    assert.match(html, /href="\/api\/v1\/diagnostics\/sessions\/another-users-session\/files\/local_ptc-report\/download"/);
+    assert.doesNotMatch(html, /href="\/api\/v1\/local-files\/local_ptc-report/);
+  }, { attachmentUrl: (file) => `/api/v1/diagnostics/sessions/another-users-session/files/${encodeURIComponent(file.id)}/download` });
 });

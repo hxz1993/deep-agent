@@ -1,4 +1,4 @@
-import { planPanelState } from "./assistant-presentation.js?v=20261022-release0140";
+import { planPanelState } from "./assistant-presentation.js?v=20261103-view-image1";
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const icon = (name) => `<i data-lucide="${name}" aria-hidden="true"></i>`;
 

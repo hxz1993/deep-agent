@@ -941,6 +941,12 @@ dialog.console-detail-dialog#llmModelModal { width: min(760px, calc(100vw - 32px
 #workspaceLegacyHost .agent-select-option-icon svg,
 #workspaceLegacyHost .agent-select-check { width: 13px; height: 13px; }
 #workspaceLegacyHost .agent-select-option > span:nth-child(2) { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#workspaceLegacyHost .agent-session-count { color: var(--text-faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+#workspaceLegacyHost .session-app-filter { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; min-width: 0; }
+#workspaceLegacyHost .session-app-filter .da-select { min-width: 0; flex: 1; }
+#workspaceLegacyHost .session-app-filter .da-select-trigger { width: 100%; }
+#workspaceLegacyHost .session-app-filter > .icon-action { flex: 0 0 32px; }
+#workspaceLegacyHost .session-filter-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 #workspaceLegacyHost .agent-switcher .icon-action {
   width: 30px;
@@ -2566,8 +2572,14 @@ body.workspace-pane-resizing { cursor: col-resize; user-select: none; }
 .inspector-inline-metrics { display: inline-flex; align-items: center; gap: 14px; color: var(--text) !important; }
 .inspector-inline-metrics > span { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-size: 12px; }
 .inspector-inline-metrics svg { width: 12px; height: 12px; color: var(--text-faint); }
-.inspector-scope-value { display: inline-flex; align-items: center; gap: 7px; color: var(--text-faint) !important; }
-.inspector-scope-value code { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+.inspector-scope-value { display: grid; min-width: 0; gap: 3px; }
+.inspector-scope-names,
+.inspector-scope-codes { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; }
+.inspector-facts .inspector-scope-names > span:not(:nth-child(2)) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.inspector-scope-names > span:nth-child(2),
+.inspector-scope-codes { color: var(--text-faint); }
+.inspector-scope-code { display: inline-flex; align-items: center; min-width: 0; }
+.inspector-scope-value code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: var(--ui-font-meta); font-weight: 400; }
 .inspector-session-group .inspector-subheading { margin: 10px 0 4px; padding-top: 10px; }
 .context-budget-overview { display: grid; gap: 10px; }
 .context-budget-summary,
@@ -2731,7 +2743,8 @@ dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface
 
 /* Current test request context lives in the header; persisted scope stays in the inspector. */
 #workspaceLegacyHost .workspace-test-app { min-width: 0; max-width: 260px; padding: 0 8px; gap: 5px; font-size: 12px; flex: 0 1 auto; }
-#workspaceLegacyHost .workspace-test-app-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); color: var(--accent); }
+#workspaceLegacyHost .workspace-test-app-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
+#workspaceLegacyHost .workspace-test-app-id.is-unassigned { color: var(--text-faint); font-style: normal; font-weight: 400; }
 #workspaceLegacyHost .workspace-test-app-label { flex: 0 0 auto; }
 @media (max-width: 900px) {
   #workspaceLegacyHost .workspace-test-app { min-width: 80px; max-width: 150px; width: auto; padding: 0 8px; }

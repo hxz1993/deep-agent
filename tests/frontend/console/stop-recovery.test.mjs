@@ -115,6 +115,7 @@ function streamHarness() {
     addSystemNote: (message) => calls.push(message),
     setStreaming: (value) => { state.streaming = value; },
     syncSessionsFromBackend: async () => calls.push('sessions'),
+    refreshSessionFilterOptions: async () => {},
     refreshCurrentHistory: async () => calls.push('history'),
     daFetch: async (_, { signal }) => ({ ok: true, body: { signal } }),
     readSse: async ({ signal }) => new Promise((_, reject) => {

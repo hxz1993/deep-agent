@@ -5,13 +5,14 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from deep_agent.api.v1.request_context import router as request_context_router
 from deep_agent.local_dev import LocalIdentity, LocalIdentityAdapter, load_local_config
+from deep_agent.services.scope_names import ScopeDirectory
 from deep_agent.security import (
     LOCAL_CONSOLE_ADMIN_SCOPE_KEY,
     LOCAL_CURRENT_USERNAME_SCOPE_KEY,
@@ -132,7 +133,10 @@ class LocalIdentityRequestContextTests(unittest.TestCase):
             LocalIdentity(user="configured-user", token="configured-token"),
         )
 
-        with TestClient(local_app) as client:
+        with patch(
+            "deep_agent.api.v1.request_context.resolve_scope_directory",
+            AsyncMock(return_value=ScopeDirectory()),
+        ) as names, TestClient(local_app) as client:
             response = client.get(
                 "/api/v1/request-context",
                 headers={
@@ -145,6 +149,7 @@ class LocalIdentityRequestContextTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(names.call_args.args[1], "configured-user")
         self.assertEqual(
             response.json(),
             {
@@ -153,6 +158,8 @@ class LocalIdentityRequestContextTests(unittest.TestCase):
                 "app": "mdxath003",
                 "space": "mdxath",
                 "language": "zh-cn",
+                "app_name": None,
+                "space_name": None,
             },
         )
 

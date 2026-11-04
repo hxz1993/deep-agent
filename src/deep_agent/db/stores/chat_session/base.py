@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent, ChannelSessionBinding
 from deep_agent.db.reference_integrity import lock_reference, lock_optional
-from deep_agent.db.session_list import MAX_LIST_LIMIT, SessionSummaryRow, SortField
+from deep_agent.db.session_list import (
+    MAX_LIST_LIMIT, SessionAgentCount, SessionAppCount,
+    SessionFilterOptions, SessionSummaryRow, SortField,
+)
 from deep_agent.db.session_source import normalize_session_source, session_source_conditions
 from deep_agent.db.session_scope import SessionOwner, agent_scope_to_api
 from deep_agent.db.stores._session import SessionBoundMixin
@@ -184,11 +187,16 @@ class ChatSessionStoreBase(SessionBoundMixin):
         updated_after: datetime | None, updated_before: datetime | None,
         query: str | None = None,
         source_type: str | None = None, source_id: str | None = None,
+        app_id: str | None = None, unassigned_app: bool = False,
     ) -> Select:
         if agent_id is not None:
             stmt = stmt.where(ChatSession.agent_id == agent_id)
         if user_id is not None:
             stmt = stmt.where(ChatSession.user_id == user_id)
+        if unassigned_app:
+            stmt = stmt.where(or_(ChatSession.app_id.is_(None), ChatSession.app_id == ""))
+        elif app_id is not None:
+            stmt = stmt.where(ChatSession.app_id == app_id)
         if updated_after is not None:
             stmt = stmt.where(ChatSession.updated_at >= updated_after)
         if updated_before is not None:
@@ -212,6 +220,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
         has_messages: bool | None = None, sort: SortField = "updated_at",
         query: str | None = None,
         source_type: str | None = None, source_id: str | None = None,
+        app_id: str | None = None, unassigned_app: bool = False,
     ) -> tuple[list[SessionSummaryRow], int]:
         limit = min(max(limit, 1), MAX_LIST_LIMIT)
         offset = max(offset, 0)
@@ -239,6 +248,7 @@ class ChatSessionStoreBase(SessionBoundMixin):
             stmt, agent_id=agent_id, user_id=user_id,
             updated_after=updated_after, updated_before=updated_before,
             query=query, source_type=source_type, source_id=source_id,
+            app_id=app_id, unassigned_app=unassigned_app,
         )
         if has_messages is True:
             stmt = stmt.where(message_exists)
@@ -265,10 +275,11 @@ class ChatSessionStoreBase(SessionBoundMixin):
                 .group_by(ChatSessionEvent.session_id)
             )).all()) if rows else {}
             count_stmt = self._apply_session_filters(
-                select(func.count()).select_from(ChatSession),
+                select(func.count()).select_from(ChatSession).join(Agent, ChatSession.agent_id == Agent.id),
                 agent_id=agent_id, user_id=user_id,
                 updated_after=updated_after, updated_before=updated_before,
                 query=query, source_type=source_type, source_id=source_id,
+                app_id=app_id, unassigned_app=unassigned_app,
             )
             if has_messages is True:
                 count_stmt = count_stmt.where(message_exists)
@@ -290,6 +301,41 @@ class ChatSessionStoreBase(SessionBoundMixin):
             for row in rows
         ]
         return summaries, total
+
+    async def list_filter_options(
+        self, *, user_id: str, agent_id: str | None = None,
+    ) -> SessionFilterOptions:
+        """Count the same extant sessions as the list, without loading events.
+
+        Agent totals are independent of the selected Agent. App totals only
+        narrow to that Agent, and deliberately ignore page/search conditions.
+        NULL and empty legacy App values form a single unassigned bucket.
+        """
+        agent_stmt = (
+            select(ChatSession.agent_id, func.count().label("session_count"))
+            .select_from(ChatSession).join(Agent, ChatSession.agent_id == Agent.id)
+            .where(ChatSession.user_id == user_id)
+            .group_by(ChatSession.agent_id).order_by(ChatSession.agent_id)
+        )
+        app_column = func.nullif(ChatSession.app_id, "")
+        app_stmt = (
+            select(app_column.label("app_id"), func.count().label("session_count"))
+            .select_from(ChatSession).join(Agent, ChatSession.agent_id == Agent.id)
+            .where(ChatSession.user_id == user_id)
+            .group_by(app_column)
+            .order_by(func.max(ChatSession.updated_at).desc(), app_column.asc())
+        )
+        if agent_id is not None:
+            app_stmt = app_stmt.where(ChatSession.agent_id == agent_id)
+        async with self._read() as db:
+            agent_rows = (await db.execute(agent_stmt)).all()
+            app_rows = (await db.execute(app_stmt)).all()
+        return SessionFilterOptions(
+            agents=[SessionAgentCount(agent_id=row.agent_id, session_count=int(row.session_count))
+                    for row in agent_rows],
+            apps=[SessionAppCount(app_id=row.app_id, session_count=int(row.session_count))
+                  for row in app_rows],
+        )
 
     async def _message_counts(self, db: AsyncSession, session_ids: list[str]) -> dict[str, int]:
         """Keep list counts at SDK-message granularity, not inserted-part count.

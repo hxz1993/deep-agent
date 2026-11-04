@@ -26,7 +26,7 @@ from deep_agent.db.event_codec import (
     message_parts,
     tool_part_references,
 )
-from deep_agent.db.session_list import SessionListFilters, SessionSummaryRow
+from deep_agent.db.session_list import SessionFilterOptions, SessionListFilters, SessionSummaryRow
 from deep_agent.db.session_scope import NO_AGENT_SCOPE, SessionOwner, normalize_agent_scope, runtime_session_key
 from deep_agent.db.stores.chat_session.base import ChatSessionStoreBase
 from deep_agent.db.stores.event.base import LifecycleStatus, SessionEventSnapshot, SessionEventStore, _compaction_anchor
@@ -108,6 +108,9 @@ class SessionStore(Protocol):
     async def list_session_summaries(
         self, filters: SessionListFilters,
     ) -> tuple[list[SessionSummaryRow], int]: ...
+    async def list_session_filter_options(
+        self, *, user_id: str, agent_id: str | None = None,
+    ) -> SessionFilterOptions: ...
     async def list_events(
         self, session_id: str, **filters: Any,
     ) -> list[SessionEventSnapshot]: ...
@@ -1087,7 +1090,13 @@ class SqlConversationCoordinator:
             updated_after=filters.updated_after, updated_before=filters.updated_before,
             has_messages=filters.has_messages, sort=filters.sort,
             query=filters.query, source_type=filters.source_type, source_id=filters.source_id,
+            app_id=filters.app_id, unassigned_app=filters.unassigned_app,
         )
+
+    async def list_session_filter_options(
+        self, *, user_id: str, agent_id: str | None = None,
+    ) -> SessionFilterOptions:
+        return await self._chat_sessions.list_filter_options(user_id=user_id, agent_id=agent_id)
 
     async def interrupt_running(self) -> int:
         return await self._events.interrupt_running()

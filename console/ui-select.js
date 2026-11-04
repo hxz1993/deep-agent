@@ -2,6 +2,12 @@
 let nextId = 0;
 const instances = new WeakMap();
 
+export function selectOptionMatchesSearch(option, query = "") {
+  const keyword = query.trim().toLocaleLowerCase();
+  return !option.hidden && (!keyword || option.dataset?.searchFixed === "true"
+    || option.label.toLocaleLowerCase().includes(keyword));
+}
+
 export function nextSelectIndex(options, current, key) {
   const enabled = options.map((option, index) => ({ option, index }))
     .filter(({ option }) => !option.disabled && !option.hidden && !option.parentElement?.disabled)
@@ -68,18 +74,51 @@ export function enhanceSelect(select) {
   menu.setAttribute("role", "listbox");
   menu.setAttribute("popover", "manual");
   menu.hidden = true;
-  trigger.setAttribute("aria-controls", menu.id);
+  const searchable = select.dataset.searchable === "true";
+  let searchInput, searchHeader;
+  const optionList = searchable ? document.createElement("div") : menu;
+  if (searchable) {
+    menu.removeAttribute("role");
+    optionList.id = `${menu.id}-options`;
+    optionList.setAttribute("role", "listbox");
+    searchHeader = document.createElement("div");
+    searchHeader.className = "da-select-search";
+    const field = document.createElement("label");
+    field.className = "console-search";
+    const icon = document.createElement("i");
+    icon.setAttribute("data-lucide", "search");
+    icon.setAttribute("aria-hidden", "true");
+    searchInput = document.createElement("input");
+    searchInput.type = "search";
+    searchInput.placeholder = select.dataset.searchPlaceholder || "搜索选项";
+    searchInput.setAttribute("aria-label", searchInput.placeholder);
+    searchInput.setAttribute("role", "combobox");
+    searchInput.setAttribute("aria-autocomplete", "list");
+    searchInput.setAttribute("aria-controls", optionList.id);
+    searchInput.setAttribute("aria-expanded", "false");
+    searchInput.autocomplete = "off";
+    searchInput.spellcheck = false;
+    searchInput.maxLength = 200;
+    field.append(icon, searchInput);
+    searchHeader.append(field);
+    menu.append(searchHeader, optionList);
+  }
+  trigger.setAttribute("aria-controls", optionList.id);
   const originalTabIndex = select.getAttribute("tabindex");
   select.before(host);
   host.append(select, trigger, menu);
   select.classList.add("da-select-native");
   select.tabIndex = -1;
   select.setAttribute("aria-hidden", "true");
-  let opened = false, active = -1, disposed = false, search = "", searchAt = 0;
+  let opened = false, active = -1, disposed = false, search = "", searchAt = 0, searchQuery = "";
   const optionRestores = new Map();
   const restores = [];
   let resizeObserver;
   const options = () => Array.from(select.options);
+  const navigationOptions = () => searchable ? options().map(option => ({
+    disabled: option.disabled, parentElement: option.parentElement,
+    hidden: !selectOptionMatchesSearch(option, searchQuery),
+  })) : options();
   const position = () => {
     if (!opened) return;
     if (!trigger.getClientRects().length || !select.isConnected || select.closest("dialog:not([open])")) { close(); return; }
@@ -101,33 +140,47 @@ export function enhanceSelect(select) {
     menu.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
     trigger.removeAttribute("aria-activedescendant");
+    if (searchInput) {
+      searchQuery = "";
+      searchInput.value = "";
+      searchInput.setAttribute("aria-expanded", "false");
+      searchInput.removeAttribute("aria-activedescendant");
+    }
     if (focus && select.isConnected) trigger.focus();
   }
   function markActive() {
     menu.querySelectorAll("[role=option]").forEach(node => node.classList.toggle("active", Number(node.dataset.index) === active));
     const node = menu.querySelector(`[data-index="${active}"]`);
-    if (node) { trigger.setAttribute("aria-activedescendant", node.id); node.scrollIntoView?.({ block: "nearest" }); }
-    else trigger.removeAttribute("aria-activedescendant");
+    if (node) {
+      trigger.setAttribute("aria-activedescendant", node.id);
+      searchInput?.setAttribute("aria-activedescendant", node.id);
+      node.scrollIntoView?.({ block: "nearest" });
+    } else {
+      trigger.removeAttribute("aria-activedescendant");
+      searchInput?.removeAttribute("aria-activedescendant");
+    }
   }
   function renderMenu() {
-    menu.replaceChildren();
-    let previousGroup = null;
+    optionList.replaceChildren();
+    menu.dataset.badgeAlign = select.dataset.badgeAlign || "";
+    let previousGroup = null, previousWasFixed = false;
     options().forEach((option, index) => {
-      if (option.hidden) return;
+      if (!selectOptionMatchesSearch(option, searchQuery)) return;
       const group = option.parentElement?.tagName === "OPTGROUP" ? option.parentElement : null;
       if (group && group !== previousGroup) {
         const heading = document.createElement("div"); heading.className = "da-select-group";
         if (group.dataset.iconSrc) {
           const icon = document.createElement("img"); icon.src = group.dataset.iconSrc; icon.alt = ""; heading.append(icon);
         }
-        heading.append(document.createTextNode(group.label)); menu.append(heading);
+        heading.append(document.createTextNode(group.label)); optionList.append(heading);
       }
       previousGroup = group;
-      if (option.dataset.separatorBefore === "true" && menu.children.length) {
+      if ((option.dataset.separatorBefore === "true"
+          || (searchable && previousWasFixed && option.dataset.searchFixed !== "true")) && optionList.children.length) {
         const separator = document.createElement("div");
         separator.className = "da-select-separator";
         separator.setAttribute("role", "separator");
-        menu.append(separator);
+        optionList.append(separator);
       }
       const row = document.createElement("div");
       row.className = "da-select-option";
@@ -153,9 +206,23 @@ export function enhanceSelect(select) {
         row.classList.add("has-icon");
       }
       row.title = option.title || option.label;
-      menu.append(row);
+      optionList.append(row);
+      previousWasFixed = option.dataset.searchFixed === "true";
     });
-    if (!menu.children.length) { const empty = document.createElement("div"); empty.className = "da-select-empty"; empty.textContent = "暂无选项"; menu.append(empty); }
+    const noMatches = searchable && searchQuery.trim() && !options().some(option =>
+      option.dataset.searchFixed !== "true" && selectOptionMatchesSearch(option, searchQuery));
+    if (!optionList.children.length || noMatches) {
+      if (noMatches && optionList.children.length) {
+        const separator = document.createElement("div");
+        separator.className = "da-select-separator";
+        separator.setAttribute("role", "separator");
+        optionList.append(separator);
+      }
+      const empty = document.createElement("div"); empty.className = "da-select-empty";
+      empty.setAttribute("role", "status");
+      empty.textContent = noMatches ? (select.dataset.searchEmpty || "未找到匹配选项") : "暂无选项";
+      optionList.append(empty);
+    }
     view.lucide?.createIcons({ root: menu });
     markActive();
   }
@@ -200,8 +267,10 @@ export function enhanceSelect(select) {
     if (trigger.disabled) return;
     // Close every other enhanced control without sharing controller state across documents.
     document.dispatchEvent(new view.CustomEvent("console-select-open", { detail: select }));
+    searchQuery = "";
+    if (searchInput) searchInput.value = "";
     active = select.selectedIndex;
-    if (key === "Home" || key === "End" || active < 0) active = nextSelectIndex(options(), active, key || "Home");
+    if (key === "Home" || key === "End" || active < 0) active = nextSelectIndex(navigationOptions(), active, key || "Home");
     renderMenu();
     menu.hidden = false;
     opened = true;
@@ -209,10 +278,14 @@ export function enhanceSelect(select) {
     trigger.setAttribute("aria-expanded", "true");
     position();
     markActive();
+    if (searchInput) {
+      searchInput.setAttribute("aria-expanded", "true");
+      searchInput.focus({ preventScroll: true });
+    }
   }
   function choose(index) {
     const option = options()[index];
-    if (!option || option.hidden || option.disabled || option.parentElement?.disabled) return;
+    if (!option || !selectOptionMatchesSearch(option, searchQuery) || option.disabled || option.parentElement?.disabled) return;
     const changed = select.selectedIndex !== index;
     select.selectedIndex = index;
     close({ focus: true });
@@ -223,19 +296,46 @@ export function enhanceSelect(select) {
     if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
       if (!opened) open(event.key);
-      else { active = nextSelectIndex(options(), active, event.key); markActive(); }
+      else { active = nextSelectIndex(navigationOptions(), active, event.key); markActive(); }
     } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault(); opened ? choose(active) : open();
     } else if (event.key === "Escape" && opened) { event.preventDefault(); event.stopPropagation(); close({ focus: true }); }
     else if (event.key === "Tab") close();
     else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      if (searchInput) {
+        event.preventDefault();
+        if (!opened) open();
+        searchInput.value += event.key;
+        updateSearch();
+        return;
+      }
       const now = Date.now(); search = now - searchAt > 700 ? event.key : search + event.key; searchAt = now;
       if (!opened) open();
       const index = options().findIndex(option => !option.disabled && !option.hidden && !option.parentElement?.disabled && option.label.toLocaleLowerCase().startsWith(search.toLocaleLowerCase()));
       if (index >= 0) { active = index; markActive(); }
     }
   });
-  on(menu, "pointerdown", event => event.preventDefault());
+  function updateSearch() {
+    searchQuery = searchInput.value;
+    active = searchQuery.trim() ? options().findIndex(option => option.dataset.searchFixed !== "true"
+      && selectOptionMatchesSearch(option, searchQuery) && !option.disabled && !option.parentElement?.disabled)
+      : select.selectedIndex;
+    renderMenu(); position();
+  }
+  if (searchInput) {
+    on(searchInput, "input", updateSearch);
+    on(searchInput, "keydown", event => {
+      if (event.isComposing) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault(); active = nextSelectIndex(navigationOptions(), active, event.key); markActive();
+      } else if (event.key === "Enter") {
+        event.preventDefault(); choose(active);
+      } else if (event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation(); close({ focus: true });
+      } else if (event.key === "Tab") close({ focus: true });
+    });
+  }
+  on(menu, "pointerdown", event => { if (!searchHeader?.contains(event.target)) event.preventDefault(); });
   on(menu, "click", event => { const row = event.target.closest("[data-index]"); if (row) { event.preventDefault(); choose(Number(row.dataset.index)); } });
   on(document, "pointerdown", event => { if (!host.contains(event.target)) close(); }, { capture: true });
   on(document, "console-select-open", event => { if (event.detail !== select) close(); });

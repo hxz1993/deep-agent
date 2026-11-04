@@ -423,11 +423,12 @@ test("session inspector shows persisted scope, never current test request header
 
 test("empty fields retain their original labels and styles while values and zero remain intact", () => {
   const empty = renderSessionInspector({ state: { agentId: "internal-agent-id" }, activeSession: { appId: null, spaceId: "" } });
-  assert.match(empty, /inspector-scope-value"><code>—<\/code>/);
+  assert.match(empty, /inspector-scope-names[^]*?未关联应用[^]*?未关联空间/);
+  assert.match(empty, /inspector-scope-codes[^]*?<code>—<\/code>/);
   assert.doesNotMatch(empty, /internal-agent-id|console-empty-value|>No<|估算方式|estimator_source/);
   const filled = renderSessionInspector({ diagnostic: true, agentName: "Agent name", state: { agentId: "hidden-id" }, activeSession: { appId: "<app>", spaceId: "space", turnCount: 0 }, contextStatus: { estimator_source: "conservative_fallback" } });
   assert.match(filled, /&lt;app&gt;/);
-  assert.match(filled, /<code>space<\/code>/);
+  assert.match(filled, /<code title="space">space<\/code>/);
   assert.match(filled, /title="提问数"><i[^]*?<\/i>0<\/span>/);
   assert.doesNotMatch(filled, /hidden-id|conservative_fallback/);
 });

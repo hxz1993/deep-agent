@@ -11,9 +11,10 @@ function refreshHarness({ status = 200, sessionId = 'old', streaming = false } =
   const state = { agentId: 'agent', sessionId, agents: [{ id: 'agent' }], sessions: [{id:'newest',agentId:'agent'}], abortController: streaming ? {} : null };
   const calls = [];
   const h = vm.createContext({ state, calls, el: { chatTitle: { textContent: 'old title' } },
-    loadAgents: async () => {}, syncSessionsFromBackend: async () => {},
+    loadAgents: async () => {}, syncSessionsFromBackend: async () => {}, refreshSessionFilterOptions: async () => {},
     sessionApiUrl: s => s.id, sessionLookupKey: s => `${s.agentId}:${s.id}`,
-    daFetch: async id => { calls.push(['get',id]); return {status,ok:status===200}; },
+    daFetch: async id => { calls.push(['get',id]); return {status,ok:status===200,json:async()=>({session_id:id})}; },
+    mergeSessionsFromBackend() {},
     newChat: () => {state.sessionId=null; calls.push(['new']);},
     switchSession: async s => {state.sessionId=s.id; calls.push(['switch',s.id]);},
     showConsoleToast: message => calls.push(['error',message]),
@@ -71,6 +72,7 @@ function streamHarness() {
     upsertSession:(...args)=>calls.push(['session',...args]),agentNameById:id=>id,
     applySessionTitle:(s,title)=>calls.push(['title',s.id,title]),
     syncSessionsFromBackend:async()=>calls.push(['sync']),
+    refreshSessionFilterOptions:async()=>{},
     handleEvent:evt=>frames.push(evt),
     daFetch:async(_, {signal})=>({ok:true,body:new ReadableStream({start(controller){
       sockets.push({controller,signal});

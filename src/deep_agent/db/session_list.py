@@ -22,6 +22,26 @@ class SessionListFilters:
     query: str | None = None
     source_type: str | None = None
     source_id: str | None = None
+    app_id: str | None = None
+    unassigned_app: bool = False
+
+
+@dataclass(frozen=True)
+class SessionAgentCount:
+    agent_id: str
+    session_count: int
+
+
+@dataclass(frozen=True)
+class SessionAppCount:
+    app_id: str | None
+    session_count: int
+
+
+@dataclass(frozen=True)
+class SessionFilterOptions:
+    agents: list[SessionAgentCount]
+    apps: list[SessionAppCount]
 
 
 @dataclass(frozen=True)

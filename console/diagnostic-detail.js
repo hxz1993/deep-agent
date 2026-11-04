@@ -5,7 +5,7 @@ import { projectConversationItems, sortConversationItems } from "./conversation-
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261103-view-image1";
 import { createTrajectoryController } from "./trajectory.js?v=20261103-trajectory-files";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20261013-providers";
+import { renderSessionInspector } from "./session-inspector.js?v=20261104-session-app";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";

@@ -167,6 +167,8 @@ class SessionInfo(BaseModel):
     source_id: str | None = Field(default=None, description="Source instance ID, not necessarily a channel account.")
     app_id: str | None = Field(default=None, description="App recorded when the session was created.")
     space_id: str | None = Field(default=None, description="Space recorded when the session was created.")
+    app_name: str | None = Field(default=None, description="Visible current App name, when available.")
+    space_name: str | None = Field(default=None, description="Visible current Space name, when available.")
     session_id: str
     message_count: int
     turn_count: int = Field(default=0, description="Distinct conversation turns in this session.")
@@ -185,3 +187,21 @@ class SessionListResponse(BaseModel):
     total: int = Field(description="Total sessions matching the filters.")
     limit: int
     offset: int
+
+
+class SessionAgentFilterOption(BaseModel):
+    agent_id: str
+    session_count: int
+
+
+class SessionAppFilterOption(BaseModel):
+    app_id: str
+    app_name: str | None = None
+    session_count: int
+
+
+class SessionFilterOptionsResponse(BaseModel):
+    agents: list[SessionAgentFilterOption]
+    apps: list[SessionAppFilterOption]
+    unassigned_count: int
+    total: int

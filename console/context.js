@@ -3,7 +3,9 @@ const api = window.DeepAgentConsoleAPI;
 
 let inheritedContext = { app: null, space: null, language: null };
 let effectiveContext = { app: null, space: null, language: null };
+let resolvedContext = null;
 let identity = null;
+let identityGeneration = 0;
 let databaseVersionLoaded = false;
 let databaseVersionPromise = null;
 
@@ -48,6 +50,10 @@ function mergedContext(overrides = api.loadContext()) {
   return {
     app,
     space,
+    app_name: app && resolvedContext?.app === app ? resolvedContext.app_name || null
+      : app && inheritedContext.app === app ? inheritedContext.app_name || null : null,
+    space_name: space && resolvedContext?.space === space ? resolvedContext.space_name || null
+      : space && inheritedContext.space === space ? inheritedContext.space_name || null : null,
     language: api.DEFAULT_LANGUAGE,
   };
 }
@@ -86,17 +92,21 @@ function renderContext() {
 
   document.querySelectorAll("[data-open-context]").forEach((button) => {
     const appId = effectiveContext.app || "不分应用";
+    const appLabel = effectiveContext.app_name || appId;
     const label = button.querySelector("[data-test-app-id]");
-    if (label) label.textContent = appId;
-    button.title = `调试：${appId}\nSpace：${effectiveContext.space || "未提供"}\nLanguage：${effectiveContext.language || "未提供"}\nUser ID：${identity?.user || "未认证"}`;
-    button.setAttribute("aria-label", `调试：${appId}，查看或修改调试上下文`);
+    if (label) {
+      label.textContent = appLabel;
+      label.classList.toggle("is-unassigned", !effectiveContext.app);
+    }
+    button.title = `调试：${appLabel}\nApp：${appId}\nSpace：${effectiveContext.space || "未提供"}\nLanguage：${effectiveContext.language || "未提供"}\nUser ID：${identity?.user || "未认证"}`;
+    button.setAttribute("aria-label", `调试：${appLabel}，查看或修改调试上下文`);
   });
 
   document.querySelectorAll("[data-empty-context-prefix]").forEach((prefix) => {
     prefix.textContent = effectiveContext.app ? "在应用 " : "当前";
   });
   document.querySelectorAll("[data-empty-context-label]").forEach((label) => {
-    label.textContent = effectiveContext.app || "不分应用";
+    label.textContent = effectiveContext.app_name || effectiveContext.app || "不分应用";
   });
   document.querySelectorAll("[data-empty-context-note]").forEach((note) => {
     note.textContent = effectiveContext.app ? " 的上下文中开始新对话。" : "，无法调用 DeepFOS MCP 及相关平台工具。";
@@ -130,23 +140,33 @@ function setAuthLocked(locked) {
 }
 
 export async function refreshIdentity() {
+  const generation = ++identityGeneration;
+  const overrides = api.loadContext();
   try {
-    const [inherited, profile] = await Promise.all([
+    const [inherited, profile, resolved] = await Promise.all([
       api.requestContext({ inherited: true }),
       api.currentUser().catch(() => null),
+      overrides.app ? api.requestContext().catch(() => null) : Promise.resolve(null),
     ]);
+    if (generation !== identityGeneration) return false;
     const username = profile?.user_id === inherited.user ? valueOrNull(profile.username) : null;
     identity = { ...inherited, username, profile: profile?.user_id === inherited.user ? profile : {resolution:"unavailable"} };
     inheritedContext = {
       app: inherited.app || null,
       space: inherited.space || null,
       language: inherited.language || null,
+      app_name: inherited.app_name || null,
+      space_name: inherited.space_name || null,
     };
+    resolvedContext = resolved?.user === inherited.user ? resolved : null;
     setAuthLocked(false);
     renderContext();
     return true;
   } catch (error) {
+    if (generation !== identityGeneration) return false;
     identity = null;
+    resolvedContext = null;
+    inheritedContext = { app: null, space: null, language: null };
     setAuthLocked(error.status === 401);
     renderContext();
     if (error.status !== 401) throw error;

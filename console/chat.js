@@ -44,6 +44,7 @@ import { shouldFollowMessages } from "./message-scroll.js?v=20260912-21";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260912-21";
 import { createHistoryFollower } from "./history-follower.js?v=20260912-21";
 import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260912-21";
+import { createSessionFilterOptionsController, sessionAppQuery } from "./session-app-filter.js?v=20261104-app-search";
 
 /* ------------------------------------------------------------------ *
  * deep-agent 前端 —— 适配 FastAPI /api/v1/chat/stream (SSE over POST)
@@ -154,6 +155,8 @@ const state = {
   sessionId: null,
   conversationId: null,
   sessions: [], // [{id, agentId, agentName, title}] — 仅来自 GET /api/v1/sessions
+  sessionAppFilter: "all",
+  sessionFilterOptions: { status: "idle", agents: [], apps: [] },
   streaming: false,
   observingRun: false,
   historyLoading: false,
@@ -190,6 +193,7 @@ const state = {
 };
 
 window.addEventListener("pagehide", () => {
+  sessionFilterOptions.dispose();
   clearTimeout(sessionSearchTimer);
   sessionPage.controller?.abort();
   state.historyFollower?.stop();
@@ -423,6 +427,8 @@ function currentSessionSnapshot() {
     source_id: persisted?.source_id ?? null,
     appId: persisted?.appId ?? null,
     spaceId: persisted?.spaceId ?? null,
+    appName: persisted?.appName ?? null,
+    spaceName: persisted?.spaceName ?? null,
   });
 }
 
@@ -445,6 +451,8 @@ function mergeSessionsFromBackend(rows, { append = false, agentId = state.agentI
       source_id: row.source_id ?? null,
       appId: row.app_id ?? null,
       spaceId: row.space_id ?? null,
+      appName: row.app_name ?? null,
+      spaceName: row.space_name ?? null,
     });
   });
 
@@ -696,8 +704,25 @@ function init() {
     loadUiTools(state.agentId);
     if (agentFromUrl) newChat(agentFromUrl);
     else updateAgentSelectState();
-    await syncSessionsFromBackend();
+    await Promise.all([syncSessionsFromBackend(), refreshSessionFilterOptions()]);
   });
+}
+
+const sessionFilterOptions = createSessionFilterOptionsController({
+  async fetchOptions(agentId, signal) {
+    const params = new URLSearchParams({ agent_id: agentId });
+    const response = await daFetch(serviceUrl(`api/v1/sessions/filter-options?${params}`), { signal, reportStatus: false });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  },
+  changed(snapshot) {
+    state.sessionFilterOptions = snapshot;
+    window.DeepAgentConsoleWorkspace?.renderSessionFilters?.();
+  },
+});
+
+function refreshSessionFilterOptions(options) {
+  return sessionFilterOptions.refresh(state.agentId, options);
 }
 
 let sessionPage = { agentId: null, offset: 0, hasMore: true, loading: false, error: false };
@@ -711,8 +736,13 @@ function resetSessionPage() {
   clearTimeout(sessionSearchTimer);
   sessionSearchTimer = null;
   sessionPage.controller?.abort();
+  if (sessionPage.agentId !== state.agentId) {
+    state.sessionAppFilter = "all";
+    window.DeepAgentConsoleWorkspace?.renderSessionFilters?.();
+  }
   sessionPage = {
     agentId: state.agentId, query: sessionSearchQuery(), ids: new Set(),
+    appFilter: state.sessionAppFilter || "all",
     offset: 0, hasMore: true, loading: false, error: false, scheduled: false,
   };
   el.sessionList.scrollTop = 0;
@@ -735,6 +765,7 @@ function scheduleSessionSearch(event) {
 function syncSessionsFromBackend() {
   if (!state.agentId) return Promise.resolve();
   if (sessionPage.agentId === state.agentId && sessionPage.query === sessionSearchQuery()
+      && sessionPage.appFilter === (state.sessionAppFilter || "all")
       && sessionPage.loading && sessionPage.offset === 0) return sessionPage.promise;
   resetSessionPage();
   return loadMoreSessions();
@@ -750,6 +781,7 @@ async function loadMoreSessions() {
   const request = (async () => {
   try {
     const params = new URLSearchParams({ agent_id: page.agentId, limit: "50", offset: String(page.offset) });
+    for (const [key, value] of Object.entries(sessionAppQuery(page.appFilter))) params.set(key, value);
     if (page.query) params.set("query", page.query);
     const r = await daFetch(serviceUrl(`api/v1/sessions?${params}`), { signal: page.controller.signal });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -759,6 +791,7 @@ async function loadMoreSessions() {
     for (const row of rows) page.ids.add(row.session_id);
     mergeSessionsFromBackend(rows, { append: page.offset > 0, agentId: page.agentId });
     page.offset += rows.length;
+    page.total = Number(payload.total);
     page.hasMore = rows.length > 0 && page.offset < Number(payload.total);
   } catch (error) {
     if (page === sessionPage && error.name !== "AbortError") page.error = true;
@@ -934,6 +967,7 @@ function detachChatView() {
 }
 
 function newChat(agentId, { preserveDraft = false } = {}) {
+  const previousAgentId = state.agentId;
   const id = normalizeAgentId(agentId);
   closeNewChatMenu();
   detachChatView();
@@ -944,6 +978,7 @@ function newChat(agentId, { preserveDraft = false } = {}) {
   } else {
     ensureAgentSelected();
   }
+  if (previousAgentId !== state.agentId) state.sessionAppFilter = "all";
   loadUiTools(state.agentId);
   state.sessionId = null;
   state.sessionCache = null;
@@ -967,6 +1002,7 @@ function newChat(agentId, { preserveDraft = false } = {}) {
   updateHitlInputState();
   updateComposerContextControls();
   renderSessions();
+  void refreshSessionFilterOptions();
   el.input.focus();
   if (sessionPage.agentId !== state.agentId) {
     el.sessionList.scrollTop = 0;
@@ -985,6 +1021,7 @@ function upsertSession(id, title, agentId, agentName) {
     if (agentName) existing.agentName = agentName;
     existing.updatedAt = now;
   } else {
+    const context = window.DeepAgentConsoleContext?.effectiveContext || {};
     state.sessions.push({
       ...normalized,
       agentName: agentName || agentNameById(normalized.agentId),
@@ -992,7 +1029,17 @@ function upsertSession(id, title, agentId, agentName) {
       createdAt: now,
       updatedAt: now,
       messageCount: state.modelMessageCount,
+      appId: context.app || null,
+      spaceId: context.space || null,
+      appName: context.app_name || null,
+      spaceName: context.space_name || null,
     });
+  }
+  if (sessionPage.agentId === normalized.agentId) {
+    const session = state.sessions.find(item => sessionLookupKey(item) === key);
+    if ((!sessionPage.query || (session?.title || "").includes(sessionPage.query) || id === sessionPage.query)
+      && (sessionPage.appFilter === "all" || (sessionPage.appFilter === "unassigned" && !session?.appId)
+        || sessionPage.appFilter === `app:${session?.appId}`)) sessionPage.ids?.add(id);
   }
   sortSessions();
   renderSessions();
@@ -1033,18 +1080,18 @@ function renderSessions() {
   const scopedSessions = state.sessions.filter(
     (session) => (session.agentId || "") === (state.agentId || "")
       && !(sessionPage.scheduled || (sessionPage.loading && sessionPage.offset === 0))
-      && (!sessionPage.query || sessionPage.ids?.has(session.id)),
+      && sessionPage.ids?.has(session.id),
   );
   const panelTitle = document.getElementById("sessionPanelTitle");
   const panelSummary = document.getElementById("sessionPanelSummary");
   if (panelTitle) panelTitle.textContent = activeAgent?.name || "Agent 会话";
   if (panelSummary) {
-    panelSummary.textContent = `${scopedSessions.length} 个历史会话`;
+    panelSummary.textContent = `${sessionPage.total ?? scopedSessions.length} 个历史会话`;
     panelSummary.title = state.sessionId ? "已选择会话" : "尚未选择会话";
   }
   if (scopedSessions.length === 0) {
     if (!sessionPage.loading && !sessionPage.scheduled && !sessionPage.error) {
-      el.sessionList.innerHTML = `<li class="session-empty">${sessionPage.query ? "未找到匹配会话" : "该 Agent 暂无历史会话"}</li>`;
+      el.sessionList.innerHTML = `<li class="session-empty">${sessionPage.query || state.sessionAppFilter !== "all" ? "未找到匹配会话" : "该 Agent 暂无历史会话"}</li>`;
     }
   }
   for (const s of scopedSessions) {
@@ -1828,7 +1875,20 @@ async function deleteSession(session) {
     sessionDeletesInFlight.delete(key);
   }
   state.sessions = state.sessions.filter((s) => sessionLookupKey(s) !== key);
-  if (sessionPage.agentId === normalized.agentId) sessionPage.offset = Math.max(0, sessionPage.offset - 1);
+  const sameAgentPage = sessionPage.agentId === normalized.agentId;
+  const listed = sameAgentPage && sessionPage.ids?.has(normalized.id);
+  const reloadPage = sameAgentPage && sessionPage.loading;
+  if (listed || reloadPage) {
+    // A page fetched before DELETE must not resurrect the removed conversation.
+    // A refresh/filter may have started while DELETE was pending, leaving ids
+    // empty even though its in-flight response still contains the removed row.
+    sessionPage.controller?.abort();
+    const ids = new Set(sessionPage.ids);
+    ids.delete(normalized.id);
+    sessionPage = { ...sessionPage, ids, offset: Math.max(0, sessionPage.offset - (listed ? 1 : 0)),
+      total: sessionPage.total == null ? undefined : Math.max(0, sessionPage.total - (listed ? 1 : 0)),
+      loading: false, controller: null, promise: null };
+  }
   if (normalized.id === state.sessionId && (normalized.agentId || "") === (state.agentId || "")) {
     // DELETE has waited for the server run to stop. Detach any buffered SSE
     // before clearing the UI so late frames cannot restore the deleted session.
@@ -1842,6 +1902,8 @@ async function deleteSession(session) {
     newChat();
   }
   else renderSessions();
+  void refreshSessionFilterOptions({ force: true });
+  if (reloadPage) await loadMoreSessions();
 }
 
 /* --------------------------- 会话重命名 --------------------------- */
@@ -2462,6 +2524,7 @@ async function runChatStream(payload, assistant) {
       else if (evt.event === "session") {
         sourceSession.id = evt.data.session_id || sourceSession.id;
         upsertSession(sourceSession.id, null, sourceSession.agentId, agentNameById(sourceSession.agentId));
+        void refreshSessionFilterOptions({ force: true });
       } else if (evt.event === "session_title") {
         applySessionTitle(sourceSession, evt.data.title);
       }
@@ -2519,6 +2582,7 @@ async function runChatStream(payload, assistant) {
         && state.sessionId === session.id && state.agentId === session.agentId);
     }
     if (state.sessionId) await syncSessionsFromBackend();
+    void refreshSessionFilterOptions({ force: true });
   }
 }
 
@@ -2682,6 +2746,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
         const isNewSession = !state.sessions.some((s) => sessionLookupKey(s) === sessionKey);
         const title = isNewSession ? lastUserText() || id.slice(0, 8) : null;
         upsertSession(id, title, state.agentId, agentNameById(state.agentId));
+        if (isNewSession) void refreshSessionFilterOptions({ force: true });
         if (isNewSession && el.chatTitle.textContent === "新对话") {
           el.chatTitle.textContent = (title || id.slice(0, 8)).slice(0, 40);
         }
@@ -3334,7 +3399,7 @@ async function refreshAgentWorkspace() {
     && state.sessionId === previousSessionId;
   await loadAgents({ isCurrent: current });
   if (!current()) return false;
-  await syncSessionsFromBackend();
+  await Promise.all([syncSessionsFromBackend(), refreshSessionFilterOptions({ force: true })]);
   if (!current()) return false;
   if (state.agentId !== previousAgentId || !state.agents.some((agent) => agent.id === previousAgentId)) {
     newChat();
@@ -3354,6 +3419,9 @@ async function refreshAgentWorkspace() {
     } else if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     } else if (!state.abortController && !state.streaming && !state.observingRun && !state.awaitingHitl && !state.historyLoading) {
+      const info = await response.json();
+      if (!current()) return false;
+      mergeSessionsFromBackend([info], { append: true });
       const target = state.sessions.find((item) => sessionLookupKey(item) === sessionLookupKey(session));
       await switchSession(target || { ...session, title: el.chatTitle.textContent });
     }
@@ -3373,6 +3441,11 @@ window.DeepAgentConsoleChat = {
   parseSseBlock,
   readSse,
   syncSessionsFromBackend,
+  refreshSessionFilterOptions,
+  async setSessionAppFilter(value) {
+    state.sessionAppFilter = value;
+    await syncSessionsFromBackend();
+  },
   stopStream,
   async openSession(session) {
     await switchSession(session);

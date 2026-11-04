@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nextSelectIndex, selectMenuPosition, observeSelectProperty, selectLabelText } from "../../../console/ui-select.js";
+import { nextSelectIndex, selectMenuPosition, observeSelectProperty, selectLabelText, selectOptionMatchesSearch } from "../../../console/ui-select.js";
+
+test("应用下拉搜索按名称和编码包含匹配，保留固定项且不修改原生选项", () => {
+  const options = [
+    { label: "全部应用", dataset: { searchFixed: "true" } },
+    { label: "未关联应用", dataset: { searchFixed: "true" } },
+    { label: "年度预算 · budget001", dataset: {} },
+    { label: "经营分析 · FINANCE002", dataset: {} },
+    { label: "隐藏预算 · budget003", dataset: {}, hidden: true },
+  ];
+  const before = structuredClone(options);
+  const labels = query => options.filter(option => selectOptionMatchesSearch(option, query)).map(option => option.label);
+  assert.deepEqual(labels("  预算 "), ["全部应用", "未关联应用", "年度预算 · budget001"]);
+  assert.deepEqual(labels("finance002"), ["全部应用", "未关联应用", "经营分析 · FINANCE002"]);
+  assert.deepEqual(labels("不存在"), ["全部应用", "未关联应用"]);
+  assert.equal(labels("").length, 4);
+  assert.deepEqual(options, before);
+});
 
 const option = (disabled = false, hidden = false, groupDisabled = false) => ({ disabled, hidden, parentElement: { disabled: groupDisabled } });
 

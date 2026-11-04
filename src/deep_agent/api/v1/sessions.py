@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai.messages import ModelMessage
 from sse_starlette.sse import EventSourceResponse
@@ -28,9 +28,14 @@ from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.display_names import decorate_history_display_names
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
-from deep_agent.schemas.chat import ChannelSessionOrigin, SessionInfo, SessionListResponse
+from deep_agent.schemas.chat import (
+    ChannelSessionOrigin, SessionInfo, SessionListResponse, SessionFilterOptionsResponse,
+    SessionAgentFilterOption, SessionAppFilterOption,
+)
 from deep_agent.time import UtcDatetime
 from deep_agent.services.channel_profiles import ChannelProfileService
+from deep_agent.agent.request_context import ResolvedRequestContext, resolve_request_context_overrides
+from deep_agent.services.scope_names import resolve_scope_directory
 
 router = APIRouter()
 
@@ -138,11 +143,16 @@ async def _build_session_info(
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
+    request: Request,
     ctx: AppContextDep,
     user_id: RequestUserDep,
     agent_id: str | None = Query(default=None, description="Filter by agent id."),
     source_type: SessionSourceType | None = Query(default=None),
     source_id: str | None = Query(default=None, min_length=1, max_length=255),
+    app_scope: Literal["auto", "all", "unassigned"] = Query(
+        default="auto", description="auto follows the effective App header; all queries across Apps; unassigned has no App.",
+    ),
+    app_id: str | None = Query(default=None, min_length=1, max_length=255),
     limit: int = Query(default=50, ge=1, le=MAX_LIST_LIMIT, description="Page size."),
     offset: int = Query(default=0, ge=0, description="Page offset."),
     query: str | None = Query(
@@ -160,6 +170,9 @@ async def list_sessions(
         description="Sort field; results are always descending.",
     ),
 ) -> SessionListResponse:
+    if app_id is not None and app_scope != "all":
+        raise HTTPException(status_code=422, detail="app_id is only supported with app_scope=all")
+    context = _session_list_context(request)
     filters = SessionListFilters(
         agent_id=agent_id,
         user_id=user_id,
@@ -171,14 +184,19 @@ async def list_sessions(
         updated_before=updated_before,
         has_messages=has_messages,
         sort=sort,
+        app_id=context.app if app_scope == "auto" else app_id,
+        unassigned_app=app_scope == "unassigned",
     )
     rows, total = await ctx.store.list_session_summaries(filters)
     origins = await ctx.stores.channel.get_session_origins([row.session_id for row in rows]) if ctx.stores.channel else {}
     origins = await ChannelProfileService(ctx).enrich_origins(origins)
     items = [_summary_to_session_info(row) for row in rows]
+    names = await resolve_scope_directory(request, user_id)
     for item in items:
         origin = origins.get(item.session_id)
         item.channel = ChannelSessionOrigin.model_validate(origin) if origin else None
+        item.app_name = names.apps.get(item.app_id) if item.app_id else None
+        item.space_name = names.spaces.get(item.space_id) if item.space_id else None
     return SessionListResponse(
         items=items,
         total=total,
@@ -187,8 +205,44 @@ async def list_sessions(
     )
 
 
+def _session_list_context(request: Request) -> ResolvedRequestContext:
+    """Use the same effective Header semantics as chat and request-context."""
+    headers = request.headers
+    try:
+        return resolve_request_context_overrides(
+            app=headers.get("app"), space=headers.get("space"), language=headers.get("language"),
+            override_app=headers.get("x-deep-agent-app"),
+            override_space=headers.get("x-deep-agent-space"),
+            override_language=headers.get("x-deep-agent-language"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/sessions/filter-options", response_model=SessionFilterOptionsResponse)
+async def get_session_filter_options(
+    request: Request,
+    ctx: AppContextDep,
+    user_id: RequestUserDep,
+    agent_id: str | None = Query(default=None),
+) -> SessionFilterOptionsResponse:
+    _session_list_context(request)
+    counts = await ctx.store.list_session_filter_options(user_id=user_id, agent_id=agent_id)
+    names = await resolve_scope_directory(request, user_id)
+    return SessionFilterOptionsResponse(
+        agents=[SessionAgentFilterOption(agent_id=row.agent_id, session_count=row.session_count)
+                for row in counts.agents],
+        apps=[SessionAppFilterOption(app_id=row.app_id, app_name=names.apps.get(row.app_id),
+                                    session_count=row.session_count)
+              for row in counts.apps if row.app_id],
+        unassigned_count=sum(row.session_count for row in counts.apps if row.app_id is None),
+        total=sum(row.session_count for row in counts.apps),
+    )
+
+
 @router.get("/sessions/{session_id}", response_model=SessionInfo)
 async def get_session(
+    request: Request,
     ctx: AppContextDep,
     user_id: RequestUserDep,
     session_id: str,
@@ -207,12 +261,16 @@ async def get_session(
 
     api_agent_id = agent_id or agent_scope_to_api(scope)
     history = await ctx.store.get_history(resolved_session_id, agent_id=api_agent_id)
-    return await _build_session_info(
+    info = await _build_session_info(
         ctx,
         resolved_session_id,
         agent_id=api_agent_id,
         history=history,
     )
+    names = await resolve_scope_directory(request, user_id)
+    info.app_name = names.apps.get(info.app_id) if info.app_id else None
+    info.space_name = names.spaces.get(info.space_id) if info.space_id else None
+    return info
 
 
 @router.post("/sessions/{session_id}/cancel", response_model=SessionCancelResponse)

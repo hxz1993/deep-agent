@@ -34,9 +34,13 @@ select.da-select-native { position: absolute !important; width: 1px !important; 
 .da-select-option.has-badge { flex-wrap: nowrap; gap: 6px; font-size: 11px; }
 .da-select-option.has-badge > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .da-select-option.has-badge .da-select-badge { flex: 0 1 auto; font-size: 10px; }
+.da-select-menu[data-badge-align="end"] .has-badge > span:not(.da-select-badge) { flex: 1; }
+.da-select-menu[data-badge-align="end"] .has-badge .da-select-badge { flex: none; margin-left: auto; }
 
 /* Optional option metadata; undecorated selects retain the existing layout. */
 .da-select-option.has-icon { gap: 8px; }
 .da-select-option.has-icon > svg,
 .da-select-trigger > .da-select-value-icon { width: var(--ui-icon); height: var(--ui-icon); flex: 0 0 var(--ui-icon); color: inherit; }
 .da-select-separator { height: 1px; margin: 5px 4px; background: var(--border-soft, var(--border)); }
+.da-select-search { position: sticky; top: -5px; z-index: 1; padding: 4px 3px 8px; background: var(--console-surface, var(--bg)); }
+.da-select-menu:has(.da-select-search) .da-select-option { scroll-margin-top: calc(var(--ui-control-height) + 12px); }

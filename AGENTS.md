@@ -31,7 +31,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.4`（同会话可信文件回读），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.5`（会话应用筛选与名称回显），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -46,6 +46,8 @@ Skill 运行规则以[Skill指南](docs/guides/skills.md)为准：0.15.0保留�
 附件上传大小和数量统一读取 `global_settings.attachment_upload` 一行 JSON（格式版本 1），不写初始化行；无记录或缺字段分别使用 20 MB、10 个。大小可配 1～200 MB，数量可配 1～20 个；旧 `UPLOAD_MAX_SIZE_MB` / `UPLOAD_MAX_COUNT` 环境变量停止使用，MIME 环境策略保留。每个新增上传、产物发布批次或数量校验操作读取一次，不做启动缓存，不存入会话事件。已上传授权文件不按后来调低的大小再次拒绝；读取安全上界为 200 MB，解析器与 Python 的独立资源限制仍生效。正式入口见[附件上传限制](docs/guides/attachment-upload.md)，位于全局配置常规页的“附件上传”，管理员接口 `/api/v1/global-settings/attachment-upload`；运维只保留允许类型。
 
 Console 加载和资源缓存见[加载说明](docs/guides/console-loading.md)：身份／权限校验后仅初始化当前页；配置脚本并行下载、有序执行。静态 UI 资源使用内容 ETag 每次校验，入口／错误／下载不缓存；不要恢复无条件预热或长期 immutable。数据库摘要可用 `include_charset=false` 跳过字符集 SQL，完整字符集检查由运维页按钮主动触发。此处属于当前本地实现，部署状态仍以目标环境核验为准。
+
+会话应用筛选见[应用筛选](docs/guides/session-app-filtering.md)：普通`/sessions`默认按有效App Header查询本人会话，Console显式`app_scope=all`，指定App只能与`all`同用。`/sessions/filter-options`使用本人主表分组统计，不读取全部历史；App筛选与调试上下文独立。展示名称由当前环境System的`POST /space-app-list`（JSON空数组）批量读取；不要沿用旧日志中的`/role-info`前缀或省略JSON格式。短期按身份隔离缓存，失败退避10秒，缺失时保留编码，不回填历史范围。
 
 诊断中心依次为「会话 / 用量 / 日志」：见[会话指南](docs/guides/diagnostic-sessions.md)、[用量指南](docs/guides/diagnostic-usage.md)和[日志指南](docs/guides/diagnostic-logs.md)。
 会话概览、列表和跨用户只读详情统一使用管理员 `/diagnostics/sessions` 接口；统计只读取现有会话与真实事件，

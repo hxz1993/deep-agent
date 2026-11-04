@@ -26,7 +26,7 @@ from deep_agent.agent.attachment_extractors import (
 from deep_agent.agent.attachments import AttachmentDownloadError, _download_file
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.media_pipeline import is_log_text_attachment, max_upload_bytes
+from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.files.office_markdown import pptx_body
 from deep_agent.files.pdf_reading import pdf_document
@@ -38,24 +38,8 @@ from deep_agent.files.schema import (
     SkillFileRef,
 )
 from deep_agent.files.storage import PlatformFileStore
-from deep_agent.skills.package import READABLE_SUFFIXES
 from deep_agent.skills.runtime import ResolvedSkill
 
-_TEXT_MIMES = frozenset(
-    {
-        "text/plain",
-        "text/csv",
-        "text/markdown",
-        "text/html",
-        "text/xml",
-        "application/xml",
-        "application/json",
-        "text/json",
-        "application/yaml",
-        "application/x-yaml",
-        "text/yaml",
-    }
-)
 _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -83,45 +67,33 @@ def _normalized_mime(value: str | None) -> str:
 
 def _platform_file_format(name: str, mime: str | None) -> str | None:
     mime = _normalized_mime(mime)
-    if is_log_text_attachment(filename=name, mime=mime):
-        return "text"
-    if mime in _TEXT_MIMES:
-        return "text"
-    if mime == "application/pdf":
+    suffix = Path(name).suffix.lower()
+    if mime == "application/pdf" or suffix == ".pdf":
         return "pdf"
-    if mime == _DOCX_MIME:
+    if mime == _DOCX_MIME or suffix == ".docx":
         return "docx"
-    if mime == _XLSX_MIME:
+    if mime == _XLSX_MIME or suffix == ".xlsx":
         return "xlsx"
-    if mime == _PPTX_MIME:
+    if mime == _PPTX_MIME or suffix == ".pptx":
         return "pptx"
-    return None
-
-
-def _skill_format(entry: dict[str, Any]) -> str | None:
-    if entry.get("category") == "script":
+    if mime == "image/svg+xml" or suffix == ".svg":
+        return "text"
+    if mime.startswith(("image/", "audio/", "video/")):
         return None
-    path = Path(str(entry.get("path") or ""))
-    suffix = path.suffix.lower()
-    mime = _normalized_mime(str(entry.get("mime") or ""))
-    if suffix == ".pdf" or mime == "application/pdf":
-        return "pdf"
-    if suffix == ".docx" or mime == _DOCX_MIME:
-        return "docx"
-    if suffix == ".xlsx" or mime == _XLSX_MIME:
-        return "xlsx"
-    if suffix == ".pptx" or mime == _PPTX_MIME:
-        return "pptx"
-    if bool(entry.get("readable")) or suffix in READABLE_SUFFIXES or mime in _TEXT_MIMES:
-        return "text"
-    return None
+    # Extension and MIME select specialized parsers, never a text allowlist.
+    # Unknown files (including code) are tried as text; the reader checks bytes.
+    return "text"
+
+
+def skill_file_read_format(entry: dict[str, Any]) -> str | None:
+    return _platform_file_format(str(entry.get("path") or ""), str(entry.get("mime") or ""))
 
 
 def has_readable_skill_resources(
     resources: dict[str, ResolvedSkill],
 ) -> bool:
     return any(
-        _skill_format(entry) is not None
+        skill_file_read_format(entry) is not None
         for item in resources.values()
         for entry in item.resource_index
     )
@@ -276,8 +248,8 @@ def _safe_skill_file(
     )
     if entry is None:
         raise ModelRetry(f"Skill {ref.skill_code!r} 中不存在资源 {ref.path!r}")
-    if entry.get("category") == "script":
-        raise ModelRetry(f"Skill脚本不能通过 {tool_name} 读取；需要时使用 execute_skill_script")
+    if entry.get("category") == "script" and tool_name != "read_file":
+        raise ModelRetry("Skill脚本源码请通过 read_file 读取")
     target = (item.package_root / ref.path).resolve()
     root = item.package_root.resolve()
     if target != root and root not in target.parents:
@@ -364,7 +336,7 @@ async def _resolve_file(
                 "图片请使用本轮已提供的view_image查看；音频和视频使用模型原生输入。本工具不执行OCR，旧二进制DOC/XLS/PPT不支持"
             )
     else:
-        kind = _skill_format(resolved.resource_metadata)
+        kind = skill_file_read_format(resolved.resource_metadata)
         if kind is None:
             raise ModelRetry(f"read_file 暂不支持 Skill资源 {resolved.resource.path!r} 的文件类型")
     return replace(resolved, format=kind)
@@ -552,11 +524,11 @@ def build_file_toolset(
     toolset = FunctionToolset[AgentDeps](
         id="file-resources",
         instructions=(
-            "read_file直接读取文本、DOCX正文和补充元信息、XLSX表格、PPTX文本/表格/备注及PDF文本层。PDF保留物理页，未提取到文本不等于原件无内容；如提供view_image，可直接查看图片或PDF原页，核验图形、布局和关键字段。本工具不支持旧DOC/XLS/PPT，不执行图片或扫描件OCR。"
+            "read_file直接读取文本（包括Python、JS、SQL等代码，不按文本后缀或MIME白名单限制）、DOCX正文和补充元信息、XLSX表格、PPTX文本/表格/备注及PDF文本层。PDF保留物理页，未提取到文本不等于原件无内容；如提供view_image，可直接查看图片或PDF原页，核验图形、布局和关键字段。本工具不支持旧DOC/XLS/PPT，不执行图片或扫描件OCR。"
             "当前会话附件和可信工具产物均使用 attachment 和原 file_id。"
             "读取已授权Skill文件时，先用list_skill_resources取得路径。首次通常只传resource；若has_more=true，"
             "把next_offset和next_char_offset分别作为offset和char_offset继续读取；"
-            "长行/段落可能分多页，必须同时传两个续读值。不要猜测file_id、Skill编码或路径，脚本不能作为文件正文读取。"
+            "长行/段落可能分多页，必须同时传两个续读值。可以读取已授权Skill的文本脚本源码和辅助模块，读取源码不授予执行权限。不要猜测file_id、Skill编码或路径。"
             + ("扫描PDF、图片或需要OCR/复杂版面时，可使用本轮已提供的parse_document，以当前供应商支持格式为准。" if document_available else "")
         ),
     )

@@ -2,7 +2,7 @@
 
 DeepAgent v0.3.18 将 Skill 与 ToolPackage 分离，v0.3.20 收口上传 Skill 的运行文件，v0.3.23
 将Skill文件与会话附件统一到 `read_file`。Agent 的 `capabilities` 继续控制可执行工具，
-`skills` 只控制任务说明、References 和 Assets；选择 Skill 不会自动授予 MCP 或其他工具权限。
+`skills` 控制任务说明、References、Assets 和脚本源码的读取；选择 Skill 不会自动授予 MCP 或其他工具权限。
 
 ## 管理入口
 
@@ -64,7 +64,7 @@ skill.zip
 ├── .env                  可选，随包配置文件，由脚本自行读取
 ├── references/           可按需读取的文本、DOCX、XLSX、PPTX或PDF资料
 ├── assets/               文本、图片或模板资产
-└── scripts/ 或 tools/    允许保存和列出，不能当资源正文读取
+└── scripts/ 或 tools/    文本脚本源码可按需读取；执行仍仅支持 Python
 ```
 
 支持根目录 `.env`，以及 `assets/` 下的 `.env` 或 `*.env` 文本配置。文件出现在 Skill 资源列表中，
@@ -79,8 +79,10 @@ ZIP 最大 10 MiB，解压后最大 50 MiB、最多 256 个文件、目录深度
 绝对路径、符号链接、加密 ZIP、重复路径和压缩炸弹。模型可分页读取索引内的文本、DOCX逻辑块
 、PPTX逻辑块、XLSX物理行及PDF物理页文本层。`read_file` 不解析图片OCR或旧DOC/XLS/PPT文件。Agent 显式关联“文档解析”后，
 `parse_document` 可读取已授权且当前供应商支持的这些资源，保留原生正文与页码；
-供应商和格式边界见[文档解析指南](document-parsing.md)。脚本可以列出路径，但不能
-通过文件工具读取源码。
+供应商和格式边界见[文档解析指南](document-parsing.md)。已关联 Skill 的文本脚本和辅助模块
+可以通过 `list_skill_resources` 取得路径，再用 `read_file` 分页读取源码。仅含脚本的 Skill
+也会提供读取入口；不要求关联 `builtin:sandbox`，读取不会执行代码。编译产物和二进制脚本
+不能作为文本源码读取。旧包无需重新安装，不回写旧资源索引；安装与执行限额不变。
 
 一个 ZIP只能包含一个 Skill。培训 Library或第三方合集包如果包含多个同级 `SKILL.md`，需要先拆成
 多个 ZIP分别安装；API会返回 422而不是隐式创建多条配置。
@@ -91,7 +93,7 @@ ZIP 最大 10 MiB，解压后最大 50 MiB、最多 256 个文件、目录深度
 
 PNG、JPEG、GIF、WebP及SVG通过当前管理员鉴权读取，点击图片可放大，点击空白、关闭按钮或按ESC收起。图片只保留当前预览的浏览器临时URL，离开后释放，不生成平台文件。
 
-PDF、PPTX及其他当前没有预览器的文件显示“暂不支持在线预览，请下载 Skill 包后查看”，并提供现有原包下载入口。旧索引中的可读标记不会使Console把PDF／PPTX作为文本读取。这里是管理预览能力，Agent的`read_file`仍按原格式能力工作，不能读取脚本源码；安装白名单和脚本执行规则不变。
+PDF、PPTX及其他当前没有预览器的文件显示“暂不支持在线预览，请下载 Skill 包后查看”，并提供现有原包下载入口。旧索引中的可读标记不会使Console把PDF／PPTX作为文本读取。这里是管理预览能力，Agent的`read_file`仍按自身格式能力工作，并可按需读取已关联Skill的文本脚本源码；安装白名单和脚本执行规则不变。
 
 ## API
 
@@ -134,13 +136,19 @@ Agent.skills
 → 初始只披露 Skill 名称和简介
 → 模型按需调用 load_capability
 → Harness 返回完整 SKILL.md
-→ list_skill_resources 获得精确路径
-→ read_file(resource={type: skill, skill_code, path}) 按需读取素材
+→ list_skill_resources 获得素材、脚本及辅助模块的精确路径
+→ read_file(resource={type: skill, skill_code, path}) 按需读取素材或脚本源码
 → Agent同时关联 builtin:sandbox 时，可 execute_skill_script
 ```
 
 `load_capability` 使用 Pydantic AI 官方 Tool Call/Return，正常进入 History，并参与取消和上下文
 压缩的工具配对。Skill正文、资源和脚本都不能覆盖系统/Agent Prompt或业务权限。
+加载时仍只披露 `SKILL.md` 正文，不自动把整包脚本塞进上下文；模型需要了解参数、实现或依赖时，
+按目录读取对应源文件。读取和执行继续使用不同权限与工具。
+`read_file` 对会话附件、可信产物及已关联 Skill 中的文本不设置后缀或 MIME 白名单：
+Python、JavaScript、SQL、SVG 源码及未识别后缀均可尝试读取；未知类型按实际内容尝试文本读取，
+二进制内容不会伪装成源码。DOCX/XLSX/PPTX/PDF 仍使用对应解析器，图片使用 `view_image`。
+本次不调整上传类型策略、Skill ZIP 资产白名单、Python 脚本安装及执行规则。
 
 Run终态的 `context.skills` 会列出 configured、available、loaded和 unavailable，便于确认配置的
 Skill是否已就绪及本轮实际加载了哪些正文。该状态不写数据库，客户端不适配也不影响聊天。

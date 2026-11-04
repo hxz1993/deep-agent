@@ -291,7 +291,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 - v0.6.0压缩吸收Harness/DSH的确定性整理与结构化摘要，但Event生命周期、来源Hash、证据索引、SSE
   和目标复检仍由DeepAgent管理。
 - v0.3.17 通过 Pydantic AI 官方 `conversation_id/run_id` 参数贯通 SSE、History 和运行日志；同一 Session 共用 Conversation ID，每次发送或 Deferred 续跑生成新 Run ID。Provider 未提供缓存计数时必须显示未知，不能把框架归一化的零伪装成缓存未命中。
-- v0.3.18 使用 Harness `Skills` 渐进披露 `SKILL.md`；初始只公开名称和描述，正文由 `load_capability` 按需加载。References/Assets 通过只读分页工具访问；`scripts/` 不向模型披露源码，Agent同时选择含脚本Skill和 `builtin:sandbox` 时可通过统一沙箱执行。Skill 本身不授予工具权限。
+- v0.3.18 使用 Harness `Skills` 渐进披露 `SKILL.md`；初始只公开名称和描述，正文由 `load_capability` 按需加载。References/Assets 和已关联 Skill 的文本脚本源码通过 `list_skill_resources`／`read_file` 按需读取，不自动加载整包。只读源码不要求沙箱；Agent同时选择含脚本Skill和 `builtin:sandbox` 时才可执行。Skill 本身不授予工具权限。
 - v0.3.19 起 URL MCP 只在显式检测时执行 initialize/tools-list 并保存无敏感信息的工具快照；聊天 Run 用快照完成工具披露，真实调用时才按当前请求 Header 建连。同一 Run 复用连接，缺少或配置失效的快照不进入模型工具列表，必须重新“检测并更新”。Builtin MCP 和 Resource 代理保持原链路。
 - v0.4.11补齐URL MCP实际工具调用超时的错误分类：Pydantic AI将协议超时包装为`ModelRetry`时，DeepAgent识别其MCP超时、连接中断或5xx原因并转成脱敏`ToolFailed`，让模型改用其他工具或解释失败；参数、对象选择等可纠正错误仍保持`ModelRetry`，正式取消不受影响。
 - v0.4.12增加Console企业管理员兜底鉴权：`systemAdmin=true`按平台综合权限语义映射为内部`enterprise_admin`；固定`admin`账号不特殊放行。管理Router统一依赖同一授权器，聊天、会话、附件和固定Agent读取等运行接口不受影响。

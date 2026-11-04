@@ -23,6 +23,20 @@ from deep_agent.agent.attachment_extractors import (
 
 
 class AttachmentExtractorTests(unittest.TestCase):
+    def test_text_check_preserves_terminal_logs_and_rejects_binary_bytes(self) -> None:
+        log = "\x1b[31mwarning\x1b[0m\b\x07\n下一行\v分页\f结束\x1e记录"
+        lines, _metadata = text_document(log.encode("utf-16"))
+        self.assertIn("warning", "\n".join(lines))
+        with self.assertRaisesRegex(AttachmentParseError, "二进制"):
+            text_document(b"PK\x03\x04\x00\xff", name="false.txt", mime="text/plain")
+
+    def test_utf32_source_is_readable(self) -> None:
+        for bom, encoding in ((b"\xff\xfe\x00\x00", "utf-32-le"), (b"\x00\x00\xfe\xff", "utf-32-be")):
+            with self.subTest(encoding=encoding):
+                lines, metadata = text_document(bom + "SELECT '中文';".encode(encoding), name="query.sql")
+                self.assertEqual(lines, ("SELECT '中文';",))
+                self.assertEqual(metadata["encoding"], "utf-32")
+
     def test_xlsx_long_cells_and_rows_are_preserved_across_pages(self) -> None:
         randomizer = random.Random(0)
         cells = ["".join(randomizer.choices("abcdefghijklmnopqrstuvwxyz", k=30_000)) for _ in range(2)]

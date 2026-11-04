@@ -478,6 +478,11 @@ user/App/Space上下文时，`export_file_to_download_center`始终直接披露�
 | `resource_reader.py` · `tools.py` | Skill管理预览和模型侧资源目录；正文统一转 `read_file` |
 | `script_tool.py` | Agent选择含脚本Skill和Sandbox时，组装已授权Skill脚本执行工具 |
 
+已关联Skill的文本脚本及辅助模块可经`list_skill_resources`发现、`read_file`分页读取；
+旧索引`readable=false`不作为文本读取禁令，不回写、不要求重装。附件、可信产物和Skill文本不按后缀或MIME白名单限制；未知类型尝试文本读取，实际二进制内容明确报错。
+只读源码不依赖Sandbox，不自动执行；编译／二进制脚本不开放为文本，原路径与Hash校验保留。
+Harness仍只延迟加载`SKILL.md`，不自动灌入整包源代码。
+
 ### `api/v1/`
 
 | 文件 | 路由 |

@@ -5,7 +5,7 @@ from typing import Any
 from pydantic_ai import FunctionToolset, ModelRetry
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.skills.resource_reader import present_resource_entry
+from deep_agent.files.toolset import skill_file_read_format
 from deep_agent.skills.runtime import ResolvedSkill
 
 
@@ -21,7 +21,8 @@ def build_skill_resource_toolset(
             "Skill references and assets are optional supporting material. "
             "Use list_skill_resources to discover exact paths, then use the system read_file tool "
             "with type=skill to read only the pages needed for the task. "
-            "Script paths may be listed for discovery but cannot be read with read_file. "
+            "Text script source and helper modules can also be read with read_file; "
+            "reading source does not grant script execution permissions. "
             f"Authorized Skills with resources: {names}."
         ),
     )
@@ -36,20 +37,20 @@ def build_skill_resource_toolset(
 
     @toolset.tool_plain
     async def list_skill_resources(skill_code: str) -> dict[str, Any]:
-        """List References and Assets in one associated Skill without reading their content."""
+        """List References, Assets and scripts in one associated Skill without reading their content."""
         item = _item(skill_code)
         entries = []
-        for raw_entry in item.resource_index:
-            entry = present_resource_entry(raw_entry)
+        for entry in item.resource_index:
+            kind = skill_file_read_format(entry)
             entries.append(
                 {
                     "path": entry["path"],
                     "category": entry["category"],
                     "mime": entry["mime"],
                     "size": entry["size"],
-                    "readable": bool(entry.get("readable")),
-                    "read_format": entry.get("read_format"),
-                    "read_unit": entry.get("read_unit"),
+                    "readable": kind is not None,
+                    "read_format": kind,
+                    "read_unit": {"text": "line", "docx": "block", "xlsx": "row", "pptx": "block", "pdf": "page"}.get(kind),
                     "content_hash": entry["content_hash"],
                 }
             )
@@ -60,7 +61,7 @@ def build_skill_resource_toolset(
             "skill_code": skill_code,
             "resources": entries,
             "script_count": script_count,
-            "scripts_readable": False,
+            "scripts_readable": any(entry["category"] == "script" and entry["readable"] for entry in entries),
         }
 
     return toolset

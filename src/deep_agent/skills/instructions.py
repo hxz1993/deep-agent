@@ -8,6 +8,8 @@ the same tool-call batch. A description is not a substitute for the Skill's inst
 Load only matching Skills, including multiple Skills when needed; do not load unrelated
 Skills or every associated Skill. If none matches, proceed without loading one.
 Reuse Skill instructions already active in the current context instead of loading them again.
+After loading a Skill, use list_skill_resources to discover exact paths. Its text scripts and
+helper modules are readable with read_file when needed to understand arguments or behavior.
 Read referenced documents only when the task or the loaded Skill's applicable steps require
 them; do not read every bundled file. Skill selection does not grant additional tool permissions.
 """

@@ -14,7 +14,7 @@ from deep_agent.agent.attachment_extractors import (
     xlsx_workbook,
     xlsx_sheet_metadata,
 )
-from deep_agent.skills.package import IMAGE_SUFFIXES, MAX_MODEL_TEXT_BYTES, READABLE_SUFFIXES, is_env_resource
+from deep_agent.skills.package import IMAGE_SUFFIXES, MAX_MODEL_TEXT_BYTES
 
 
 SkillResourceFormat = Literal["text", "docx", "xlsx"]
@@ -51,37 +51,22 @@ def resource_format(
 ) -> SkillResourceFormat | None:
     suffix = Path(str(entry.get("path") or "")).suffix.lower()
     mime = str(entry.get("mime") or "").split(";", 1)[0].strip().lower()
-    # Console has text/Office readers, but no PDF/PPTX or binary image reader.
-    # Legacy package indexes marked these readable for the model's separate
-    # read_file pipeline; that flag must not send binary bytes to this text path.
-    if console_preview and (
-        suffix in IMAGE_SUFFIXES | {".pdf", ".pptx"}
-        or mime.startswith("image/")
-        or mime in {"application/pdf", "application/vnd.openxmlformats-officedocument.presentationml.presentation"}
-    ):
-        return None
-    if entry.get("category") == "script" and not console_preview:
-        return None
+    # This reader serves text/Office previews. The model's separate read_file
+    # pipeline also has PDF/PPTX parsers; list_skill_resources describes that
+    # pipeline rather than relying on legacy stored readable flags.
     if suffix == ".docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         return "docx"
     if suffix == ".xlsx" or mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
         return "xlsx"
-    if entry.get("category") == "script":
-        if console_preview and (
-            suffix == ".py"
-            or suffix in READABLE_SUFFIXES
-            or mime.startswith("text/")
-            or mime in {"application/javascript", "application/x-sh", "application/x-shellscript"}
-        ):
-            return "text"
-        return None
-    if (
-        bool(entry.get("readable"))
-        or suffix in READABLE_SUFFIXES
-        or is_env_resource(str(entry.get("path") or ""))
-    ):
+    if not console_preview and (suffix == ".svg" or mime == "image/svg+xml"):
         return "text"
-    return None
+    if suffix in IMAGE_SUFFIXES | {".pdf", ".pptx"} or mime.startswith(("image/", "audio/", "video/")) or mime in {
+        "application/pdf", "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }:
+        return None
+    # Code and other text do not require a known extension or an old readable
+    # index flag. Actual binary content is rejected by text_document.
+    return "text"
 
 
 def resource_unit(

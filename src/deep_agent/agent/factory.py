@@ -15,6 +15,7 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.sandbox.context import ExecutionContextLifecycle
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.models import OpenAICompatibleVideoChatModel
 from deep_agent.models.http_transport import model_http_settings
@@ -323,6 +324,8 @@ def build_agent(
         image_view_toolset=image_view_toolset,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = [RuntimeDiagnostics()]
+    if "builtin:sandbox" in spec.capabilities:
+        capabilities.append(ExecutionContextLifecycle())
     if document_lifecycle is not None and "builtin:document" in spec.capabilities:
         capabilities.append(document_lifecycle)
     if image_view_lifecycle is not None:

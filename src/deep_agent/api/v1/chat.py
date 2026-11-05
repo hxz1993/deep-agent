@@ -20,7 +20,7 @@ from deep_agent.agent.deferred import (
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import usage_dict
 from deep_agent.agent.context.compaction import ContextWindowExceededError
-from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.agent.headers import extract_execution_context_headers, extract_forward_headers
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.api.v1.deps import build_runner_for_agent
 from deep_agent.api.v1.channel_auth import ChannelAccountDep, ChannelRequestUserDep
@@ -30,6 +30,7 @@ from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFou
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.files.upload_settings import load_upload_settings
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
+from deep_agent.local_security import LOCAL_CURRENT_USERNAME_SCOPE_KEY
 
 
 class _ChatBodyValidationRoute(APIRoute):
@@ -68,6 +69,8 @@ def _agent_deps(
     user: str | None,
     agent_id: str | None = None,
     request_headers: dict[str, str] | None = None,
+    execution_request_headers: dict[str, str] | None = None,
+    local_username: str | None = None,
 ) -> AgentDeps:
     conversation_id = conversation_id_for(agent_id, session_id)
     return AgentDeps(
@@ -77,11 +80,23 @@ def _agent_deps(
         conversation_id=conversation_id,
         run_id=new_run_id(),
         request_headers=dict(request_headers or {}),
+        execution_request_headers=(
+            dict(execution_request_headers) if execution_request_headers is not None else None
+        ),
+        local_username=local_username,
         file_store=ctx.file_store,
         upload_settings_store=getattr(ctx.stores, "global_setting", None),
         app_id=(request_headers or {}).get("app"),
         space_id=(request_headers or {}).get("space"),
     )
+
+
+def _local_execution_username(request: Request, user: str) -> str | None:
+    # Channel authentication may replace the local adapter's owner. Never pair
+    # that different platform user with the developer's local display profile.
+    if user != request.headers.get("user"):
+        return None
+    return request.scope.get(LOCAL_CURRENT_USERNAME_SCOPE_KEY)
 
 
 async def _adopt_channel_session_scope(ctx, account, deps: AgentDeps) -> None:
@@ -250,6 +265,8 @@ async def chat(
     session_id = body.session_id or uuid.uuid4().hex
     request_headers = extract_forward_headers(request, channel_account=channel_account)
     request_headers["user"] = user
+    execution_request_headers = extract_execution_context_headers(request, channel_account=channel_account)
+    execution_request_headers["user"] = user
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user
     )
@@ -274,6 +291,8 @@ async def chat(
         user=user,
         agent_id=agent_id,
         request_headers=request_headers,
+        execution_request_headers=execution_request_headers,
+        local_username=_local_execution_username(request, user),
     )
     try:
         active_run = ctx.active_runs.register(
@@ -339,6 +358,8 @@ async def chat_stream(
     message = body.message or ""
     request_headers = extract_forward_headers(request, channel_account=channel_account)
     request_headers["user"] = user
+    execution_request_headers = extract_execution_context_headers(request, channel_account=channel_account)
+    execution_request_headers["user"] = user
 
     agent_id = await _resolve_chat_agent_id(
         ctx, body, session_id=session_id, user=user
@@ -370,6 +391,8 @@ async def chat_stream(
         user=user,
         agent_id=agent_id,
         request_headers=request_headers,
+        execution_request_headers=execution_request_headers,
+        local_username=_local_execution_username(request, user),
     )
     session_data = {
         "session_id": session_id,

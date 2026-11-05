@@ -94,6 +94,10 @@ DeepAgent PTC rules:
   with code and JSON inputs; call a Skill with its exact authorized script path.
   No save_file_data, read_file, parse_document, UI confirmation or Shell function
   is added to this catalog. Python executions still have separate temporary dirs.
+- For Python or Skill code that needs the current user's identity/app scope, pass
+  include_context=True to that execution tool. It receives credential-free JSON in
+  DEEP_AGENT_CONTEXT; ordinary computation and fixed-account APIs keep False.
+  Native and nested calls share the same Run snapshot. Monty itself cannot read it.
 - In a trusted channel run, channel_message is also available natively and here.
   Forward a known public media URL directly with components=[{'type': 'image',
   'url': public_url}], or use an authorized file_id. No Python or platform upload

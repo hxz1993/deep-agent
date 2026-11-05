@@ -31,7 +31,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.5`（会话应用筛选与名称回显），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.6`（Python／Skill按需运行上下文），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -42,6 +42,9 @@
 保留显式 IP/端口、真实域名及网关路径的直连语义。
 
 Skill 运行规则以[Skill指南](docs/guides/skills.md)为准：0.15.0保留原入口于每次调用的`skill/`副本，自动携带同Skill Python模块，工作目录仍含`inputs.json`与`outputs/`。不保留临时`main.py`旧布局；普通Python仍直接执行代码。两工具共用文件授权、`input_path`、`publish_path`及FileStore上传，PTC使用同一工具并收集可信文件事实。旧会话和结果不重写。`.env`显式携带并由脚本读取，随原包导出，不做秘密注入或独立配置存储。
+
+Python／Skill 的 `include_context=False` 默认不查用户、不注入身份；显式开启后仅通过 `DEEP_AGENT_CONTEXT` 提供非凭据用户资料及本次 app/space/language。Run 内 single-flight 复用并在结束清理，Console 与执行链路共用短期账号资料缓存。失败只保留 User ID，不阻止脚本执行；不得把模型传入的用户资料当鉴权身份。没有 Skill metadata 开关、get_current_context 工具或平台凭据透传。
+客户账号映射、Token 兑换及 MCP／Skill 共用的可更新适配器另归[42 企业集成课题](docs/design/42-enterprise-auth-adapters/README.md)，尚未实施；后续鉴权不以模型选择的 include_context 为授权依据。
 
 附件上传大小和数量统一读取 `global_settings.attachment_upload` 一行 JSON（格式版本 1），不写初始化行；无记录或缺字段分别使用 20 MB、10 个。大小可配 1～200 MB，数量可配 1～20 个；旧 `UPLOAD_MAX_SIZE_MB` / `UPLOAD_MAX_COUNT` 环境变量停止使用，MIME 环境策略保留。每个新增上传、产物发布批次或数量校验操作读取一次，不做启动缓存，不存入会话事件。已上传授权文件不按后来调低的大小再次拒绝；读取安全上界为 200 MB，解析器与 Python 的独立资源限制仍生效。正式入口见[附件上传限制](docs/guides/attachment-upload.md)，位于全局配置常规页的“附件上传”，管理员接口 `/api/v1/global-settings/attachment-upload`；运维只保留允许类型。
 

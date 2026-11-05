@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from deep_agent.core.paths import SOURCE_ROOT
+from deep_agent.sandbox.context_env import EXECUTION_CONTEXT_ENV
 
 _WHITELISTED_ENV_KEYS = frozenset(
     {
@@ -26,7 +28,7 @@ def repo_root() -> Path:
     return SOURCE_ROOT
 
 
-def build_worker_env() -> dict[str, str]:
+def build_worker_env(context: Mapping[str, str] | None = None) -> dict[str, str]:
     env: dict[str, str] = {}
     for key in _WHITELISTED_ENV_KEYS:
         value = os.environ.get(key)
@@ -39,5 +41,7 @@ def build_worker_env() -> dict[str, str]:
     env["no_proxy"] = "*"
     # Backend-controlled import path for the worker module; never inherit host PYTHONPATH.
     env["PYTHONPATH"] = str(repo_root())
+    if context and EXECUTION_CONTEXT_ENV in context:
+        env[EXECUTION_CONTEXT_ENV] = context[EXECUTION_CONTEXT_ENV]
     env.pop("PYTHONHOME", None)
     return env

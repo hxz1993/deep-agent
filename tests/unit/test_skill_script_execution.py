@@ -142,7 +142,7 @@ class SkillScriptValidationTests(unittest.IsolatedAsyncioTestCase):
             nonlocal step
             step += 1
             self.assertEqual(set(info.function_tools[0].parameters_json_schema["properties"]),
-                             {"skill_code", "script_path", "arguments", "inputs", "resource_paths", "files"})
+                             {"skill_code", "script_path", "arguments", "inputs", "resource_paths", "files", "include_context"})
             if step == 1:
                 return ModelResponse(parts=[ToolCallPart("execute_skill_script", bad_args, "invalid")])
             if step == 2:

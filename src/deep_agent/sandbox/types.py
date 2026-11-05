@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from deep_agent.sandbox.context_env import EXECUTION_CONTEXT_ENV, MAX_EXECUTION_CONTEXT_BYTES
+
 JsonValue = Any
 
 SandboxErrorCode = Literal[
@@ -146,6 +148,21 @@ class ExecuteRequest(BaseModel):
     # Paths in skill_files are relative to the selected Skill root.
     script_entry: str | None = None
     skill_files: tuple[SandboxInputFile, ...] = ()
+    # Host-only data. It is passed through the child environment, not its frame,
+    # result, logs, model arguments or the public tool schema.
+    context_env: dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
+
+    @field_validator("context_env")
+    @classmethod
+    def validate_context_env(cls, value: dict[str, str]) -> dict[str, str]:
+        if set(value) - {EXECUTION_CONTEXT_ENV}:
+            raise ValueError("unsupported execution environment key")
+        for text in value.values():
+            if "\x00" in text or _utf8_byte_length(text) > MAX_EXECUTION_CONTEXT_BYTES:
+                raise ValueError("execution context is invalid or too large")
+            if not isinstance(json.loads(text), dict):
+                raise ValueError("execution context must be a JSON object")
+        return value
 
     @field_validator("script_entry")
     @classmethod

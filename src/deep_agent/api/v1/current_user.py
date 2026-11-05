@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from deep_agent.api.v1.diagnostic_routes import NoStoreRoute
 from deep_agent.api.v1.request_identity import RequestUserDep
+from deep_agent.security import current_user as current_user_security
 from deep_agent.security.current_user import (
     CurrentUserAuthenticationError,
     CurrentUserProfileResolver,
@@ -27,11 +28,8 @@ class CurrentUserResponse(BaseModel):
     resolution: str
 
 
-_CURRENT_USER_PROFILE_RESOLVER = CurrentUserProfileResolver()
-
-
 def get_current_user_profile_resolver() -> CurrentUserProfileResolver:
-    return _CURRENT_USER_PROFILE_RESOLVER
+    return current_user_security.get_current_user_profile_resolver()
 
 
 CurrentUserProfileResolverDep = Annotated[

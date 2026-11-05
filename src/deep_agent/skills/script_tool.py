@@ -11,6 +11,7 @@ from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed, Too
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_errors import tool_error_message
 from deep_agent.sandbox.backend import PythonExecutionBackend
+from deep_agent.sandbox.context import execution_context_env
 from deep_agent.sandbox.file_bridge import SandboxFileInput, prepare_input_files, publish_execution_result
 from deep_agent.files.upload_settings import load_upload_settings_for_tool
 from deep_agent.sandbox.types import (
@@ -162,6 +163,7 @@ def build_skill_script_toolset(
         inputs: dict[str, JsonValue] | None = None,
         resource_paths: list[str] | None = None,
         files: list[SandboxFileInput] | None = None,
+        include_context: bool = False,
     ) -> ToolReturn:
         """Execute one authorized stored Python Skill script in the isolated Sandbox.
 
@@ -170,6 +172,30 @@ def build_skill_script_toolset(
         Check status == 'ok' and each truncated flag before using that result.
         With PTC, pass upstream JSON directly in inputs and keep the returned
         result in a variable for the next tool instead of transcribing it.
+
+        Set include_context=True only when the Skill needs the current user's
+        identity or app/space/language, e.g. per-user customer API access. The host
+        provides credential-free JSON in DEEP_AGENT_CONTEXT, shared within this Run.
+        Ordinary computation and fixed-account APIs keep the default False.
+        Check resolution/error and required fields before business requests;
+        unavailable profile data does not stop script execution. Never substitute
+        a fixed account for a missing runtime user.
+
+        The flag controls injection only; the JSON shape is fixed. False means
+        the variable is absent, including any same-named host environment value.
+        In the script, import json, os; then read
+        context = json.loads(os.environ["DEEP_AGENT_CONTEXT"]). Example:
+        {"user":{"id":"user-001","username":"zhangsan","nickname":null,
+        "display_name":"zhangsan","email":null,"avatar_url":null},
+        "app":"budget001","space":"budget","language":"zh-cn",
+        "resolution":"resolved","error":null}.
+        User fields and app/space/language may be empty. For a domain account,
+        check context["user"]["username"] before making the business request.
+        resolution is resolved/local/empty/unavailable. On lookup failure only
+        user.id remains; other business fields are null and error contains safe
+        code/message fields, e.g. {"code":"profile_unavailable","message":"Profile unavailable"}.
+        Do not print/return the full context or invent it in inputs/arguments.
+        This does not automatically load the Skill's .env or provide credentials.
         """
         if ctx.deps.user is None:
             raise ModelRetry("Skill脚本执行需要已认证用户")
@@ -197,6 +223,7 @@ def build_skill_script_toolset(
                 arguments=tuple(arguments or ()),
                 inputs=inputs or {},
                 files=input_files,
+                context_env=await execution_context_env(ctx.deps, include_context=include_context),
                 timeout_ms=timeout_ms,
             )
         except ValidationError as exc:

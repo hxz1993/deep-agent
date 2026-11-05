@@ -169,7 +169,7 @@ class SubprocessBackend:
             cpu_seconds=self._cpu_limit_seconds,
             max_pids=self._max_pids if self._max_pids else None,
         )
-        worker_env = build_worker_env()
+        worker_env = build_worker_env(request.context_env)
         worker_env.update(
             {
                 "HOME": work_dir,

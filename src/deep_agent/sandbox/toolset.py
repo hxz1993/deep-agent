@@ -8,6 +8,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities.registry import ToolInfo, ToolPackage
 from deep_agent.files.upload_settings import load_upload_settings_for_tool
 from deep_agent.sandbox.backend import PythonExecutionBackend
+from deep_agent.sandbox.context import execution_context_env
 from deep_agent.sandbox.file_bridge import SandboxFileInput, prepare_input_files, publish_execution_result
 from deep_agent.sandbox.profile import (
     ResolvedSandboxProfile,
@@ -47,6 +48,7 @@ def build_python_sandbox_tool_package(
         code: str,
         inputs: dict[str, JsonValue] | None = None,
         files: list[SandboxFileInput] | None = None,
+        include_context: bool = False,
     ) -> ToolReturn:
         """使用第三方库进行计算、文件解析或转换，可读取会话文件并发布产物。
 
@@ -61,6 +63,24 @@ def build_python_sandbox_tool_package(
         只有确实需要解析、转码或生成新文件时才使用 Python 沙箱。
         用户仅要求发送/转交 WebP 等公网文件时不属于转码需求，保持原文件中转即可；
         只有用户明确要求 PNG/JPEG 或内联图片时才尝试转换。
+
+        仅当代码需要当前用户身份或应用范围（例如按用户访问客户知识库）时设置
+        include_context=True，后端会在 DEEP_AGENT_CONTEXT 环境变量中提供用户资料与
+        app/space/language，不含 Cookie、Token 或 API Key。同一 Run 内复用资料。
+        普通计算、转换和固定账号 API 保持默认 False。资料失败仍执行，检查 resolution/error
+        和所需字段后再请求业务接口；不要猜测或使用固定账号代替当前用户。
+
+        此开关只控制是否注入，JSON 格式固定；False 时变量不存在，不从宿主继承。
+        代码中 import json, os 后，用 json.loads(os.environ["DEEP_AGENT_CONTEXT"]) 读取：
+        {"user":{"id":"user-001","username":"zhangsan","nickname":null,
+        "display_name":"zhangsan","email":null,"avatar_url":null},
+        "app":"budget001","space":"budget","language":"zh-cn",
+        "resolution":"resolved","error":null}。
+        user 各字段及 app/space/language 可以为空；按所需字段检查，例如 context["user"]["username"]。
+        resolution 为 resolved/local/empty/unavailable。资料失败时仅 user.id 保留，
+        其余业务字段为 null，error={"code":"profile_unavailable","message":"暂时无法获取用户资料"}
+        （超时或认证失败使用对应安全错误码）。此上下文不是凭据，不要打印或返回完整对象。
+        不要在 inputs 中自行编造此对象，也不会自动加载包内 .env。
         """
         if ctx.deps.user is None:
             raise ModelRetry("python-sandbox 需要已认证用户，无法在无用户身份时执行")
@@ -76,6 +96,7 @@ def build_python_sandbox_tool_package(
             inputs=inputs or {},
             timeout_ms=timeout_ms,
             files=sandbox_files,
+            context_env=await execution_context_env(ctx.deps, include_context=include_context),
         )
         result = await backend.execute(request)
         return await publish_execution_result(

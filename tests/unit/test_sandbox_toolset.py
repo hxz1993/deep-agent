@@ -359,7 +359,7 @@ class SandboxCapabilityTests(unittest.IsolatedAsyncioTestCase):
         schema = tool.tool_def.parameters_json_schema
         self.assertEqual(
             set(schema.get("properties", {}).keys()),
-            {"code", "inputs", "files"},
+            {"code", "inputs", "files", "include_context"},
         )
         description = tool.tool_def.description or ""
         self.assertIn("确实需要解析、转码或生成新文件", description)

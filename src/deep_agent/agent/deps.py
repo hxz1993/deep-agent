@@ -10,6 +10,7 @@ from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.files.upload_settings import DefaultUploadSettingsStore
 
 if TYPE_CHECKING:
+    from deep_agent.sandbox.context import ExecutionContextState
     from deep_agent.agent.request_budget import TurnRequestBudget
     from deep_agent.agent.context.runtime import ContextRunState
     from deep_agent.agent.tool_discovery import ToolDiscoveryTelemetry
@@ -43,6 +44,11 @@ class AgentDeps:
     app_id: str | None = None
     space_id: str | None = None
     request_headers: Mapping[str, str] = field(default_factory=dict)
+    # Trusted execution-only inputs, independent of the configurable MCP allowlist.
+    execution_request_headers: Mapping[str, str] | None = field(default=None, repr=False)
+    # Local development identity is populated from trusted server scope only.
+    local_username: str | None = field(default=None, repr=False)
+    execution_context_state: "ExecutionContextState | None" = field(default=None, repr=False)
     file_store: "FileStore | None" = field(default=None, repr=False)
     upload_settings_store: Any = field(default_factory=DefaultUploadSettingsStore, repr=False)
     context_state: "ContextRunState | None" = None

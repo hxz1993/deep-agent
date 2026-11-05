@@ -13,6 +13,21 @@ from deep_agent.channels.app_context import channel_deepfos_app, channel_deepfos
 from deep_agent.options import OPTION
 
 
+_EXECUTION_CONTEXT_HEADERS = frozenset({
+    "authorization", "cookie", "token", "x-user-token", "x-tenant-id",
+    "x-deepfos-key", "user", "app", "space", "language",
+})
+
+
+def extract_execution_context_headers(
+    request: Request, *, channel_account: object | None = None,
+) -> dict[str, str]:
+    """Capture fixed trusted profile inputs without changing MCP forwarding policy."""
+    return extract_forward_headers(
+        request, allowed=_EXECUTION_CONTEXT_HEADERS, channel_account=channel_account,
+    )
+
+
 def _split_rules(allowed: Iterable[str]) -> tuple[frozenset[str], tuple[str, ...]]:
     exact: set[str] = set()
     wildcard_prefixes: list[str] = []

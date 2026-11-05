@@ -176,14 +176,59 @@ Alembic 010 删除`skill_packages.enabled`。旧值不再影响运行时：升�
 Python 进程和临时目录。PTC 调用这两个工具也走同一实现，不产生另一套脚本协议。
 
 ```text
-execute_python(code, inputs?, files?)
-execute_skill_script(skill_code, script_path, arguments?, inputs?, resource_paths?, files?)
+execute_python(code, inputs?, files?, include_context=False)
+execute_skill_script(skill_code, script_path, arguments?, inputs?, resource_paths?, files?, include_context=False)
 files = [{"file_id": "当前会话授权文件ID", "path": "inputs/source.pdf"}]
 ```
 
 普通 Python 继续直接执行代码并提供 `inputs` 变量，不改为文件入口，也不获得 Skill 目录访问能力。
 Skill 只接受当前 Agent 已选择且已索引的 UTF-8 `.py` 路径；同 Skill 的 Python 模块自动携带，
 非代码资源仍按 `resource_paths` 精确选择。组装执行副本时校对索引指纹，更新冲突明确失败。
+
+### 按需读取当前用户与应用范围
+
+自 v0.15.6 起，两工具的 `include_context` 默认 `False`：不查询用户资料，也不继承宿主同名变量。
+只有脚本需要按当前用户访问客户系统、填写域账号或取得本次应用范围时，才传 `True`。
+普通计算、格式转换和固定账号 API 无须开启。无需在 Skill 的 metadata 增加配置。
+原生和 PTC 调用使用相同参数与实现；PTC 本身不能直接读取环境变量。
+
+开启后，脚本可读取单个 JSON 环境变量 `DEEP_AGENT_CONTEXT`：
+`include_context` 只决定是否注入，不改变下述固定结构；两个执行工具的模型可见说明也包含完整格式、读取示例及失败规则。
+
+```python
+import json
+import os
+
+context = json.loads(os.environ["DEEP_AGENT_CONTEXT"])
+username = context["user"]["username"]
+if not username:
+    raise RuntimeError("缺少当前用户名，请检查用户资料服务和 include_context 参数")
+```
+
+```json
+{
+  "user": {
+    "id": "user-001", "username": "zhangsan", "nickname": "张三",
+    "display_name": "zhangsan", "email": "zhangsan@example.com", "avatar_url": null
+  },
+  "app": "budget001", "space": "budget", "language": "zh_CN",
+  "resolution": "resolved", "error": null
+}
+```
+
+身份来自服务端可信请求，App、Space、Language 使用本次有效请求范围，不由模型填写用户资料。
+执行上下文与 MCP 转发白名单独立，缩窄 MCP Header 不会清空这些字段；资料查询所需的认证仅留在服务端，不注入脚本。
+`resolution` 为 `resolved`、`local`、`empty` 或 `unavailable`。成功响应中的空值保留，
+不拿 User ID 或固定账号代替缺失的用户名；`display_name` 沿用当前用户接口的 username 语义。
+同一 Run 第一次开启时解析一次，并发调用合并，普通 Python、不同 Skill 和 PTC 共用结果；
+默认关闭的后续调用仍不注入。共享账号资料服务另保留 30 秒成功缓存，不要求先打开 Console。
+
+资料查询失败或 5 秒超时不阻止脚本执行：仅保留 `user.id`，其余业务字段为 `null`，
+`resolution` 为 `unavailable`，`error` 包含安全的 `code/message`。同 Run 不反复请求失败服务。
+脚本应在业务请求前检查所需字段；不得回退到包内固定账号冒充当前用户。
+环境中不包含 Cookie、Token、API Key 或任意 Header，不自动加载 `.env`，不修改进程全局环境。
+需要客户固定密钥时继续在 `.env` 自行读取；运行身份不写入 Skill 包、输入文件或执行协议帧。
+执行器不自动回显该环境变量；脚本自行打印、返回或写入产物的内容仍由脚本负责。
 
 ### 每次 Skill 调用的目录
 

@@ -67,6 +67,7 @@ from deep_agent.agent.attachments import (
 )
 from deep_agent.agent.deferred import serialize_deferred
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.sandbox.context import execution_context_scope
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
 from deep_agent.diagnostics.persistence import persistence_failure_fields
 from deep_agent.agent.message_persistence import MessagePersistenceCapability, StreamMessagePersistenceCapability, MessagePersistenceError
@@ -1830,7 +1831,7 @@ class AgentRunner:
         )
         self._set_tool_discovery_inputs(deps, message, context_refs)
         title_task: asyncio.Task[None] | None = None
-        async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id):
+        async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id), execution_context_scope(deps):
             # Recheck after waiting: another request may have consumed the UI result.
             # This rejection must stay outside the execution-error persistence block.
             await validate_deferred_results(self.store, session_id, deferred_tool_results)
@@ -2259,7 +2260,7 @@ class AgentRunner:
         title_task: asyncio.Task[None] | None = None
         stream_snapshot = _StreamRunSnapshot()
         self._set_tool_discovery_inputs(deps, message, context_refs)
-        async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id):
+        async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id), execution_context_scope(deps):
             # Recheck after waiting: another request may have consumed the UI result.
             # This rejection must stay outside the execution-error persistence block.
             await validate_deferred_results(self.store, session_id, deferred_tool_results)

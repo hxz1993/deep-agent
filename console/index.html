@@ -41,7 +41,7 @@
   <link rel="stylesheet" href="./agent-package-export.css?v=20260913-49" />
   <link rel="stylesheet" href="./user-identity.css?v=20260917-release01010" />
   <link rel="stylesheet" href="./integrations.css?v=20260918-release01013" />
-  <link rel="stylesheet" href="./ui-primitives.css?v=20261106-developer-release" />
+  <link rel="stylesheet" href="./ui-primitives.css?v=20261106-developer-dialog3" />
   <link rel="stylesheet" href="./configuration/agent-output.css?v=20261022-output-compact4" />
   <link rel="stylesheet" href="./structured-output.css?v=20261022-output-inspector3" />
 </head>
@@ -63,7 +63,7 @@
       <div class="console-nav-footer">
         <div class="resource-group-label">系统</div>
         <button class="tab resource-btn" data-tab="global-settings"><i data-lucide="settings-2"></i><span>全局配置</span></button>
-        <button type="button" class="console-nav-btn" data-page="developer" title="开发助手" aria-label="开发助手"><i data-lucide="book-open-text"></i><span>开发助手</span></button>
+        <button type="button" class="console-nav-btn" data-page="developer" aria-haspopup="dialog" aria-expanded="false" title="开发调试" aria-label="开发调试"><i data-lucide="book-open-text"></i><span>开发调试</span></button>
       </div>
       <div class="console-rail-settings">
         <div class="console-theme-control">
@@ -138,9 +138,7 @@
         </div>
       </section>
 
-      <section class="console-page" id="page-developer" data-page-panel="developer" aria-label="开发助手">
-        <div class="configuration-loading" id="developerLoading" role="status"><span class="loading-spinner"></span><span>正在加载开发助手…</span></div>
-      </section>
+      <div id="developerHost"></div>
 
       <section class="console-page" id="page-diagnostics" data-page-panel="diagnostics">
         <div class="configuration-loading hidden" id="diagnosticsLoading" role="status"></div>
@@ -227,6 +225,6 @@
   <script src="./json-view.js?v=20261028-context-details1"></script>
   <script src="./g2-chart.js?v=20261106-skill-theme"></script>
   <script src="./markdown.js?v=20261105-g2-card"></script>
-  <script type="module" src="./main.js?v=20261106-developer-release"></script>
+  <script type="module" src="./main.js?v=20261106-developer-dialog3"></script>
 </body>
 </html>

@@ -15,7 +15,7 @@ const PAGE_LABELS = {
   workspace: "测试",
   configuration: "配置中心",
   diagnostics: "诊断中心",
-  developer: "开发助手",
+  developer: "开发调试",
 };
 let consoleAllowed = false;
 let toastTimer = null;
@@ -26,7 +26,7 @@ let diagnosticsModule = null;
 let developerModule = null;
 const loadPage = createPageLoader({
   developer: async () => {
-    const module = await import("./developer.js?v=20261106-developer-release");
+    const module = await import("./developer.js?v=20261106-developer-dialog3");
     module.initDeveloper();
     developerModule = module;
     return module;
@@ -112,6 +112,18 @@ function syncNavigation() {
 }
 
 async function showPage(page, { updateHash = true, restoreTab = true, diagnosticTarget = null } = {}) {
+  if (page === "developer") {
+    if (!consoleAllowed) return false;
+    // A legacy deep link opens the dialog over the ordinary workspace.
+    if (!workspaceModule && !configurationModule && !diagnosticsModule) await showPage("workspace", { updateHash: false });
+    const generation = ++navigationGeneration;
+    try {
+      await loadPage("developer");
+      if (generation !== navigationGeneration || !consoleAllowed) return false;
+      developerModule.openDeveloper();
+      return true;
+    } catch (error) { toast(error.message, true); return false; }
+  }
   const next = VALID_PAGES.has(page) ? page : "workspace";
   const generation = ++navigationGeneration;
   const current = document.querySelector("[data-page-panel].active")?.dataset.pagePanel;
@@ -143,14 +155,13 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
     }
   }
   if (next !== "diagnostics") setDiagnosticsActive(false);
-  if (next !== "developer") developerModule?.setDeveloperActive(false);
+  developerModule?.closeDeveloper();
   if (!consoleAllowed) return false;
   const workspaceWasReady = Boolean(workspaceModule);
   try {
     await loadPage(next);
     if (generation !== navigationGeneration || !consoleAllowed) return false;
     setDiagnosticsActive(consoleAllowed && next === "diagnostics");
-    if (next === "developer") developerModule.setDeveloperActive(true);
     if (next === "configuration") {
       if (restoreTab) await configurationModule.restoreConfigurationTab();
     }

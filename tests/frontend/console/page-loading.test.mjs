@@ -12,7 +12,7 @@ function harness({allowed=true, authenticated=true, pending={}}={}) {
   const location={hash:'#/configuration'};
   const window={DeepAgentConsoleAPI:{adminAccess:async()=>{calls.push('access');return {allowed,roles:allowed?['enterprise_admin']:[]};}},lucide:{createIcons(){}},addEventListener(){}};
   const modules={
-    developer:{initDeveloper(){calls.push('init:developer');},setDeveloperActive(active){calls.push(`developer:${active}`);}},
+    developer:{initDeveloper(){calls.push('init:developer');},openDeveloper(){calls.push("developer:open");},closeDeveloper(){calls.push("developer:close");}},
     configuration:{async initConfiguration(){calls.push('init:configuration');await pending.configuration?.promise;},restoreConfigurationTab(){calls.push('refresh:configuration');},rememberConfigurationTab(){}},
     workspace:{async initWorkspace(){calls.push('init:workspace');await pending.workspace?.promise;}},
     'diagnostics-center':{initDiagnostics(){calls.push('init:diagnostics');},setDiagnosticsActive(active){calls.push(`diagnostics:${active}`);}},
@@ -54,12 +54,13 @@ test('repeated workspace navigation initializes once without cancelling existing
  const h=harness();await h.context.boot();let refreshes=0;h.window.DeepAgentConsoleChat={refreshConfiguration(){refreshes++;},abort(){throw Error('must not abort');}};await h.context.showPage('workspace');await h.context.showPage('configuration');await h.context.showPage('workspace');assert.equal(h.calls.filter(x=>x==='init:workspace').length,1);assert.equal(refreshes,1);
 });
 
-test('developer page lazy loads, follows history navigation and leaves workspace execution intact', async()=>{
+test('developer dialog lazy loads without replacing the current page or cancelling chat', async()=>{
  const h=harness(); await h.context.boot(); await h.context.showPage('workspace');
  h.window.DeepAgentConsoleChat={abort(){throw Error('must not abort chat');}};
- await h.context.showPage('developer'); assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'developer');
- assert.ok(h.calls.includes('developer:true'));
- await h.context.showPage('workspace'); assert.ok(h.calls.includes('developer:false'));
+ await h.context.showPage('developer'); assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'workspace');
+ assert.ok(h.calls.includes('developer:open'));
+ await h.context.showPage('configuration'); assert.ok(h.calls.includes('developer:close'));
  h.context.location.hash='#/developer'; await h.context.showPage(h.context.pageFromLocation(),{updateHash:false});
  assert.equal(h.calls.filter(x=>x==='init:developer').length,1);
+ assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'configuration');
 });

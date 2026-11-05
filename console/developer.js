@@ -95,42 +95,62 @@ function downloadBlob(blob, filename) {
   finally { link.remove(); setTimeout(() => URL.revokeObjectURL(objectUrl), 1000); }
 }
 
-let controller;
-export function setDeveloperActive(active) { controller?.setActive(active); }
+let controller, dialog;
+export function openDeveloper() {
+  if (!dialog || dialog.open) return;
+  dialog.showModal();
+  document.querySelector('[data-page="developer"]')?.setAttribute("aria-expanded", "true");
+  controller.setActive(true);
+}
+export function closeDeveloper() { if (dialog?.open) dialog.close(); }
 export function initDeveloper() {
   if (controller) return;
   const css = document.createElement("link"); css.rel = "stylesheet";
-  css.href = new URL("./developer.css?v=20261106-developer-release", import.meta.url).href;
+  css.href = new URL("./developer.css?v=20261106-developer-dialog3", import.meta.url).href;
   document.head.append(css);
-  const root = document.getElementById("page-developer");
+  const root = document.getElementById("developerHost");
   root.innerHTML = `
-    <div class="developer-page">
-      <header class="panel-toolbar console-page-header"><div>
-        <h1>开发助手</h1><p class="panel-subtitle">初始化指南与业务 Agent 开发 Skill。</p>
-      </div></header>
+    <dialog class="modal console-detail-dialog developer-dialog" aria-labelledby="developerTitle">
+      <header class="developer-dialog-header"><div>
+        <h2 id="developerTitle">开发调试</h2><p>下载资料，完成初始化与 Coding Agent 接入。</p>
+      </div><button type="button" class="icon-action" data-close aria-label="关闭开发调试"><i data-lucide="x"></i></button></header>
       <div class="developer-resources">
         <div class="developer-load-state" role="status"><span data-catalog-status>正在读取资料…</span><button type="button" class="btn small" data-retry hidden>重试</button></div>
         <section class="developer-resource-row" data-resource="initialization-guide">
-          <div class="developer-file">
-            <button type="button" class="developer-download" data-download="initialization-guide" aria-label="下载电子表格初始化" title="下载电子表格初始化" disabled>
-            <span class="developer-file-copy"><strong><i data-lucide="file-text" class="developer-file-icon is-pdf" aria-hidden="true"></i>电子表格初始化</strong><span data-metadata>PDF</span></span><i data-lucide="download" class="developer-download-icon" aria-hidden="true"></i></button>
-            <p class="developer-error" data-error role="status" hidden></p>
+          <div class="developer-section-heading">
+            <h2 class="console-section-title">快速上手</h2>
+            <div class="developer-file">
+              <button type="button" class="developer-download" data-download="initialization-guide" aria-label="下载电子表格助手初始化" title="下载电子表格助手初始化" disabled>
+                <i data-lucide="file-text" class="developer-file-icon is-pdf" aria-hidden="true"></i><span class="developer-file-copy"><strong>电子表格助手初始化</strong><span data-metadata>PDF</span></span><i data-lucide="download" class="developer-download-icon" aria-hidden="true"></i>
+              </button>
+              <p class="developer-error" data-error role="status" hidden></p>
+            </div>
           </div>
-          <div class="console-section developer-description"><h2 class="console-section-title">快速上手</h2><p>按电子表格助手示例完成模型与工具配置、预制 Agent 安装和首次验证。下载指南后按需查看即可。</p></div>
+          <p class="developer-description">按指南配置模型与工具，安装电子表格助手并完成首次验证。</p>
         </section>
         <section class="developer-resource-row" data-resource="development-skill">
-          <div class="developer-file">
-            <button type="button" class="developer-download" data-download="development-skill" aria-label="下载 DeepAgent 开发 Skill" title="下载 DeepAgent 开发 Skill" disabled>
-            <span class="developer-file-copy"><strong><i data-lucide="package" class="developer-file-icon is-skill" aria-hidden="true"></i>DeepAgent 开发 Skill</strong><span data-metadata>DeepAgent-agents-dev</span></span><i data-lucide="download" class="developer-download-icon" aria-hidden="true"></i></button>
-            <p class="developer-error" data-error role="status" hidden></p>
+          <div class="developer-section-heading">
+            <h2 class="console-section-title">Coding 开发</h2>
+            <div class="developer-file">
+              <button type="button" class="developer-download" data-download="development-skill" aria-label="下载 DeepAgent-agents-dev" title="下载 DeepAgent-agents-dev" disabled>
+                <i data-lucide="book-open-check" class="developer-file-icon" aria-hidden="true"></i><span class="developer-file-copy"><strong>DeepAgent-agents-dev</strong><span data-metadata>ZIP</span></span><i data-lucide="download" class="developer-download-icon" aria-hidden="true"></i>
+              </button>
+              <p class="developer-error" data-error role="status" hidden></p>
+            </div>
           </div>
-          <div class="console-section developer-description"><h2 class="console-section-title">Coding 开发</h2><p>下载 ZIP 并附给 Coding Agent，再复制下面的提示。安装步骤与开发资料均在包内，按需读取。</p>
-            <div class="developer-prompt"><div class="developer-prompt-heading"><span>给 Coding Agent 的提示</span><button type="button" class="btn ghost small" data-copy><i data-lucide="copy" aria-hidden="true"></i><span data-copy-label>复制</span></button></div><pre data-prompt></pre></div>
-            <p class="developer-copy-status" data-copy-status role="status" hidden></p>
-          </div>
+          <p class="developer-description">将 Skill ZIP 附给 Coding Agent，再发送接入提示词，按包内说明完成安装和连接。</p>
+          <div class="developer-prompt"><div class="developer-prompt-heading"><span>给 Coding Agent 的提示词</span><button type="button" class="btn ghost small" data-copy><i data-lucide="copy" aria-hidden="true"></i><span data-copy-label>复制</span></button></div><pre data-prompt></pre></div>
+          <p class="developer-copy-status" data-copy-status role="status" hidden></p>
         </section>
       </div>
-    </div>`;
+    </dialog>`;
+  dialog = root.querySelector("dialog");
+  root.querySelector("[data-close]").addEventListener("click", closeDeveloper);
+  dialog.addEventListener("close", () => {
+    controller.setActive(false);
+    document.querySelector('[data-page="developer"]')?.setAttribute("aria-expanded", "false");
+    if (location.hash === "#/developer") history.replaceState(null, "", "#/" + (document.body.dataset.consolePage || "workspace"));
+  });
   const text = codingPrompt(serviceUrl(""));
   root.querySelector("[data-prompt]").textContent = text;
   const state = root.querySelector(".developer-load-state"), status = root.querySelector("[data-catalog-status]"), retry = root.querySelector("[data-retry]");
@@ -140,8 +160,8 @@ export function initDeveloper() {
       state.hidden = true;
       for (const item of items) {
         const target = row(item.code), button = target.querySelector("[data-download]");
-        if (item.code === "initialization-guide") target.querySelector("[data-metadata]").textContent = resourceSummary(item);
-        button.title = `下载${item.name} · ${resourceSummary(item)} · v${item.version}`;
+        target.querySelector("[data-metadata]").textContent = resourceSummary(item);
+        button.title = `下载${button.querySelector("strong").textContent.trim()} · ${resourceSummary(item)} · v${item.version}`;
         button.disabled = false;
       }
     },
@@ -168,6 +188,6 @@ export function initDeveloper() {
     status.hidden = false;
   });
   window.addEventListener("pagehide", () => controller.setActive(false));
-  window.addEventListener("pageshow", () => controller.setActive(root.classList.contains("active")));
+  window.addEventListener("pageshow", () => controller.setActive(dialog.open));
   window.lucide?.createIcons();
 }

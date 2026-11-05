@@ -1,8 +1,10 @@
 # 开发助手与资料发行
 
-Console 的 `#/developer` 提供初始化 PDF 和一份 `deepagent-agents-dev` 开发 Skill。PDF 面向实施人员；Skill 安装到 Coding Agent，负责业务配置、接口联调、脚本、原生输出、电子表格和会话诊断，有对应源码时再使用后端/前端开发资料。
+Console 的“开发调试”弹框提供初始化 PDF 和一份 `deepagent-agents-dev` 开发 Skill。PDF 面向实施人员；Skill 安装到 Coding Agent，负责业务配置、接口联调、脚本、原生输出、电子表格和会话诊断，有对应源码时再使用后端/前端开发资料。
 
 使用顺序为：下载 Skill ZIP，附给 Coding Agent，再复制页面提示词。提示词仅指向包内 README，并提供当前服务根地址，引导安装后检查连接和权限；安装、权限核对、按需阅读和验收步骤由包内 README 与 SKILL.md 维护，不在页面重复。提示词不带下载链接或认证信息。Coding 工具用用户提供的私有配置访问目标环境；本机已启用 trusted local-dev 身份时可直接验证当前权限。`localhost` 必须是实际执行命令的电脑，不能假定云执行器能访问它。
+
+旧 `#/developer` 地址在工作台上打开同一弹框；普通导航入口不切换页面。关闭弹框中止资料读取和未完成下载，不影响后台聊天流。
 
 ## 管理接口
 

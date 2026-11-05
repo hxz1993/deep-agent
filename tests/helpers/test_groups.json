@@ -11,6 +11,7 @@
     "tests/integration/test_structured_output_channel_lifecycle.py",
     "tests/integration/test_structured_output_client_contracts.py",
     "tests/integration/test_structured_output_compatible_provider.py",
+    "tests/integration/test_structured_output_correction_feedback.py",
     "tests/integration/test_structured_output_databases.py",
     "tests/integration/test_structured_output_final_deferred_gates.py",
     "tests/integration/test_structured_output_persistence.py",
@@ -42,6 +43,7 @@
     "tests/unit/test_models_dev.py",
     "tests/unit/test_nullable_agent_model.py",
     "tests/unit/test_openai_compatible_video.py",
+    "tests/unit/test_output_correction_messages.py",
     "tests/unit/test_project_layout.py",
     "tests/unit/test_provider_registry.py",
     "tests/unit/test_qwen_schema.py",
@@ -49,6 +51,7 @@
     "tests/unit/test_runtime_dependencies.py",
     "tests/unit/test_session_model_override.py",
     "tests/unit/test_single_system_message.py",
+    "tests/unit/test_structured_output_feedback.py",
     "tests/unit/test_structured_output_schema.py",
     "tests/unit/test_system_tools.py",
     "tests/unit/test_title_generator.py",
@@ -103,6 +106,7 @@
     "tests/unit/test_compacted_attachment_access.py",
     "tests/unit/test_config_backup.py",
     "tests/unit/test_configuration_import.py",
+    "tests/unit/test_developer_resources.py",
     "tests/unit/test_document_adaptation.py",
     "tests/unit/test_document_bundle.py",
     "tests/unit/test_document_configuration_concurrency.py",
@@ -322,5 +326,13 @@
     "tests/unit/test_wecom_profiles.py",
     "tests/unit/test_wecom_registration.py",
     "tests/unit/test_wecom_store.py"
+  ],
+  "developer_resources": [
+    "tests/unit/test_console_admin_auth.py",
+    "tests/integration/test_developer_resources_api.py",
+    "tests/unit/test_developer_resources.py"
+  ],
+  "console_theme": [
+    "tests/unit/test_console_g2_theme.py"
   ]
 }

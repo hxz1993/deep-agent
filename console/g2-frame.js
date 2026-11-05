@@ -26,22 +26,28 @@
   }
 
   function safeOptions(spec) {
+    function theme(value) {
+      if (value === undefined || value === null) return { type: global.DeepAgentG2Theme.name };
+      if (typeof value === "object" && !Array.isArray(value)) return { ...value, type: value.type ?? global.DeepAgentG2Theme.name };
+      return value;
+    }
     // Preserve mark-level title/items/field tooltip definitions and data precision.
     function visit(node) {
-      if (!node || typeof node !== "object") return;
-      node.animate = false;
+      if (!node || typeof node !== "object") return node;
+      const result = { ...node, animate: false };
       if (node.interaction !== false) {
         const interaction = node.interaction && typeof node.interaction === "object" ? node.interaction : {};
+        result.interaction = { ...interaction };
         if (interaction.tooltip !== false) {
           const options = interaction.tooltip && typeof interaction.tooltip === "object" ? interaction.tooltip : {};
-          interaction.tooltip = { ...options, render: tooltip };
+          result.interaction.tooltip = { ...options, render: tooltip };
         }
-        node.interaction = interaction;
       }
-      if (Array.isArray(node.children)) node.children.forEach(visit);
+      if (node.theme !== undefined) result.theme = theme(node.theme);
+      if (Array.isArray(node.children)) result.children = node.children.map(visit);
+      return result;
     }
-    visit(spec);
-    return { ...spec, width: undefined, height: 300, autoFit: true, theme: spec.theme ?? "classic" };
+    return { ...visit(spec), width: undefined, height: 300, autoFit: true, theme: theme(spec.theme) };
   }
 
   global.addEventListener("message", async event => {
@@ -49,7 +55,7 @@
     if (started || disposed || event.source !== global.parent || !data || data.channel !== CHANNEL || data.token !== token || data.type !== "init") return;
     started = true;
     try {
-      if (!global.G2?.Chart || !data.spec || typeof data.spec !== "object" || Array.isArray(data.spec)) throw new Error("G2 unavailable");
+      if (!global.G2?.Chart || !global.DeepAgentG2Theme || !data.spec || typeof data.spec !== "object" || Array.isArray(data.spec)) throw new Error("G2 unavailable");
       chart = new global.G2.Chart({ container: document.getElementById("chart"), autoFit: true, height: 300 });
       chart.options(safeOptions(data.spec));
       await chart.render();

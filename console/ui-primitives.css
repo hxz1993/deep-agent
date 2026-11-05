@@ -79,9 +79,10 @@
 }
 .resource-btn.tab.active { border-radius: var(--config-radius) !important; }
 
+.console-page-header,
 #configurationHost .panel-toolbar,
 #configurationHost .catalog-panel .models-toolbar {
-  min-height: var(--config-header-height);
+  min-height: var(--config-header-height, 56px);
   align-items: flex-start;
   gap: 16px;
   margin: 0 0 16px;
@@ -96,6 +97,7 @@
   min-width: 0;
 }
 
+.console-page-header h1,
 #configurationHost .panel-toolbar h1,
 #configurationHost .panel-toolbar h2,
 #configurationHost .catalog-panel .catalog-title {
@@ -111,6 +113,7 @@
 #configurationHost #panel-channels .panel-title-copy { display: block; }
 #configurationHost .channel-title-row .channel-runtime-chip { margin-block: -4px; }
 
+.console-page-header .panel-subtitle,
 #configurationHost .panel-subtitle,
 #configurationHost .catalog-panel .models-desc {
   overflow: hidden;

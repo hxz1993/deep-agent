@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from deep_agent.agent_packages.archive import PackageAgent, PackageUi, parse_package
+from sync_console_g2_theme import OUTPUT as CONSOLE_THEME, render_theme
 
 
 def deterministic_zip(files: dict[str, bytes]) -> bytes:
@@ -117,6 +118,11 @@ def main() -> None:
                 temporary.unlink(missing_ok=True)
     elif target.read_bytes() != raw:
         raise SystemExit("预制包与来源不一致；核对来源后使用 --write 更新")
+    theme = render_theme(target)
+    if args.write:
+        CONSOLE_THEME.write_text(theme, encoding="utf-8")
+    elif not CONSOLE_THEME.exists() or CONSOLE_THEME.read_text("utf-8") != theme:
+        raise SystemExit("Console 图表主题与预制 Skill 不一致；运行 scripts/sync_console_g2_theme.py 更新")
     report["action"] = "written" if args.write else "verified"
     print(json.dumps(report, ensure_ascii=False, indent=2))
 

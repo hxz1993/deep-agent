@@ -72,6 +72,57 @@ class OutputValidationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(len(field) <= 256 for error in errors for field in error.values()))
         self.assertNotIn("private-contract-content", str(errors))
 
+    async def test_worker_returns_actionable_nullable_branch_feedback_without_candidate_text(self):
+        schema = {"properties": {"recon_analysis": {"anyOf": [
+            {"type": "object", "properties": {"questions": {"type": "array", "maxItems": 4}}},
+            {"type": "null"},
+        ]}}}
+        errors = await validate_output(schema, {"recon_analysis": {"questions": ["private-business-content"] * 5}})
+        self.assertEqual([error["constraint"] for error in errors], ["anyOf", "maxItems"])
+        leaf = errors[1]
+        self.assertEqual(leaf["path"], "/recon_analysis/questions")
+        self.assertIn("maximum=4", leaf["message"])
+        self.assertIn("actual=5", leaf["message"])
+        self.assertNotIn("private-business-content", str(errors))
+        self.assertEqual(await validate_output(schema, {"recon_analysis": {"questions": ["fixed"]}}), [])
+
+    async def test_worker_missing_and_extra_fields_are_precise_without_changing_validation(self):
+        schema = {"type": "object", "properties": {"amount": {"type": "integer"}, "code": {"type": "string"}},
+                  "required": ["amount", "code"], "additionalProperties": False}
+        errors = await validate_output(schema, {"ammount": "private-business-content"})
+        self.assertCountEqual([(e["path"], e["constraint"]) for e in errors],
+                              [("/amount", "required"), ("/code", "required"), ("/ammount", "additionalProperties")])
+        self.assertNotIn("private-business-content", str(errors))
+        self.assertEqual(await validate_output(schema, {"amount": 0, "code": ""}), [])
+
+    async def test_worker_redacts_nested_map_keys_but_preserves_static_and_generated_fields(self):
+        schema = {"allOf": [{"properties": {"groups": {"type": "object", "additionalProperties": {
+            "anyOf": [{"type": "object", "properties": {"rows": {"type": "array", "items": {
+                "type": "object", "properties": {"amount": {"type": "integer"}},
+                "required": ["amount"], "additionalProperties": False,
+            }}}}, {"type": "null"}],
+        }}}}]}
+        key = "private-person@example.invalid"
+        errors = await validate_output(schema, {"groups": {key: {"rows": [{"amount": "private-value"}, {"ammount": 1}]}}})
+        self.assertTrue(any(e["path"] == "/groups/<key>/rows/0/amount" and e["constraint"] == "type" for e in errors))
+        self.assertTrue(any(e["path"] == "/groups/<key>/rows/1/amount" and e["constraint"] == "required" for e in errors))
+        self.assertTrue(any(e["path"] == "/groups/<key>/rows/1/ammount" and '"ammount"' in e["message"] for e in errors))
+        self.assertTrue(any(e["constraint"] == "anyOf" for e in errors))
+        self.assertNotIn(key, str(errors))
+        self.assertNotIn("private-value", str(errors))
+        self.assertEqual(await validate_output(schema, {"groups": {key: {"rows": [{"amount": 1}]}}}), [])
+
+    async def test_worker_redacts_long_pattern_map_keys_and_keeps_field_budgets(self):
+        schema = {"patternProperties": {".*": {"properties": {"rows": {
+            "type": "array", "items": {"properties": {"a/b~c": {"type": "integer"}}},
+        }}}}}
+        errors = await validate_output(schema, {"private-user-" + "x" * 500: {"rows": [{"a/b~c": "private-value"}]}})
+        self.assertEqual(errors[0]["path"], "/<key>/rows/0/a~1b~0c")
+        self.assertTrue(all(len(field) <= 256 for error in errors for field in error.values()))
+        self.assertLessEqual(len(errors[0]["path"]), 160)
+        self.assertNotIn("private-user", str(errors))
+        self.assertNotIn("private-value", str(errors))
+
     async def test_non_json_and_output_size_are_candidate_errors_without_worker(self):
         with patch.object(validation.asyncio, "create_subprocess_exec", side_effect=AssertionError("must not spawn")):
             for value in (float("nan"), float("inf"), {1: "bad"}, (1, 2)):

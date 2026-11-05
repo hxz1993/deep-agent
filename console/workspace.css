@@ -2788,13 +2788,22 @@ html, body {
 .composer-model-menu .da-select-group { min-height:22px; gap:5px; padding:2px 6px; line-height:18px; }
 
 /* JSON charts run only in opaque-origin frames; the original spec stays copyable. */
-deepagent-g2-chart { display: block; width: 100%; margin: 12px 0 16px; }
-.g2-chart-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-.g2-chart-config[hidden], .g2-chart-viewport[hidden] { display: none; }
-.g2-chart-viewport { position: relative; min-height: 300px; overflow: hidden; border: 1px solid var(--console-card-border); border-radius: var(--ui-radius); background: #fff; }
+deepagent-g2-chart { display: block; width: 100%; margin: 12px 0 16px; border: 1px solid var(--console-card-border); border-radius: var(--ui-radius); overflow: hidden; }
+.g2-chart-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 10px; border-bottom: 1px solid var(--console-card-border); }
+.g2-chart-title { color: var(--text-dim); font: 12px/1.5 var(--font); }
+.g2-chart-config[hidden] { display: none; }
+/* Keep the iframe's measurable width while viewing config, including an
+   in-flight first render. display:none makes G2 initialize at its minimum width. */
+deepagent-g2-chart { position: relative; }
+.g2-chart-viewport[hidden] { display: block !important; position: absolute; left: 0; right: 0; visibility: hidden; pointer-events: none; }
+.g2-chart-viewport, .g2-chart-config { height: 300px; box-sizing: border-box; }
+.g2-chart-viewport { position: relative; overflow: hidden; background: #fff; }
 .g2-chart-frame { display: block; width: 100%; height: 300px; border: 0; background: #fff; }
 .g2-chart-frame.is-loading { opacity: 0; }
 .g2-chart-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; color: #617483; font-size: var(--ui-font-helper); text-align: center; }
 .g2-chart-status[hidden] { display: none; }
 .g2-chart-status.is-error { color: var(--danger, #c45656); }
-.g2-chart-config > .markdown-code-block { margin: 0; }
+.g2-chart-config { overflow: hidden; }
+.markdown-body .g2-chart-config > .markdown-code-block { display: flex; flex-direction: column; height: 100%; margin: 0; border: 0; border-radius: 0; }
+.g2-chart-config .markdown-code-header { flex: none; }
+.markdown-body .g2-chart-config > .markdown-code-block > pre { flex: 1; min-height: 0; overflow: auto; }

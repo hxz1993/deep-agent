@@ -59,10 +59,10 @@
     return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
-  function frameDocument({ nonce, token, g2Url, frameUrl }) {
+  function frameDocument({ nonce, token, g2Url, themeUrl, frameUrl }) {
     const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'none'; img-src data: blob:; font-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
     // Only trusted URLs and random identifiers enter srcdoc. Message JSON never does.
-    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta name="referrer" content="no-referrer"><style>html,body{margin:0;width:100%;height:300px;overflow:hidden;background:#fff;color:#263c4e;font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",Arial,sans-serif}#chart{width:100%;height:300px}.g2-safe-tooltip{max-width:300px;padding:8px 10px;background:#fff;color:#263c4e;font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.g2-safe-tooltip-title{font-weight:600;margin-bottom:3px}.g2-safe-tooltip-row{display:flex;justify-content:space-between;gap:12px}</style><script nonce="${nonce}" src="${escapeAttribute(g2Url)}" defer></script><script nonce="${nonce}" data-token="${token}" src="${escapeAttribute(frameUrl)}" defer></script></head><body><div id="chart" aria-label="G2 图表"></div></body></html>`;
+    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta name="referrer" content="no-referrer"><style>html,body{margin:0;width:100%;height:300px;overflow:hidden;background:#fff;color:#263c4e;font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",Arial,sans-serif}#chart{width:100%;height:300px}.g2-safe-tooltip{max-width:300px;padding:8px 10px;background:#fff;color:#263c4e;font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.g2-safe-tooltip-title{font-weight:600;margin-bottom:3px}.g2-safe-tooltip-row{display:flex;justify-content:space-between;gap:12px}</style><script nonce="${nonce}" src="${escapeAttribute(g2Url)}" defer></script><script nonce="${nonce}" src="${escapeAttribute(themeUrl)}" defer></script><script nonce="${nonce}" data-token="${token}" src="${escapeAttribute(frameUrl)}" defer></script></head><body><div id="chart" aria-label="G2 图表"></div></body></html>`;
   }
 
   if (global.HTMLElement && global.customElements && !global.customElements.get("deepagent-g2-chart")) {
@@ -149,7 +149,8 @@
           frame.setAttribute("sandbox", "allow-scripts");
           frame.setAttribute("referrerpolicy", "no-referrer");
           const g2Url = new URL("../vendor/g2-5.4.8.min.js", this.ownerDocument.baseURI).href;
-          const frameUrl = new URL("./g2-frame.js?v=20261105-v01511", this.ownerDocument.baseURI).href;
+          const themeUrl = new URL("./g2-theme.js?v=20261106-skill-theme", this.ownerDocument.baseURI).href;
+          const frameUrl = new URL("./g2-frame.js?v=20261106-skill-theme", this.ownerDocument.baseURI).href;
           this._frame = frame;
           let sent = false;
           this._listener = event => {
@@ -168,7 +169,7 @@
             } else if (data.type === "error") this._fail("图表渲染失败，请展开配置检查。");
           };
           global.addEventListener("message", this._listener);
-          frame.srcdoc = frameDocument({ nonce, token, g2Url, frameUrl });
+          frame.srcdoc = frameDocument({ nonce, token, g2Url, themeUrl, frameUrl });
           this.dataset.g2State = "loading";
           this._timer = global.setTimeout(() => {
             if (generation === this._generation) this._fail("图表加载超时，已保留完整配置。");

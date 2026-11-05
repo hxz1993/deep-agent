@@ -13,6 +13,9 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart
 from deep_agent.capabilities.codes import ENVIRONMENT_TOOL_NAMES, environment_name_conflict
+from deep_agent.structured_output.feedback import (
+    OutputArgumentsError, correction_feedback, decode_output_arguments, protocol_error,
+)
 
 BUDGET = "deepagent_output_budget"
 DISPATCH = "deepagent_dispatch"
@@ -125,19 +128,7 @@ class StructuredOutputState(AbstractCapability):
             reason = "missing_output"
         elif outputs:
             try:
-                args = outputs[0][1].args
-                if isinstance(args, str):
-                    def reject_constant(value):
-                        raise ValueError("Non-finite JSON number")
-                    def unique_object(pairs):
-                        result = {}
-                        for key, item in pairs:
-                            if key in result:
-                                raise ValueError("Duplicate JSON object key")
-                            result[key] = item
-                        return result
-                    args = json.loads(args, parse_constant=reject_constant, object_pairs_hook=unique_object)
-                value = args if self.contract["json_schema"].get("type") == "object" else args["response"]
+                value = decode_output_arguments(outputs[0][1].args, self.contract["json_schema"])
                 from deep_agent.structured_output.validation import validate_output, OutputValidationServiceError
                 try:
                     errors = await validate_output(self.contract["json_schema"], value)
@@ -148,8 +139,9 @@ class StructuredOutputState(AbstractCapability):
                     raise
                 if errors:
                     reason = "schema_validation_failed"
-            except (ValueError, KeyError, TypeError):
+            except OutputArgumentsError as exc:
                 reason = "invalid_json"
+                errors = [exc.error]
         if reason:
             response.metadata = {**(response.metadata or {}), DISPATCH: {
                 "rejected": True, "reason": reason,
@@ -178,14 +170,15 @@ class StructuredOutputState(AbstractCapability):
                             "source": {"message_ordinal": self._ordinal(response, progress), "part_index": index},
                             "accepted": False}
             if reason:
-                self.pending["errors"] = errors or [{"code": reason, "message": reason}]
+                errors = errors or [protocol_error(reason, self.contract["name"])]
+                self.pending["errors"] = errors
                 await self._append_attempt(ctx.deps, accepted=False)
             else:
                 self.pending["output"] = deepcopy(value)
         if reason:
             if len(self.rejected_keys) > 2:
                 raise UnexpectedModelBehavior("output_retry_exhausted: output correction limit reached")
-            raise ModelRetry(_json({"code": reason, "errors": errors})[:6000])
+            raise ModelRetry(correction_feedback(reason, errors, self.contract["name"]))
         if (not calls and self.allow_text_output
                 and any(isinstance(part, TextPart) and part.content for part in response.parts)):
             # The SDK's unadorned str processor can bypass output-validation

@@ -1,0 +1,29 @@
+/* Geometry only: typography, colors, buttons and icons use Console primitives. */
+.developer-page { height: 100%; overflow: auto; padding: 22px; background: var(--console-surface); }
+.developer-resources { max-width: 1040px; }
+.developer-load-state { display: flex; align-items: center; gap: var(--ui-group-content-gap); color: var(--text-dim); font-size: var(--ui-font-helper); margin-bottom: 16px; }
+.developer-page [hidden] { display: none; }
+.developer-resource-row { display: grid; grid-template-columns: 220px minmax(0, 1fr); column-gap: 24px; padding: 20px 0 28px; align-items: start; }
+.developer-resource-row + .developer-resource-row { border-top: 1px solid var(--border); padding-top: 28px; }
+.developer-file { min-width: 0; }
+.developer-download { display: flex; gap: 6px; align-items: center; width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: var(--ui-radius); background: var(--console-surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.developer-download:hover:not(:disabled) { border-color: var(--accent); }
+.developer-download:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.developer-download:disabled { cursor: default; opacity: .6; }
+.developer-file-icon { width: 14px; height: 14px; flex: 0 0 14px; }
+.developer-file-icon.is-pdf { color: var(--danger); }
+.developer-file-icon.is-skill { color: var(--accent); }
+.developer-file-copy { min-width: 0; flex: 1; }
+.developer-file-copy strong { display: flex; align-items: center; gap: 5px; font-size: var(--ui-font-helper); font-weight: 600; line-height: 1.5; white-space: nowrap; }
+.developer-file-copy [data-metadata] { display: block; font-size: var(--ui-font-meta); color: var(--text-dim); line-height: 1.5; margin-top: 3px; white-space: nowrap; }
+.developer-download-icon { width: 14px; height: 14px; flex: 0 0 14px; color: var(--text-dim); }
+.developer-description { min-width: 0; padding: 0; }
+.developer-description > p { margin: var(--ui-group-content-gap) 0 0; color: var(--text-dim); font-size: var(--ui-font-helper); line-height: 1.8; }
+.developer-prompt { margin-top: 16px; padding: 12px 14px; background: var(--console-surface); border: 1px solid var(--border); border-radius: var(--ui-radius); }
+.developer-prompt-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--text-dim); font-size: var(--ui-font-meta); margin-bottom: 8px; }
+.developer-prompt pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: var(--ui-font-helper); line-height: 1.8; color: var(--text); user-select: text; }
+.developer-error { color: var(--danger); font-size: var(--ui-font-helper); margin: 8px 0 0; }
+.developer-file [aria-busy="true"] .developer-download-icon { animation: developer-download-pulse 1s ease-in-out infinite; }
+@keyframes developer-download-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .developer-file [aria-busy="true"] svg { animation: none; } }
+@media (max-width: 700px) { .developer-resource-row { grid-template-columns: minmax(0, 1fr); row-gap: 16px; } .developer-page { padding: 16px; } .developer-file { max-width: 240px; } }

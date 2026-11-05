@@ -6,6 +6,8 @@ import { Element } from "./helpers/presenter-dom.mjs";
 
 const source = await readFile(new URL("../../../console/g2-chart.js", import.meta.url), "utf8");
 const frameSource = await readFile(new URL("../../../console/g2-frame.js", import.meta.url), "utf8");
+const themeSource = await readFile(new URL("../../../console/g2-theme.js", import.meta.url), "utf8");
+const g2Source = await readFile(new URL("../../../console/vendor/g2-5.4.8.min.js", import.meta.url), "utf8");
 const markdownSource = await readFile(new URL("../../../console/markdown.js", import.meta.url), "utf8");
 const markedSource = await readFile(new URL("../../../console/vendor/marked.min.js", import.meta.url), "utf8");
 
@@ -130,6 +132,8 @@ test("sandbox document has local nonced scripts and no model content or eval per
   assert.match(frame.srcdoc, /connect-src 'none'/);
   assert.match(frame.srcdoc, /img-src data: blob:/);
   assert.match(frame.srcdoc, /http:\/\/localhost:8000\/vendor\/g2-5\.4\.8\.min\.js/);
+  assert.match(frame.srcdoc, /g2-theme\.js\?v=20261106-skill-theme/);
+  assert.ok(frame.srcdoc.indexOf("g2-theme.js") < frame.srcdoc.indexOf("g2-frame.js"));
   assert.equal(frame.contentWindow.messages.length, 0);
   h.message(frame, "ready", { source: {} }); h.message(frame, "ready", { token: "wrong" });
   assert.equal(frame.contentWindow.messages.length, 0);
@@ -206,27 +210,82 @@ function frameHarness({ rendering } = {}) {
     destroy() { this.destroyed++; }
   }
   const context = vm.createContext({
-    console, parent, G2: { Chart },
+    console, parent, G2: { Chart, Light: options => options, register() {} },
     document: { currentScript: { dataset: { token: "per-frame-token" } }, createElement: tag => new Element(tag), getElementById: () => new Element("div") },
     addEventListener(type, callback) { listeners.set(type, callback); },
   });
-  context.window = context; vm.runInContext(frameSource, context);
+  context.window = context; vm.runInContext(themeSource, context); vm.runInContext(frameSource, context);
   return { context, messages, instances, listeners, init(spec, source = parent, token = "per-frame-token") { return listeners.get("message")({ source, data: { channel: "deepagent-g2", type: "init", token, spec } }); } };
 }
 
 test("frame authenticates initialization, fixes host size and safely renders precise tooltip text", async () => {
   const h = frameHarness();
   const spec = { type: "view", width: 99999, height: 88888, theme: { type: "classic" }, children: [{ type: "point", tooltip: { title: "category", items: [{ field: "actual", name: "实际" }] } }] };
+  const original = JSON.stringify(spec);
   await h.init(spec, {}); await h.init(spec, h.context.parent, "wrong"); assert.equal(h.instances.length, 0);
   await h.init(spec); await h.init(spec); assert.equal(h.instances.length, 1);
   const options = h.instances[0].spec;
   assert.equal(options.width, undefined); assert.equal(options.height, 300); assert.equal(options.autoFit, true);
   assert.equal(options.children[0].tooltip.items[0].field, "actual");
+  assert.equal(options.theme.type, "classic");
+  assert.equal(JSON.stringify(spec), original);
   const root = options.interaction.tooltip.render(null, { title: '<img src=x onerror="bad()">', items: [{ name: "实际", value: 0.123456789 }] });
   assert.match(root.textContent, /<img src=x onerror="bad\(\)">/); assert.match(root.textContent, /0\.123456789/);
   assert.equal(root.querySelector("img"), null);
   assert.deepEqual(h.messages.map(item => item.type), ["ready", "rendered"]);
   h.listeners.get("pagehide")(); assert.equal(h.instances[0].destroyed, 1);
+});
+
+test("default and partial themes use DeepFOS while explicit themes, colors and input JSON stay intact", async () => {
+  for (const theme of [undefined, { axis: { labelFontSize: 17 } }, "classicDark", { type: "classic", color: "#123456" }]) {
+    const h = frameHarness();
+    const spec = { type: "view", theme, children: [
+      { type: "interval", style: { fill: "#ff0000" }, interaction: { tooltip: { shared: false } } },
+      { type: "line", theme: { color: "#222222" }, style: { stroke: "#333333" } },
+    ] };
+    const original = JSON.stringify(spec);
+    await h.init(spec);
+    const options = h.instances[0].spec;
+    assert.equal(options.theme.type ?? options.theme, typeof theme === "string" ? theme : theme?.type ?? "deepfos");
+    if (theme?.axis) assert.equal(options.theme.axis.labelFontSize, 17);
+    assert.equal(options.children[0].style.fill, "#ff0000");
+    assert.equal(options.children[0].interaction.tooltip.shared, false);
+    assert.equal(options.children[1].theme.type, "deepfos");
+    assert.equal(options.children[1].theme.color, "#222222");
+    assert.equal(options.children[1].style.stroke, "#333333");
+    assert.equal(JSON.stringify(spec), original);
+  }
+});
+
+test("generated theme uses real pinned G2 Light and preserves nested user overrides without changing defaults", () => {
+  const context = vm.createContext({ window: {} });
+  vm.runInContext(g2Source, context);
+  context.window = context;
+  const registrations = new Map(), register = context.G2.register;
+  context.G2.register = (name, factory) => { registrations.set(name, factory); register(name, factory); };
+  vm.runInContext(themeSource, context);
+  const registered = registrations.get("theme.deepfos");
+  assert.equal(typeof registered, "function");
+  const defaults = registered();
+  const tokens = context.DeepAgentG2Theme.tokens;
+  assert.equal(defaults.color, tokens.colors.actual);
+  assert.equal(JSON.stringify(defaults.category10), JSON.stringify(tokens.categoryColors));
+  assert.equal(JSON.stringify(defaults.category20), JSON.stringify(tokens.categoryColors));
+  assert.equal(defaults.axis.labelFontFamily, tokens.fontFamily);
+  assert.equal(defaults.legendCategory.itemLabelFontFamily, tokens.fontFamily);
+  assert.equal(defaults.label.fontFamily, tokens.fontFamily);
+  assert.equal(defaults.title.titleFontSize, tokens.sizes.title);
+  assert.equal(defaults.view.viewFill, tokens.colors.background);
+  assert.equal(defaults.axis.gridStroke, tokens.colors.border);
+  assert.equal(defaults.axis.titleSpacing, context.G2.Light().axis.titleSpacing);
+  const changed = registered({ category10: ["#123456"], axis: { labelFontSize: 19 }, text: { text: { fill: "#abcdef" } } });
+  assert.equal(JSON.stringify(changed.category10), '["#123456"]');
+  assert.equal(changed.axis.labelFontSize, 19);
+  assert.equal(changed.axis.labelFontFamily, tokens.fontFamily);
+  assert.equal(changed.text.text.fill, "#abcdef");
+  assert.equal(changed.text.text.fontFamily, tokens.fontFamily);
+  assert.equal(registered().axis.labelFontSize, tokens.sizes.category);
+  assert.equal(JSON.stringify(registered().category10), JSON.stringify(tokens.categoryColors));
 });
 
 test("frame release during asynchronous rendering destroys chart and suppresses stale success", async () => {

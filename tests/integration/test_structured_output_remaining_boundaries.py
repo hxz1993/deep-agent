@@ -301,7 +301,12 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(final["output"], {"ok": True})
                     self.assertEqual(final["output_info"]["attempt"], 2)
                     attempts = [r for r in await self.rows(sid) if r.event_type == "output/attempt"]
-                    self.assertEqual(attempts[0].payload["errors"], [{"code": "invalid_json", "message": "invalid_json"}])
+                    errors = attempts[0].payload["errors"]
+                    self.assertEqual(len(errors), 1)
+                    self.assertEqual(errors[0]["code"], "invalid_json")
+                    self.assertEqual(errors[0]["constraint"], "duplicateKey" if raw.count('"ok"') > 1 else "json")
+                    self.assertTrue(errors[0]["message"])
+                    self.assertNotIn(raw, errors[0]["message"])
                     self.assertNotIn("output", attempts[0].payload)
                     self.assertEqual(len(calls), 2)
 

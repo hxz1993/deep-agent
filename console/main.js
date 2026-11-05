@@ -10,11 +10,12 @@ import "./configuration-directory.js?v=20261019-release0137";
 
 initUserIdentityControls();
 
-const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics"]);
+const VALID_PAGES = new Set(["workspace", "configuration", "diagnostics", "developer"]);
 const PAGE_LABELS = {
   workspace: "测试",
   configuration: "配置中心",
   diagnostics: "诊断中心",
+  developer: "开发助手",
 };
 let consoleAllowed = false;
 let toastTimer = null;
@@ -22,7 +23,14 @@ let navigationGeneration = 0;
 let configurationModule = null;
 let workspaceModule = null;
 let diagnosticsModule = null;
+let developerModule = null;
 const loadPage = createPageLoader({
+  developer: async () => {
+    const module = await import("./developer.js?v=20261106-developer-release");
+    module.initDeveloper();
+    developerModule = module;
+    return module;
+  },
   configuration: async () => {
     const module = await import("./configuration.js?v=20261105-v01510");
     await module.initConfiguration();
@@ -130,17 +138,19 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   if (updateHash) {
     const target = next === "diagnostics" ? diagnosticTarget || (location.hash.startsWith("#/diagnostics/") ? location.hash : "#/diagnostics/logs") : `#/${next}`;
     if (location.hash !== target) {
-      if (next === "diagnostics" || current === "diagnostics") history.pushState(null, "", target);
+      if (["diagnostics", "developer"].includes(next) || ["diagnostics", "developer"].includes(current)) history.pushState(null, "", target);
       else history.replaceState(null, "", target);
     }
   }
   if (next !== "diagnostics") setDiagnosticsActive(false);
+  if (next !== "developer") developerModule?.setDeveloperActive(false);
   if (!consoleAllowed) return false;
   const workspaceWasReady = Boolean(workspaceModule);
   try {
     await loadPage(next);
     if (generation !== navigationGeneration || !consoleAllowed) return false;
     setDiagnosticsActive(consoleAllowed && next === "diagnostics");
+    if (next === "developer") developerModule.setDeveloperActive(true);
     if (next === "configuration") {
       if (restoreTab) await configurationModule.restoreConfigurationTab();
     }
@@ -156,7 +166,7 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
     else if (next === "configuration") {
       if (!document.getElementById("configurationLoading")?.querySelector(".configuration-error")) showPageLoadError("configurationLoading", error);
     }
-    else showPageLoadError("diagnosticsLoading", error);
+    else showPageLoadError(next === "developer" ? "developerLoading" : "diagnosticsLoading", error);
     toast(error.message, true);
     return false;
   }
@@ -238,23 +248,6 @@ function bindConsoleNavigationResizer() {
 }
 
 function bindNavigation() {
-  const tutorialsDialog = document.getElementById("tutorialsDialog");
-  document.getElementById("openTutorialsBtn")?.addEventListener("click", () => {
-    if (consoleAllowed && !tutorialsDialog.open) tutorialsDialog.showModal();
-  });
-  tutorialsDialog.querySelectorAll("[data-close-tutorials]").forEach((button) => {
-    button.addEventListener("click", () => tutorialsDialog.close());
-  });
-  document.getElementById("downloadTutorialBtn")?.addEventListener("click", () => {
-    const selected = tutorialsDialog.querySelector('input[name="tutorialDocument"]:checked');
-    if (!selected) return;
-    const link = document.createElement("a");
-    link.href = new URL(selected.value, document.baseURI).href;
-    link.download = selected.dataset.filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
-  });
   bindConsoleNavigationResizer();
   const resourceNav = document.getElementById("consoleResourceNav");
   const template = document.getElementById("configurationNavigation");

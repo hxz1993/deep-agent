@@ -8,10 +8,11 @@ const { createPageLoader } = await import(`data:text/javascript;base64,${Buffer.
 const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => {resolve=a;reject=b;}); return {promise,resolve,reject}; };
 function harness({allowed=true, authenticated=true, pending={}}={}) {
   const calls=[];
-  const panels=['workspace','configuration','diagnostics'].map(name=>({dataset:{pagePanel:name},active:name==='workspace',classList:{toggle(_name,value){panels.find(p=>p.dataset.pagePanel===name).active=value;}}}));
+  const panels=['workspace','configuration','diagnostics','developer'].map(name=>({dataset:{pagePanel:name},active:name==='workspace',classList:{toggle(_name,value){panels.find(p=>p.dataset.pagePanel===name).active=value;}}}));
   const location={hash:'#/configuration'};
   const window={DeepAgentConsoleAPI:{adminAccess:async()=>{calls.push('access');return {allowed,roles:allowed?['enterprise_admin']:[]};}},lucide:{createIcons(){}},addEventListener(){}};
   const modules={
+    developer:{initDeveloper(){calls.push('init:developer');},setDeveloperActive(active){calls.push(`developer:${active}`);}},
     configuration:{async initConfiguration(){calls.push('init:configuration');await pending.configuration?.promise;},restoreConfigurationTab(){calls.push('refresh:configuration');},rememberConfigurationTab(){}},
     workspace:{async initWorkspace(){calls.push('init:workspace');await pending.workspace?.promise;}},
     'diagnostics-center':{initDiagnostics(){calls.push('init:diagnostics');},setDiagnosticsActive(active){calls.push(`diagnostics:${active}`);}},
@@ -51,4 +52,14 @@ test('each dirty configuration guard reports rejected navigation to cross-page c
 });
 test('repeated workspace navigation initializes once without cancelling existing execution',async()=>{
  const h=harness();await h.context.boot();let refreshes=0;h.window.DeepAgentConsoleChat={refreshConfiguration(){refreshes++;},abort(){throw Error('must not abort');}};await h.context.showPage('workspace');await h.context.showPage('configuration');await h.context.showPage('workspace');assert.equal(h.calls.filter(x=>x==='init:workspace').length,1);assert.equal(refreshes,1);
+});
+
+test('developer page lazy loads, follows history navigation and leaves workspace execution intact', async()=>{
+ const h=harness(); await h.context.boot(); await h.context.showPage('workspace');
+ h.window.DeepAgentConsoleChat={abort(){throw Error('must not abort chat');}};
+ await h.context.showPage('developer'); assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'developer');
+ assert.ok(h.calls.includes('developer:true'));
+ await h.context.showPage('workspace'); assert.ok(h.calls.includes('developer:false'));
+ h.context.location.hash='#/developer'; await h.context.showPage(h.context.pageFromLocation(),{updateHash:false});
+ assert.equal(h.calls.filter(x=>x==='init:developer').length,1);
 });

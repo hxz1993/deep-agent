@@ -13,15 +13,21 @@ QUICK_FILES = (
     "tests/unit/test_agent_ids.py",
     "tests/unit/test_diagnostics_text.py",
     "tests/unit/test_forward_headers.py",
+    "tests/unit/test_output_correction_messages.py",
     "tests/unit/test_reading_budget.py",
     "tests/unit/test_sandbox_framing.py",
     "tests/unit/test_sandbox_serialization.py",
+    "tests/unit/test_structured_output_feedback.py",
     "tests/unit/test_web_search_settings.py",
 )
 
 # A source directory is opted in only with its cross-boundary regression group.
 # New/unmapped product paths deliberately fall back to the complete suite.
 SOURCE_GROUPS = {
+    "src/deep_agent/developer_resources/": "developer_resources",
+    "src/deep_agent/api/v1/developer_resources.py": "developer_resources",
+    "scripts/build_developer_resources.py": "developer_resources",
+    "scripts/sync_console_g2_theme.py": "console_theme",
     "src/deep_agent/models/": "providers",
     "src/deep_agent/skills/": "files",
     "src/deep_agent/builtin_skills/": "files",

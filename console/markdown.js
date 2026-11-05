@@ -193,7 +193,7 @@
             return `<div class="mermaid-diagram" data-mermaid-state="pending">${codeBlock(escapeHtml(text), language, { source: text })}</div>\n`;
           }
           if (language === "g2") {
-            return `<deepagent-g2-chart data-g2-state="${highlightCode ? "pending" : "streaming"}"><div class="g2-chart-toolbar"><div class="console-segmented" role="group" aria-label="G2 展示方式"><button type="button" data-g2-view="chart" class="active" aria-pressed="true">图表</button><button type="button" data-g2-view="config" aria-pressed="false">配置</button></div></div><div class="g2-chart-config" hidden>${codeBlock(escapeHtml(text), language, { source: text, label: "G2 图表配置", expanded: true })}</div></deepagent-g2-chart>\n`;
+            return `<deepagent-g2-chart data-g2-state="${highlightCode ? "pending" : "streaming"}"><div class="g2-chart-toolbar"><span class="g2-chart-title">G2 图表</span><div class="console-segmented" role="group" aria-label="G2 展示方式"><button type="button" data-g2-view="chart" class="active" aria-pressed="true">图表</button><button type="button" data-g2-view="config" aria-pressed="false">配置</button></div></div><div class="g2-chart-config" hidden>${codeBlock(escapeHtml(text), language, { source: text, label: "G2 图表配置", expanded: true })}</div></deepagent-g2-chart>\n`;
           }
 
           let highlighted = escapeHtml(text);

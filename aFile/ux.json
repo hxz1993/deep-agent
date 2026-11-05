@@ -1,0 +1,3919 @@
+{
+  "uxInfo": {
+    "description": {
+      "zh-cn": "审批任务中心（按四态分四个页签）"
+    },
+    "elementInfo": {
+      "elementName": "Approval_Task_Center",
+      "elementType": "UX",
+      "folderId": "DIR6323695fa66c",
+      "path": "\\Application\\SANY\\11_Approval_Process\\"
+    },
+    "schema": {
+      "viewList": [
+        {
+          "code": "root",
+          "handDragAndDropBySelf": true,
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-root",
+            "time": "1655950566164",
+            "version": "1.0.0"
+          },
+          "id": "root",
+          "config": {
+            "limitByParent": true,
+            "description": {
+              "zh-cn": "画布"
+            },
+            "sourceIds": []
+          },
+          "configCss": {
+            "style": {
+              "paddingBottom": "16px",
+              "background": "#F5F7FC",
+              "paddingRight": "16px",
+              "paddingTop": "16px",
+              "paddingLeft": "16px",
+              "height": "100%"
+            }
+          }
+        },
+        {
+          "code": "tabs_main",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-tabs",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "q_tabs",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onChange"
+            }
+          ],
+          "id": "tabs_main",
+          "configCss": {
+            "style": {
+              "backgroundColor": "rgba(255,255,255,1)",
+              "borderBottomLeftRadius": "var(--ux-border-radius-base, 2px)",
+              "borderWidth": 1,
+              "borderBottomRightRadius": "var(--ux-border-radius-base, 2px)",
+              "borderTopRightRadius": "var(--ux-border-radius-base, 2px)",
+              "marginBottom": "8px",
+              "backgroundSize": "contain",
+              "borderStyle": "none",
+              "marginTop": "8px",
+              "borderTopLeftRadius": "var(--ux-border-radius-base, 2px)",
+              "height": "auto"
+            }
+          },
+          "config": {
+            "imageSource": "link",
+            "background": "color",
+            "limitByParent": true,
+            "tabs": [
+              {
+                "label": {
+                  "en": "New",
+                  "zh-cn": "新建流程"
+                },
+                "id": "pane_new"
+              },
+              {
+                "label": {
+                  "en": "Rejected",
+                  "zh-cn": "被驳回"
+                },
+                "id": "pane_rej"
+              },
+              {
+                "label": {
+                  "en": "Running",
+                  "zh-cn": "审批中"
+                },
+                "id": "pane_run"
+              },
+              {
+                "label": {
+                  "en": "Done",
+                  "zh-cn": "审批完成"
+                },
+                "id": "pane_done"
+              }
+            ],
+            "description": {
+              "en": "Tab",
+              "zh-cn": "多标签页"
+            },
+            "type": "auto",
+            "checkAutoRefresh": true
+          },
+          "parentId": "root",
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "code": "pane_new",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-tabs/TabPane",
+            "version": "1.0.0"
+          },
+          "id": "pane_new",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(0,0,0,0.06)",
+              "paddingBottom": "16px",
+              "borderLeftWidth": "1px",
+              "borderRightWidth": "1px",
+              "borderTopWidth": "0px",
+              "paddingRight": "16px",
+              "paddingTop": "16px",
+              "borderStyle": "solid",
+              "borderBottomWidth": "1px",
+              "paddingLeft": "16px",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "iconColor": "rgba(140,140,140,1)",
+            "limitByParent": true,
+            "description": {
+              "en": "New",
+              "zh-cn": "新建流程"
+            },
+            "type": "custom",
+            "fontColor": "rgba(140,140,140,1)"
+          },
+          "parentId": "tabs_main",
+          "tags": [
+            "flexHeight"
+          ],
+          "accept": []
+        },
+        {
+          "code": "nf_grid",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-grid",
+            "version": "1.0.0"
+          },
+          "id": "nf_grid",
+          "configCss": {},
+          "config": {
+            "columnGap": "16",
+            "limitByParent": true,
+            "description": {
+              "en": "Grid",
+              "zh-cn": "行布局"
+            },
+            "columnRatio": "6:6"
+          },
+          "parentId": "pane_new",
+          "accept": [],
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "code": "nf_gc_1",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-grid/GridColumn",
+            "version": "1.0.0"
+          },
+          "id": "nf_gc_1",
+          "configCss": {
+            "style": {
+              "alignItems": "stretch",
+              "flexDirection": "column",
+              "display": "flex",
+              "justifyContent": "flex-start",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "limitByParent": true,
+            "description": {
+              "en": "Text",
+              "zh-cn": "行布局-列"
+            },
+            "ratio": "6"
+          },
+          "parentId": "nf_grid",
+          "tags": [
+            "flexHeight"
+          ],
+          "disableCopy": false
+        },
+        {
+          "code": "nf_sub_a",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-grid",
+            "version": "1.0.0"
+          },
+          "id": "nf_sub_a",
+          "configCss": {},
+          "config": {
+            "columnGap": "16",
+            "limitByParent": true,
+            "description": {
+              "en": "Grid",
+              "zh-cn": "行布局"
+            },
+            "columnRatio": "6:6"
+          },
+          "parentId": "nf_gc_1",
+          "accept": [],
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "code": "nf_gc_a1",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-grid/GridColumn",
+            "version": "1.0.0"
+          },
+          "id": "nf_gc_a1",
+          "configCss": {
+            "style": {
+              "alignItems": "stretch",
+              "flexDirection": "column",
+              "display": "flex",
+              "justifyContent": "flex-start",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "limitByParent": true,
+            "description": {
+              "en": "Text",
+              "zh-cn": "行布局-列"
+            },
+            "type": "custom",
+            "ratio": "6"
+          },
+          "parentId": "nf_sub_a",
+          "tags": [
+            "flexHeight"
+          ],
+          "disableCopy": false
+        },
+        {
+          "code": "nf_dim_entity",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/app-deep-dimension",
+            "version": "1.0.0"
+          },
+          "id": "nf_dim_entity",
+          "configCss": {
+            "style": {
+              "paddingBottom": "8px",
+              "textAlign": "left",
+              "paddingRight": "8px",
+              "paddingTop": "8px",
+              "paddingLeft": "8px",
+              "height": "300px"
+            }
+          },
+          "config": {
+            "dataValueType": "default",
+            "dimensionType": 3,
+            "role": {
+              "roleInfo": [],
+              "allRoles": true,
+              "groupInfo": []
+            },
+            "description": {
+              "zh-cn": "实体"
+            },
+            "showPath": true,
+            "dimensionFlag": 1,
+            "roleType": "custom",
+            "type": "custom",
+            "showFilters": true,
+            "isMultiEntity": false,
+            "showTransfer": false,
+            "showType": "select",
+            "expendLevel": 1,
+            "layoutType": "upDown",
+            "placeholder": {
+              "en": "pleaseSelect",
+              "zh-cn": "请选择"
+            },
+            "dimension": {
+              "dimensionType": 3,
+              "openPath": "/edit",
+              "elementTypeChild": "3",
+              "serverName": "dimension-server1-2",
+              "description": {
+                "zh-cn": "实体"
+              },
+              "elementNameDes": "实体",
+              "dimensionFlag": 1,
+              "folderId": "DIR034e6568c6ad",
+              "elementName": "Entity",
+              "path": "\\Application\\SANY\\01_DIM\\",
+              "idGenerateType": 0,
+              "moduleVersion": "1.2",
+              "elementTypeId": "DIM1_2_DIM",
+              "moduleId": "DIM1_2",
+              "absoluteTag": true,
+              "elementType": "DIM",
+              "multilingual": {
+                "zh-cn": "实体"
+              }
+            },
+            "dimensionExpression": "Entity{Base(50020020,0)}",
+            "roleElement": {
+              "mapping": 1,
+              "openPath": "/edit",
+              "serverName": "role-strategy-server1-0",
+              "description": {
+                "zh-cn": "预算编制权限方案"
+              },
+              "elementNameDes": "预算编制权限方案",
+              "folderId": "DIR776a37a4cd57",
+              "elementName": "Access_Scheme",
+              "path": "\\Application\\SANY\\08_PER\\",
+              "idGenerateType": 0,
+              "moduleVersion": "1.0",
+              "elementTypeId": "ACS1_0_ACS",
+              "moduleId": "ACS1_0",
+              "absoluteTag": true,
+              "elementType": "ACS"
+            },
+            "limitByParent": true,
+            "displayMode": "description",
+            "isShowSearch": true,
+            "isShowHeight": false,
+            "defaultExpressionScenario": 0,
+            "showTree": false,
+            "subDataValueType": "first",
+            "minLengthExpandAll": 999999,
+            "allowClear": true,
+            "emptyNoExec": true
+          },
+          "parentId": "nf_gc_a1",
+          "tags": [
+            "flexHeight"
+          ],
+          "accept": [
+            {
+              "name": "@deepfos/ux-demo",
+              "version": "0.0.1"
+            }
+          ]
+        },
+        {
+          "code": "nf_gc_a2",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-grid/GridColumn",
+            "version": "1.0.0"
+          },
+          "id": "nf_gc_a2",
+          "configCss": {
+            "style": {
+              "alignItems": "stretch",
+              "flexDirection": "column",
+              "display": "flex",
+              "justifyContent": "flex-start",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "limitByParent": true,
+            "description": {
+              "en": "Text",
+              "zh-cn": "行布局-列"
+            },
+            "ratio": "6"
+          },
+          "parentId": "nf_sub_a",
+          "tags": [
+            "flexHeight"
+          ],
+          "disableCopy": false
+        },
+        {
+          "code": "nf_dim_version",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/app-deep-dimension",
+            "version": "1.0.0"
+          },
+          "id": "nf_dim_version",
+          "configCss": {
+            "style": {
+              "paddingBottom": "8px",
+              "textAlign": "left",
+              "paddingRight": "8px",
+              "paddingTop": "8px",
+              "paddingLeft": "8px",
+              "height": "300px"
+            }
+          },
+          "config": {
+            "dataValueType": "default",
+            "dimensionType": 2,
+            "limitByParent": true,
+            "description": {
+              "en": "dimension-select",
+              "zh-cn": "版本"
+            },
+            "showPath": true,
+            "roleType": "custom",
+            "showFilters": true,
+            "displayMode": "description",
+            "isMultiEntity": false,
+            "isShowSearch": true,
+            "isShowHeight": false,
+            "defaultExpressionScenario": 0,
+            "subDataValueType": "first",
+            "showTransfer": true,
+            "showType": "select",
+            "expendLevel": 2,
+            "layoutType": "upDown",
+            "placeholder": {
+              "en": "pleaseSelect",
+              "zh-cn": "请选择"
+            },
+            "minLengthExpandAll": 100,
+            "allowClear": true,
+            "dimension": {
+              "dimensionType": 2,
+              "openPath": "/edit",
+              "elementTypeChild": "2",
+              "serverName": "dimension-server1-2",
+              "description": {
+                "zh-cn": "版本"
+              },
+              "elementNameDes": "版本",
+              "folderId": "DIR034e6568c6ad",
+              "elementName": "Version",
+              "path": "\\Application\\SANY\\01_DIM\\",
+              "idGenerateType": 0,
+              "moduleVersion": "1.2",
+              "elementTypeId": "DIM1_2_DIM",
+              "moduleId": "DIM1_2",
+              "absoluteTag": true,
+              "elementType": "DIM",
+              "multilingual": {
+                "zh-cn": "版本"
+              }
+            },
+            "dimensionExpression": "Version{Working}",
+            "emptyNoExec": true
+          },
+          "parentId": "nf_gc_a2",
+          "tags": [
+            "flexHeight"
+          ],
+          "accept": [
+            {
+              "name": "@deepfos/ux-demo",
+              "version": "0.0.1"
+            }
+          ]
+        },
+        {
+          "code": "nf_gc_2",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-grid/GridColumn",
+            "version": "1.0.0"
+          },
+          "id": "nf_gc_2",
+          "configCss": {
+            "style": {
+              "alignItems": "stretch",
+              "flexDirection": "column",
+              "display": "flex",
+              "justifyContent": "flex-start",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "limitByParent": true,
+            "description": {
+              "en": "Text",
+              "zh-cn": "行布局-列"
+            },
+            "ratio": "6"
+          },
+          "parentId": "nf_grid",
+          "tags": [
+            "flexHeight"
+          ],
+          "disableCopy": false
+        },
+        {
+          "code": "nf_sub_b",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-grid",
+            "version": "1.0.0"
+          },
+          "id": "nf_sub_b",
+          "configCss": {},
+          "config": {
+            "columnGap": "16",
+            "limitByParent": true,
+            "description": {
+              "en": "Grid",
+              "zh-cn": "行布局"
+            },
+            "columnRatio": "6:6"
+          },
+          "parentId": "nf_gc_2",
+          "accept": [],
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "code": "nf_gc_b1",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-grid/GridColumn",
+            "version": "1.0.0"
+          },
+          "id": "nf_gc_b1",
+          "configCss": {
+            "style": {
+              "alignItems": "stretch",
+              "flexDirection": "column",
+              "display": "flex",
+              "justifyContent": "flex-start",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "limitByParent": true,
+            "description": {
+              "en": "Text",
+              "zh-cn": "行布局-列"
+            },
+            "ratio": "6"
+          },
+          "parentId": "nf_sub_b",
+          "tags": [
+            "flexHeight"
+          ],
+          "disableCopy": false
+        },
+        {
+          "code": "nf_dim_scenario",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/app-deep-dimension",
+            "version": "1.0.0"
+          },
+          "id": "nf_dim_scenario",
+          "configCss": {
+            "style": {
+              "paddingBottom": "8px",
+              "textAlign": "left",
+              "paddingRight": "8px",
+              "paddingTop": "8px",
+              "paddingLeft": "8px",
+              "height": "300px"
+            }
+          },
+          "config": {
+            "dataValueType": "default",
+            "dimensionType": 1,
+            "limitByParent": true,
+            "description": {
+              "en": "dimension-select",
+              "zh-cn": "场景"
+            },
+            "showPath": true,
+            "roleType": "custom",
+            "showFilters": true,
+            "displayMode": "description",
+            "isMultiEntity": false,
+            "isShowSearch": true,
+            "isShowHeight": false,
+            "defaultExpressionScenario": 0,
+            "subDataValueType": "first",
+            "showTransfer": true,
+            "showType": "select",
+            "expendLevel": 2,
+            "layoutType": "upDown",
+            "placeholder": {
+              "en": "pleaseSelect",
+              "zh-cn": "请选择"
+            },
+            "minLengthExpandAll": 100,
+            "allowClear": true,
+            "dimension": {
+              "dimensionType": 1,
+              "openPath": "/edit",
+              "elementTypeChild": "1",
+              "serverName": "dimension-server1-2",
+              "description": {
+                "zh-cn": "场景"
+              },
+              "elementNameDes": "场景",
+              "folderId": "DIR034e6568c6ad",
+              "elementName": "Scenario",
+              "path": "\\Application\\SANY\\01_DIM\\",
+              "idGenerateType": 0,
+              "moduleVersion": "1.2",
+              "elementTypeId": "DIM1_2_DIM",
+              "moduleId": "DIM1_2",
+              "absoluteTag": true,
+              "elementType": "DIM",
+              "multilingual": {
+                "zh-cn": "场景"
+              }
+            },
+            "dimensionExpression": "Scenario{Budget;Plan}",
+            "emptyNoExec": true
+          },
+          "parentId": "nf_gc_b1",
+          "tags": [
+            "flexHeight"
+          ],
+          "accept": [
+            {
+              "name": "@deepfos/ux-demo",
+              "version": "0.0.1"
+            }
+          ]
+        },
+        {
+          "code": "nf_gc_b2",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-grid/GridColumn",
+            "version": "1.0.0"
+          },
+          "id": "nf_gc_b2",
+          "configCss": {
+            "style": {
+              "alignItems": "stretch",
+              "flexDirection": "column",
+              "display": "flex",
+              "justifyContent": "flex-start",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "limitByParent": true,
+            "description": {
+              "en": "Text",
+              "zh-cn": "行布局-列"
+            },
+            "ratio": "6"
+          },
+          "parentId": "nf_sub_b",
+          "tags": [
+            "flexHeight"
+          ],
+          "disableCopy": false
+        },
+        {
+          "code": "nf_dim_year",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/app-deep-dimension",
+            "version": "1.0.0"
+          },
+          "id": "nf_dim_year",
+          "configCss": {
+            "style": {
+              "paddingBottom": "8px",
+              "textAlign": "left",
+              "paddingRight": "8px",
+              "paddingTop": "8px",
+              "paddingLeft": "8px",
+              "height": "300px"
+            }
+          },
+          "config": {
+            "dataValueType": "default",
+            "dimensionType": 5,
+            "defaultValue": "Year{2027}",
+            "limitByParent": true,
+            "description": {
+              "en": "dimension-select",
+              "zh-cn": "年份"
+            },
+            "showPath": true,
+            "roleType": "custom",
+            "showFilters": true,
+            "displayMode": "description",
+            "isMultiEntity": false,
+            "isShowSearch": true,
+            "isShowHeight": false,
+            "defaultExpressionScenario": 0,
+            "subDataValueType": "dimExpr",
+            "showTransfer": true,
+            "showType": "select",
+            "expendLevel": 2,
+            "layoutType": "upDown",
+            "placeholder": {
+              "en": "pleaseSelect",
+              "zh-cn": "请选择"
+            },
+            "minLengthExpandAll": 100,
+            "allowClear": true,
+            "dimension": {
+              "dimensionType": 5,
+              "openPath": "/edit",
+              "elementTypeChild": "5",
+              "serverName": "dimension-server1-2",
+              "description": {
+                "zh-cn": "年份"
+              },
+              "elementNameDes": "年份",
+              "folderId": "DIR034e6568c6ad",
+              "elementName": "Year",
+              "path": "\\Application\\SANY\\01_DIM\\",
+              "idGenerateType": 0,
+              "moduleVersion": "1.2",
+              "elementTypeId": "DIM1_2_DIM",
+              "moduleId": "DIM1_2",
+              "absoluteTag": true,
+              "elementType": "DIM",
+              "multilingual": {
+                "zh-cn": "年份"
+              }
+            },
+            "dimensionExpression": "Year{Base(TotalYear,0)}",
+            "emptyNoExec": true
+          },
+          "parentId": "nf_gc_b2",
+          "tags": [
+            "flexHeight"
+          ],
+          "accept": [
+            {
+              "name": "@deepfos/ux-demo",
+              "version": "0.0.1"
+            }
+          ]
+        },
+        {
+          "code": "nf_card",
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-card",
+            "version": "1.0.0"
+          },
+          "id": "nf_card",
+          "configCss": {
+            "style": {
+              "backgroundColor": "rgba(255,255,255,1)",
+              "borderColor": "rgba(0,0,0,0.06)",
+              "alignItems": "stretch",
+              "flexDirection": "column",
+              "display": "flex",
+              "paddingRight": "0px",
+              "justifyContent": "flex-start",
+              "marginLeft": 0,
+              "marginRight": 0,
+              "paddingBottom": "0px",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "borderWidth": "1px",
+              "backgroundSize": "contain",
+              "marginBottom": 8,
+              "paddingTop": "0px",
+              "borderStyle": "solid",
+              "paddingLeft": "0px",
+              "marginTop": "8px"
+            }
+          },
+          "config": {
+            "imageSource": "link",
+            "shadow": {
+              "color": "rgba(0, 0, 0, 0.15)",
+              "x": [
+                "0",
+                "px"
+              ],
+              "showType": "always",
+              "y": [
+                "0",
+                "px"
+              ],
+              "blur": [
+                "0",
+                "px"
+              ],
+              "spread": [
+                "0",
+                "px"
+              ]
+            },
+            "hidden": false,
+            "defaultCollapse": false,
+            "background": "color",
+            "limitByParent": true,
+            "description": {
+              "en": "Card",
+              "zh-cn": "卡片"
+            }
+          },
+          "parentId": "pane_new",
+          "accept": [],
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "code": "nf_text_hint",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-text",
+            "version": "1.0.0"
+          },
+          "id": "nf_text_hint",
+          "configCss": {
+            "style": {
+              "paddingBottom": "8px",
+              "color": "rgba(0, 0, 0, 0.65)",
+              "textAlign": "left",
+              "paddingRight": "8px",
+              "letterSpacing": "0",
+              "fontSize": "12px",
+              "lineHeight": "20px",
+              "paddingTop": "8px",
+              "paddingLeft": "8px"
+            }
+          },
+          "config": {
+            "hidden": false,
+            "_display": "block",
+            "limitByParent": true,
+            "description": {
+              "en": "Text",
+              "zh-cn": "文本"
+            },
+            "textStyle": "TEXT",
+            "content": "选择实体、版本、场景、年份，选择要提交的预算表单，填写标题后点「提交流程」"
+          },
+          "parentId": "nf_card"
+        },
+        {
+          "code": "nf_dd_form",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-dropdown-btn",
+            "version": "1.0.0"
+          },
+          "id": "nf_dd_form",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(217,217,217,1)",
+              "color": "rgba(140,140,140,1)",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "background": "rgba(255,255,255,1)",
+              "borderWidth": "1px",
+              "width": "fit-content",
+              "marginBottom": "8px"
+            }
+          },
+          "config": {
+            "size": "middle",
+            "shape": "default",
+            "hidden": false,
+            "showText": true,
+            "limitByParent": true,
+            "description": {
+              "en": "Select form",
+              "zh-cn": "选择表单"
+            },
+            "btns": [
+              {
+                "code": "B_Exp01",
+                "description": {
+                  "en": "制造费用",
+                  "zh-cn": "制造费用"
+                },
+                "id": "nf_btn_exp01"
+              },
+              {
+                "code": "B_Exp03",
+                "description": {
+                  "en": "期间费用（项目_展会项目）",
+                  "zh-cn": "期间费用（项目_展会项目）"
+                },
+                "id": "nf_btn_exp03"
+              },
+              {
+                "code": "B_Exp04",
+                "description": {
+                  "en": "期间费用（非项目通用）",
+                  "zh-cn": "期间费用（非项目通用）"
+                },
+                "id": "nf_btn_exp04"
+              }
+            ],
+            "disabled": false,
+            "theme": "default",
+            "showBorder": true
+          },
+          "parentId": "nf_card"
+        },
+        {
+          "code": "nf_btn_exp01",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-btn",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "nf_set_exp01",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            }
+          ],
+          "id": "nf_btn_exp01",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(217,217,217,1)",
+              "color": "rgba(140,140,140,1)",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "background": "rgba(255,255,255,1)",
+              "borderWidth": "1px",
+              "width": "100%"
+            }
+          },
+          "config": {
+            "size": "middle",
+            "shape": "default",
+            "hidden": false,
+            "showText": true,
+            "limitByParent": true,
+            "description": {
+              "en": "制造费用",
+              "zh-cn": "制造费用"
+            },
+            "disabled": false,
+            "theme": "default",
+            "showBorder": true
+          },
+          "parentId": "nf_dd_form"
+        },
+        {
+          "code": "nf_btn_exp03",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-btn",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "nf_set_exp03",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            }
+          ],
+          "id": "nf_btn_exp03",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(217,217,217,1)",
+              "color": "rgba(140,140,140,1)",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "background": "rgba(255,255,255,1)",
+              "borderWidth": "1px",
+              "width": "100%"
+            }
+          },
+          "config": {
+            "size": "middle",
+            "shape": "default",
+            "hidden": false,
+            "showText": true,
+            "limitByParent": true,
+            "description": {
+              "en": "期间费用（项目_展会项目）",
+              "zh-cn": "期间费用（项目_展会项目）"
+            },
+            "disabled": false,
+            "theme": "default",
+            "showBorder": true
+          },
+          "parentId": "nf_dd_form"
+        },
+        {
+          "code": "nf_btn_exp04",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-btn",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "nf_set_exp04",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            }
+          ],
+          "id": "nf_btn_exp04",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(217,217,217,1)",
+              "color": "rgba(140,140,140,1)",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "background": "rgba(255,255,255,1)",
+              "borderWidth": "1px",
+              "width": "100%"
+            }
+          },
+          "config": {
+            "size": "middle",
+            "shape": "default",
+            "hidden": false,
+            "showText": true,
+            "limitByParent": true,
+            "description": {
+              "en": "期间费用（非项目通用）",
+              "zh-cn": "期间费用（非项目通用）"
+            },
+            "disabled": false,
+            "theme": "default",
+            "showBorder": true
+          },
+          "parentId": "nf_dd_form"
+        },
+        {
+          "code": "nf_input_formcode",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-input",
+            "version": "1.0.0"
+          },
+          "id": "nf_input_formcode",
+          "configCss": {
+            "style": {
+              "marginBottom": "8px"
+            }
+          },
+          "config": {
+            "enableDataField": false,
+            "dataValueType": "default",
+            "hidden": false,
+            "labelAlign": "left",
+            "limitByParent": true,
+            "layoutType": "leftRight",
+            "description": {
+              "en": "Selected form",
+              "zh-cn": "已选表单"
+            },
+            "disabled": true,
+            "labelWidth": "10%",
+            "placeholder": {
+              "en": "please select",
+              "zh-cn": "请从下拉选择表单"
+            },
+            "allowClear": false
+          },
+          "parentId": "nf_card",
+          "tags": [
+            "dataEntry"
+          ]
+        },
+        {
+          "code": "nf_input_title",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-input",
+            "version": "1.0.0"
+          },
+          "id": "nf_input_title",
+          "configCss": {
+            "style": {
+              "marginRight": "0px",
+              "paddingBottom": "08px",
+              "paddingRight": "08px",
+              "marginBottom": "0px",
+              "paddingTop": "08px",
+              "paddingLeft": "08px",
+              "marginTop": "0px",
+              "marginLeft": "0px"
+            }
+          },
+          "config": {
+            "enableDataField": false,
+            "dataValueType": "default",
+            "hidden": false,
+            "labelAlign": "left",
+            "limitByParent": true,
+            "layoutType": "leftRight",
+            "description": {
+              "en": "Text",
+              "zh-cn": "流程标题"
+            },
+            "disabled": false,
+            "labelWidth": "10%",
+            "placeholder": {
+              "en": "pleaseEnter",
+              "zh-cn": "请输入流程标题"
+            },
+            "allowClear": true
+          },
+          "parentId": "nf_card",
+          "tags": [
+            "dataEntry"
+          ]
+        },
+        {
+          "code": "nf_ta_comment",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-textarea",
+            "version": "1.0.0"
+          },
+          "id": "nf_ta_comment",
+          "configCss": {
+            "style": {
+              "paddingBottom": "8px",
+              "paddingRight": "8px",
+              "paddingTop": "8px",
+              "paddingLeft": "8px"
+            }
+          },
+          "config": {
+            "enableDataField": false,
+            "hidden": false,
+            "labelAlign": "left",
+            "limitByParent": true,
+            "layoutType": "leftRight",
+            "description": {
+              "en": "Text",
+              "zh-cn": "备注信息"
+            },
+            "disabled": false,
+            "readOnly": false,
+            "labelWidth": "10%",
+            "placeholder": {
+              "en": "pleaseEnter",
+              "zh-cn": "请输入备注信息"
+            },
+            "allowClear": true,
+            "rowHeight": "1"
+          },
+          "parentId": "nf_card",
+          "tags": [
+            "dataEntry"
+          ]
+        },
+        {
+          "code": "nf_file",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-file",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "nf_run_upload",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onChange"
+            }
+          ],
+          "id": "nf_file",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(217,217,217,1)",
+              "color": "rgba(140,140,140,1)",
+              "background": "rgba(255,255,255,1)",
+              "borderWidth": "1px"
+            }
+          },
+          "config": {
+            "hidden": false,
+            "size": "middle",
+            "shape": "default",
+            "showText": true,
+            "limitByParent": true,
+            "icon": "Base/icon-attachment",
+            "layoutType": "upDown",
+            "description": {
+              "en": "Upload",
+              "zh-cn": "附件上传"
+            },
+            "disabled": false,
+            "textStyle": "Upload",
+            "btnContent": {
+              "en": "Upload",
+              "zh-cn": "上传"
+            },
+            "showBorder": true
+          },
+          "parentId": "nf_card"
+        },
+        {
+          "code": "nf_btn_submit",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-btn",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "nf_run_start",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            },
+            {
+              "targetId": "q_after_submit",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            },
+            {
+              "targetId": "init_lst_rej",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            },
+            {
+              "targetId": "init_lst_run",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            },
+            {
+              "targetId": "init_lst_done",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            }
+          ],
+          "id": "nf_btn_submit",
+          "configCss": {
+            "style": {
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "width": "fit-content",
+              "textDecoration": "none",
+              "fontStyle": "normal",
+              "fontWeight": "bold"
+            }
+          },
+          "config": {
+            "size": "middle",
+            "shape": "default",
+            "hidden": false,
+            "showText": true,
+            "limitByParent": true,
+            "icon": "Base/icon-run-circle",
+            "confirmContent": {
+              "zh-cn": "是否发起预算详版审批流程"
+            },
+            "description": {
+              "en": "Submit",
+              "zh-cn": "提交流程"
+            },
+            "disabled": false,
+            "theme": "primary",
+            "confirmEnabled": false,
+            "showBorder": true
+          },
+          "parentId": "nf_card"
+        },
+        {
+          "configExprs": [
+            {
+              "configPath": "config.description.zh-cn",
+              "logicId": "expr_tab_rej"
+            },
+            {
+              "configPath": "config.fontColor",
+              "logicId": "expr_tab_rej_color"
+            },
+            {
+              "configPath": "config.showIcon",
+              "logicId": "expr_tab_rej_icon"
+            },
+            {
+              "configPath": "config.iconColor",
+              "logicId": "expr_tab_rej_iconcolor"
+            }
+          ],
+          "code": "pane_rej",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-tabs/TabPane",
+            "version": "1.0.0"
+          },
+          "id": "pane_rej",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(0,0,0,0.06)",
+              "paddingBottom": "16px",
+              "borderLeftWidth": "1px",
+              "borderRightWidth": "1px",
+              "borderTopWidth": "0px",
+              "paddingRight": "16px",
+              "paddingTop": "16px",
+              "borderStyle": "solid",
+              "borderBottomWidth": "1px",
+              "paddingLeft": "16px",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "iconColor": "rgba(140,140,140,1)",
+            "limitByParent": true,
+            "icon": "Character/icon-attention",
+            "description": {
+              "en": "Rejected",
+              "zh-cn": "被驳回"
+            },
+            "type": "custom",
+            "fontColor": "rgba(140,140,140,1)",
+            "showIcon": false
+          },
+          "parentId": "tabs_main",
+          "tags": [
+            "flexHeight"
+          ],
+          "accept": []
+        },
+        {
+          "code": "tbar_rej",
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-card",
+            "version": "1.0.0"
+          },
+          "id": "tbar_rej",
+          "configCss": {
+            "style": {
+              "backgroundColor": "rgba(255,255,255,1)",
+              "borderColor": "rgba(0,0,0,0.06)",
+              "alignItems": "center",
+              "flexDirection": "row",
+              "display": "flex",
+              "paddingRight": "8px",
+              "justifyContent": "flex-start",
+              "marginLeft": 0,
+              "marginRight": 0,
+              "paddingBottom": "8px",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "borderWidth": "1px",
+              "gap": "8px",
+              "backgroundSize": "contain",
+              "marginBottom": 8,
+              "paddingTop": "8px",
+              "borderStyle": "solid",
+              "paddingLeft": "8px",
+              "marginTop": 8,
+              "height": 44
+            }
+          },
+          "config": {
+            "imageSource": "link",
+            "shadow": {
+              "color": "rgba(0, 0, 0, 0.15)",
+              "x": [
+                "0",
+                "px"
+              ],
+              "showType": "always",
+              "y": [
+                "0",
+                "px"
+              ],
+              "blur": [
+                "0",
+                "px"
+              ],
+              "spread": [
+                "0",
+                "px"
+              ]
+            },
+            "hidden": false,
+            "defaultCollapse": false,
+            "background": "color",
+            "limitByParent": true,
+            "description": {
+              "en": "card",
+              "zh-cn": "工具栏"
+            }
+          },
+          "parentId": "pane_rej",
+          "accept": [],
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "code": "btn_refresh_rej",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-btn",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "q_rej",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            }
+          ],
+          "id": "btn_refresh_rej",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(217,217,217,1)",
+              "color": "rgba(140,140,140,1)",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "background": "rgba(255,255,255,1)",
+              "borderWidth": "1px",
+              "width": "fit-content",
+              "textDecoration": "none",
+              "fontStyle": "normal",
+              "fontWeight": "bold"
+            }
+          },
+          "config": {
+            "size": "small",
+            "shape": "default",
+            "hidden": false,
+            "showText": true,
+            "limitByParent": true,
+            "icon": "Base/icon-refresh",
+            "description": {
+              "en": "refresh",
+              "zh-cn": "刷新"
+            },
+            "disabled": false,
+            "theme": "default",
+            "confirmEnabled": false,
+            "showBorder": true
+          },
+          "parentId": "tbar_rej"
+        },
+        {
+          "configExprs": [],
+          "code": "lst_rej",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/app-deep-element-list-table",
+            "version": "1.0.0"
+          },
+          "id": "lst_rej",
+          "configCss": {
+            "style": {
+              "paddingBottom": "0px",
+              "paddingRight": "0px",
+              "paddingTop": "0px",
+              "paddingLeft": "0px",
+              "height": "340px"
+            }
+          },
+          "config": {
+            "hidden": false,
+            "limitByParent": true,
+            "elementDetail": {
+              "openPath": "/",
+              "serverName": "list-table-server1-2",
+              "description": {
+                "zh-cn": "预算详版审批状态明细"
+              },
+              "elementNameDes": "预算详版审批状态明细",
+              "folderId": "DIR3b49a963f7b6",
+              "elementName": "process_status_info",
+              "path": "\\Application\\SANY\\11_Approval_Process\\",
+              "idGenerateType": 0,
+              "moduleVersion": "1.2",
+              "elementTypeId": "LST1_2_LST",
+              "moduleId": "LST1_2",
+              "absoluteTag": true,
+              "elementType": "LST"
+            },
+            "description": {
+              "en": "List of tables",
+              "zh-cn": "清单表"
+            },
+            "linkageParams": {
+              "starter": "",
+              "status_filter": "20"
+            },
+            "type": "custom"
+          },
+          "parentId": "pane_rej",
+          "accept": [],
+          "tags": [
+            "flexHeight",
+            "isOld"
+          ]
+        },
+        {
+          "code": "actbar_rej",
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-card",
+            "version": "1.0.0"
+          },
+          "id": "actbar_rej",
+          "configCss": {
+            "style": {
+              "backgroundColor": "rgba(255,255,255,1)",
+              "borderColor": "rgba(0,0,0,0.06)",
+              "alignItems": "flex-end",
+              "flexDirection": "row",
+              "display": "flex",
+              "paddingRight": "8px",
+              "justifyContent": "flex-start",
+              "marginLeft": 0,
+              "marginRight": 0,
+              "paddingBottom": "8px",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "borderWidth": "1px",
+              "gap": "12px",
+              "backgroundSize": "contain",
+              "marginBottom": 8,
+              "paddingTop": "8px",
+              "borderStyle": "solid",
+              "paddingLeft": "8px",
+              "marginTop": 8
+            }
+          },
+          "config": {
+            "imageSource": "link",
+            "shadow": {
+              "color": "rgba(0, 0, 0, 0.15)",
+              "x": [
+                "0",
+                "px"
+              ],
+              "showType": "always",
+              "y": [
+                "0",
+                "px"
+              ],
+              "blur": [
+                "0",
+                "px"
+              ],
+              "spread": [
+                "0",
+                "px"
+              ]
+            },
+            "hidden": false,
+            "defaultCollapse": false,
+            "background": "color",
+            "limitByParent": true,
+            "description": {
+              "en": "card",
+              "zh-cn": "再提操作栏"
+            }
+          },
+          "parentId": "pane_rej",
+          "accept": [],
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "code": "sel_rej",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-select",
+            "version": "1.0.0"
+          },
+          "id": "sel_rej",
+          "configCss": {
+            "style": {
+              "paddingBottom": "4px",
+              "paddingRight": "8px",
+              "width": "460px",
+              "paddingTop": "4px",
+              "paddingLeft": "8px"
+            }
+          },
+          "config": {
+            "enableDataField": false,
+            "dataField": {
+              "valueRange": [],
+              "id": "python.task_title"
+            },
+            "displayType": "3",
+            "hidden": false,
+            "labelAlign": "left",
+            "limitByParent": true,
+            "layoutType": "upDown",
+            "description": {
+              "en": "sel_rej",
+              "zh-cn": "选择任务"
+            },
+            "disabled": false,
+            "placeholder": {
+              "en": "select a task",
+              "zh-cn": "请选择任务"
+            },
+            "allowClear": true
+          },
+          "parentId": "actbar_rej"
+        },
+        {
+          "code": "btn_resubmit",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-btn",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "jump_resubmit",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            }
+          ],
+          "id": "btn_resubmit",
+          "configCss": {
+            "style": {
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "width": "fit-content",
+              "textDecoration": "none",
+              "marginBottom": "4px",
+              "fontStyle": "normal",
+              "fontWeight": "bold"
+            }
+          },
+          "config": {
+            "size": "middle",
+            "shape": "default",
+            "hidden": false,
+            "showText": true,
+            "limitByParent": true,
+            "icon": "Base/icon-edit",
+            "description": {
+              "en": "refresh",
+              "zh-cn": "编辑并重新提交"
+            },
+            "disabled": false,
+            "theme": "primary",
+            "confirmEnabled": false,
+            "showBorder": true
+          },
+          "parentId": "actbar_rej"
+        },
+        {
+          "configExprs": [
+            {
+              "configPath": "config.hidden",
+              "logicId": "expr_selinfo_rej_hidden"
+            }
+          ],
+          "code": "selinfo_rej",
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-card",
+            "version": "1.0.0"
+          },
+          "id": "selinfo_rej",
+          "configCss": {
+            "style": {
+              "backgroundColor": "rgba(255,255,255,1)",
+              "borderColor": "rgba(0,0,0,0.06)",
+              "alignItems": "stretch",
+              "flexDirection": "column",
+              "display": "flex",
+              "paddingRight": "8px",
+              "justifyContent": "flex-start",
+              "marginLeft": 0,
+              "marginRight": 0,
+              "paddingBottom": "8px",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "borderWidth": "1px",
+              "backgroundSize": "contain",
+              "marginBottom": 8,
+              "paddingTop": "8px",
+              "borderStyle": "solid",
+              "paddingLeft": "8px",
+              "marginTop": 8
+            }
+          },
+          "config": {
+            "imageSource": "link",
+            "shadow": {
+              "color": "rgba(0, 0, 0, 0.15)",
+              "x": [
+                "0",
+                "px"
+              ],
+              "showType": "always",
+              "y": [
+                "0",
+                "px"
+              ],
+              "blur": [
+                "0",
+                "px"
+              ],
+              "spread": [
+                "0",
+                "px"
+              ]
+            },
+            "hidden": true,
+            "defaultCollapse": false,
+            "background": "color",
+            "limitByParent": true,
+            "description": {
+              "en": "card",
+              "zh-cn": "已选任务信息"
+            }
+          },
+          "parentId": "pane_rej",
+          "accept": [],
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "configExprs": [
+            {
+              "configPath": "config.content",
+              "logicId": "expr_selinfo_rej"
+            }
+          ],
+          "code": "selinfo_txt",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-text",
+            "version": "1.0.0"
+          },
+          "id": "selinfo_txt",
+          "configCss": {
+            "style": {
+              "whiteSpace": "pre-wrap",
+              "paddingBottom": "4px",
+              "color": "rgba(0,0,0,0.75)",
+              "paddingRight": "4px",
+              "lineHeight": "20px",
+              "fontSize": "13px",
+              "paddingTop": "4px",
+              "paddingLeft": "4px"
+            }
+          },
+          "config": {
+            "hidden": false,
+            "limitByParent": true,
+            "description": {
+              "en": "text",
+              "zh-cn": "已选任务信息"
+            },
+            "textStyle": "text",
+            "showDebug": false,
+            "align": "left",
+            "content": ""
+          },
+          "parentId": "selinfo_rej"
+        },
+        {
+          "configExprs": [
+            {
+              "configPath": "config.description.zh-cn",
+              "logicId": "expr_tab_run"
+            }
+          ],
+          "code": "pane_run",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-tabs/TabPane",
+            "version": "1.0.0"
+          },
+          "id": "pane_run",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(0,0,0,0.06)",
+              "paddingBottom": "16px",
+              "borderLeftWidth": "1px",
+              "borderRightWidth": "1px",
+              "borderTopWidth": "0px",
+              "paddingRight": "16px",
+              "paddingTop": "16px",
+              "borderStyle": "solid",
+              "borderBottomWidth": "1px",
+              "paddingLeft": "16px",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "iconColor": "rgba(140,140,140,1)",
+            "limitByParent": true,
+            "description": {
+              "en": "Running",
+              "zh-cn": "审批中"
+            },
+            "type": "custom",
+            "fontColor": "rgba(140,140,140,1)"
+          },
+          "parentId": "tabs_main",
+          "tags": [
+            "flexHeight"
+          ],
+          "accept": []
+        },
+        {
+          "code": "tbar_run",
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-card",
+            "version": "1.0.0"
+          },
+          "id": "tbar_run",
+          "configCss": {
+            "style": {
+              "backgroundColor": "rgba(255,255,255,1)",
+              "borderColor": "rgba(0,0,0,0.06)",
+              "alignItems": "center",
+              "flexDirection": "row",
+              "display": "flex",
+              "paddingRight": "8px",
+              "justifyContent": "flex-start",
+              "marginLeft": 0,
+              "marginRight": 0,
+              "paddingBottom": "8px",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "borderWidth": "1px",
+              "gap": "8px",
+              "backgroundSize": "contain",
+              "marginBottom": 8,
+              "paddingTop": "8px",
+              "borderStyle": "solid",
+              "paddingLeft": "8px",
+              "marginTop": 8,
+              "height": 44
+            }
+          },
+          "config": {
+            "imageSource": "link",
+            "shadow": {
+              "color": "rgba(0, 0, 0, 0.15)",
+              "x": [
+                "0",
+                "px"
+              ],
+              "showType": "always",
+              "y": [
+                "0",
+                "px"
+              ],
+              "blur": [
+                "0",
+                "px"
+              ],
+              "spread": [
+                "0",
+                "px"
+              ]
+            },
+            "hidden": false,
+            "defaultCollapse": false,
+            "background": "color",
+            "limitByParent": true,
+            "description": {
+              "en": "card",
+              "zh-cn": "工具栏"
+            }
+          },
+          "parentId": "pane_run",
+          "accept": [],
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "code": "btn_refresh_run",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-btn",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "q_run",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            }
+          ],
+          "id": "btn_refresh_run",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(217,217,217,1)",
+              "color": "rgba(140,140,140,1)",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "background": "rgba(255,255,255,1)",
+              "borderWidth": "1px",
+              "width": "fit-content",
+              "textDecoration": "none",
+              "fontStyle": "normal",
+              "fontWeight": "bold"
+            }
+          },
+          "config": {
+            "size": "small",
+            "shape": "default",
+            "hidden": false,
+            "showText": true,
+            "limitByParent": true,
+            "icon": "Base/icon-refresh",
+            "description": {
+              "en": "refresh",
+              "zh-cn": "刷新"
+            },
+            "disabled": false,
+            "theme": "default",
+            "confirmEnabled": false,
+            "showBorder": true
+          },
+          "parentId": "tbar_run"
+        },
+        {
+          "configExprs": [],
+          "code": "lst_run",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/app-deep-element-list-table",
+            "version": "1.0.0"
+          },
+          "id": "lst_run",
+          "configCss": {
+            "style": {
+              "paddingBottom": "0px",
+              "paddingRight": "0px",
+              "paddingTop": "0px",
+              "paddingLeft": "0px",
+              "height": "560px"
+            }
+          },
+          "config": {
+            "hidden": false,
+            "limitByParent": true,
+            "elementDetail": {
+              "openPath": "/",
+              "serverName": "list-table-server1-2",
+              "description": {
+                "zh-cn": "预算详版审批状态明细"
+              },
+              "elementNameDes": "预算详版审批状态明细",
+              "folderId": "DIR3b49a963f7b6",
+              "elementName": "process_status_info",
+              "path": "\\Application\\SANY\\11_Approval_Process\\",
+              "idGenerateType": 0,
+              "moduleVersion": "1.2",
+              "elementTypeId": "LST1_2_LST",
+              "moduleId": "LST1_2",
+              "absoluteTag": true,
+              "elementType": "LST"
+            },
+            "description": {
+              "en": "List of tables",
+              "zh-cn": "清单表"
+            },
+            "linkageParams": {
+              "starter": "",
+              "status_filter": "10"
+            },
+            "type": "custom"
+          },
+          "parentId": "pane_run",
+          "accept": [],
+          "tags": [
+            "flexHeight",
+            "isOld"
+          ]
+        },
+        {
+          "configExprs": [
+            {
+              "configPath": "config.description.zh-cn",
+              "logicId": "expr_tab_done"
+            }
+          ],
+          "code": "pane_done",
+          "handDragAndDropBySelf": true,
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-tabs/TabPane",
+            "version": "1.0.0"
+          },
+          "id": "pane_done",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(0,0,0,0.06)",
+              "paddingBottom": "16px",
+              "borderLeftWidth": "1px",
+              "borderRightWidth": "1px",
+              "borderTopWidth": "0px",
+              "paddingRight": "16px",
+              "paddingTop": "16px",
+              "borderStyle": "solid",
+              "borderBottomWidth": "1px",
+              "paddingLeft": "16px",
+              "height": "100%"
+            }
+          },
+          "config": {
+            "iconColor": "rgba(140,140,140,1)",
+            "limitByParent": true,
+            "description": {
+              "en": "Done",
+              "zh-cn": "审批完成"
+            },
+            "type": "custom",
+            "fontColor": "rgba(140,140,140,1)"
+          },
+          "parentId": "tabs_main",
+          "tags": [
+            "flexHeight"
+          ],
+          "accept": []
+        },
+        {
+          "code": "tbar_done",
+          "acceptWebType": [
+            "form",
+            "formItem",
+            "table",
+            "dataEntry",
+            "layout",
+            "popup",
+            "chart"
+          ],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-card",
+            "version": "1.0.0"
+          },
+          "id": "tbar_done",
+          "configCss": {
+            "style": {
+              "backgroundColor": "rgba(255,255,255,1)",
+              "borderColor": "rgba(0,0,0,0.06)",
+              "alignItems": "center",
+              "flexDirection": "row",
+              "display": "flex",
+              "paddingRight": "8px",
+              "justifyContent": "flex-start",
+              "marginLeft": 0,
+              "marginRight": 0,
+              "paddingBottom": "8px",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "borderWidth": "1px",
+              "gap": "8px",
+              "backgroundSize": "contain",
+              "marginBottom": 8,
+              "paddingTop": "8px",
+              "borderStyle": "solid",
+              "paddingLeft": "8px",
+              "marginTop": 8,
+              "height": 44
+            }
+          },
+          "config": {
+            "imageSource": "link",
+            "shadow": {
+              "color": "rgba(0, 0, 0, 0.15)",
+              "x": [
+                "0",
+                "px"
+              ],
+              "showType": "always",
+              "y": [
+                "0",
+                "px"
+              ],
+              "blur": [
+                "0",
+                "px"
+              ],
+              "spread": [
+                "0",
+                "px"
+              ]
+            },
+            "hidden": false,
+            "defaultCollapse": false,
+            "background": "color",
+            "limitByParent": true,
+            "description": {
+              "en": "card",
+              "zh-cn": "工具栏"
+            }
+          },
+          "parentId": "pane_done",
+          "accept": [],
+          "tags": [
+            "flexHeight"
+          ]
+        },
+        {
+          "code": "btn_refresh_done",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-btn",
+            "version": "1.0.0"
+          },
+          "configActions": [
+            {
+              "targetId": "q_done",
+              "targetMethod": "run",
+              "disabled": false,
+              "trigger": "onClick"
+            }
+          ],
+          "id": "btn_refresh_done",
+          "configCss": {
+            "style": {
+              "borderColor": "rgba(217,217,217,1)",
+              "color": "rgba(140,140,140,1)",
+              "borderRadius": "var(--ux-border-radius-base, 2px)",
+              "background": "rgba(255,255,255,1)",
+              "borderWidth": "1px",
+              "width": "fit-content",
+              "textDecoration": "none",
+              "fontStyle": "normal",
+              "fontWeight": "bold"
+            }
+          },
+          "config": {
+            "size": "small",
+            "shape": "default",
+            "hidden": false,
+            "showText": true,
+            "limitByParent": true,
+            "icon": "Base/icon-refresh",
+            "description": {
+              "en": "refresh",
+              "zh-cn": "刷新"
+            },
+            "disabled": false,
+            "theme": "default",
+            "confirmEnabled": false,
+            "showBorder": true
+          },
+          "parentId": "tbar_done"
+        },
+        {
+          "configExprs": [],
+          "code": "lst_done",
+          "acceptWebType": [],
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/app-deep-element-list-table",
+            "version": "1.0.0"
+          },
+          "id": "lst_done",
+          "configCss": {
+            "style": {
+              "paddingBottom": "0px",
+              "paddingRight": "0px",
+              "paddingTop": "0px",
+              "paddingLeft": "0px",
+              "height": "340px"
+            }
+          },
+          "config": {
+            "hidden": false,
+            "limitByParent": true,
+            "elementDetail": {
+              "openPath": "/",
+              "serverName": "list-table-server1-2",
+              "description": {
+                "zh-cn": "预算详版审批状态明细"
+              },
+              "elementNameDes": "预算详版审批状态明细",
+              "folderId": "DIR3b49a963f7b6",
+              "elementName": "process_status_info",
+              "path": "\\Application\\SANY\\11_Approval_Process\\",
+              "idGenerateType": 0,
+              "moduleVersion": "1.2",
+              "elementTypeId": "LST1_2_LST",
+              "moduleId": "LST1_2",
+              "absoluteTag": true,
+              "elementType": "LST"
+            },
+            "description": {
+              "en": "List of tables",
+              "zh-cn": "清单表"
+            },
+            "linkageParams": {
+              "starter": "",
+              "status_filter": "99"
+            },
+            "type": "custom"
+          },
+          "parentId": "pane_done",
+          "accept": [],
+          "tags": [
+            "flexHeight",
+            "isOld"
+          ]
+        },
+        {
+          "code": "probe_rej",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-graph",
+            "version": "1.0.0"
+          },
+          "id": "probe_rej",
+          "configCss": {
+            "style": {
+              "overflow": "hidden",
+              "paddingBottom": "0px",
+              "borderWidth": "0px",
+              "paddingRight": "0px",
+              "width": "0px",
+              "paddingTop": "0px",
+              "paddingLeft": "0px",
+              "height": "0px"
+            }
+          },
+          "config": {
+            "hidden": true,
+            "shadow": {
+              "color": "rgba(0,0,0,0)",
+              "x": [
+                "0",
+                "px"
+              ],
+              "showType": "always",
+              "y": [
+                "0",
+                "px"
+              ],
+              "blur": [
+                "0",
+                "px"
+              ],
+              "spread": [
+                "0",
+                "px"
+              ]
+            },
+            "chartsConfig": {
+              "chartsType": "dagre",
+              "fieldsConfig": {
+                "templateType": "template1"
+              }
+            },
+            "limitByParent": true,
+            "description": {
+              "en": "probe_rej",
+              "zh-cn": "被驳回取数探针"
+            },
+            "dataSource": {
+              "id": "ds_task_rej",
+              "type": "dataSource"
+            }
+          },
+          "parentId": "root"
+        },
+        {
+          "code": "probe_run",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-graph",
+            "version": "1.0.0"
+          },
+          "id": "probe_run",
+          "configCss": {
+            "style": {
+              "overflow": "hidden",
+              "paddingBottom": "0px",
+              "borderWidth": "0px",
+              "paddingRight": "0px",
+              "width": "0px",
+              "paddingTop": "0px",
+              "paddingLeft": "0px",
+              "height": "0px"
+            }
+          },
+          "config": {
+            "hidden": true,
+            "shadow": {
+              "color": "rgba(0,0,0,0)",
+              "x": [
+                "0",
+                "px"
+              ],
+              "showType": "always",
+              "y": [
+                "0",
+                "px"
+              ],
+              "blur": [
+                "0",
+                "px"
+              ],
+              "spread": [
+                "0",
+                "px"
+              ]
+            },
+            "chartsConfig": {
+              "chartsType": "dagre",
+              "fieldsConfig": {
+                "templateType": "template1"
+              }
+            },
+            "limitByParent": true,
+            "description": {
+              "en": "probe_run",
+              "zh-cn": "审批中取数探针"
+            },
+            "dataSource": {
+              "id": "ds_task_run",
+              "type": "dataSource"
+            }
+          },
+          "parentId": "root"
+        },
+        {
+          "code": "probe_done",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-pc-graph",
+            "version": "1.0.0"
+          },
+          "id": "probe_done",
+          "configCss": {
+            "style": {
+              "overflow": "hidden",
+              "paddingBottom": "0px",
+              "borderWidth": "0px",
+              "paddingRight": "0px",
+              "width": "0px",
+              "paddingTop": "0px",
+              "paddingLeft": "0px",
+              "height": "0px"
+            }
+          },
+          "config": {
+            "hidden": true,
+            "shadow": {
+              "color": "rgba(0,0,0,0)",
+              "x": [
+                "0",
+                "px"
+              ],
+              "showType": "always",
+              "y": [
+                "0",
+                "px"
+              ],
+              "blur": [
+                "0",
+                "px"
+              ],
+              "spread": [
+                "0",
+                "px"
+              ]
+            },
+            "chartsConfig": {
+              "chartsType": "dagre",
+              "fieldsConfig": {
+                "templateType": "template1"
+              }
+            },
+            "limitByParent": true,
+            "description": {
+              "en": "probe_done",
+              "zh-cn": "审批完成取数探针"
+            },
+            "dataSource": {
+              "id": "ds_task_done",
+              "type": "dataSource"
+            }
+          },
+          "parentId": "root"
+        }
+      ],
+      "logicList": [
+        {
+          "code": "data_TaskList_rej",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-data-python",
+            "version": "1.0.0"
+          },
+          "id": "ds_task_rej",
+          "configCss": {},
+          "config": {
+            "filterBySelfs": [
+              {
+                "name": "status",
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "20"
+                },
+                "key": "status"
+              },
+              {
+                "name": "limit",
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "200"
+                },
+                "key": "limit"
+              }
+            ],
+            "pageSize": 200,
+            "description": "被驳回任务清单数据源",
+            "autoExec": true,
+            "fields": [
+              {
+                "webType": "PY",
+                "code": "B_Appr_Task_List",
+                "children": [
+                  {
+                    "webType": "String",
+                    "code": "task_title",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "task_title",
+                    "id": "python.task_title"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "four_dim",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "four_dim",
+                    "id": "python.four_dim"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "starter",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "starter",
+                    "id": "python.starter"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "last_update_time",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "last_update_time",
+                    "id": "python.last_update_time"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "comment",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "comment",
+                    "id": "python.comment"
+                  }
+                ],
+                "enable": true,
+                "serverType": "PY",
+                "name": "python",
+                "id": "python",
+                "label": "被驳回任务清单数据源"
+              }
+            ],
+            "elementInfo": {
+              "openPath": "/edit",
+              "elementTypeChild": "raw",
+              "serverName": "python-server2-0",
+              "description": {
+                "zh-cn": "被驳回任务清单数据源"
+              },
+              "elementNameDes": "被驳回任务清单数据源",
+              "folderId": "DIR3b49a963f7b6",
+              "elementName": "B_Appr_Task_List",
+              "path": "\\Application\\SANY\\11_Approval_Process\\",
+              "idGenerateType": 0,
+              "moduleVersion": "2.0",
+              "elementTypeId": "PY2_0_PY",
+              "moduleId": "PY2_0",
+              "absoluteTag": true,
+              "elementType": "PY"
+            },
+            "sorts": [],
+            "emptyNoExec": true
+          },
+          "parentId": "root"
+        },
+        {
+          "code": "q_rej",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/queryDataSource",
+            "version": "1.0.0"
+          },
+          "id": "q_rej",
+          "configCss": {},
+          "config": {
+            "dataSourceId": [
+              "ds_task_rej",
+              "ds_task_run",
+              "ds_task_done"
+            ]
+          },
+          "parentId": "btn_refresh_rej"
+        },
+        {
+          "code": "expr_tab_rej",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-expression-logic",
+            "version": "1.0.0"
+          },
+          "id": "expr_tab_rej",
+          "configObserves": [
+            {
+              "observePath": "data",
+              "observeId": "ds_task_rej"
+            }
+          ],
+          "configCss": {},
+          "config": {
+            "limitByParent": true,
+            "editType": "expr",
+            "expr": "(((($dataSources.ds_task_rej || {}).data) || []).length) > 0 ? ('被驳回 (' + (((($dataSources.ds_task_rej || {}).data) || []).length) + ')') : '被驳回'",
+            "configPath": "config.description.zh-cn"
+          },
+          "parentId": "pane_rej"
+        },
+        {
+          "code": "expr_tab_rej_color",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-expression-logic",
+            "version": "1.0.0"
+          },
+          "id": "expr_tab_rej_color",
+          "configObserves": [
+            {
+              "observePath": "data",
+              "observeId": "ds_task_rej"
+            }
+          ],
+          "configCss": {},
+          "config": {
+            "limitByParent": true,
+            "editType": "expr",
+            "expr": "((((($dataSources.ds_task_rej || {}).data) || []).length)) > 0 ? 'rgba(255,77,79,1)' : 'rgba(140,140,140,1)'",
+            "configPath": "config.fontColor"
+          },
+          "parentId": "pane_rej"
+        },
+        {
+          "code": "expr_tab_rej_icon",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-expression-logic",
+            "version": "1.0.0"
+          },
+          "id": "expr_tab_rej_icon",
+          "configObserves": [
+            {
+              "observePath": "data",
+              "observeId": "ds_task_rej"
+            }
+          ],
+          "configCss": {},
+          "config": {
+            "limitByParent": true,
+            "editType": "expr",
+            "expr": "((((($dataSources.ds_task_rej || {}).data) || []).length)) > 0",
+            "configPath": "config.showIcon"
+          },
+          "parentId": "pane_rej"
+        },
+        {
+          "code": "expr_tab_rej_iconcolor",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-expression-logic",
+            "version": "1.0.0"
+          },
+          "id": "expr_tab_rej_iconcolor",
+          "configObserves": [
+            {
+              "observePath": "data",
+              "observeId": "ds_task_rej"
+            }
+          ],
+          "configCss": {},
+          "config": {
+            "limitByParent": true,
+            "editType": "expr",
+            "expr": "((((($dataSources.ds_task_rej || {}).data) || []).length)) > 0 ? 'rgba(255,77,79,1)' : 'rgba(140,140,140,1)'",
+            "configPath": "config.iconColor"
+          },
+          "parentId": "pane_rej"
+        },
+        {
+          "code": "expr_sel_rej",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-expression-logic",
+            "version": "1.0.0"
+          },
+          "id": "expr_sel_rej",
+          "configObserves": [
+            {
+              "observePath": "data",
+              "observeId": "ds_task_rej"
+            }
+          ],
+          "configCss": {},
+          "config": {
+            "limitByParent": true,
+            "editType": "expr",
+            "expr": "(($dataSources.ds_task_rej || {}).data || []).map((r) => ({code: r.instance_id, name: {'zh-cn': r.task_title + ' ｜ 实例 ' + r.instance_id, 'en': r.task_title + ' | ' + r.instance_id}}))",
+            "configPath": "config.dataField.valueRange"
+          },
+          "parentId": "sel_rej"
+        },
+        {
+          "code": "expr_selinfo_rej",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-expression-logic",
+            "version": "1.0.0"
+          },
+          "id": "expr_selinfo_rej",
+          "configObserves": [
+            {
+              "observePath": "data",
+              "observeId": "ds_task_rej"
+            },
+            {
+              "observePath": "value",
+              "observeId": "sel_rej"
+            }
+          ],
+          "configCss": {},
+          "config": {
+            "limitByParent": true,
+            "editType": "expr",
+            "expr": "(((($components.sel_rej || {}).value)) ? ('已选任务：' + ((((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).task_title || '—') + '\\n实例 ID：' + ((((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).instance_id || '—') + '　状态：' + ((((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).status_name || '—') + '\\n四维范围：' + ((((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).four_dim || '—') + '\\n发起人：' + ((((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).starter || '—') + '　更新时间：' + ((((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).last_update_time || '—') + '\\n备注：' + ((((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).comment || '—')) : '')",
+            "configPath": "config.content"
+          },
+          "parentId": "selinfo_txt"
+        },
+        {
+          "code": "expr_selinfo_rej_hidden",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-expression-logic",
+            "version": "1.0.0"
+          },
+          "id": "expr_selinfo_rej_hidden",
+          "configObserves": [
+            {
+              "observePath": "data",
+              "observeId": "ds_task_rej"
+            },
+            {
+              "observePath": "value",
+              "observeId": "sel_rej"
+            }
+          ],
+          "configCss": {},
+          "config": {
+            "limitByParent": true,
+            "editType": "expr",
+            "expr": "!(((($components.sel_rej || {}).value)))",
+            "configPath": "config.hidden"
+          },
+          "parentId": "selinfo_rej"
+        },
+        {
+          "code": "data_TaskList_run",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-data-python",
+            "version": "1.0.0"
+          },
+          "id": "ds_task_run",
+          "configCss": {},
+          "config": {
+            "filterBySelfs": [
+              {
+                "name": "status",
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "10"
+                },
+                "key": "status"
+              },
+              {
+                "name": "limit",
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "200"
+                },
+                "key": "limit"
+              }
+            ],
+            "pageSize": 200,
+            "description": "审批中任务清单数据源",
+            "autoExec": true,
+            "fields": [
+              {
+                "webType": "PY",
+                "code": "B_Appr_Task_List",
+                "children": [
+                  {
+                    "webType": "String",
+                    "code": "task_title",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "task_title",
+                    "id": "python.task_title"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "four_dim",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "four_dim",
+                    "id": "python.four_dim"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "starter",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "starter",
+                    "id": "python.starter"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "last_update_time",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "last_update_time",
+                    "id": "python.last_update_time"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "comment",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "comment",
+                    "id": "python.comment"
+                  }
+                ],
+                "enable": true,
+                "serverType": "PY",
+                "name": "python",
+                "id": "python",
+                "label": "审批中任务清单数据源"
+              }
+            ],
+            "elementInfo": {
+              "openPath": "/edit",
+              "elementTypeChild": "raw",
+              "serverName": "python-server2-0",
+              "description": {
+                "zh-cn": "审批中任务清单数据源"
+              },
+              "elementNameDes": "审批中任务清单数据源",
+              "folderId": "DIR3b49a963f7b6",
+              "elementName": "B_Appr_Task_List",
+              "path": "\\Application\\SANY\\11_Approval_Process\\",
+              "idGenerateType": 0,
+              "moduleVersion": "2.0",
+              "elementTypeId": "PY2_0_PY",
+              "moduleId": "PY2_0",
+              "absoluteTag": true,
+              "elementType": "PY"
+            },
+            "sorts": [],
+            "emptyNoExec": true
+          },
+          "parentId": "root"
+        },
+        {
+          "code": "q_run",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/queryDataSource",
+            "version": "1.0.0"
+          },
+          "id": "q_run",
+          "configCss": {},
+          "config": {
+            "dataSourceId": [
+              "ds_task_rej",
+              "ds_task_run",
+              "ds_task_done"
+            ]
+          },
+          "parentId": "btn_refresh_run"
+        },
+        {
+          "code": "expr_tab_run",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-expression-logic",
+            "version": "1.0.0"
+          },
+          "id": "expr_tab_run",
+          "configObserves": [
+            {
+              "observePath": "data",
+              "observeId": "ds_task_run"
+            }
+          ],
+          "configCss": {},
+          "config": {
+            "limitByParent": true,
+            "editType": "expr",
+            "expr": "'审批中 (' + (((($dataSources.ds_task_run || {}).data) || []).length) + ')'",
+            "configPath": "config.description.zh-cn"
+          },
+          "parentId": "pane_run"
+        },
+        {
+          "code": "data_TaskList_done",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-data-python",
+            "version": "1.0.0"
+          },
+          "id": "ds_task_done",
+          "configCss": {},
+          "config": {
+            "filterBySelfs": [
+              {
+                "name": "status",
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "99"
+                },
+                "key": "status"
+              },
+              {
+                "name": "limit",
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "200"
+                },
+                "key": "limit"
+              }
+            ],
+            "pageSize": 200,
+            "description": "审批完成任务清单数据源",
+            "autoExec": true,
+            "fields": [
+              {
+                "webType": "PY",
+                "code": "B_Appr_Task_List",
+                "children": [
+                  {
+                    "webType": "String",
+                    "code": "task_title",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "task_title",
+                    "id": "python.task_title"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "four_dim",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "four_dim",
+                    "id": "python.four_dim"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "starter",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "starter",
+                    "id": "python.starter"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "last_update_time",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "last_update_time",
+                    "id": "python.last_update_time"
+                  },
+                  {
+                    "webType": "String",
+                    "code": "comment",
+                    "children": [],
+                    "enable": true,
+                    "serverType": "str",
+                    "name": "comment",
+                    "id": "python.comment"
+                  }
+                ],
+                "enable": true,
+                "serverType": "PY",
+                "name": "python",
+                "id": "python",
+                "label": "审批完成任务清单数据源"
+              }
+            ],
+            "elementInfo": {
+              "openPath": "/edit",
+              "elementTypeChild": "raw",
+              "serverName": "python-server2-0",
+              "description": {
+                "zh-cn": "审批完成任务清单数据源"
+              },
+              "elementNameDes": "审批完成任务清单数据源",
+              "folderId": "DIR3b49a963f7b6",
+              "elementName": "B_Appr_Task_List",
+              "path": "\\Application\\SANY\\11_Approval_Process\\",
+              "idGenerateType": 0,
+              "moduleVersion": "2.0",
+              "elementTypeId": "PY2_0_PY",
+              "moduleId": "PY2_0",
+              "absoluteTag": true,
+              "elementType": "PY"
+            },
+            "sorts": [],
+            "emptyNoExec": true
+          },
+          "parentId": "root"
+        },
+        {
+          "code": "q_done",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/queryDataSource",
+            "version": "1.0.0"
+          },
+          "id": "q_done",
+          "configCss": {},
+          "config": {
+            "dataSourceId": [
+              "ds_task_rej",
+              "ds_task_run",
+              "ds_task_done"
+            ]
+          },
+          "parentId": "btn_refresh_done"
+        },
+        {
+          "code": "expr_tab_done",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-expression-logic",
+            "version": "1.0.0"
+          },
+          "id": "expr_tab_done",
+          "configObserves": [
+            {
+              "observePath": "data",
+              "observeId": "ds_task_done"
+            }
+          ],
+          "configCss": {},
+          "config": {
+            "limitByParent": true,
+            "editType": "expr",
+            "expr": "'审批完成 (' + (((($dataSources.ds_task_done || {}).data) || []).length) + ')'",
+            "configPath": "config.description.zh-cn"
+          },
+          "parentId": "pane_done"
+        },
+        {
+          "code": "q_tabs",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/queryDataSource",
+            "version": "1.0.0"
+          },
+          "id": "q_tabs",
+          "configCss": {},
+          "config": {
+            "dataSourceId": [
+              "ds_task_rej",
+              "ds_task_run",
+              "ds_task_done"
+            ]
+          },
+          "parentId": "tabs_main"
+        },
+        {
+          "code": "jump_resubmit",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/JumpPage",
+            "version": "1.0.0"
+          },
+          "id": "jump_resubmit",
+          "configCss": {},
+          "config": {
+            "whetherRefreshOnOpenStatus": true,
+            "isNew": true,
+            "elementInfo": {
+              "path": "\\Application\\SANY\\11_Approval_Process\\",
+              "moduleVersion": "1.0",
+              "moduleId": "UX1_0",
+              "elementType": "UX",
+              "folderId": "DIR3b49a963f7b6",
+              "elementName": "Approval_Resubmit"
+            },
+            "params": [
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(($components.sel_rej || {}).value || '')"
+                },
+                "key": "instance_id"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).task_title || ''"
+                },
+                "key": "instance_title"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).task_title || ''"
+                },
+                "key": "task_title"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).four_dim || ''"
+                },
+                "key": "four_dim"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).comment || ''"
+                },
+                "key": "comment"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).starter || ''"
+                },
+                "key": "starter"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).last_update_time || ''"
+                },
+                "key": "last_update_time"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).status_name || ''"
+                },
+                "key": "status_name"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).year || ''"
+                },
+                "key": "year"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).scenario || ''"
+                },
+                "key": "scenario"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).version || ''"
+                },
+                "key": "version"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).entity || ''"
+                },
+                "key": "entity"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "(((($dataSources.ds_task_rej || {}).data) || []).filter((r) => r.instance_id === ((($components.sel_rej || {}).value)))[0] || {}).budget_link || ''"
+                },
+                "key": "budget_link"
+              }
+            ]
+          },
+          "parentId": "btn_resubmit"
+        },
+        {
+          "code": "variable",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "@deepfos/page-variable",
+            "time": "1655950566164",
+            "type": "logic",
+            "version": "1.0.0"
+          },
+          "id": "__deep_variable__",
+          "config": {
+            "limitByParent": true,
+            "fields": []
+          },
+          "parentId": "pane_new"
+        },
+        {
+          "code": "nf_run_start",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/RunPython",
+            "version": "1.0.0"
+          },
+          "id": "nf_run_start",
+          "configCss": {},
+          "config": {
+            "inexecutableConfig": {
+              "toastContent": {
+                "editType": "static",
+                "type": "static",
+                "value": "运行条件不满组合, 请检查"
+              },
+              "toastEnable": true,
+              "handleMode": "CONTINUE"
+            },
+            "executionMode": "sync",
+            "needLoading": true,
+            "elementInfo": {
+              "openPath": "/edit",
+              "elementTypeChild": "raw",
+              "serverName": "python-server2-0",
+              "description": {
+                "zh-cn": "发起；新一轮插入新实例，不覆盖旧行"
+              },
+              "elementNameDes": "发起；新一轮插入新实例，不覆盖旧行",
+              "folderId": "DIR3b49a963f7b6",
+              "elementName": "B_Appr_Start",
+              "path": "\\Application\\SANY\\11_Approval_Process\\",
+              "idGenerateType": 0,
+              "moduleVersion": "2.0",
+              "elementTypeId": "PY2_0_PY",
+              "moduleId": "PY2_0",
+              "absoluteTag": true,
+              "elementType": "PY"
+            },
+            "params": [
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_dim_entity.value"
+                },
+                "key": "Entity"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_dim_version.value"
+                },
+                "key": "Version"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_dim_scenario.value"
+                },
+                "key": "Scenario"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_dim_year.value"
+                },
+                "key": "Year"
+              },
+              {
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "gw_zhang95"
+                },
+                "key": "userDoaminNo"
+              },
+              {
+                "value": {
+                  "type": "static",
+                  "value": "TEST"
+                },
+                "key": "env"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_input_title.value"
+                },
+                "key": "instanceTitle"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_ta_comment.value"
+                },
+                "key": "comment"
+              },
+              {
+                "value": {
+                  "editType": "expr",
+                  "type": "expr",
+                  "value": "$system.userId"
+                },
+                "key": "user"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_input_formcode.value || $components.nf_dd_form.value"
+                },
+                "key": "budget_link"
+              }
+            ],
+            "toastAfterFail": true,
+            "toastAfterSuccess": true
+          },
+          "parentId": "nf_btn_submit"
+        },
+        {
+          "code": "nf_set_exp01",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/SetValue",
+            "version": "1.0.0"
+          },
+          "id": "nf_set_exp01",
+          "config": {
+            "values": [
+              {
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "B_Exp01"
+                },
+                "target": "nf_dd_form"
+              },
+              {
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "B_Exp01"
+                },
+                "target": "nf_input_formcode"
+              }
+            ]
+          },
+          "parentId": "nf_btn_exp01"
+        },
+        {
+          "code": "nf_set_exp03",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/SetValue",
+            "version": "1.0.0"
+          },
+          "id": "nf_set_exp03",
+          "config": {
+            "values": [
+              {
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "B_Exp03"
+                },
+                "target": "nf_dd_form"
+              },
+              {
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "B_Exp03"
+                },
+                "target": "nf_input_formcode"
+              }
+            ]
+          },
+          "parentId": "nf_btn_exp03"
+        },
+        {
+          "code": "nf_set_exp04",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/SetValue",
+            "version": "1.0.0"
+          },
+          "id": "nf_set_exp04",
+          "config": {
+            "values": [
+              {
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "B_Exp04"
+                },
+                "target": "nf_dd_form"
+              },
+              {
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "B_Exp04"
+                },
+                "target": "nf_input_formcode"
+              }
+            ]
+          },
+          "parentId": "nf_btn_exp04"
+        },
+        {
+          "code": "nf_run_upload",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/RunPython",
+            "version": "1.0.0"
+          },
+          "id": "nf_run_upload",
+          "configCss": {},
+          "config": {
+            "inexecutableConfig": {
+              "toastContent": {
+                "editType": "static",
+                "type": "static",
+                "value": "运行条件不满组合, 请检查"
+              },
+              "toastEnable": true,
+              "handleMode": "CONTINUE"
+            },
+            "executionMode": "sync",
+            "needLoading": true,
+            "elementInfo": {
+              "openPath": "/edit",
+              "elementTypeChild": "raw",
+              "serverName": "python-server2-0",
+              "description": {
+                "zh-cn": "附件上传/移除，写 bud_appr_file"
+              },
+              "elementNameDes": "附件上传/移除，写 bud_appr_file",
+              "folderId": "DIR3b49a963f7b6",
+              "elementName": "B_Appr_Upload",
+              "path": "\\Application\\SANY\\11_Approval_Process\\",
+              "idGenerateType": 0,
+              "moduleVersion": "2.0",
+              "elementTypeId": "PY2_0_PY",
+              "moduleId": "PY2_0",
+              "absoluteTag": true,
+              "elementType": "PY"
+            },
+            "params": [
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_dim_year.value"
+                },
+                "key": "Year"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_dim_scenario.value"
+                },
+                "key": "Scenario"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_dim_version.value"
+                },
+                "key": "Version"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_dim_entity.value"
+                },
+                "key": "Entity"
+              },
+              {
+                "value": {
+                  "editType": "expr",
+                  "type": "expr",
+                  "value": "$system.userId"
+                },
+                "key": "userDomainNo"
+              },
+              {
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "TEST"
+                },
+                "key": "env"
+              },
+              {
+                "value": {
+                  "editType": "static",
+                  "type": "static",
+                  "value": "upload"
+                },
+                "key": "action"
+              },
+              {
+                "value": {
+                  "editType": "component",
+                  "type": "expr",
+                  "value": "$components.nf_file.value"
+                },
+                "key": "platform_file_id"
+              }
+            ],
+            "toastAfterFail": true,
+            "toastAfterSuccess": true
+          },
+          "parentId": "nf_file"
+        },
+        {
+          "code": "q_after_submit",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/queryDataSource",
+            "version": "1.0.0"
+          },
+          "id": "q_after_submit",
+          "configCss": {},
+          "config": {
+            "dataSourceId": [
+              "ds_task_rej",
+              "ds_task_run",
+              "ds_task_done"
+            ]
+          },
+          "parentId": "nf_btn_submit"
+        },
+        {
+          "code": "init_lst_rej",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/SetInitialize",
+            "version": "1.0.0"
+          },
+          "id": "init_lst_rej",
+          "configCss": {},
+          "config": {
+            "target": "lst_rej"
+          },
+          "parentId": "nf_btn_submit"
+        },
+        {
+          "code": "init_lst_run",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/SetInitialize",
+            "version": "1.0.0"
+          },
+          "id": "init_lst_run",
+          "configCss": {},
+          "config": {
+            "target": "lst_run"
+          },
+          "parentId": "nf_btn_submit"
+        },
+        {
+          "code": "init_lst_done",
+          "uxComponentInfo": {
+            "importType": "official",
+            "name": "event-panel/SetInitialize",
+            "version": "1.0.0"
+          },
+          "id": "init_lst_done",
+          "configCss": {},
+          "config": {
+            "target": "lst_done"
+          },
+          "parentId": "nf_btn_submit"
+        }
+      ],
+      "version": "1.0.13.0"
+    },
+    "componentConfig": {
+      "customComponents": []
+    },
+    "refRelationList": [
+      {
+        "compId": "nf_dim_entity",
+        "path": "config.dimension",
+        "relationKey": "ref_field1",
+        "refRelation": {
+          "elementName": "Entity",
+          "elementType": "DIM",
+          "folderId": "DIR93a0ef4701e0",
+          "path": "\\Application\\SANY\\01_DIM\\",
+          "absoluteTag": true,
+          "serverName": "dimension-server1-2"
+        }
+      },
+      {
+        "compId": "nf_dim_version",
+        "path": "config.dimension",
+        "relationKey": "ref_field2",
+        "refRelation": {
+          "elementName": "Version",
+          "elementType": "DIM",
+          "folderId": "DIR93a0ef4701e0",
+          "path": "\\Application\\SANY\\01_DIM\\",
+          "absoluteTag": true,
+          "serverName": "dimension-server1-2"
+        }
+      },
+      {
+        "compId": "nf_dim_scenario",
+        "path": "config.dimension",
+        "relationKey": "ref_field3",
+        "refRelation": {
+          "elementName": "Scenario",
+          "elementType": "DIM",
+          "folderId": "DIR93a0ef4701e0",
+          "path": "\\Application\\SANY\\01_DIM\\",
+          "absoluteTag": true,
+          "serverName": "dimension-server1-2"
+        }
+      },
+      {
+        "compId": "nf_dim_year",
+        "path": "config.dimension",
+        "relationKey": "ref_field4",
+        "refRelation": {
+          "elementName": "Year",
+          "elementType": "DIM",
+          "folderId": "DIR93a0ef4701e0",
+          "path": "\\Application\\SANY\\01_DIM\\",
+          "absoluteTag": true,
+          "serverName": "dimension-server1-2"
+        }
+      },
+      {
+        "compId": "nf_dim_entity",
+        "path": "config.roleElement",
+        "relationKey": "ref_field5",
+        "refRelation": {
+          "elementName": "Access_Scheme",
+          "elementType": "ACS",
+          "folderId": "DIR3ffc7dbce471",
+          "path": "\\Application\\SANY\\08_PER\\",
+          "absoluteTag": true,
+          "serverName": "role-strategy-server1-0"
+        }
+      },
+      {
+        "compId": "ds_task_rej",
+        "path": "config.elementInfo",
+        "relationKey": "ref_field6",
+        "refRelation": {
+          "elementName": "B_Appr_Task_List",
+          "elementType": "PY",
+          "folderId": "DIR6323695fa66c",
+          "path": "\\Application\\SANY\\11_Approval_Process\\",
+          "absoluteTag": true,
+          "serverName": "python-server2-0"
+        }
+      },
+      {
+        "compId": "lst_rej",
+        "path": "config.elementDetail",
+        "relationKey": "ref_field7",
+        "refRelation": {
+          "elementName": "process_status_info",
+          "elementType": "LST",
+          "folderId": "DIR6323695fa66c",
+          "path": "\\Application\\SANY\\11_Approval_Process\\",
+          "absoluteTag": true,
+          "serverName": "list-table-server1-2"
+        }
+      },
+      {
+        "compId": "ds_task_run",
+        "path": "config.elementInfo",
+        "relationKey": "ref_field8",
+        "refRelation": {
+          "elementName": "B_Appr_Task_List",
+          "elementType": "PY",
+          "folderId": "DIR6323695fa66c",
+          "path": "\\Application\\SANY\\11_Approval_Process\\",
+          "absoluteTag": true,
+          "serverName": "python-server2-0"
+        }
+      },
+      {
+        "compId": "lst_run",
+        "path": "config.elementDetail",
+        "relationKey": "ref_field9",
+        "refRelation": {
+          "elementName": "process_status_info",
+          "elementType": "LST",
+          "folderId": "DIR6323695fa66c",
+          "path": "\\Application\\SANY\\11_Approval_Process\\",
+          "absoluteTag": true,
+          "serverName": "list-table-server1-2"
+        }
+      },
+      {
+        "compId": "ds_task_done",
+        "path": "config.elementInfo",
+        "relationKey": "ref_field10",
+        "refRelation": {
+          "elementName": "B_Appr_Task_List",
+          "elementType": "PY",
+          "folderId": "DIR6323695fa66c",
+          "path": "\\Application\\SANY\\11_Approval_Process\\",
+          "absoluteTag": true,
+          "serverName": "python-server2-0"
+        }
+      },
+      {
+        "compId": "lst_done",
+        "path": "config.elementDetail",
+        "relationKey": "ref_field11",
+        "refRelation": {
+          "elementName": "process_status_info",
+          "elementType": "LST",
+          "folderId": "DIR6323695fa66c",
+          "path": "\\Application\\SANY\\11_Approval_Process\\",
+          "absoluteTag": true,
+          "serverName": "list-table-server1-2"
+        }
+      },
+      {
+        "compId": "jump_resubmit",
+        "path": "config.elementInfo",
+        "relationKey": "ref_field12",
+        "refRelation": {
+          "elementName": "Approval_Resubmit",
+          "elementType": "UX",
+          "folderId": "DIR6323695fa66c",
+          "path": "\\Application\\SANY\\11_Approval_Process\\",
+          "absoluteTag": true,
+          "serverName": "ux-server1-0"
+        }
+      },
+      {
+        "compId": "nf_run_start",
+        "path": "config.elementInfo",
+        "relationKey": "ref_field13",
+        "refRelation": {
+          "elementName": "B_Appr_Start",
+          "elementType": "PY",
+          "folderId": "DIR6323695fa66c",
+          "path": "\\Application\\SANY\\11_Approval_Process\\",
+          "absoluteTag": true,
+          "serverName": "python-server2-0"
+        }
+      },
+      {
+        "compId": "nf_run_upload",
+        "path": "config.elementInfo",
+        "relationKey": "ref_field14",
+        "refRelation": {
+          "elementName": "B_Appr_Upload",
+          "elementType": "PY",
+          "folderId": "DIR6323695fa66c",
+          "path": "\\Application\\SANY\\11_Approval_Process\\",
+          "absoluteTag": true,
+          "serverName": "python-server2-0"
+        }
+      }
+    ],
+    "operation": "edit"
+  }
+}

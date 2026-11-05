@@ -252,7 +252,7 @@ test("目录自定义下拉保留选中值并通过原 change 事件更新筛选
 
 test("供应商模型行使用该供应商的编码和能力而非研发方上限", () => {
   const sandbox = {};
-  const source = catalogSource.slice(0, catalogSource.indexOf("async function parseJsonResponse"))
+  const source = catalogSource.slice(0, catalogSource.indexOf("async function parseJsonResponse")).replace(/^import .+;\n/gm, "")
     + catalogSource.slice(catalogSource.indexOf("function renderModelRows"), catalogSource.indexOf("function renderResults"));
   vm.runInNewContext(source + `
     catalogState.providerId = "second";

@@ -2034,7 +2034,7 @@ html[data-theme="paper"] .context-budget-row.tone-target .context-budget-track >
 .catalog-view-tab.active { color: var(--accent); background: var(--accent-soft); box-shadow: none; }
 .models-status { margin: 12px 0 9px; color: var(--text-faint); font-size: 12px; }
 
-.catalog-browser { grid-template-columns: 176px minmax(0, 1fr); gap: 12px; }
+.catalog-browser { grid-template-columns: 208px minmax(0, 1fr); gap: 12px; }
 .catalog-lab-sidebar {
   gap: 6px;
   max-height: calc(100vh - 330px);
@@ -2758,6 +2758,11 @@ dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface
 .catalog-model-table .model-tag-cell .badge { padding: 2px 5px; font-size: 11px; line-height: 16px; }
 #catalogSupplierSidebar .catalog-lab-item { transform: none; }
 #catalogSupplierSidebar .catalog-lab-item span { min-width: 0; line-height: 18px; }
+#catalogSupplierSidebar .catalog-supplier-name { flex: 1; gap: 8px; overflow: hidden; }
+#catalogSupplierSidebar .catalog-supplier-icon { flex: 0 0 18px; width: 18px; height: 18px; }
+#catalogSupplierSidebar .catalog-supplier-icon img { display: block; width: 18px; height: 18px; object-fit: contain; }
+#catalogSupplierSidebar .catalog-supplier-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-theme="dark"] #catalogSupplierSidebar img[data-provider-type="xai"] { filter: brightness(0) invert(1); }
 
 /* Shared settings detail headings and a single catalog filter/status row. */
 #configurationHost .global-settings-section-title h3 { font-size: 16px; font-weight: 600; line-height: 1.25; }

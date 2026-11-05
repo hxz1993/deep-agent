@@ -205,12 +205,14 @@ const llmProvidersAdmin = {
     if (!host) return;
     host.querySelectorAll("[data-model-test-result]").forEach((element) => {
       const result = providerAdminState.modelTests.get(element.dataset.modelTestResult);
-      const labels = { pending: "等待测试", testing: "测试中…", success: "成功", error: "失败" };
+      const labels = { pending: "等待测试", testing: "测试中…", success: "成功" };
       element.className = `provider-model-test-result ${result?.status || ""}`;
-      element.textContent = result ? `${labels[result.status]}${Number.isFinite(result.elapsed_ms) ? ` · ${(result.elapsed_ms / 1000).toFixed(1)}s` : ""}` : "";
-      element.title = result?.message || "";
+      element.textContent = result?.status === "error"
+        ? result.message || "未返回详细原因，请重试或检查服务日志"
+        : result ? `${labels[result.status]}${Number.isFinite(result.elapsed_ms) ? ` · ${(result.elapsed_ms / 1000).toFixed(1)}s` : ""}` : "";
+      element.title = "";
       element.tabIndex = result ? 0 : -1;
-      element.setAttribute("aria-label", result ? `${element.textContent}，${result.message || ""}` : "");
+      element.setAttribute("aria-label", element.textContent);
     });
     const button = host.querySelector("[data-provider-test-models]");
     if (button) {

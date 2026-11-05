@@ -1587,8 +1587,7 @@ dialog.console-action-dialog::backdrop {
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 9%, var(--console-surface, var(--bg)));
+  background: transparent;
   color: var(--accent);
   font-size: 12px;
   font-weight: 750;
@@ -1596,15 +1595,7 @@ dialog.console-action-dialog::backdrop {
   overflow: hidden;
 }
 .provider-brand-mark img { display: block; width: 21px; height: 21px; object-fit: contain; }
-.provider-brand-mark.deepseek { background: #edf5ff; }
-.provider-brand-mark.moonshot { background: #f0efff; }
-.provider-brand-mark.alibaba { background: #fff2eb; }
-.provider-brand-mark.zai { background: #edf7f7; }
-.provider-brand-mark.openrouter { background: #f4efff; }
-.provider-brand-mark.openai { background: transparent; }
-.provider-brand-mark.anthropic { background: #f8f1e9; }
-.provider-brand-mark.google { background: #edf3ff; }
-.provider-brand-mark.compatible { background: var(--console-subtle, var(--bg-soft)); color: var(--text-dim); }
+.provider-brand-mark.compatible { color: var(--text-dim); }
 .provider-brand-mark.compatible img { color: var(--text-dim); }
 .provider-list-signals { display: inline-flex; align-items: center; gap: 8px; }
 .provider-key-state { display: inline-flex; align-items: center; color: var(--text-faint); }
@@ -1780,7 +1771,7 @@ dialog.console-action-dialog::backdrop {
 }
 .provider-model-facts > span { display: inline-flex; align-items: center; gap: 4px; }
 .provider-model-facts svg { width: 12px; height: 12px; color: var(--text-faint); }
-.provider-model-test-result { flex: none; font-size: 12px; color: var(--text-dim); white-space: nowrap; cursor: help; }
+.provider-model-test-result { flex: 0 1 auto; min-width: 0; max-width: 55%; font-size: 12px; line-height: 1.5; color: var(--text-dim); white-space: pre-wrap; overflow-wrap: anywhere; text-align: right; }
 .provider-model-test-result:empty { display: none; }
 .provider-model-test-result.testing { color: var(--accent); }
 .provider-model-test-result.success { color: var(--success); }

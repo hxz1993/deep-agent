@@ -8,3 +8,5 @@
 | `stepfun.svg` | https://www.stepfun.com/step_favicon.svg |
 
 Anthropic Compatible 复用已有 `anthropic.png`；OpenAI Compatible 保留已有通用图标。
+
+2026-11-05 补充模型目录 xAI 图标：`xai.svg` 来自 https://models.dev/logos/xai.svg，保留原始字节，仅用于供应商品牌标识。

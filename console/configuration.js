@@ -10,7 +10,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20261103-model-compatibility-scope";
+const CONFIGURATION_ASSET_VERSION = "20261105-provider-feedback2";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -136,7 +136,7 @@ async function loadAdminScripts() {
       // These scripts arrived after the browser's original DOMContentLoaded.
       // Replay once for their existing bindings; initialization makes no API calls.
       document.dispatchEvent(new Event("DOMContentLoaded"));
-      await import("./configuration/catalog.js?v=20261023-console-load1");
+      await import("./configuration/catalog.js?v=20261105-catalog-icons");
     });
     await Promise.race([loaded, failedExecution]);
   } finally {

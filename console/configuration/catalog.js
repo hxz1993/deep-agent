@@ -1,5 +1,7 @@
 "use strict";
 
+import { catalogProviderIcon } from "../provider-icons.js?v=20261105-catalog-icons";
+
 const PAGE_SIZE = 50;
 const MODALITY_LABELS = {
   text: "文本",
@@ -134,7 +136,7 @@ function renderFacets() {
     '<div class="catalog-lab-heading"><span>供应商</span></div>',
     ...providers.map((provider) => `<button type="button" class="catalog-lab-item ${catalogState.providerId === provider.id ? "active" : ""}"
       data-provider-id="${escapeHtml(provider.id)}" aria-pressed="${catalogState.providerId === provider.id}">
-      <span>${escapeHtml(provider.label)}</span><strong>${Number(provider.count || 0)}</strong>
+      <span class="catalog-supplier-name"><span class="catalog-supplier-icon" aria-hidden="true">${catalogProviderIcon(provider)}</span><span class="catalog-supplier-label" title="${escapeHtml(provider.label)}">${escapeHtml(provider.label)}</span></span><strong>${Number(provider.count || 0)}</strong>
     </button>`),
   ].join("");
   sidebar.querySelectorAll("[data-provider-id]").forEach((button) => {

@@ -12,6 +12,7 @@ from pydantic_ai import DeferredToolRequests, ModelRetry, StructuredDict, ToolOu
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart
+from deep_agent.capabilities.codes import ENVIRONMENT_TOOL_NAMES, environment_name_conflict
 
 BUDGET = "deepagent_output_budget"
 DISPATCH = "deepagent_dispatch"
@@ -42,6 +43,8 @@ class StructuredOutputState(AbstractCapability):
         from deep_agent.structured_output.schema import normalize_schema, schema_digest, validate_output_name
         schema = normalize_schema(contract["json_schema"])
         validate_output_name(contract["name"])
+        if contract["name"] in ENVIRONMENT_TOOL_NAMES:
+            raise ValueError(environment_name_conflict(contract["name"]))
         allow_text = contract.get("allow_text_output", False)
         if type(allow_text) is not bool:
             raise ValueError("Output contract allow_text_output must be a boolean")

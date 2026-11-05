@@ -30,7 +30,7 @@ from deep_agent.capabilities.ui.registry import (
     prepare_ui_tool_packages_for_spec,
 )
 from deep_agent.capabilities.ui.types import UIToolRecord
-from deep_agent.db.models import Base, McpServer, UiToolDefinition, UiToolPackage
+from deep_agent.db.models import Agent as AgentRow, Base, McpServer, UiToolDefinition, UiToolPackage
 from deep_agent.db.dialect import DbDialect
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.stores.ui_tool import UiToolStoreBase
@@ -40,7 +40,7 @@ from deep_agent.schemas.ui_tools import (
     UiToolPackageUpdate,
     UiToolUpdate,
 )
-from deep_agent.schemas.agent import AgentCreate, AgentUpdate
+from deep_agent.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
 from deep_agent.db.reference_integrity import ReferenceConflict
 from fastapi import HTTPException
 from deep_agent.capabilities import build_registry
@@ -110,6 +110,18 @@ class UiToolSchemaValidationTests(unittest.TestCase):
                 self.assertEqual(created.name, name)
 
 
+class RetiredTimeReferenceSchemaTests(unittest.TestCase):
+    def test_create_update_drop_only_retired_code(self) -> None:
+        capabilities = ["builtin:general", "builtin:code-mode", "builtin:future"]
+        created = AgentCreate(name="Time", prompt="test", capabilities=capabilities)
+        updated = AgentUpdate(capabilities=capabilities)
+        self.assertEqual(created.capabilities, ["builtin:ptc", "builtin:future"])
+        self.assertEqual(updated.capabilities, created.capabilities)
+        for invalid in (["builtin:general", "builtin:general"], ["builtin:general", ""], None):
+            with self.subTest(capabilities=invalid), self.assertRaises(ValidationError):
+                AgentUpdate(capabilities=invalid)
+
+
 class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -131,6 +143,22 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self) -> None:
         await self.engine.dispose()
+
+    async def test_legacy_time_reference_reads_without_rewriting_and_is_removed_on_copy_or_save(self) -> None:
+        created = await self.stores.agent.create_unique(AgentCreate(name="LegacyTime", prompt="test"))
+        async with self.session_factory() as db:
+            raw = await db.get(AgentRow, created.id)
+            raw.capabilities = ["builtin:general", "builtin:ptc"]
+            await db.commit()
+        row = await self.stores.agent.get_by_id(created.id)
+        response = AgentResponse.from_row(row, None)
+        self.assertEqual(response.capabilities, ["builtin:ptc"])
+        self.assertEqual((await self.stores.agent.get_by_id(created.id)).capabilities, ["builtin:general", "builtin:ptc"])
+        copy = await self.stores.agent.create_unique(AgentCreate(name="LegacyTime Copy", prompt=row.prompt, capabilities=row.capabilities))
+        self.assertEqual(copy.capabilities, ["builtin:ptc"])
+        await self.stores.agent.update_unique(created.id, AgentUpdate(capabilities=row.capabilities))
+        self.assertEqual((await self.stores.agent.get_by_id(created.id)).capabilities, ["builtin:ptc"])
+        self.assertEqual(await invalid_tool_package_codes(["builtin:general", "builtin:future"], build_registry(), self.stores), ["builtin:future"])
 
     async def test_create_manual_and_list(self) -> None:
         row = await self.store.create_manual(
@@ -541,15 +569,9 @@ class UiToolStoreTests(unittest.IsolatedAsyncioTestCase):
         registry = build_registry(sandbox_backend=MagicMock())
         ctx = SimpleNamespace(stores=self.stores, registry=registry)
         capabilities = await list_tool_packages(ctx)
-        general_package = next(
-            item for item in capabilities if item.code == "builtin:general"
-        )
+        self.assertNotIn("builtin:general", [item.code for item in capabilities])
         sandbox_package = next(
             item for item in capabilities if item.code == "builtin:sandbox"
-        )
-        self.assertEqual(
-            [tool.name for tool in general_package.tools],
-            ["get_current_time"],
         )
         self.assertEqual(
             [tool.name for tool in sandbox_package.tools],

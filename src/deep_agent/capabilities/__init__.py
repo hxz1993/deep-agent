@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from deep_agent.capabilities.general import build_native_tool_package
 from deep_agent.capabilities.registry import ToolInfo, ToolPackage, ToolPackageRegistry
 from deep_agent.options import OPTION
 from loguru import logger
@@ -41,7 +40,6 @@ def build_registry(
 
     registry = ToolPackageRegistry()
 
-    registry.register(build_native_tool_package())
     registry.register(build_code_mode_tool_package())
     registry.register(build_web_tool_package())
     registry.register(build_document_tool_package())

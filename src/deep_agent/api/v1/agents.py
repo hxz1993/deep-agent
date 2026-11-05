@@ -113,6 +113,9 @@ async def _validate_skills(
 async def _validate_output_name(config, capabilities, ctx) -> None:
     if config is None:
         return
+    from deep_agent.capabilities.codes import ENVIRONMENT_TOOL_NAMES, environment_name_conflict
+    if config.name in ENVIRONMENT_TOOL_NAMES:
+        raise HTTPException(status_code=422, detail=environment_name_conflict(config.name))
     # Only existing catalogs are consulted here. Dynamic MCP disclosure is
     # checked again against the actual assembled tool definitions at Run time.
     capabilities = canonical_tool_package_codes(capabilities)

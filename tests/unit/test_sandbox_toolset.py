@@ -267,18 +267,12 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
 class SandboxRegistryTests(unittest.TestCase):
     def test_registry_excludes_capability_when_backend_missing(self) -> None:
         registry = build_registry()
-        self.assertEqual(
-            {item.name for item in registry.get("builtin:general").tools},
-            {"get_current_time"},
-        )
+        self.assertNotIn("builtin:general", registry.codes())
         self.assertNotIn("builtin:sandbox", registry.codes())
 
     def test_registry_includes_capability_when_backend_present(self) -> None:
         registry = build_registry(sandbox_backend=FakeSandboxBackend())
-        self.assertEqual(
-            {item.name for item in registry.get("builtin:general").tools},
-            {"get_current_time"},
-        )
+        self.assertNotIn("builtin:general", registry.codes())
         self.assertEqual(
             {item.name for item in registry.get("builtin:sandbox").tools},
             {"execute_python"},

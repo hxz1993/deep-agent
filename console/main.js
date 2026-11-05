@@ -24,7 +24,7 @@ let workspaceModule = null;
 let diagnosticsModule = null;
 const loadPage = createPageLoader({
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261105-provider-feedback2");
+    const module = await import("./configuration.js?v=20261105-runtime-environment");
     await module.initConfiguration();
     configurationModule = module;
     return module;

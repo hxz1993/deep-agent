@@ -12,7 +12,7 @@ test('Agent 卡片仅提供整包开关及分类计数，不渲染逐工具选�
   const admin = context.window.agentsAdmin;
   const ui = admin.renderCapCard(cap, new Set(['ui:forms']));
   const mcp = admin.renderCapCard({code:'mcp:demo',category:'mcp',tool_count:11,resource_count:3,tools:[]}, new Set());
-  const builtin = admin.renderCapCard({code:'builtin:general',category:'builtin',tool_count:1,tools:[]}, new Set());
+  const builtin = admin.renderCapCard({code:'builtin:ptc',category:'builtin',tool_count:1,tools:[]}, new Set());
   assert.match(ui, /data-lucide="monitor-check"/);
   assert.doesNotMatch(ui, /data-ui-tool|<details|已选/);
   assert.match(mcp, /data-lucide="wrench"/);

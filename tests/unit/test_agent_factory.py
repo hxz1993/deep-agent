@@ -285,10 +285,10 @@ class ToolsetAssemblyTests(unittest.TestCase):
 
     def test_selected_packages_preserve_all_runtime_toolset_layers(self) -> None:
         registry = ToolPackageRegistry()
-        general = object()
+        fixture = object()
         sandbox = object()
         for code, toolset in (
-            ("builtin:general", general),
+            ("builtin:fixture", fixture),
             ("builtin:sandbox", sandbox),
         ):
             registry.register(
@@ -304,7 +304,7 @@ class ToolsetAssemblyTests(unittest.TestCase):
         ui = object()
         spec = _spec(
             capabilities=[
-                "builtin:general",
+                "builtin:fixture",
                 "builtin:sandbox",
                 "mcp:deepcube",
                 "ui:deepcube",
@@ -326,8 +326,11 @@ class ToolsetAssemblyTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(len(assembled), 7)
-        self.assertIs(assembled[0], general)
+        self.assertEqual(len(assembled), 8)
+        self.assertIsInstance(assembled[0], FunctionToolset)
+        self.assertEqual(set(assembled[0].tools), {"get_current_time"})
+        assembled = assembled[1:]
+        self.assertIs(assembled[0], fixture)
         self.assertIs(assembled[1], sandbox)
         self.assertIsInstance(assembled[2], McpDiscoveryToolset)
         self.assertIs(assembled[3], resources)
@@ -335,28 +338,21 @@ class ToolsetAssemblyTests(unittest.TestCase):
         self.assertEqual(assembled[5], "file-export-toolset")
         self.assertIs(assembled[6], ui)
 
-    def test_empty_selection_has_no_implicit_packages(self) -> None:
+    def test_empty_and_retired_selections_only_have_runtime_environment(self) -> None:
         registry = ToolPackageRegistry()
-        general = object()
-        registry.register(
-            ToolPackage(
-                code="builtin:general",
-                category="builtin",
-                toolset=general,
-            )
-        )
-        self.assertEqual(_toolsets_for_spec(registry, _spec(capabilities=[])), [])
-        self.assertEqual(
-            _toolsets_for_spec(registry, _spec(capabilities=["builtin:general"])),
-            [general],
-        )
+        for capabilities in ([], ["builtin:general"]):
+            with self.subTest(capabilities=capabilities):
+                toolsets = _toolsets_for_spec(registry, _spec(capabilities=capabilities))
+                self.assertEqual(len(toolsets), 1)
+                self.assertIsInstance(toolsets[0], FunctionToolset)
+                self.assertEqual(set(toolsets[0].tools), {"get_current_time"})
 
     def test_web_toolset_is_only_injected_for_explicit_runtime_selection(self) -> None:
         registry = build_registry()
         web_toolset = object()
 
         self.assertEqual(
-            _toolsets_for_spec(registry, _spec(capabilities=[])),
+            _toolsets_for_spec(registry, _spec(capabilities=[]))[1:],
             [],
         )
         self.assertEqual(
@@ -364,7 +360,7 @@ class ToolsetAssemblyTests(unittest.TestCase):
                 registry,
                 _spec(capabilities=["builtin:web"]),
                 web_toolset=web_toolset,
-            ),
+            )[1:],
             [web_toolset],
         )
 

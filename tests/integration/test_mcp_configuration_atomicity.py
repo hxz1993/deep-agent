@@ -111,7 +111,7 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
                 name="atomic-rename-agent",
                 model_id=model_id,
                 prompt="keep capability",
-                capabilities=["builtin:general", "mcp:atomic-rename-old"],
+                capabilities=["builtin:ptc", "mcp:atomic-rename-old"],
             )
         )
 
@@ -131,7 +131,7 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self.stores.mcp.get_by_name("atomic-rename-new"))
         self.assertEqual(
             (await self.stores.agent.get_by_id(agent.id)).capabilities,
-            ["builtin:general", "mcp:atomic-rename-old"],
+            ["builtin:ptc", "mcp:atomic-rename-old"],
         )
 
 

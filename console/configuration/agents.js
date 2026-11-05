@@ -761,6 +761,7 @@ const agentsAdmin = {
       }))) return;
       if (!(await deleteWithImpactConfirmation(`/api/v1/agents/${encodeURIComponent(agentId)}`, {
         title: "删除 Agent 及全部历史会话？",
+        progressLabel: "正在处理删除请求，请稍候…",
         describeImpact: (impact) => [
           `Agent“${name}”共有 `, { text: `${impact.session_count} 个历史会话` },
           "。\n其中：你本人的 ", { text: `${impact.own_session_count} 个` },

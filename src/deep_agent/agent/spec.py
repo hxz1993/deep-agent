@@ -42,7 +42,7 @@ class AgentSpec:
 
     ``capabilities`` contains the explicitly associated product tool-package
     codes such as
-    ``builtin:general`` or ``ui:deepcube``.
+    ``builtin:sandbox`` or ``ui:deepcube``. Environment tools are automatic.
     """
 
     name: str

@@ -18,6 +18,7 @@ from pydantic_ai.mcp import MCPToolset  # Initialize the SDK integration before 
 import uvicorn
 
 from deep_agent.api.v1 import api_router
+from deep_agent.capabilities import build_registry
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.files.storage import LocalFileStore
 from deep_agent.security import ConsoleAdminAuthorizer
@@ -40,7 +41,7 @@ def main():
         stores, engine, factory = await make_sqlite_stores(f'sqlite+aiosqlite:///{root / "config.sqlite"}')
         files = LocalFileStore(root / "files")
         await files.initialize()
-        context = AppContext.for_testing(stores=stores, db_engine=engine,
+        context = AppContext.for_testing(stores=stores, db_engine=engine, registry=build_registry(),
             db_session_factory=factory, file_store=files,
             skill_runtime=SkillRuntimeLibrary(root / "runtime", file_store=files),
             console_admin_authorizer=ConsoleAdminAuthorizer(AsyncMock(return_value=True)))

@@ -140,6 +140,16 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
             ["agent-1"],
         )
 
+    async def test_old_backup_with_retired_time_reference_previews_and_restores(self) -> None:
+        with sqlite3.connect(self.backup_path) as connection:
+            connection.execute("UPDATE agents SET capabilities='[\"builtin:general\",\"builtin:ptc\"]' WHERE id='agent-1'")
+        validated = await self._post(apply=False, confirm=False)
+        self.assertEqual(validated.status_code, 200, validated.text)
+        imported = await self._post(apply=True, confirm=True)
+        self.assertEqual(imported.status_code, 200, imported.text)
+        row = await self.stores.agent.get_by_id("agent-1")
+        self.assertEqual(row.capabilities, ["builtin:ptc"])
+
     async def test_apply_requires_explicit_confirmation(self) -> None:
         response = await self._post(apply=True, confirm=False)
         self.assertEqual(response.status_code, 422)

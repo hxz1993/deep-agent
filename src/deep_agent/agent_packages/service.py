@@ -14,6 +14,7 @@ from deep_agent.agent_packages.archive import (
     PackageUi, build_zip, canonical, digest, parse_package,
 )
 from deep_agent.agent_packages.runtime_transaction import RuntimeCheckpoint
+from deep_agent.capabilities.codes import canonical_tool_package_codes, ENVIRONMENT_TOOL_NAMES, environment_name_conflict
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.db.ids import new_agent_id
 from deep_agent.db.models import (
@@ -82,7 +83,8 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     resources, blocked = [], []
     if package.agent.output_config is not None:
         output_name = package.agent.output_config.name
-        known_names = {tool.name for incoming in package.ui for tool in incoming.tools}
+        known_names = set(ENVIRONMENT_TOOL_NAMES)
+        known_names.update(tool.name for incoming in package.ui for tool in incoming.tools)
         known_names.update(tool.name for tool in builtin_ui_records()
                            if tool.package_code in package.agent.capabilities)
         known_names.update(tool.name for tool in data[UiToolDefinition]
@@ -90,7 +92,9 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
         selected = getattr(ctx.registry, 'selected', None)
         if selected is not None:
             known_names.update(tool.name for resource in selected(package.agent.capabilities) for tool in resource.tools)
-        if output_name in known_names:
+        if output_name in ENVIRONMENT_TOOL_NAMES:
+            blocked.append(environment_name_conflict(output_name))
+        elif output_name in known_names:
             blocked.append('输出编码与已关联工具名称冲突')
     def add(kind, code, label, status, **extra):
         refs = []
@@ -154,7 +158,7 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     resulting_skills = {r['code'] for r in resources if r['kind'] in ('skill', 'builtin_skill') and r['status'] not in ('missing', 'blocked')}
     removed = []
     if target:
-        removed.extend({'kind': 'capability', 'code': c, 'label': c, 'status': 'unlinked'} for c in target.capabilities or [] if c not in resulting_caps)
+        removed.extend({'kind': 'capability', 'code': c, 'label': c, 'status': 'unlinked'} for c in canonical_tool_package_codes(target.capabilities) if c not in resulting_caps)
         removed.extend({'kind': 'skill', 'code': c, 'label': c, 'status': 'unlinked'} for c in target.skills or [] if c not in resulting_skills)
     return {'digest': digest({'package': package.digest, 'target': snapshot_hash(data),
                              'builtin': sorted(available | builtin_skills), 'mode': mode, 'target_agent_id': target_agent_id}),

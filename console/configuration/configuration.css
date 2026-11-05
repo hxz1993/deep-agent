@@ -1189,6 +1189,21 @@ dialog.console-action-dialog::backdrop {
   background: rgba(0, 0, 0, 0.45);
 }
 
+dialog.console-action-dialog[open] { animation: console-action-enter 160ms ease-out; }
+dialog.console-action-dialog[open]::backdrop { animation: console-backdrop-enter 160ms ease-out; }
+@keyframes console-action-enter {
+  from { opacity: 0; transform: translateY(6px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes console-backdrop-enter { from { background: transparent; } to { background: rgba(0, 0, 0, 0.45); } }
+dialog.console-deletion-progress { width: min(360px, calc(100vw - 32px)); }
+.console-deletion-progress > div { display: flex; align-items: center; gap: 12px; padding: 24px; }
+.console-deletion-progress .loading-spinner { flex: none; }
+@media (prefers-reduced-motion: reduce) {
+  dialog.console-action-dialog[open], dialog.console-action-dialog[open]::backdrop { animation: none; }
+  .console-deletion-progress .loading-spinner { animation: none; }
+}
+
 .console-action-dialog form { padding: 18px; }
 .console-action-dialog-main {
   display: grid;

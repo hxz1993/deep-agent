@@ -416,7 +416,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
                 name="rename-agent-a",
                 model_id=self._model_id,
                 prompt="rename A",
-                capabilities=["builtin:general", "mcp:rename_old", "ui:contracts"],
+                capabilities=["builtin:ptc", "mcp:rename_old", "ui:contracts"],
             )
         )
         second = await self.stores.agent.create_unique(
@@ -463,7 +463,7 @@ class ConfigurationCrudContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_row.status_code, 200, new_row.text)
         self.assertEqual(
             (await self.stores.agent.get_by_id(first.id)).capabilities,
-            ["builtin:general", "mcp:rename_new", "ui:contracts"],
+            ["builtin:ptc", "mcp:rename_new", "ui:contracts"],
         )
         self.assertEqual(
             (await self.stores.agent.get_by_id(second.id)).capabilities,

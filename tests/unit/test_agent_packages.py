@@ -75,6 +75,15 @@ class AgentPackageArchiveTests(unittest.TestCase):
             with self.subTest(capabilities=capabilities), self.assertRaises(ValueError):
                 make_package(agent_changes={'capabilities': capabilities})
 
+    def test_retired_general_reference_is_removed_without_accepting_invalid_codes(self):
+        package = make_package(agent_changes={'capabilities': ['builtin:general', 'builtin:web']})
+        self.assertEqual(package.agent.capabilities, ['builtin:web'])
+        for capabilities in (['builtin:general', 'builtin:general'], ['runtime:environment']):
+            with self.subTest(capabilities=capabilities), self.assertRaises(ValueError):
+                make_package(agent_changes={'capabilities': capabilities})
+        self.assertEqual(make_package(agent_changes={'capabilities': ['builtin:not-installed']}).agent.capabilities,
+                         ['builtin:not-installed'])
+
     def test_prompt_version_only_reads_explicit_title_version(self):
         self.assertEqual(archive.prompt_version('# 电子表格智能助手 · deeptable-unified-agent-v85\n正文'), 'V85')
         self.assertEqual(archive.prompt_version('# DeepCube 助手系统提示词 V34\n正文'), 'V34')
@@ -275,14 +284,14 @@ class AgentPackageServiceTests(unittest.IsolatedAsyncioTestCase):
         self.ctx.registry = build_registry()
         package = make_package(agent_changes={'capabilities': ['builtin:code-mode', 'builtin:general']})
         preview = await preview_package(self.ctx, package)
-        self.assertEqual({row['code'] for row in preview['resources']}, {'builtin:ptc', 'builtin:general'})
+        self.assertEqual({row['code'] for row in preview['resources']}, {'builtin:ptc'})
         self.assertEqual({row['status'] for row in preview['resources']}, {'reuse'})
         installed = await install_package(self.ctx, package, InstallOptions(
             digest=preview['digest'], name='Legacy PTC installed', model_id=None,
         ), {})
-        self.assertEqual(set(installed.capabilities), {'builtin:ptc', 'builtin:general'})
+        self.assertEqual(set(installed.capabilities), {'builtin:ptc'})
         exported = archive.parse_package(await export_package(self.ctx, installed.id, {}))
-        self.assertEqual(set(exported.agent.capabilities), {'builtin:ptc', 'builtin:general'})
+        self.assertEqual(set(exported.agent.capabilities), {'builtin:ptc'})
 
         # Already-persisted legacy references export canonically without rewriting
         # the source row or introducing a second compatibility representation.
@@ -291,8 +300,36 @@ class AgentPackageServiceTests(unittest.IsolatedAsyncioTestCase):
             row.capabilities = ['builtin:code-mode', 'builtin:general']
         raw = await export_package(self.ctx, installed.id, {})
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
-            self.assertEqual(json.loads(z.read('agent.json'))['capabilities'], ['builtin:ptc', 'builtin:general'])
+            self.assertEqual(json.loads(z.read('agent.json'))['capabilities'], ['builtin:ptc'])
         self.assertEqual((await self.rows(Agent))[0].capabilities, ['builtin:code-mode', 'builtin:general'])
+
+    async def test_time_reference_legacy_packages_create_overwrite_and_export(self):
+        from deep_agent.capabilities import build_registry
+
+        self.ctx.registry = build_registry()
+        for index, legacy in enumerate(([], ['builtin:general'])):
+            with self.subTest(legacy=legacy):
+                package = make_package(agent_changes={'capabilities': [*legacy, 'builtin:web']})
+                preview = await preview_package(self.ctx, package)
+                self.assertEqual({item['code'] for item in preview['resources']}, {'builtin:web'})
+                self.assertFalse(preview['blocked'])
+                created = await install_package(self.ctx, package, InstallOptions(
+                    digest=preview['digest'], name=f'Time package {index}', model_id=None,
+                ), {})
+                async with self.stores.agent._write() as db:
+                    target = await db.get(Agent, created.id)
+                    target.capabilities = ['builtin:general', 'builtin:web']
+                overwritten_preview = await preview_package(self.ctx, package, mode='overwrite', target_agent_id=created.id)
+                self.assertNotIn('builtin:general', {item['code'] for item in overwritten_preview['removed_associations']})
+                installed = await install_package(self.ctx, package, InstallOptions(
+                    digest=overwritten_preview['digest'], name=f'Time overwritten {index}', model_id=None,
+                    mode='overwrite', target_agent_id=created.id,
+                ), {})
+                self.assertEqual(installed.capabilities, ['builtin:web'])
+                with zipfile.ZipFile(io.BytesIO(await export_package(self.ctx, installed.id, {}))) as exported:
+                    capabilities = json.loads(exported.read('agent.json'))['capabilities']
+                self.assertEqual(capabilities, ['builtin:web'])
+                self.assertNotIn('runtime:environment', capabilities)
 
     async def test_empty_ui_package_exports_and_reinstalls_without_losing_metadata(self):
         files = package_files(resources=True)

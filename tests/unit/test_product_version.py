@@ -12,12 +12,12 @@ class ProductVersionTests(unittest.IsolatedAsyncioTestCase):
     async def test_package_fastapi_and_info_share_one_version(self) -> None:
         ctx = SimpleNamespace(
             stores=object(),
-            registry=SimpleNamespace(codes=lambda: ["builtin:general"]),
+            registry=SimpleNamespace(codes=lambda: ["builtin:ptc"]),
         )
         with patch(
             "deep_agent.main.selectable_tool_package_codes",
             new_callable=AsyncMock,
-            return_value={"builtin:general", "ui:builtin"},
+            return_value={"builtin:ptc", "ui:builtin"},
         ):
             payload = await info(ctx)
 
@@ -27,7 +27,7 @@ class ProductVersionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["version"], __version__)
         self.assertEqual(
             payload["capabilities"],
-            ["builtin:general", "ui:builtin"],
+            ["builtin:ptc", "ui:builtin"],
         )
 
 

@@ -1,15 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from pydantic_ai import RunContext
-from pydantic_ai.models.test import TestModel
-from pydantic_ai.usage import RunUsage
-
 from deep_agent.capabilities import build_registry
-from deep_agent.capabilities.general import build_native_tool_package
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.sandbox.toolset import build_python_sandbox_tool_package
 
@@ -19,7 +13,7 @@ class ToolPackageRegistryTests(unittest.TestCase):
         registry = ToolPackageRegistry()
         registry.register(
             ToolPackage(
-                code="builtin:general",
+                code="builtin:fixture",
                 category="builtin",
                 toolset=object(),
             )
@@ -32,7 +26,7 @@ class ToolPackageRegistryTests(unittest.TestCase):
         mcp = object()
         registry.register(
             ToolPackage(
-                code="builtin:general",
+                code="builtin:fixture",
                 category="builtin",
                 toolset=general,
             )
@@ -52,25 +46,15 @@ class ToolPackageRegistryTests(unittest.TestCase):
         toolset = object()
         registry.register(
             ToolPackage(
-                code="builtin:general",
+                code="builtin:fixture",
                 category="builtin",
                 toolset=toolset,
             )
         )
         self.assertEqual(registry.toolsets(None), [])
-        self.assertEqual(registry.toolsets(["builtin:general"]), [toolset])
-        self.assertFalse(hasattr(registry.get("builtin:general"), "toolsets"))
+        self.assertEqual(registry.toolsets(["builtin:fixture"]), [toolset])
+        self.assertFalse(hasattr(registry.get("builtin:fixture"), "toolsets"))
 
-class BuiltinToolPackageMetadataTests(unittest.IsolatedAsyncioTestCase):
-    async def test_general_package_contains_current_time(self) -> None:
-        package = build_native_tool_package()
-        context = RunContext(deps=None, model=TestModel(), usage=RunUsage())
-        tools = await package.toolset.get_tools(context)
-        self.assertEqual(package.code, "builtin:general")
-        self.assertEqual(package.category, "builtin")
-        self.assertEqual(set(tools), {"get_current_time"})
-        current_time = await tools["get_current_time"].call_func({}, context)
-        self.assertIsNotNone(datetime.fromisoformat(current_time))
 
 class PythonSandboxPackageTests(unittest.TestCase):
     def test_sandbox_has_independent_package_code(self) -> None:
@@ -84,33 +68,20 @@ class PythonSandboxPackageTests(unittest.TestCase):
             {"execute_python"},
         )
 
-    def test_registry_keeps_general_and_sandbox_separate(self) -> None:
-        backend = MagicMock()
-        registry = build_registry(sandbox_backend=backend)
-        general = registry.get("builtin:general")
+    def test_registry_only_contains_configurable_packages(self) -> None:
+        registry = build_registry(sandbox_backend=MagicMock())
         sandbox = registry.get("builtin:sandbox")
-        self.assertEqual(
-            {item.name for item in general.tools},
-            {"get_current_time"},
-        )
-        self.assertEqual(
-            {item.name for item in sandbox.tools},
-            {"execute_python"},
-        )
+        self.assertEqual({item.name for item in sandbox.tools}, {"execute_python"})
+        self.assertNotIn("builtin:general", registry.codes())
+        self.assertFalse(any(code.startswith("runtime:") for code in registry.codes()))
         self.assertEqual(registry.toolsets(None), [])
-        self.assertEqual(
-            registry.toolsets(["builtin:general"]),
-            [general.toolset],
-        )
-        self.assertEqual(
-            registry.toolsets(["builtin:sandbox"]),
-            [sandbox.toolset],
-        )
+        self.assertEqual(registry.toolsets(["builtin:general"]), [])
+        self.assertEqual(registry.toolsets(["builtin:sandbox"]), [sandbox.toolset])
 
-    def test_registry_general_only_contains_time_without_backend(self) -> None:
+    def test_registry_without_backend_has_no_general_or_sandbox(self) -> None:
         registry = build_registry()
-        general = registry.get("builtin:general")
-        self.assertEqual({item.name for item in general.tools}, {"get_current_time"})
+        self.assertNotIn("builtin:general", registry.codes())
+        self.assertNotIn("builtin:sandbox", registry.codes())
 
 
 if __name__ == "__main__":

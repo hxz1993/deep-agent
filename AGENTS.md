@@ -31,7 +31,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.7`（Console供应商图标与模型测试反馈），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.8`（默认运行时时间工具与Agent删除反馈），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -193,7 +193,7 @@ v0.8.3 完成目录收敛，本地与线上都从同一份 `src/` 加载 Python 
 详见 [`项目结构指南`](docs/guides/project-structure.md)。
 
 目录按职责命名，不为外观一致移动公开 CLI、协议名或持久化字段。共享模型支持在
-`src/deep_agent/models/`，程序编排在 `ptc/`，通用工具在 `capabilities/general/`；
+`src/deep_agent/models/`，程序编排在 `ptc/`，运行环境工具在 `capabilities/environment.py`；
 Gateway 不保留指向企微 Adapter 的旧转发模块。Alpha 制品流水线仍按根目录 `ls` 分词后搬移打包；根目录受 Git 管理的名称不得包含空白或 Shell 通配符。
 设计原型统一放到 `docs/design/`，报告放到 `docs/reports/`，带空格的主题目录只能出现在这些子目录中。
 新增根目录条目前运行 `tests.unit.test_release_packaging`，不通过修改流水线绕过该约束。
@@ -214,7 +214,9 @@ HTTP → src/deep_agent/api/v1 → AgentRunner → pydantic_ai.Agent → Toolset
                                       └→ SessionStore (postgres/mysql/sqlite)
 ```
 
-工具包来源：`builtin:general` | `builtin:sandbox` | `builtin:ptc` | `builtin:web` | `mcp:*`
+工具包来源：`builtin:sandbox` | `builtin:ptc` | `builtin:web` | `builtin:document` | `mcp:*`
+
+`get_current_time(timezone="UTC")` 属于 `runtime:environment`（运行环境），业务 Agent 构建时固定注入一份，不属于可配置能力或 PTC 函数。旧 `builtin:general` 仅在能力规范化入口过滤，旧记录不批量迁移；读写、Agent 包与配置恢复复用该入口，不为旧版补回关联。时区取显式 IANA 名称，不能按语言、Header 或服务器 TZ 猜测；默认 UTC 保持原字符串结果。部署镜像须检查时区数据，见[指南](docs/guides/runtime-environment.md)。
 （DB + `mcp_servers/` 兜底）| `ui:builtin` | `ui:<package>`。Skill 与 ToolPackage 分离，Agent 通过
 `agents.skills` 显式选择，上传包元数据位于 `skill_packages`。
 

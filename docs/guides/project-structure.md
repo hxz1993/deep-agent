@@ -77,7 +77,6 @@ Adapter的原生SDK回复。Gateway不是MCP工具，也不包含模型执行引
 
 | 名称 | 来源 | 用途 |
 | --- | --- | --- |
-| `builtin:general` | `src/deep_agent/capabilities/general/` | 内置“通用工具”，提供 UTC 时间 |
 | `builtin:sandbox` | `src/deep_agent/sandbox/` | 内置“Python 沙箱”，提供无状态 Python 计算 |
 | `builtin:ptc` | `src/deep_agent/ptc/` | 程序编排，运行时只调用已授权且已披露的 MCP |
 | `builtin:web` | `src/deep_agent/web/` | Web Search 与 Web Fetch |
@@ -110,7 +109,7 @@ Skill 不能扩大 MCP 或其他工具授权。
 | --- | --- | --- |
 | `agent/` | `context/` | Agent 执行和上下文预算、压缩；跨层模型支持已移到 `models/` |
 | `api/` | `v1/` | 对外版本化 HTTP 路由，不因目录整理变更 REST/SSE 路径 |
-| `capabilities/` | `general/`、`mcp/`、`ui/` | 工具包注册与协议适配；`native/` 改为明确的 `general/`，协议 `builtin:general` 不变 |
+| `capabilities/` | `environment.py`、`mcp/`、`ui/` | 工具包注册与协议适配；运行环境工具默认注入，旧 `builtin:general` 引用只作规范化移除 |
 | `channels/` | `adapters/wecom/`、`gateway/` | 厂商协议与公共宿主分离；删除 Gateway 内转发企微解析、SDK 日志的旧兼容文件 |
 | `db/stores/` | `agent/`、`chat_session/`、`event/`、`llm_model/`、`mcp/`、`model_catalog/`、`skill_package/`、`ui_tool/`、`ui_tool_package/` | 按实体组织 Store，已有方言文件保持在实体内部；单文件 Store 不为了外观一致额外嵌套 |
 | `core/` | 无额外子层 | `lib/const.py` 的 MCP 共享常量移为 `core/mcp_constants.py`；保持轻量导入，不触发配置或工具运行时加载 |

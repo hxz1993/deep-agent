@@ -17,6 +17,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [domain.code for domain in domains],
             [
+                "runtime:environment",
                 "runtime:channel",
                 "runtime:planning",
                 "runtime:conversation-history",
@@ -30,6 +31,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [[tool.name for tool in domain.tools] for domain in domains],
             [
+                ["get_current_time"],
                 ["channel_message"],
                 ["write_plan"],
                 ["search_conversation_history", "read_conversation_event"],
@@ -72,6 +74,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
         packages = await list_tool_packages(ctx)
 
         self.assertFalse(any(item.code.startswith("runtime:") for item in packages))
+        self.assertNotIn("builtin:general", [item.code for item in packages])
 
     async def test_tool_package_api_exposes_only_current_product_builtin_mcp(self) -> None:
         ctx = SimpleNamespace(

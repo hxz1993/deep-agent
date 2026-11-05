@@ -5,6 +5,8 @@ from typing import Any
 from urllib.parse import quote
 
 from loguru import logger
+from deep_agent.capabilities.codes import ENVIRONMENT_TOOL_NAMES, environment_name_conflict
+from deep_agent.core.exceptions import ToolPackageError
 from pydantic_ai import ExternalToolset
 from pydantic_ai.tools import ToolDefinition
 
@@ -212,6 +214,8 @@ async def prepare_ui_tool_packages_for_spec(
     effective = await load_effective_ui_tools(stores, spec)
     valid_definitions: list[UIToolRecord] = []
     for definition in effective.definitions:
+        if definition.name in ENVIRONMENT_TOOL_NAMES:
+            raise ToolPackageError(environment_name_conflict(definition.name))
         try:
             build_args_validator(definition)
         except ValueError as exc:

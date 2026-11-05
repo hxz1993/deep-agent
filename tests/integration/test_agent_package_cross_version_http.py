@@ -27,6 +27,7 @@ from tests.unit.test_agent_output_configuration import OUTPUT_CONFIG
 from tests.unit.test_agent_packages import package_files
 
 OLD_SHA = "552b7b25291e85a23b22244d5178823f1c60570e"
+TIME_BASELINE_SHA = "ba8cc0faf22516f5c540e9bbd5f2707b61e07080"  # Published v0.15.7, before runtime time tools.
 REPO = Path(__file__).resolve().parents[2]
 SERVER = REPO / "tests/integration/helpers/agent_package_http_server.py"
 HEADERS = {"user": "compatibility-operator", "authorization": "Bearer synthetic-test"}
@@ -142,6 +143,48 @@ class AgentPackageCrossVersionHttpTests(unittest.IsolatedAsyncioTestCase):
     def record(self, scenario, raw, **extra):
         self.evidence.append({"id": scenario, "zip_sha256": hashlib.sha256(raw).hexdigest(), **extra})
 
+    async def test_runtime_time_tool_packages_install_on_real_v0157_and_back(self):
+        baseline = self.root / "old-v0.15.7"
+        baseline.mkdir()
+        raw = subprocess.run(["git", "archive", TIME_BASELINE_SHA, "src", "tests/helpers", "tests/__init__.py"],
+            cwd=REPO, check=True, capture_output=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
+            tar.extractall(baseline, filter="data")
+        old, ready, _database = await self.start(baseline, "v0157-data")
+
+        # NEW's formal exporter must not fabricate the retired selectable tool.
+        source = await self.create(self.new, "runtime time export", capabilities=[])
+        exported = await self.export(self.new, source["id"])
+        with zipfile.ZipFile(io.BytesIO(exported)) as files:
+            self.assertEqual(json.loads(files.read("agent.json"))["capabilities"], [])
+        target, _ = await self.install(old, exported, "v0157 installed new time package")
+        replaced, _ = await self.install(old, exported, "v0157 overwritten new time package", target=target["id"])
+        self.assertEqual(replaced["capabilities"], [])
+        self.record("TIME-NEW-TO-0157", exported, baseline_sha=TIME_BASELINE_SHA,
+                    create=True, overwrite=True, no_general_association=True)
+
+        # Both old selection states are real exports from the frozen source,
+        # then installed through NEW's preview/install endpoints in both modes.
+        for index, capabilities in enumerate(([], ["builtin:general"])):
+            created = await old.post("/api/v1/agents", json={"name": f"v0157 time source {index}",
+                "prompt": "synthetic time compatibility fixture", "model_id": ready["model_id"],
+                "capabilities": capabilities, "skills": []})
+            self.assertEqual(created.status_code, 201, created.text)
+            old_export = await self.export(old, created.json()["id"])
+            with zipfile.ZipFile(io.BytesIO(old_export)) as files:
+                self.assertEqual(json.loads(files.read("agent.json"))["capabilities"], capabilities)
+            imported, preview = await self.install(self.new, old_export, f"new installed time {index}")
+            self.assertFalse(any(item["code"] == "builtin:general" for item in preview["resources"]))
+            self.assertEqual(imported["capabilities"], [])
+            overwritten, _ = await self.install(self.new, old_export, f"new overwritten time {index}", target=imported["id"])
+            self.assertEqual(overwritten["capabilities"], [])
+            second_export = await self.export(self.new, overwritten["id"])
+            with zipfile.ZipFile(io.BytesIO(second_export)) as files:
+                self.assertEqual(json.loads(files.read("agent.json"))["capabilities"], [])
+            self.record(f"TIME-0157-TO-NEW-{index}", old_export, baseline_sha=TIME_BASELINE_SHA,
+                        source_general=bool(capabilities), create=True, overwrite=True,
+                        second_export_has_no_runtime_codes=True)
+
     async def test_formal_http_cross_version_install_matrix(self):
         # Seed actual portable Skill/UI resources, then generate the tested ZIP
         # through NEW's formal export endpoint; the seed archive is not the
@@ -248,6 +291,8 @@ class AgentPackageCrossVersionHttpTests(unittest.IsolatedAsyncioTestCase):
         for code in ("deepcube-assistant", "deeptable-assistant"):
             historical_raw = (REPO / "src/deep_agent/agent_packages/builtin" / f"{code}.zip").read_bytes()
             created, _ = await self.install(self.new, historical_raw, f"historical {code}")
+            self.assertNotIn("builtin:general", created["capabilities"])
+            self.assertNotIn("runtime:environment", created["capabilities"])
             self.assertFalse(created["structured_output_enabled"])
             self.assertIsNone((await self.new.get(f'/api/v1/agents/{created["id"]}/output-config')).json()["output_config"])
             target = await self.create(self.new, f"historical overwrite target {code}", structured_output_enabled=True, output_config=OUTPUT_CONFIG)

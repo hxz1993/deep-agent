@@ -100,6 +100,22 @@ test("任务规划只暴露完整快照写入工具", () => {
   assert.doesNotMatch(html, /checkbox|switch/);
 });
 
+test("运行环境作为只读运行时领域展示时间工具与时区说明", () => {
+  const ui = loadSystemToolsUi();
+  const html = ui.systemToolDomain({
+    code: "runtime:environment",
+    label: "运行环境",
+    description: "所有业务 Agent 默认可用，时间默认 UTC。",
+    tools: [{ name: "get_current_time", display_name: "获取当前时间", source: "DeepAgent", injection_condition: "所有业务 Agent Run 自动注入", description: "支持可选 timezone 参数，例如 Asia/Shanghai。" }],
+  });
+  assert.match(html, /runtime:environment/);
+  assert.match(html, /运行环境/);
+  assert.match(html, /get_current_time/);
+  assert.match(html, /timezone/);
+  assert.match(html, /Asia\/Shanghai/);
+  assert.doesNotMatch(html, /checkbox|switch|builtin:general/);
+});
+
 test("Skill 三个工具归 Skill，文件工具独立归文件领域", () => {
   const ui = loadSystemToolsUi();
   const skillHtml = ui.systemToolDomain({

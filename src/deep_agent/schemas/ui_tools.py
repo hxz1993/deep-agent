@@ -9,6 +9,7 @@ from jsonschema.validators import validator_for
 
 from deep_agent.db.models import UiToolDefinition, UiToolPackage
 from deep_agent.time import UtcDatetime
+from deep_agent.capabilities.codes import ENVIRONMENT_TOOL_NAMES, environment_name_conflict
 
 if TYPE_CHECKING:
     from deep_agent.capabilities.ui.types import UIToolRecord
@@ -59,6 +60,8 @@ class UiToolCreate(BaseModel):
     def validate_name(cls, value: str) -> str:
         if not TOOL_NAME_PATTERN.fullmatch(value):
             raise ValueError("name must match ^[a-z][a-z0-9_]{1,120}$")
+        if value in ENVIRONMENT_TOOL_NAMES:
+            raise ValueError(environment_name_conflict(value))
         if value in RESERVED_TOOL_NAMES:
             raise ValueError(f"name {value!r} is reserved for builtin tools")
         return value

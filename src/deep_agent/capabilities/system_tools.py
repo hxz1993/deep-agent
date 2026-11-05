@@ -7,6 +7,16 @@ __all__ = ["list_system_tool_domains"]
 
 _SYSTEM_TOOL_DOMAINS = (
     SystemToolDomain(
+        code="runtime:environment",
+        label="运行环境",
+        description="所有业务 Agent 默认可用的运行环境工具，无需关联工具包。",
+        tools=(SystemToolDescription(
+            name="get_current_time", display_name="获取当前时间", source="DeepAgent",
+            injection_condition="所有业务 Agent Run 自动注入，不依赖能力关联",
+            description="获取实际当前时间，默认 UTC；可指定 Asia/Shanghai 等 IANA 时区，返回包含 UTC 偏移的 ISO 8601 字符串。",
+        ),),
+    ),
+    SystemToolDomain(
         code="runtime:channel", label="渠道消息",
         description="向本轮来源群聊或私聊发送消息和附件，无需配置MCP。",
         tools=(SystemToolDescription(

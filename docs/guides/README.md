@@ -36,6 +36,8 @@
 
 ## 实现经验
 
+运行环境时间工具、时区与旧 Agent 包兼容见[运行环境工具](runtime-environment.md)。
+
 | 文档 | 用途 |
 | --- | --- |
 | [`application-references.md`](application-references.md) | 数据库003逻辑引用、发布顺序、迁移回退及验收 |

@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.15.7`（测试分支）。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.15.8`（测试分支）。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -213,11 +213,10 @@ Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP�
 DeepAgent 当前支持：
 
 - 内置工具：
-  - `builtin:general`（通用工具）：只包含 `get_current_time`。
   - `builtin:sandbox`（Python 沙箱）：只包含 `execute_python`。
-  - `builtin:web`（公开网络）：包含 `web_search`、`web_fetch` 与按模型能力注入的
-    `web_image_view`，默认不关联。
-- 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、
+  - `builtin:web`（公开网络）：包含 `web_search`、`web_fetch`，默认不关联。
+- 运行环境 `runtime:environment` 的 `get_current_time(timezone="UTC")` 对所有业务 Agent 默认可用，返回带偏移的 ISO 时间，支持 `Asia/Shanghai` 等 IANA 时区；无需关联工具包，不进入 PTC。旧 `builtin:general` 引用在读取、保存和安装导出时规范化移除，不回写历史数据。详见[运行环境工具](docs/guides/runtime-environment.md)。
+- 系统工具不是 ToolPackage。Harness任务规划、`load_capability`、Skill Resource、`read_file`、`view_image`、
   `export_file_to_download_center`、`read_tool_result`、`search_tools` 和 MCP Resource
   由运行时按 Agent/Run 条件自动注入，只在 Console 的只读“系统工具”目录中说明。
 - 每个Run只暴露Harness `Planning`的`write_plan`完整快照工具。计划仍以普通Tool Call/Result

@@ -170,14 +170,35 @@ async function confirmAction(options) {
 
 // The server supplies current impact and binds the confirmation to that set.
 // A changed set requires another explicit confirmation, never an automatic retry.
-async function deleteWithImpactConfirmation(path, { title, describeImpact, confirmLabel }) {
+async function withDeletionProgress(label, action) {
+  if (!label) return action();
+  let dialog = document.getElementById("consoleDeletionProgress");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "consoleDeletionProgress";
+    dialog.className = "console-action-dialog console-deletion-progress";
+    dialog.setAttribute("aria-label", "正在处理删除请求");
+    dialog.innerHTML = '<div role="status" aria-live="polite"><span class="loading-spinner" aria-hidden="true"></span><span data-deletion-progress-label></span></div>';
+    dialog.addEventListener("cancel", (event) => event.preventDefault());
+    document.body.appendChild(dialog);
+  }
+  dialog.querySelector("[data-deletion-progress-label]").textContent = label;
+  dialog.showModal();
+  try {
+    return await action();
+  } finally {
+    dialog.close();
+  }
+}
+
+async function deleteWithImpactConfirmation(path, { title, describeImpact, confirmLabel, progressLabel }) {
   let confirmationToken;
   for (;;) {
     try {
-      await apiFetch(path, {
+      await withDeletionProgress(progressLabel, () => apiFetch(path, {
         method: "DELETE",
         ...(confirmationToken ? { body: JSON.stringify({ confirmation_token: confirmationToken }) } : {}),
-      });
+      }));
       return true;
     } catch (error) {
       const detail = error.detail;

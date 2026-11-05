@@ -25,7 +25,7 @@ function harness(fetcher) {
 
 test("卡片与列表按已配置的包和服务去重计数，零配置整体标记为空", async () => {
   const configured = { ...agent,
-    capabilities: ["builtin:general", "builtin:sandbox", "builtin:general", "ui:forms", "mcp:finance", "mcp:finance"],
+    capabilities: ["builtin:ptc", "builtin:sandbox", "builtin:ptc", "ui:forms", "mcp:finance", "mcp:finance"],
     skills: ["analysis", "analysis"],
   };
   const { admin, elements } = harness(path => path.endsWith("/agents") ? [configured, { ...agent, id: "empty" }] : []);

@@ -123,8 +123,8 @@ def construct_fixture(case):
     skills = list(incoming_skills)
     expected_missing = set()
     if case['builtin'] in ('matched', 'mixed'):
-        caps.append('builtin:general'); skills.append('deepfos-readonly-analysis')
-        statuses[('builtin_tool', 'builtin:general')] = 'reuse'
+        caps.append('builtin:web'); skills.append('deepfos-readonly-analysis')
+        statuses[('builtin_tool', 'builtin:web')] = 'reuse'
         statuses[('builtin_skill', 'deepfos-readonly-analysis')] = 'reuse'
     if case['builtin'] in ('missing', 'mixed'):
         caps.append('builtin:matrix-unavailable'); skills.append('matrix-unavailable-skill')

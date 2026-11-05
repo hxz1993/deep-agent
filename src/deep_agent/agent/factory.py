@@ -34,6 +34,7 @@ from deep_agent.agent.tool_discovery import (
     search_deferred_tools,
 )
 from deep_agent.capabilities.codes import is_ptc_selected
+from deep_agent.capabilities.environment import build_environment_toolset
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
 from deep_agent.ptc.builtin import BuiltinPtcToolset
@@ -205,7 +206,7 @@ def _toolsets_for_spec(
     image_view_toolset: Any | None = None,
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
-    toolsets: list[Any] = []
+    toolsets: list[Any] = [build_environment_toolset()]
     ptc_enabled = is_ptc_selected(spec.capabilities)
 
     def builtin_ptc(toolset: Any, *names: str) -> Any:

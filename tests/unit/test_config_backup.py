@@ -291,7 +291,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             generated = list(output_root.rglob("*")) if output_root.exists() else []
             self.assertFalse([path for path in generated if path.is_file()])
 
-    async def test_export_canonicalizes_legacy_ptc_capability(self) -> None:
+    async def test_export_canonicalizes_ptc_and_drops_retired_time_without_rewriting_source(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
             root = Path(tmpdir)
             source_path = root / "source.db"
@@ -299,7 +299,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
             with sqlite3.connect(source_path) as connection:
                 connection.execute(
                     "UPDATE agents SET capabilities = ? WHERE id = 'agent-1'",
-                    ('["builtin:code-mode","mcp:remote"]',),
+                    ('["builtin:general","builtin:code-mode","mcp:remote"]',),
                 )
 
             result = await export_backup(
@@ -318,6 +318,9 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 json.loads(str(capabilities)),
                 ["builtin:ptc", "mcp:remote"],
             )
+            with sqlite3.connect(source_path) as connection:
+                original = connection.execute("SELECT capabilities FROM agents WHERE id = 'agent-1'").fetchone()[0]
+            self.assertEqual(json.loads(original), ["builtin:general", "builtin:code-mode", "mcp:remote"])
 
     async def test_004_backup_keeps_required_model_shape(self) -> None:
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete_backup_004_") as directory:

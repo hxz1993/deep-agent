@@ -212,3 +212,106 @@ test('initial usage bounds publish only to page memory and remain restorable on 
   assert.equal(h.controller.snapshot().report.sentinel, 'restored');
   h.controller.deactivate();
 });
+
+
+test('usage details render before slow report and neither request waits for the other', async () => {
+  const report = deferred(), details = deferred();
+  const h = harness(path => path.includes('/details?') ? details.promise : report.promise, {report:null,details:null});
+  assert.equal(h.requests.length,2);
+  details.resolve({items:[{key:'a',name:'Ready table',requests:1,total_tokens:10}],total:1}); await settle();
+  assert.match(h.nodes.get('#usageDetailRows').innerHTML,/Ready table/);
+  assert.equal(h.controller.snapshot().report,null);
+  assert.equal(h.controller.snapshot().detailBusy,false);
+  report.resolve({summary:{total_tokens:10,requests:1},dates:['2026-09-16']}); await settle();
+  assert.equal(h.controller.snapshot().busy,false);
+  assert.match(h.nodes.get('#usageDetailRows').innerHTML,/Ready table/);
+});
+
+test('usage report failure retains independently loaded details and retries only report', async () => {
+  let reports = 0;
+  const h = harness(async path => {
+    if(path.includes('/details?')) return {items:[{key:'a',name:'Ready table',requests:1}],total:1};
+    if(++reports === 1) throw Error('trend unavailable');
+    return {summary:{requests:1}};
+  }, {report:null,details:null});
+  await settle(); await settle();
+  assert.match(h.root.html,/trend unavailable/);
+  assert.match(h.nodes.get('#usageDetailRows').innerHTML,/Ready table/);
+  const detailReads=h.requests.filter(item=>item.path.includes('/details?')).length;
+  await h.click('retry-report');
+  assert.equal(h.controller.snapshot().reportError,'');
+  assert.equal(h.requests.filter(item=>item.path.includes('/details?')).length,detailReads);
+});
+
+test('usage table failure does not discard report and isolated retry preserves its data', async () => {
+  let details = 0;
+  const h=harness(async path=>{
+    if(!path.includes('/details?')) return {summary:{total_tokens:10,requests:1}};
+    if(++details===1) throw Error('table unavailable');
+    return {items:[],total:0};
+  },{report:null,details:null});
+  await settle(); await settle();
+  assert.equal(h.controller.snapshot().report.summary.total_tokens,10);
+  assert.match(h.nodes.get('#usageDetailRows').innerHTML,/table unavailable/);
+  const reportReads=h.requests.filter(item=>!item.path.includes('/details?')).length;
+  await h.click('retry-details');
+  assert.equal(h.controller.snapshot().detailError,'');
+  assert.equal(h.requests.filter(item=>!item.path.includes('/details?')).length,reportReads);
+});
+
+
+test('late usage report keeps a newer series focus selected while the table was already ready', async () => {
+  const report = deferred();
+  const h = harness(path => path.includes('/details?') ? Promise.resolve({items:[{key:'a',name:'Ready table',requests:1}],total:1}) : report.promise,
+    {report:null,details:null});
+  await settle();
+  await h.event('[data-usage-series]',{usageSeries:'a'});
+  assert.equal(h.controller.snapshot().focused,'a');
+  report.resolve({summary:{requests:1}}); await settle();
+  assert.equal(h.controller.snapshot().focused,'a');
+  assert.match(h.nodes.get('#usageDetailRows').innerHTML,/Ready table/);
+});
+
+
+test('usage navigation aborts both pending reads and late old results cannot replace the new filter', async () => {
+  const oldReport = deferred(), oldDetails = deferred(), newReport = deferred(), newDetails = deferred();
+  const h = harness(path => {
+    const url = new URL(path, 'http://test');
+    const fresh = url.searchParams.get('agent_id') === 'new-agent';
+    return (url.pathname.endsWith('/details') ? fresh ? newDetails : oldDetails : fresh ? newReport : oldReport).promise;
+  }, {report:null,details:null});
+  assert.equal(h.requests.length,2);
+  h.controller.deactivate();
+  assert.ok(h.requests.slice(0,2).every(item => item.signal.aborted));
+  h.controller.activate({filters:{...filters,agent_id:'new-agent'}});
+  assert.equal(h.requests.length,4);
+  assert.ok(h.requests.slice(2).every(item => !item.signal.aborted));
+  newDetails.resolve({items:[{key:'new-agent',name:'Fresh table',requests:2}],total:1});
+  newReport.resolve({summary:{requests:2,total_tokens:20},sentinel:'fresh'});
+  await settle(); await settle();
+  oldDetails.resolve({items:[{key:'old-agent',name:'Stale table',requests:99}],total:1});
+  oldReport.resolve({summary:{requests:99,total_tokens:999},sentinel:'stale'});
+  await settle(); await settle();
+  const snapshot = h.controller.snapshot();
+  assert.equal(snapshot.filters.agent_id,'new-agent');
+  assert.equal(snapshot.report.sentinel,'fresh');
+  assert.equal(snapshot.report.summary.total_tokens,20);
+  assert.equal(snapshot.details.items[0].key,'new-agent');
+  assert.match(h.nodes.get('#usageDetailRows').innerHTML,/Fresh table/);
+  assert.doesNotMatch(h.nodes.get('#usageDetailRows').innerHTML,/Stale table/);
+  h.controller.deactivate();
+});
+
+
+test('usage request count stays unknown before report arrives and preserves a completed zero', async () => {
+  const report = deferred();
+  const h = harness(path => path.includes('/details?') ? Promise.resolve({items:[],total:0}) : report.promise,
+    {report:null,details:null});
+  await settle();
+  assert.match(h.root.html,/<small>模型请求<\/small><strong>—<\/strong>/);
+  assert.doesNotMatch(h.root.html,/<small>模型请求<\/small><strong>0<\/strong>/);
+  report.resolve({summary:{requests:0,total_tokens:0}});
+  await settle();
+  assert.match(h.root.html,/<small>模型请求<\/small><strong>0<\/strong>/);
+  h.controller.deactivate();
+});

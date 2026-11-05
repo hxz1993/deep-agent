@@ -51,7 +51,8 @@
       label: block.querySelector("pre")?.getAttribute?.("aria-label") || "",
       touched: Boolean(block.dataset.codeDisclosureTouched), wrapped: block.classList.contains("is-wrapped"),
       wrapTouched: Boolean(block.dataset.codeWrapTouched),
-    })).filter(item => item.touched || item.wrapTouched);
+      g2View: block.closest?.("deepagent-g2-chart")?.dataset.g2View,
+    })).filter(item => item.touched || item.wrapTouched || item.g2View === "config");
   }
 
   function restoreCodeState(root, saved = []) {
@@ -59,6 +60,7 @@
     for (const item of saved) {
       const block = item.toolCallId ? blocks.find(candidate => candidate.closest?.("[data-tool-call-id]")?.dataset.toolCallId === item.toolCallId && (candidate.querySelector("pre")?.getAttribute?.("aria-label") || "") === item.label) : blocks[item.index];
       if (!block || (block.dataset.codeLanguage || "") !== item.language) continue;
+      if (item.g2View === "chart" || item.g2View === "config") block.closest?.("deepagent-g2-chart")?._setView?.(item.g2View, false);
       if (item.touched) { block.dataset.codeDisclosureTouched = "1"; setCodeExpanded(block, item.expanded); }
       if (item.wrapTouched) {
         block.dataset.codeWrapTouched = "1";
@@ -190,6 +192,9 @@
           if (language === "mermaid") {
             return `<div class="mermaid-diagram" data-mermaid-state="pending">${codeBlock(escapeHtml(text), language, { source: text })}</div>\n`;
           }
+          if (language === "g2") {
+            return `<deepagent-g2-chart data-g2-state="${highlightCode ? "pending" : "streaming"}"><div class="g2-chart-toolbar"><div class="console-segmented" role="group" aria-label="G2 展示方式"><button type="button" data-g2-view="chart" class="active" aria-pressed="true">图表</button><button type="button" data-g2-view="config" aria-pressed="false">配置</button></div></div><div class="g2-chart-config" hidden>${codeBlock(escapeHtml(text), language, { source: text, label: "G2 图表配置", expanded: true })}</div></deepagent-g2-chart>\n`;
+          }
 
           let highlighted = escapeHtml(text);
           if (highlightCode && typeof global.hljs !== "undefined") {
@@ -278,7 +283,8 @@
     try { raw = parser.parse(text); } finally { highlightCode = previousHighlight; }
     return global.DOMPurify.sanitize(raw, {
       USE_PROFILES: { html: true, mathMl: true, svg: true },
-      ADD_ATTR: ["target", "rel", "class", "data-lang", "data-mermaid-state"],
+      ADD_TAGS: ["deepagent-g2-chart"],
+      ADD_ATTR: ["target", "rel", "class", "data-lang", "data-mermaid-state", "data-g2-state"],
     });
   }
 

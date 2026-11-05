@@ -11,6 +11,7 @@ import { ensureSessionViewTemplate } from "./session-view-shell.js?v=20261025-re
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
 const PAGE_SIZE = 50;
+const OVERVIEW_SECTIONS = ["metrics", "trend", "agents", "activity"];
 const button = (label, action, extra = "", kind = "") => `<button type="button" class="btn diagnostics-button ${kind}" data-session-action="${action}" ${extra}>${label}</button>`;
 const empty = message => `<div class="diagnostics-empty">${e(message)}</div>`;
 export function userCardHtml(id, profiles = {}) {
@@ -42,7 +43,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   const userReader = createSessionReader(diagnosticRequest);
   let userTimer = null, userMatches = [], userAfter = null, userSearchQuery = "", userSearchBusy = false, userSearchSucceeded = false;
   const reader = createSessionReader(diagnosticRequest), contextReader = createSessionReader(diagnosticRequest), eventsReader = createSessionReader(diagnosticRequest);
-  const state = { active: false, route: null, filters: {}, data: null, listTotal: null, busy: false, error: "", users: {}, agents: new Map(), channelAgents: new Set(), showUsers: false, showAgents: false };
+  const state = { active: false, route: null, filters: {}, data: null, listTotal: null, busy: false, error: "", users: {}, agents: new Map(), channelAgents: new Set(), showUsers: false, showAgents: false, overviewStatus: {}, overviewErrors: {} };
   let detail = null, detailData = null, selectBinding = null, scrollToUsers = false, eventsLoading = false, trendObserver = null;
   let detailMountGeneration = 0;
   let releaseColumns = () => {}, columnWidths = null, listFilters = {};
@@ -108,20 +109,46 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       ${button(`${icon("rss")}渠道详情`, "channels", 'title="渠道详情" aria-label="渠道详情"', "diagnostic-channel-entry")}${viewSwitchHtml()}</div></div>`;
   }
   function chipsHtml() { return [state.filters.has_questions === "true" || state.filters.has_questions === true ? ["has_questions", "范围内有提问"] : null, state.filters.has_execution_error === "true" || state.filters.has_execution_error === true ? ["has_execution_error", "范围内有执行异常"] : null].filter(Boolean).map(([key, label]) => `<button type="button" class="diagnostic-filter-chip" data-clear-session="${key}">${label}${icon("x")}</button>`).join(""); }
+  const overviewPlaceholder = (section, fallback) => state.overviewErrors[section]
+    ? `<div class="diagnostics-notice" data-kind="error" role="alert">${e(state.overviewErrors[section])} ${button("重试", "retry-overview", `data-overview-section="${section}"`, "text")}</div>`
+    : empty(state.overviewStatus[section] === "loading" ? "正在加载…" : fallback);
+  function patchOverview(section) {
+    if (!state.active || state.route?.view !== "overview") return;
+    const selectors = {metrics:["[data-overview-panel=metrics]"], trend:[".diagnostic-chart-section"], agents:[".diagnostic-agent-section"], activity:[".diagnostic-recent", ".diagnostic-dashboard-side"]};
+    const existing = section && root.querySelector(selectors[section][0]);
+    if (section && !existing) { render(); return; }
+    if (section) {
+      const scroll = captureScroll(), template = document.createElement("template");
+      template.innerHTML = overviewHtml(state.data);
+      if (section === "trend") disconnectTrend();
+      for (const selector of selectors[section]) root.querySelector(selector)?.replaceWith(template.content.querySelector(selector));
+      if (section === "agents") {
+        template.innerHTML = filtersHtml();
+        const selector = '[data-diagnostic-control="agent_id"]';
+        root.querySelector(selector)?.replaceWith(template.content.querySelector(selector));
+      }
+      if (section === "trend") observeTrend();
+      restoreScroll(scroll); icons();
+    }
+    root.setAttribute("aria-busy", String(state.busy));
+    const status = root.querySelector(".diagnostic-loading");
+    if (status) status.textContent = state.busy ? "正在加载…" : "";
+    for (const control of root.querySelectorAll?.('#diagnosticSessionFilters button[type="submit"], button[form="diagnosticSessionFilters"][type="submit"], [data-session-action="retry-overview"]') || []) control.disabled = state.busy;
+  }
   function overviewHtml(data) {
     const metrics = data?.metrics || {}, questions = data?.recent_questions || [], errors = data?.recent_errors || [], users = data?.active_users || [], agents = data?.agents || [];
     const max = Math.max(1, ...agents.map(agent => agent.question_count));
     const stats = [["session_count", "会话数", "messages-square", "blue"], ["question_count", "提问数", "message-circle-more", "purple"], ["active_user_count", "活跃用户", "user-round", "green"], ["error_session_count", "含异常会话", "triangle-alert", "red"]];
-    return `<div class="diagnostic-stats">${stats.map(([key, label, glyph, tone]) => `
-      <button type="button" data-stat="${key}" ${!data ? "disabled" : ""}>
+    return `<div data-overview-panel="metrics">${state.overviewErrors.metrics ? overviewPlaceholder("metrics", "") : ""}<div class="diagnostic-stats">${stats.map(([key, label, glyph, tone]) => `
+      <button type="button" data-stat="${key}" ${!data?.metrics ? "disabled" : ""}>
         <span class="diagnostic-stat-icon ${tone}">${icon(glyph)}</span>
         <span><small>${label}</small><strong>${metrics[key] == null ? "—" : Number(metrics[key]).toLocaleString()}</strong></span>
         <span class="diagnostic-stat-arrow">${icon("arrow-up-right")}</span>
-      </button>`).join("")}</div>
+      </button>`).join("")}</div></div>
       <div class="diagnostic-dashboard">
-        <section class="diagnostic-chart-section"><header><h2>提问趋势</h2><span title="${e(state.filters.timezone)}">提问数 · ${e(state.filters.timezone)}</span></header><div class="diagnostic-trend-host">${questionTrendHtml(data?.trend)}</div></section>
+        <section class="diagnostic-chart-section"><header><h2>提问趋势</h2><span title="${e(state.filters.timezone)}">提问数 · ${e(state.filters.timezone)}</span></header><div class="diagnostic-trend-host">${state.overviewStatus.trend === "loading" || state.overviewErrors.trend ? overviewPlaceholder("trend", "") : questionTrendHtml(data?.trend)}</div></section>
         <section class="diagnostic-agent-section"><header><h2>Agent 分布</h2><span>提问数</span></header>
-          <div class="diagnostic-agent-bars">${agents.slice(0, state.showAgents ? agents.length : 8).map((agent, index) => `<button type="button" data-agent-drill="${e(agent.agent_id)}" data-tone="${index % 3}"><span title="${e(agent.agent_name || agent.agent_id)}">${e(agent.agent_name || agent.agent_id)}</span><span class="diagnostic-bar-track"><i style="width:${Math.max(0, Math.min(100, agent.question_count / max * 100))}%"></i></span><b>${Number(agent.question_count)}</b></button>`).join("") || empty("暂无提问")}</div>
+          <div class="diagnostic-agent-bars">${agents.slice(0, state.showAgents ? agents.length : 8).map((agent, index) => `<button type="button" data-agent-drill="${e(agent.agent_id)}" data-tone="${index % 3}"><span title="${e(agent.agent_name || agent.agent_id)}">${e(agent.agent_name || agent.agent_id)}</span><span class="diagnostic-bar-track"><i style="width:${Math.max(0, Math.min(100, agent.question_count / max * 100))}%"></i></span><b>${Number(agent.question_count)}</b></button>`).join("") || overviewPlaceholder("agents", "暂无提问")}</div>
           ${agents.length > 8 ? button(state.showAgents ? "收起" : `展开全部 ${agents.length} 个 Agent`, "agents", "", "text") : ""}
         </section>
         <section class="diagnostic-recent"><header><h2>最近提问</h2>${button(`查看全部${icon("arrow-right")}`, "all-questions", "", "text")}</header>
@@ -129,11 +156,11 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
             <span class="diagnostic-question-icon">${icon("message-circle-more")}</span>
             <span class="diagnostic-question-copy"><strong title="${e(question.summary)}">${e(question.summary || "附件 / 上下文输入")}</strong><span class="diagnostic-question-meta"><span title="${e(question.agent_name || question.agent_id)}">${e(question.agent_name || question.agent_id)}</span><span aria-hidden="true">·</span>${userCardHtml(question.user_id, state.users)}<span aria-hidden="true">·</span><time title="${e(diagnosticTime(question.created_at))}">${e(shortQuestionTime(question.created_at))}</time></span></span>
             <span class="diagnostic-question-arrow">${icon("arrow-right")}</span>
-          </button>`).join("") || empty("当前范围暂无提问")}</div>
+          </button>`).join("") || overviewPlaceholder("activity", "当前范围暂无提问")}</div>
         </section>
         <div class="diagnostic-dashboard-side">
-          <section><header><h2>最近异常</h2></header>${errors.map((error, index) => `<button type="button" class="diagnostic-error-item" data-error-index="${index}"><span class="diagnostic-error-icon">${icon("triangle-alert")}</span><span class="diagnostic-error-copy"><strong>${e(error.message || error.summary || error.code || "执行异常")}</strong><small><span title="${e(error.agent_name || error.agent_id)}">${e(error.agent_name || error.agent_id)}</span><time title="${e(diagnosticTime(error.created_at))}">${e(shortQuestionTime(error.created_at))}</time></small></span></button>`).join("") || empty("当前范围没有执行异常")}</section>
-          <section id="diagnosticActiveUsers" tabindex="-1"><header><h2>平台活跃用户(提问)</h2>${users.length > 5 ? button(state.showUsers ? "收起" : `展开${icon("arrow-right")}`, "users", "", "text") : ""}</header>${users.slice(0, state.showUsers ? 20 : 5).map((user, index) => `<button type="button" class="diagnostic-active-user" data-user-drill="${e(user.user_id)}"><span class="diagnostic-user-rank">${index + 1}</span><span class="diagnostic-ranking-identity"><span class="diagnostic-identity-icon">${icon("user-round")}</span>${renderUserIdentity(state.users[user.user_id] || {}, {userId:user.user_id, compact:true, copyable:false})}</span><span class="diagnostic-user-count" title="范围内提问数">${Number(user.question_count)}</span></button>`).join("") || empty("暂无活跃账号")}</section>
+          <section><header><h2>最近异常</h2></header>${errors.map((error, index) => `<button type="button" class="diagnostic-error-item" data-error-index="${index}"><span class="diagnostic-error-icon">${icon("triangle-alert")}</span><span class="diagnostic-error-copy"><strong>${e(error.message || error.summary || error.code || "执行异常")}</strong><small><span title="${e(error.agent_name || error.agent_id)}">${e(error.agent_name || error.agent_id)}</span><time title="${e(diagnosticTime(error.created_at))}">${e(shortQuestionTime(error.created_at))}</time></small></span></button>`).join("") || overviewPlaceholder("activity", "当前范围没有执行异常")}</section>
+          <section id="diagnosticActiveUsers" tabindex="-1"><header><h2>平台活跃用户(提问)</h2>${users.length > 5 ? button(state.showUsers ? "收起" : `展开${icon("arrow-right")}`, "users", "", "text") : ""}</header>${users.slice(0, state.showUsers ? 20 : 5).map((user, index) => `<button type="button" class="diagnostic-active-user" data-user-drill="${e(user.user_id)}"><span class="diagnostic-user-rank">${index + 1}</span><span class="diagnostic-ranking-identity"><span class="diagnostic-identity-icon">${icon("user-round")}</span>${renderUserIdentity(state.users[user.user_id] || {}, {userId:user.user_id, compact:true, copyable:false})}</span><span class="diagnostic-user-count" title="范围内提问数">${Number(user.question_count)}</span></button>`).join("") || overviewPlaceholder("activity", "暂无活跃账号")}</section>
         </div>
       </div>`;
   }
@@ -192,15 +219,39 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     else state.filters.limit = PAGE_SIZE;
     state.listTotal = pageChange ? state.data?.total ?? state.listTotal : null;
     try { state.filters = sessionRange(state.filters); } catch (error) { reader.cancel(); state.busy = false; state.data = null; state.error = error.message; render(); return; }
-    publishFilters(); const scope = reader.begin(); state.busy = true; state.error = ""; state.data = null; restoreScroll(); render();
+    publishFilters(); const scope = reader.begin(); state.busy = true; state.error = ""; state.data = null;
+    state.overviewStatus = state.route.view === "overview" ? Object.fromEntries(OVERVIEW_SECTIONS.map(key => [key, "loading"])) : {};
+    state.overviewErrors = {}; restoreScroll(); render();
+    if (state.route.view === "overview") {
+      const queue = [...OVERVIEW_SECTIONS];
+      // Match the server's two-heavy-query budget; do not fan out all panels at once.
+      const worker = async () => {
+        while (queue.length && scope.current() && state.active) await loadOverviewSection(scope, queue.shift());
+      };
+      await Promise.all([worker(), worker()]);
+      if (scope.current() && state.active) { state.busy = false; patchOverview(); }
+      return;
+    }
     try {
-      const suffix = state.route.view === "overview" ? "/overview" : "";
-      const data = await scope.get(`api/v1/diagnostics/sessions${suffix}?${buildSessionQuery(state.filters, state.route.view === "overview")}`);
+      const data = await scope.get(`api/v1/diagnostics/sessions?${buildSessionQuery(state.filters)}`);
       if (!scope.current() || !state.active) return;
       state.data = data; rememberProfiles(data);
     } catch (error) { if (scope.current() && state.active) state.error = sessionQueryError(error); }
     finally { if (scope.current() && state.active) { state.busy = false; render(); } }
   }
+  async function loadOverviewSection(scope, section) {
+    try {
+      const data = await scope.get(`api/v1/diagnostics/sessions/overview?${buildSessionQuery(state.filters, true)}&section=${section}`);
+      if (!scope.current() || !state.active) return;
+      state.data = {...state.data, ...data}; rememberProfiles(data); state.overviewStatus[section] = "ready";
+      delete state.overviewErrors[section];
+    } catch (error) {
+      if (!scope.current() || !state.active) return;
+      state.overviewStatus[section] = "error"; state.overviewErrors[section] = sessionQueryError(error);
+    }
+    patchOverview(section);
+  }
+
   const openSession = (id, focus = {}) => navigate(diagnosticTarget("detail", focus, id));
   const drill = extra => navigate(diagnosticTarget("list", sessionDrilldown(state.filters, extra)));
   async function mountDetail(saved) {
@@ -303,6 +354,16 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     const target = event.target.closest("button,[data-session-id],[data-day-index]"); if (!target || !root.contains(target)) return;
     if (target.dataset.sessionAction === "retry-detail" && state.active && state.route?.view === "detail" && !detail) { void mountDetail(null); return; }
     if (state.route?.view === "detail") return;
+    if (target.dataset.sessionAction === "retry-overview") {
+      const section = target.dataset.overviewSection;
+      if (!state.busy && OVERVIEW_SECTIONS.includes(section)) {
+        const scope = reader.begin(); state.busy = true; state.overviewStatus[section] = "loading";
+        delete state.overviewErrors[section]; patchOverview(section);
+        await loadOverviewSection(scope, section);
+        if (scope.current() && state.active) { state.busy = false; patchOverview(); }
+      }
+      return;
+    }
     if (target.dataset.copySession) {
       event.stopPropagation();
       if (target.disabled) return;
@@ -435,7 +496,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       detailMountGeneration += 1;
       cancelReaders(); state.active = true; state.route = route; detail?.destroy(); detail = null; state.busy = false; state.error = "";
       if (route.view === "detail") return mountDetail(saved);
-      state.filters = { offset: 0, ...route.filters, limit: PAGE_SIZE }; state.data = saved?.data || null; state.listTotal = null;
+      state.filters = { offset: 0, ...route.filters, limit: PAGE_SIZE }; state.data = saved?.overviewComplete === false ? null : saved?.data || null; state.overviewStatus = {}; state.overviewErrors = {}; state.listTotal = null;
       if (saved) {
         Object.assign(state, { filters: { ...saved.filters, limit: PAGE_SIZE }, showUsers: saved.showUsers, showAgents: saved.showAgents });
         if (Number(saved.filters?.limit || PAGE_SIZE) !== PAGE_SIZE) state.data = null;
@@ -446,7 +507,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       if (state.data) { rememberProfiles(state.data); render(); restoreScroll(saved); } else void loadCurrent();
     },
     deactivate() { detailMountGeneration += 1; state.active = false; cancelReaders(); selectBinding?.close(); detail?.destroy(); detail = null; },
-    snapshot() { return state.route?.view === "detail" ? { detailData, detailSnapshot: detail?.snapshot?.() } : { filters: { ...state.filters }, data: state.data, showUsers: state.showUsers, showAgents: state.showAgents, ...captureScroll() }; },
+    snapshot() { return state.route?.view === "detail" ? { detailData, detailSnapshot: detail?.snapshot?.() } : { filters: { ...state.filters }, data: state.data, overviewComplete: !state.busy && !Object.keys(state.overviewErrors).length, showUsers: state.showUsers, showAgents: state.showAgents, ...captureScroll() }; },
     clear() { detailMountGeneration += 1; state.active = false; cancelReaders(); detail?.destroy(); detail = null; detailData = null; state.data = null; state.users = {}; listFilters = {}; columnWidths = null; state.agents.clear(); state.channelAgents.clear(); root.replaceChildren(); },
   };
 }

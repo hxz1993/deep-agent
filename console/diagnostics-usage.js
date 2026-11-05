@@ -97,15 +97,19 @@ export function usageChartSvg(report, group = "agent", metric = "total_tokens", 
 
 export function initDiagnosticUsage({ root, navigate, replace }) {
   const state = { active: false, filters: null, draft: null, report: null, details: null, dimension: "agent", metric: "total_tokens", chartType: "line",
-    focused: null, sort: "total_tokens", descending: true, offset: 0, contributionOffset: 0, detailBusy: false, contributionBusy: false, busy: false, error: "", contributing: null, contributions: null };
+    focused: null, sort: "total_tokens", descending: true, offset: 0, contributionOffset: 0, detailBusy: false, contributionBusy: false, busy: false, error: "", reportError: "", detailError: "", contributionError: "", contributing: null, contributions: null };
   let reportAbort = null, detailAbort = null, contributionAbort = null;
   let releaseResizer = () => {};
+  let chartSize = "";
   const chartResize = new ResizeObserver(() => drawChart());
   function drawChart() {
     if (!state.active) return;
     const host = root.querySelector(".usage-chart");
-    if (!host || !state.report) return;
+    if (!host || !state.report || state.busy || state.reportError) return;
     const width = Math.max(320, Math.round(host.clientWidth)), height = Math.max(220, Math.round(host.clientHeight));
+    const size = `${width}x${height}`;
+    if (chartSize === size && host.dataset.rendered === "true") return;
+    chartSize = size; host.dataset.rendered = "true";
     host.innerHTML = usageChartSvg(state.report, state.dimension, state.metric, state.chartType, state.focused, width, height);
   }
   const queryString = values => new URLSearchParams(Object.entries(values).filter(([, value]) => value !== undefined && value !== null && value !== "")).toString();
@@ -137,7 +141,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
   };
   const insightsHtml = data => {
     const summary = data?.summary || {};
-    return `<section class="usage-surface usage-purpose"><div class="usage-panel-head"><h2>用量统计</h2></div><div class="usage-purpose-values">${(data?.distribution || []).map(row => `<div><small>${title(PURPOSES[row.key] || row.key)}</small><strong>${short(row.total_tokens)}</strong><span>${summary.total_tokens ? (row.total_tokens/summary.total_tokens*100).toFixed(1) : "0"}%</span></div>`).join("")}<div><small>输入</small><strong>${measured(summary,"input_tokens")}</strong></div><div><small>输出</small><strong>${measured(summary,"output_tokens")}</strong></div><div><small>模型请求</small><strong>${fmt(summary.requests)}</strong></div></div></section>`;
+    return `<section class="usage-surface usage-purpose"><div class="usage-panel-head"><h2>用量统计</h2></div><div class="usage-purpose-values">${(data?.distribution || []).map(row => `<div><small>${title(PURPOSES[row.key] || row.key)}</small><strong>${short(row.total_tokens)}</strong><span>${summary.total_tokens ? (row.total_tokens/summary.total_tokens*100).toFixed(1) : "0"}%</span></div>`).join("")}<div><small>输入</small><strong>${measured(summary,"input_tokens")}</strong></div><div><small>输出</small><strong>${measured(summary,"output_tokens")}</strong></div><div><small>模型请求</small><strong>${Number.isSafeInteger(summary.requests) && summary.requests >= 0 ? fmt(summary.requests) : "—"}</strong></div></div></section>`;
   };
   const chartSwitchHtml = (field, name, options) => `<div class="agent-view-switch diagnostic-view-switch" role="group" aria-label="${name}">${options.map(([key,text,glyph]) => `<button type="button" data-usage-chart-field="${field}" data-usage-chart-value="${key}" class="${state[field] === key ? "active" : ""}" aria-pressed="${state[field] === key}">${icon(glyph)}<span>${text}</span></button>`).join("")}</div>`;
   const exportDialog = () => `<dialog class="modal usage-export-dialog" id="usageExportDialog" aria-labelledby="usageExportTitle"><div class="modal-header"><h3 id="usageExportTitle">导出用量汇总</h3><button type="button" class="icon-action" data-usage-action="close-export" aria-label="关闭">${icon("x")}</button></div><div class="modal-body"><p>时间：<span id="usageExportRange"></span></p><p>Agent：<span id="usageExportAgent"></span> · 维度：<span id="usageExportDimension"></span></p><label><input type="radio" name="usage_export_scope" value="all" checked> 全部匹配汇总</label><label><input type="radio" name="usage_export_scope" value="page"> 当前页（最多 10 条）</label><p class="usage-export-status" role="status"></p></div><div class="modal-footer"><button type="button" class="btn" data-usage-action="close-export">取消</button><button type="button" class="btn primary" data-usage-action="confirm-export">导出 CSV</button></div></dialog>`;
@@ -148,6 +152,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
 
   function render(scroll = readScroll()) {
     if (!state.active) return;
+    chartSize = "";
     const range = state.draft || {}, data = state.report, summary = data?.summary || {};
     const agents = [["", "全部 Agent"], ...Object.entries(data?.agents || {}).map(([id, name]) => [id, name])];
     releaseResizer();
@@ -157,10 +162,10 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
         <div class="diagnostics-field diagnostic-control-with-icon usage-agent">${icon("bot")}${selectHtml("agent_id", "Agent", range.agent_id || "", agents)}</div>
         <button class="btn diagnostics-button primary" type="submit" ${state.busy ? "disabled" : ""}>${icon("search")}查询</button><button class="btn diagnostics-button text" type="button" data-usage-action="reset">重置</button>
       </form></header>
-      ${state.error ? `<p class="usage-error" role="alert">${title(state.error)}</p>` : ""}
+      ${state.error ? `<p class="usage-error" role="alert">${title(state.error)}</p>` : ""}${state.reportError ? `<p class="usage-error" role="alert">用量趋势与汇总加载失败：${title(state.reportError)} <button type="button" class="btn text" data-usage-action="retry-report">重试</button></p>` : ""}
       <div class="usage-view-toolbar">${dimensionSwitchHtml()}<button type="button" class="diagnostics-button" data-usage-action="export">${icon("download")}导出</button></div>
       <div class="usage-overview">
-        <section class="usage-surface usage-trend"><div class="usage-panel-head"><div><h2>用量趋势</h2><small>按日期查看 Token 与模型请求次数</small></div><div class="usage-chart-tools">${chartSwitchHtml("metric", "统计指标", METRICS)}<div class="agent-view-switch diagnostic-view-switch usage-chart-types" role="group" aria-label="图表类型">${[["line","折线图","chart-line"],["stack","堆叠图","chart-column-stacked"]].map(([key,name,glyph]) => `<button type="button" class="${state.chartType === key ? "active" : ""}" data-usage-chart-field="chartType" data-usage-chart-value="${key}" aria-label="${name}" title="${name}" aria-pressed="${state.chartType === key}">${icon(glyph)}</button>`).join("")}</div></div></div><div class="usage-chart-body"><div class="usage-chart">${usageChartSvg(data, state.dimension, state.metric, state.chartType, state.focused)}</div><div class="usage-legend">${legendHtml(data)}</div></div></section>
+        <section class="usage-surface usage-trend"><div class="usage-panel-head"><div><h2>用量趋势</h2><small>按日期查看 Token 与模型请求次数</small></div><div class="usage-chart-tools">${chartSwitchHtml("metric", "统计指标", METRICS)}<div class="agent-view-switch diagnostic-view-switch usage-chart-types" role="group" aria-label="图表类型">${[["line","折线图","chart-line"],["stack","堆叠图","chart-column-stacked"]].map(([key,name,glyph]) => `<button type="button" class="${state.chartType === key ? "active" : ""}" data-usage-chart-field="chartType" data-usage-chart-value="${key}" aria-label="${name}" title="${name}" aria-pressed="${state.chartType === key}">${icon(glyph)}</button>`).join("")}</div></div></div><div class="usage-chart-body"><div class="usage-chart">${state.busy ? '<p class="diagnostics-empty" role="status">正在加载用量趋势…</p>' : state.reportError ? '<p class="diagnostics-empty">请重试加载用量趋势。</p>' : usageChartSvg(data, state.dimension, state.metric, state.chartType, state.focused)}</div><div class="usage-legend">${legendHtml(data)}</div></div></section>
         <div class="usage-summary"><div class="usage-stats">${stat("累计 Token", measured(summary, "total_tokens"), "layers-3", "purple", "", summary.missing_requests ? `有 ${fmt(summary.missing_requests)} 次请求缺少 Token 数据，总量仅包含已记录部分。` : "")}${stat("日均 Token", (summary.input_reported_requests || summary.output_reported_requests) && data?.dates?.length ? short(summary.total_tokens/data.dates.length) : "—", "calendar-days", "blue")}${stat("单次平均 Token", averageHtml(summary), "chart-no-axes-combined", "green", "", usageAveragePresentation(summary).hint)}${stat("峰值日期", peakUsage(data)?.[1] ? `${title(peakUsage(data)[0].slice(5))} <span class="usage-peak-secondary">${short(peakUsage(data)[1])}</span>` : "—", "calendar-check", "orange")}</div>${insightsHtml(data)}</div>
       </div>
       <section class="usage-details"><div class="usage-workbench"><div class="usage-table-area"><div class="usage-table-frame"><div id="usageDetailRows"></div></div><div id="usageDetailFooter"></div></div><div class="channel-resizer usage-resizer" role="separator" aria-label="调整贡献会话宽度" aria-orientation="vertical" tabindex="0"></div><aside class="usage-contributions diagnostic-channels-page" aria-label="贡献会话"><div id="usageContributionRows"></div><div id="usageContributionFooter"></div></aside></div></section>
@@ -199,7 +204,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
       const selected = state.details?.items?.find(row => row.key === state.contributing.key), dimension = state.contributing.dimension;
       const description = dimension === "model" ? selected?.model?.provider_name || "模型用量" : dimension === "user" ? state.details?.users?.[state.contributing.key]?.email || "用户用量" : state.contributing.key;
       const name = dimension === "user" ? state.details?.users?.[state.contributing.key]?.username || state.contributing.name : dimension === "model" ? modelName(selected?.model) : selected?.name || state.contributing.name;
-      contributionHost.innerHTML = `<div class="usage-panel-head">${contributionIcon(selected || {})}<div class="usage-object-copy"><h2>${title(name)}</h2><small>${dimension === "agent" ? `<span class="usage-agent-id"><code title="${title(description)}">${title(description.slice(0,8))}</code><button type="button" class="usage-agent-copy" data-usage-copy="${title(description)}" data-usage-copy-label="Agent ID" aria-label="复制 Agent ID" title="复制完整 Agent ID">${icon("copy")}</button></span>` : title(description)}</small></div><span class="usage-session-count" title="${total} 个会话">${icon("messages-square")}${fmt(total)}</span></div>${rows.map(row => `<article class="usage-session-entry"><div class="usage-session-content"><div class="usage-session-heading"><button type="button" class="channel-last-question" data-usage-session="${title(row.session_id)}">${title(row.title || "未命名会话")}</button><strong class="usage-token-count" title="Token">${measured(row,"total_tokens")}</strong></div><div class="diagnostic-session-id channel-session-meta"><span class="channel-session-time"><code title="${title(row.session_id)}">${title(row.session_id.slice(0,8))}</code><button type="button" class="diagnostic-copy-separator" data-usage-copy="${title(row.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${title(row.session_id)}">${icon("copy")}</button><time>${title(diagnosticTime(row.last_activity))}</time></span><span class="usage-session-counts"><span title="模型请求次数">${icon("activity")}${fmt(row.requests)}</span></span></div></div></article>`).join("") || `<p class="diagnostics-empty">${state.contributions ? "暂无贡献会话" : "正在加载贡献会话…"}</p>`}`;
+      contributionHost.innerHTML = `<div class="usage-panel-head">${contributionIcon(selected || {})}<div class="usage-object-copy"><h2>${title(name)}</h2><small>${dimension === "agent" ? `<span class="usage-agent-id"><code title="${title(description)}">${title(description.slice(0,8))}</code><button type="button" class="usage-agent-copy" data-usage-copy="${title(description)}" data-usage-copy-label="Agent ID" aria-label="复制 Agent ID" title="复制完整 Agent ID">${icon("copy")}</button></span>` : title(description)}</small></div><span class="usage-session-count" title="${total} 个会话">${icon("messages-square")}${fmt(total)}</span></div>${state.contributionError ? `<p class="usage-error" role="alert">${title(state.contributionError)} <button type="button" class="btn text" data-usage-action="retry-contributions">重试</button></p>` : ""}${rows.map(row => `<article class="usage-session-entry"><div class="usage-session-content"><div class="usage-session-heading"><button type="button" class="channel-last-question" data-usage-session="${title(row.session_id)}">${title(row.title || "未命名会话")}</button><strong class="usage-token-count" title="Token">${measured(row,"total_tokens")}</strong></div><div class="diagnostic-session-id channel-session-meta"><span class="channel-session-time"><code title="${title(row.session_id)}">${title(row.session_id.slice(0,8))}</code><button type="button" class="diagnostic-copy-separator" data-usage-copy="${title(row.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${title(row.session_id)}">${icon("copy")}</button><time>${title(diagnosticTime(row.last_activity))}</time></span><span class="usage-session-counts"><span title="模型请求次数">${icon("activity")}${fmt(row.requests)}</span></span></div></div></article>`).join("") || `<p class="diagnostics-empty">${state.contributions ? "暂无贡献会话" : "正在加载贡献会话…"}</p>`}`;
       contributionFooter.innerHTML = rows.length < total ? `<button type="button" class="usage-load-more" data-usage-action="contribution-more" ${state.contributionBusy ? "disabled" : ""} title="已加载 ${rows.length} / ${total} 个会话">加载更多</button>` : "";
     } else {
       contributionHost.innerHTML = `<div class="usage-panel-head"><h2>贡献会话</h2></div><p class="diagnostics-empty">选择左侧条目，查看贡献会话</p>`;
@@ -212,7 +217,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
       if (state.dimension === "model") { const model = row.model || {}; const badge = modelBadge(model, row.key); return `<span title="${title(model.provider_name || "")}">${title(modelName(model))}</span>${badge ? `<small class="usage-model-badge">${badge}</small>` : ""}`; }
       return title(row.name || row.key);
     };
-    host.innerHTML = `${headers}${rows.map(row => `<button type="button" class="usage-detail-row ${state.contributing?.key === row.key && state.contributing?.dimension === state.dimension ? "is-selected" : ""}" data-usage-key="${title(row.key)}"><span class="usage-detail-identity">${rowIcon(row)}<span class="usage-detail-name">${names(row)}</span></span><strong>${measured(row, "total_tokens")}</strong><span>${fmt(row.requests)}</span><span>${averageHtml(row)}</span><span>${state.details?.summary?.total_tokens ? (row.total_tokens/state.details.summary.total_tokens*100).toFixed(1)+"%" : "—"}</span></button>`).join("") || `<p class="diagnostics-empty">${state.busy ? "正在加载…" : "当前条件暂无用量"}</p>`}`;
+    host.innerHTML = `${headers}${state.detailError ? `<p class="usage-error" role="alert">${title(state.detailError)} <button type="button" class="btn text" data-usage-action="retry-details">重试</button></p>` : ""}${rows.map(row => `<button type="button" class="usage-detail-row ${state.contributing?.key === row.key && state.contributing?.dimension === state.dimension ? "is-selected" : ""}" data-usage-key="${title(row.key)}"><span class="usage-detail-identity">${rowIcon(row)}<span class="usage-detail-name">${names(row)}</span></span><strong>${measured(row, "total_tokens")}</strong><span>${fmt(row.requests)}</span><span>${averageHtml(row)}</span><span>${state.details?.summary?.total_tokens ? (row.total_tokens/state.details.summary.total_tokens*100).toFixed(1)+"%" : "—"}</span></button>`).join("") || `<p class="diagnostics-empty">${state.detailBusy ? "正在加载明细…" : state.detailError ? "明细尚未加载，请重试。" : "当前条件暂无用量"}</p>`}`;
     footer.innerHTML = (total > 10 ? pagination(total, state.offset, "previous", "next") : "");
     restoreScroll(scroll);
   }
@@ -220,7 +225,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
   async function loadDetails(resetScroll = false) {
     detailAbort?.abort(); detailAbort = new AbortController();
     const signal = detailAbort.signal;
-    state.detailBusy = true; renderDetailRows();
+    state.detailBusy = true; state.detailError = ""; renderDetailRows();
     try {
       const details = await diagnosticRequest(`/api/v1/diagnostics/usage/details?${queryString({...params(), group_by:state.dimension, sort:state.sort, descending:state.descending, offset:state.offset, limit:10})}`, signal);
       if (!signal.aborted && state.active) { state.details = details; state.detailBusy = false;
@@ -232,29 +237,37 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
         if (resetScroll) restoreScroll([]);
         if (!selected && details.items?.length) root.querySelector("[data-usage-key]")?.click();
         else if (selected && !state.contributions) { state.contributionOffset = 0; loadContributions(); } }
-    } catch (error) { if (!signal.aborted && state.active) { state.detailBusy = false; state.error = error.message; render(); } }
+    } catch (error) { if (!signal.aborted && state.active) { state.detailBusy = false; state.detailError = error.message; renderDetailRows(); icons(); } }
   }
   async function loadContributions() {
     contributionAbort?.abort();
     if (!state.contributing) return;
     contributionAbort = new AbortController();
     const signal = contributionAbort.signal, selected = state.contributing, offset = state.contributionOffset;
-    state.contributionBusy = true; renderDetailRows(); icons();
+    state.contributionBusy = true; state.contributionError = ""; renderDetailRows(); icons();
     try {
       const result = await diagnosticRequest(`/api/v1/diagnostics/usage/sessions?${queryString({...params(), group_by:selected.dimension, key:selected.key, offset})}`, signal);
       if (!signal.aborted && state.active && state.contributing === selected) { state.contributionBusy = false; state.contributions = {...result, items:offset ? [...(state.contributions?.items || []), ...result.items] : result.items}; renderDetailRows(); icons(); }
-    } catch (error) { if (!signal.aborted && state.active && state.contributing === selected) { state.contributionBusy = false; state.error = error.message; render(); } }
+    } catch (error) { if (!signal.aborted && state.active && state.contributing === selected) { state.contributionBusy = false; state.contributionError = error.message; renderDetailRows(); icons(); } }
   }
-  async function load() {
-    reportAbort?.abort(); detailAbort?.abort(); contributionAbort?.abort(); reportAbort = new AbortController();
-    state.contributing = null; state.contributions = null; state.details = null; state.detailBusy = false; state.contributionBusy = false;
-    const signal = reportAbort.signal; state.busy = true; state.error = ""; render([]);
+  async function loadReport() {
+    reportAbort?.abort(); reportAbort = new AbortController();
+    const signal = reportAbort.signal; state.busy = true; state.reportError = ""; render();
     try {
       const data = await diagnosticRequest(`/api/v1/diagnostics/usage?${queryString(params())}`, signal);
       if (signal.aborted || !state.active) return;
-      state.report = data; state.busy = false; state.focused = null; render(); await loadDetails();
-    } catch (error) { if (!signal.aborted && state.active) { state.busy = false; state.error = error.message; render(); } }
+      state.report = data; state.busy = false; render();
+    } catch (error) { if (!signal.aborted && state.active) { state.busy = false; state.reportError = error.message; render(); } }
   }
+  async function load() {
+    reportAbort?.abort(); detailAbort?.abort(); contributionAbort?.abort();
+    state.contributing = null; state.contributions = null; state.details = null; state.report = null; state.focused = null;
+    state.detailBusy = false; state.contributionBusy = false; state.error = "";
+    state.reportError = ""; state.detailError = ""; state.contributionError = "";
+    // Independent reads: a slow trend/profile request must not hold back the table.
+    await Promise.all([loadReport(), loadDetails(true)]);
+  }
+
   function applyFilters() {
     try {
       const period = state.draft.period || "7";
@@ -329,8 +342,11 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
     }
     const action = event.target.closest("[data-usage-action]")?.dataset.usageAction;
     if (!action) return;
+    if (action === "retry-report") { await loadReport(); return; }
+    if (action === "retry-details") { await loadDetails(); return; }
+    if (action === "retry-contributions") { await loadContributions(); return; }
     if (action === "reset") { const range = usageRange("7"); state.filters = {...range, period:"7", timezone:Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", agent_id:""}; state.draft = {...state.filters}; state.offset = 0; replace(diagnosticTarget("usage", state.filters)); load(); }
-    else if (action === "previous" || action === "next") { if (state.detailBusy || state.busy) return; state.offset = Math.max(0, state.offset + (action === "next" ? 10 : -10)); loadDetails(true); }
+    else if (action === "previous" || action === "next") { if (state.detailBusy) return; state.offset = Math.max(0, state.offset + (action === "next" ? 10 : -10)); loadDetails(true); }
     else if (action === "contribution-more") { if (state.contributionBusy) return; state.contributionOffset = state.contributions?.items?.length || 0; await loadContributions(); }
     else if (action === "export") { const dialog = root.querySelector("#usageExportDialog"); dialog.querySelector("#usageExportRange").textContent = `${new Date(state.filters.start).toLocaleString()} — ${new Date(state.filters.end).toLocaleString()}`; dialog.querySelector("#usageExportAgent").textContent = state.report?.agents?.[state.filters.agent_id] || "全部 Agent"; dialog.querySelector("#usageExportDimension").textContent = DIMENSIONS.find(([key]) => key === state.dimension)?.[1] || ""; dialog.showModal(); }
     else if (action === "close-export") root.querySelector("#usageExportDialog")?.close();
@@ -349,6 +365,7 @@ export function initDiagnosticUsage({ root, navigate, replace }) {
   });
   return {
     activate(route, snapshot) {
+      reportAbort?.abort(); detailAbort?.abort(); contributionAbort?.abort();
       state.active = true;
       const restoring = snapshot?.filters && sameDiagnosticFilters(snapshot.filters, route.filters) && snapshot.report;
       if (restoring) Object.assign(state, {...snapshot, active:true, focused:snapshot.focused || null});

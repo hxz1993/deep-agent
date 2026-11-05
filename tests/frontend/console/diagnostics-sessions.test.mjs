@@ -518,11 +518,12 @@ test("loading status lives in header, outside the list controls and rows", async
 });
 
 test("new session query wins over late response and deactivation ignores all late data", async () => {
-  const gates = [deferred(), deferred()]; let index = 0;
+  const gates = [deferred(), deferred(), deferred()]; let index = 0;
   const h = sessionHarness(() => gates[index++].promise); h.activate("overview");
   h.activate("list", { ...filters, user_id: "new-owner" });
   assert.equal(h.requests[0].signal.aborted, true);
-  gates[1].resolve({ items: [], total: 2 }); await settle(); gates[0].resolve(overview()); await settle();
+  assert.equal(h.requests[1].signal.aborted, true);
+  gates[2].resolve({ items: [], total: 2 }); await settle(); gates[0].resolve(overview()); gates[1].resolve(overview()); await settle();
   assert.equal(h.controller.snapshot().data.total, 2);
   const late = deferred(), h2 = sessionHarness(() => late.promise); h2.activate(); h2.controller.deactivate();
   assert.equal(h2.requests[0].signal.aborted, true); late.resolve(overview()); await settle();
@@ -983,4 +984,50 @@ test("a refused menu navigation does not leave a stale pending filter payload", 
   await h.context.openDiagnostics("sessions"); // showPage guard did not change the route.
   h.navigation.history.replaceState(null, "", "#/diagnostics/sessions/list"); h.context.setDiagnosticsActive(true);
   assert.equal(h.sessions.activated.at(-1)[0].filters.query, undefined);
+});
+
+
+test("overview loads independent panels with at most two requests and preserves completed panels", async () => {
+  const gates = new Map(["metrics", "trend", "agents", "activity"].map(key => [key, deferred()]));
+  let active = 0, maximum = 0;
+  const h = sessionHarness(path => {
+    const key = new URL(path, "http://test").searchParams.get("section");
+    active++; maximum = Math.max(maximum, active);
+    return gates.get(key).promise.finally(() => active--);
+  });
+  h.activate("overview");
+  assert.equal(h.requests.length, 2);
+  assert.match(h.root.innerHTML, /正在加载/);
+  gates.get("metrics").resolve({metrics:overview().metrics}); await settle();
+  assert.match(h.root.innerHTML, /<strong>5<\/strong>/);
+  assert.equal(h.controller.snapshot().data.trend, undefined);
+  assert.equal(h.controller.snapshot().overviewComplete, false);
+  assert.equal(h.requests.length, 3);
+  gates.get("agents").resolve({agents:overview().agents}); await settle();
+  gates.get("activity").resolve({recent_questions:overview().recent_questions}); await settle();
+  assert.match(h.root.innerHTML, /实际问题/);
+  assert.match(h.root.innerHTML, /正在加载/);
+  gates.get("trend").resolve({trend:overview().trend}); await settle();
+  assert.equal(h.controller.snapshot().overviewComplete, true);
+  assert.equal(maximum, 2);
+  assert.equal(h.requests.length, 4);
+});
+
+test("overview failed panel retries alone and never clears another panel", async () => {
+  let attempts = 0;
+  const h = sessionHarness(async path => {
+    const section = new URL(path, "http://test").searchParams.get("section");
+    if (section === "trend" && attempts++ === 0) throw new Error("network unavailable");
+    const data = overview();
+    return section === "metrics" ? {metrics:data.metrics} : section === "trend" ? {trend:data.trend} : section === "agents" ? {agents:data.agents} : {recent_questions:data.recent_questions};
+  });
+  h.activate("overview"); await settle(); await settle();
+  assert.equal(h.controller.snapshot().overviewComplete, false);
+  assert.match(h.root.innerHTML, /data-overview-section="trend"/);
+  assert.match(h.root.innerHTML, /实际问题/);
+  const before = h.requests.length;
+  await h.click({sessionAction:"retry-overview", overviewSection:"trend"}); await settle();
+  assert.equal(h.requests.length, before + 1);
+  assert.equal(h.controller.snapshot().overviewComplete, true);
+  assert.match(h.root.innerHTML, /实际问题/);
 });

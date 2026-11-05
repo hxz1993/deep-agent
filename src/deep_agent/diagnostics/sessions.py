@@ -273,9 +273,13 @@ class DiagnosticSessionQueries(SessionBoundMixin):
                 select(execution.c.session_id).where(execution.c.latest_status == f.latest_status)))
         return conditions
 
-    async def overview(self, f: SessionFilters):
+    async def overview(self, f: SessionFilters, *, section="all"):
+        if section not in ("all", "metrics", "trend", "agents", "activity"):
+            raise DiagnosticQueryError("无效的概览分区")
+        result = {"range": f.public_range(), "generated_at": utc_rfc3339(datetime.now(UTC))}
         async with self._read() as db:
-            sessions = (await db.execute(select(func.count()).select_from(ChatSession).where(*self._filters(f)))).scalar_one()
+            if section in ("all", "metrics"):
+                sessions = (await db.execute(select(func.count()).select_from(ChatSession).where(*self._filters(f)))).scalar_one()
             # A ranged question/error already establishes real activity. Avoid
             # repeating an event-exists lookup for every matching event below.
             scope = self._filters(f, activity=False)
@@ -284,52 +288,60 @@ class DiagnosticSessionQueries(SessionBoundMixin):
             facts = events.with_only_columns(ChatSessionEvent.event_id, ChatSessionEvent.session_id,
                 ChatSessionEvent.created_at, ChatSessionEvent.event_type, ChatSession.agent_id, ChatSession.user_id).subquery()
             is_question = facts.c.event_type == "user/message"
-            aggregate = (await db.execute(select(
-                func.count(case((is_question, facts.c.event_id))),
-                func.count(func.distinct(case((is_question, facts.c.user_id)))),
-                func.count(func.distinct(case((facts.c.event_type == "execution/error", facts.c.session_id)))),
-            ).select_from(facts))).one()
-            days = list(f.days())
-            day_case = case(*[(and_(facts.c.created_at >= start, facts.c.created_at < end), date) for date, start, end in days])
-            counts = dict((await db.execute(select(day_case.label("day"), func.count()).select_from(facts)
-                .where(is_question).group_by(day_case))).all())
-            agents = (await db.execute(select(facts.c.agent_id, Agent.name, func.count().label("count"))
-                .select_from(facts).outerjoin(Agent, Agent.id == facts.c.agent_id).where(is_question)
-                .group_by(facts.c.agent_id, Agent.name).order_by(func.count().desc(), facts.c.agent_id))).all()
-            users = (await db.execute(select(facts.c.user_id, func.count().label("count"))
-                .where(is_question).group_by(facts.c.user_id).order_by(func.count().desc(), facts.c.user_id).limit(20))).all()
-            # Aggregate narrow keys within the selected scope first. Only read
-            # payloads for the final ten rows, never all inputs or ten rows per
-            # session. Sequence is the Event Store's authoritative input order.
-            first_questions = events.with_only_columns(ChatSessionEvent.session_id,
-                func.min(ChatSessionEvent.sequence).label("sequence"))\
-                .where(ChatSessionEvent.event_type == "user/message")\
-                .group_by(ChatSessionEvent.session_id).subquery("first_questions")
-            question_page = select(ChatSessionEvent.event_id, ChatSessionEvent.created_at)\
-                .join(first_questions, and_(ChatSessionEvent.session_id == first_questions.c.session_id,
-                    ChatSessionEvent.sequence == first_questions.c.sequence))\
-                .order_by(ChatSessionEvent.created_at.desc(), ChatSessionEvent.event_id.desc())\
-                .limit(10).subquery("question_page")
-            questions = (await db.execute(select(ChatSessionEvent, ChatSession, Agent.name)
-                .join(question_page, question_page.c.event_id == ChatSessionEvent.event_id)
-                .join(ChatSession, ChatSession.session_id == ChatSessionEvent.session_id)
-                .outerjoin(Agent, Agent.id == ChatSession.agent_id)
-                .order_by(question_page.c.created_at.desc(), question_page.c.event_id.desc()))).all()
-            errors = (await db.execute(select(ChatSessionEvent, ChatSession, Agent.name)
-                .join(ChatSession, ChatSession.session_id == ChatSessionEvent.session_id)
-                .outerjoin(Agent, Agent.id == ChatSession.agent_id).where(*scope,
-                    ChatSessionEvent.event_type == "execution/error", _range(ChatSessionEvent.created_at, f))
-                .order_by(ChatSessionEvent.created_at.desc(), ChatSessionEvent.event_id.desc()).limit(5))).all()
-            return {"range": f.public_range(), "generated_at": utc_rfc3339(datetime.now(UTC)),
-                "agent_options": await self._agent_options(db),
-                "metrics": {"session_count": sessions, "question_count": aggregate[0],
-                    "active_user_count": aggregate[1], "error_session_count": aggregate[2]},
-                "trend": [{"date": day, "start": utc_rfc3339(start), "end": utc_rfc3339(end),
-                    "question_count": counts.get(day, 0)} for day, start, end in days],
-                "agents": [{"agent_id": agent_scope_to_api(row[0]), "agent_name": row[1], "question_count": row[2]} for row in agents],
-                "active_users": [{"user_id": row[0], "question_count": row[1]} for row in users],
-                "recent_questions": [event_link(event, session, name) for event, session, name in questions],
-                "recent_errors": [event_link(event, session, name, error=True) for event, session, name in errors]}
+            if section in ("all", "metrics"):
+                aggregate = (await db.execute(select(
+                    func.count(case((is_question, facts.c.event_id))),
+                    func.count(func.distinct(case((is_question, facts.c.user_id)))),
+                    func.count(func.distinct(case((facts.c.event_type == "execution/error", facts.c.session_id)))),
+                ).select_from(facts))).one()
+            if section in ("all", "trend"):
+                days = list(f.days())
+                day_case = case(*[(and_(facts.c.created_at >= start, facts.c.created_at < end), date) for date, start, end in days])
+                counts = dict((await db.execute(select(day_case.label("day"), func.count()).select_from(facts)
+                    .where(is_question).group_by(day_case))).all())
+            if section in ("all", "agents"):
+                agents = (await db.execute(select(facts.c.agent_id, Agent.name, func.count().label("count"))
+                    .select_from(facts).outerjoin(Agent, Agent.id == facts.c.agent_id).where(is_question)
+                    .group_by(facts.c.agent_id, Agent.name).order_by(func.count().desc(), facts.c.agent_id))).all()
+            if section in ("all", "activity"):
+                users = (await db.execute(select(facts.c.user_id, func.count().label("count"))
+                    .where(is_question).group_by(facts.c.user_id).order_by(func.count().desc(), facts.c.user_id).limit(20))).all()
+                # Aggregate narrow keys within the selected scope first. Only read
+                # payloads for the final ten rows, never all inputs or ten rows per
+                # session. Sequence is the Event Store's authoritative input order.
+                first_questions = events.with_only_columns(ChatSessionEvent.session_id,
+                    func.min(ChatSessionEvent.sequence).label("sequence"))\
+                    .where(ChatSessionEvent.event_type == "user/message")\
+                    .group_by(ChatSessionEvent.session_id).subquery("first_questions")
+                question_page = select(ChatSessionEvent.event_id, ChatSessionEvent.created_at)\
+                    .join(first_questions, and_(ChatSessionEvent.session_id == first_questions.c.session_id,
+                        ChatSessionEvent.sequence == first_questions.c.sequence))\
+                    .order_by(ChatSessionEvent.created_at.desc(), ChatSessionEvent.event_id.desc())\
+                    .limit(10).subquery("question_page")
+                questions = (await db.execute(select(ChatSessionEvent, ChatSession, Agent.name)
+                    .join(question_page, question_page.c.event_id == ChatSessionEvent.event_id)
+                    .join(ChatSession, ChatSession.session_id == ChatSessionEvent.session_id)
+                    .outerjoin(Agent, Agent.id == ChatSession.agent_id)
+                    .order_by(question_page.c.created_at.desc(), question_page.c.event_id.desc()))).all()
+                errors = (await db.execute(select(ChatSessionEvent, ChatSession, Agent.name)
+                    .join(ChatSession, ChatSession.session_id == ChatSessionEvent.session_id)
+                    .outerjoin(Agent, Agent.id == ChatSession.agent_id).where(*scope,
+                        ChatSessionEvent.event_type == "execution/error", _range(ChatSessionEvent.created_at, f))
+                    .order_by(ChatSessionEvent.created_at.desc(), ChatSessionEvent.event_id.desc()).limit(5))).all()
+            if section in ("all", "agents"):
+                result.update(agent_options=await self._agent_options(db),
+                    agents=[{"agent_id": agent_scope_to_api(row[0]), "agent_name": row[1], "question_count": row[2]} for row in agents])
+            if section in ("all", "metrics"):
+                result["metrics"] = {"session_count": sessions, "question_count": aggregate[0],
+                    "active_user_count": aggregate[1], "error_session_count": aggregate[2]}
+            if section in ("all", "trend"):
+                result["trend"] = [{"date": day, "start": utc_rfc3339(start), "end": utc_rfc3339(end),
+                    "question_count": counts.get(day, 0)} for day, start, end in days]
+            if section in ("all", "activity"):
+                result.update(active_users=[{"user_id": row[0], "question_count": row[1]} for row in users],
+                    recent_questions=[event_link(event, session, name) for event, session, name in questions],
+                    recent_errors=[event_link(event, session, name, error=True) for event, session, name in errors])
+            return result
 
     def _activity(self, session_ids):
         event = ChatSessionEvent

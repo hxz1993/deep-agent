@@ -61,6 +61,68 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         return saved
 
+    async def test_overview_sections_equal_full_result_without_extra_sql(self):
+        await self.question("section-one", terminal="completed")
+        await self.question("section-two", user="user-two")
+        await self.error("section-one", "run-1")
+        statements = []
+        def track(_conn, _cursor, statement, _params, _context, _many):
+            if statement.lstrip().upper().startswith("SELECT"):
+                statements.append(statement)
+        sql_event.listen(self.engine.sync_engine, "before_cursor_execute", track)
+        try:
+            full = await self.queries.overview(self.filters)
+            full_count = len(statements)
+            merged, counts = {}, []
+            for section in ("metrics", "trend", "agents", "activity"):
+                before = len(statements)
+                part = await self.queries.overview(self.filters, section=section)
+                counts.append(len(statements) - before)
+                self.assertEqual(part["range"], full["range"])
+                for key, value in part.items():
+                    if key not in ("generated_at", "range"):
+                        self.assertNotIn(key, merged)
+                        self.assertEqual(value, full[key])
+                        merged[key] = value
+            self.assertEqual(set(merged), set(full) - {"range", "generated_at"})
+            self.assertEqual(counts, [2, 1, 2, 3])
+            self.assertEqual(sum(counts), full_count)
+            self.assertEqual(full_count, 8)
+        finally:
+            sql_event.remove(self.engine.sync_engine, "before_cursor_execute", track)
+        with self.assertRaises(DiagnosticQueryError):
+            await self.queries.overview(self.filters, section="invalid")
+
+    async def test_overview_section_http_keeps_admin_guard_and_default_complete_contract(self):
+        await self.question("section-http", user="other-user")
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        app.dependency_overrides[get_app_context] = lambda: SimpleNamespace(db_session_factory=self.factory, active_runs=self.active)
+        app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=True, roles=("enterprise_admin",))
+        async def profiles(_request, _caller, ids):
+            return {uid: {"username": "User " + uid} for uid in ids}
+        bounds = {"start": self.filters.start.isoformat(), "end": self.filters.end.isoformat()}
+        with patch("deep_agent.security.diagnostic_users.resolve_diagnostic_users", profiles):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                path = "/api/v1/diagnostics/sessions/overview"
+                full = await client.post(path, json=bounds, headers={"user":"admin"})
+                self.assertEqual(full.status_code, 200, full.text)
+                self.assertIn("metrics", full.json())
+                self.assertIn("trend", full.json())
+                self.assertIn("other-user", full.json()["users"])
+                for method in ("get", "post"):
+                    for section in ("metrics", "trend", "agents", "activity"):
+                        kwargs = {"params" if method == "get" else "json": {**bounds, "section":section}}
+                        response = await getattr(client, method)(path, headers={"user":"admin"}, **kwargs)
+                        self.assertEqual(response.status_code, 200, response.text)
+                        self.assertEqual(response.headers["cache-control"], "no-store")
+                        if section != "activity": self.assertNotIn("users", response.json())
+                    invalid = await getattr(client, method)(path, headers={"user":"admin"}, **{"params" if method == "get" else "json": {**bounds,"section":"invalid"}})
+                    self.assertEqual(invalid.status_code, 422)
+                app.dependency_overrides[resolve_console_admin_access] = lambda: ConsoleAdminAccess(allowed=False, roles=())
+                denied = await client.post(path, json={**bounds,"section":"metrics"}, headers={"user":"admin"})
+                self.assertEqual(denied.status_code, 403)
+
     async def test_source_filters_and_null_internal_are_session_facts(self):
         await self.question("legacy")
         await self.question("channel")

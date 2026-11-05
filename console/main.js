@@ -36,7 +36,7 @@ const loadPage = createPageLoader({
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261105-v01510");
+    const module = await import("./diagnostics-center.js?v=20261105-v01511");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

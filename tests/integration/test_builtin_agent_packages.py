@@ -40,10 +40,12 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(listing.status_code, 200, listing.text)
                     self.assertEqual(listing.json()['errors'], [])
                     self.assertEqual({item['code'] for item in listing.json()['items']}, {'deeptable-assistant', 'deepcube-assistant'})
-                    self.assertEqual({item['code']: item['prompt_version'] for item in listing.json()['items']}, {'deeptable-assistant': 'V92', 'deepcube-assistant': 'V34'})
+                    self.assertEqual({item['code']: item['prompt_version'] for item in listing.json()['items']}, {'deeptable-assistant': 'V124', 'deepcube-assistant': 'V34'})
                     self.assertEqual(await stores.agent.list_all(), [])
                     for code, expected_skills, tool_count in (
-                        ('deeptable-assistant', {'deeptable-assistant-workflows', 'deeptable-intelligent-analysis', 'consolidation-model-analysis'}, 3),
+                        ('deeptable-assistant', {'deeptable-assistant-workflows', 'deeptable-intelligent-analysis',
+                            'consolidation-model-analysis', 'external-financial-benchmarking',
+                            'wind-finance-data-http', 'deepfos-financial-charts'}, 3),
                         ('deepcube-assistant', {'deepcube-script-authoring'}, 2),
                     ):
                         with self.subTest(code=code):
@@ -51,8 +53,23 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(raw_builtin, (archive.BUILTIN_PACKAGES_ROOT / f'{code}.zip').read_bytes())
                             package = archive.parse_package(raw_builtin)
                             self.assertNotIn('temperature', package.agent.model_dump())
-                            self.assertEqual(package.agent.model_reference.name, "deepseek-flash")
-                            self.assertEqual(package.agent.model_reference.provider_type, "deepseek")
+                            if code == 'deeptable-assistant':
+                                self.assertIsNone(package.agent.model_reference)
+                                self.assertNotIn('builtin:general', package.agent.capabilities)
+                                self.assertNotIn('mcp:ifind-finance', package.agent.capabilities)
+                                self.assertEqual({c for c in package.agent.capabilities if c.startswith('mcp:')},
+                                    {'mcp:context7', 'mcp:deepfos', 'mcp:wind-stock', 'mcp:wind-edb'})
+                                self.assertEqual({name: data[1]['version'] for name, data in package.skills.items()}, {
+                                    'deeptable-assistant-workflows': '1.4.18',
+                                    'deeptable-intelligent-analysis': '2.18.5',
+                                    'consolidation-model-analysis': '1.1.3',
+                                    'external-financial-benchmarking': '1.1.8',
+                                    'wind-finance-data-http': '0.1.0',
+                                    'deepfos-financial-charts': '2.0.6',
+                                })
+                            else:
+                                self.assertEqual(package.agent.model_reference.name, "deepseek-flash")
+                                self.assertEqual(package.agent.model_reference.provider_type, "deepseek")
                             self.assertEqual(set(package.skills), expected_skills)
                             self.assertEqual(sum(len(ui.tools) for ui in package.ui), tool_count)
                             # The package carries component assets, not deployment identity or credentials.
@@ -106,6 +123,21 @@ class BuiltinAgentPackagesTests(unittest.IsolatedAsyncioTestCase):
                             self.assertEqual(ui_by_code(parsed_export.ui), ui_by_code(package.ui))
                             self.assertNotIn('ui_tool_selection', parsed_export.agent.model_dump())
                             self.assertEqual(parsed_export.skills, package.skills)
+                            if code == 'deeptable-assistant':
+                                # The same current package works through the upload path and can
+                                # overwrite its explicitly selected isolated installation.
+                                overwrite_preview = await client.post('/api/v1/agent-packages/preview',
+                                    files={'file': (f'{code}.zip', raw_builtin, 'application/zip')},
+                                    data={'mode': 'overwrite', 'target_agent_id': result['id']})
+                                self.assertEqual(overwrite_preview.status_code, 200, overwrite_preview.text)
+                                overwritten = await client.post('/api/v1/agent-packages/install',
+                                    files={'file': (f'{code}.zip', raw_builtin, 'application/zip')},
+                                    data={'options': json.dumps({'digest': overwrite_preview.json()['digest'],
+                                        'mode': 'overwrite', 'target_agent_id': result['id'],
+                                        'name': result['name'], 'model_id': None})})
+                                self.assertEqual(overwritten.status_code, 201, overwritten.text)
+                                self.assertEqual(overwritten.json()['agent']['id'], result['id'])
+                                self.assertEqual(overwritten.json()['agent']['prompt'], package.agent.prompt)
                     self.assertEqual(len(await stores.agent.list_all()), 2)
             finally:
                 reset_context()

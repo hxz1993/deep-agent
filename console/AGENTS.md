@@ -717,3 +717,9 @@ text/thinking 只合并展示（75 ms），协议事实及工具／人审不缓�
 ## 高频展示与恢复
 
 Markdown 依赖缺失、Mermaid 加载失败及图语法失败三类警告每页各记一次，逐图错误及源码保留；库恢复后仍重试正常渲染，不替换全局 console。普通 SSE／Live 继续实时，只有 History fallback 常规完整读取节流为三秒，状态仍每秒检查，首读、变化、刷新、重试和终态强制校准。不要使用 event head 作为 History 唯一变化版本，同 Sequence 的 checkpoint 仍可能更新。
+
+### 统计分区与 G2 图表（2026-11-05）
+
+会话概览按 metrics/trend/agents/activity 分区，最多两并发，完成后仅替换所属区域；旧 overview 请求缺省仍完整返回。用量报表与明细并行，贡献会话跟随明细，不等待主图；各区独立报错／重试。保留请求代次与 AbortController，不让迟到报表清掉用户新选择；未返回的统计显示“—”，不能冒充零。
+
+G2 使用本地 5.4.8，识别 `g2` 严格 JSON 围栏（`{type:"g2",config:{...}}` 或直接 spec）。自定义元素在终态且进入视口时才创建隔离 frame，断开时释放；不得改成流式逐帧构建。frame 仅 allow-scripts、随机 nonce CSP，配置通过 postMessage 传入，不拼进 HTML、不开放网络数据或任意 JS；Tooltip 使用可信 textContent，保留完整配置的复制／失败回退。库与许可证随 Console 分发，不需要 npm 构建；依赖交接见 deploy/dependency-images.md。

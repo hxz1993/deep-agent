@@ -21,7 +21,7 @@ from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.projector import ConversationProjectionError
 from deep_agent.schemas.session_source import SessionSourceType
 from deep_agent.schemas.diagnostic_query import (
-    DiagnosticSessionQuery, DiagnosticUsersQuery, DiagnosticUserProfileQuery,
+    DiagnosticSessionQuery, DiagnosticSessionOverviewQuery, DiagnosticUsersQuery, DiagnosticUserProfileQuery,
     DiagnosticSessionDetailQuery, DiagnosticSessionEventsQuery,
 )
 from deep_agent.core.context import AppContextDep
@@ -82,11 +82,12 @@ async def with_users(request, caller_user_id, result, user_ids):
 
 
 @router.get("/overview")
-async def get_diagnostic_overview(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep, selected: FiltersDep):
+async def get_diagnostic_overview(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep, selected: FiltersDep,
+                                  section: Literal["all", "metrics", "trend", "agents", "activity"] = "all"):
     async with query_budget():
-        result = await service(ctx).overview(selected)
-    ids = {row["user_id"] for key in ("active_users", "recent_questions", "recent_errors") for row in result[key]}
-    return await with_users(request, caller_user_id, result, ids)
+        result = await service(ctx).overview(selected, section=section)
+    ids = {row["user_id"] for key in ("active_users", "recent_questions", "recent_errors") for row in result.get(key, [])}
+    return await with_users(request, caller_user_id, result, ids) if ids or section == "all" else result
 
 
 @router.get("")
@@ -222,8 +223,8 @@ def body_filters(body: DiagnosticSessionQuery):
 
 @router.post("/overview")
 async def query_diagnostic_overview(request: Request, ctx: AppContextDep, caller_user_id: RequestUserDep,
-                                    body: DiagnosticSessionQuery):
-    return await get_diagnostic_overview(request, ctx, caller_user_id, body_filters(body))
+                                    body: DiagnosticSessionOverviewQuery):
+    return await get_diagnostic_overview(request, ctx, caller_user_id, body_filters(body), body.section)
 
 
 @router.post("")

@@ -24,19 +24,19 @@ let workspaceModule = null;
 let diagnosticsModule = null;
 const loadPage = createPageLoader({
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261105-runtime-environment");
+    const module = await import("./configuration.js?v=20261105-v01510");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=20261104-app-search");
+    const module = await import("./workspace.js?v=20261105-v01510");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261104-app-search");
+    const module = await import("./diagnostics-center.js?v=20261105-v01510");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

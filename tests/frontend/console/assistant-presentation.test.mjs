@@ -381,7 +381,7 @@ test("大工具结果显示外置提示并保留预览", () => {
 
 test("无参数工具显示空对象且参数和结果 JSON 不重复绘制边框", () => {
   assert.match(chatSource, /const renderedArgs = hasArgs \? merged\.args : \{\};/);
-  assert.match(chatSource, /renderBlock\(renderedArgs, \{ className: "args", ariaLabel: "工具参数 JSON" \}\)/);
+  assert.match(chatSource, /renderBlock\(state\.args, \{ className: "args", ariaLabel: "工具参数 JSON" \}\)/);
   assert.doesNotMatch(chatSource, /参数接收中…|args-pending/);
   assert.match(
     workspaceCss,

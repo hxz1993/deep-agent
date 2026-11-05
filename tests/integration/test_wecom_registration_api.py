@@ -3,11 +3,11 @@ from unittest.mock import patch
 
 import httpx
 
-from tests.integration.test_channel_accounts_api import ChannelAccountsApiTests
+from tests.integration import test_channel_accounts_api as channel_accounts
 from deep_agent.services.wecom_registration import WecomRegistrationService
 
 
-class WecomRegistrationApiTests(ChannelAccountsApiTests):
+class WecomRegistrationApiTests(channel_accounts.ChannelAccountsApiTests):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         def handler(request):

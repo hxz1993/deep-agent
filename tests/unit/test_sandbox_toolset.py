@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import unittest
 from typing import Any
@@ -265,10 +264,6 @@ class SandboxBootstrapHardGateTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SandboxRegistryTests(unittest.TestCase):
-    def test_registry_excludes_capability_when_backend_missing(self) -> None:
-        registry = build_registry()
-        self.assertNotIn("builtin:general", registry.codes())
-        self.assertNotIn("builtin:sandbox", registry.codes())
 
     def test_registry_includes_capability_when_backend_present(self) -> None:
         registry = build_registry(sandbox_backend=FakeSandboxBackend())

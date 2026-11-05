@@ -14,7 +14,7 @@ from deep_agent.channels.contracts import InboundMessage, InboundMedia
 from deep_agent.channels.service import ChannelService, MessageJob
 from deep_agent.channels.adapters.wecom.messages import parse_message
 from deep_agent.db.models import ChatSession
-from tests.unit.test_channel_gateway import ChannelGatewayTests
+from tests.helpers.channel_gateway import ChannelGatewayFixture
 from tests.unit.test_wecom_adapter import frame
 
 
@@ -72,8 +72,8 @@ class FakeAgent:
 
 
 class ChannelCommandTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = ChannelGatewayTests.asyncSetUp
-    asyncTearDown = ChannelGatewayTests.asyncTearDown
+    asyncSetUp = ChannelGatewayFixture.asyncSetUp
+    asyncTearDown = ChannelGatewayFixture.asyncTearDown
 
     def message(self, text, *, identifier=None, peer="u", peer_type="single", sender="sender"):
         metadata = {"chat_id": peer} if peer_type == "group" else {"user_id": sender}

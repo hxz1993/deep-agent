@@ -10,15 +10,11 @@ from pydantic_ai.models.test import TestModel
 from deep_agent.core.context import get_context
 from deep_agent.schemas.channel import ChannelAccountUpdate
 from deep_agent.security import ConsoleAdminAuthorizer
-from tests.integration.test_channel_accounts_api import ChannelAccountsApiTests
+from tests.helpers.channel_accounts import ChannelAccountsFixture
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
 
 
-class ChannelSessionControlTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = ChannelAccountsApiTests.asyncSetUp
-    asyncTearDown = ChannelAccountsApiTests.asyncTearDown
-    request = ChannelAccountsApiTests.request
-    payload = ChannelAccountsApiTests.payload
+class ChannelSessionControlTests(ChannelAccountsFixture, unittest.IsolatedAsyncioTestCase):
 
     async def prepare(self):
         payload = self.payload()

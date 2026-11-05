@@ -24,7 +24,7 @@ from deep_agent.security import ConsoleAdminAuthorizer
 from tests.helpers.request_identity import TEST_USER_ID
 from tests.integration import test_session_live_api as _live_fixture
 from tests.integration import test_structured_output_public_protocol as _public_fixture
-from tests.unit import test_channel_gateway as _channel_fixture
+from tests.helpers import channel_gateway as _channel_fixture
 
 
 OBJECT_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}},
@@ -272,9 +272,9 @@ class AllowTextOutputPublicProtocolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AllowTextOutputChannelRoutingTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = _channel_fixture.ChannelGatewayTests.asyncSetUp
-    asyncTearDown = _channel_fixture.ChannelGatewayTests.asyncTearDown
-    _run_presentation = _channel_fixture.ChannelGatewayTests._run_presentation
+    asyncSetUp = _channel_fixture.ChannelGatewayFixture.asyncSetUp
+    asyncTearDown = _channel_fixture.ChannelGatewayFixture.asyncTearDown
+    _run_presentation = _channel_fixture.ChannelGatewayFixture._run_presentation
 
     async def test_same_string_channel_delivery_uses_output_info_not_python_value_type(self):
         for structured in (False, True):

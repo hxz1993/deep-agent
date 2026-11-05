@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { projectConversationItems, latestPendingDeferredTool } from "../../../console/conversation-items.js";
 import { buildTrajectory } from "../../../console/trajectory.js";
+import { sameHistoryValue } from "../../../console/history-comparison.js";
 
 const source = readFileSync(new URL("../../../console/chat.js", import.meta.url), "utf8");
 const history = (text = "第一轮") => [
@@ -31,7 +32,8 @@ function renderHarness() {
   const state = { historyRendered: [], messageAutoFollow: true };
   const calls = [];
   const context = {
-    state, el: { messages }, projectConversationItems, latestPendingDeferredTool,
+    state, el: { messages }, projectConversationItems, latestPendingDeferredTool, sameHistoryValue,
+    JSON: { stringify() { throw new Error("History reconciliation must not serialize full rows"); } },
     localDayKey: (date) => date.slice(0, 10),
     addDateSeparator: () => messages.appendChild(new Element("date")),
     addMessage: () => { const row = new Element("user"); messages.appendChild(row); return row; },
@@ -52,6 +54,19 @@ function renderHarness() {
   return { ...context, messages, calls };
 }
 
+test("History structural comparison preserves full values without serialized copies or key-order churn", () => {
+  const body = "长工具结果🙂".repeat(20000);
+  const first = { items: [{ id: "same", sequence: 2, text: body, status: "running", result: { a: 1, b: [null, false] } }] };
+  const same = { items: [{ result: { b: [null, false], a: 1 }, status: "running", text: body, sequence: 2, id: "same" }] };
+  assert.equal(sameHistoryValue(first, same), true);
+  assert.equal(sameHistoryValue(first, { items: [{ ...first.items[0], text: body + "新增" }] }), false);
+  assert.equal(sameHistoryValue(first, { items: [{ ...first.items[0], status: "completed" }] }), false);
+  assert.equal(sameHistoryValue({ a: undefined }, {}), false);
+  assert.equal(sameHistoryValue([1, 2], [2, 1]), false);
+  assert.equal(sameHistoryValue([1], { 0: 1 }), false);
+  assert.equal(sameHistoryValue({ a: null }, { a: [] }), false);
+});
+
 test("unchanged history preserves exact rows, disclosure and pending form DOM", () => {
   const h = renderHarness();
   h.render(history(), { running: true });
@@ -62,6 +77,7 @@ test("unchanged history preserves exact rows, disclosure and pending form DOM", 
   assert.deepEqual(h.messages.children, rows);
   assert.equal(h.messages.children.at(-1).draft, "not submitted");
   assert.equal(h.state.assistantPresenter.options.allowDeferred, false);
+  assert.equal(h.state.historyRendered.some(record => "signature" in record), false);
 });
 
 test("a changed assistant projection preserves scroll and draft outside it", () => {
@@ -81,6 +97,30 @@ test("a changed assistant projection preserves scroll and draft outside it", () 
   assert.equal(h.messages.children[2].running, true);
   assert.equal(h.messages.scrollTop, 37);
   assert.equal(h.calls.length, scrolls);
+});
+
+test("history refresh hydrates previously expanded tool bodies before restoring code disclosure", () => {
+  let hydrated = false;
+  let restored = false;
+  const block = (open) => ({
+    dataset: { toolCallId: "call", disclosureTouched: "1" },
+    classList: { contains: name => name === "open" && open, toggle() {} },
+    querySelector: () => ({ setAttribute() {} }),
+  });
+  const before = block(true), after = block(false);
+  const row = tool => ({ querySelectorAll: selector => selector === ".tool-block" ? [tool] : [] });
+  const context = {
+    DeepAgentMarkdown: {
+      captureCodeState: () => ["expanded-code"],
+      restoreCodeState: (_root, saved) => { assert.equal(hydrated, true); assert.deepEqual(saved, ["expanded-code"]); restored = true; },
+    },
+    setToolBlockExpanded: (target, expanded) => { assert.equal(target, after); assert.equal(expanded, true); hydrated = true; },
+  };
+  vm.createContext(context);
+  const fn = source.slice(source.indexOf("function restoreHistoryDisclosure("), source.indexOf("\nconst sessionDeletesInFlight"));
+  vm.runInContext(`${fn}\nthis.restore = restoreHistoryDisclosure;`, context);
+  context.restore(row(before), row(after));
+  assert.equal(restored, true);
 });
 
 test("terminal history permits only genuine pending Deferred interaction", () => {

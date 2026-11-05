@@ -1,8 +1,8 @@
 import { initDiagnosticLogs } from "./diagnostics.js?v=20261019-release0138";
-import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20261104-session-app";
+import { initDiagnosticSessions } from "./diagnostics-sessions.js?v=20261105-v01510";
 import { createDiagnosticNavigation, diagnosticHash, diagnosticTarget, parseDiagnosticRoute } from "./diagnostics-navigation.js?v=20261019-release0138";
 
-import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20261104-session-app";
+import { initDiagnosticChannels } from "./diagnostics-channels.js?v=20261105-v01510";
 import { initDiagnosticUsage } from "./diagnostics-usage.js?v=20261027-usage-average1";
 
 let center = null;

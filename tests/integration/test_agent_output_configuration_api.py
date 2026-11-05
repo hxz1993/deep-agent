@@ -94,11 +94,11 @@ class AgentOutputConfigurationApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_known_output_tool_name_collision_is_rejected_before_save(self):
         from deep_agent.capabilities import build_registry
         self.ctx.registry = build_registry()
-        package = self.ctx.registry.get("builtin:general")
+        package = self.ctx.registry.get("builtin:ptc")
         known_tool_name = package.tools[0].name
         collision = {**OUTPUT_CONFIG, "name": known_tool_name}
         response = await self.client.post("/api/v1/agents", headers=self.headers, json={
-            "name": "collision fixture", "prompt": "test", "capabilities": ["builtin:general"],
+            "name": "collision fixture", "prompt": "test", "capabilities": ["builtin:ptc"],
             "structured_output_enabled": True, "output_config": collision,
         })
         self.assertEqual(response.status_code, 422, response.text)

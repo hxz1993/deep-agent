@@ -1,3 +1,4 @@
+import { createRenderBatch, renderIconsWithin } from "./render-scheduler.js?v=20261105-v01510";
 import { mountStructuredOutput, serializeStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
@@ -16,7 +17,22 @@ export function createConversationPresenter({
 } = {}) {
   if (!messages) throw new TypeError("Conversation presentation requires its own message host");
   const lucideIcon = (name, className = "") => `<i data-lucide="${name}" class="${className}" aria-hidden="true"></i>`;
-  const refreshLucideIcons = () => window.requestAnimationFrame(() => window.lucide?.createIcons());
+  const pendingIconRoots = new Set();
+  let iconQueued = false;
+  const refreshLucideIcons = (root = messages) => {
+    pendingIconRoots.add(root);
+    if (iconQueued) return;
+    iconQueued = true;
+    window.requestAnimationFrame(() => {
+      iconQueued = false;
+      for (const node of pendingIconRoots) {
+        if (node.isConnected !== false) renderIconsWithin(node, window.lucide);
+      }
+      pendingIconRoots.clear();
+    });
+  };
+  const toolDetailRenderers = new WeakMap();
+  const toolDetailStates = new WeakMap();
 function createMessageActions({
   getText = null,
   timestamp,
@@ -44,7 +60,7 @@ function createMessageActions({
         copyBtn.title = "已复制";
         copyBtn.setAttribute("aria-label", copiedLabel);
         copyBtn.innerHTML = lucideIcon("check");
-        refreshLucideIcons();
+        refreshLucideIcons(actions);
         showConsoleToast(toastMessage);
         window.setTimeout(() => {
           if (!copyBtn.isConnected) return;
@@ -53,7 +69,7 @@ function createMessageActions({
           copyBtn.setAttribute("aria-label", copyLabel);
           copyBtn.innerHTML = lucideIcon("copy");
           copyBtn.disabled = false;
-          refreshLucideIcons();
+          refreshLucideIcons(actions);
         }, 1500);
       } catch {
         copyBtn.disabled = false;
@@ -103,7 +119,7 @@ function addMessage(role, text, timestamp, branchPoint, attachments, contextRefs
     }));
   }
   messages.appendChild(row);
-  refreshLucideIcons();
+  refreshLucideIcons(row);
   scrollToBottom();
   return row;
 }
@@ -158,7 +174,7 @@ function renderMessageAttachments(container, attachments) {
     wrap.appendChild(chip);
   }
   container.appendChild(wrap);
-  refreshLucideIcons();
+  refreshLucideIcons(wrap);
 }
 
 function processElapsedSecondsBetween(startedAt, completedAt) {
@@ -205,7 +221,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
 
   if (beforeNode?.parentNode === messages) messages.insertBefore(row, beforeNode);
   else messages.appendChild(row);
-  refreshLucideIcons();
+  refreshLucideIcons(row);
   scrollToBottom();
 
   let textBuffer = "";
@@ -216,6 +232,28 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   let interruptedStatus = null;
   const toolBlocks = new Map(); // tool_call_id -> element
   const pendingToolPositions = new Map(); // block -> original process position
+  let textDirty = false, thinkingDirty = false, disposed = false;
+  const streamRender = createRenderBatch(() => flushStreamContent(), {
+    schedule: (window.setTimeout || globalThis.setTimeout).bind(window),
+    cancel: (window.clearTimeout || globalThis.clearTimeout).bind(window),
+  });
+  function flushStreamContent() {
+    if (disposed || (!thinkingDirty && !textDirty)) return;
+    if (thinkingDirty) {
+      renderThinkingContent();
+      thinkingDirty = false;
+    }
+    if (textDirty) {
+      replaceMarkdownBody(ensureFinalContent(), textBuffer, { highlight: !isLive || processFinished });
+      textDirty = false;
+    }
+    updateProcessDisclosure();
+    scrollToBottom();
+  }
+  function requestStreamRender() {
+    if (!isLive || processFinished) flushStreamContent();
+    else streamRender.request();
+  }
 
   function syncPendingToolPresentation() {
     for (const block of toolBlocks.values()) {
@@ -313,7 +351,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         toastMessage: "已复制 Agent 回复",
       });
       wrap.appendChild(finalActions);
-      refreshLucideIcons();
+      refreshLucideIcons(row);
     }
     return finalContent;
   }
@@ -331,6 +369,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
 
   function promoteFinalToProcess() {
     if (!textBuffer) return;
+    streamRender.flush();
     addProcessText(textBuffer, window.DeepAgentMarkdown?.captureCodeState?.(finalContent));
     finalContent?.remove();
     finalActions?.remove();
@@ -366,7 +405,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       });
       thinkingHead.title = "展开思考过程";
       processBody.appendChild(thinkingBlock);
-      refreshLucideIcons();
+      refreshLucideIcons(row);
       updateProcessDisclosure();
     }
     return thinkingBlock;
@@ -378,7 +417,8 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   function finalizeThinkingBlock() {
-    if (!thinkingBlock) return;
+    if (!thinkingBlock && !thinkingDirty) return;
+    streamRender.flush();
     thinkingBlock.querySelector(".thinking-title").textContent = "思考过程";
     thinkingBlock.querySelector(".thinking-status").innerHTML = "";
     thinkingBlock = null;
@@ -387,6 +427,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   function sealFinalContent() {
+    streamRender.flush();
     if (!finalContent || finalContent.dataset.structuredOutputId) return;
     finalContent.classList.remove("streaming");
     replaceMarkdownBody(finalContent, textBuffer);
@@ -397,6 +438,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   const presenter = {
     row,
     setStructuredOutput(value) {
+      streamRender.flush();
       if (acceptedOutputId === value.id && finalContent?.dataset.structuredOutputId === value.id) return;
       promoteFinalToProcess();
       acceptedOutputId = value.id;
@@ -412,9 +454,9 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
     appendThinking(delta) {
       promoteFinalToProcess();
       thinkingBuffer += delta;
-      renderThinkingContent();
-      updateProcessDisclosure();
-      scrollToBottom();
+      ensureThinkingBlock();
+      thinkingDirty = true;
+      requestStreamRender();
     },
     finalizeThinking() {
       finalizeThinkingBlock();
@@ -428,9 +470,11 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
     addProcessText,
     appendText(delta) {
       textBuffer += delta;
-      replaceMarkdownBody(ensureFinalContent(), textBuffer);
+      textDirty = true;
+      requestStreamRender();
     },
     setFinalText(content) {
+      streamRender.flush();
       const output = typeof content === "string"
         ? content
         : content == null ? "" : pretty(content);
@@ -452,6 +496,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       finishProcess();
     },
     markInterrupted() {
+      streamRender.flush();
       if (interruptedStatus) return;
       for (const block of toolBlocks.values()) {
         if (block.dataset.done) continue;
@@ -471,9 +516,10 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       wrap.appendChild(interruptedStatus);
       row.classList.add("interrupted");
       finishProcess();
-      refreshLucideIcons();
+      refreshLucideIcons(row);
     },
     addToolCall(data) {
+      streamRender.flush();
       finalizeThinkingBlock();
       promoteFinalToProcess();
       const merged = mergeUiToolCall(data);
@@ -484,11 +530,10 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
 
       if (existing) {
         if (hasArgs) {
-          const argsEl = existing.querySelector(".args");
-          if (argsEl) {
-            if (window.DeepAgentJson?.updateBlock) window.DeepAgentJson.updateBlock(argsEl, merged.args);
-            else argsEl.innerHTML = window.DeepAgentJson?.highlight(merged.args) || escapeHtml(pretty(merged.args));
-          }
+          const details = toolDetailStates.get(existing);
+          if (details) { details.args = merged.args; details.argsDirty = true; }
+          if (existing.classList.contains("open") || isUiToolCall(merged)) toolDetailRenderers.get(existing)?.();
+          else existing.querySelector("[data-tool-args]")?.replaceChildren?.();
         }
         if (merged.widget) existing.dataset.widget = merged.widget;
         if (merged.metadata) existing.dataset.metadata = JSON.stringify(merged.metadata);
@@ -510,8 +555,6 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       if (merged.widget) block.dataset.widget = merged.widget;
       if (merged.metadata) block.dataset.metadata = JSON.stringify(merged.metadata);
       const renderedArgs = hasArgs ? merged.args : {};
-      const argsHtml = window.DeepAgentJson?.renderBlock(renderedArgs, { className: "args", ariaLabel: "工具参数 JSON" })
-        || `<pre class="args">${escapeHtml(pretty(renderedArgs))}</pre>`;
       block.innerHTML = `
         <button type="button" class="tool-head" aria-expanded="false">
           <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : "wrench")}</span>
@@ -521,20 +564,24 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         </button>
         <div class="tool-body">
           <div class="label">参数 args</div>
-          ${argsHtml}
+          <div data-tool-args=""></div>
         </div>`;
+      toolDetailStates.set(block, { args: renderedArgs, argsDirty: true, resultDirty: false });
+      toolDetailRenderers.set(block, () => hydrateToolDetails(block));
+      if (isUiToolCall(merged)) hydrateToolDetails(block);
       block.querySelector(".tool-head").addEventListener("click", () => {
         block.dataset.disclosureTouched = "1";
         setToolBlockExpanded(block, !block.classList.contains("open"));
       });
       processBody.appendChild(block);
-      refreshLucideIcons();
+      refreshLucideIcons(row);
       toolBlocks.set(key, block);
       if (autoAttachDeferred) maybeAttachHitlWidget(block, merged);
       updateProcessDisclosure();
       scrollToBottom();
     },
     addToolResult(data) {
+      streamRender.flush();
       promoteFinalToProcess();
       const key = data.tool_call_id;
       if (isPlanningToolEvent(data)) return;
@@ -549,7 +596,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
       const resultStatus = toolResultPresentation(data);
       block.querySelector(".tool-status").innerHTML = `<span class="${resultStatus.className}">${resultStatus.label}</span>`;
-      refreshLucideIcons();
+      refreshLucideIcons(row);
       const body = block.querySelector(".tool-body");
       const existingWidget = body.querySelector(".hitl-widget");
       if (existingWidget) existingWidget.remove();
@@ -559,13 +606,31 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
       const imageOptions = { toolName: data.tool || block.dataset.toolName, metadata: data.metadata, attachmentUrl };
-      res.innerHTML = `${renderToolResultArtifacts(data.artifacts)}<div class="label" style="margin-top:8px">结果 result</div>${renderToolResult(data.result, imageOptions)}${renderLocalFileDownload(data.result, data.artifacts, imageOptions)}`;
-      window.DeepAgentMarkdown?.restoreCodeState?.(res, codeState);
+      const media = renderViewImageResult(data.result, { attachmentUrl, ...imageOptions })
+        || renderWebImagePreview(data.result, { className: "tool-web-image-preview" });
+      // File and image controls remain available without mounting the raw result.
+      let artifactsHost = block.querySelector("[data-tool-artifacts]");
+      if (!artifactsHost) {
+        artifactsHost = document.createElement("div");
+        artifactsHost.dataset.toolArtifacts = "1";
+        block.insertBefore(artifactsHost, body);
+      }
+      artifactsHost.innerHTML = `${renderToolResultArtifacts(data.artifacts)}${media || ""}${renderLocalFileDownload(data.result, data.artifacts, imageOptions)}`;
+      res.innerHTML = media ? "" : '<div class="label" style="margin-top:8px">结果 result</div><div data-tool-result-content=""></div>';
       body.appendChild(res);
-      refreshLucideIcons();
+      const details = toolDetailStates.get(block);
+      if (details) {
+        details.result = data.result;
+        details.imageOptions = imageOptions;
+        details.resultDirty = !media;
+        details.codeState = codeState;
+      }
+      if (block.classList.contains("open")) hydrateToolDetails(block);
+      refreshLucideIcons(row);
       updateProcessDisclosure();
     },
     removeToolCall(data) {
+      streamRender.flush();
       const key = data.tool_call_id;
       if (!key) return;
       if (isPlanningToolEvent(data)) return;
@@ -578,6 +643,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       updateProcessDisclosure();
     },
     attachHitlWidget(call) {
+      streamRender.flush();
       if (!allowDeferred) {
         const block = toolBlocks.get(call.tool_call_id);
         if (block && !block.dataset.done) {
@@ -599,11 +665,43 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       updateProcessDisclosure();
     },
     dispose() {
+      disposed = true;
+      streamRender.dispose();
+      for (const root of pendingIconRoots) {
+        if (root === row || row.contains?.(root)) pendingIconRoots.delete(root);
+      }
       if (processTimer) window.clearInterval(processTimer);
       processTimer = null;
     },
   };
   return presenter;
+}
+
+function hydrateToolDetails(block) {
+  const state = toolDetailStates.get(block);
+  if (!state) return;
+  if (state.argsDirty) {
+    const host = block.querySelector("[data-tool-args]");
+    if (host) {
+      const codeState = window.DeepAgentMarkdown?.captureCodeState?.(host);
+      const argsEl = host.querySelector(".args");
+      if (argsEl && window.DeepAgentJson?.updateBlock) window.DeepAgentJson.updateBlock(argsEl, state.args);
+      else host.innerHTML = window.DeepAgentJson?.renderBlock(state.args, { className: "args", ariaLabel: "工具参数 JSON" })
+        || `<pre class="args">${escapeHtml(pretty(state.args))}</pre>`;
+      window.DeepAgentMarkdown?.restoreCodeState?.(host, codeState);
+    }
+    state.argsDirty = false;
+  }
+  if (state.resultDirty) {
+    const host = block.querySelector("[data-tool-result-content]");
+    if (host) {
+      host.innerHTML = renderToolResult(state.result, state.imageOptions);
+      window.DeepAgentMarkdown?.restoreCodeState?.(host, state.codeState);
+      state.codeState = null;
+    }
+    state.resultDirty = false;
+  }
+  refreshLucideIcons(block);
 }
 
 function pretty(v) {
@@ -710,6 +808,7 @@ function hasNonEmptyArgs(args) {
 }
 
 function setToolBlockExpanded(block, expanded) {
+  if (expanded) toolDetailRenderers.get(block)?.();
   block.classList.toggle("open", expanded);
   block.querySelector(".tool-head")?.setAttribute("aria-expanded", String(expanded));
 }
@@ -726,13 +825,13 @@ function renderMarkdown(src) {
   return window.DeepAgentMarkdown?.render(src) ?? `<pre class="md-fallback">${escapeHtml(src)}</pre>`;
 }
 
-function renderMarkdownBody(src) {
-  return window.DeepAgentMarkdown?.renderBody(src) ?? `<div class="markdown-body">${renderMarkdown(src)}</div>`;
+function renderMarkdownBody(src, options) {
+  return window.DeepAgentMarkdown?.renderBody(src, options) ?? `<div class="markdown-body">${renderMarkdown(src)}</div>`;
 }
 
-function replaceMarkdownBody(root, source) {
-  if (window.DeepAgentMarkdown?.replaceBody) window.DeepAgentMarkdown.replaceBody(root, source);
-  else root.innerHTML = renderMarkdownBody(source);
+function replaceMarkdownBody(root, source, options) {
+  if (window.DeepAgentMarkdown?.replaceBody) window.DeepAgentMarkdown.replaceBody(root, source, options);
+  else root.innerHTML = renderMarkdownBody(source, options);
 }
 
 function renderMarkdownDiagrams(root) {

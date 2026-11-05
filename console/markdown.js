@@ -7,6 +7,14 @@
   let renderSequence = 0;
   let markdownOptions;
   let mathExtension;
+  let highlightCode = true;
+  // Fixed categories keep failure logging bounded during repeated stream renders.
+  const warned = new Set();
+  function warnOnce(kind, ...details) {
+    if (warned.has(kind)) return;
+    warned.add(kind);
+    console.warn(...details);
+  }
 
   function codeIcon(name) {
     const definition = global.lucide?.icons?.[name];
@@ -62,9 +70,9 @@
     }
   }
 
-  function replaceBody(root, source) {
+  function replaceBody(root, source, options) {
     const saved = captureCodeState(root);
-    root.innerHTML = renderBody(source);
+    root.innerHTML = renderBody(source, options);
     restoreCodeState(root, saved);
   }
 
@@ -149,7 +157,7 @@
   function init() {
     if (ready) return true;
     if (typeof global.marked === "undefined" || typeof global.DOMPurify === "undefined") {
-      console.warn("[deep-agent] Markdown 库未加载，将回退为纯文本");
+      warnOnce("markdown-dependencies", "[deep-agent] Markdown 库未加载，将回退为纯文本");
       return false;
     }
 
@@ -184,7 +192,7 @@
           }
 
           let highlighted = escapeHtml(text);
-          if (typeof global.hljs !== "undefined") {
+          if (highlightCode && typeof global.hljs !== "undefined") {
             if (language && global.hljs.getLanguage(language)) {
               try {
                 highlighted = global.hljs.highlight(text, { language, ignoreIllegals: true }).value;
@@ -257,22 +265,25 @@
     return extension;
   }
 
-  function render(source) {
+  function render(source, { highlight = true } = {}) {
     const text = String(source ?? "");
     if (!init()) return `<pre class="md-fallback">${escapeHtml(text)}</pre>`;
     // Footnotes are scoped per message, including repeated renders during streaming.
     const parser = global.markedFootnote && text.includes("[^")
       ? new global.marked.Marked(markdownOptions, ...(mathExtension ? [mathExtension] : []), scopedFootnotes(`md-fn-${++renderSequence}-`))
       : global.marked;
-    const raw = parser.parse(text);
+    const previousHighlight = highlightCode;
+    highlightCode = highlight;
+    let raw;
+    try { raw = parser.parse(text); } finally { highlightCode = previousHighlight; }
     return global.DOMPurify.sanitize(raw, {
       USE_PROFILES: { html: true, mathMl: true, svg: true },
       ADD_ATTR: ["target", "rel", "class", "data-lang", "data-mermaid-state"],
     });
   }
 
-  function renderBody(source) {
-    return `<div class="markdown-body">${render(source)}</div>`;
+  function renderBody(source, options) {
+    return `<div class="markdown-body">${render(source, options)}</div>`;
   }
 
   function loadMermaid() {
@@ -317,7 +328,7 @@
       message.className = "mermaid-diagram-error";
       message.textContent = "Mermaid 图表语法有误，已保留源代码。";
       node.appendChild(message);
-      console.warn("[deep-agent] Mermaid 渲染失败", error);
+      warnOnce("mermaid-render", "[deep-agent] Mermaid 渲染失败", error);
     }
   }
 
@@ -346,7 +357,7 @@
           node.appendChild(message);
         }
       }
-      console.warn("[deep-agent] Mermaid 资源加载失败", error);
+      warnOnce("mermaid-load", "[deep-agent] Mermaid 资源加载失败", error);
     }
   }
 

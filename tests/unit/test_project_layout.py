@@ -219,17 +219,17 @@ class ProjectLayoutTest(unittest.TestCase):
             from deep_agent.models import OpenAICompatibleVideoChatModel
             from deep_agent.models.provider_registry import ProviderRuntimeConfig
             from deep_agent.models.models_dev import ModelsDevBundle
-            from deep_agent.capabilities.general import build_native_tool_package
+            from deep_agent.capabilities.environment import build_environment_toolset
             print(json.dumps({value.__name__: value.__module__ for value in (
                 OpenAICompatibleVideoChatModel, ProviderRuntimeConfig,
-                ModelsDevBundle, build_native_tool_package,
+                ModelsDevBundle, build_environment_toolset,
             )}))
         """)
         self.assertEqual(actual, {
             "OpenAICompatibleVideoChatModel": "deep_agent.models.openai_compatible_video",
             "ProviderRuntimeConfig": "deep_agent.models.provider_registry",
             "ModelsDevBundle": "deep_agent.models.models_dev",
-            "build_native_tool_package": "deep_agent.capabilities.general.builtin",
+            "build_environment_toolset": "deep_agent.capabilities.environment",
         })
 
     def test_mcp_subprocess_constants_do_not_load_runtime_or_configuration(self):

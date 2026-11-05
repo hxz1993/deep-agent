@@ -275,7 +275,7 @@ test("折叠后复制仍取得完整原文，JSON参数更新保留code节点与
   h.json.updateBlock(dom.pre,{updated:'new value',rows:Array(20).fill('item')});
   assert.equal(dom.code,code); assert.equal(dom.pre.hidden,false);
   assert.match(code.innerHTML,/new value/); assert.match(code.innerHTML,/json-key/);
-  assert.match(chatSource,/DeepAgentJson\.updateBlock\(argsEl, merged\.args\)/);
+  assert.match(chatSource,/DeepAgentJson\.updateBlock\(argsEl, state\.args\)/);
   assert.match(chatSource,/restoreCodeState\?\.\(nextRow/);
 });
 
@@ -294,4 +294,68 @@ test("流式正文替换调用真实renderer后恢复手动选择；工具代码
   const saved = h.md.captureCodeState(old.root), other = attachTool(codeDom(),'call-b'), same = attachTool(codeDom(),'call-a');
   h.md.restoreCodeState({querySelectorAll: () => [other.block,same.block]},saved);
   assert.equal(other.pre.hidden,true); assert.equal(same.pre.hidden,false);
+});
+
+test("流式可跳过语法高亮，终态默认恢复高亮且不影响后续消息", () => {
+  const source = '```python\nprint(True)\n```\n\n| 项 | 值 |\n|---|---|\n| A | 1 |';
+  const partial = parserContext.DeepAgentMarkdown.render(source, { highlight: false });
+  assert.doesNotMatch(partial, /hljs-keyword|hljs-built_in|hljs-literal/);
+  assert.match(partial, /language-python/);
+  assert.match(partial, /<table>/);
+  assert.match(partial, /print\(True\)/);
+  assert.match(render(source), /hljs-/);
+  const host = { querySelectorAll: () => [], innerHTML: '' };
+  parserContext.DeepAgentMarkdown.replaceBody(host, source, { highlight: false });
+  assert.doesNotMatch(host.innerHTML, /hljs-keyword|hljs-built_in|hljs-literal/);
+  parserContext.DeepAgentMarkdown.replaceBody(host, source);
+  assert.match(host.innerHTML, /hljs-/);
+});
+
+test("Markdown 依赖缺失时重复渲染只警告一次，依赖恢复后仍能正常解析", async () => {
+  const warnings = [];
+  const context = vm.createContext({ console: { warn: (...args) => warnings.push(args) } });
+  context.window = context;
+  vm.runInContext(markdownSource, context);
+  for (let i = 0; i < 100; i++) {
+    assert.equal(context.DeepAgentMarkdown.render('<private>&'), '<pre class="md-fallback">&lt;private&gt;&amp;</pre>');
+  }
+  assert.equal(warnings.length, 1);
+  context.DOMPurify = { addHook() {}, sanitize: value => value };
+  vm.runInContext(await readFile(new URL('../../../console/vendor/marked.min.js', import.meta.url), 'utf8'), context);
+  assert.match(context.DeepAgentMarkdown.render('**恢复**'), /<strong>恢复<\/strong>/);
+  assert.equal(warnings.length, 1);
+});
+
+test("Mermaid 加载与语法失败分别只警告一次，各图保留错误及源码且后续可恢复", async () => {
+  const warnings = [];
+  const context = vm.createContext({ console: { warn: (...args) => warnings.push(args) }, URL });
+  context.window = context;
+  context.DOMPurify = { sanitize: value => value };
+  context.document = {
+    baseURI: 'http://localhost/console/',
+    documentElement: { getAttribute: () => 'light' },
+    createElement: () => ({}),
+    head: { appendChild: script => script.onerror() },
+  };
+  vm.runInContext(markdownSource, context);
+  const node = () => {
+    const children = [];
+    return { dataset: { mermaidState: 'pending' }, children,
+      querySelector: selector => selector === 'code' ? { textContent: 'graph fixture' } : children.find(child => child.className === 'mermaid-diagram-error'),
+      appendChild: child => children.push(child) };
+  };
+  const nodes = Array.from({ length: 100 }, node);
+  for (const item of nodes) await context.DeepAgentMarkdown.renderDiagrams({ querySelectorAll: () => [item] });
+  assert.equal(warnings.length, 1);
+  assert.ok(nodes.every(item => item.dataset.mermaidState === 'error' && item.children[0].textContent.includes('保留源代码')));
+  context.mermaid = { initialize() {}, render: async () => { throw new Error('fixture syntax'); } };
+  const invalid = Array.from({ length: 100 }, node);
+  await context.DeepAgentMarkdown.renderDiagrams({ querySelectorAll: () => invalid });
+  assert.equal(warnings.length, 2);
+  assert.ok(invalid.every(item => item.dataset.mermaidState === 'error' && item.children[0].textContent.includes('保留源代码')));
+  context.mermaid.render = async () => ({ svg: '<svg></svg>' });
+  const valid = node();
+  await context.DeepAgentMarkdown.renderDiagrams({ querySelectorAll: () => [valid] });
+  assert.equal(valid.dataset.mermaidState, 'rendered');
+  assert.equal(warnings.length, 2);
 });

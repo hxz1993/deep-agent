@@ -19,6 +19,17 @@ Sandbox Worker 仍只使用受控的 `src`，禁止继承宿主的任意 `PYTHON
 
 ## 运行命令
 
+优先 `.venv/bin/python scripts/run_tests.py --suite affected --base HEAD` 做日常相关回归，
+发布前 `.venv/bin/python scripts/run_tests.py --suite all`。默认 all，包含 Python 与 Console；
+`--suite quick` 仅为显式纯逻辑清单加 Console 全量，不能替代完整验收。
+`--list` 只显示选测原因，`--durations` 默认 20，可选 JSON 写忽略的 `output/TMP to delete.../`。
+显式领域清单在 `helpers/test_groups.json`；新增／移动相关测试需同步清单，未知生产路径、
+共享入口、数据库、依赖、删除或无法确定消费者的 helper 一律全量，不按目录名猜成本。
+
+共用初始化放非 TestCase 的 fixture/mixin，不从其他测试模块直接导入测试类借用 setUp。
+确需继承整组行为时用模块引用基类，保留不同初始化下的场景。重复 ID 在统一入口报错，
+不得运行时静默去重。subTest 保留参数标签，权限、取消和事务边界不为减数量强行合并。
+
 运行中持久化回归入口：`unit/test_message_persistence.py`、`test_message_part_store.py`、
 `integration/test_incremental_message_persistence.py`、`test_message_persistence_process_exit.py`、`test_channel_message_persistence.py`。
 真实 SDK 需在模型静默/并行工具中途设屏障，从独立 HTTP/SQLite 连接读 History，不能先 flush 后宣称实时。
@@ -27,16 +38,16 @@ Console 跟随验证包含请求串行、同 Sequence 状态更新、切页迟�
 
 ```bash
 # 全部
-PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -t . -p "test_*.py" -v
 
 # 排查失败：首个报错即停
-PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" --failfast -v
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -t . -p "test_*.py" --failfast -v
 
-# 仅单元（无网络、无外部子进程）
-PYTHONPATH=src python3.12 -m unittest discover -s tests/unit -p "test_*.py" -v
+# 仅 unit 目录（含部分数据库、HTTP 和子进程边界测试，不等同快速组）
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests/unit -t . -p "test_*.py" -v
 
 # 仅集成（HTTP、MCP 子进程、header 转发）
-PYTHONPATH=src python3.12 -m unittest discover -s tests/integration -p "test_*.py" -v
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests/integration -t . -p "test_*.py" -v
 ```
 
 ---

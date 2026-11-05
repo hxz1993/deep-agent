@@ -1,3 +1,4 @@
+import { renderIconsWithin } from "./render-scheduler.js?v=20261105-v01510";
 import { mountStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
 import { cacheMessageSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 import { tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
@@ -152,6 +153,22 @@ function assistantLoopSummary(payload = {}, status = "running") {
   if (status === "interrupted") return "已停止";
   if (status === "completed") return "模型思考";
   return "模型处理中";
+}
+
+function appendTextPreview(preview, delta, limit = 180) {
+  // Match valuePreview's whitespace/trim/slice behavior without re-reading an
+  // append-only answer. Once its normalized prefix overflows it cannot shrink.
+  if (!preview.overflow) for (let index = 0; index < delta.length; index += 1) {
+    const character = delta[index];
+    if (/\s/.test(character)) {
+      if (preview.text.length) preview.space = true;
+      continue;
+    }
+    if (preview.space) { preview.text += " "; preview.space = false; }
+    preview.text += character;
+    if (preview.text.length > limit) { preview.overflow = true; break; }
+  }
+  return preview.overflow ? `${preview.text.slice(0, limit)}…` : preview.text;
 }
 
 function assistantMessageKey(event) {
@@ -1289,6 +1306,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   const runTurns = new Map();
   let pendingResults = [];
   let liveCalls = new WeakMap();
+  let liveTextPreviews = new WeakMap();
+  let inputCount = null;
   let activeAssistantLoop = null;
   let assistantLoopSequence = 0;
   let selectedId = null;
@@ -1301,12 +1320,36 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let clockMode = "time";
   let renderQueued = false;
   let renderedSelectedId = null, renderedDetailTab = null;
+  let renderedDetail = null;
+  let renderedClockMode = null;
+  let eventRevision = 0;
+  const eventVersions = new WeakMap();
+  const rowElements = new Map();
+  const touchEvent = (event) => { if (event) eventVersions.set(event, ++eventRevision); };
 
   const allEvents = () => [...historyEvents, ...liveEvents].sort((left, right) => {
     const leftSequence = Number.isFinite(Number(left.sequence)) ? Number(left.sequence) : Number.MAX_SAFE_INTEGER;
     const rightSequence = Number.isFinite(Number(right.sequence)) ? Number(right.sequence) : Number.MAX_SAFE_INTEGER;
     return leftSequence - rightSequence;
   });
+
+  function currentInputCount() {
+    if (inputCount === null) {
+      const sequences = new Set();
+      for (const events of [historyEvents, liveEvents]) for (const event of events) {
+        const sequence = event.input_sequence;
+        if (sequence) sequences.add(sequence);
+      }
+      inputCount = sequences.size;
+    }
+    return inputCount;
+  }
+
+  function liveAssistantSummary(assistant) {
+    const preview = liveTextPreviews.get(assistant);
+    if (assistant.payload.content && preview) return appendTextPreview(preview, "");
+    return assistantLoopSummary(assistant.payload, assistant.status);
+  }
 
   function selectView(view, { notify = true } = {}) {
     if (disposed) return;
@@ -1327,6 +1370,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       else if (!host) window.DeepAgentConsoleWorkspace?.openInspectorPane?.();
       scheduleRender();
     } else {
+      // The shared inspector may replace its contents in conversation mode.
+      renderedDetail = null;
       if (onInspector) onInspector();
       else if (!host) window.DeepAgentConsoleWorkspace?.renderInspector?.();
     }
@@ -1334,7 +1379,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   }
 
   function scheduleRender() {
-    if (disposed || renderQueued) return;
+    if (disposed || activeView !== "trajectory" || renderQueued) return;
     renderQueued = true;
     animationFrame = window.requestAnimationFrame(() => {
       animationFrame = null;
@@ -1344,23 +1389,56 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   }
 
   function renderRows(events) {
+    const remaining = new Set(events.map((event) => event.id));
+    for (const [id, entry] of rowElements) {
+      if (!remaining.has(id)) { entry.node.remove(); rowElements.delete(id); }
+    }
     if (!events.length) {
-      list.innerHTML = `<div class="trajectory-empty">${icon("route")}<p>当前筛选下没有轨迹。</p></div>`;
+      if (!list.querySelector?.(".trajectory-empty")) {
+        list.innerHTML = `<div class="trajectory-empty">${icon("route")}<p>当前筛选下没有轨迹。</p></div>`;
+        renderIconsWithin(list, window.lucide);
+      }
       return;
     }
-    const html = [];
-    events.forEach((event) => {
+    list.querySelector?.(".trajectory-empty")?.remove();
+    for (const [index, event] of events.entries()) {
       const showToolName = TOOL_KINDS.has(event.kind) || event.kind === "output";
       const summary = event.summary || "No content";
-      html.push(`<button type="button" class="trajectory-row ${escapeHtml(event.kind)} ${selectedId === event.id ? "active" : ""}" data-trajectory-id="${escapeHtml(event.id)}">
-        <span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
-        <span class="trajectory-row-meta">${renderRowTime(event, clockMode)}<em class="${escapeHtml(event.status)}">${escapeHtml(event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status))}</em></span>
-      </button>`);
-    });
-    list.innerHTML = html.join("");
+      const html = `<span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
+        <span class="trajectory-row-meta">${renderRowTime(event, clockMode)}<em class="${escapeHtml(event.status)}">${escapeHtml(event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status))}</em></span>`;
+      let entry = rowElements.get(event.id);
+      if (!entry) {
+        const node = document.createElement("button");
+        node.type = "button";
+        node.dataset.trajectoryId = event.id;
+        entry = { node, html: null };
+        rowElements.set(event.id, entry);
+      }
+      const { node } = entry;
+      const className = `trajectory-row ${event.kind}${selectedId === event.id ? " active" : ""}`;
+      if (node.className !== className) node.className = className;
+      if (entry.html !== html) {
+        node.innerHTML = html;
+        entry.html = html;
+        renderIconsWithin(node, window.lucide);
+      }
+      if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+    }
+  }
+
+  function detailContext(event, events) {
+    if (event?.kind !== "assistant" || !event.payload?.tool_calls?.length) return "";
+    // Assistant tool jump links depend on matching tool facts, not unrelated deltas.
+    return event.payload.tool_calls.map((call) => [...events].reverse().find((item) =>
+      (TOOL_KINDS.has(item.kind) || item.kind === "output") && item.tool_call_id === call?.tool_call_id
+      && (event.source === "sse" ? item.run_id === event.run_id
+        : item.kind === "output"
+          ? (item.native?.source_event_ids || []).some(id => (event.native?.event_ids || [event.id]).includes(id))
+          : (event.native?.event_ids || [event.id]).includes(item.native?.call_event_id)))?.id || "").join("\n");
   }
 
   function render() {
+    if (disposed || activeView !== "trajectory") return;
     const listScrollTop = list.scrollTop;
     const detailScrollTop = detail.scrollTop;
     const ptcChartScrollTop = detail.querySelector?.(".trajectory-ptc-chart")?.scrollTop || 0;
@@ -1368,17 +1446,22 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     const events = allEvents();
     const stats = trajectoryStats(events);
     const visible = filterTrajectory(events, { mode, query: search?.value });
-    if (clockToggle) {
+    if (clockToggle && renderedClockMode !== clockMode) {
+      renderedClockMode = clockMode;
       clockToggle.innerHTML = `${icon(clockMode === "duration" ? "timer" : "clock-3")}<span>${clockMode === "duration" ? "耗时" : "时间"}</span>`;
       clockToggle.setAttribute("aria-pressed", String(clockMode === "duration"));
       clockToggle.setAttribute("aria-label", clockMode === "duration" ? "切换为时间显示" : "切换为耗时显示");
       clockToggle.title = clockMode === "duration" ? "切换为时间；耗时分档：≤5秒、5–10秒、10–20秒、>20秒；橙色表示较慢，非错误" : "切换为耗时：≤5秒、5–10秒、10–20秒、>20秒";
+      renderIconsWithin(clockToggle, window.lucide);
     }
-    if (byId("trajectoryCallCount")) byId("trajectoryCallCount").textContent = String(stats.calls);
+    const callCount = byId("trajectoryCallCount");
+    if (callCount && callCount.textContent !== String(stats.calls)) callCount.textContent = String(stats.calls);
     const selected = events.find((event) => event.id === selectedId) || visible[0] || null;
     selectedId = selected?.id || null;
     renderRows(visible);
-    if (query("main.chat")?.classList.contains("trajectory-active")) {
+    const detailState = [selected, selected ? eventVersions.get(selected) : 0, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, detailContext(selected, events)];
+    if (!renderedDetail || detailState.some((value, index) => value !== renderedDetail[index])) {
+      renderedDetail = detailState;
       const codeState = selectedId === renderedSelectedId && detailTab === renderedDetailTab ? globalThis.DeepAgentMarkdown?.captureCodeState?.(detail) : [];
       const openContexts = selectedId === renderedSelectedId && detailTab === renderedDetailTab
         ? new Set(Array.from(detail.querySelectorAll?.("details[data-trajectory-context]") || []).filter(item => item.open).map(item => item.dataset.trajectoryContext)) : new Set();
@@ -1388,6 +1471,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       if (outputHost && selected?.candidate_found) mountStructuredOutput(outputHost, { id: selected.id, name: selected.payload.name, output: selected.candidate, failed: !selected.payload.accepted });
       globalThis.DeepAgentMarkdown?.restoreCodeState?.(detail, codeState);
       globalThis.DeepAgentMarkdown?.renderDiagrams?.(detail);
+      renderIconsWithin(detail, window.lucide);
       if (selectedId === renderedSelectedId) {
         detail.scrollTop = detailScrollTop;
         const chart = detail.querySelector?.(".trajectory-ptc-chart");
@@ -1399,17 +1483,37 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     list.scrollTop = listScrollTop;
     if (selectedId !== renderedSelectedId) onSelectEvent?.(selected);
     renderedSelectedId = selectedId; renderedDetailTab = detailTab;
-    window.lucide?.createIcons();
+  }
+
+  function clearRenderedTrajectory() {
+    if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+    renderQueued = false;
+    rowElements.clear();
+    list.innerHTML = "";
+    list.scrollTop = 0;
+    // The inspector is shared with conversation metadata. Remove only content
+    // still owned by this controller, never an already-rendered overview.
+    if (activeView === "trajectory" || detail.querySelector?.(".trajectory-detail-head, .trajectory-detail-empty")) {
+      detail.innerHTML = "";
+      detail.scrollTop = 0;
+    }
+    renderedDetail = null;
+    renderedSelectedId = null;
+    renderedDetailTab = null;
   }
 
   function setHistory(nextHistory, { preserveView = false } = {}) {
     const sessionChanged = nextHistory?.session_id && history.session_id
       && nextHistory.session_id !== history.session_id;
+    if (sessionChanged) clearRenderedTrajectory();
     history = nextHistory || { items: [] };
     historyEvents = buildTrajectory(history);
     liveEvents = [];
+    inputCount = null;
     pendingResults = [];
     liveCalls = new WeakMap();
+    liveTextPreviews = new WeakMap();
     runTurns.clear();
     for (const event of history.items || []) if (event.run_id && event.turn_id) runTurns.set(event.run_id, event.turn_id);
     currentRunId = null;
@@ -1426,10 +1530,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   function reset() {
     setHistory({ items: [] });
     selectView("conversation");
+    clearRenderedTrajectory();
   }
 
   function addUser({ content, attachments = [], context_refs = [], branch_point = null }) {
-    const inputSequence = trajectoryStats(allEvents()).inputs + 1;
+    const inputSequence = currentInputCount() + 1;
     const inputEvent = newEvent({
       id: `live-user-${Date.now()}`,
       kind: "input",
@@ -1440,6 +1545,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       payload: { content: content || null, attachments, context_refs, branch_point },
     });
     liveEvents.push(inputEvent);
+    inputCount = null;
     scheduleRender();
   }
 
@@ -1459,6 +1565,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       source: "sse",
     });
     liveEvents.push(activeAssistantLoop);
+    inputCount = null;
     return activeAssistantLoop;
   }
 
@@ -1467,7 +1574,14 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (type === "thinking") {
       assistant.payload.thinking = `${assistant.payload.thinking || ""}${payload.delta || ""}` || null;
     } else if (type === "text") {
-      assistant.payload.content = `${assistant.payload.content || ""}${payload.delta || ""}` || null;
+      const delta = `${payload.delta || ""}`;
+      assistant.payload.content = `${assistant.payload.content || ""}${delta}` || null;
+      let preview = liveTextPreviews.get(assistant);
+      if (!preview) {
+        preview = { text: "", space: false, overflow: false };
+        liveTextPreviews.set(assistant, preview);
+      }
+      appendTextPreview(preview, delta);
     } else if (type === "tool_call") {
       const calls = assistant.payload.tool_calls;
       const existing = calls.find((item) => item.tool_call_id === payload.tool_call_id);
@@ -1482,8 +1596,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       if (existing) Object.assign(existing, next);
       else calls.push(next);
     }
-    assistant.summary = assistantLoopSummary(assistant.payload, assistant.status);
+    assistant.summary = liveAssistantSummary(assistant);
     assistant.timestamp_end = timestamp;
+    touchEvent(assistant);
     return assistant;
   }
 
@@ -1520,6 +1635,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       row.status = toolResultPresentation(payload).status;
       if (row.duration_source !== "execution") row.timestamp_end = frame.timestamp;
       applyExecutionTiming(row, payload.timing, "tool_execution");
+      touchEvent(row);
       return true;
     });
   }
@@ -1551,6 +1667,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (["session_event_appended", "session_event_updated"].includes(type)) {
       const stored = payload.event || payload;
       if (!stored?.event_id || !stored?.event_type) return;
+      inputCount = null;
       const liveInput = stored.event_type === "user/message"
         ? [...liveEvents].reverse().find((item) => item.kind === "input")
         : null;
@@ -1598,8 +1715,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     if (type === "output") {
       if (!payload.output_id || historyEvents.some(item => item.id === payload.output_id)) return;
       const existing = liveEvents.find(item => item.id === payload.output_id);
-      const projected = projectOutputAttempt({ event_id: payload.output_id, sequence: payload.sequence, turn_id: payload.turn_id, run_id: payload.run_id, event_type: "output/attempt", created_at: new Date().toISOString(), payload }, Math.max(trajectoryStats(allEvents()).inputs, 1), history.items || []);
-      if (existing) Object.assign(existing, projected); else liveEvents.push(projected);
+      const projected = projectOutputAttempt({ event_id: payload.output_id, sequence: payload.sequence, turn_id: payload.turn_id, run_id: payload.run_id, event_type: "output/attempt", created_at: new Date().toISOString(), payload }, Math.max(currentInputCount(), 1), history.items || []);
+      if (existing) { Object.assign(existing, projected); touchEvent(existing); } else liveEvents.push(projected);
+      inputCount = null;
       scheduleRender();
       return;
     }
@@ -1610,7 +1728,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         id: `live-compaction-${id}`,
         compaction_event_id: id,
         kind: "compaction",
-        input_sequence: Math.max(trajectoryStats(allEvents()).inputs, 1),
+        input_sequence: Math.max(currentInputCount(), 1),
         run_id: payload.run_id || currentRunId,
         timestamp: existing?.timestamp || new Date().toISOString(),
         timestamp_end: new Date().toISOString(),
@@ -1623,8 +1741,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         result: null,
         native: null,
       };
-      if (existing) Object.assign(existing, next);
+      if (existing) { Object.assign(existing, next); touchEvent(existing); }
       else liveEvents.push(next);
+      inputCount = null;
       scheduleRender();
       return;
     }
@@ -1632,11 +1751,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       currentRunId = payload.run_id || currentRunId;
       if (currentRunId && payload.turn_id) runTurns.set(currentRunId, payload.turn_id);
       const currentUser = [...liveEvents].reverse().find((item) => item.kind === "input" && !item.run_id);
-      if (currentUser && currentRunId) currentUser.run_id = currentRunId;
+      if (currentUser && currentRunId) { currentUser.run_id = currentRunId; touchEvent(currentUser); }
       scheduleRender();
       return;
     }
-    const inputSequence = Math.max(trajectoryStats(allEvents()).inputs, 1);
+    const inputSequence = Math.max(currentInputCount(), 1);
     const timestamp = new Date().toISOString();
 
     if (["thinking", "text"].includes(type)) {
@@ -1661,7 +1780,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       reconcileResults();
       if (activeAssistantLoop?.run_id === currentRunId) {
         activeAssistantLoop.status = "completed";
-        activeAssistantLoop.summary = assistantLoopSummary(activeAssistantLoop.payload, activeAssistantLoop.status);
+        activeAssistantLoop.summary = liveAssistantSummary(activeAssistantLoop);
+        touchEvent(activeAssistantLoop);
         activeAssistantLoop = null;
       }
       scheduleRender();
@@ -1674,9 +1794,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         call.status = "interrupted";
         call.summary = liveSummary(type, payload);
         call.timestamp_end = timestamp;
+        touchEvent(call);
         if (activeAssistantLoop?.run_id === currentRunId) {
           activeAssistantLoop.status = "interrupted";
-          activeAssistantLoop.summary = assistantLoopSummary(activeAssistantLoop.payload, activeAssistantLoop.status);
+          activeAssistantLoop.summary = liveAssistantSummary(activeAssistantLoop);
+          touchEvent(activeAssistantLoop);
           activeAssistantLoop = null;
         }
         scheduleRender();
@@ -1687,7 +1809,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
           liveEvents.filter((item) => item.run_id === currentRunId && item.status === "running")
             .forEach((item) => {
               item.status = "completed"; item.timestamp_end = timestamp;
-              if (item.kind === "assistant") item.summary = assistantLoopSummary(item.payload, item.status);
+              if (item.kind === "assistant") item.summary = liveAssistantSummary(item);
+              touchEvent(item);
             });
           activeAssistantLoop = null;
           scheduleRender();
@@ -1697,7 +1820,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       liveEvents.filter((item) => item.run_id === currentRunId && ["running", "pending"].includes(item.status))
         .forEach((item) => {
           item.status = type === "error" ? "failed" : "interrupted"; item.timestamp_end = timestamp;
-          if (item.kind === "assistant") item.summary = assistantLoopSummary(item.payload, item.status);
+          if (item.kind === "assistant") item.summary = liveAssistantSummary(item);
+          touchEvent(item);
         });
       activeAssistantLoop = null;
       // Transport termination closes live content; only a persisted execution
@@ -1726,6 +1850,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       native: null,
     };
     liveEvents.push(live);
+    inputCount = null;
     if (type === "tool_call") {
       liveCalls.set(live, { args: jsonClone(payload.args),
         baseline: (history.items || []).reduce((max, item) => Math.max(max, Number(item.sequence) || 0), 0) });
@@ -1873,13 +1998,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     ptcDetailTab = ["input", "result", "error", "code"].includes(value.ptcDetailTab) ? value.ptcDetailTab : "result";
     if (search) search.value = value.query || "";
     queryAll("[data-trajectory-mode]").forEach((button) => button.classList.toggle("active", button.dataset.trajectoryMode === mode));
-    selectView(value.view, { notify: false }); render();
+    selectView(value.view ?? activeView, { notify: false }); render();
     list.scrollTop = Number(value.listScrollTop) || 0; detail.scrollTop = Number(value.detailScrollTop) || 0;
   }
   function destroy() {
     disposed = true; if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
     bindings.splice(0).forEach((remove) => remove()); historyEvents = []; liveEvents = []; history = {};
-    pendingResults = []; runTurns.clear(); liveCalls = new WeakMap();
+    pendingResults = []; runTurns.clear(); liveCalls = new WeakMap(); liveTextPreviews = new WeakMap(); inputCount = null; rowElements.clear(); renderedDetail = null;
   }
   return { setHistory, setExportReady, reset, addUser, ingest, selectView, focus, snapshot, restore, destroy, events: allEvents };
 }

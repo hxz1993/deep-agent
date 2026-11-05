@@ -1,3 +1,4 @@
+import { trajectoryDomHarness } from "./trajectory-dom-harness.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { attachmentDownloadUrl } from "../../../console/attachment-preview.js";
@@ -39,20 +40,19 @@ test("part facts preserve assistant loop identity and pair independently complet
 function withController(check, options = {}) {
   const oldDocument = globalThis.document;
   const oldWindow = globalThis.window;
-  const elements = new Map();
-  const element = (id) => {
-    if (!elements.has(id)) elements.set(id, {
-      innerHTML: "", value: "", scrollTop: 0,
-      classList: { toggle() {}, contains: () => true },
-      listeners: new Map(),
-      addEventListener(type, callback) { this.listeners.set(type, callback); }, setAttribute() {},
-    });
-    return elements.get(id);
-  };
-  globalThis.document = { getElementById: element, querySelector: element, querySelectorAll: () => [] };
-  globalThis.window = { requestAnimationFrame: (fn) => fn() };
-  try { check(createTrajectoryController({ state: {}, ...options }), elements); }
-  finally { globalThis.document = oldDocument; globalThis.window = oldWindow; }
+  const harness = trajectoryDomHarness({ immediate: true });
+  globalThis.document = harness.document;
+  globalThis.window = harness.window;
+  let controller;
+  try {
+    controller = createTrajectoryController({ state: {}, ...options });
+    controller.selectView("trajectory");
+    check(controller, harness.elements);
+  } finally {
+    controller?.destroy();
+    globalThis.document = oldDocument;
+    globalThis.window = oldWindow;
+  }
 }
 
 const contextReferences = [
@@ -84,7 +84,8 @@ test("trajectory download retains distinct full contexts from persisted user fac
   let exported;
   withController((controller, elements) => {
     const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
-    globalThis.document.createElement = () => ({ click() {} });
+    const createElement = globalThis.document.createElement;
+    globalThis.document.createElement = tag => tag === "a" ? { click() {} } : createElement(tag);
     URL.createObjectURL = blob => { exported = blob; return "blob:test"; };
     URL.revokeObjectURL = () => {};
     try {

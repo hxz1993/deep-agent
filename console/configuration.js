@@ -10,7 +10,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20261105-runtime-environment";
+const CONFIGURATION_ASSET_VERSION = "20261105-v01510";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -107,7 +107,7 @@ async function loadAdminScripts() {
     "./configuration/agent-packages.js",
     "./configuration/agent-package-export.js",
     "./configuration/builtin-tools.js",
-    "./configuration/system-tools.js",
+    "./configuration/system-tools.js?v=20261105-v01510",
     "./configuration/skills.js",
     "./configuration/mcp.js",
     "./ui-editable-select.js",

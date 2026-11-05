@@ -31,9 +31,9 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.9`（默认运行时时间工具与Agent删除反馈），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.10`（Console 渲染／恢复与测试执行提效），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
-| **测试** | `PYTHONPATH=src python3.12 -m unittest discover -s tests -p "test_*.py" -v` |
+| **测试** | `.venv/bin/python scripts/run_tests.py --suite all` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
 
 平台接入基础见[服务地址与账号链路](docs/guides/platform-integration.md)：
@@ -363,6 +363,16 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 因此它解决“模型调用前不知道返回字段”的问题；真实结果本身过大、空字段过多则属于分页、投影或 Artifact 治理，不能混为同一需求。
 
 ---
+
+## 测试选择与执行效率
+
+日常使用 `.venv/bin/python scripts/run_tests.py --suite affected --base HEAD`，发布前使用
+`--suite all`（默认）。`--suite quick` 只运行显式纯逻辑组及 Console 全量，不能当全量通过。
+共享装配、数据库、依赖、测试入口或未知改动回退全量；领域映射与测试清单由
+`tests/helpers/test_selection.py`、`test_groups.json` 明确维护，相关测试新增／移动要同步。
+原 unittest 命令统一加 `-t .`；复用初始化请提取非 TestCase helper，不直接导入测试类造成重复收集。
+本轮不引入并行执行或共享可变数据库。耗时摘要与逐例清单可写忽略的 `output/TMP to delete.../`，
+正式结论与去重依据见测试报告；指南入口为 `tests/README.md`。
 
 ## 其他文档
 

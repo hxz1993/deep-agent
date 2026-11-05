@@ -10,12 +10,12 @@ from deep_agent.channels.gateway.deepagent_client import StreamEvent
 from deep_agent.channels.service import ChannelService
 from deep_agent.db.models import ChatSession, ChatSessionEvent, WecomApplication
 from deep_agent.schemas.channel import ChannelAccountUpdate
-from tests.unit import test_channel_gateway as gateway_fixture
+from tests.helpers import channel_gateway as gateway_fixture
 
 
 class WecomIdentityChannelTests(unittest.IsolatedAsyncioTestCase):
-    asyncSetUp = gateway_fixture.ChannelGatewayTests.asyncSetUp
-    asyncTearDown = gateway_fixture.ChannelGatewayTests.asyncTearDown
+    asyncSetUp = gateway_fixture.ChannelGatewayFixture.asyncSetUp
+    asyncTearDown = gateway_fixture.ChannelGatewayFixture.asyncTearDown
 
     async def enable(self, application_id="application", enabled=True):
         async with self.factory.begin() as db:

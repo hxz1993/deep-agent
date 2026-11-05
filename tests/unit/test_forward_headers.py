@@ -98,6 +98,8 @@ class ForwardHeaderAllowlistTests(unittest.TestCase):
         )
 
     def test_default_allowlist_when_empty(self) -> None:
+        previous = OPTION.agent.mcp_forward_request_headers
+        self.addCleanup(setattr, OPTION.agent, "mcp_forward_request_headers", previous)
         OPTION.agent.mcp_forward_request_headers = ""
         self.assertIn("authorization", OPTION.agent.mcp_forward_request_headers)
         self.assertIn("app", OPTION.agent.mcp_forward_request_headers)

@@ -2,9 +2,9 @@ import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-usage-tab-2";
 import { renderPlanItems } from "./plan-view.js?v=20261103-view-image1";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
-import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20261103-trajectory-files";
+import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20261105-v01510";
 import { cacheTrajectorySummary } from "./cache-usage.js?v=20260923-usage-tab-2";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20261103-view-image3";
+import { createConversationPresenter } from "./conversation-presenter.js?v=20261105-v01510";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
   contextCompactionPresentation,
@@ -22,7 +22,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20261103-view-image1";
-import { createTrajectoryController } from "./trajectory.js?v=20261103-trajectory-files";
+import { createTrajectoryController } from "./trajectory.js?v=20261105-v01510";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20261103-view-image1";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { bindViewImagePreviews } from "./view-image.js?v=20261103-view-image3";
@@ -42,7 +42,8 @@ import {
 } from "./model-options.js?v=20260925-codex-1";
 import { shouldFollowMessages } from "./message-scroll.js?v=20260912-21";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260912-21";
-import { createHistoryFollower } from "./history-follower.js?v=20260912-21";
+import { createHistoryFollower } from "./history-follower.js?v=20261105-v01510";
+import { sameHistoryValue } from "./history-comparison.js?v=20261105-v01510";
 import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260912-21";
 import { createSessionFilterOptionsController, sessionAppQuery } from "./session-app-filter.js?v=20261104-app-search";
 
@@ -1411,6 +1412,8 @@ async function observePersistedSessionHistory(session, controller, current, {
   };
   const follower = createHistoryFollower({
     isCurrent: current,
+    // Only the persisted fallback is throttled; ordinary SSE/Live stays immediate.
+    historyIntervalMs: 3000,
     readStatus: async (signal) => {
       if (snapshotOnly) return { status: "idle", read_only: readOnly };
       const response = await daFetch(sessionApiUrl(session, "/run-status"), { signal });
@@ -1425,11 +1428,10 @@ async function observePersistedSessionHistory(session, controller, current, {
       const response = await daFetch(sessionApiUrl(session, "/history"), { signal });
       if (!response.ok) throw new Error(`历史 HTTP ${response.status}`);
       const history = historyThroughRun(normalizeConversationHistory(await response.json()), runId, { baselineSequence });
-      // Checkpoint updates retain their Sequence, so compare payloads rather
-      // than treating event_head_sequence as a change/version token.
-      const signature = JSON.stringify(history);
-      const changed = signature !== lastHistory || status.status !== lastStatus;
-      return { history, signature, changed };
+      // Checkpoints can update in place: compare actual payloads, never a head
+      // Sequence/status shortcut or another full serialized History copy.
+      const changed = status.status !== lastStatus || !sameHistoryValue(history, lastHistory);
+      return { history, changed };
     },
     onStatus: (status) => {
       state.historyLoading = false;
@@ -1444,12 +1446,13 @@ async function observePersistedSessionHistory(session, controller, current, {
       }
       if (status.status === "idle") onIdle?.();
     },
-    onHistory: async ({ history, signature, changed }, status) => {
+    onHistory: async ({ history, changed }, status) => {
       if (changed) {
         applyObservedHistory(history, status);
         refreshTrajectory();
+        // Keep one authoritative rendered snapshot, not every equal re-read.
+        lastHistory = status.status === "idle" ? null : history;
       }
-      lastHistory = signature;
       lastStatus = status.status;
       lastError = null;
       if (status.status === "idle") void loadContextStatus(session, { signal: controller.signal, isCurrent: current });
@@ -1467,7 +1470,10 @@ async function observePersistedSessionHistory(session, controller, current, {
     },
   });
   if (register) state.historyFollower = follower;
-  controller.signal.addEventListener("abort", () => follower.stop(), { once: true });
+  controller.signal.addEventListener("abort", () => {
+    lastHistory = null;
+    follower.stop();
+  }, { once: true });
   await follower.start();
   return follower;
 }
@@ -1764,9 +1770,9 @@ function renderHistory(items, { updating = false, running = false } = {}) {
       }
     }
     const active = running && index === presentationNodes.length - 1 && node.type === "assistant";
-    const signature = JSON.stringify({ node, date, active, readOnly: running });
+    const snapshot = { node, date, active, readOnly: running };
     const old = previous[index];
-    if (old?.signature === signature) {
+    if (old && sameHistoryValue(old.snapshot, snapshot)) {
       next.push(old);
       desired.push(...old.elements);
       if (old.presenter) state.assistantPresenter = old.presenter;
@@ -1811,7 +1817,7 @@ function renderHistory(items, { updating = false, running = false } = {}) {
       elements.push(assistant.row);
       state.assistantPresenter = assistant;
     }
-    next.push({ signature, elements, presenter });
+    next.push({ snapshot, elements, presenter });
     desired.push(...elements);
   }
   const retained = new Set(next);
@@ -1839,7 +1845,7 @@ function renderHistory(items, { updating = false, running = false } = {}) {
 }
 
 function restoreHistoryDisclosure(oldRow, nextRow) {
-  globalThis.DeepAgentMarkdown?.restoreCodeState?.(nextRow, globalThis.DeepAgentMarkdown?.captureCodeState?.(oldRow));
+  const codeState = globalThis.DeepAgentMarkdown?.captureCodeState?.(oldRow);
   for (const selector of [".assistant-process", ".assistant-thinking", ".tool-block"]) {
     const oldBlocks = [...oldRow.querySelectorAll(selector)];
     for (const [index, block] of [...nextRow.querySelectorAll(selector)].entries()) {
@@ -1849,11 +1855,14 @@ function restoreHistoryDisclosure(oldRow, nextRow) {
       if (!previous?.dataset.disclosureTouched) continue;
       if (selector === ".tool-block" && previous.classList.contains("hitl-pending") !== block.classList.contains("hitl-pending")) continue;
       const open = previous.classList.contains("open");
-      block.classList.toggle("open", open);
+      if (selector === ".tool-block") setToolBlockExpanded(block, open);
+      else block.classList.toggle("open", open);
       if (previous.dataset.disclosureTouched) block.dataset.disclosureTouched = "1";
       block.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", String(open));
     }
   }
+  // Expanded lazy tool bodies must exist before restoring their code controls.
+  globalThis.DeepAgentMarkdown?.restoreCodeState?.(nextRow, codeState);
 }
 
 const sessionDeletesInFlight = new Set();

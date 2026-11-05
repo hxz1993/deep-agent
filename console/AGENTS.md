@@ -85,8 +85,8 @@ History 中运行工具一律只读，不能因工具目录补齐 widget 自动�
 | 会话 | `session_id` 由后端 `session` 事件返回；`GET/DELETE /api/v1/sessions`；标题展示 `title \|\| user_prompt`（见 [`../docs/guides/experience/ai-title-generator.md`](../docs/guides/experience/ai-title-generator.md)） |
 | 能力面板 | `GET /api/v1/tools` |
 | 配置 | `localStorage` 只保存调试 App；全局环境配置只读展示，身份和鉴权由平台提供 |
-| 内置工具目录 | 配置中心展示`builtin:general`、`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`、`builtin:document`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示；目录行复用UI工具的`ui-tool-tree-node`及公共资源布局，不依赖Skill旧卡片样式，交互仍按`data-tool-catalog-code`独立绑定 |
-| 系统工具目录 | 配置中心按任务规划、Skill、文件、工具结果、MCP 工具发现、MCP Resource 分组展示自动注入工具；不参与 Agent 配置 |
+| 内置工具目录 | 配置中心展示`builtin:sandbox`、`builtin:ptc`（程序编排）、`builtin:web`、`builtin:document`；Agent按包选择，旧`builtin:code-mode`不作为新目录项展示；目录行复用UI工具的`ui-tool-tree-node`及公共资源布局，不依赖Skill旧卡片样式，交互仍按`data-tool-catalog-code`独立绑定 |
+| 系统工具目录 | 配置中心按基础运行、文件与结果、Skill、MCP、渠道消息五组展示自动注入工具；不参与 Agent 配置 |
 | 渠道配置 | 配置中心维护企微Account、Agent、Bot凭证和启停；顶部展示渠道网关部署/运行状态，列表展示机器人连接状态；快捷命令弹框从公共只读目录获取，与渠道 `/help` 共用定义 |
 | 任务计划 | 只识别`write_plan`完整快照；仅当前Run直播展示，任何Run终态后隐藏，重新打开History不恢复；同Turn Deferred由后端恢复PlanStore |
 | Skill | 独立 Skill 列表与详情；上传包安装/替换/单个与全部导出/删除；资源目录复用本地Lucide文件图标，按后缀区分Excel/CSV绿色、Python蓝色、Word蓝色、PDF红色、PPT橙色、图片紫色；单行展示图标、相对路径和可用文件大小，完整路径悬停可见，不重复分类/MIME说明；所有目录项可选，文本/Word/Excel可读、脚本源码复用公共高亮代码块、图片经鉴权读取并复用图片弹框样式；PDF/PPTX等显示下载Skill包占位，不展示可执行性判断；Agent 使用独立 `skills` 列表选择 |
@@ -703,3 +703,17 @@ GET /skills/references/agents 只投影 Agent.id/name/skills，管理员权限�
 Skill 列表筛选默认显示“全部 Skill”，第二项“未被引用”，独立分割线后为引用 Agent 默认顺序；三个口径分别使用 library/unlink/bot 图标。表格所有筛选都将自定义稳定排列在内置之前，名称旁仅保留内置标签；未被引用使用弱灰色 unlink 图标和文字。共享下拉通过可选 option.data-icon/data-separator-before 复用此展示，未标记的控件行为不变。
 
 引用 Agent 名称和浮层内容只展示，不点击回筛选；筛选只通过顶部下拉操作。引用标签及标签旁间隙点击无操作，不进入详情；仅其余行区域进入 Skill 详情。+N 数字是独立浮层热区，悬停／键盘聚焦显示下划线，必须阻止事件冒泡到行导航。
+
+
+### 运行时目录展示分组（2026-11-05）
+
+`configuration/system-tools.js` 只将只读目录聚合为基础运行、文件与结果、Skill、MCP、渠道消息五组；`runtime:basic` 是 Console 展示编码，不写入 Agent 或安装包。后端领域、工具名称及逐工具注入条件保持不变，未知领域保留在列表末尾。不要根据展示分组决定运行装配、授权或 PTC 可用性。
+
+
+### 流式与轨迹展示开销（2026-11-05）
+
+text/thinking 只合并展示（75 ms），协议事实及工具／人审不缓冲；所有语义边界刷新，销毁取消任务。折叠工具原始详情按需挂载，文件／图片／下载入口保持可用；History 更新恢复展开工具时，先通过 presenter 挂载详情，再恢复代码状态。隐藏轨迹仍接收事实但不写 DOM，跨会话与 reset 必须释放旧行／详情缓存。图标使用 render-scheduler.js 的局部 SVG 创建，不能向不支持 root 的 Lucide createIcons 传无效参数。固定回放及边界见 docs/reports/2026-11-05-console-rendering-performance.md；浏览器瞬时堆采样不能作为泄漏或客户 OOM 修复结论。
+
+## 高频展示与恢复
+
+Markdown 依赖缺失、Mermaid 加载失败及图语法失败三类警告每页各记一次，逐图错误及源码保留；库恢复后仍重试正常渲染，不替换全局 console。普通 SSE／Live 继续实时，只有 History fallback 常规完整读取节流为三秒，状态仍每秒检查，首读、变化、刷新、重试和终态强制校准。不要使用 event head 作为 History 唯一变化版本，同 Sequence 的 checkpoint 仍可能更新。

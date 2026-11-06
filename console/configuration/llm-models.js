@@ -1,5 +1,6 @@
 const SINGLE_SYSTEM_MESSAGE_TAG = "single_system_message";
 const INLINE_TOOL_SCHEMA_REFS_TAG = "inline_tool_schema_refs";
+const OPENAI_RESPONSES_TAG = "openai_responses";
 
 function setCheckedValues(name, values) {
   const selected = new Set(Array.isArray(values) ? values : []);
@@ -139,11 +140,13 @@ const llmModelsAdmin = {
   editorTags: [],
   mergeLeadingSystem: false,
   inlineToolSchemaRefs: false,
+  useResponses: false,
 
   setCompatibilityDraft(tags = []) {
     this.editorTags = [...tags];
     this.mergeLeadingSystem = tags.includes(SINGLE_SYSTEM_MESSAGE_TAG);
     this.inlineToolSchemaRefs = tags.includes(INLINE_TOOL_SCHEMA_REFS_TAG);
+    this.useResponses = tags.includes(OPENAI_RESPONSES_TAG);
     document.getElementById("llmModelAdvancedSettings").open = false;
     this.renderCompatibility();
   },
@@ -152,10 +155,15 @@ const llmModelsAdmin = {
     const providerId = document.getElementById("llmModelProviderId").value;
     const provider = state.llmProviders.find((item) => item.id === providerId);
     const type = state.llmProviderTypes.find((item) => item.code === provider?.provider_type);
-    return type?.code === "openai_compatible" && type.model_protocol === "openai_chat";
+    return type?.code === "openai_compatible" && type.model_protocol === "openai_chat" && !this.useResponses;
   },
 
   renderCompatibility() {
+    const providerId = document.getElementById("llmModelProviderId").value;
+    const provider = state.llmProviders.find((item) => item.id === providerId);
+    const canSelectProtocol = ["openai", "openai_compatible"].includes(provider?.provider_type);
+    document.getElementById("llmModelProtocolField").classList.toggle("hidden", !canSelectProtocol);
+    document.getElementById("llmModelProtocol").value = this.useResponses ? "openai_responses" : "openai_chat";
     const supported = this.supportsCompatibilityOverrides();
     const details = document.getElementById("llmModelAdvancedSettings");
     document.getElementById("llmModelAdvancedSection").classList.toggle("hidden", !supported);
@@ -186,12 +194,13 @@ const llmModelsAdmin = {
   modelTags() {
     const capabilityTags = new Set([...document.querySelectorAll('input[name="llmModelTag"]')].map((input) => input.value));
     const otherTags = this.editorTags.filter((tag) =>
-      !capabilityTags.has(tag) && tag !== SINGLE_SYSTEM_MESSAGE_TAG && tag !== INLINE_TOOL_SCHEMA_REFS_TAG);
+      !capabilityTags.has(tag) && tag !== SINGLE_SYSTEM_MESSAGE_TAG && tag !== INLINE_TOOL_SCHEMA_REFS_TAG && tag !== OPENAI_RESPONSES_TAG);
     return [...new Set([
       ...readCheckedValues("llmModelTag"),
       ...otherTags,
       ...(this.mergeLeadingSystem ? [SINGLE_SYSTEM_MESSAGE_TAG] : []),
       ...(this.inlineToolSchemaRefs ? [INLINE_TOOL_SCHEMA_REFS_TAG] : []),
+      ...(this.useResponses ? [OPENAI_RESPONSES_TAG] : []),
     ])];
   },
 
@@ -549,6 +558,10 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("llmModelModal").close();
   });
   document.getElementById("llmModelProviderId")?.addEventListener("change", () => llmModelsAdmin.renderCompatibility());
+  document.getElementById("llmModelProtocol")?.addEventListener("change", (event) => {
+    llmModelsAdmin.useResponses = event.currentTarget.value === "openai_responses";
+    llmModelsAdmin.renderCompatibility();
+  });
   document.getElementById("llmModelAdvancedSettings")?.addEventListener("toggle", () => llmModelsAdmin.renderCompatibility());
   document.getElementById("llmModelMergeSystem")?.addEventListener("click", () => {
     llmModelsAdmin.mergeLeadingSystem = !llmModelsAdmin.mergeLeadingSystem;

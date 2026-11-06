@@ -194,6 +194,9 @@ class AsyncCodeModeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parts[1].content, 42)
         self.assertEqual(parts[2].outcome, "failed")
         self.assertEqual(parts[3].content, 7)
+        restarted = parts[3].metadata['ptc_diagnostics']['steps'][0]['source_location']
+        self.assertEqual(restarted['call_id'], 'outer-3')
+        self.assertEqual(restarted['filename'], '<python-input-0>')
         second = await agent.run("independent run", deps=deps)
         self.assertEqual(_parts(second)[0].content, 41)
 
@@ -400,6 +403,9 @@ class AsyncCodeModeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         agent, deps, _ = self._agent(data, ["data(value=7) + 1"], sequential=True)
         result = await agent.run("sync stub", deps=deps)
         self.assertEqual(_parts(result)[0].content, 8)
+        self.assertEqual(_parts(result)[0].metadata['ptc_diagnostics']['steps'][0]['source_location'], {
+            'call_id': 'outer-0', 'filename': '<python-input-0>', 'start': 0, 'end': 13,
+        })
 
     async def test_gather_failure_joins_the_other_started_host_callback(self):
         slow_started = asyncio.Event()

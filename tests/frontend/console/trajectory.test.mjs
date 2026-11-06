@@ -8,9 +8,46 @@ import {
   filterTrajectory,
   redactTrajectoryValue,
   runCodeSource,
+  renderPtcSource,
   shouldIngestTrajectoryEvent,
   trajectoryStats,
 } from "../../../console/trajectory.js";
+
+test("PTC 精确源码按 UTF-8 范围定位同一行的单次调用，并回读原始片段", () => {
+  const code = '# 中文😀\na = query(1); b = query(2)\n';
+  const original = { kind: "tool", label: "run_code", tool_call_id: "outer-1", run_id: "run-1", payload: { args: { code } } };
+  const expression = "query(2)";
+  const start = new TextEncoder().encode(code.slice(0, code.indexOf(expression))).length;
+  const step = { tool_name: "query", source_location: { call_id: "outer-1", filename: "<python-input-0>", start, end: start + expression.length } };
+  const html = renderPtcSource(original, step);
+  assert.match(html, /源码：第 2 行/);
+  assert.equal((html.match(/<mark /g) || []).length, 1);
+  assert.match(html, /<mark class="trajectory-code-call">query\(2\)<\/mark>/);
+  assert.doesNotMatch(html, /<mark[^>]*>query\(1\)/);
+  const current = { ...original, tool_call_id: "outer-2", payload: { args: { code: "await helper()" } } };
+  assert.match(renderPtcSource(current, step, [original]), /先前 PTC 调用/);
+  assert.match(renderPtcSource(current, step, [original]), /query\(2\)/);
+  assert.doesNotMatch(renderPtcSource(current, step, [{ ...original, run_id: "other-run" }]), /<mark/);
+  assert.match(renderPtcSource(current, step), /尚未加载/);
+});
+
+test("PTC 多行源码、旧历史和损坏位置安全回退，不把定位当作报错", () => {
+  const code = 'result = await query(\n    "<script>",\n    2\n)';
+  const event = { kind: "tool", label: "run_code", tool_call_id: "outer", payload: { args: { code } } };
+  const start = new TextEncoder().encode('result = await ').length;
+  const step = { tool_name: "query", source_location: { call_id: "outer", start, end: new TextEncoder().encode(code).length } };
+  const html = renderPtcSource(event, step);
+  assert.match(html, /第 1–4 行/);
+  assert.equal((html.match(/<mark /g) || []).length, 4);
+  assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>|is-error/);
+  assert.match(renderPtcSource(event, { tool_name: "query" }), /is-call-match/);
+  for (const bad of [{ start: -1 }, { start: 2.5 }, { end: 10000 }, { start: true }]) {
+    assert.match(renderPtcSource(event, { ...step, source_location: { ...step.source_location, ...bad } }), /定位信息不可用/);
+  }
+  const chinese = { ...event, payload: { args: { code: "中文" } } };
+  assert.match(renderPtcSource(chinese, { source_location: { call_id: "outer", start: 1, end: 3 } }), /定位信息不可用/);
+});
 
 const template = await readFile(
   new URL("../../../console/workspace-template.html", import.meta.url),

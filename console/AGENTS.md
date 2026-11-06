@@ -101,6 +101,13 @@ Markdown 排版加载本地 `github-markdown-css`，由 `theme.js` 随 Console �
 v0.6.7起，轨迹把`run_code`显示为独立`PTC`类型，并在详情中提供带Python高亮与复制能力的
 Code页签；用户输入详情中的附件与Context Reference分区展示。这里只改变Event的Console投影，
 不增加Event字段或普通ConversationItem类型。
+PTC Calls 的 Code 优先使用可选 `source_location`，按 UTF-8 字节范围精确标记调用表达式，
+同一行重复调用也不混淆；跨片段按同 Run 的外层 call_id 回读原源码，不复制正文。
+无定位的旧记录沿用行号／函数名匹配；有定位但原片段未加载时明确提示，不标错当前片段。
+甘特图计时、布局和其他页签保持原逻辑。
+模型弹框仅 OpenAI／OpenAI Compatible 提供“API 协议”选择，缺省 Chat Completions，
+Responses 通过既有 tags 中的 `openai_responses` 保存；不是能力复选框，不丢弃其他标签。
+切 Provider 保留协议草稿，目录刷新只刷新能力；Responses 时隐藏 Chat 专用高级设置并保留其标记。
 
 普通对话中的思考与工具标题共用弱灰色、小图标和文字左对齐；标题后的展开箭头仅悬停/焦点时出现
 （触屏保持可见），左侧标注线只显示在展开正文。思考实时显示“思考中…”和动态提示，结束后

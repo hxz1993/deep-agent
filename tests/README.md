@@ -4,9 +4,14 @@ Python 测试继续使用 `unittest`，Console 使用 Node.js 原生测试，不
 
 ## 日常与发布入口
 
+日常与发布均按实际影响面运行定向回归、静态检查和必要冒烟，不再强制每次发布全量。
+相关源码未变时复用已经通过的测试结果；只因提交、推送或版本号调整不重跑完整套件。
+先审阅选测范围；选测器对未知改动仍保守回退全量，可根据核对后的实际范围直接运行相关模块。
+全量入口保留，在用户要求或确有未解风险时执行，并如实区分定向与全量结果。
+
 ```bash
-# 默认完整回归：全部 Python + Console；发布前使用
-.venv/bin/python scripts/run_tests.py
+# 手动完整回归：全部 Python + Console；无参数也为此模式
+.venv/bin/python scripts/run_tests.py --suite all
 
 # 显式纯逻辑快速组 + Console 全量，不代表完整验收
 .venv/bin/python scripts/run_tests.py --suite quick

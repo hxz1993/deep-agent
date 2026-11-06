@@ -327,8 +327,12 @@ ToolSearch。v0.14.7实现：已授权且已披露MCP，以及当前已装配的
 `load_file_data`仍为code-only原语；不新增`save_file_data`，不接入`read_file`、`parse_document`、
 `web_image_view`、UI/Deferred、发现、计划、历史或任意Shell。Run Token、Base64和全量内部返回不进入历史审计。
 
-当前通过`ptc/async_runtime.py`使用已安装Monty的官方`AsyncMontySession.feed_run`，
+当前通过`ptc/async_runtime.py`使用已安装Monty的官方`AsyncMontySession.feed_start`与`resume_auto`，
 复用Harness的ToolManager、调用预算、类型签名和返回转换；不实现第二套工具分发。
+逐个暂停点只读取工具调用的`position`，在既有`ptc_diagnostics.steps`中保存可选
+`source_location={call_id,filename,start,end}`，偏移为UTF-8字节、end不包含；call_id指原始
+外层run_code，支持同Run前一段定义函数。仅保存引用，不复制源码、不改变甘特图计时；
+Run/REPL重置清理映射，未知来源不推测，定位采集失败不阻止工具执行。
 Monty已升级1.5.0，Pydantic AI 2.46.0/Harness 0.32.0保持；桥接层将旧max_duration_secs映射到
 新max_feed_duration_secs，执行时间改为每段120秒，不再跨段累计。资源超限销毁不可靠REPL。
 工具说明仅列仍存在的子集限制，不再禁止字符串格式化、JSON default、CSV或Decimal；
@@ -337,6 +341,13 @@ Monty已升级1.5.0，Pydantic AI 2.46.0/Harness 0.32.0保持；桥接层将旧m
 每段120秒总截止（含工具等待）、每段100次内部调用。超时/取消清理worker并取消、等待宿主回调，
 正常同Run复用REPL；restart清变量，不回滚已发生副作用。无新增配置、数据库结构或协议类型；
 Monty依赖升级如上，独立Python沙箱依赖不变。
+
+OpenAI／OpenAI Compatible 模型可用显式 `tags: ["openai_responses", ...]` 选择 Responses；
+缺省仍为 Chat Completions，不按名称或 URL 推断，其他 Provider 忽略该标记。
+Responses 中有 `reasoning` 能力标签时请求 `openai_reasoning_summary="auto"`；订阅 GPT 同样请求摘要，
+均不显式设置 effort。摘要取供应商实际返回，不保证每轮有文本。Chat 专用高级兼容标记在
+Responses 中保留但不应用。StepFun 单独开启累计流式用量模式，缺 usage 的片段保留前值，
+重复累计尾包不相加；视频分支沿用同一统计规则。不回写旧会话已记录的错误用量。
 可信Python与下载中心导出成功产物汇总到外层既有`generated_files` metadata，后续失败或取消仍保留；
 仅引用授权成果，不把内部参数/结果复制为完整嵌套消息。详见
 [PTC当前设计](../../docs/design/20-code-mode/ptc-data-transfer-design.md)，完整验收另列报告。

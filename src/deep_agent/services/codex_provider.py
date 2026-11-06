@@ -222,7 +222,9 @@ def codex_model(model_name: str, provider_id: str, revision: int) -> OpenAICodex
     key = (provider_id, model_name)
     model = bucket["models"].get(key)
     if model is None:
-        model = OpenAICodexModel(model_name, provider=provider, settings=model_http_settings())
+        model = OpenAICodexModel(model_name, provider=provider, settings=model_http_settings({
+            "openai_reasoning_summary": "auto",
+        }))
         bucket["models"][key] = model
     return model
 

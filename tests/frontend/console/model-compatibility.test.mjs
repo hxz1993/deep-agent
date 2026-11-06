@@ -168,6 +168,39 @@ test("高级开关与说明可访问，兼容标记不加入能力复选框", ()
   assert.doesNotMatch(template, /name="llmModelTag" value="inline_tool_schema_refs"/);
 });
 
+test("Responses 协议显式选择、复制及目录刷新保留，Chat 兼容设置仅隐藏", async () => {
+  const h = harness([marker, inlineMarker, 'reasoning'], 'private');
+  h.state.llmProviders.push({ id: 'gpt', provider_type: 'openai' });
+  h.state.llmProviderTypes.push({ code: 'openai', model_protocol: 'openai_chat' });
+  await h.admin.openEdit('saved');
+  assert.equal(h.element('llmModelProtocol').value, 'openai_chat');
+  h.element('llmModelProtocol').value = 'openai_responses';
+  await h.element('llmModelProtocol').fire('change');
+  assert.equal(h.element('llmModelAdvancedSection').classList.contains('hidden'), true);
+  assert.equal(h.admin.modelTags().includes('openai_responses'), true);
+  assert.equal(h.admin.modelTags().includes(marker), true);
+  await h.admin.updateFromCatalog();
+  await h.admin.save({ preventDefault() {}, currentTarget: h.element('llmModelForm') });
+  assert.equal(JSON.parse(h.requests.at(-1).body).tags.includes('openai_responses'), true);
+  h.row.tags.push('openai_responses');
+  await h.admin.openCopy('saved');
+  assert.equal(h.element('llmModelProtocol').value, 'openai_responses');
+  h.element('llmModelProviderId').value = 'qwen';
+  await h.element('llmModelProviderId').fire('change');
+  assert.equal(h.element('llmModelProtocolField').classList.contains('hidden'), true);
+  h.element('llmModelProviderId').value = 'gpt';
+  await h.element('llmModelProviderId').fire('change');
+  assert.equal(h.element('llmModelProtocolField').classList.contains('hidden'), false);
+  assert.equal(h.element('llmModelProtocol').value, 'openai_responses');
+  h.element('llmModelProviderId').value = 'private';
+  await h.element('llmModelProviderId').fire('change');
+  h.element('llmModelProtocol').value = 'openai_chat';
+  await h.element('llmModelProtocol').fire('change');
+  assert.equal(h.element('llmModelAdvancedSection').classList.contains('hidden'), false);
+  assert.equal(h.admin.modelTags().includes('openai_responses'), false);
+  assert.equal(h.admin.modelTags().includes(marker), true);
+});
+
 test("展开引用默认关闭，两个标记独立保存，复制和目录刷新继承", async () => {
   const h = harness(["tool_call", marker], "private");
   await h.admin.openEdit("saved");

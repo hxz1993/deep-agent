@@ -19,8 +19,9 @@ Sandbox Worker 仍只使用受控的 `src`，禁止继承宿主的任意 `PYTHON
 
 ## 运行命令
 
-优先 `.venv/bin/python scripts/run_tests.py --suite affected --base HEAD` 做日常相关回归，
-发布前 `.venv/bin/python scripts/run_tests.py --suite all`。默认 all，包含 Python 与 Console；
+日常及发布都按影响面选测，不强制每次发布跑全量；可先用 `--suite affected --base HEAD --list` 查看范围。
+相关源码和测试未变化时复用已有通过结果，版本号／文档调整只补必要检查；有失败或未解风险再扩测。
+全量保留为手动 `--suite all`；脚本无参数仍默认 all，包含 Python 与 Console，调用时明确选择；
 `--suite quick` 仅为显式纯逻辑清单加 Console 全量，不能替代完整验收。
 `--list` 只显示选测原因，`--durations` 默认 20，可选 JSON 写忽略的 `output/TMP to delete.../`。
 显式领域清单在 `helpers/test_groups.json`；新增／移动相关测试需同步清单，未知生产路径、

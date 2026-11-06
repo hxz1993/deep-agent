@@ -31,9 +31,9 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.13`（轨迹与文件导出、应用范围回显、G2 鉴权资源加载修复及 Monty 1.5.0 兼容），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.14`（PTC 源码精确定位、GPT 思考摘要与协议选择、StepFun 用量修复），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
-| **测试** | `.venv/bin/python scripts/run_tests.py --suite all` |
+| **测试** | 按影响面运行定向测试；可先用 `scripts/run_tests.py --suite affected --base HEAD --list` 查看选测范围 |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
 
 平台接入基础见[服务地址与账号链路](docs/guides/platform-integration.md)：
@@ -366,9 +366,11 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 
 ## 测试选择与执行效率
 
-日常使用 `.venv/bin/python scripts/run_tests.py --suite affected --base HEAD`，发布前使用
-`--suite all`（默认）。`--suite quick` 只运行显式纯逻辑组及 Console 全量，不能当全量通过。
-共享装配、数据库、依赖、测试入口或未知改动回退全量；领域映射与测试清单由
+日常和发布均按改动影响面运行定向测试、静态检查及必要冒烟，不再每次发布强制全量。
+已通过测试的相关源码未变化时复用其结果，不因提交、推送或升小版本重复执行；有新失败或未解风险再扩大范围。
+`scripts/run_tests.py --suite affected --base HEAD --list` 可先查看选择；该入口对未知影响面仍会保守回退全量，需审阅原因后决定运行相关模块还是完整套件。
+全量保留为手动入口 `--suite all`（脚本无参数仍为 all），仅在用户要求或明确需要时执行；不得把定向结果称为全量通过。
+`--suite quick` 只运行显式纯逻辑组及 Console 全量。领域映射与测试清单由
 `tests/helpers/test_selection.py`、`test_groups.json` 明确维护，相关测试新增／移动要同步。
 原 unittest 命令统一加 `-t .`；复用初始化请提取非 TestCase helper，不直接导入测试类造成重复收集。
 本轮不引入并行执行或共享可变数据库。耗时摘要与逐例清单可写忽略的 `output/TMP to delete.../`，

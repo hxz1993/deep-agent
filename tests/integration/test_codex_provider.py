@@ -20,6 +20,18 @@ from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
 class CodexProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_codex_model_requests_summary_without_overriding_default_effort(self):
+        from deep_agent.services.codex_provider import codex_model, evict_provider
+        provider_id = 'fixture-summary-only'
+        try:
+            model = codex_model('gpt-6-luna', provider_id, 1)
+            self.assertEqual(model.settings['openai_reasoning_summary'], 'auto')
+            self.assertNotIn('openai_reasoning_effort', model.settings)
+            self.assertEqual(model.settings['extra_headers']['Accept-Encoding'], 'identity')
+            self.assertIs(codex_model('gpt-6-luna', provider_id, 1), model)
+        finally:
+            evict_provider(provider_id)
+
     async def asyncSetUp(self) -> None:
         # Keep the actual OS ownership lock, but isolate it from the running
         # developer service and from other tests in this process.

@@ -1,12 +1,12 @@
 import { sessionLoadingHtml, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
-import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentation } from "./session-presentation.js?v=20261105-v01510";
+import { renderContextReferenceContent, sessionStatusLabels, savedRunPresentation } from "./session-presentation.js?v=20261106-ptc-source";
 import { renderSessionInspector } from "./session-inspector.js?v=20261104-app-search";
 import { channelOriginPresentation } from "./session-display.js?v=20260929-release0124";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { registerSessionViewTemplate, loadSessionViewTemplate } from "./session-view-shell.js?v=20261025-readonly-load2";
 import { sessionAppOptions } from "./session-app-filter.js?v=20261104-app-search";
 
-const WORKSPACE_ASSET_VERSION = "20261106-trajectory-export";
+const WORKSPACE_ASSET_VERSION = "20261106-ptc-source";
 
 const WORKSPACE_PANE_LIMITS = {
   session: { min: 220, max: 420, initial: 300, variable: "--console-session-width" },

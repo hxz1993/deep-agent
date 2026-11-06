@@ -1,9 +1,9 @@
 import { sessionLoadingHtml, prepareSessionRender, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
-import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20261105-v01510";
+import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20261106-ptc-source";
 import { createConversationPresenter } from "./conversation-presenter.js?v=20261105-v01510";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20261103-view-image1";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261103-view-image1";
-import { createTrajectoryController } from "./trajectory.js?v=20261106-trajectory-export";
+import { createTrajectoryController } from "./trajectory.js?v=20261106-ptc-source";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { renderSessionInspector } from "./session-inspector.js?v=20261104-session-app";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";

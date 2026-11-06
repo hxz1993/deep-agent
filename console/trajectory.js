@@ -1174,7 +1174,7 @@ function highlightPython(code) {
   return escapeHtml(code);
 }
 
-function renderRunCode(event, line = null, callName = null, compact = false) {
+function renderRunCode(event, line = null, callName = null, compact = false, range = null) {
   const code = runCodeSource(event);
   if (!code) return `<p class="trajectory-summary-empty">No source code in this call.</p>`;
   const lines = code.split("\n");
@@ -1183,13 +1183,52 @@ function renderRunCode(event, line = null, callName = null, compact = false) {
   const callPattern = escapedName ? new RegExp(`(?:^|[^\\w])${escapedName}\\s*\\(`) : null;
   const matchingLines = callPattern && !exactLine
     ? lines.map((text, index) => callPattern.test(text) ? index + 1 : null).filter(Boolean) : [];
-  const displayed = exactLine || callName
+  let offset = 0;
+  const displayed = range ? lines.map((text) => {
+    const start = Math.max(0, range.start - offset);
+    const end = Math.min(text.length, range.end - offset);
+    offset += text.length + 1;
+    const selected = end > start;
+    const content = selected
+      ? `${highlightPython(text.slice(0, start))}<mark class="trajectory-code-call">${highlightPython(text.slice(start, end))}</mark>${highlightPython(text.slice(end))}`
+      : highlightPython(text);
+    return `<span class="trajectory-code-line${selected ? " is-call-match" : ""}">${content || " "}</span>`;
+  }).join("\n") : exactLine || callName
     ? lines.map((text, index) => `<span class="trajectory-code-line${index + 1 === exactLine ? " is-error" : matchingLines.includes(index + 1) ? " is-call-match" : ""}">${highlightPython(text) || " "}</span>`).join("\n")
     : highlightPython(code);
   return `<section class="trajectory-code-view">
     ${compact ? "" : `<header><span>Python</span><button type="button" data-copy-run-code>${icon("copy")}Copy</button></header>`}
     <pre><code class="hljs language-python">${displayed}</code></pre>
   </section>`;
+}
+
+export function renderPtcSource(event, step, events = []) {
+  const location = step?.source_location;
+  if (!location) return renderRunCode(event, step?.source_line, step?.tool_name, true);
+  // A function may have been defined by an earlier feed in the same Run.
+  // Resolve its existing outer call rather than copying source into metadata.
+  const sourceEvent = location.call_id === event.tool_call_id ? event : events.find(item =>
+    isRunCodeEvent(item) && item.tool_call_id === location.call_id && item.run_id === event.run_id);
+  if (!sourceEvent) return '<p class="trajectory-summary-empty">源码所在的先前 PTC 调用尚未加载，无法精确定位。</p>';
+  const code = runCodeSource(sourceEvent);
+  const bytes = new TextEncoder().encode(code);
+  if (!Number.isSafeInteger(location.start) || !Number.isSafeInteger(location.end)
+      || location.start < 0 || location.end <= location.start || location.end > bytes.length) {
+    return '<p class="trajectory-summary-empty">源码定位信息不可用。</p>';
+  }
+  try {
+    // Monty uses UTF-8 byte offsets; JS string offsets use UTF-16 code units.
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const before = decoder.decode(bytes.subarray(0, location.start));
+    const selected = decoder.decode(bytes.subarray(location.start, location.end));
+    const line = before.split("\n").length;
+    const endLine = line + selected.split("\n").length - 1;
+    const label = line === endLine ? `第 ${line} 行` : `第 ${line}–${endLine} 行`;
+    return `<p class="trajectory-ptc-note">源码：${label}${sourceEvent !== event ? "（先前 PTC 调用）" : ""}</p>`
+      + renderRunCode(sourceEvent, null, null, true, { start: before.length, end: before.length + selected.length });
+  } catch {
+    return '<p class="trajectory-summary-empty">源码定位信息不可用。</p>';
+  }
 }
 
 // Tabs describe semantic projections, not HTTP bodies or database columns.
@@ -1256,7 +1295,7 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, 
   if (activeTab === "raw") content = renderRaw(event);
   if (activeTab === "usage") content = renderTrajectoryUsage(event);
   if (activeTab === "code") content = renderRunCode(event);
-  if (activeTab === "execution") content = renderPtcExecution(event, { ...ptcState, codeView: (step) => renderRunCode(event, step.source_line, step.tool_name, true) });
+  if (activeTab === "execution") content = renderPtcExecution(event, { ...ptcState, codeView: (step) => renderPtcSource(event, step, events) });
   const headerLabel = TOOL_KINDS.has(event.kind) || ["compaction", "title", "output"].includes(event.kind)
     ? event.label
     : event.run_id ? `Run ${String(event.run_id).slice(0, 8)}` : "";
@@ -1323,6 +1362,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let clockMode = "time";
   let renderQueued = false;
   let renderedSelectedId = null, renderedDetailTab = null;
+  let renderedPtcSourceKey = "";
   let renderedDetail = null;
   let renderedClockMode = null;
   let eventRevision = 0;
@@ -1483,6 +1523,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         if (chart) chart.scrollTop = ptcChartScrollTop;
         if (jsonPanel) jsonPanel.scrollTop = ptcJsonScrollTop;
       }
+      const sourceKey = detailTab === "execution" && ptcDetailTab === "code" ? `${selectedId}:${ptcExpanded}` : "";
+      if (sourceKey && sourceKey !== renderedPtcSourceKey) {
+        const panel = detail.querySelector?.(".trajectory-ptc-json-panel");
+        const target = panel?.querySelector?.(".trajectory-code-call");
+        if (panel && target) panel.scrollTop += target.getBoundingClientRect().top - panel.getBoundingClientRect().top - 24;
+      }
+      renderedPtcSourceKey = sourceKey;
     }
     list.scrollTop = listScrollTop;
     if (selectedId !== renderedSelectedId) onSelectEvent?.(selected);
@@ -1505,6 +1552,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     renderedDetail = null;
     renderedSelectedId = null;
     renderedDetailTab = null;
+    renderedPtcSourceKey = "";
   }
 
   function setHistory(nextHistory, { preserveView = false } = {}) {

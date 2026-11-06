@@ -10,6 +10,8 @@
 
 模型列表里用于运行的 `id` 与供应商的模型编码是不同字段。Agent的 `model_id` 引用preset ID；它可以为空，但运行前需要Agent默认或本次请求提供可用模型，不存在环境默认模型的隐式回退。不要写已移除的temperature或max_requests字段。
 
+OpenAI／OpenAI Compatible 模型的“API 协议”默认是 Chat Completions；确认目标服务支持 `/responses` 后可显式选择 Responses。对应模型 `tags` 增加 `openai_responses`，保留其他标签，去掉该标记可切回；不根据模型名称或 Base URL 推测。Responses 模型勾选“推理”能力时自动请求思考摘要，订阅 GPT 也请求摘要，均不改变默认思考强度。摘要由供应商决定是否返回，不等于完整内部思维链；没有摘要文本不能据此判断未进行推理。Chat 专用高级兼容选项在 Responses 下不生效，切回后保留。
+
 ## Agent配置最小示例
 
 使用管理员接口，先从目标目录获取真实模型与资源编码：

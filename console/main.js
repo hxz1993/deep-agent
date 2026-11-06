@@ -32,19 +32,19 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261105-v01510");
+    const module = await import("./configuration.js?v=20261106-provider-reasoning");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=20261106-trajectory-export");
+    const module = await import("./workspace.js?v=20261106-ptc-source");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261106-trajectory-export");
+    const module = await import("./diagnostics-center.js?v=20261106-ptc-source");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

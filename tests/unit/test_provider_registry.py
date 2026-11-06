@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.alibaba import AlibabaProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
@@ -234,6 +234,24 @@ class ProviderLookupTests(unittest.IsolatedAsyncioTestCase):
             await load_provider_for_model(model, store)
 
 class ProviderModelAssemblyTests(unittest.TestCase):
+    def test_responses_is_explicit_model_opt_in_for_both_openai_types(self):
+        for provider_type in ('openai', 'openai_compatible'):
+            config = _config(provider_type, use_default_base_url=False)
+            for tags, reasoning in [(['openai_responses'], False), (['openai_responses', 'reasoning'], True)]:
+                with self.subTest(provider=provider_type, tags=tags):
+                    model = resolve_provider_model(model_name='arbitrary-model', provider=config, tags=tags)
+                    self.assertIsInstance(model, OpenAIResponsesModel)
+                    self.assertEqual(model.settings.get('openai_reasoning_summary'), 'auto' if reasoning else None)
+                    self.assertNotIn('openai_reasoning_effort', model.settings)
+                    self.assertEqual(model.settings['extra_headers']['Accept-Encoding'], 'identity')
+            for tags in (None, [], ['reasoning']):
+                self.assertIsInstance(resolve_provider_model(model_name='gpt-6-luna', provider=config, tags=tags), OpenAIChatModel)
+        for provider_type in ('alibaba', 'stepfun', 'deepseek', 'moonshotai', 'openrouter'):
+            model = resolve_provider_model(model_name='openai/gpt-6-luna' if provider_type == 'openrouter' else 'gpt-6-luna', provider=_config(provider_type), tags=['openai_responses', 'reasoning'])
+            self.assertIsInstance(model, OpenAIChatModel)
+            self.assertNotIn('openai_reasoning_summary', model.settings)
+            self.assertEqual(model.settings.get('openai_continuous_usage_stats'), True if provider_type == 'stepfun' else None)
+
     def test_compatible_vendor_profiles_survive_custom_endpoints(self) -> None:
         for code, name, model_class, provider_class in (
             ("minimax", "MiniMax-M2.7", AnthropicModel, MiniMaxProvider),

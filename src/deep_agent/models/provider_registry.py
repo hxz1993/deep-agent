@@ -16,7 +16,7 @@ import httpx2
 from pydantic_ai.models import DEFAULT_HTTP_TIMEOUT, Model, get_user_agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.alibaba import AlibabaProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.deepseek import DeepSeekProvider
@@ -27,7 +27,9 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.providers.zai import ZaiProvider
 
 from deep_agent.models import OpenAICompatibleVideoChatModel
-from deep_agent.models.compatible_providers import MiniMaxProvider, StepFunProvider
+from deep_agent.models.compatible_providers import (
+    MiniMaxProvider, StepFunProvider, StepFunChatModel, StepFunVideoChatModel,
+)
 from deep_agent.models.http_transport import model_http_settings
 from deep_agent.models.qwen import qwen38_chat_profile
 from deep_agent.models.tool_schema_refs import (
@@ -129,6 +131,7 @@ PROVIDER_TYPES: tuple[ProviderTypeDefinition, ...] = (
     ),
 )
 _PROVIDER_TYPES_BY_CODE = {item.code: item for item in PROVIDER_TYPES}
+OPENAI_RESPONSES_TAG = "openai_responses"
 
 
 def provider_type_definition(code: str) -> ProviderTypeDefinition:
@@ -385,6 +388,15 @@ def resolve_provider_model(
 
     if definition.model_protocol == "openai_chat":
         runtime_provider = _openai_style_provider(provider)
+        if provider.provider_type in {"openai", "openai_compatible"} and OPENAI_RESPONSES_TAG in (tags or []):
+            model = OpenAIResponsesModel(
+                model_name, provider=runtime_provider,
+                settings=model_http_settings(
+                    {"openai_reasoning_summary": "auto"} if "reasoning" in (tags or []) else None,
+                ),
+            )
+            model.deepagent_provider_type = provider.provider_type
+            return model
         supports_compatibility_overrides = provider.provider_type == "openai_compatible"
         profile = None
         if provider.provider_type == "deepseek":
@@ -407,14 +419,18 @@ def resolve_provider_model(
                 "openai_chat_supports_multiple_system_messages": False,
             }
         supports_video = "video" in (input_modalities or []) or "video_url" in (tags or [])
-        if supports_compatibility_overrides and INLINE_TOOL_SCHEMA_REFS_TAG in (tags or []):
+        if provider.provider_type == "stepfun":
+            model_class = StepFunVideoChatModel if supports_video else StepFunChatModel
+        elif supports_compatibility_overrides and INLINE_TOOL_SCHEMA_REFS_TAG in (tags or []):
             model_class = InlineToolRefsVideoChatModel if supports_video else InlineToolRefsChatModel
         else:
             model_class = OpenAICompatibleVideoChatModel if supports_video else OpenAIChatModel
         model = model_class(
             model_name,
             provider=runtime_provider,
-            settings=model_http_settings(),
+            settings=model_http_settings(
+                {"openai_continuous_usage_stats": True} if provider.provider_type == "stepfun" else None,
+            ),
             **({"profile": profile} if profile is not None else {}),
         )
         # Custom endpoints use OpenAIProvider and report system="openai".

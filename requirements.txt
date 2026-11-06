@@ -8,7 +8,7 @@ openai==3.8.0
 pydantic-ai-harness[skills,exa,youdotcom]==0.32.0
 # Harness CodeMode uses Monty as its isolated Python-subset runtime. Keep the
 # direct pin instead of enabling the broader code-mode extra.
-pydantic-monty==0.0.23
+pydantic-monty==1.5.0
 # DeepAgent passes a dedicated proxy client to GoogleProvider. Pydantic AI 2.35
 # deprecates legacy httpx clients for this path in favor of httpx2.
 httpx2>=2.7,<3

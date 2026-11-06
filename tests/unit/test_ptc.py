@@ -25,6 +25,7 @@ from deep_agent.ptc.toolset import (
     _scrub_error_text,
 )
 from deep_agent.ptc.file_payload import (
+    CODE_MODE_ORIGINAL_NAME_KEY,
     CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY,
     FILE_DATA_TOKEN_PREFIX,
     MAX_FILE_BYTES,
@@ -651,16 +652,22 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Python syntax alone does not require execute_python", descriptions[0])
         self.assertIn("web_fetch returns an object with url, title and content", descriptions[0])
         self.assertIn("`search_tools` is native-only", descriptions[0])
-        self.assertIn("connection/pairing, and canvas snapshots", descriptions[0])
+        self.assertIn("Tool discovery and schema inspection", descriptions[0])
         self.assertNotIn("one tool's result feeds another", descriptions[0])
         catalog = HybridCodeModeToolset._render_catalog(
             {
                 "load_file_data": type("Definition", (), {"metadata": {}})(),
                 "demo_lookup": type("Definition", (), {"metadata": {}})(),
+                "demo_write": type("Definition", (), {
+                    "metadata": {CODE_MODE_ORIGINAL_NAME_KEY: "demo-write"}, "sequential": True,
+                })(),
             }
         )
         self.assertIn("await demo_lookup(...)", catalog)
         self.assertIn("await load_file_data", catalog)
+        self.assertIn("`demo-write` -> Python `demo_write(...)`", catalog)
+        self.assertNotIn("await demo_write", catalog)
+        self.assertNotIn("Every listed function is async", catalog)
 
     def test_load_file_data_catalog_signature_matches_function_schema(self) -> None:
         rendered = HybridCodeModeToolset._render_catalog(

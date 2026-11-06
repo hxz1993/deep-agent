@@ -47,7 +47,7 @@ MiB 即 1024×1024 字节，不是 Token。不新增部署、API 或 Console 配
 | Monty 内存 | 256 MiB |
 | 单个内部返回 | 32 MiB |
 | Python/Skill inputs 紧凑 UTF-8 JSON | 16 MiB |
-| Monty 执行预算 | 120 秒，同一 Run 的 REPL Session 共享 |
+| Monty 执行预算 | 120 秒，每段代码；1.5.0 的 feed 预算不跨段累计 |
 | 每段 run_code 总时间 | 120 秒，包含外部工具等待 |
 | 每段内部调用 | 100 次，失败同样计入 |
 | Python 进程通信帧 | 64 MiB，含代码、输入与编码文件的整包 |

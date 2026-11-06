@@ -211,8 +211,13 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
                 AsyncMonty(max_processes=1, request_timeout=PTC_EXECUTION_SECONDS),
             )
         if runtime.session is None:
+            limits = _resolve_resource_limits(toolset.resource_limits, in_temporal_workflow=False)
+            # Harness 0.32 names this max_duration_secs; Monty 1.5 separates
+            # per-feed execution time from time between individual host calls.
+            if "max_duration_secs" in limits:
+                limits["max_feed_duration_secs"] = limits.pop("max_duration_secs")
             runtime.session = await runtime.session_stack.enter_async_context(runtime.pool.checkout(
-                limits=_resolve_resource_limits(toolset.resource_limits, in_temporal_workflow=False),
+                limits=limits,
                 type_check=fresh and bool(tool.callable_defs),
                 type_check_stubs=(toolset._build_type_check_stubs(tool.callable_defs)
                                   if fresh and tool.callable_defs else None),
@@ -240,10 +245,13 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
         message = f"Runtime error:\n{execution.capture.prepend_to(exc.display())}"
         if execution.nested_calls:
             message += "\n\n" + _describe_started_calls(execution.nested_calls, execution.nested_returns)
-        if _is_duration_exhausted(exc):
-            message += ("\n\nThe sandbox session exhausted max_duration_secs. Later calls share "
-                        "that allowance; restart: true discards REPL state. Inspect completed "
-                        "side effects before recreating state; do not blindly repeat writes.")
+        if _is_duration_exhausted(exc) or exc.display(format="msg").startswith("memory limit exceeded:"):
+            # Monty 1.5 warns that a resource trip can leave a half-mutated heap.
+            # Discard it instead of feeding further code into uncertain state.
+            await reset_runtime(toolset)
+            message += ("\n\nThe sandbox exceeded its execution or memory limit and its REPL state "
+                        "was reset. Inspect completed side effects before recreating state; "
+                        "do not blindly repeat writes.")
         raise ModelRetry(message) from exc
     except MontyCrashedError as exc:
         await reset_runtime(toolset)

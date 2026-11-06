@@ -31,7 +31,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.13`（轨迹与文件导出、应用范围回显与 G2 鉴权资源加载修复），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
+| **产品版本** | `deep_agent.__version__`为唯一来源；`0.15.13`（轨迹与文件导出、应用范围回显、G2 鉴权资源加载修复及 Monty 1.5.0 兼容），数据库Head为`013`（012输出配置及更新人，013允许文本策略；历史迁移保持不变） |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | `.venv/bin/python scripts/run_tests.py --suite all` |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -341,7 +341,7 @@ v0.6.1删除目录资源自身的冗余启停层；v0.6.4只恢复Model的`enabl
 
 ### 框架能力说明方式
 
-2026-10-16增量研究入口：`docs/design/38-pydantic-ai-harness-upgrade/upstream-review-20261016.md`。Harness独立仓库已归档，新源码随Core主仓库维护；研究快照2.57/0.57不等于产品已升级（实装仍2.46/0.32/Monty0.0.23）。升级先核验Skills Workspace/异步校验、PTC自定义包装与Hook生命周期，不将`repl_store`或`Conversation`误称为自动获得会话级业务草稿。
+2026-10-16增量研究入口：`docs/design/38-pydantic-ai-harness-upgrade/upstream-review-20261016.md`。Harness独立仓库已归档，新源码随Core主仓库维护；研究快照2.57/0.57不等于产品已升级。2026-11-06实装仍为Core 2.46/Harness 0.32，Monty单独升为1.5.0，异步桥及执行限额变化见`docs/reports/2026-11-06-monty-1.5-upgrade.md`。后续框架升级先核验Skills Workspace/异步校验、PTC自定义包装与Hook生命周期，不将`repl_store`或`Conversation`误称为自动获得会话级业务草稿。
 
 向产品或客户端解释 Pydantic AI、Harness、Provider 能力时，不能只给类名和抽象结论。至少按以下顺序说明：
 

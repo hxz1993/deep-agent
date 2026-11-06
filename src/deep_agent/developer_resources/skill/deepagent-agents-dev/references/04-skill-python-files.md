@@ -78,6 +78,10 @@ if not username:
 
 ## PTC与限制
 
+服务专属的MCP工具名、目标选择、上传／发送协议和业务步骤应写入对应业务Skill，先读取实际Tool Schema再调用。通用PTC工具说明仅保留执行边界和占位示例，不预设某家MCP或客户平台的固定链路；修改通用说明不会自动改写已安装的业务Skill。
+
 PTC可调用这两个已授权执行工具，工具返回result/files后汇总可信产物。PTC不能直接访问宿主环境或Skill目录；view_image不进入PTC，先生成/上传File ID，回外层查看。Skill限额、运行超时和预装依赖以目标版本工具说明为准，不能靠拆脚本绕过。
+
+PTC使用Monty 1.5.0的Python子集。`asyncio.gather`不接受关键字参数，没有`create_task`/`wait_for`/`as_completed`；不支持`yield`，生成器表达式会生成列表。JSON的`cls`和`object_hook`/`object_pairs_hook`不支持，按需显式转换或用已授权Python／Skill。调试只返回项数等小摘要，不为测大小序列化整份数据。普通字符串格式化、JSON `default`、CSV和Decimal已支持，不要沿用旧版限制。片段失败不等于整轮失败或外部操作已回滚；检查已完成调用后修正，不盲重放写入。
 
 外部HTTP请求应有明确超时、有界轮询和业务状态检查。错误返回分类说明认证失败、网络失败、任务失败、返回结构不符或缺页；不造数、不把部分成功包装成完整成功。

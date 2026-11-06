@@ -329,9 +329,14 @@ ToolSearch。v0.14.7实现：已授权且已披露MCP，以及当前已装配的
 
 当前通过`ptc/async_runtime.py`使用已安装Monty的官方`AsyncMontySession.feed_run`，
 复用Harness的ToolManager、调用预算、类型签名和返回转换；不实现第二套工具分发。
-`ptc/limits.py`固定256MiB Monty内存、32MiB单个内部返回、120秒同Run Session执行预算、
+Monty已升级1.5.0，Pydantic AI 2.46.0/Harness 0.32.0保持；桥接层将旧max_duration_secs映射到
+新max_feed_duration_secs，执行时间改为每段120秒，不再跨段累计。资源超限销毁不可靠REPL。
+工具说明仅列仍存在的子集限制，不再禁止字符串格式化、JSON default、CSV或Decimal；
+已知解释器错误补具体纠正提示，仍保留失败事实，不自动改写或重放代码。
+`ptc/limits.py`固定256MiB Monty内存、32MiB单个内部返回、每段120秒Monty执行预算、
 每段120秒总截止（含工具等待）、每段100次内部调用。超时/取消清理worker并取消、等待宿主回调，
-正常同Run复用REPL；restart清变量，不回滚已发生副作用。无新增配置、依赖、数据库结构或协议类型。
+正常同Run复用REPL；restart清变量，不回滚已发生副作用。无新增配置、数据库结构或协议类型；
+Monty依赖升级如上，独立Python沙箱依赖不变。
 可信Python与下载中心导出成功产物汇总到外层既有`generated_files` metadata，后续失败或取消仍保留；
 仅引用授权成果，不把内部参数/结果复制为完整嵌套消息。详见
 [PTC当前设计](../../docs/design/20-code-mode/ptc-data-transfer-design.md)，完整验收另列报告。

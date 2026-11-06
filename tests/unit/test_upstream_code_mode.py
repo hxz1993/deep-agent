@@ -66,11 +66,20 @@ class UpstreamCodeModeTests(unittest.IsolatedAsyncioTestCase):
 
         returns = await self._run(record, [
             'saved = await demo_record(value=0)\nsaved',
-            'for i in range(1, 4):\n    await demo_record(value=i)',
+            'for i in range(1, 10):\n    await demo_record(value=i)',
+            'saved',
+            'await demo_record(value=99)',
         ], limits={'max_suspensions': 4})
-        self.assertEqual(executed, [0, 1])
+        # Monty 1.5 eager awaits use one host round trip, not a separate
+        # call and future-resolution pair. The session budget must still hold.
+        self.assertEqual(executed, [0, 1, 2, 3])
         self.assertEqual(returns[0].outcome, 'success')
         self.assertEqual(returns[1].outcome, 'failed')
         self.assertIn('suspension limit 4 exceeded', str(returns[1].content))
         self.assertEqual(returns[1].metadata['ptc_diagnostics']['steps'][0]['status'], 'completed')
         self.assertEqual(returns[1].metadata['ptc_diagnostics']['steps'][0]['output']['value'], 1)
+        self.assertEqual(returns[2].outcome, 'success')
+        self.assertEqual(returns[2].content, 0)
+        self.assertEqual(returns[3].outcome, 'failed')
+        self.assertIn('suspension limit 4 exceeded', str(returns[3].content))
+        self.assertEqual(returns[3].metadata['ptc_diagnostics']['summary']['call_count'], 0)

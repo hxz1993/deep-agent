@@ -15,7 +15,76 @@ from deepfos.element.datatable import DataTableDeepModel
 
 PATH = "/Application/SANY/11_Approval_Process/"
 TEMPLATE = "811708849152061474"
-BPP_USER = "gw_zhang95"
+# 固定展示测试样例：对应原型中的 AI 参考意见，内联样式便于直接提交给 BPP。
+APPROVAL_OPINION_HTML = """
+<div style="max-width:760px;margin:0 auto;color:#293d35;font:14px/1.8 'PingFang SC','Microsoft YaHei',sans-serif;box-sizing:border-box;overflow-wrap:break-word;">
+  <div style="color:#087d62;font-size:11px;font-weight:600;letter-spacing:1px;">预算审批</div>
+  <h2 style="margin:4px 0 14px;font-size:22px;line-height:1.4;">AI 审批参考</h2>
+  <p style="margin:0 0 20px;padding:10px 13px;border-radius:4px;background:#fffaf0;color:#987331;font-size:12px;">2027年制造费用 · 固定测试样例。以下金额与意见均为示例，用于审批表单展示测试。</p>
+
+  <h3 style="margin:24px 0 12px;font-size:15px;">01　总体摘要与审批重点</h3>
+  <div style="padding:14px 17px;border-left:3px solid #087d62;background:#eef7f0;font-size:13px;line-height:1.9;">本次制造费用预算为 <strong>1,320 万元</strong>，较示例下达目标增加 <strong>120 万元（10.0%）</strong>。建议重点核对<strong>同业对比是否合理</strong>、<strong>预算投入是否与 SP 战略目标一致</strong>，并补充增量依据。</div>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:14px;">
+    <div style="flex:1 1 280px;min-width:0;box-sizing:border-box;padding:15px 16px;border:1px solid #eadcbe;border-top:3px solid #b9893c;border-radius:6px;background:#fffcf5;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <h4 style="margin:0;font-size:15px;color:#8e6325;">同业对比</h4>
+        <span style="padding:2px 7px;border-radius:3px;background:#fff0d5;color:#8c611d;font-size:11px;">待补充可比数据</span>
+      </div>
+      <p style="margin:9px 0 0;font-size:13px;font-weight:600;color:#304f3e;">费用水平是否偏离同业？</p>
+      <p style="margin:9px 0 0;font-size:12px;color:#647c6d;">需按同期间、同指标定义及可比业务规模，对照制造费用率、单位产出成本。当前缺少同口径资料，尚无法判断差异。</p>
+      <p style="margin:12px 0 0;padding-top:10px;border-top:1px solid #eadfc9;font-size:12px;color:#856332;"><strong style="display:block;font-size:11px;">建议审批人追问</strong>与哪些企业比较？指标口径是否一致？若高于同业，差异原因是什么？</p>
+    </div>
+    <div style="flex:1 1 280px;min-width:0;box-sizing:border-box;padding:15px 16px;border:1px solid #d6e6db;border-top:3px solid #087d62;border-radius:6px;background:#f4f9f5;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <h4 style="margin:0;font-size:15px;color:#28674f;">战略目标一致性</h4>
+        <span style="padding:2px 7px;border-radius:3px;background:#fff0d5;color:#8c611d;font-size:11px;">一致性待核实</span>
+      </div>
+      <p style="margin:9px 0 0;font-size:13px;font-weight:600;color:#304f3e;">预算投入是否支撑 SP 战略目标？</p>
+      <p style="margin:9px 0 0;font-size:12px;color:#647c6d;">需补充本组织 SP 战略目标、关键指标与预算项目的对应关系，核对投入方向、目标值及预期贡献。</p>
+      <p style="margin:12px 0 0;padding-top:10px;border-top:1px solid #dce8de;font-size:12px;color:#39664e;"><strong style="display:block;font-size:11px;">建议审批人追问</strong>新增 120 万元对应哪项战略目标？预期成果和衡量指标是什么？</p>
+    </div>
+  </div>
+
+  <h3 style="margin:24px 0 12px;font-size:15px;">02　关键指标对照 <span style="font-size:11px;font-weight:400;color:#788b81;">单位：万元 · 示例</span></h3>
+  <div style="overflow-x:auto;border:1px solid #e3ece6;border-radius:5px;">
+    <table style="border-collapse:collapse;width:100%;text-align:left;font-size:12px;">
+      <thead style="background:#f3f6f4;color:#62796b;"><tr>
+        <th style="padding:10px 12px;font-weight:500;">指标</th><th style="padding:10px 12px;font-weight:500;">本次预算</th><th style="padding:10px 12px;font-weight:500;">下达目标</th><th style="padding:10px 12px;font-weight:500;">较目标</th>
+      </tr></thead>
+      <tbody>
+        <tr><td style="padding:11px 12px;border-top:1px solid #e3ece6;">制造费用合计</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;">1,320</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;">1,200</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;color:#bd7344;">+10.0%</td></tr>
+        <tr><td style="padding:11px 12px;border-top:1px solid #e3ece6;">其中：设备维修费</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;">420</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;">300</td><td style="padding:11px 12px;border-top:1px solid #e3ece6;color:#bd7344;">+40.0%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin:8px 0 0;font-size:12px;color:#788b81;">上年实际制造费用合计 1,100 万元，本次较上年增加 20.0%。</p>
+
+  <h3 style="margin:24px 0 12px;font-size:15px;">03　建议审批人重点核实</h3>
+  <div style="padding-bottom:15px;border-bottom:1px solid #e3ece6;">
+    <p style="margin:0;font-size:13px;font-weight:600;"><span style="padding:2px 6px;margin-right:8px;border-radius:3px;background:#fff4df;color:#a6742d;font-size:10px;font-weight:400;">目标偏差</span>设备维修费增量需要补充依据</p>
+    <p style="margin:7px 0;font-size:12px;color:#6d8074;">设备维修费较目标增加 120 万元，占本次制造费用超目标金额的 100%。建议核实是否涉及集中检修、设备老化或新增产线，并提供明细及测算依据。</p>
+    <p style="margin:7px 0;padding:9px 12px;border-radius:4px;background:#f0f8f2;color:#3a6d51;font-size:12px;"><strong>建议询问：</strong>420 万元维修费对应哪些检修项目？增加的 120 万元是否为一次性支出？</p>
+    <p style="margin:7px 0 0;font-size:11px;color:#788b81;"><strong>数据依据：</strong>[S1] 设备维修费 420 万元；[S2] 示例下达目标 300 万元。差额 120 万元，增幅 40.0%。原因为待核实假设，未作为已确认事实。</p>
+  </div>
+  <div style="padding-top:15px;">
+    <p style="margin:0;font-size:13px;font-weight:600;"><span style="padding:2px 6px;margin-right:8px;border-radius:3px;background:#fff4df;color:#a6742d;font-size:10px;font-weight:400;">战略一致性</span>新增投入与 SP 战略目标的对应关系待确认</p>
+    <p style="margin:7px 0;font-size:12px;color:#6d8074;">目前未提供本组织 SP 战略目标、关键指标及预算项目映射，尚不能判断新增投入是否与战略方向一致。建议编制人补充目标、投入及预期成果的对应说明。</p>
+    <p style="margin:7px 0;padding:9px 12px;border-radius:4px;background:#f0f8f2;color:#3a6d51;font-size:12px;"><strong>建议询问：</strong>新增 120 万元对应哪项 SP 战略目标？如何量化产能保障或设备效率的预期贡献？</p>
+    <p style="margin:7px 0 0;font-size:11px;color:#788b81;"><strong>核对依据：</strong>[S1] 送审预算与 [S2] 预算下达目标可用于核对金额差异。战略一致性还需补充 SP 战略目标、关键指标与预算项目映射资料，当前结论为待核实。</p>
+  </div>
+
+  <h3 style="margin:24px 0 12px;font-size:15px;">04　同业与战略核对所需资料</h3>
+  <div style="padding:10px 12px;margin-bottom:8px;border-radius:4px;background:#f6f9f6;font-size:12px;"><strong>同业｜可比企业、同期间与同口径指标</strong><br><span style="font-size:11px;color:#788b81;">补充制造费用率、单位产出成本、数据来源及业务规模差异说明。</span></div>
+  <div style="padding:10px 12px;margin-bottom:8px;border-radius:4px;background:#f6f9f6;font-size:12px;"><strong>战略｜本组织 SP 战略目标、关键指标与预算项目映射</strong><br><span style="font-size:11px;color:#788b81;">标明目标值、资源投入、预期成果及衡量方式，核对预算与战略是否一致。</span></div>
+  <div style="padding:10px 12px;border-radius:4px;background:#f6f9f6;font-size:12px;"><strong>业务｜设备维修明细、检修计划和产量预算</strong><br><span style="font-size:11px;color:#788b81;">用于说明预算增量的业务动因，补充后再判断投入合理性。</span></div>
+
+  <h3 style="margin:24px 0 12px;font-size:15px;">05　分析依据与版本</h3>
+  <div style="padding:10px 12px;margin-bottom:8px;border-radius:4px;background:#f6f9f6;font-size:12px;">S1　<strong>制造费用送审预算 · 示例数据</strong><br><span style="font-size:11px;color:#788b81;">本次展示测试所用的固定预算样例。</span></div>
+  <div style="padding:10px 12px;margin-bottom:8px;border-radius:4px;background:#f6f9f6;font-size:12px;">S2　<strong>2027年预算下达目标 · 示例资料</strong><br><span style="font-size:11px;color:#788b81;">按同组织、同表单及同期间进行对照。</span></div>
+  <div style="padding:10px 12px;border-radius:4px;background:#f6f9f6;font-size:12px;">S3　<strong>2026年全年实际 · 示例数据</strong><br><span style="font-size:11px;color:#788b81;">与本次预算使用相同科目范围和金额单位。</span></div>
+  <p style="margin:20px 0 0;font-size:11px;color:#788b81;">展示测试样例 V1 · 审批参考，最终由审批人判断。</p>
+</div>
+""".strip()
 FORM_LINK = {
     "B_Exp01": "https://alpha.deepfos.com/element-deep-table/2-0-0/?elementName=B_Exp01&folderId=DIR748a8d9ff25b&moduleId=GRD2_0&sign=YXBwSWQ9dmJodmt3MDU5JnNwYWNlPXZiaHZrdw%3D%3D",
     "B_Exp03": "https://alpha.deepfos.com/element-deep-table/2-0-0/?elementName=B_Exp03&folderId=DIR748a8d9ff25b&moduleId=GRD2_0&sign=YXBwSWQ9dmJodmt3MDU5JnNwYWNlPXZiaHZrdw%3D%3D",
@@ -112,10 +181,13 @@ def main(p1, p2):
     entity = val(p2, "Entity", "entity")
     scenario = val(p2, "Scenario", "scenario") or "Budget"
     submitter = val(p2, "user", "User")
+    bpp_user = val(p2, "userDomainNo")
     env = val(p2, "env") or "TEST"
     bu_name = val(p2, "bu_name", "EntityName") or entity
     if not all([year, version, entity, submitter]):
         raise ValueError("需要 Year / Version / Entity / user")
+    if not bpp_user:
+        raise ValueError("需要 userDomainNo（BPP 账号）")
 
     w = where(year, scenario, version, entity)
     if val(row("bud_appr_status", w), "complete_status") == "20":
@@ -153,11 +225,18 @@ def main(p1, p2):
 
     data = call_bpp("0501200206", env, {
         "idempotentSeqNo": val(p2, "idempotentSeqNo") or f"{TEMPLATE}-{year}-{scenario}-{version}-{entity}-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-        "userDomainNo": BPP_USER,
+        "userDomainNo": bpp_user,
         "templateCode": val(p2, "templateCode") or TEMPLATE,
         "instanceTitle": title,
         "variables": {},
-        "formVariables": {"Year": year, "Version": version, "bu_name": bu_name, "user": submitter, "budget_link": link},
+        "formVariables": {
+            "Year": year,
+            "Version": version,
+            "bu_name": bu_name,
+            "user": submitter,
+            "budget_link": link,
+            "approval_opinion": APPROVAL_OPINION_HTML,
+        },
         "additionalTag": {"year": year, "scenario": scenario, "version": version, "entity": entity},
         "comment": comment,
         "fileInfos": infos,

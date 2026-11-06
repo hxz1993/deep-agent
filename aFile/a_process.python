@@ -1,0 +1,194 @@
+# -*- coding: utf-8 -*-
+"""发起 0501200206。同一四维再开一轮插入新 instance_id，不覆盖旧实例。被驳回不能走这里。
+
+附件规则（2026-09-21 起）：**只带本轮新传的附件**（used_instance_id 为空的）。
+上一轮已认领给别的实例的附件不再重复带上，且**原样保留**（不摘旗、不改归属），
+所以旧实例 ↔ 附件的归属仍然可查，那一轮被驳回后重提也仍能找回自己的附件。
+"""
+import re
+from datetime import datetime
+from urllib.parse import urlencode
+
+import pandas as pd
+import requests
+from deepfos.element.datatable import DataTableDeepModel
+
+PATH = "/Application/SANY/11_Approval_Process/"
+TEMPLATE = "811708849152061474"
+BPP_USER = "gw_zhang95"
+FORM_LINK = {
+    "B_Exp01": "https://alpha.deepfos.com/element-deep-table/2-0-0/?elementName=B_Exp01&folderId=DIR748a8d9ff25b&moduleId=GRD2_0&sign=YXBwSWQ9dmJodmt3MDU5JnNwYWNlPXZiaHZrdw%3D%3D",
+    "B_Exp03": "https://alpha.deepfos.com/element-deep-table/2-0-0/?elementName=B_Exp03&folderId=DIR748a8d9ff25b&moduleId=GRD2_0&sign=YXBwSWQ9dmJodmt3MDU5JnNwYWNlPXZiaHZrdw%3D%3D",
+    "B_Exp04": "https://alpha.deepfos.com/element-deep-table/2-0-0/?elementName=B_Exp04&folderId=DIR748a8d9ff25b&moduleId=GRD2_0&sign=YXBwSWQ9dmJodmt3MDU5JnNwYWNlPXZiaHZrdw%3D%3D",
+}
+COLS = [
+    "year", "scenario", "version", "entity", "instance_id",
+    "complete_status", "lock_flag", "starter", "budget_link",
+    "last_update_time", "comment", "instance_title",
+]
+
+
+def form_link(picked):
+    s = str(picked or "").strip()
+    if s.startswith("http"):
+        return s
+    if s in FORM_LINK:
+        return FORM_LINK[s]
+    for code, url in FORM_LINK.items():
+        if s.startswith(code) or code in s:
+            return url
+    return ""
+
+
+def val(src, *keys):
+    src = src or {}
+    for k in keys:
+        x = src.get(k)
+        if isinstance(x, list):
+            x = x[0] if x else ""
+        if x is not None and str(x).strip():
+            return str(x).strip()
+    return ""
+
+
+def where(year, scenario, version, entity):
+    parts = []
+    for name, x in [("year", year), ("scenario", scenario), ("version", version), ("entity", entity)]:
+        s = str(x or "").strip()
+        if not re.match(r"^[A-Za-z0-9_\-]+$", s):
+            raise ValueError(f"{name} 非法")
+        parts.append(f"{name}='{s}'")
+    return " and ".join(parts)
+
+
+def row(name, w):
+    df = DataTableDeepModel(element_name=name, path=PATH).select(where=w)
+    if df is None or df.empty:
+        return {}
+    if "last_update_time" in df.columns:
+        df = df.sort_values("last_update_time", ascending=False)
+    return df.iloc[0].to_dict()
+
+
+def put_status(data):
+    t = DataTableDeepModel(element_name="bud_appr_status", path=PATH)
+    rec = {c: data.get(c) for c in COLS}
+    biz = val(rec, "complete_status") or "10"
+    rec["complete_status"] = biz
+    # 锁数标志：审批中(10) / 审批完毕(99) 都锁；99 由值列表 Bud_Appr_Biz_Status 定义
+    rec["lock_flag"] = "1" if biz in ("10", "99") else "0"
+    rec["last_update_time"] = datetime.now()
+    t.insert_df(pd.DataFrame([rec]))
+    return rec
+
+
+def call_bpp(code, env, body):
+    env = (env or "TEST").upper()
+    if env not in ("TEST", "PROD"):
+        raise ValueError("env 只能是 TEST 或 PROD")
+    cfg = row("bud_appr_api_cfg", f"api_code='{code}' and env='{env}'")
+    if not cfg:
+        raise ValueError(f"无接口配置 {code}/{env}，到 B_Appr_Api_Cfg 补行")
+    if not val(cfg, "auth_key"):
+        raise ValueError(f"未填 authKey，到 B_Appr_Api_Cfg 补 {code}/{env} 的钥")
+    url = val(cfg, "base_url").rstrip("/") + val(cfg, "api_path")
+    headers = {
+        "Content-Type": "application/json",
+        "appId": val(cfg, "app_id") or "EPM",
+        "authKey": val(cfg, "auth_key"),
+    }
+    resp = requests.post(url, headers=headers, json=body, timeout=60)
+    print("HTTP", resp.status_code, resp.text[:1500])
+    data = resp.json()
+    if resp.status_code >= 400 or data.get("failed") is True:
+        raise ValueError(f"BPP 失败 {resp.status_code}: {data}")
+    return data
+
+
+def main(p1, p2):
+    p2 = p2 or {}
+    year = val(p2, "Year", "year")
+    version = val(p2, "Version", "version")
+    entity = val(p2, "Entity", "entity")
+    scenario = val(p2, "Scenario", "scenario") or "Budget"
+    submitter = val(p2, "user", "User")
+    env = val(p2, "env") or "TEST"
+    bu_name = val(p2, "bu_name", "EntityName") or entity
+    if not all([year, version, entity, submitter]):
+        raise ValueError("需要 Year / Version / Entity / user")
+
+    w = where(year, scenario, version, entity)
+    if val(row("bud_appr_status", w), "complete_status") == "20":
+        raise ValueError("已被驳回，请走重新提交")
+
+    picked = val(p2, "budget_link", "form_code", "form", "readonly_ux", "elementName")
+    link = form_link(picked)
+    if not link.startswith("http"):
+        raise ValueError("请先选择表单")
+    if "year=" not in link:
+        sep = "&" if "?" in link else "?"
+        link = link + sep + urlencode({
+            "year": year, "scenario": scenario, "version": version, "entity": entity,
+        })
+
+    # 只带「还没被任何实例认领过」的附件（used_instance_id 为空）。
+    # 已经认领过的 = 上一轮带过的：本轮**不带**，而且**一个字段都不动** ——
+    #   ① 归属（used_instance_id）留着，旧实例 ↔ 附件仍然查得到；
+    #   ② 万一那个实例后来被驳回，重提时还能按 used_instance_id 把这些附件找回来
+    #      ⇒ 所以这里**不能摘旗**：摘旗会让「审批中又发起一轮」之后的再提丢掉附件。
+    # 判断放 Python 里做，不用 `is null / <> / or` 这类 where 语法（未经验证，避免踩坑）。
+    files = DataTableDeepModel(element_name="bud_appr_file", path=PATH)
+    df = files.select(where=w + " and attach_flag='1'")
+    all_rows = [] if df is None or df.empty else df.to_dict(orient="records")
+    carried = [r for r in all_rows if not val(r, "used_instance_id")]
+    file_rows = carried
+    infos = [{"id": val(r, "file_id"), "fdName": val(r, "fd_name")}
+             for r in file_rows if val(r, "file_id") and val(r, "fd_name")]
+    if isinstance(p2.get("fileInfos"), list):
+        infos = p2["fileInfos"]
+    infos = infos or None
+    scene = val(p2, "ScenarioName", "scenario_name") or scenario
+    title = val(p2, "instanceTitle") or f"预算编制详版表单审批流程发起_{scene} -- {datetime.now().strftime('%Y%m%d')}"
+    comment = val(p2, "comment") or f"{bu_name}预算编制详版表单审批流程发起"
+
+    data = call_bpp("0501200206", env, {
+        "idempotentSeqNo": val(p2, "idempotentSeqNo") or f"{TEMPLATE}-{year}-{scenario}-{version}-{entity}-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+        "userDomainNo": BPP_USER,
+        "templateCode": val(p2, "templateCode") or TEMPLATE,
+        "instanceTitle": title,
+        "variables": {},
+        "formVariables": {"Year": year, "Version": version, "bu_name": bu_name, "user": submitter, "budget_link": link},
+        "additionalTag": {"year": year, "scenario": scenario, "version": version, "entity": entity},
+        "comment": comment,
+        "fileInfos": infos,
+    })
+    payload = data.get("data", data) if isinstance(data, dict) else data
+    if isinstance(payload, list) and payload:
+        payload = payload[0]
+    instance_id = (payload.get("instanceId") or payload.get("prcsInstId")) if isinstance(payload, dict) else None
+    if not instance_id:
+        raise ValueError(f"BPP 回包没有 instanceId: {data}")
+
+    saved = put_status({
+        "year": year, "scenario": scenario, "version": version, "entity": entity,
+        "instance_id": instance_id, "complete_status": "10",
+        "starter": submitter, "budget_link": link,
+        "comment": comment, "instance_title": title,
+    })
+    if carried:
+        for rec in carried:
+            rec["used_instance_id"] = instance_id      # 本轮带上的，认领给新实例
+        # 按 file_id 精确定位后删除再写回：**只动这几行**，已认领过的行完全不动。
+        # （不能用 `delete(where=w + " and attach_flag='1'")` 整批删再补写，
+        #   那样会把已认领的行也删掉重建，与"原样不动"的承诺不符。）
+        for rec in carried:
+            fid = val(rec, "file_id")
+            if fid and re.match(r"^[A-Za-z0-9_\-]+$", fid):
+                files.delete(where=w + f" and file_id='{fid}'")
+        files.insert_df(pd.DataFrame(carried))
+    return {
+        "success": 1, "biz_status": "10", "lock_flag": saved.get("lock_flag"),
+        "instance_id": instance_id, "instance_title": title, "comment": comment,
+        "fileInfos": infos, "file_count": len(carried),
+        "skipped_count": len(all_rows) - len(carried),
+    }

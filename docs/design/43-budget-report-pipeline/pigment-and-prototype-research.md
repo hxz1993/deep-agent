@@ -1,6 +1,6 @@
 # Pigment 与报告工作台原型：依据核验
 
-核验日期：2026-11-06。本文记录来源及其能证明的范围；产品方向见[课题入口](README.md)。
+核验日期：2026-11-06；2026-11-07 复核官方运行／编辑说明并更新原型证据位置。本文记录来源及其能证明的范围；产品方向见[课题入口](README.md)，本轮横向比较见[同行再研究](artifact-product-research.md)。
 
 ## Pigment 官方能确认什么
 
@@ -18,7 +18,7 @@ Mission 是 Pigment 官方概念：自然语言描述的可重复分析任务。
 
 ### Output 与 Export 的含义
 
-Output 是报告结果。官方描述 Mission 报告可编辑文字、调整图表并保存；可分享 PDF／链接，或导出到 Text Metric 后用于 Board。导出设置还区分自动和人工触发。[官方编辑与分享说明](https://kb.pigment.com/v1/docs/edit-analyst-agent-reports)
+Output 是报告结果。官方描述 Mission 报告可编辑文字、调整图表并保存；可分享 PDF／链接，或导出到 Text Metric 后用于 Board。聊天报告与 Mission 报告的编辑／分享范围不同，导出设置还区分自动和人工触发。[官方编辑与分享说明](https://kb.pigment.com/docs/edit-analyst-agent-reports)
 
 不能把这里的 Export 解释成导出 Mission 配置 JSON、源代码或完整查询流水线。
 
@@ -44,9 +44,9 @@ Output 是报告结果。官方描述 Mission 报告可编辑文字、调整图�
 ## 用户交接包：本地核验范围
 
 原件名：`20261106-报告工作台原型交接.zip`，29 项文件。原件留在用户附件位置，未修改、未加入 Git。
-已存在的本地解包资料位于 `docs/local-artifacts/TMP to delete 报告工作台需求分析-20261106/`，为私有忽略目录。
+前次解包使用私有忽略目录 `docs/local-artifacts/TMP to delete 报告工作台需求分析-20261106/`。本轮核对该临时目录已不在仓库，不作为长期资料或下载入口；以下保留当时的只读核验记录，未重新解包或运行原件。
 
-| 材料 | 本轮核对结果 |
+| **材料** | **2026-11-06 核对结果** |
 | --- | --- |
 | `说明与验证/交互说明.md`、`验证记录.md`、`可转发摘要.txt` | 目标是封装既有电子表格问数、分析和报告能力；当前仅为本机原型 |
 | `原型源码/app.js` | 已有任务配置和运行记录；通过浏览器 localStorage 保存，数据和生成过程为模拟 |

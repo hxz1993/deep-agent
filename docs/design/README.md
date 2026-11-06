@@ -32,7 +32,7 @@
 | `26` | [`定时任务`](26-scheduled-tasks/README.md) | 2026-09-14 | 上游调研与初步设计；独立配置、Cron、会话归属及停机补跑，尚未开发 |
 | `27` | [`个人用量统计`](27-personal-usage/README.md) | 2026-09-23 | C04-USAGE 已在本地实现，版本 0.11.0 / 007；复用事件和 SDK Usage，管理员按人／日期／模型／Agent／用途统计，UI 验收中；价格／配额暂缓 |
 | `28` | [`Codex 订阅 Provider`](28-codex-provider/README.md) | 2026-09-24 | C10-CODEX 本机实验版；复用 Provider／模型链路，OAuth 凭据同表 JSON 保存；待真实授权联调 |
-| `29` | [`模型原生思考配置与影响面`](29-reasoning-controls/README.md) | 2026-10-31 | C09-THINKING 已恢复研究；原生档位、能力来源、默认层级与接入影响已整理，方案评审中，尚未实施 |
+| `29` | [`模型原生思考配置与影响面`](29-reasoning-controls/README.md) | 2026-10-31 | 11-07 最新：仅Agent配默认，模型／Provider只提供能力和只读缺省；补ADK、OpenAI SDK及models.dev来源复核，客户端可不适配；仅方案，未实施 |
 | `30` | [`UI 工具同 Run 等待与执行连续性`](30-ui-tool-inline-wait/README.md) | 2026-09-26 | 已验证官方 handler 保留 PTC 内存；保留 UI 定义与安装格式，运行／SSE／客户端待适配，发布兼容策略待决，尚未实施 |
 
 | `31` | [`敏感凭据数据库加密存储`](31-credential-encryption/README.md) | 2026-09-26 | 高优先级待实施；统一凭据边界、密钥部署、迁移与恢复，无业务客户端升级要求 |
@@ -44,7 +44,7 @@
 | `40` | [图像查看与PDF原页核验](40-image-viewing/README.md) | 2026-11-03 | 纳入 v0.15.2；v0.15.1 基线不含此功能 |
 | `41` | [工单助手委派本地仓库排查](41-ticket-repo-investigation/README.md) | 2026-11-04 | 补充 Autoloop／Symphony／SuperAgent 部署与复用比较、最小适配及原会话恢复缺口；内部原型优先少改造，尚未实施 |
 | `42` | [企业集成与鉴权适配器](42-enterprise-auth-adapters/README.md) | 2026-11-05 | 记录 MCP／Skill 统一账号映射、取票、配置与可更新适配器方向；统一鉴权尚未实施；非凭据 include_context 已纳入 v0.15.6 |
-| `43` | [预算报告流水线与持续分析产物](43-budget-report-pipeline/README.md) | 2026-11-06 | 回顾报告工作台、Pigment Mission、要求／结果 JSON 边界与固定渲染；建议先验证有界报告场景，尚未批准实施 |
+| `43` | [中间产物管理与报告流水线](43-budget-report-pipeline/README.md) | 2026-11-06 | 11-07 原样归档 Dot 交接并去重；原生 JSON＋受控 patch 方向已明确，补充可选模块与同行研究、财务交付规范，具体实施及 DDL 尚未批准 |
 
 ## 文档命名
 

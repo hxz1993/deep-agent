@@ -3,7 +3,7 @@ import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContex
 import { createConversationPresenter } from "./conversation-presenter.js?v=20261105-v01510";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20261103-view-image1";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261103-view-image1";
-import { createTrajectoryController } from "./trajectory.js?v=20261105-v01510";
+import { createTrajectoryController } from "./trajectory.js?v=20261106-trajectory-export";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { renderSessionInspector } from "./session-inspector.js?v=20261104-session-app";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";
@@ -239,6 +239,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     loadingSnapshot = next.history == null ? previous : null;
     data = { session: next.session || {}, history: next.history || { items: [] }, events: nextEvents, users: next.users || next.session?.users || {} };
     state.sessionId = data.session.session_id; state.conversationId = data.session.conversation_id;
+    state.exportRunStatus = data.session.latest_status?.status || data.session.latest_status || "unknown";
     if (!sameSession) { inspectorTab = "session"; selectedRunId = null; selectedReference = null; lastFocusKey = null; }
     role("chatTitle").textContent = data.session.title || data.session.name || "未命名会话";
     role("sessionBadge").textContent = formatSessionIdSubtitle(state.sessionId);

@@ -11,9 +11,10 @@ const g2Source = await readFile(new URL("../../../console/vendor/g2-5.4.8.min.js
 const markdownSource = await readFile(new URL("../../../console/markdown.js", import.meta.url), "utf8");
 const markedSource = await readFile(new URL("../../../console/vendor/marked.min.js", import.meta.url), "utf8");
 
-function harness() {
+function harness({ fetchAsset } = {}) {
   const listeners = new Map(), timers = new Map(), frames = [], observers = [];
   let ElementClass, nextTimer = 1;
+  const requests = [];
   const document = {
     baseURI: "http://localhost:8000/console/",
     createElement(tag) {
@@ -28,7 +29,12 @@ function harness() {
     get firstChild() { return this.childNodes[0] || null; }
   }
   const context = vm.createContext({
-    console, TextEncoder, URL, Uint8Array, Promise, HTMLElement,
+    console, TextEncoder, URL, Uint8Array, Promise, HTMLElement, Blob, AbortController,
+    async fetch(url, options) {
+      requests.push({ url, options });
+      if (fetchAsset) return fetchAsset(url, options);
+      return new Response("// trusted fixture script", { headers: { "Content-Type": "text/javascript" } });
+    },
     document, customElements: { get: () => null, define(_name, value) { ElementClass = value; } },
     crypto: { getRandomValues(value) { for (let i = 0; i < value.length; i++) value[i] = i + nextTimer; return value; } },
     IntersectionObserver: class {
@@ -45,14 +51,14 @@ function harness() {
   context.window = context;
   vm.runInContext(source, context);
   return {
-    context, frames, observers, listeners, timers,
+    context, frames, observers, listeners, timers, requests,
     async create(spec = '{"type":"g2","config":{"type":"interval","data":[{"x":"甲","y":1}]}}', state = "pending") {
       const el = new ElementClass(); el.dataset.g2State = state;
       const code = document.createElement("code"); code.textContent = spec; el.appendChild(code);
       el.connectedCallback(); await Promise.resolve();
       return el;
     },
-    visible() { observers.at(-1).visible(); },
+    async visible() { observers.at(-1).visible(); await new Promise(resolve => setImmediate(resolve)); },
     message(frame, type, { token, source: sender = frame.contentWindow } = {}) {
       const found = frame.srcdoc.match(/data-token="([^"]+)"/)[1];
       for (const callback of listeners.get("message") || []) callback({ source: sender, data: { channel: "deepagent-g2", type, token: token ?? found } });
@@ -98,8 +104,8 @@ test("streaming charts never create observers or frames; completed charts wait f
   assert.match(stream.textContent, /图表生成中/);
   const complete = await h.create();
   assert.equal(h.frames.length, 0); assert.equal(h.observers.length, 1);
-  h.visible(); assert.equal(h.frames.length, 1); assert.equal(complete.dataset.g2State, "loading");
-  h.visible(); assert.equal(h.frames.length, 1);
+  await h.visible(); assert.equal(h.frames.length, 1); assert.equal(complete.dataset.g2State, "loading");
+  await h.visible(); assert.equal(h.frames.length, 1);
   h.disconnect(stream); h.disconnect(complete);
 });
 
@@ -111,9 +117,10 @@ test("chart/config switch shows one representation and reuses the same chart and
   for (const mode of ["chart", "config"]) {
     const button = doc.createElement("button"); button.setAttribute("data-g2-view", mode); el.appendChild(button);
   }
-  el._setView("config"); h.visible();
+  el._setView("config"); await h.visible();
   assert.equal(config.hidden, false); assert.equal(el._viewport.hidden, true); assert.equal(h.frames.length, 0);
   el._setView("chart");
+  await new Promise(resolve => setImmediate(resolve));
   const frame = h.frames[0]; h.message(frame, "ready"); h.message(frame, "rendered");
   assert.equal(config.hidden, true); assert.equal(el._viewport.hidden, false);
   el._setView("config"); el._setView("chart");
@@ -125,15 +132,19 @@ test("chart/config switch shows one representation and reuses the same chart and
 
 test("sandbox document has local nonced scripts and no model content or eval permission", async () => {
   const h = harness(), el = await h.create('{"type":"interval","data":[{"name":"</script><img src=x>"}]}');
-  h.visible(); const frame = h.frames[0];
+  await h.visible(); const frame = h.frames[0];
   assert.equal(frame.getAttribute("sandbox"), "allow-scripts");
   assert.doesNotMatch(frame.srcdoc, /allow-same-origin|unsafe-eval|<img src=x>/);
   assert.doesNotMatch(frame.srcdoc.match(/script-src ([^;]+);/)[1], /unsafe-inline/);
   assert.match(frame.srcdoc, /connect-src 'none'/);
   assert.match(frame.srcdoc, /img-src data: blob:/);
-  assert.match(frame.srcdoc, /http:\/\/localhost:8000\/vendor\/g2-5\.4\.8\.min\.js/);
-  assert.match(frame.srcdoc, /g2-theme\.js\?v=20261106-skill-theme/);
-  assert.ok(frame.srcdoc.indexOf("g2-theme.js") < frame.srcdoc.indexOf("g2-frame.js"));
+  assert.equal(h.requests.length, 3);
+  assert.equal(h.requests[0].url, "http://localhost:8000/console/vendor/g2-5.4.8.min.js");
+  assert.ok(h.requests.every(({ options }) => options.credentials === "same-origin" && options.redirect === "error"));
+  assert.doesNotMatch(frame.srcdoc, /<script[^>]+src=/);
+  assert.match(frame.srcdoc, /nonce="[a-f0-9]+">\/\/ trusted fixture script/);
+  assert.match(h.requests[1].url, /g2-theme\.js\?v=20261106-skill-theme/);
+
   assert.equal(frame.contentWindow.messages.length, 0);
   h.message(frame, "ready", { source: {} }); h.message(frame, "ready", { token: "wrong" });
   assert.equal(frame.contentWindow.messages.length, 0);
@@ -144,10 +155,20 @@ test("sandbox document has local nonced scripts and no model content or eval per
   h.disconnect(el); assert.equal(h.listeners.get("message").size, 0);
 });
 
+test("trusted bundled scripts escape raw HTML terminators while preserving JavaScript values", () => {
+  const { context } = harness();
+  const script = `globalThis.value = "</ScRiPt><img src=x>";`;
+  const html = context.DeepAgentG2.frameDocument({ nonce: "n", token: "t", g2Source: script, themeSource: "// theme", frameSource: "// frame" });
+  assert.equal((html.match(/<\/script>/gi) || []).length, 3);
+  const isolated = vm.createContext({});
+  vm.runInContext(html.match(/<script[^>]*>(.*?)<\/script>/s)[1], isolated);
+  assert.equal(isolated.value, "</ScRiPt><img src=x>");
+});
+
 test("disconnect cleans pending visibility and in-flight frames; late replies cannot resurrect them", async () => {
   const h = harness(), pending = await h.create();
-  h.disconnect(pending); h.visible(); assert.equal(h.frames.length, 0);
-  const mounted = await h.create(); h.visible(); const frame = h.frames[0];
+  h.disconnect(pending); await h.visible(); assert.equal(h.frames.length, 0);
+  const mounted = await h.create(); await h.visible(); const frame = h.frames[0];
   h.disconnect(mounted); h.message(frame, "ready"); h.message(frame, "rendered");
   assert.equal(mounted.querySelector("iframe"), null); assert.equal(frame.contentWindow.messages.length, 0);
   assert.equal(h.listeners.get("message").size, 0); assert.equal(h.timers.size, 0);
@@ -155,14 +176,78 @@ test("disconnect cleans pending visibility and in-flight frames; late replies ca
 });
 
 test("parse/render/timeout failures keep the original complete code available", async () => {
-  const h = harness(), bad = await h.create("not valid JSON"); h.visible();
+  const h = harness(), bad = await h.create("not valid JSON"); await h.visible();
   assert.equal(h.frames.length, 0); assert.equal(bad.dataset.g2State, "error"); assert.equal(bad.querySelector("code").textContent, "not valid JSON");
   assert.match(bad.textContent, /不是有效的 JSON/);
-  const failed = await h.create(); h.visible(); const frame = h.frames[0]; h.message(frame, "error");
+  const failed = await h.create(); await h.visible(); const frame = h.frames[0]; h.message(frame, "error");
   assert.equal(failed.dataset.g2State, "error"); assert.equal(failed.querySelector("iframe"), null);
   assert.match(failed.textContent, /图表渲染失败/); assert.ok(failed.querySelector("code"));
-  const timed = await h.create(); h.visible(); for (const callback of [...h.timers.values()]) callback();
+  const timed = await h.create(); await h.visible(); for (const callback of [...h.timers.values()]) callback();
   assert.equal(timed.dataset.g2State, "error"); assert.match(timed.textContent, /加载超时/); assert.ok(timed.querySelector("code"));
+});
+
+test("bundled assets share authenticated parent loading until the last chart leaves", async () => {
+  const h = harness(), first = await h.create(); await h.visible();
+  const second = await h.create(); await h.visible();
+  assert.equal(h.requests.length, 3);
+  assert.equal(h.frames[0].srcdoc.match(/<script[^>]*>(.*?)<\/script>/s)[1], h.frames[1].srcdoc.match(/<script[^>]*>(.*?)<\/script>/s)[1]);
+  h.disconnect(first);
+  assert.ok(h.requests.every(({ options }) => !options.signal.aborted));
+  h.disconnect(second);
+  assert.ok(h.requests.every(({ options }) => options.signal.aborted));
+});
+
+test("asset HTTP/MIME/size errors keep JSON and permit a fresh chart retry", async () => {
+  for (const response of [
+    () => new Response("denied", { status: 401 }),
+    () => new Response("login", { headers: { "Content-Type": "text/html" } }),
+    () => new Response("x".repeat(2 * 1024 * 1024 + 1), { headers: { "Content-Type": "text/javascript" } }),
+  ]) {
+    let failing = true;
+    const h = harness({ fetchAsset: () => failing ? response() : new Response("// script", { headers: { "Content-Type": "text/javascript" } }) });
+    const el = await h.create(); await h.visible();
+    assert.equal(el.dataset.g2State, "error");
+    assert.ok(el.querySelector("code")); assert.equal(h.timers.size, 0);
+    failing = false;
+    el._setView("config"); el._setView("chart");
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(el.dataset.g2State, "loading");
+    const frame = el.querySelector("iframe"); h.message(frame, "ready"); h.message(frame, "rendered");
+    assert.equal(el.dataset.g2State, "ready"); h.disconnect(el);
+  }
+});
+
+test("disconnect during shared loading aborts only when all consumers leave and ignores late results", async () => {
+  const pending = [];
+  const h = harness({ fetchAsset: (_url, options) => new Promise(resolve => pending.push({ resolve, options })) });
+  const first = await h.create(); await h.visible();
+  const second = await h.create(); await h.visible();
+  assert.equal(pending.length, 3);
+  h.disconnect(first); assert.ok(pending.every(({ options }) => !options.signal.aborted));
+  h.disconnect(second); assert.ok(pending.every(({ options }) => options.signal.aborted));
+  for (const { resolve } of pending) resolve(new Response("// late", { headers: { "Content-Type": "text/javascript" } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.listeners.get("message")?.size || 0, 0);
+  assert.equal(first.querySelector("iframe"), null); assert.equal(second.querySelector("iframe"), null);
+});
+
+test("loading timeout aborts the asset lease and a late old load cannot alter a remounted chart", async () => {
+  const pending = [];
+  const h = harness({ fetchAsset: (_url, options) => new Promise(resolve => pending.push({ resolve, options })) });
+  const el = await h.create(); await h.visible();
+  for (const callback of [...h.timers.values()]) callback();
+  assert.equal(el.dataset.g2State, "error");
+  assert.ok(pending.every(({ options }) => options.signal.aborted));
+  el._setView("config"); el._setView("chart");
+  assert.equal(pending.length, 6);
+  for (const { resolve } of pending.slice(0, 3)) resolve(new Response("// old", { headers: { "Content-Type": "text/javascript" } }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(el.dataset.g2State, "loading"); assert.equal(el.querySelector("iframe"), null);
+  for (const { resolve } of pending.slice(3)) resolve(new Response("// current", { headers: { "Content-Type": "text/javascript" } }));
+  await new Promise(resolve => setImmediate(resolve));
+  const frame = el.querySelector("iframe"); assert.match(frame.srcdoc, /current/); assert.doesNotMatch(frame.srcdoc, /old/);
+  h.message(frame, "ready"); h.message(frame, "rendered"); assert.equal(el.dataset.g2State, "ready");
+  h.disconnect(el);
 });
 
 test("Markdown final/stream contracts preserve copyable JSON and only allow the exact G2 element", () => {

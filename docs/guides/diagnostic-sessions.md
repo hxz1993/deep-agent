@@ -5,6 +5,8 @@
 统计读取现有 `chat_sessions + chat_session_events`，不从诊断日志推算，不新增统计表、事件或迁移。
 日志的实例范围、保留期和文件约束见[诊断日志指南](diagnostic-logs.md)。
 
+详情轨迹工具栏支持仅 JSON 或含用户附件与可信工具产物的 ZIP。ZIP 需运行结束／停止并完成历史加载，先预估、再确认；权限、文件清单、保护限制与接口见[轨迹与文件导出](trajectory-export.md)。
+
 ## 入口与筛选
 
 - 概览：`/console/#/diagnostics/sessions/overview`；本次访问期间记住最后使用的概览或列表。

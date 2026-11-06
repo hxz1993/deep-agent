@@ -64,6 +64,7 @@
     "tests/unit/test_web_provider_fetch_overflow.py"
   ],
   "files": [
+    "tests/integration/test_trajectory_export.py",
     "tests/integration/test_agent_package_cross_version_http.py",
     "tests/integration/test_agent_packages_api.py",
     "tests/integration/test_attachment_upload_databases.py",

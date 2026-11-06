@@ -22,6 +22,7 @@
 | 普通/流式聊天 | POST /api/v1/chat、/api/v1/chat/stream | 业务用户 |
 | 会话列表 | GET /api/v1/sessions | 本人范围 |
 | 历史/事件/状态 | GET /api/v1/sessions/{id}/history、/events、/run-status | 本人范围 |
+| 轨迹文件预估/打包 | GET /api/v1/sessions/{id}/trajectory-export/preview；POST /trajectory-export?include_files=true | 本人范围，管理员使用diagnostics/sessions对应路径 |
 | 停止 | POST /api/v1/sessions/{id}/cancel | 本人范围 |
 | 附件上传 | POST /api/v1/uploads | 当前认证用户 |
 | 管理员会话诊断 | /api/v1/diagnostics/sessions/** | 管理员 |

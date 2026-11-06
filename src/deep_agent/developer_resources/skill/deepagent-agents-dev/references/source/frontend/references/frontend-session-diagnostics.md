@@ -1,5 +1,7 @@
 # 前端 Agent：按环境和会话 ID 只读取证
 
+Console 支持轨迹 JSON 与含文件 ZIP；读取导出包先核对 manifest.json 的实际文件、缺失项与 SHA256。使用与接口见[会话诊断与离线排查](../../../09-session-diagnostics.md#console-轨迹导出与离线排查)，不要把诊断包当作 Agent 安装包。
+
 资料核对：2026-11-06，DeepAgent {{DEEP_AGENT_VERSION}} / Head013；目标环境须另读 /info 和 OpenAPI。诊断权限允许读取后台证据，不扩大前端Skill的代码修改范围；目标部署另行核验。
 
 ## 从环境和会话 ID 开始

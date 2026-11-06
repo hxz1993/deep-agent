@@ -1,5 +1,7 @@
 # 环境 + Session ID：日志与跨用户会话诊断
 
+轨迹与文件 ZIP 的使用和完整性核对见[会话诊断与离线排查](../../../09-session-diagnostics.md#console-轨迹导出与离线排查)。导出不替代原始 Events／日志取证，也不扩大文件权限。
+
 资料核对：2026-11-06，DeepAgent {{DEEP_AGENT_VERSION}} / Head013；目标环境须另读 /info 和 OpenAPI。
 
 ## 从环境和会话 ID 开始

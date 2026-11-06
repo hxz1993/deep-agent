@@ -44,7 +44,11 @@ _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _read_only_diagnostic_post(path: str) -> bool:
-    """Allow only the JSON aliases of existing administrator diagnostic reads."""
+    """Allow explicit diagnostic reads and ephemeral trajectory exports only."""
+    ordinary_prefix = "/api/v1/sessions/"
+    if path.startswith(ordinary_prefix):
+        parts = path[len(ordinary_prefix):].split("/")
+        return len(parts) == 2 and bool(parts[0]) and parts[1] == "trajectory-export"
     prefix = "/api/v1/diagnostics/"
     if not path.startswith(prefix):
         return False
@@ -54,7 +58,7 @@ def _read_only_diagnostic_post(path: str) -> bool:
     if len(parts) == 2:
         return parts[0] == "sessions" or (parts[0] == "usage" and parts[1] in {"details", "sessions", "export"})
     if len(parts) == 3:
-        return (parts[0] == "sessions" and parts[2] == "events" and bool(parts[1])) or (
+        return (parts[0] == "sessions" and parts[2] in {"events", "trajectory-export"} and bool(parts[1])) or (
             parts[0] == "channels" and bool(parts[1]) and parts[2] in {"overview", "peers", "sessions"})
     return False
 

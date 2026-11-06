@@ -48,6 +48,66 @@
     return spec;
   }
 
+  // Fetch only bundled, fixed scripts in the authenticated parent. An opaque
+  // sandbox cannot inherit the gateway login when loading those URLs itself.
+  const assetPools = new Map();
+  const ASSET_LIMIT = 2 * 1024 * 1024;
+
+  async function readAsset(url, signal) {
+    const response = await global.fetch(url, { credentials: "same-origin", redirect: "error", signal });
+    if (!response.ok) throw new Error(`图表资源加载失败（HTTP ${response.status}），请检查登录状态后重试。`);
+    if (!/(?:java|ecma)script/i.test(response.headers.get("content-type") || "")) throw new Error("图表资源未返回脚本，请检查登录状态后重试。");
+    const reader = response.body.getReader(), chunks = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > ASSET_LIMIT) throw new Error("图表资源超过加载上限。");
+        chunks.push(value);
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    return new global.Blob(chunks, { type: "text/javascript" }).text();
+  }
+
+  function acquireAssets(baseURI) {
+    const urls = ["./vendor/g2-5.4.8.min.js", "./g2-theme.js?v=20261106-skill-theme", "./g2-frame.js?v=20261106-skill-theme"]
+      .map(path => new URL(path, baseURI).href);
+    const key = urls.join("\n");
+    let pool = assetPools.get(key);
+    if (!pool) {
+      pool = { refs: 0, controller: new AbortController(), scripts: [] };
+      assetPools.set(key, pool);
+      pool.ready = Promise.all(urls.map(url => readAsset(url, pool.controller.signal))).then(scripts => {
+        if (pool.controller.signal.aborted) throw new Error("图表资源加载已取消。");
+        pool.scripts = scripts;
+        return scripts;
+      }).catch(error => {
+        pool.controller.abort();
+        pool.scripts = [];
+        if (assetPools.get(key) === pool) assetPools.delete(key);
+        throw error;
+      });
+    }
+    pool.refs++;
+    let released = false;
+    return {
+      ready: pool.ready,
+      release() {
+        if (released) return;
+        released = true;
+        if (--pool.refs !== 0) return;
+        pool.controller.abort();
+        pool.scripts = [];
+        if (assetPools.get(key) === pool) assetPools.delete(key);
+      },
+    };
+  }
+
   function randomToken() {
     const bytes = new Uint8Array(18);
     if (!global.crypto?.getRandomValues) throw new Error("当前浏览器不支持安全的图表预览。");
@@ -59,10 +119,14 @@
     return String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
-  function frameDocument({ nonce, token, g2Url, themeUrl, frameUrl }) {
+  function frameDocument({ nonce, token, g2Source, themeSource, frameSource }) {
+    // Sources are fixed bundled assets, never model data. Escape the HTML raw-text
+    // terminator without changing JavaScript string values. Nonces permit only
+    // these trusted scripts; the sandbox still has an opaque origin and no I/O.
+    const inline = source => source.replace(/<\/script/gi, match => match.replace("/", "\\/"));
     const policy = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'none'; img-src data: blob:; font-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
-    // Only trusted URLs and random identifiers enter srcdoc. Message JSON never does.
-    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta name="referrer" content="no-referrer"><style>html,body{margin:0;width:100%;height:300px;overflow:hidden;background:#fff;color:#263c4e;font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",Arial,sans-serif}#chart{width:100%;height:300px}.g2-safe-tooltip{max-width:300px;padding:8px 10px;background:#fff;color:#263c4e;font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.g2-safe-tooltip-title{font-weight:600;margin-bottom:3px}.g2-safe-tooltip-row{display:flex;justify-content:space-between;gap:12px}</style><script nonce="${nonce}" src="${escapeAttribute(g2Url)}" defer></script><script nonce="${nonce}" src="${escapeAttribute(themeUrl)}" defer></script><script nonce="${nonce}" data-token="${token}" src="${escapeAttribute(frameUrl)}" defer></script></head><body><div id="chart" aria-label="G2 图表"></div></body></html>`;
+    // Only bundled script sources and random identifiers enter srcdoc. Message JSON never does.
+    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta name="referrer" content="no-referrer"><style>html,body{margin:0;width:100%;height:300px;overflow:hidden;background:#fff;color:#263c4e;font:12px -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",Arial,sans-serif}#chart{width:100%;height:300px}.g2-safe-tooltip{max-width:300px;padding:8px 10px;background:#fff;color:#263c4e;font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;overflow-wrap:anywhere}.g2-safe-tooltip-title{font-weight:600;margin-bottom:3px}.g2-safe-tooltip-row{display:flex;justify-content:space-between;gap:12px}</style><script nonce="${nonce}">${inline(g2Source)}\n</script><script nonce="${nonce}">${inline(themeSource)}\n</script><script nonce="${nonce}" data-token="${token}">${inline(frameSource)}\n</script></head><body><div id="chart" aria-label="G2 图表"></div></body></html>`;
   }
 
   if (global.HTMLElement && global.customElements && !global.customElements.get("deepagent-g2-chart")) {
@@ -75,6 +139,7 @@
         this._viewport = null;
         this._timer = null;
         this._listener = null;
+        this._assets = null;
         this._started = false;
         this._view = "chart";
       }
@@ -137,7 +202,7 @@
         return status;
       }
 
-      _mount(generation) {
+      async _mount(generation) {
         if (this._started || this._view !== "chart" || !this.isConnected || generation !== this._generation) return;
         this._started = true;
         try {
@@ -148,9 +213,21 @@
           frame.title = "G2 图表";
           frame.setAttribute("sandbox", "allow-scripts");
           frame.setAttribute("referrerpolicy", "no-referrer");
-          const g2Url = new URL("../vendor/g2-5.4.8.min.js", this.ownerDocument.baseURI).href;
-          const themeUrl = new URL("./g2-theme.js?v=20261106-skill-theme", this.ownerDocument.baseURI).href;
-          const frameUrl = new URL("./g2-frame.js?v=20261106-skill-theme", this.ownerDocument.baseURI).href;
+          const assets = acquireAssets(this.ownerDocument.baseURI);
+          this._assets = assets;
+          this.dataset.g2State = "loading";
+          this._status("图表加载中…");
+          this._timer = global.setTimeout(() => {
+            if (this._assets === assets && generation === this._generation) this._fail("图表加载超时，已保留完整配置。切换回图表可重试。");
+          }, 15000);
+          let scripts;
+          try { scripts = await assets.ready; }
+          catch (error) {
+            if (this._assets === assets && generation === this._generation) this._fail(error.message || "图表资源加载失败，请切换回图表重试。");
+            return;
+          }
+          if (this._assets !== assets || !this.isConnected || generation !== this._generation) return;
+          const [g2Source, themeSource, frameSource] = scripts;
           this._frame = frame;
           let sent = false;
           this._listener = event => {
@@ -169,11 +246,8 @@
             } else if (data.type === "error") this._fail("图表渲染失败，请展开配置检查。");
           };
           global.addEventListener("message", this._listener);
-          frame.srcdoc = frameDocument({ nonce, token, g2Url, themeUrl, frameUrl });
+          frame.srcdoc = frameDocument({ nonce, token, g2Source, themeSource, frameSource });
           this.dataset.g2State = "loading";
-          this._timer = global.setTimeout(() => {
-            if (generation === this._generation) this._fail("图表加载超时，已保留完整配置。");
-          }, 15000);
           this._viewport.appendChild(frame);
         } catch (error) { this._fail(error.message || "图表暂时无法显示，已保留完整配置。"); }
       }
@@ -185,10 +259,12 @@
         this._listener = null;
         this._frame?.remove();
         this._frame = null;
+        this._assets?.release(); this._assets = null;
       }
       _fail(message) {
         this.dataset.g2State = "error";
         this._releaseFrame();
+        this._started = false;
         this._status(message, true);
       }
       disconnectedCallback() {

@@ -19,7 +19,7 @@ description: 配置、开发和排查 DeepAgent 业务助手，包括模型与MC
 | BOM、合同等 JSON 与人审流程 | [结构化流程](references/06-structured-workflows.md) |
 | 电子表格选区、分析、填充和图表 | [电子表格助手](references/07-spreadsheet-assistant.md) |
 | 文档、OCR、图片及 PDF 核验 | [文档与视觉](references/08-document-and-vision.md) |
-| 会话 ID、轨迹、日志及断流排查 | [会话诊断](references/09-session-diagnostics.md) |
+| 会话 ID、轨迹与文件导出、日志及断流排查 | [会话诊断](references/09-session-diagnostics.md) |
 | Agent/Skill 迁移与交付 | [安装与验收](references/10-install-test-handoff.md) |
 | 查找接口与版本依据 | [接口索引](references/11-api-and-version.md) |
 | 修改 DeepAgent 源码或内置 Console | [后端开发](references/source/backend/index.md) |

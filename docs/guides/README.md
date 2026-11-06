@@ -21,6 +21,7 @@
 | [`skills.md`](skills.md) | Skill 安装、Agent 授权、渐进披露、迁移与发布复测 |
 | [`configuration-import.md`](configuration-import.md) | 无会话新环境的同Revision配置预检与初始化接口 |
 | [`code-mode.md`](code-mode.md) | Hybrid Code Mode 启用、工具选择、文件变量、边界与排障 |
+| [`trajectory-export.md`](trajectory-export.md) | Console JSON／ZIP 轨迹导出、可信文件范围、权限与完整性清单 |
 | [`console-admin-access.md`](console-admin-access.md) | Console 企业管理员判定、管理API门禁和业务接口边界 |
 | [`developer-assistant.md`](developer-assistant.md) | 开发助手页面、鉴权资料下载、单 Skill 包及可重复构建 |
 | [`web-tools.md`](web-tools.md) | 网络搜索、DeepSeek/Kimi网页抓取、历史配置兼容与图片读取边界 |

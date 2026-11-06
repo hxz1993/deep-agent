@@ -106,7 +106,8 @@ function renderContext() {
     prefix.textContent = effectiveContext.app ? "在应用 " : "当前";
   });
   document.querySelectorAll("[data-empty-context-label]").forEach((label) => {
-    label.textContent = effectiveContext.app_name || effectiveContext.app || "不分应用";
+    label.textContent = effectiveContext.app_name && effectiveContext.app_name !== effectiveContext.app
+      ? `${effectiveContext.app_name} · ${effectiveContext.app}` : effectiveContext.app || "不分应用";
   });
   document.querySelectorAll("[data-empty-context-note]").forEach((note) => {
     note.textContent = effectiveContext.app ? " 的上下文中开始新对话。" : "，无法调用 DeepFOS MCP 及相关平台工具。";
@@ -132,6 +133,7 @@ function renderContext() {
     currentUserButton.setAttribute("aria-label", `当前平台用户：${currentUser}`);
   }
   renderEffectiveContextValues(effectiveContext);
+  window.DeepAgentConsoleWorkspace?.renderInspector?.();
 }
 
 function setAuthLocked(locked) {
@@ -142,15 +144,17 @@ function setAuthLocked(locked) {
 export async function refreshIdentity() {
   const generation = ++identityGeneration;
   const overrides = api.loadContext();
+  // Profile enrichment is optional. A slow profile service must not hold up
+  // the effective App/Space or the Console's authentication bootstrap.
+  const profilePromise = api.currentUser().catch(() => null);
   try {
-    const [inherited, profile, resolved] = await Promise.all([
+    const [inherited, resolved] = await Promise.all([
       api.requestContext({ inherited: true }),
-      api.currentUser().catch(() => null),
       overrides.app ? api.requestContext().catch(() => null) : Promise.resolve(null),
     ]);
     if (generation !== identityGeneration) return false;
-    const username = profile?.user_id === inherited.user ? valueOrNull(profile.username) : null;
-    identity = { ...inherited, username, profile: profile?.user_id === inherited.user ? profile : {resolution:"unavailable"} };
+    const previous = identity?.user === inherited.user ? identity : null;
+    identity = { ...inherited, username: previous?.username || null, profile: previous?.profile || {resolution:"unavailable"} };
     inheritedContext = {
       app: inherited.app || null,
       space: inherited.space || null,
@@ -161,6 +165,14 @@ export async function refreshIdentity() {
     resolvedContext = resolved?.user === inherited.user ? resolved : null;
     setAuthLocked(false);
     renderContext();
+    void profilePromise.then(profile => {
+      if (generation !== identityGeneration) return;
+      identity = { ...inherited,
+        username: profile?.user_id === inherited.user ? valueOrNull(profile.username) : null,
+        profile: profile?.user_id === inherited.user ? profile : {resolution:"unavailable"},
+      };
+      renderContext();
+    });
     return true;
   } catch (error) {
     if (generation !== identityGeneration) return false;
@@ -306,6 +318,11 @@ export function bindContextControls() {
   });
   window.addEventListener("resize", closeContextPopover);
   window.addEventListener("scroll", closeContextPopover, true);
+  window.addEventListener("storage", event => {
+    if (event.key !== api.CONTEXT_KEY && event.key !== null) return;
+    renderContext();
+    void refreshIdentity().catch(error => window.DeepAgentConsole?.toast(error.message, true));
+  });
   renderContext();
 }
 

@@ -22,7 +22,7 @@ import {
   processDisclosureLabel,
   toolResultPresentation,
 } from "./assistant-presentation.js?v=20261103-view-image1";
-import { createTrajectoryController } from "./trajectory.js?v=20261105-v01510";
+import { createTrajectoryController } from "./trajectory.js?v=20261106-trajectory-export";
 import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20261103-view-image1";
 import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { bindViewImagePreviews } from "./view-image.js?v=20261103-view-image3";

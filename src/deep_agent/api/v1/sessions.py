@@ -36,8 +36,24 @@ from deep_agent.time import UtcDatetime
 from deep_agent.services.channel_profiles import ChannelProfileService
 from deep_agent.agent.request_context import ResolvedRequestContext, resolve_request_context_overrides
 from deep_agent.services.scope_names import resolve_scope_directory
+from deep_agent.services.trajectory_export import EXPORT_OPENAPI
 
 router = APIRouter()
+
+
+@router.get("/sessions/{session_id}/trajectory-export/preview")
+async def preview_trajectory_export(request: Request, ctx: AppContextDep, user_id: RequestUserDep,
+                                    session_id: str, agent_id: str | None = None):
+    from deep_agent.services.trajectory_export import preview
+    return await preview(ctx, request, session_id, user_id, agent_id=agent_id)
+
+
+@router.post("/sessions/{session_id}/trajectory-export", openapi_extra=EXPORT_OPENAPI)
+async def export_session_trajectory(request: Request, ctx: AppContextDep, user_id: RequestUserDep,
+                                    session_id: str, agent_id: str | None = None,
+                                    include_files: bool = Query(default=False)):
+    from deep_agent.services.trajectory_export import export_response
+    return await export_response(ctx, request, session_id, user_id, agent_id=agent_id, include_files=include_files)
 
 
 class SessionCancelResponse(BaseModel):

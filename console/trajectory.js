@@ -11,6 +11,7 @@ import { findViewImageResult, renderViewImageResult } from "./view-image.js?v=20
 import { attachmentPreviewAttributes, attachmentDownloadUrl } from "./attachment-preview.js?v=20261103-view-image1";
 import { toolResultPresentation } from "./assistant-presentation.js?v=20261103-view-image1";
 import { renderPtcExecution } from "./ptc-execution.js?v=20260924-5";
+import { mountTrajectoryExport } from "./trajectory-export.js?v=20261106-trajectory-export";
 
 const TOOL_KINDS = new Set(["tool", "planning", "deferred"]);
 const PRESENTATION_ONLY_SSE_TYPES = new Set(["session_title"]);
@@ -79,8 +80,8 @@ function eventSummary(kind, source = {}) {
     const after = source.budget?.estimated_tokens_after ?? source.budget?.estimated_after;
     return before != null && after != null ? `${before} → ${after} Token` : "上下文压缩事件";
   }
-  if (source.type === "tool_result") return valuePreview(source.result ?? source.content) || "工具已返回";
-  return valuePreview(source.args) || "等待参数或结果";
+  if (source.type === "tool_result") return valuePreview(redactTrajectoryValue(source.result ?? source.content)) || "工具已返回";
+  return valuePreview(redactTrajectoryValue(source.args)) || "等待参数或结果";
 }
 
 function newEvent({
@@ -702,9 +703,9 @@ function liveLabel(type, data) {
 
 function liveSummary(type, data) {
   if (["thinking", "text"].includes(type)) return valuePreview(data?.delta);
-  if (type === "tool_result") return valuePreview(data?.result) || "工具已返回";
+  if (type === "tool_result") return valuePreview(redactTrajectoryValue(data?.result)) || "工具已返回";
   if (type === "tool_call_removed") return data?.reason || "调用已撤回";
-  return valuePreview(data?.message || data?.args) || type;
+  return valuePreview(redactTrajectoryValue(data?.message || data?.args)) || type;
 }
 
 function formatJson(value) {
@@ -1288,6 +1289,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   const search = byId("trajectorySearch");
   const exportButton = byId("exportTrajectoryBtn");
   const clockToggle = byId("trajectoryClockToggle");
+  let exportUI = null;
   let exportReady = !readOnly;
   function setExportReady(ready) {
     exportReady = Boolean(ready);
@@ -1295,6 +1297,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       exportButton.disabled = !exportReady;
       exportButton.title = exportReady ? "导出轨迹" : "轨迹完整读取后可导出";
     }
+    exportUI?.sync();
   }
   setExportReady(exportReady);
   if (!root || !list || !detail || !conversationTab || !trajectoryTab) return null;
@@ -1353,6 +1356,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
 
   function selectView(view, { notify = true } = {}) {
     if (disposed) return;
+    if (view !== "trajectory") exportUI?.close();
     const changed = activeView !== view;
     activeView = view === "trajectory" ? "trajectory" : "conversation";
     const trajectoryActive = view === "trajectory";
@@ -1506,6 +1510,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   function setHistory(nextHistory, { preserveView = false } = {}) {
     const sessionChanged = nextHistory?.session_id && history.session_id
       && nextHistory.session_id !== history.session_id;
+    if (sessionChanged) exportUI?.close();
     if (sessionChanged) clearRenderedTrajectory();
     history = nextHistory || { items: [] };
     historyEvents = buildTrajectory(history);
@@ -1528,12 +1533,14 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   }
 
   function reset() {
+    exportUI?.close();
     setHistory({ items: [] });
     selectView("conversation");
     clearRenderedTrajectory();
   }
 
   function addUser({ content, attachments = [], context_refs = [], branch_point = null }) {
+    exportUI?.close();
     const inputSequence = currentInputCount() + 1;
     const inputEvent = newEvent({
       id: `live-user-${Date.now()}`,
@@ -1661,6 +1668,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   }
 
   function ingest({ event, data }) {
+    if (event === "session") exportUI?.close();
     const type = event || data?.type;
     const payload = data || {};
     if (!type || !shouldIngestTrajectoryEvent(type)) return;
@@ -1859,12 +1867,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     scheduleRender();
   }
 
-  function exportTrace() {
-    if (!exportReady || disposed) return;
-    const payload = {
+  function exportPayload(persistedHistory = null) {
+    return {
       format: "deepagent-session-trajectory",
       version: 1,
-      source: readOnly ? "history" : "history+sse",
+      source: readOnly || persistedHistory ? "history" : "history+sse",
       generated_at: new Date().toISOString(),
       session_id: state.sessionId || history.session_id || null,
       conversation_id: state.conversationId || history.conversation_id || null,
@@ -1873,8 +1880,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         "历史轨迹没有持久化逐Part精确耗时",
         "同一模型响应的 Part 合并展示；native.event_ids 保留对应数据库事件 ID",
       ],
-      events: redactTrajectoryValue(allEvents()),
+      events: redactTrajectoryValue(persistedHistory ? buildTrajectory(persistedHistory) : allEvents()),
     };
+  }
+
+  function exportTrace() {
+    if (!exportReady || disposed) return;
+    const payload = exportPayload();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -1901,7 +1913,13 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     clockMode = clockMode === "time" ? "duration" : "time";
     scheduleRender();
   });
-  listen(exportButton, "click", exportTrace);
+  exportUI = mountTrajectoryExport({ button: exportButton, getTrajectory: exportPayload, exportJson: exportTrace,
+    getScope: () => ({ sessionId: state.sessionId || history.session_id || null, agentId: state.agentId || "", readOnly,
+      ready: exportReady && !state.historyLoading && state.historyReady !== false && !state.refreshHistoryAfterStream && !state.historyObservationPending,
+      running: Boolean(state.streaming || state.observingRun || state.exportRunStatus === "running" || state.exportRunStatus === "cancel_requested"),
+    }),
+  });
+  if (!exportUI) listen(exportButton, "click", exportTrace);
   listen(list, "click", (event) => {
         const row = event.target.closest("[data-trajectory-id]");
     if (!row) return;
@@ -2002,6 +2020,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     list.scrollTop = Number(value.listScrollTop) || 0; detail.scrollTop = Number(value.detailScrollTop) || 0;
   }
   function destroy() {
+    exportUI?.destroy();
     disposed = true; if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
     bindings.splice(0).forEach((remove) => remove()); historyEvents = []; liveEvents = []; history = {};
     pendingResults = []; runTurns.clear(); liveCalls = new WeakMap(); liveTextPreviews = new WeakMap(); inputCount = null; rowElements.clear(); renderedDetail = null;

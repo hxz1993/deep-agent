@@ -440,7 +440,15 @@ class AgentRunner:
         error: str | None = None,
         exception: BaseException | None = None,
         phase: str | None = None,
+        before_first_response: bool = False,
     ):
+        # A stop before the first accepted Provider response has no assistant
+        # event to close. Persist the existing interruption fact in that case.
+        # The transport continues to expose its original cancelled status.
+        if status == "cancelled":
+            if not before_first_response:
+                return None
+            status = "interrupted"
         if status not in {"failed", "interrupted"}:
             return None
         deps = run_event.deps
@@ -1856,6 +1864,7 @@ class AgentRunner:
                     started_at=started_at,
                     usage=None,
                     error=type(exc).__name__, exception=exc,
+                    before_first_response=True,
                 )
                 raise
             title_task = await self._start_title_generation(
@@ -1889,6 +1898,7 @@ class AgentRunner:
                     started_at=started_at,
                     usage=None,
                     error=type(exc).__name__, exception=exc,
+                    before_first_response=True,
                 )
                 await self._cancel_title_task(title_task)
                 raise
@@ -1942,6 +1952,9 @@ class AgentRunner:
                     started_at=started_at,
                     usage=getattr(exc, "usage", None),
                     error=type(exc).__name__, exception=exc,
+                    before_first_response=progress is None or not any(
+                        isinstance(item, ModelResponse) for item in progress.messages
+                    ),
                 )
                 await self._cancel_title_task(title_task)
                 raise
@@ -2292,6 +2305,7 @@ class AgentRunner:
                     started_at=started_at,
                     usage=None,
                     error=type(exc).__name__, exception=exc,
+                    before_first_response=True,
                 )
                 if failed_run_event is not None:
                     yield {
@@ -2700,6 +2714,7 @@ class AgentRunner:
                             cancelled_run_event = await self._finish_run_event(
                                 run_event, status="cancelled", started_at=started_at,
                                 usage=cancelled_run.usage,
+                                before_first_response=True,
                             )
                 if owns_active_run:
                     self._active_runs.unregister(active_run)

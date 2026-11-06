@@ -3,7 +3,7 @@ import "./assets/deepagent-pet/sprite-pet.js?v=20261023-console-load1";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
 import { initConsoleSelects } from "./ui-select.js?v=20261104-app-search";
-import { bindContextControls, refreshIdentity } from "./context.js?v=20261104-app-search";
+import { bindContextControls, refreshIdentity } from "./context.js?v=20261106-context-refresh";
 import { createPageLoader } from "./page-loader.js?v=20261023-console-load1";
 import "./time.js?v=20260913-49";
 import "./configuration-directory.js?v=20261019-release0137";
@@ -38,13 +38,13 @@ const loadPage = createPageLoader({
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=20261105-v01510");
+    const module = await import("./workspace.js?v=20261106-trajectory-export");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261105-v01511");
+    const module = await import("./diagnostics-center.js?v=20261106-trajectory-export");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

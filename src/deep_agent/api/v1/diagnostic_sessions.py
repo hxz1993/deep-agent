@@ -28,6 +28,7 @@ from deep_agent.core.context import AppContextDep
 from deep_agent.diagnostics.sessions import DiagnosticQueryError, DiagnosticSessionQueries, SessionFilters, detail_event_metadata, project_diagnostic_history, query_budget
 from deep_agent.services.channel_profiles import ChannelProfileService
 from deep_agent.time import UtcDatetime, utc_rfc3339
+from deep_agent.services.trajectory_export import EXPORT_OPENAPI
 
 
 class DiagnosticSessionRoute(NoStoreRoute):
@@ -43,6 +44,20 @@ class DiagnosticSessionRoute(NoStoreRoute):
 
 
 router = APIRouter(prefix="/diagnostics/sessions", dependencies=CONSOLE_ADMIN_DEPENDENCIES, route_class=DiagnosticSessionRoute)
+
+
+@router.get("/{session_id}/trajectory-export/preview")
+async def preview_trajectory_export(request: Request, ctx: AppContextDep, user_id: RequestUserDep,
+                                    session_id: str):
+    from deep_agent.services.trajectory_export import preview
+    return await preview(ctx, request, session_id, user_id, admin=True)
+
+
+@router.post("/{session_id}/trajectory-export", openapi_extra=EXPORT_OPENAPI)
+async def export_session_trajectory(request: Request, ctx: AppContextDep, user_id: RequestUserDep,
+                                    session_id: str, include_files: bool = Query(default=False)):
+    from deep_agent.services.trajectory_export import export_response
+    return await export_response(ctx, request, session_id, user_id, admin=True, include_files=include_files)
 
 
 def filters(

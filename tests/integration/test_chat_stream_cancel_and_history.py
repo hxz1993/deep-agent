@@ -446,6 +446,13 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         history = await self._history(session_id)
         self.assertEqual([item["kind"] for item in history["items"]], ["user_message"])
         self.assertEqual(history["items"][0]["text"], "keep this question")
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            preview = await client.get(
+                f"/api/v1/sessions/{session_id}/trajectory-export/preview",
+                params={"agent_id": self._agent_id},
+            )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertTrue(preview.json()["can_export"])
 
     async def test_pre_cancelled_run_does_not_start_model_tasks(self) -> None:
         model, tracker = build_slow_stream_model(chunks=["must-not-start"], delay_s=1.0)
@@ -479,12 +486,18 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(streamed[-1]["type"], "cancelled")
         self.assertIn("session_event_appended", {event["type"] for event in streamed})
         self.assertFalse(any(event.get("event", {}).get("event_type") in
-                             {"run/progress", "run/terminal", "execution/error"} for event in streamed))
+                             {"run/progress", "run/terminal"} for event in streamed))
+        interruptions = [event["event"] for event in streamed
+                         if event.get("event", {}).get("event_type") == "execution/error"]
+        self.assertEqual(len(interruptions), 1)
+        self.assertEqual(interruptions[0]["status"], "interrupted")
         history = await self._history(session_id)
         self.assertEqual([item["kind"] for item in history["items"]], ["user_message"])
         self.assertIsNone(
             get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)
         )
+        from deep_agent.services.trajectory_export import _persisted_running
+        self.assertFalse(_persisted_running(await get_context().store.list_all_events(session_id)))
 
     async def test_e2_deferred_tool_call_persists_in_history_and_resumes(self) -> None:
         session_id, tool_call_id = await self._run_hitl_pending()

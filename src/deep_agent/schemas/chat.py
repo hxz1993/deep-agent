@@ -10,6 +10,7 @@ from deep_agent.time import UtcDatetime
 
 
 class ChatRequest(BaseModel):
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
     agent_id: str | None = Field(
         default=None,
         description=(

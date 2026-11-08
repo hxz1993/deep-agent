@@ -37,11 +37,15 @@ import {
   isModelSelectable,
   modelProvider,
   modelOptionLabel,
+  modelPickerLabel,
+  modelPickerModalityLabels,
   preserveCurrentModel,
   renderGroupedModelOptions,
-} from "./model-options.js?v=20260925-codex-1";
+} from "./model-options.js?v=0160-picker-shared";
 import { shouldFollowMessages } from "./message-scroll.js?v=20260912-21";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260912-21";
+import { appendThinkingMenu, effortLabel, eventEffort, historyEffort } from "./reasoning-ui.js?v=0160-picker-labels";
+import { positionModelPicker, renderModelPickerValue, revealModelPickerOption } from "./ui-select.js?v=0160-session-groups";
 import { createHistoryFollower } from "./history-follower.js?v=20261105-v01510";
 import { sameHistoryValue } from "./history-comparison.js?v=20261105-v01510";
 import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260912-21";
@@ -152,6 +156,7 @@ const state = {
   uploadCapabilities: { kinds: [], labels: {}, max_count: 10, max_size_mb: 20 },
   llmModelId: "",
   modelManuallySelected: false,
+  reasoningOverrides: new Map(),
   sessionModelIds: {},
   sessionId: null,
   conversationId: null,
@@ -205,16 +210,9 @@ window.addEventListener("pagehide", () => {
   state.stopController?.abort();
   state.stopController = null;
   streamController?.abort();
-  for (const controller of state.backgroundStreams || []) controller.abort();
+  for (const controller of state.backgroundStreams?.keys() || []) controller.abort();
   state.backgroundStreams?.clear();
 });
-
-const LLM_MODALITY_LABELS = {
-  text: "文本",
-  image: "图像",
-  audio: "音频",
-  video: "视频",
-};
 
 const UPLOAD_KIND_ORDER = ["image", "text_file", "docx", "xlsx", "audio", "video"];
 /* ----------------------------- DOM ----------------------------- */
@@ -518,9 +516,16 @@ function init() {
   el.modelSelect?.addEventListener("change", () => {
     selectComposerModel(el.modelSelect.value);
   });
+  el.composerModelMenu?.classList.add("da-select-menu");
+  el.composerModelMenu?.setAttribute("popover", "manual");
   el.composerModelTrigger?.addEventListener("click", () => {
     setComposerModelMenuOpen(!state.modelMenuOpen);
   });
+  window.addEventListener("resize", positionComposerModelMenu);
+  window.addEventListener("hashchange", () => setComposerModelMenuOpen(false));
+  document.addEventListener("scroll", event => {
+    if (!el.composerModelMenu?.contains(event.target)) positionComposerModelMenu();
+  }, { capture: true, passive: true });
   el.copySessionIdBtn?.addEventListener("click", copyCurrentSessionId);
 
   $("newChatBtn").addEventListener("click", handleNewChatControl);
@@ -528,7 +533,7 @@ function init() {
     handleNewChatControl(e);
   });
   document.addEventListener("click", (e) => {
-    if (state.modelMenuOpen && !e.target.closest("#composerMeta")) {
+    if (state.modelMenuOpen && !e.composedPath().includes(el.composerMeta)) {
       setComposerModelMenuOpen(false);
     }
     if (el.newChatMenu?.classList.contains("hidden")) return;
@@ -955,6 +960,7 @@ function toggleNewChatMenu(anchor) {
 // aborting it here would cancel the server Run. Its callbacks lose UI ownership.
 function detachChatView() {
   state.navigationRevision = (state.navigationRevision || 0) + 1;
+  state.backgroundStreams?.get(state.abortController)?.releasePresenter();
   state.abortController = null;
   state.stopController?.abort();
   state.stopController = null;
@@ -1061,7 +1067,7 @@ function applySessionTitle(session, title) {
   ) {
     el.chatTitle.textContent = displayTitle;
   }
-  renderSessions();
+  if (!el.sessionList.querySelector(".session-title-input")) renderSessions();
 }
 
 function renderComposerSource() {
@@ -1100,10 +1106,11 @@ function renderSessions() {
     li.className =
       "session-item" +
       (s.id === state.sessionId && (s.agentId || "") === (state.agentId || "") ? " active" : "");
+    li.dataset.sessionKey = sessionLookupKey(s);
     const activity = formatSessionActivity(s);
     const origin = channelOriginPresentation(s);
     const questionIcon = origin ? `<span class="session-channel-source" title="${escapeHtml(origin.description)}" aria-label="${escapeHtml(origin.description)}"><img src="${origin.logo}" alt="${escapeHtml(origin.platform)}" /></span>` : lucideIcon("message-circle-more");
-    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title-row"><span class="session-title">${escapeHtml(s.title)}</span></span><span class="session-meta"><span class="session-stat-group"><span title="提问数">${questionIcon}${escapeHtml(String(s.turnCount || 0))}</span></span><span class="session-meta-dot" aria-hidden="true">·</span><span class="session-activity">${escapeHtml(activity)}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
+    li.innerHTML = `<span class="sid" title="${escapeHtml(`${s.title} · ${activity}`)}"><span class="session-title">${escapeHtml(s.title)}</span><span class="session-meta"><span class="session-stat-group"><span title="提问数">${questionIcon}${escapeHtml(String(s.turnCount || 0))}</span></span><span class="session-meta-dot" aria-hidden="true">·</span><span class="session-activity">${escapeHtml(activity)}</span></span></span><span class="session-actions"><span class="rename-btn" title="重命名" aria-label="重命名">${lucideIcon("pencil")}</span><span class="session-run-slot" title="正在生成" hidden><span class="spinner" role="img" aria-label="正在生成"></span></span><span class="del" title="删除" aria-label="删除">${lucideIcon("trash-2")}</span></span>`;
     li.querySelector(".sid").addEventListener("click", (e) => {
       if (e.target.closest(".session-title-input")) return;
       switchSession(s);
@@ -1131,7 +1138,38 @@ function renderSessions() {
   el.sessionList.appendChild(footer);
   el.sessionList.scrollTop = scrollTop;
   updateSessionListFooter();
+  updateSessionRunIndicators();
   refreshLucideIcons();
+}
+
+function updateSessionRunIndicators() {
+  const running = runningSessionKeys();
+  for (const row of el.sessionList.querySelectorAll("[data-session-key]")) {
+    const active = running.has(row.dataset.sessionKey);
+    row.classList.toggle("is-generating", active);
+    row.querySelector(".session-run-slot").hidden = !active;
+    row.querySelector(".del").hidden = active;
+  }
+}
+
+function runningSessionKeys() {
+  const running = new Set(Array.from(state.backgroundStreams?.values() || [], sessionLookupKey));
+  if (state.observingRun && state.sessionId) running.add(sessionLookupKey({ id: state.sessionId, agentId: state.agentId }));
+  return running;
+}
+
+const MAX_CONSOLE_CHAT_STREAMS = 5;
+
+function hasConsoleChatSlot() {
+  if ((state.backgroundStreams?.size || 0) < MAX_CONSOLE_CHAT_STREAMS) return true;
+  showConsoleToast(`本页已有 ${MAX_CONSOLE_CHAT_STREAMS} 个会话正在生成，请等其中一个完成或停止后再发送。`, true);
+  return false;
+}
+
+function currentSessionHasProducer() {
+  if (!state.sessionId || !state.backgroundStreams?.size) return false;
+  return Array.from(state.backgroundStreams.values()).some(session =>
+    session.id === state.sessionId && session.agentId === state.agentId);
 }
 
 async function switchSession(s) {
@@ -1491,7 +1529,7 @@ function updateObservedSessionMetrics(session, events) {
     const facts = savedRunFacts(events.filter(event => (event.run_id ?? null) === saved.run_id));
     const previous = state.lastRunMetrics?.run_id === saved.run_id ? state.lastRunMetrics : {};
     state.lastRunUsage = facts.usage;
-    state.lastRunMetrics = { ...previous, ...facts, ...saved, detailed: false };
+    state.lastRunMetrics = { ...previous, ...facts, ...saved, reasoning_effort: eventEffort(events, saved.run_id), detailed: false };
     selected.modelName = [...events].reverse().find(event => event.event_type === "assistant/message" && event.payload?.message?.model_name)?.payload.message.model_name || null;
   }
   if (selected.messageCount === messageCount && selected.turnCount === turnCount) return;
@@ -1509,6 +1547,7 @@ function applyObservedHistory(history, status) {
     usage: latestAssistant.usage || null,
     conversation_id: latestAssistant.conversation_id || null,
     model_name: latestAssistant.model_name || null,
+    reasoning_effort: historyEffort(history.items, latestAssistant.turn_id),
     provider_name: latestAssistant.provider_name || null,
     run_id: latestAssistant.run_id,
     status: latestAssistant.status || "completed",
@@ -1526,7 +1565,9 @@ function applyObservedHistory(history, status) {
 async function loadContextStatus(session, { signal, isCurrent = () => true } = {}) {
   const target = normalizeSession(session);
   const revision = state.navigationRevision || 0;
+  const requestRevision = state.contextStatusRequestRevision = (state.contextStatusRequestRevision || 0) + 1;
   const current = () => isCurrent() && !signal?.aborted
+    && state.contextStatusRequestRevision === requestRevision
     && (state.navigationRevision || 0) === revision
     && state.sessionId === target.id && state.agentId === target.agentId;
   const lastCompaction = state.contextStatus?.last_compaction;
@@ -1870,8 +1911,20 @@ async function deleteSession(session) {
   const normalized = normalizeSession(session);
   const key = sessionLookupKey(normalized);
   if (sessionDeletesInFlight.has(key)) return;
+  const stopFirst = () => showConsoleToast("请先停止生成，再删除会话。", true);
+  if (runningSessionKeys().has(key)) return stopFirst();
   sessionDeletesInFlight.add(key);
   try {
+    // Another client can own the run even if this row hasn't been opened here.
+    const run = await boundedStreamRequest(async (signal) => {
+      const response = await daFetch(sessionApiUrl(normalized, "/run-status"), { signal });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(typeof body?.detail === "string" ? body.detail : `无法确认运行状态（HTTP ${response.status}）`);
+      }
+      return response.json();
+    });
+    if (run?.status !== "idle" || runningSessionKeys().has(key)) return stopFirst();
     const response = await daFetch(sessionApiUrl(normalized), { method: "DELETE" });
     if (!response.ok) {
       const body = await response.json().catch(() => null);
@@ -1954,7 +2007,7 @@ async function renameSession(session, newTitle) {
 }
 
 function startInlineEdit(session, titleElement) {
-  if (state.streaming) return;
+  if (titleElement.querySelector(".session-title-input")) return;
 
   const currentTitle = titleElement.textContent;
   const input = document.createElement("input");
@@ -1984,7 +2037,7 @@ function startInlineEdit(session, titleElement) {
       titleElement.textContent = newTitle || currentTitle;
       await renameSession(session, newTitle);
     } else {
-      titleElement.textContent = currentTitle;
+      titleElement.textContent = state.sessions.find(s => sessionLookupKey(s) === sessionLookupKey(session))?.title || currentTitle;
     }
   };
 
@@ -2158,29 +2211,16 @@ function currentModelInfo() {
   return { presetName, modelId, modalities };
 }
 
-function nonTextModalityBadges(modalities = []) {
-  const supported = new Set(modalities.map((item) => String(item).toLowerCase()));
-  return ["image", "audio", "video"]
-    .filter((key) => supported.has(key))
-    .map((key) => `<span class="model-modality-badge">${escapeHtml(LLM_MODALITY_LABELS[key] || key)}</span>`)
-    .join("");
-}
-
-function composerModelLabel(model) {
-  return String(model?.name || model?.model || "模型").trim();
-}
-
-
-function selectComposerModel(modelId) {
+function selectComposerModel(modelId, { keepMenuOpen = false } = {}) {
   state.modelManuallySelected = true;
   if (!modelId || modelId === state.llmModelId) {
-    setComposerModelMenuOpen(false);
+    if (!keepMenuOpen) setComposerModelMenuOpen(false);
     return;
   }
   state.llmModelId = modelId;
   if (el.modelSelect) el.modelSelect.value = modelId;
   rememberSessionModel();
-  setComposerModelMenuOpen(false);
+  if (!keepMenuOpen) setComposerModelMenuOpen(false);
   updateComposerModelInfo();
   updateHitlInputState();
   if (state.sessionId) {
@@ -2188,11 +2228,29 @@ function selectComposerModel(modelId) {
   }
 }
 
+function positionComposerModelMenu() {
+  if (!state.modelMenuOpen) return;
+  if (!el.composerModelTrigger?.getClientRects().length) { setComposerModelMenuOpen(false); return; }
+  positionModelPicker(el.composerModelMenu, el.composerModelTrigger, el.composerModelMenu.firstElementChild);
+}
+
 function setComposerModelMenuOpen(open) {
-  state.modelMenuOpen = Boolean(open && !state.streaming && el.composerModelMenu);
-  el.composerModelMenu?.classList.toggle("hidden", !state.modelMenuOpen);
+  const menu = el.composerModelMenu;
+  const wasOpen = state.modelMenuOpen;
+  state.modelMenuOpen = Boolean(open && !state.streaming && menu);
   el.composerModelTrigger?.setAttribute("aria-expanded", String(state.modelMenuOpen));
   el.composerMeta?.classList.toggle("open", state.modelMenuOpen);
+  if (!menu) return;
+  if (state.modelMenuOpen) {
+    menu.classList.remove("hidden");
+    try { menu.showPopover?.(); } catch { /* Fixed-position fallback for older embedded browsers. */ }
+    positionComposerModelMenu();
+    if (!wasOpen) revealModelPickerOption(menu.firstElementChild, menu.querySelector('[aria-selected="true"]'), { center: true });
+  } else {
+    menu.querySelector('.reasoning-picker-options:not([hidden])')?.closeReasoningMenu?.();
+    if (menu.hidePopover && menu.matches(":popover-open")) menu.hidePopover();
+    menu.classList.add("hidden");
+  }
 }
 
 function uploadCapabilityText() {
@@ -2257,6 +2315,23 @@ async function loadUploadCapabilities({ force = false } = {}) {
   return pending;
 }
 
+function reasoningOverride(model) {
+  if (!model?.id) return null;
+  const effort = state.reasoningOverrides.get(model.id);
+  return effort === "default" || model.reasoning_efforts?.includes(effort) ? effort : null;
+}
+
+function selectedReasoningEffort(model) {
+  const override = reasoningOverride(model);
+  if (override) return override;
+  const choices = model?.reasoning_efforts || [];
+  const agent = currentAgent();
+  if (agent?.model_id === model?.id && agent?.reasoning_effort_bound !== false && choices.includes(agent?.reasoning_effort)) {
+    return agent.reasoning_effort;
+  }
+  return "default";
+}
+
 function updateComposerModelInfo() {
   if (!el.composerMeta) return;
   const info = currentModelInfo();
@@ -2282,12 +2357,13 @@ function updateComposerModelInfo() {
 
   const selected = selectedLlmModel();
   if (el.composerModelTrigger) {
-    const selectedLabel = selected ? composerModelLabel(selected) : (info?.presetName || "选择模型");
+    const selectedLabel = selected ? modelPickerLabel(selected) : (info?.presetName || "选择模型");
+    const value = el.composerModelTrigger.querySelector(".composer-model-trigger-label");
     el.composerModelTrigger.disabled = state.streaming || !state.llmModels.some(isModelSelectable);
-    el.composerModelTrigger.querySelector(".composer-model-trigger-label").textContent = selectedLabel;
+    renderModelPickerValue(value, selectedLabel, selected && effortLabel(selectedReasoningEffort(selected)));
     el.composerModelTrigger.querySelector(".composer-provider-icon").innerHTML = composerProviderIcon(modelProvider(selected));
     el.composerModelTrigger.title = selected
-      ? `${modelProvider(selected)?.name || "Provider"} · ${selectedLabel}`
+      ? `${modelProvider(selected)?.name || "Provider"} · ${value.textContent}`
       : "选择本会话使用的 LLM 模型";
   }
   if (el.composerModelMenu) {
@@ -2299,20 +2375,35 @@ function updateComposerModelInfo() {
       if (!groups.has(key)) groups.set(key, { provider, models: [] });
       groups.get(key).models.push(model);
     }
-    el.composerModelMenu.innerHTML = visible.length
+    const rows = visible.length
       ? [...groups.values()].map(({ provider, models }) => `<div role="group" aria-label="${escapeHtml(provider?.name || "未关联供应商")}">
           <div class="da-select-group"><span class="composer-provider-icon">${composerProviderIcon(provider)}</span>${escapeHtml(provider?.name || "未关联供应商")}</div>
           ${models.map((model) => {
           const active = model.id === state.llmModelId;
-          return `<button type="button" class="composer-model-option${active ? " active" : ""}" role="option" aria-selected="${active}" data-model-id="${escapeHtml(model.id)}">
-            <strong class="composer-model-option-name" title="${escapeHtml(composerModelLabel(model))}">${escapeHtml(composerModelLabel(model))}</strong>
-            <span class="composer-model-option-badges">${nonTextModalityBadges(model.input_modalities || [])}</span>
-            ${active ? `<span class="composer-model-check">${lucideIcon("check")}</span>` : ""}
+          return `<button type="button" class="da-select-option is-grouped composer-model-option" role="option" aria-selected="${active}" data-model-id="${escapeHtml(model.id)}">
+            ${active ? '<i class="reasoning-model-check" data-lucide="check" aria-hidden="true"></i>' : ""}
+            <span class="reasoning-model-option-name" title="${escapeHtml(modelOptionLabel(model))}">${escapeHtml(modelPickerLabel(model))}</span>
+            <span class="reasoning-model-option-badges">${modelPickerModalityLabels(model.input_modalities || []).map(label => `<span class="model-modality-badge">${escapeHtml(label)}</span>`).join("")}</span>
           </button>`;
         }).join("")}</div>`).join("")
       : '<div class="composer-model-empty">无可用模型</div>';
+    const scrollTop = el.composerModelMenu.firstElementChild?.scrollTop || 0;
+    el.composerModelMenu.innerHTML = `<div class="reasoning-model-list" id="composerModelList" role="listbox" aria-label="选择本会话模型">${rows}</div>`;
+    if (selected) appendThinkingMenu(el.composerModelMenu, selected.reasoning_efforts, selectedReasoningEffort(selected), effort => {
+      state.reasoningOverrides.set(selected.id, effort);
+      setComposerModelMenuOpen(false);
+      updateComposerModelInfo();
+      el.composerModelTrigger?.focus();
+    });
+    if (state.modelMenuOpen) {
+      positionComposerModelMenu();
+      el.composerModelMenu.firstElementChild.scrollTop = scrollTop;
+    }
     el.composerModelMenu.querySelectorAll("[data-model-id]").forEach((button) => {
-      button.addEventListener("click", () => selectComposerModel(button.dataset.modelId));
+      button.addEventListener("click", () => {
+        selectComposerModel(button.dataset.modelId, { keepMenuOpen: true });
+        el.composerModelMenu.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
+      });
     });
   }
   const tooltip = uploadCapabilityText();
@@ -2400,7 +2491,7 @@ async function loadCapabilities() {
 async function onSend() {
   const text = el.input.value.trim();
   const attachments = state.pendingAttachments.slice();
-  if ((!text && attachments.length === 0) || state.streaming || state.historyLoading) return;
+  if ((!text && attachments.length === 0) || state.streaming || state.historyLoading || currentSessionHasProducer()) return;
   if (state.awaitingHitl) {
     addSystemNote("请先完成上方待处理的交互。");
     return;
@@ -2413,6 +2504,7 @@ async function onSend() {
     showConsoleToast("当前 Agent 的模型已停用或不可用，请先选择可用模型", true);
     return;
   }
+  if (!hasConsoleChatSlot()) return;
 
   hideEmptyState();
   state.messageAutoFollow = true;
@@ -2439,6 +2531,8 @@ async function onSend() {
   };
   const modelId = chatPayloadModelId();
   if (modelId) payload.model_id = modelId;
+  const effort = reasoningOverride(selectedLlmModel());
+  if (effort) payload.reasoning_effort = effort;
   rememberSessionModel();
   if (attachments.length) {
     payload.attachments = attachments.map((a) => ({
@@ -2451,12 +2545,13 @@ async function onSend() {
   await runChatStream(payload, assistant);
 }
 
-async function resumeDeferred(deferredResults) {
-  if (!state.sessionId) return;
-  if (state.streaming || state.historyLoading) {
+function resumeDeferred(deferredResults) {
+  if (!state.sessionId) return false;
+  if (state.streaming || state.historyLoading || currentSessionHasProducer()) {
     showConsoleToast("当前会话仍在生成，请先停止后再提交交互结果", true);
-    return;
+    return false;
   }
+  if (!hasConsoleChatSlot()) return false;
   state.awaitingHitl = false;
   state.messageAutoFollow = true;
   updateHitlInputState();
@@ -2476,9 +2571,9 @@ async function resumeDeferred(deferredResults) {
     deferred_tool_results: deferredResults,
   };
   const modelId = chatPayloadModelId();
-  if (modelId) payload.model_id = modelId;
+  if (modelId && !state.lastRunMetrics?.reasoning_effort) payload.model_id = modelId;
   rememberSessionModel();
-  await runChatStream(payload, assistant);
+  return runChatStream(payload, assistant);
 }
 
 async function runChatStream(payload, assistant) {
@@ -2488,8 +2583,14 @@ async function runChatStream(payload, assistant) {
   state.historyFollower = null;
   state.historyController = null;
   const streamController = new AbortController();
-  (state.backgroundStreams ||= new Set()).add(streamController);
-  const sourceSession = { id: payload.session_id, agentId: payload.agent_id || state.agentId };
+  const sourceSession = {
+    id: payload.session_id,
+    agentId: payload.agent_id || state.agentId,
+    releasePresenter: () => { assistant = null; },
+  };
+  const viewingSourceSession = () => state.sessionId === sourceSession.id && state.agentId === sourceSession.agentId;
+  (state.backgroundStreams ||= new Map()).set(streamController, sourceSession);
+  updateSessionRunIndicators();
   state.stopController?.abort();
   state.abortController = streamController;
   const current = () => state.abortController === streamController;
@@ -2529,15 +2630,26 @@ async function runChatStream(payload, assistant) {
 
     await readSse(resp.body, (evt) => {
       if (streamController.signal.aborted) return;
-      if (current()) handleEvent(evt, assistant);
-      else if (evt.event === "session") {
+      const type = evt.event || evt.data?.type;
+      if (type === "session") {
         sourceSession.id = evt.data.session_id || sourceSession.id;
+        sourceSession.agentId = evt.data.agent_id || sourceSession.agentId;
+      }
+      if (current()) {
+        handleEvent(evt, assistant);
+      }
+      else if (type === "session") {
         upsertSession(sourceSession.id, null, sourceSession.agentId, agentNameById(sourceSession.agentId));
         void refreshSessionFilterOptions({ force: true });
-      } else if (evt.event === "session_title") {
+        // Returning before the POST is admitted can see an idle run status.
+        // Now that the session frame has arrived, follow the admitted Run.
+        if (viewingSourceSession() && !state.abortController && !state.observingRun) {
+          void loadSessionHistory(sourceSession);
+        }
+      } else if (type === "session_title") {
         applySessionTitle(sourceSession, evt.data.title);
       }
-      if (["final", "error", "cancelled"].includes(evt.event || evt.data?.type)) {
+      if (["final", "error", "cancelled"].includes(type)) {
         // A real terminal frame needs no further socket bytes to finish.
         streamController.abort();
       }
@@ -2557,8 +2669,10 @@ async function runChatStream(payload, assistant) {
   } finally {
     streamController.signal.removeEventListener("abort", abortStop);
     state.backgroundStreams.delete(streamController);
+    updateSessionRunIndicators();
     if (!current()) {
       streamController.abort();
+      if (viewingSourceSession()) updateHitlInputState();
       return;
     }
     state.stopController?.abort();
@@ -2606,7 +2720,7 @@ function updateHitlInputState() {
         : "输入消息…";
     el.input.disabled = locked;
   }
-  if (el.sendBtn) el.sendBtn.disabled = locked || state.historyLoading;
+  if (el.sendBtn) el.sendBtn.disabled = locked || state.historyLoading || currentSessionHasProducer();
   updateComposerContextControls();
 }
 
@@ -2689,7 +2803,9 @@ async function stopObservedRun() {
 }
 
 function setStreaming(v) {
+  const changed = state.streaming !== v;
   state.streaming = v;
+  if (changed) updateSessionRunIndicators();
   if (v) setComposerModelMenuOpen(false);
   el.sendBtn.classList.toggle("hidden", v);
   el.stopBtn.classList.toggle("hidden", !v);
@@ -2735,14 +2851,18 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       const id = data.session_id;
       state.runCache = null;
       if (id) {
-        state.sessionId = id;
         state.conversationId = data.conversation_id || state.conversationId;
         state.lastRunMetrics = {
           conversation_id: state.conversationId,
           run_id: data.run_id || null,
           status: "running",
+          reasoning_effort: data.reasoning_effort || null,
           detailed: true,
         };
+        // Replay describes an existing run, so it must not touch the session's
+        // list activity or the model the user chose for the next message.
+        if (state.observingRun) break;
+        state.sessionId = id;
         state.streamSessionConfirmed = true;
         if (data.agent_id) {
           state.agentId = data.agent_id;
@@ -2773,6 +2893,10 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       break;
     case "session_event_appended":
     case "session_event_updated":
+      if (type === "session_event_appended" && data.event?.event_type === "user/message"
+        && data.event?.run_id === state.lastRunMetrics?.run_id) {
+        state.lastRunMetrics.reasoning_effort = data.event.payload?.message?.metadata?.reasoning_effort || null;
+      }
       updateAutomaticContextCompactionEvent(data);
       break;
     case "output":
@@ -2812,6 +2936,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       state.conversationId = data.conversation_id || state.conversationId;
       state.lastRunMetrics = {
         ...(data.run_metrics || {}),
+        reasoning_effort: state.lastRunMetrics?.reasoning_effort || null,
         conversation_id: state.conversationId,
         run_id: data.run_id || data.run_metrics?.run_id || state.lastRunMetrics?.run_id || null,
         status: data.status || data.run_metrics?.status || "completed",
@@ -2865,6 +2990,7 @@ function handleEvent({ event, data }, assistant, { allowDeferred = true } = {}) 
       state.conversationId = data.conversation_id || state.conversationId;
       state.lastRunMetrics = {
         ...(data.run_metrics || {}),
+        reasoning_effort: state.lastRunMetrics?.reasoning_effort || null,
         conversation_id: state.conversationId,
         run_id: data.run_id || state.lastRunMetrics?.run_id || null,
         status: "cancelled",
@@ -3311,8 +3437,7 @@ function renderStructuredForm(widgetEl, call, onSubmit) {
         : { value: control.value };
     }
     error.classList.add("hidden");
-    submit.disabled = true;
-    onSubmit([{ tool_call_id: call.tool_call_id, result: { confirmed: true, values } }]);
+    if (onSubmit([{ tool_call_id: call.tool_call_id, result: { confirmed: true, values } }]) !== false) submit.disabled = true;
   });
   widgetEl.appendChild(submit);
 }

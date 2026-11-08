@@ -1,5 +1,7 @@
 # 配置第一个业务 Agent
 
+0.16.0 可给模型配置 `reasoning_options`，按 models.dev 的 effort 枚举格式保存。Agent 的 `reasoning_effort` 是当前默认模型的一档，null 表示供应商默认。模型更换时校验适用性，模型标签不用于推断档位。
+
 ## 推荐初始化顺序
 
 1. 确认目标版本、登录身份和管理权限。

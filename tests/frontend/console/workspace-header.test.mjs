@@ -261,11 +261,11 @@ test("输入区使用内嵌模型菜单并把非文本模态放到模型选项",
   assert.match(template, /id="composerModelTrigger"/);
   assert.match(template, /id="composerModelMenu"/);
   assert.match(chatSource, /model-modality-badge/);
-  assert.match(chatSource, /\["image", "audio", "video"\]/);
+  assert.match(chatSource, /modelPickerModalityLabels\(model\.input_modalities/);
   assert.doesNotMatch(template, /composerModelModalities|composerUploadCapabilities/);
   assert.doesNotMatch(template, /deep-agent 可能会出错|composer-hint/);
   assert.match(chatSource, /provider-icons\.js/);
-  assert.match(chatSource, /class="composer-model-option-name"/);
+  assert.match(chatSource, /class="reasoning-model-option-name"/);
   assert.doesNotMatch(chatSource, /composer-model-option-copy[\s\S]*<small>/);
 });
 

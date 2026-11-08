@@ -14,6 +14,13 @@ from deep_agent.agent.tool_output_limits import build_tool_output_limits
 from deep_agent.agent.history_tools import build_history_toolset
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
 from deep_agent.models.context_window import ContextWindowModel
+from deep_agent.models.reasoning import (
+    DEFAULT_EFFORT,
+    ReasoningEffortError,
+    bound_agent_effort,
+    effective_agent_effort,
+    reasoning_settings,
+)
 from deep_agent.models.provider_registry import (
     ProviderRuntimeError,
     effective_base_url,
@@ -52,7 +59,7 @@ async def _provider_for_model(ctx: AppContext, llm_row):
 
 
 def _model_settings_for_spec(spec: AgentSpec) -> ModelSettings | None:
-    values: ModelSettings = {}
+    values: ModelSettings = dict(spec.reasoning_settings or {})
     if spec.max_output_tokens is not None:
         values["max_tokens"] = spec.max_output_tokens
     if not values:
@@ -137,6 +144,8 @@ async def build_runner_for_agent(
     request_headers: dict[str, str] | None = None,
     channel_type: str | None = None,
     channel_context: ChannelRunContext | None = None,
+    reasoning_effort: str | None = None,
+    expected_provider_id: str | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     row = await ctx.stores.agent.get_by_id(agent_id)
@@ -149,9 +158,17 @@ async def build_runner_for_agent(
     llm_row = await ctx.stores.llm_model.get_by_id(effective_model_id)
     if llm_row is None:
         raise LlmModelNotFoundError(effective_model_id)
+    if expected_provider_id is not None and llm_row.provider_id != expected_provider_id:
+        raise ReasoningEffortError("原模型的供应商已变更")
 
     provider = await _provider_for_model(ctx, llm_row)
     spec = AgentSpec.from_row(row, llm_row, provider=provider)
+    if reasoning_effort is not None:
+        bound_agent_effort(reasoning_effort, llm_row, provider)
+    effort = reasoning_effort or effective_agent_effort(row, llm_row, provider) or DEFAULT_EFFORT
+    spec.reasoning_effort = effort
+    if effort != DEFAULT_EFFORT:
+        spec.reasoning_settings = reasoning_settings(llm_row, provider, effort)
     entry_instructions = channel_instructions(channel_type)
     if entry_instructions:
         spec = replace(spec, instructions=f"{spec.instructions}\n\n{entry_instructions}")
@@ -368,6 +385,7 @@ async def _build_runner_from_spec(
         ui_tool_hints=ui_tool_hints,
         tool_display_names=tool_display_names,
         model_settings=_model_settings_for_spec(spec),
+        reasoning_effort=spec.reasoning_effort,
         context_window_tokens=spec.context_window_tokens,
         max_output_tokens=spec.max_output_tokens,
         model_tags=spec.tags,

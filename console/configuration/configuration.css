@@ -1340,7 +1340,10 @@ dialog.console-deletion-progress { width: min(360px, calc(100vw - 32px)); }
   margin-bottom: 12px;
 }
 
-.field span { color: var(--text-dim); font-size: 13px; }
+.field span:not(:where(.reasoning-model-menu span, .reasoning-model-value, .reasoning-model-value span)) {
+  color: var(--text-dim);
+  font-size: 13px;
+}
 
 .field .field-title-row {
   display: flex;
@@ -2093,17 +2096,6 @@ dialog.console-deletion-progress { width: min(360px, calc(100vw - 32px)); }
 .provider-catalog-choice.is-added .provider-catalog-choice-copy code { color: var(--text-dim); }
 .provider-catalog-choice-copy small { color: var(--text-faint); font-size: 12px; }
 .provider-catalog-choice-copy .provider-catalog-choice-error { color: var(--danger); overflow-wrap: anywhere; }
-
-.da-select:has(> #agentModelId) .da-select-option {
-  min-height: 24px;
-  padding-top: 3px;
-  padding-bottom: 3px;
-}
-
-.da-select:has(> #agentModelId) .da-select-group {
-  padding-top: 5px;
-  padding-bottom: 2px;
-}
 
 @media (max-width: 900px) {
   .provider-admin-workspace { grid-template-columns: minmax(210px, 280px) minmax(360px, 1fr); }

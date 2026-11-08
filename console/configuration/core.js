@@ -323,16 +323,17 @@ async function loadSkills() {
   return state.skills;
 }
 
-function populateAgentModelSelect(selectedId = null) {
+function populateAgentModelSelect(selectedId = null, effort = null) {
   const select = document.getElementById("agentModelId");
   if (!select) return;
   const models = state.llmModels || [];
   select.disabled = false;
   select.innerHTML = `<option value="" hidden></option>`
     + window.DeepAgentModelOptions.renderGroupedModelOptions(models, {
-      selectedId, emptyLabel: null, enabledOnly: true, groupIcon: (provider) => providerBrand(provider).src,
+      selectedId, emptyLabel: null, enabledOnly: true, picker: true, groupIcon: (provider) => providerBrand(provider).src,
     });
   select.value = selectedId || "";
+  window.agentsAdmin?.setupReasoningPicker(select, effort);
 }
 
 function initTabs() {

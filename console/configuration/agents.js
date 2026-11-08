@@ -616,6 +616,33 @@ const agentsAdmin = {
     }
   },
 
+  setupReasoningPicker(select, effort) {
+    this.reasoningDraft = effort;
+    this.reasoningDirty = false;
+    const ui = window.DeepAgentReasoning;
+    const selectedModel = () => state.llmModels.find(model => model.id === select.value);
+    const effective = () => selectedModel()?.reasoning_efforts?.includes(this.reasoningDraft) ? this.reasoningDraft : "default";
+    select.consoleSelectedEffort = option => option.value ? ui.effortLabel(effective()) : "";
+    select.consoleMenuFooter = (menu, close) => {
+      if (!select.value) return;
+      ui.appendThinkingMenu(menu, selectedModel()?.reasoning_efforts, effective(), value => {
+        this.reasoningDraft = value === "default" ? null : value;
+        this.reasoningDirty = true;
+        select.title = "";
+        close();
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+    select.onchange = () => {
+      this.reasoningDraft = null;
+      this.reasoningDirty = true;
+      select.title = "";
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    select.title = effort && effective() === "default" ? "原思考档位已不可用，请重新选择" : "";
+    select.dispatchEvent(new Event("input"));
+  },
+
   async openEdit(agentId) {
     const requestId = ++agentEditorRequestId;
     try {
@@ -632,7 +659,8 @@ const agentsAdmin = {
       document.getElementById("agentName").disabled = false;
       document.getElementById("agentName").value = agent.name;
       this.syncEditorTitle();
-      populateAgentModelSelect(agent.model_id);
+      populateAgentModelSelect(agent.model_id, agent.reasoning_effort_bound === false ? null : agent.reasoning_effort);
+      if (agent.reasoning_effort_bound === false) document.getElementById('agentModelId').title = '原思考档位已不可用，请重新选择';
       document.getElementById("agentPrompt").value = agent.prompt;
       this.renderCapabilityCheckboxes(agent.capabilities);
       this.renderSkillChoices(agent.skills || []);
@@ -652,6 +680,8 @@ const agentsAdmin = {
         apiFetch("/api/v1/agents"),
         apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/output-config`),
       ]);
+      const model = agent.reasoning_effort && agent.reasoning_effort_bound !== false && agent.model_id
+        ? await apiFetch(`/api/v1/llm-models/${encodeURIComponent(agent.model_id)}`) : null;
       const existingNames = new Set((agents || []).map((item) => item.name));
       const values = await requestActionFields({
         title: "复制 Agent",
@@ -673,6 +703,7 @@ const agentsAdmin = {
         body: JSON.stringify({
           name,
           model_id: agent.model_id,
+          reasoning_effort: model?.reasoning_efforts?.includes(agent.reasoning_effort) ? agent.reasoning_effort : null,
           prompt: agent.prompt,
           capabilities: [...(agent.capabilities || [])],
           skills: [...(agent.skills || [])],
@@ -713,6 +744,7 @@ const agentsAdmin = {
     const capabilities = this.getSelectedCapabilities();
     const payload = {
       model_id: modelId || null,
+      ...(this.reasoningDirty ? { reasoning_effort: this.reasoningDraft } : {}),
       prompt,
       capabilities,
       skills: this.getSelectedSkills(),

@@ -2,15 +2,16 @@ let initialized = false;
 import * as JsonInput from "./json-input.js?v=20261022-output-compact4";
 import * as OutputSchema from "./output-schema-fields.js?v=20261022-output-compact4";
 if (typeof window !== "undefined") { window.DeepAgentJsonInput = JsonInput; window.DeepAgentOutputSchema = OutputSchema; }
-import "./model-options.js?v=20260925-codex-1";
-import * as ProviderCatalog from "./provider-catalog.js?v=20261015-provider-protocol-groups";
+import "./model-options.js?v=0160-picker-shared";
+import "./reasoning-ui.js?v=0160-picker-labels";
+import * as ProviderCatalog from "./provider-catalog.js?v=0160";
 import * as SkillFrontmatter from "./skill-frontmatter.js?v=20260913-49";
 import * as SchemaText from "./schema-editor.js?v=20260913-49";
 if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCatalog;
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "20261106-provider-reasoning";
+const CONFIGURATION_ASSET_VERSION = "0160-picker-shared";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -136,7 +137,7 @@ async function loadAdminScripts() {
       // These scripts arrived after the browser's original DOMContentLoaded.
       // Replay once for their existing bindings; initialization makes no API calls.
       document.dispatchEvent(new Event("DOMContentLoaded"));
-      await import("./configuration/catalog.js?v=20261105-catalog-icons");
+      await import("./configuration/catalog.js?v=0160-picker");
     });
     await Promise.race([loaded, failedExecution]);
   } finally {

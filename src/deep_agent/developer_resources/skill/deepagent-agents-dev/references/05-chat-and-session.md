@@ -1,5 +1,7 @@
 # Chat、SSE、附件与历史
 
+0.16.0 的 `/chat` 与 `/chat/stream` 接收可选字符串 `reasoning_effort`。省略或 null 跟随实际模型上有效的 Agent 档位，`default` 显式使用供应商默认。其他值取自模型选择响应的 `reasoning_efforts`。新 History 用户条目可有该字段，旧条目省略。
+
 ## 新建和继续会话
 
 `POST /api/v1/chat`等待完整Agent运行，返回JSON；`POST /api/v1/chat/stream`使用SSE。调用一次可以包含多轮模型与工具循环，不是只请求一次LLM。新会话传agent_id；继续时使用真实session_id并保持Agent对应关系。

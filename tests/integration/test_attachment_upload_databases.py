@@ -44,11 +44,11 @@ class AttachmentUploadDatabaseTests(unittest.IsolatedAsyncioTestCase):
         try:
             # Use the released schema builder: metadata-only MySQL creation is
             # not equivalent to deployed migrations (notably Boolean defaults).
-            await asyncio.to_thread(_upgrade_target_schema, url, "013")
+            await asyncio.to_thread(_upgrade_target_schema, url, "014")
             first, second = GlobalSettingStore(first_factory), GlobalSettingStore(second_factory)
             self.assertEqual(await load_upload_settings(first), UploadSettings(20, 10))
             async with second_engine.connect() as connection:
-                self.assertEqual(await connection.scalar(select(func.count()).select_from(GlobalSetting)), 0)
+                self.assertEqual(await connection.scalar(select(func.count()).select_from(GlobalSetting).where(GlobalSetting.key == UPLOAD_SETTING_KEY)), 0)
             # The revision-row barrier also serializes concurrent first inserts
             # on MySQL/PostgreSQL, where locking a nonexistent settings row alone
             # would not provide a cross-worker critical section.
@@ -58,7 +58,7 @@ class AttachmentUploadDatabaseTests(unittest.IsolatedAsyncioTestCase):
             stored = await first.get(UPLOAD_SETTING_KEY)
             self.assertIn(stored.value, candidates)
             async with second_engine.connect() as connection:
-                self.assertEqual(await connection.scalar(select(func.count()).select_from(GlobalSetting)), 1)
+                self.assertEqual(await connection.scalar(select(func.count()).select_from(GlobalSetting).where(GlobalSetting.key == UPLOAD_SETTING_KEY)), 1)
             await first.upsert(UPLOAD_SETTING_KEY, value={"max_size_mb": 50, "max_count": 12}, version=1)
             self.assertEqual(await load_upload_settings(second), UploadSettings(50, 12))
 
@@ -80,8 +80,8 @@ class AttachmentUploadDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(after.value, before.value)
             self.assertEqual(after.updated_at, before.updated_at)
             with sqlite3.connect(backup.path) as connection:
-                self.assertEqual(connection.execute("SELECT COUNT(*) FROM global_settings").fetchone()[0], 1)
-                self.assertEqual(connection.execute("SELECT version_num FROM alembic_version").fetchone()[0], "013")
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM global_settings WHERE key = ?", (UPLOAD_SETTING_KEY,)).fetchone()[0], 1)
+                self.assertEqual(connection.execute("SELECT version_num FROM alembic_version").fetchone()[0], "014")
                 self.assertEqual(connection.execute("SELECT COUNT(*) FROM chat_session_events").fetchone()[0], 0)
             # Prove restore uses the existing generic global_settings path.
             await first.upsert(UPLOAD_SETTING_KEY, value={"max_size_mb": 1, "max_count": 5}, version=1)
@@ -89,8 +89,8 @@ class AttachmentUploadDatabaseTests(unittest.IsolatedAsyncioTestCase):
             await apply_configuration_import(plan, target_engine=first_engine, file_store=_NoFileWrites(), request_headers={})
             self.assertEqual(await load_upload_settings(second), UploadSettings(50, 12))
             async with second_engine.connect() as connection:
-                self.assertEqual(await connection.scalar(text("SELECT version_num FROM alembic_version")), "013")
-                self.assertEqual(await connection.scalar(select(func.count()).select_from(GlobalSetting)), 1)
+                self.assertEqual(await connection.scalar(text("SELECT version_num FROM alembic_version")), "014")
+                self.assertEqual(await connection.scalar(select(func.count()).select_from(GlobalSetting).where(GlobalSetting.key == UPLOAD_SETTING_KEY)), 1)
         finally:
             await first_engine.dispose()
             await second_engine.dispose()

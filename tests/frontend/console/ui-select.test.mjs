@@ -47,6 +47,14 @@ test("共享下拉在底部向上展开，靠右和窄屏时保持在视口内",
   assert.equal(narrow.left, 8);
   assert.equal(narrow.width, 134);
   assert.equal(narrow.maxHeight, 125);
+  const model = selectMenuPosition({ left: 20, top: 20, bottom: 52, width: 550 }, viewport, 100, true);
+  assert.equal(model.left, 210);
+  assert.equal(model.width, 360);
+  const composer = { left: 350, top: 250, bottom: 276, width: 160 };
+  assert.equal(selectMenuPosition(composer, { width: 600, height: 600 }, 280, true).top, 281);
+  const flipped = selectMenuPosition(composer, { width: 600, height: 470 }, 280, true);
+  assert.equal(flipped.width, model.width);
+  assert.equal(flipped.top, 8, "when the full picker cannot fit below, use the roomier side");
 });
 
 test("程序设置 value/selectedIndex 同步显示，但不伪造 change，销毁恢复原生属性", () => {

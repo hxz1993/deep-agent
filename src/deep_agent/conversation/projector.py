@@ -243,7 +243,9 @@ def _user_item(event: Any, message: Mapping[str, Any]) -> UserConversationItem |
     if not found:
         return None
     event_id = str(_get(event, "event_id"))
+    metadata = message.get('metadata')
     return UserConversationItem(
+        reasoning_effort=_optional_str(metadata.get('reasoning_effort')) if isinstance(metadata, Mapping) else None,
         item_id=f"message:{event_id}",
         status="completed",
         turn_id=_optional_str(_get(event, "turn_id")),

@@ -545,7 +545,7 @@
                 <label for="agentModelId">默认模型</label>
                 <button type="button" class="agent-model-clear" id="clearAgentModelBtn">清空</button>
               </span>
-              <select id="agentModelId" data-placeholder="请选择"></select>
+              <select id="agentModelId" data-placeholder="请选择" data-model-picker="true"></select>
             </div>
             <label class="field field-grow">
               <span class="field-title-row">
@@ -763,6 +763,21 @@
             <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="temperature" /> 温度</label>
             <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="open_weights" /> 开放</label>
             <label class="checkbox-field"><input type="checkbox" name="llmModelTag" value="interleaved" /> 交错</label>
+          </div>
+        </div>
+        <div class="field llm-option-row llm-reasoning-row">
+          <div class="llm-option-copy field-label-row"><span id="llmReasoningLabel">思考档位</span><span class="field-help" tabindex="0" aria-label="思考档位说明" aria-describedby="llmReasoningHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="llmReasoningHelp" role="tooltip">未配置档位时使用供应商默认值，不传档位参数。这里只列出原生编码；none 等开关值目前不提供选择。</span></span></div>
+          <div class="reasoning-inline" id="llmReasoningEditor">
+            <div class="reasoning-inline-value">
+              <output id="llmReasoningSummary" class="reasoning-inline-empty">默认</output>
+              <input id="llmReasoningInput" type="text" class="hidden" placeholder='low, medium, high' title="支持逗号分隔或 JSON 字符串数组" autocomplete="off" aria-labelledby="llmReasoningLabel">
+            </div>
+            <div class="reasoning-inline-actions">
+              <button type="button" class="icon-btn hidden" id="llmReasoningRestore" aria-label="恢复目录档位" title="恢复目录档位"><i data-lucide="rotate-ccw" aria-hidden="true"></i></button>
+              <button type="button" class="icon-btn" id="llmReasoningEdit" aria-label="编辑档位" title="编辑档位"><i data-lucide="pencil" aria-hidden="true"></i></button>
+              <button type="button" class="icon-btn hidden" id="llmReasoningCancel" aria-label="取消档位编辑" title="取消"><i data-lucide="x" aria-hidden="true"></i></button>
+              <button type="button" class="icon-btn hidden" id="llmReasoningConfirm" aria-label="确认档位" title="确认"><i data-lucide="check" aria-hidden="true"></i></button>
+            </div>
           </div>
         </div>
         <div class="llm-model-advanced-section hidden" id="llmModelAdvancedSection">

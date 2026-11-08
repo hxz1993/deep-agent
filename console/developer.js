@@ -18,7 +18,7 @@ export function resourceSummary(item) {
 async function requestError(response) {
   if (response.status === 401) return "登录已失效，请重新登录后重试。";
   if (response.status === 403) return "需要管理员权限才能下载开发资料。";
-  if (response.status === 404) return "资料暂不可用，请联系管理员核对发行文件。";
+  if (response.status === 404 || response.status === 503) return "资料暂不可用，请联系管理员核对发行文件。";
   return `资料请求失败（${response.status}），请稍后重试。`;
 }
 
@@ -45,7 +45,7 @@ export function createResourcesController({ request, url, view, saveBlob, timeou
     items.clear();
     view.busy("catalog", true);
     return run("catalog", async (signal, current) => {
-      const response = await request(url("api/v1/developer-resources"), { signal });
+      const response = await request(url("api/v1/developer-resources"), { signal, reportStatus: false });
       if (!response.ok) throw new Error(await requestError(response));
       const payload = await response.json();
       if (!current()) return;
@@ -75,7 +75,7 @@ export function createResourcesController({ request, url, view, saveBlob, timeou
       view.busy(code, true);
       return run(code, async (signal, current) => {
         // Fixed resource codes, never follow an arbitrary catalog-provided destination.
-        const response = await request(url(`api/v1/developer-resources/${code}/download`), { signal });
+        const response = await request(url(`api/v1/developer-resources/${code}/download`), { signal, reportStatus: false });
         if (!response.ok) throw new Error(await requestError(response));
         if (response.headers.get("Content-Type")?.split(";")[0].trim() !== TYPES[code]) throw new Error("下载内容格式不正确，请重新登录或重试。");
         const blob = await response.blob();

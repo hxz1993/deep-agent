@@ -8,7 +8,9 @@ from deep_agent.models.provider_registry import (
     UnknownProviderTypeError,
     provider_type_definition,
 )
-from deep_agent.db.models import Agent, GlobalSetting, LlmModel, LlmProvider
+from deep_agent.db.models import Agent, GlobalSetting, LlmModel, LlmProvider, ModelCatalog
+from deep_agent.models.catalog import catalog_provider_type, provider_runtime_fields
+from deep_agent.models.reasoning import catalog_row_options, model_binding
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.reference_integrity import lock_optional, is_unique_conflict
 from deep_agent.db.stores.llm_model.base import _validate_runtime_metadata
@@ -260,6 +262,39 @@ class LlmConfigurationService(SessionBoundMixin):
                 ) from exc
             raise
 
+    @staticmethod
+    async def _save_reasoning_options(db, row, provider, data) -> None:
+        reference = data.reasoning_catalog
+        if reference is not None:
+            if "reasoning_options" in data.model_fields_set:
+                raise LlmConfigurationValidationError("请选择目录档位或手工档位")
+            catalog = await db.get(ModelCatalog, (reference.provider_id, reference.provider_model_id))
+            if catalog is None:
+                raise LlmConfigurationValidationError("模型目录条目已变更，请刷新")
+            adapter, runtime_model, _ = provider_runtime_fields(
+                catalog.provider_id, catalog.provider_model_id,
+                provider_npm=catalog.provider_npm, provider_api_url=catalog.provider_api_url,
+            )
+            matches_provider = (
+                provider.provider_type == catalog_provider_type(catalog.provider_id)
+                or provider.provider_type == adapter
+                or (provider.provider_type == "openai_codex" and catalog.provider_id == "openai")
+            )
+            if row.model not in {catalog.provider_model_id, runtime_model} or not matches_provider:
+                raise LlmConfigurationValidationError("目录档位与模型接入不匹配")
+            options = catalog_row_options(catalog)
+            source = "catalog"
+        elif "reasoning_options" in data.model_fields_set:
+            options = [option.model_dump() for option in data.reasoning_options] if data.reasoning_options is not None else None
+            source = "manual"
+        else:
+            return
+        row.reasoning_options = (
+            {"options": options, "source": source, "binding": model_binding(row, provider),
+             **({"catalog": reference.model_dump()} if reference is not None else {})}
+            if options is not None else None
+        )
+
     async def create_model(self, data: LlmModelCreate) -> LlmModel:
         try:
             async with self._write() as db:
@@ -291,6 +326,7 @@ class LlmConfigurationService(SessionBoundMixin):
                     enabled=data.enabled,
                     purpose=data.purpose,
                 )
+                await self._save_reasoning_options(db, row, provider, data)
                 db.add(row)
                 await db.flush()
                 await db.refresh(row)
@@ -313,7 +349,7 @@ class LlmConfigurationService(SessionBoundMixin):
                 row = await db.get(LlmModel, model_id)
                 if row is None:
                     return None
-                updates = data.model_dump(exclude_unset=True)
+                updates = data.model_dump(exclude_unset=True, exclude={'reasoning_options', 'reasoning_catalog'})
                 provider_id = str(updates.get("provider_id", row.provider_id))
                 old_provider = row.provider_id
                 parents = {}
@@ -346,6 +382,7 @@ class LlmConfigurationService(SessionBoundMixin):
                 for field, value in updates.items():
                     setattr(row, field, value)
                 _validate_runtime_metadata(row)
+                await self._save_reasoning_options(db, row, provider, data)
                 await db.flush()
                 await db.refresh(row)
                 return row

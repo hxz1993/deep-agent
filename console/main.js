@@ -2,7 +2,7 @@ import { initSecretInputs } from "./ui-secret-input.js?v=20260929-component-webh
 import "./assets/deepagent-pet/sprite-pet.js?v=20261023-console-load1";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
-import { initConsoleSelects } from "./ui-select.js?v=20261104-app-search";
+import { initConsoleSelects } from "./ui-select.js?v=0160-session-groups";
 import { bindContextControls, refreshIdentity } from "./context.js?v=20261106-context-refresh";
 import { createPageLoader } from "./page-loader.js?v=20261023-console-load1";
 import "./time.js?v=20260913-49";
@@ -26,25 +26,25 @@ let diagnosticsModule = null;
 let developerModule = null;
 const loadPage = createPageLoader({
   developer: async () => {
-    const module = await import("./developer.js?v=20261106-developer-dialog3");
+    const module = await import("./developer.js?v=0160-resource-status");
     module.initDeveloper();
     developerModule = module;
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261106-provider-reasoning");
+    const module = await import("./configuration.js?v=0160-picker-shared");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=20261106-ptc-source");
+    const module = await import("./workspace.js?v=0160-session-audit");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261106-ptc-source");
+    const module = await import("./diagnostics-center.js?v=0160-audit");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

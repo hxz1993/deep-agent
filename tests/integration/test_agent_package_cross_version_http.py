@@ -27,6 +27,7 @@ from tests.unit.test_agent_output_configuration import OUTPUT_CONFIG
 from tests.unit.test_agent_packages import package_files
 
 OLD_SHA = "552b7b25291e85a23b22244d5178823f1c60570e"
+REASONING_BASELINE_SHA = "77e4179c"  # v0.15.14, before reasoning effort.
 TIME_BASELINE_SHA = "ba8cc0faf22516f5c540e9bbd5f2707b61e07080"  # Published v0.15.7, before runtime time tools.
 REPO = Path(__file__).resolve().parents[2]
 SERVER = REPO / "tests/integration/helpers/agent_package_http_server.py"
@@ -142,6 +143,38 @@ class AgentPackageCrossVersionHttpTests(unittest.IsolatedAsyncioTestCase):
 
     def record(self, scenario, raw, **extra):
         self.evidence.append({"id": scenario, "zip_sha256": hashlib.sha256(raw).hexdigest(), **extra})
+
+    async def test_reasoning_packages_install_on_real_v01514_and_back(self):
+        baseline = self.root / "old-v0.15.14"
+        baseline.mkdir()
+        raw = subprocess.run(
+            ["git", "archive", REASONING_BASELINE_SHA, "src", "tests/helpers", "tests/__init__.py"],
+            cwd=REPO, check=True, capture_output=True,
+        ).stdout
+        with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
+            tar.extractall(baseline, filter="data")
+        old, ready, _database = await self.start(baseline, "v01514-data")
+        model_path = f'/api/v1/llm-models/{self.new_ready["model_id"]}'
+        configured = await self.new.patch(model_path, json={"reasoning_options": [{"type": "effort", "values": ["high"]}]})
+        self.assertEqual(configured.status_code, 200, configured.text)
+        source = await self.create(self.new, "reasoning export", reasoning_effort="high")
+        exported = await self.export(self.new, source["id"])
+        with zipfile.ZipFile(io.BytesIO(exported)) as files:
+            self.assertEqual(json.loads(files.read("agent.json"))["reasoning_effort"], "high")
+
+        installed, _ = await self.install(old, exported, "old installed reasoning")
+        self.assertNotIn("reasoning_effort", installed)
+        old_source = await self.create(old, "old export without reasoning", model_id=ready["model_id"])
+        legacy = await self.export(old, old_source["id"])
+        imported, _ = await self.install(self.new, exported, "new imported reasoning")
+        self.assertEqual(imported["reasoning_effort"], "high")
+        replaced, _ = await self.install(self.new, legacy, "legacy overwrite clears reasoning", target=imported["id"])
+        self.assertIsNone(replaced["reasoning_effort"])
+        cleared = await self.new.patch(model_path, json={"reasoning_options": []})
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        unavailable, preview = await self.install(self.new, exported, "missing reasoning uses default")
+        self.assertIsNone(unavailable["reasoning_effort"])
+        self.assertIn("reasoning_effort", json.dumps(preview))
 
     async def test_runtime_time_tool_packages_install_on_real_v0157_and_back(self):
         baseline = self.root / "old-v0.15.7"

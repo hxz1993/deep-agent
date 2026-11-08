@@ -11,6 +11,7 @@ import re
 from typing import Any, Literal
 
 from deep_agent.db.models import LlmModel, LlmProvider, ModelCatalog
+from deep_agent.models.reasoning import catalog_row_options
 
 CatalogView = Literal["model", "provider"]
 
@@ -678,6 +679,7 @@ def _provider_option(
             None,
         ),
         "metadata": row.provider_metadata or {},
+        "reasoning_options": catalog_row_options(row),
     }
 
 
@@ -789,6 +791,7 @@ def build_catalog_page(
                     "max_output_tokens": row.max_output_tokens,
                     "input_modalities": _row_modalities(row.input_modalities),
                     "tags": _row_tags(row),
+                    "reasoning_options": catalog_row_options(row),
                 }
                 for row in sorted(
                     provider_rows,

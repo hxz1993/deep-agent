@@ -23,6 +23,7 @@ from deep_agent.db.models import (
 from deep_agent.db.reference_integrity import is_unique_conflict
 from deep_agent.db.stores.agent.base import save_output_config, trusted_updater
 from deep_agent.models.provider_registry import model_unavailable_reason
+from deep_agent.models.reasoning import available_efforts, bound_agent_effort, effective_agent_effort, reasoning_protocol
 from deep_agent.schemas.agent import AgentResponse
 from deep_agent.schemas.ui_tools import UiToolCreate
 from deep_agent.skills.catalog import get_builtin_skill, list_builtin_skills
@@ -59,6 +60,17 @@ def snapshot_hash(data):
     return digest(tables)
 
 
+def _package_effort(agent, model, provider):
+    reference = agent.model_reference
+    effort = agent.reasoning_effort
+    if not effort or not reference or model is None or provider is None:
+        return None
+    if (reference.model != model.model or reference.provider_type != provider.provider_type
+            or reference.protocol != reasoning_protocol(model, provider)):
+        return None
+    return effort if effort in available_efforts(model, provider) else None
+
+
 def preview_from_snapshot(ctx, package: Package, data, mode='create', target_agent_id=None):
     if mode not in ('create', 'overwrite') or (mode == 'overwrite') != bool(target_agent_id):
         raise PackageError('请选择新建，或选择要覆盖的 Agent')
@@ -67,7 +79,9 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
         raise PackageConflict('目标 Agent 已不存在，请重新选择并预检')
     providers = {p.id: p for p in data[LlmProvider]}
     models = sorted([
-        {'id': m.id, 'name': m.name, 'provider_type': providers[m.provider_id].provider_type}
+        {'id': m.id, 'name': m.name, 'provider_type': providers[m.provider_id].provider_type,
+         **({'reasoning_effort': _package_effort(package.agent, m, providers[m.provider_id])}
+            if package.agent.reasoning_effort else {})}
         for m in data[LlmModel] if not model_unavailable_reason(m, providers.get(m.provider_id))
     ], key=lambda m: (m['name'], m['id']))
     mcps = sorted([{'code': f'mcp:{m.name}', 'name': m.name} for m in data[McpServer]], key=lambda m: m['code'])
@@ -206,9 +220,13 @@ async def export_package(ctx, agent_id, headers):
         if row.model_id and (not model or not provider):
             raise PackageError('Agent 引用的模型或 Provider 已缺失')
         output_config = next((c for c in data[AgentOutputConfig] if c.agent_id == row.id), None)
+        effort = effective_agent_effort(row, model, provider) if model and provider else None
+        reference = {'name': model.name, 'provider_type': provider.provider_type} if model else None
+        if effort and reference is not None:
+            reference.update(model=model.model, protocol=reasoning_protocol(model, provider))
         agent = PackageAgent(name=row.name, prompt=row.prompt,
                              capabilities=row.capabilities, skills=row.skills,
-                             model_reference={'name': model.name, 'provider_type': provider.provider_type} if model else None,
+                             model_reference=reference, reasoning_effort=effort,
                              structured_output_enabled=bool(row.structured_output_enabled),
                              allow_text_output=bool(output_config.allow_text_output) if row.structured_output_enabled and output_config is not None else False,
                              output_config=(next(({
@@ -239,7 +257,10 @@ async def export_package(ctx, agent_id, headers):
     excluded_output_fields = ({'structured_output_enabled', 'output_config', 'allow_text_output'}
                               if not agent.structured_output_enabled else
                               ({'allow_text_output'} if not agent.allow_text_output else set()))
-    exported_agent = agent.model_dump(exclude=excluded_output_fields)
+    excluded = {field: True for field in excluded_output_fields}
+    if not agent.reasoning_effort:
+        excluded.update({'reasoning_effort': True, 'model_reference': {'model', 'protocol'}})
+    exported_agent = agent.model_dump(exclude=excluded)
     files = {'manifest.json': canonical({'format': 'deepagent-agent-package', 'schema_version': 1, 'exported_from': __version__}),
              'agent.json': canonical(exported_agent), 'ui-tools.json': canonical(custom_ui)}
     for skill in needed:
@@ -268,7 +289,7 @@ def agent_state(row):
     if row is None:
         return None
     return digest({k: getattr(row, k) for k in
-                   ('id', 'name', 'prompt', 'model_id', 'capabilities', 'skills', 'structured_output_enabled', 'allow_text_output', 'updated_by')})
+                   ('id', 'name', 'prompt', 'model_id', 'reasoning_effort', 'capabilities', 'skills', 'structured_output_enabled', 'allow_text_output', 'updated_by')})
 
 
 def installation_results(preview, agent):
@@ -371,6 +392,10 @@ async def _install(ctx, package, options, headers, *, user_id=None):
                 caps.extend(r['matched_code'] for r in current['references']['mcps'] if r['matched_code'])
                 row = await db.get(Agent, agent_id) if options.mode == 'overwrite' else Agent(id=agent_id)
                 row.name, row.prompt, row.model_id = options.name, package.agent.prompt, model_id
+                model = await db.get(LlmModel, model_id) if model_id else None
+                provider = await db.get(LlmProvider, model.provider_id) if model and package.agent.reasoning_effort else None
+                effort = _package_effort(package.agent, model, provider)
+                row.reasoning_effort = bound_agent_effort(effort, model, provider)
                 row.capabilities, row.skills = list(dict.fromkeys(caps)), list(dict.fromkeys(skills))
                 row.ui_tool_selection = {}
                 row.structured_output_enabled = package.agent.structured_output_enabled

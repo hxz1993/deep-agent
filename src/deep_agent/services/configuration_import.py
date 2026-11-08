@@ -38,12 +38,20 @@ _MYSQL_LOCK_NAME = "deep-agent-configuration-import"
 _POSTGRES_LOCK_KEY = 2_024_070_230_001
 
 # Historical backups use their actual table shapes, never the latest ORM defaults.
-# Same-011/012 restores must not select or insert the new 013 column.
+# Read historical backups using the columns available in each revision.
+_REASONING_014_COLUMNS = {'agents': 'reasoning_effort', 'llm_models': 'reasoning_options'}
+_BEFORE_014 = {
+    name: Table(name, MetaData(), *(
+        Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
+        for column in Base.metadata.tables[name].columns if column.name != excluded
+    ))
+    for name, excluded in _REASONING_014_COLUMNS.items()
+}
 # This does not perform cross-revision import or alter an Alembic revision.
 _AGENT_011 = Table("agents", MetaData(), *(
     Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
     for column in Base.metadata.tables["agents"].columns
-    if column.name not in {"structured_output_enabled", "updated_by"}
+    if column.name not in {"structured_output_enabled", "updated_by", "reasoning_effort"}
 ))
 _OUTPUT_CONFIG_012 = Table("agent_output_configs", MetaData(), *(
     Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
@@ -62,6 +70,8 @@ def _contract_table(table_name: str, revision: str):
         return _AGENT_011
     if table_name == "agent_output_configs" and revision == "012":
         return _OUTPUT_CONFIG_012
+    if revision in {"011", "012", "013"} and table_name in _BEFORE_014:
+        return _BEFORE_014[table_name]
     return Base.metadata.tables[table_name]
 
 

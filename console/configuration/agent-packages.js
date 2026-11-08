@@ -37,6 +37,13 @@
     if (output.target_enabled) return '<span class="is-warning">结构化输出：将关闭，并移除目标原有输出定义</span>';
     return '<span>结构化输出：关闭</span>';
   }
+  function reasoningInstallSummary(preview, modelId) {
+    if (!preview?.agent?.reasoning_effort) return "";
+    const selected = preview.models?.find(model => model.id === modelId)?.reasoning_effort;
+    return selected
+      ? `<span>思考档位 · ${escapeHtml(window.DeepAgentReasoning.effortLabel(selected))}</span>`
+      : '<span class="is-warning">目标模型不支持包内档位，将使用默认</span>';
+  }
   const admin = {
     step: 1, mode: 'builtin', items: [], catalogErrors: [], source: null, preview: null, choices: null,
     busy: false, installing: false, generation: 0, installed: null, installResult: null,
@@ -295,7 +302,7 @@
     renderSummary() {
       const choices = this.choices;
       const target = this.agents.find(agent => agent.id === this.targetAgentId);
-      return `<div class="agent-package-summary"><span>${this.operationMode === 'overwrite' ? '覆盖' : '新建'} <strong>${escapeHtml(choices.name)}</strong></span><span>默认模型：${escapeHtml(this.modelLabel(choices.model_id, target))}</span>${outputInstallSummary(this.preview)}</div>`;
+      return `<div class="agent-package-summary"><span>${this.operationMode === 'overwrite' ? '覆盖' : '新建'} <strong>${escapeHtml(choices.name)}</strong></span><span>默认模型：${escapeHtml(this.modelLabel(choices.model_id, target))}</span>${outputInstallSummary(this.preview)}${reasoningInstallSummary(this.preview, choices.model_id)}</div>`;
     },
     renderSuccess() {
       const result = this.installResult, agent = this.installed;

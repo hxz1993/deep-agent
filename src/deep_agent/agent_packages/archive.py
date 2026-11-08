@@ -53,6 +53,8 @@ class Manifest(ExtensiblePackageModel):
 class ModelReference(ExtensiblePackageModel):
     name: str = Field(min_length=1, max_length=191)
     provider_type: str = Field(min_length=1, max_length=64)
+    model: str | None = Field(default=None, min_length=1, max_length=512)
+    protocol: str | None = Field(default=None, min_length=1, max_length=32)
 
 
 class PackageOutputConfig(AgentOutputConfig):
@@ -63,6 +65,7 @@ class PackageAgent(ExtensiblePackageModel):
     name: str = Field(min_length=1, max_length=191)
     prompt: str = Field(min_length=1, max_length=2 * 1024 * 1024)
     model_reference: ModelReference | None = None
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
     capabilities: list[str] = Field(default_factory=list, max_length=256)
     skills: list[str] = Field(default_factory=list, max_length=256)
     structured_output_enabled: bool = Field(default=False, strict=True)

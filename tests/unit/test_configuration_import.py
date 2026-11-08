@@ -99,7 +99,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def _target_engine(
         self,
         *,
-        revision: str = "013",
+        revision: str = "014",
         baseline: bool = False,
     ) -> AsyncEngine:
         target = self.root / f"target-{revision}-{baseline}.db"
@@ -131,7 +131,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         include_skill: bool = False,
-        revision: str = "013",
+        revision: str = "014",
     ) -> tuple[Path, Path | None, bytes | None]:
         source = self.root / f"source-{include_skill}-{revision}.db"
         await config_backup_tests.ConfigBackupTests()._create_source(source, revision=revision)
@@ -166,6 +166,13 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             with sqlite3.connect(source) as connection:
                 connection.execute("UPDATE agents SET skills='[]'")
                 connection.execute("DELETE FROM skill_packages")
+
+        if revision == "014":
+            with sqlite3.connect(source) as connection:
+                connection.execute("UPDATE agents SET reasoning_effort=?", (json.dumps({"value": "high", "binding": "fixture"}),))
+                connection.execute("UPDATE llm_models SET reasoning_options=?", (json.dumps({
+                    "options": [{"type": "effort", "values": ["high"]}], "binding": "fixture", "source": "manual",
+                }),))
 
         result = await export_backup(
             self._url(source),
@@ -252,8 +259,8 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             await engine.dispose()
 
     async def test_same_dynamic_revision_import_preserves_ids_and_revision(self) -> None:
-        backup_path, _, _ = await self._backup(revision="013")
-        engine = await self._target_engine(revision="013", baseline=True)
+        backup_path, _, _ = await self._backup()
+        engine = await self._target_engine(baseline=True)
         try:
             plan = await build_configuration_import_plan(
                 backup_path,
@@ -283,6 +290,10 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                     text("SELECT COUNT(*) FROM chat_sessions")
                 )
                 model_tags = await connection.scalar(text("SELECT tags FROM llm_models WHERE id='model-1'"))
+                effort = await connection.scalar(select(Agent.reasoning_effort).where(Agent.id == "agent-1"))
+                options = await connection.scalar(text("SELECT reasoning_options FROM llm_models WHERE id='model-1'"))
+                self.assertEqual(effort, {"value": "high", "binding": "fixture"})
+                self.assertEqual(json.loads(options)["options"], [{"type": "effort", "values": ["high"]}])
                 self.assertEqual(json.loads(model_tags), [
                     "reasoning", "tool_call", "single_system_message", "inline_tool_schema_refs",
                 ])
@@ -291,7 +302,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 tuple(provider),
                 ("0123456789abcdef0123456789abcdef", "plain-api-key"),
             )
-            self.assertEqual(revision, "013")
+            self.assertEqual(revision, "014")
             self.assertEqual(sessions, 0)
             self.assertEqual(integrations[0]["code"], "deeptable-assistant")
             self.assertEqual(integrations[0]["settings"], {"enabled": True, "options": [1, None, "中文"]})

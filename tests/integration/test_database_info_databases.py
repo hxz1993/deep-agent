@@ -28,7 +28,7 @@ class DatabaseInfoDialectTests(unittest.IsolatedAsyncioTestCase):
             ctx = SimpleNamespace(db_session_factory=async_sessionmaker(engine))
             with patch.object(database_info, "get_database_url", return_value=url):
                 light = await database_info.get_database_info(_user=None, ctx=ctx, include_charset=False)
-                self.assertEqual(light.schema_version, "013")
+                self.assertEqual(light.schema_version, "014")
                 self.assertIsNone(light.charset)
                 self.assertEqual(len(statements), 1)
                 self.assertIn("alembic_version", statements[0])
@@ -47,7 +47,7 @@ class DatabaseInfoDialectTests(unittest.IsolatedAsyncioTestCase):
     async def test_sqlite(self):
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete-console-info-") as directory:
             url = f"sqlite+aiosqlite:///{Path(directory) / 'database.db'}"
-            await asyncio.to_thread(_upgrade_target_schema, url, "013")
+            await asyncio.to_thread(_upgrade_target_schema, url, "014")
             await self._check(url)
 
     async def _server(self, env):
@@ -64,7 +64,7 @@ class DatabaseInfoDialectTests(unittest.IsolatedAsyncioTestCase):
                 await db.execute(text(f"CREATE DATABASE {name}" + (" CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci" if mysql else "")))
                 created = True
             target = url.set(database=name).render_as_string(hide_password=False)
-            await asyncio.to_thread(_upgrade_target_schema, target, "013")
+            await asyncio.to_thread(_upgrade_target_schema, target, "014")
             await self._check(target)
         finally:
             if created:

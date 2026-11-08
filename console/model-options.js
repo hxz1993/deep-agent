@@ -48,7 +48,18 @@ export function firstSelectableModelId(models) {
   return (models || []).find(isModelSelectable)?.id || "";
 }
 
-export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel = "无可用模型", groupIcon = null, enabledOnly = false } = {}) {
+export function modelPickerLabel(model) {
+  return String(model?.name || model?.model || "模型").trim();
+}
+
+export function modelPickerModalityLabels(modalities = []) {
+  const supported = new Set(modalities.map(item => String(item).toLowerCase()));
+  return Object.entries({ image: "图像", audio: "音频", video: "视频" })
+    .filter(([modality]) => supported.has(modality))
+    .map(([, label]) => label);
+}
+
+export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel = "无可用模型", groupIcon = null, enabledOnly = false, picker = false } = {}) {
   const visibleModels = Array.isArray(models)
     ? models.filter((model) => enabledOnly
       ? model.enabled !== false && model.unavailable_reason !== "model_wrong_purpose"
@@ -73,7 +84,11 @@ export function renderGroupedModelOptions(models, { selectedId = "", emptyLabel 
   return [...groups.values()].map((group) => {
     const options = group.models.map((model) => {
       const selected = model.id === selectedId ? " selected" : "";
-      return `<option value="${escapeOptionText(model.id)}"${selected}>${escapeOptionText(modelOptionLabel(model))}</option>`;
+      const fullLabel = modelOptionLabel(model);
+      const metadata = picker
+        ? ` title="${escapeOptionText(fullLabel)}" data-model-badges="${modelPickerModalityLabels(model.input_modalities || []).join(",")}"`
+        : "";
+      return `<option value="${escapeOptionText(model.id)}"${selected}${metadata}>${escapeOptionText(picker ? modelPickerLabel(model) : fullLabel)}</option>`;
     }).join("");
     const icon = group.icon ? ` data-icon-src="${escapeOptionText(group.icon)}"` : "";
     return `<optgroup label="${escapeOptionText(group.label)}"${icon}>${options}</optgroup>`;

@@ -2,6 +2,8 @@
 
 import { catalogProviderIcon } from "../provider-icons.js?v=20261105-catalog-icons";
 
+import { effortValues } from '../reasoning-ui.js?v=0160-picker';
+
 const PAGE_SIZE = 50;
 const MODALITY_LABELS = {
   text: "文本",
@@ -229,6 +231,8 @@ function renderModelRows() {
       <td>${escapeHtml(formatTokenCount(provider.max_output_tokens))}</td>
       <td class="model-tag-cell">${renderBadges(provider.input_modalities, MODALITY_LABELS)}</td>
       <td class="model-tag-cell">${renderBadges(provider.tags, TAG_LABELS)}</td>
+      <td class="catalog-effort-cell">${effortValues(provider.reasoning_options).map(value =>
+        `<code class="reasoning-inline-chip">${escapeHtml(value)}</code>`).join("") || "—"}</td>
 
     </tr>`;
   }).join("");
@@ -249,11 +253,11 @@ function renderResults() {
   empty.classList.toggle("hidden", !databaseEmpty);
   table.classList.toggle("hidden", databaseEmpty);
   head.innerHTML = `<tr>
-    <th>模型</th><th>上下文</th><th>最大输出</th><th>输入模态</th><th>能力</th>
+    <th>模型</th><th>上下文</th><th>最大输出</th><th>输入模态</th><th>能力</th><th>思考档位</th>
   </tr>`;
   body.innerHTML = catalogState.items.length
     ? renderModelRows()
-    : '<tr><td colspan="5" class="empty-cell">无匹配模型</td></tr>';
+    : '<tr><td colspan="6" class="empty-cell">无匹配模型</td></tr>';
   window.lucide?.createIcons();
 }
 
@@ -283,7 +287,7 @@ async function loadCatalog() {
   if (element("catalogStatusLine")) element("catalogStatusLine").textContent = "加载中…";
   if (element("catalogTableBody")) {
     element("catalogTableBody").innerHTML =
-      '<tr><td colspan="5" class="empty-cell">加载中…</td></tr>';
+      '<tr><td colspan="6" class="empty-cell">加载中…</td></tr>';
   }
   renderPagination();
   try {

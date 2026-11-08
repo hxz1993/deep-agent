@@ -132,12 +132,12 @@
               </span>
               <div class="composer-model-picker" id="composerMeta">
                 <select id="modelSelect" class="composer-model-select" aria-hidden="true" tabindex="-1"></select>
-                <button type="button" class="composer-model-trigger" id="composerModelTrigger" aria-haspopup="listbox" aria-expanded="false" title="选择模型">
+                <button type="button" class="composer-model-trigger" id="composerModelTrigger" aria-haspopup="listbox" aria-controls="composerModelList" aria-expanded="false" title="选择模型">
                   <span class="composer-provider-icon"><i data-lucide="sliders-horizontal" aria-hidden="true"></i></span>
                   <span class="composer-model-trigger-label">模型</span>
                   <i class="composer-model-chevron" data-lucide="chevron-up" aria-hidden="true"></i>
                 </button>
-                <div class="composer-model-menu hidden" id="composerModelMenu" role="listbox" aria-label="选择本会话模型"></div>
+                <div class="composer-model-menu reasoning-model-menu hidden" id="composerModelMenu"></div>
               </div>
               <button class="send-btn" id="sendBtn" title="发送" aria-label="发送">
                 <i data-lucide="send" aria-hidden="true"></i>

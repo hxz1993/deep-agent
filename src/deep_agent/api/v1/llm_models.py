@@ -321,18 +321,24 @@ async def test_llm_model(
         return await probe_model(row, provider)
 
 
-@router.get("/llm-models/{model_id}", response_model=LlmModelClientResponse)
+@router.get("/llm-models/{model_id}", response_model=LlmModelResponse | LlmModelClientResponse)
 async def get_llm_model(
     model_id: str,
+    request: Request,
+    ctx: AppContextDep,
     user: RequestUserDep,
+    management: bool = Query(False),
     store: LlmModelStoreBase = Depends(get_llm_model_store),
     service: LlmConfigurationService = Depends(get_llm_configuration_service),
-) -> LlmModelClientResponse:
+) -> LlmModelResponse | LlmModelClientResponse:
+    if management:
+        await require_console_admin(await resolve_console_admin_access(request, user, ctx))
     normalized_id = _parse_model_id(model_id)
     row = await store.get_by_id(normalized_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"LLM model not found: {model_id}")
-    return LlmModelClientResponse.from_response(await _response_for_row(store, service, row, agent_count=0))
+    response = await _response_for_row(store, service, row, agent_count=0)
+    return response if management else LlmModelClientResponse.from_response(response)
 
 
 @router.post("/llm-models", response_model=LlmModelResponse, status_code=status.HTTP_201_CREATED, dependencies=CONSOLE_ADMIN_DEPENDENCIES)

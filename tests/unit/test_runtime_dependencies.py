@@ -36,10 +36,10 @@ class RuntimeDependencyTests(unittest.TestCase):
             "pydantic-ai-harness[skills,exa,youdotcom]==0.32.0",
             requirements,
         )
-        self.assertIn("pydantic-monty==0.0.23", requirements)
+        self.assertIn("pydantic-monty==1.5.0", requirements)
         self.assertEqual(version("pydantic-ai-slim"), "2.46.0")
         self.assertEqual(version("pydantic-ai-harness"), "0.32.0")
-        self.assertEqual(version("pydantic-monty"), "0.0.23")
+        self.assertEqual(version("pydantic-monty"), "1.5.0")
         self.assertEqual(version("openai"), "3.8.0")
         self.assertGreaterEqual(tuple(map(int, version("aiohttp").split(".")[:2])), (3, 14))
 

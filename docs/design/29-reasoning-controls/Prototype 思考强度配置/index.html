@@ -46,6 +46,18 @@
     </aside>
     <main id="mainContent"></main>
   </div>
+  <dialog id="catalogAddDialog" aria-labelledby="catalogAddTitle">
+    <form id="catalogAddForm">
+      <header class="dialog-header"><h2 id="catalogAddTitle">从目录添加模型</h2></header>
+      <div class="dialog-body">
+        <label class="field"><span>模型</span><select class="btn" id="catalogAddChoice"></select></label>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="btn" id="cancelCatalogAdd">取消</button>
+        <button type="submit" class="btn primary" id="confirmCatalogAdd">继续</button>
+      </footer>
+    </form>
+  </dialog>
   <dialog id="modelDialog" class="model-dialog" aria-labelledby="modelDialogTitle">
     <form id="modelForm">
       <header class="dialog-header"><h2 id="modelDialogTitle">编辑模型</h2><button type="button" class="icon-btn" id="closeModelDialog" aria-label="关闭模型配置"><i data-lucide="x"></i></button></header>

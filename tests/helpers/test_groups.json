@@ -6,6 +6,7 @@
     "tests/integration/test_llm_providers_api.py",
     "tests/integration/test_model_connectivity.py",
     "tests/integration/test_model_read_access.py",
+    "tests/integration/test_reasoning_effort.py",
     "tests/integration/test_session_model_override.py",
     "tests/integration/test_structured_output_boundaries.py",
     "tests/integration/test_structured_output_channel_lifecycle.py",

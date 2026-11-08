@@ -2508,46 +2508,17 @@ html, body {
 .composer-model-trigger:focus-visible { outline: 0; }
 .composer-model-trigger:disabled { opacity: .48; cursor: not-allowed; }
 .composer-provider-icon { width: 16px; height: 16px; display: inline-grid; place-items: center; flex: 0 0 auto; color: var(--accent); }
-.composer-provider-icon img { width: 14px; height: 14px; display: block; object-fit: contain; border-radius: 3px; }
-.composer-model-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-provider-icon img { width: 16px; height: 16px; display: block; object-fit: contain; border-radius: 3px; }
 .composer-model-chevron { width: 13px; height: 13px; flex: 0 0 auto; transition: transform .15s ease; }
 .composer-model-picker.open .composer-model-chevron { transform: rotate(180deg); }
-.composer-model-menu {
-  position: absolute;
-  z-index: 35;
-  right: 0;
-  bottom: calc(100% + 8px);
-  width: min(260px, calc(100vw - 48px));
-  max-height: 280px;
-  padding: 4px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg);
-  box-shadow: 0 12px 32px color-mix(in srgb, #000 18%, transparent);
-}
 .composer-model-option {
   width: 100%;
-  min-height: 24px;
-  padding: 2px 6px 2px 26px;
-  line-height: 18px;
-  display: flex;
-  align-items: center;
   gap: 5px;
   border: 0;
-  border-radius: 8px;
   background: transparent;
-  color: var(--text);
+  font: inherit;
   text-align: left;
-  cursor: pointer;
 }
-.composer-model-option:hover,
-.composer-model-option.active { background: var(--bg-soft); }
-.composer-model-option-name { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.composer-model-option-badges { display: flex; gap: 2px; flex: 0 0 auto; }
-.model-modality-badge { padding: 0 4px; border: 0; border-radius: 999px; background: var(--bg-soft); color: var(--text-muted); font-size: 12px; line-height: 16px; transform: scale(.88); transform-origin: center; }
-.composer-model-check { display: inline-grid; color: var(--accent); }
-.composer-model-check svg { width: 14px; height: 14px; }
 .composer-model-empty { padding: 12px; color: var(--text-faint); font-size: 12px; text-align: center; }
 .send-btn, .stop-btn { width: 26px; height: 26px; min-width: 26px; border-radius: 50%; }
 .send-btn svg { width: 14px; height: 14px; }
@@ -2710,7 +2681,6 @@ html, body {
 @media (max-width: 760px) {
   .composer { padding-inline: 12px; }
   .composer-model-trigger { max-width: 150px; }
-  .composer-model-option-badges { display: none; }
 }
 
 /* Shared Markdown code actions and common extensions. */
@@ -2786,7 +2756,6 @@ html, body {
 .composer-channel-label img, .session-source-logo { width: 14px; height: 14px; object-fit: contain; flex-shrink: 0; }
 .inspector-channel-name { display: inline-flex; align-items: center; gap: 5px; }
 
-.composer-model-menu .da-select-group { min-height:22px; gap:5px; padding:2px 6px; line-height:18px; }
 
 /* JSON charts run only in opaque-origin frames; the original spec stays copyable. */
 deepagent-g2-chart { display: block; width: 100%; margin: 12px 0 16px; border: 1px solid var(--console-card-border); border-radius: var(--ui-radius); overflow: hidden; }

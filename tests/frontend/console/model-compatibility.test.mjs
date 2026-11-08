@@ -1,3 +1,4 @@
+import * as reasoning from "../../../console/reasoning-ui.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -26,7 +27,7 @@ function harness(tags = [], providerId = "private") {
         setAttribute(name, value) { this.attributes[name] = value; },
         addEventListener(name, handler) { handlers.set(name, handler); },
         async fire(name) { await handlers.get(name)?.({ preventDefault() {}, currentTarget: this }); },
-        showModal() { this.open = true; }, close() { this.open = false; },
+        focus() {}, showModal() { this.open = true; }, close() { this.open = false; },
       });
     }
     return elements.get(id);
@@ -46,7 +47,7 @@ function harness(tags = [], providerId = "private") {
   };
   let loaded;
   const context = {
-    state, window: {}, URLSearchParams,
+    state, window: { DeepAgentReasoning: reasoning }, AbortController, URLSearchParams,
     escapeHtml: (value) => String(value || ""), providerTypeLabel: (provider) => provider.provider_type,
     document: {
       getElementById: element,
@@ -63,6 +64,7 @@ function harness(tags = [], providerId = "private") {
     apiFetch: async (path, options) => {
       requests.push({ path, ...options });
       if (context.failSave && options?.body) throw new Error("保存失败");
+      if (path.includes("/catalog?") && context.catalogResponse) return context.catalogResponse();
       if (path.includes("/catalog?")) return { items: [{ model_label: "目录模型", providers: [{
         runtime_model: row.model, context_window_tokens: 256000, max_output_tokens: 16384,
         input_modalities: ["text", "image"], tags: ["structured_output"],
@@ -123,6 +125,35 @@ test("目录刷新只替换能力，不丢兼容设置与其他已有标签", as
   assert.deepEqual(payload.tags, ["structured_output", "custom:existing", "video_url", marker]);
   assert.deepEqual(payload.input_modalities, ["text", "image"]);
   assert.equal(payload.context_window_tokens, 256000);
+});
+
+test("目录恢复匹配原生模型名，只恢复档位并忽略已离开的弹框请求", async () => {
+  const h = harness([], "qwen");
+  const catalog = { items: [{ model_label: "Qwen", providers: [{
+    provider_id: "alibaba", provider_model_id: h.row.model, runtime_model: `openai:${h.row.model}`,
+    context_window_tokens: 256000, max_output_tokens: 16384,
+    input_modalities: ["text", "image"], tags: ["structured_output"],
+    reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+  }] }] };
+  await h.admin.openEdit("saved");
+  h.element("llmModelContextWindow").value = "777777";
+  h.context.catalogResponse = async () => catalog;
+  await h.admin.updateFromCatalog(true);
+  assert.equal(h.element("llmModelContextWindow").value, "777777");
+  assert.deepEqual({ ...h.admin.reasoningPayload.reasoning_catalog }, {
+    provider_id: "alibaba", provider_model_id: h.row.model,
+  });
+
+  let reply;
+  h.context.catalogResponse = () => new Promise(resolve => { reply = resolve; });
+  const refresh = h.admin.updateFromCatalog();
+  await h.admin.openEdit("saved");
+  const request = h.requests.findLast(r => r.path.includes("/catalog?"));
+  assert.equal(request.signal.aborted, true);
+  reply(catalog);
+  await refresh;
+  assert.equal(h.element("llmModelContextWindow").value, String(h.row.context_window_tokens));
+  assert.equal(h.admin.reasoningPayload.reasoning_catalog, undefined);
 });
 
 test("开启和关闭保存都保留未知标签，保存失败保留弹框及草稿", async () => {

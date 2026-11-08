@@ -58,6 +58,7 @@ class LlmModel(Base):
     context_window_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     max_output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    reasoning_options: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -170,6 +171,7 @@ class Agent(Base):
         String(AGENT_ID_LENGTH),
         nullable=True,
     )
+    reasoning_effort: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     capabilities: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
     ui_tool_selection: Mapped[dict[str, list[str]]] = mapped_column(JSONType, nullable=False, default=dict)
     skills: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)

@@ -263,6 +263,7 @@ class AgentRunner:
         ui_tool_hints: dict[str, dict[str, Any]] | None = None,
         tool_display_names: dict[str, str] | None = None,
         model_settings: ModelSettings | None = None,
+        reasoning_effort: str | None = None,
         context_window_tokens: int | None = None,
         max_output_tokens: int | None = None,
         model_tags: list[str] | None = None,
@@ -283,6 +284,7 @@ class AgentRunner:
         self.ui_tool_hints = ui_tool_hints or {}
         self.tool_display_names = tool_display_names or {}
         self.model_settings = model_settings
+        self._reasoning_effort = reasoning_effort
         self._context_window_tokens = context_window_tokens
         self._max_output_tokens = max_output_tokens
         self._model_tags = list(model_tags or [])
@@ -963,7 +965,10 @@ class AgentRunner:
         user_event_id: str | None = None
         if has_user_turn(message, attachments, context_refs):
             content = refs_from_attachments(message, attachments, context_refs)
-            user_request = ModelRequest(parts=[UserPromptPart(content=content)])
+            user_request = ModelRequest(
+                parts=[UserPromptPart(content=content)],
+                metadata={'reasoning_effort': self._reasoning_effort} if self._reasoning_effort else None,
+            )
             rows = await self.store.append(
                 session_id,
                 [user_request],

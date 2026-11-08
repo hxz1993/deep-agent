@@ -417,6 +417,7 @@ const llmProvidersAdmin = {
     const { choices } = window.DeepAgentProviderCatalog.buildProviderCatalogChoices({
       provider: providerCatalogPickerState.provider,
       catalogModels: source?.models || [],
+      catalogProviderId: source?.provider_id,
       existingModels: providerModels(providerCatalogPickerState.provider?.id),
     });
     providerCatalogPickerState.choices = choices;

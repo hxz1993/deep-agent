@@ -30,6 +30,8 @@ from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFou
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.files.upload_settings import load_upload_settings
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
+from deep_agent.models.provider_registry import ProviderRuntimeError
+from deep_agent.models.reasoning import DEFAULT_EFFORT, ReasoningEffortError
 from deep_agent.local_security import LOCAL_CURRENT_USERNAME_SCOPE_KEY
 
 
@@ -276,12 +278,13 @@ async def chat(
             ctx,
             agent_id,
             model_id=body.model_id,
+            **({'reasoning_effort': body.reasoning_effort} if body.reasoning_effort is not None else {}),
             capabilities=body.capabilities,
             request_headers=request_headers,
             channel_type=channel_account.channel_type if channel_account is not None else None,
             **({"channel_context": message_source} if message_source is not None else {}),
         )
-    except AgentModelNotConfiguredError as exc:
+    except (AgentModelNotConfiguredError, ReasoningEffortError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (AgentNotFoundError, LlmModelNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -365,26 +368,44 @@ async def chat_stream(
         ctx, body, session_id=session_id, user=user
     )
     try:
-        await validate_deferred_results(ctx.store, session_id, deferred_tool_results)
+        pending_reasoning = await validate_deferred_results(ctx.store, session_id, deferred_tool_results)
     except DeferredResultConflict as exc:
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)}) from exc
+    model_id = body.model_id
+    effort = body.reasoning_effort
+    if pending_reasoning is not None:
+        if pending_reasoning.model_id is None:
+            raise HTTPException(status_code=409, detail="原会话模型不可确认，请重新发起请求")
+        if model_id not in {None, pending_reasoning.model_id} or effort not in {None, pending_reasoning.effort}:
+            raise HTTPException(status_code=409, detail="工具续跑须使用原模型和思考档位，请重新发起请求")
+        model_id, effort = pending_reasoning.model_id, pending_reasoning.effort
+    elif deferred_tool_results is not None:
+        effort = DEFAULT_EFFORT
     message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
     try:
         runner = await build_runner_for_agent(
             ctx,
             agent_id,
-            model_id=body.model_id,
+            model_id=model_id,
+            **({'reasoning_effort': effort} if effort is not None else {}),
+            **({'expected_provider_id': pending_reasoning.provider_id} if pending_reasoning is not None else {}),
             capabilities=body.capabilities,
             request_headers=request_headers,
             channel_type=channel_account.channel_type if channel_account is not None else None,
             **({"channel_context": message_source} if message_source is not None else {}),
         )
-    except AgentModelNotConfiguredError as exc:
+    except (AgentModelNotConfiguredError, ReasoningEffortError) as exc:
+        if pending_reasoning is not None:
+            raise HTTPException(status_code=409, detail="原模型或思考档位已不可用，请重新发起请求") from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except LlmModelNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (LlmModelNotFoundError, ProviderRuntimeError) as exc:
+        if pending_reasoning is not None:
+            raise HTTPException(status_code=409, detail="原模型或思考档位已不可用，请重新发起请求") from exc
+        if isinstance(exc, LlmModelNotFoundError):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise
     deps = _agent_deps(
         ctx,
         session_id=session_id,
@@ -399,6 +420,7 @@ async def chat_stream(
         "agent_id": agent_id,
         "conversation_id": deps.conversation_id,
         "run_id": deps.run_id,
+        **({'reasoning_effort': pending_reasoning.effort} if pending_reasoning is not None else {}),
     }
 
     stream_run = None

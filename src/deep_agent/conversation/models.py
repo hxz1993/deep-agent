@@ -59,6 +59,7 @@ class ConversationItemBase(BaseModel):
 
 class UserConversationItem(ConversationItemBase):
     kind: Literal["user_message"] = "user_message"
+    reasoning_effort: str | None = Field(default=None, exclude_if=lambda value: value is None)
     text: str | None = None
     attachments: list[ConversationAttachment] = Field(default_factory=list)
     context_refs: list[dict[str, Any]] = Field(default_factory=list)

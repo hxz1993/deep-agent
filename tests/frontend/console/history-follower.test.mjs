@@ -1,3 +1,4 @@
+import { eventEffort } from '../../../console/reasoning-ui.js';
 import { cacheTrajectorySummary } from "../../../console/cache-usage.js";
 import { savedSessionCounts, savedRunFacts, savedRunState } from "../../../console/session-presentation.js";
 import assert from "node:assert/strict";
@@ -394,7 +395,7 @@ async function observedMetricsFixture(options = {}) {
   let responseHistory = { items: [] };
   const controller = new AbortController();
   const context = {
-    state, cacheTrajectorySummary, boundedStreamRequest, historyThroughRun, savedSessionCounts, savedRunFacts, savedRunState, prepareSessionRender: async () => {},
+    state, eventEffort, cacheTrajectorySummary, boundedStreamRequest, historyThroughRun, savedSessionCounts, savedRunFacts, savedRunState, prepareSessionRender: async () => {},
     sameHistoryValue, normalizeConversationHistory,
     JSON: { stringify() { throw new Error("History polling must not serialize a full snapshot"); } },
     sessionApiUrl: (_session, path) => path,

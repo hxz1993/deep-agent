@@ -4,6 +4,8 @@ import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
 // Pure shared inspector markup. Hosts supply identity, historical data and tab state.
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+import { modelWithEffort } from './reasoning-ui.js?v=0160';
+
 export function formatTokens(value) {
   if (value === null || value === undefined || value === "") return "—";
   return Number.isFinite(Number(value)) ? Number(value).toLocaleString("zh-CN") : "—";
@@ -147,6 +149,7 @@ export function renderSessionInspector({
   state = {}, activeSession = {}, model = null, modelProvider = null, context = {}, identity = {}, contextStatus = {},
   usage = {}, run = {}, sessionCache = {}, runCache = {}, runModel = null, agentName = "—", channelOrigin = null, agentChannels = [],
   activeTab = "session", contextContent = "", statusText = "", statusClass = "idle",
+  sessionReasoningEffort = run.reasoning_effort,
 } = {}) {
   // Every Run emits telemetry, including no-op estimates. Only a successful
   // triggered compaction may replace the last persisted comparison.
@@ -215,7 +218,7 @@ export function renderSessionInspector({
     <div class="inspector-facts">
       ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true, copy: Boolean(state.sessionId), displayValue: state.sessionId?.slice(0, 8) })}
       ${inspectorFact("Agent", agentName, { wide: true })}
-      ${inspectorFactHtml("模型", `<span class="inspector-channel-name">${modelProvider ? `<span class="composer-provider-icon">${composerProviderIcon(modelProvider)}</span>` : ""}${escapeHtml(model?.name || model?.model || "未记录")}</span>`)}
+      ${inspectorFactHtml("模型", `<span class="inspector-channel-name">${modelProvider ? `<span class="composer-provider-icon">${composerProviderIcon(modelProvider)}</span>` : ""}${escapeHtml(model ? modelWithEffort(model.name || model.model || "未记录", sessionReasoningEffort) : "未记录")}</span>`)}
       ${inspectorFactHtml("会话来源", channelOrigin ? `<span class="inspector-channel-name"><img class="session-source-logo" src="${channelOrigin.logo}" alt="" />${escapeHtml(channelOrigin.platform)}</span>` : `<span class="inspector-channel-name"><img class="session-source-logo" src="./favicon.svg?v=20260922-d-rounded" alt="" />DeepFOS</span>`)}
       ${inspectorFactHtml("App / Space", sessionScope, { wide: true })}
       ${inspectorFactHtml("会话统计", sessionCounts)}
@@ -245,7 +248,7 @@ export function renderSessionInspector({
       ${inspectorFact("压缩", run.compaction || "—")}
       ${inspectorFact("Conv. ID", run.conversation_id || "—", { mono: true, wide: true })}
       ${inspectorFact("Run ID", run.run_id || "—", { mono: true, wide: true, copy: Boolean(run.run_id) })}
-      ${inspectorFact("模型", runModel?.name || runModel?.model || run.model_id || "未记录", { wide: true })}
+      ${inspectorFact("模型", runModel || run.model_id ? modelWithEffort(runModel?.name || runModel?.model || run.model_id, run.reasoning_effort) : "未记录", { wide: true })}
     </div>
   </section>`;
 

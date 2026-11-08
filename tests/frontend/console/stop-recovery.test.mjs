@@ -110,6 +110,7 @@ function streamHarness() {
   const noop = () => {};
   const context = { state, calls, AbortController, boundedStreamRequest,
     serviceUrl: (url) => url, setConn: noop, trajectory: null,
+    updateSessionRunIndicators: noop,
     applyAssistantPresentationActions: noop, assistantActionsFromSse: noop,
     failAutomaticContextCompaction: noop, clearComposerPlan: noop, addErrorTo: noop,
     addSystemNote: (message) => calls.push(message),

@@ -51,7 +51,7 @@ export function buildProviderCatalogCreatePlan({ provider, catalogModels, existi
   };
 }
 
-export function buildProviderCatalogChoices({ provider, catalogModels, existingModels }) {
+export function buildProviderCatalogChoices({ provider, catalogModels, existingModels, catalogProviderId }) {
   const createOnly = isGenericCatalogProvider(provider?.provider_type);
   const existingCodes = new Set(
     (existingModels || []).map((model) => normalizedModelCode(model.model || model.name)),
@@ -76,6 +76,7 @@ export function buildProviderCatalogChoices({ provider, catalogModels, existingM
       label: String(model.model_label || modelCode),
       added,
       payload: {
+        ...(catalogProviderId && model.reasoning_options != null ? { reasoning_catalog: { provider_id: catalogProviderId, provider_model_id: modelCode } } : {}),
         provider_id: provider.id,
         name: modelCode,
         description: null,

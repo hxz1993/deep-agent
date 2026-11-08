@@ -59,6 +59,8 @@ class AgentSpec:
     tags: list[str] | None = None
     llm_model_id: str | None = None
     provider_config: ProviderRuntimeConfig | None = None
+    reasoning_effort: str | None = None
+    reasoning_settings: dict | None = None
 
     @classmethod
     def from_row(

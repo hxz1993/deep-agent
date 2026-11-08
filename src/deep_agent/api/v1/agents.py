@@ -20,6 +20,7 @@ from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.agent.base import InvalidAgentOutputConfig
 from deep_agent.db.stores.llm_model import LlmModelStoreBase
+from deep_agent.models.reasoning import ReasoningEffortError
 from deep_agent.schemas.agent import (
     AgentCreate,
     AgentPromptEstimateRequest,
@@ -227,7 +228,7 @@ async def create_agent(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Agent already exists: {body.name}")
     try:
         row = await store.create_unique(body, user_id=user)
-    except InvalidAgentOutputConfig as exc:
+    except (InvalidAgentOutputConfig, ReasoningEffortError) as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -270,7 +271,7 @@ async def update_agent(
         body = body.model_copy(update={"model_id": normalized_model_id})
     try:
         row = await store.update_unique(normalized_id, body, user_id=user)
-    except InvalidAgentOutputConfig as exc:
+    except (InvalidAgentOutputConfig, ReasoningEffortError) as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

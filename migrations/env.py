@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import inspect, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -62,6 +62,12 @@ def do_run_migrations(connection: Connection) -> None:
             # first batch-rebuild CREATE TABLE outside rollback protection.
             connection.exec_driver_sql("BEGIN IMMEDIATE")
         context.configure(connection=connection, target_metadata=target_metadata)
+        if "014" in context.get_context().get_current_heads():
+            # A separate development branch used the same revision identifier.
+            inspector = inspect(connection)
+            for table, column in (("llm_models", "reasoning_options"), ("agents", "reasoning_effort")):
+                if not inspector.has_table(table) or column not in {item["name"] for item in inspector.get_columns(table)}:
+                    raise RuntimeError(f"Database revision 014 does not match this release: missing {table}.{column}")
         run_migrations_with_initial_defaults()
 
 

@@ -7,10 +7,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 
-from deep_agent.db.models import Agent, AgentOutputConfig, LlmModel, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
+from deep_agent.db.models import Agent, AgentOutputConfig, LlmModel, LlmProvider, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
 from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.models.reasoning import DEFAULT_EFFORT, bound_agent_effort
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate, AgentOutputConfig as OutputConfig
 
 
@@ -47,6 +48,13 @@ async def save_output_config(
         for key, value in values.items():
             setattr(current, key, value)
         current.updated_at = datetime.now(UTC)
+
+
+async def _bind_effort(db, model, effort):
+    if effort is None or effort == DEFAULT_EFFORT:
+        return None
+    provider = await db.get(LlmProvider, model.provider_id, populate_existing=True) if model else None
+    return bound_agent_effort(effort, model, provider)
 
 
 class AgentStoreBase(SessionBoundMixin):
@@ -95,8 +103,9 @@ class AgentStoreBase(SessionBoundMixin):
     async def create_unique(self, data: AgentCreate, *, user_id: str | None = None) -> Agent:
         try:
             async with self._write() as db:
+                model = None
                 if data.model_id is not None:
-                    await lock_reference(db, LlmModel, LlmModel.id, data.model_id, "LLM model")
+                    model = await lock_reference(db, LlmModel, LlmModel.id, data.model_id, "LLM model")
                 await self._lock_ui_packages(db, data.capabilities)
                 await self._lock_mcp_servers(db, data.capabilities)
                 if await self._get_by_name(db, data.name) is not None:
@@ -104,6 +113,7 @@ class AgentStoreBase(SessionBoundMixin):
                 row = Agent(
                     name=data.name,
                     model_id=data.model_id,
+                    reasoning_effort=await _bind_effort(db, model, data.reasoning_effort),
                     capabilities=data.capabilities,
                     ui_tool_selection={},
                     skills=data.skills,
@@ -131,8 +141,9 @@ class AgentStoreBase(SessionBoundMixin):
                     return None
                 old_model, old_caps = row.model_id, list(row.capabilities or [])
                 new_model = data.model_id if "model_id" in data.model_fields_set else old_model
+                locked_models = {}
                 for model_id in sorted(value for value in {old_model, new_model} if value is not None):
-                    await lock_reference(db, LlmModel, LlmModel.id, model_id, "LLM model")
+                    locked_models[model_id] = await lock_reference(db, LlmModel, LlmModel.id, model_id, "LLM model")
                 await self._lock_ui_packages(db, old_caps + (data.capabilities or []))
                 await self._lock_mcp_servers(db, data.capabilities if data.capabilities is not None else old_caps,
                                              old_capabilities=old_caps)
@@ -171,7 +182,11 @@ class AgentStoreBase(SessionBoundMixin):
                     raise InvalidAgentOutputConfig("output_config is required when structured output is enabled")
                 if allow_text and config is None and (definition_changed or policy_changed):
                     raise InvalidAgentOutputConfig("output_config is required when allow_text_output is true")
-                updates = data.model_dump(exclude_unset=True, exclude={"output_config", "allow_text_output"})
+                updates = data.model_dump(exclude_unset=True, exclude={"output_config", "allow_text_output", "reasoning_effort"})
+                if 'reasoning_effort' in data.model_fields_set:
+                    updates['reasoning_effort'] = await _bind_effort(db, locked_models.get(new_model), data.reasoning_effort)
+                elif new_model != old_model:
+                    updates['reasoning_effort'] = None
                 # Keep the legacy column for existing databases, but never use its old per-tool scope.
                 updates["ui_tool_selection"] = {}
                 for field, value in updates.items():

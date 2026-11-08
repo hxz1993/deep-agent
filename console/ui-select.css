@@ -19,6 +19,31 @@ select.da-select-native { position: absolute !important; width: 1px !important; 
 .console-select-option > svg { width:var(--ui-icon); height:var(--ui-icon); flex:0 0 var(--ui-icon); }
 .console-select-option.selected { color:var(--accent); background:var(--accent-soft); }
 .console-select-option:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.reasoning-model-menu { display: flex; flex-direction: column; overflow: hidden; }
+.reasoning-model-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.reasoning-model-list .da-select-option { position: relative; }
+.reasoning-model-option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reasoning-model-option-badges { display: flex; gap: 2px; flex: none; }
+.model-modality-badge { padding: 0 4px; border-radius: 999px; background: var(--bg-soft); color: var(--text-muted); font-size: var(--ui-font-meta); line-height: 16px; }
+.reasoning-model-check { position: absolute; inset-inline-start: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--accent); }
+.reasoning-model-value { display: flex; min-width: 0; }
+.reasoning-model-value-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reasoning-model-value-effort { flex: none; white-space: pre; }
+.da-select-trigger > img.da-select-value-icon { width: 16px; height: 16px; flex: none; object-fit: contain; }
+.reasoning-picker-row { position: relative; flex: none; margin-top: 3px; padding-top: 4px; }
+.reasoning-picker-row::before { content: ""; position: absolute; inset: 0 5px auto; height: 1px; background: var(--border); }
+.reasoning-picker-trigger { box-sizing: border-box; width: 100%; display: flex; align-items: center; justify-content: space-between; min-height: 28px; padding: 3px 9px; border: 0; background: transparent; color: var(--text-dim); font: inherit; line-height: 18px; border-radius: var(--ui-radius-inner); }
+button.reasoning-picker-trigger:hover, .reasoning-picker-trigger[aria-expanded="true"] { background: var(--bg-hover); }
+button.reasoning-picker-trigger { cursor: pointer; }
+.reasoning-picker-current { display: inline-flex; gap: 4px; align-items: center; color: var(--text-muted); font-size: var(--ui-font-meta); }
+button.reasoning-picker-trigger .reasoning-picker-current { color: var(--accent); }
+button.reasoning-picker-trigger:is(:hover, :focus-visible) .reasoning-picker-current > span { text-decoration: underline; text-underline-offset: 2px; }
+.reasoning-picker-row svg { width: 14px; height: 14px; flex: none; }
+.reasoning-picker-options { width: 124px; max-height: min(330px, 70vh); inset: auto; }
+.reasoning-picker-options > button { width: 100%; justify-content: space-between; gap: 6px; border: 0; background: transparent; font: inherit; }
+.reasoning-picker-option-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reasoning-picker-option-code { margin-inline-start: 2px; color: var(--text-muted); font-size: var(--ui-font-meta); }
+.reasoning-picker-options > button[aria-checked="true"] { color: var(--accent); background: var(--accent-soft); }
 .da-select-menu[hidden] { display: none; }
 .da-select-menu::backdrop { background: transparent; }
 :is(.da-select-option, .console-select-option) { display: flex; align-items: center; min-height: 30px; box-sizing: border-box; padding: 6px 9px; border-radius: var(--ui-radius-inner); color: var(--text-dim); line-height: 18px; cursor: pointer; overflow-wrap: anywhere; }
@@ -27,11 +52,13 @@ select.da-select-native { position: absolute !important; width: 1px !important; 
 :is(.da-select-option, .console-select-option)[aria-disabled=true] { color: var(--text-faint); cursor: not-allowed; opacity: .6; }
 .da-select-group { display: flex; align-items: center; gap: 7px; padding: 8px 9px 4px; color: var(--text-faint); font-size: 11px; }
 .da-select-group img { width: 16px; height: 16px; object-fit: contain; }
+.reasoning-model-list .da-select-group img { border-radius: 3px; }
 :is(.da-select-option, .console-select-option).is-grouped { padding-left: 32px; }
 :is(.da-select-empty, .console-select-empty) { padding: 10px; color: var(--text-faint); font-style: italic; text-align: center; }
 .da-select-badge { flex: none; border-radius: 4px; padding: 0 5px; font-size: 10px; color: var(--accent); background: var(--accent-soft); }
 
 .da-select-option.has-badge { flex-wrap: nowrap; gap: 6px; font-size: 11px; }
+.reasoning-model-list .da-select-option.has-badge { font-size: inherit; }
 .da-select-option.has-badge > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .da-select-option.has-badge .da-select-badge { flex: 0 1 auto; font-size: 10px; }
 .da-select-menu[data-badge-align="end"] .has-badge > span:not(.da-select-badge) { flex: 1; }
@@ -44,3 +71,7 @@ select.da-select-native { position: absolute !important; width: 1px !important; 
 .da-select-separator { height: 1px; margin: 5px 4px; background: var(--border-soft, var(--border)); }
 .da-select-search { position: sticky; top: -5px; z-index: 1; padding: 4px 3px 8px; background: var(--console-surface, var(--bg)); }
 .da-select-menu:has(.da-select-search) .da-select-option { scroll-margin-top: calc(var(--ui-control-height) + 12px); }
+
+@media (max-width: 760px) {
+  .reasoning-model-option-badges { display: none; }
+}

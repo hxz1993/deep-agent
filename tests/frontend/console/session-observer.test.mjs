@@ -312,3 +312,18 @@ test("observer pending final stays locked without interactive widgets until end-
   assert.equal(state.awaitingHitl, true);
   assert.equal(widgets, 1);
 });
+
+test("a replayed session frame updates Run metadata without moving the row or remembering a model", () => {
+  const state = { observingRun: true, sessionId: "s", agentId: "a", llmModelId: "draft-model" };
+  const unexpected = () => assert.fail("replay must not apply a new send to the workspace");
+  const ctx = vm.createContext({
+    state, trajectory: null, rememberSessionModel: unexpected, upsertSession: unexpected,
+    updateChatHeader: unexpected, localStorage: { setItem: unexpected }, scrollToBottom() {},
+  });
+  const code = source.slice(source.indexOf("function handleEvent("), source.indexOf("\nfunction renderUsage("));
+  vm.runInContext(`${code}\nthis.handle = handleEvent;`, ctx);
+  ctx.handle({ event: "session", data: { session_id: "s", agent_id: "a", run_id: "run-a", reasoning_effort: "high" } }, {});
+  assert.equal(state.lastRunMetrics.run_id, "run-a");
+  assert.equal(state.lastRunMetrics.reasoning_effort, "high");
+  assert.equal(state.llmModelId, "draft-model");
+});

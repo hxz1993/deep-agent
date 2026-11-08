@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationInfo, f
 
 from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.schemas.llm_model import LlmModelSummary
+from deep_agent.models.reasoning import saved_effort
 from deep_agent.time import UtcDatetime
 
 if TYPE_CHECKING:
@@ -70,6 +71,7 @@ class AgentChatRequest(BaseModel):
 class AgentCreate(_RejectRemovedAgentFields):
     name: str = Field(..., max_length=191, description="Unique agent display name.")
     model_id: str | None = Field(default=None, description="Optional LLM model preset id.")
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
     prompt: str = Field(..., description="System prompt / instructions.")
     capabilities: list[str] = Field(
         default_factory=list,
@@ -119,6 +121,7 @@ class AgentCreate(_RejectRemovedAgentFields):
 class AgentUpdate(_RejectRemovedAgentFields):
     name: str | None = Field(default=None, max_length=191)
     model_id: str | None = None
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
     prompt: str | None = None
     capabilities: list[str] | None = None
     skills: list[str] | None = None
@@ -188,6 +191,8 @@ class AgentResponse(BaseModel):
     id: str
     name: str
     model_id: str | None
+    reasoning_effort: str | None = None
+    reasoning_effort_bound: bool | None = None
     model: LlmModelSummary | None
     prompt: str
     capabilities: list[str] = Field(default_factory=list)
@@ -205,6 +210,11 @@ class AgentResponse(BaseModel):
             id=row.id,
             name=row.name,
             model_id=row.model_id,
+            reasoning_effort=saved_effort(getattr(row, 'reasoning_effort', None)),
+            reasoning_effort_bound=(
+                row.reasoning_effort.get('binding') == (getattr(llm_model, 'reasoning_options', None) or {}).get('binding')
+                if isinstance(getattr(row, 'reasoning_effort', None), dict) else None
+            ),
             model=LlmModelSummary.from_row(llm_model) if llm_model is not None else None,
             prompt=row.prompt,
             capabilities=canonical_tool_package_codes(row.capabilities),

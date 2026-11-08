@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from deep_agent.models.reasoning import EffortOption
 from deep_agent.time import UtcDatetime
 
 
@@ -34,6 +35,7 @@ class CatalogProviderOption(BaseModel):
     tags: list[str] = Field(default_factory=list)
     status: str | None = None
     configured_preset: str | None = None
+    reasoning_options: list[EffortOption] | None = None
     metadata: dict = Field(default_factory=dict)
 
 
@@ -68,6 +70,7 @@ class CatalogProviderModelSummary(BaseModel):
     max_output_tokens: int
     input_modalities: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    reasoning_options: list[EffortOption] | None = None
 
 
 class ModelCatalogProviderItem(BaseModel):

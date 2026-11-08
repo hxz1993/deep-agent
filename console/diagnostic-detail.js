@@ -5,7 +5,8 @@ import { projectConversationItems, sortConversationItems } from "./conversation-
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261103-view-image1";
 import { createTrajectoryController } from "./trajectory.js?v=20261106-ptc-source";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
-import { renderSessionInspector } from "./session-inspector.js?v=20261104-session-app";
+import { eventEffort, historyEffort } from "./reasoning-ui.js?v=0160";
+import { renderSessionInspector } from "./session-inspector.js?v=0160";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
@@ -82,6 +83,10 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     if (disposed || currentView === "trajectory") return;
     const session = data.session;
     const { run, usage, model, runModel } = savedRunPresentation(session, data.events, selectedRunId);
+    const items = data.history.items || [];
+    const assistant = items.findLast(item => item.kind === "assistant_message");
+    const currentAssistant = items.findLast(item => item.kind === "assistant_message" && item.run_id === run.run_id);
+    run.reasoning_effort = historyEffort(items, currentAssistant?.turn_id) || eventEffort(data.events, run.run_id);
     const contextStatus = { ...(session.context_status || {}) };
     if (session.context_error) contextStatus.unavailable_reason = typeof session.context_error === "string" ? session.context_error : session.context_error.message || "当前配置无法估算";
     const status = session.latest_status?.status || session.latest_status || "unknown";
@@ -89,7 +94,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     role("inspectorContent").innerHTML = renderSessionInspector({
       state: { sessionId: session.session_id, agentId: session.agent_id, conversationId: session.conversation_id, modelMessageCount: data.history.items?.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length },
       activeSession: { appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
-      model, runModel,
+      model, runModel, sessionReasoningEffort: historyEffort(items, assistant?.turn_id),
       modelProvider: session.provider_name ? { name: session.provider_name } : null,
       run, usage, contextStatus, agentName: session.agent_name || session.agent_id || "未记录",
       sessionCache: session.cache_usage || {}, runCache: run.cache_usage || {},
@@ -225,6 +230,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     }
     setInspectorVisible(value.inspectorVisible !== false);
     if (value.inspectorWidth) find(".diagnostic-detail-grid").style.setProperty("--diagnostic-inspector-width", value.inspectorWidth);
+    renderInspector();
     messages.scrollTop = Number(value.messagesScrollTop) || 0;
     role("inspectorContent").scrollTop = Number(value.inspectorScrollTop) || 0;
   }

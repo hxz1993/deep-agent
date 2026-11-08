@@ -16,7 +16,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
-from pydantic_ai.usage import RunUsage
+from pydantic_ai.usage import RequestUsage, RunUsage
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.message_persistence import (
@@ -79,6 +79,25 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cap.messages, [])
         self.assertFalse(any(write["messages"] for write in self.store.writes))
         self.assertEqual(cap.canonical_messages([]), [])
+
+    async def test_only_identical_stream_finalization_skips_write(self):
+        cap = self.capability()
+        response = ModelResponse(parts=[TextPart("final")], usage=RequestUsage(), run_id="run")
+        await cap.after_model_request(self.ctx, request_context=None, response=response)
+        await cap.after_node_run(self.ctx, node=object(), result=object())
+        await cap._flush(self.ctx, hook="stream_end")
+        self.assertEqual(len(self.store.writes), 1)
+
+        # An explicit zero changes durable metering even though the normal SDK
+        # serialization has the same default-zero field.
+        response.usage = RequestUsage(input_tokens=0)
+        await cap._flush(self.ctx, hook="stream_end")
+        self.assertEqual(len(self.store.writes), 2)
+        response.parts[0].content = "changed"
+        await cap._flush(self.ctx, hook="stream_end")
+        self.assertEqual(len(self.store.writes), 3)
+        await cap._flush(self.ctx, hook="before_tool_execute")
+        self.assertEqual(len(self.store.writes), 4)
 
     async def test_native_search_parts_preserve_order_without_exposing_local_args(self):
         cap = self.capability()

@@ -9,7 +9,7 @@ from deep_agent.models.provider_registry import (
     provider_type_definition,
 )
 from deep_agent.db.models import Agent, GlobalSetting, LlmModel, LlmProvider, ModelCatalog
-from deep_agent.models.catalog import catalog_provider_type, provider_runtime_fields
+from deep_agent.models.catalog import PROVIDER_ALLOWLIST, catalog_provider_type, provider_runtime_fields
 from deep_agent.models.reasoning import catalog_row_options, model_binding
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.reference_integrity import lock_optional, is_unique_conflict
@@ -268,6 +268,8 @@ class LlmConfigurationService(SessionBoundMixin):
         if reference is not None:
             if "reasoning_options" in data.model_fields_set:
                 raise LlmConfigurationValidationError("请选择目录档位或手工档位")
+            if reference.provider_id not in PROVIDER_ALLOWLIST:
+                raise LlmConfigurationValidationError("模型目录条目已变更，请刷新")
             catalog = await db.get(ModelCatalog, (reference.provider_id, reference.provider_model_id))
             if catalog is None:
                 raise LlmConfigurationValidationError("模型目录条目已变更，请刷新")

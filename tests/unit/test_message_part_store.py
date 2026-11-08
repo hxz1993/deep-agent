@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import unittest
+from unittest.mock import patch
 
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from deep_agent.db.models import ChatSessionEvent
 from deep_agent.conversation.projector import project_session_events
@@ -22,6 +25,28 @@ class MessagePartStoreTests(unittest.IsolatedAsyncioTestCase):
         return await self.store.append_message_parts(
             "session", agent_id=self.agent_id, user_id="user-1",
             turn_id="turn", run_id="run", messages=messages, **kwargs)
+
+    async def test_cancel_during_sqlite_begin_settles_before_next_write(self):
+        begin_completed = asyncio.Event()
+        execute = AsyncSession.execute
+        writer = None
+
+        async def cancel_after_begin(db, statement, *args, **kwargs):
+            result = await execute(db, statement, *args, **kwargs)
+            if str(statement) == "BEGIN IMMEDIATE":
+                writer.cancel()
+                await asyncio.sleep(0)
+                begin_completed.set()
+            return result
+
+        response = ModelResponse(parts=[TextPart("confirmed")])
+        with patch.object(AsyncSession, "execute", cancel_after_begin):
+            writer = asyncio.create_task(self.append_parts([response]))
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(writer, timeout=3)
+        self.assertTrue(begin_completed.is_set())
+        self.assertEqual(await asyncio.wait_for(self.append_parts([response]), timeout=3), [])
+        self.assertEqual(len(await self.store.list_all_events("session")), 1)
 
     async def test_parts_append_without_mutating_prior_content_and_reassemble(self):
         response = ModelResponse(parts=[ThinkingPart("thinking"), TextPart("working")])

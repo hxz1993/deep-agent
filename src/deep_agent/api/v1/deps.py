@@ -27,12 +27,13 @@ from deep_agent.models.provider_registry import (
     load_provider_for_model,
     validate_provider_config,
 )
-from deep_agent.capabilities.catalog import invalid_tool_package_codes
 from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.capabilities.display_names import build_tool_display_name_map
-from deep_agent.capabilities.mcp.resolver import load_mcp_rows, resolve_mcp_toolsets
+from deep_agent.capabilities.mcp.resolver import load_mcp_rows, load_mcp_tool_packages, resolve_mcp_toolsets
 from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
-from deep_agent.capabilities.ui.registry import prepare_ui_tool_packages_for_spec
+from deep_agent.capabilities.ui.registry import (
+    UiToolCatalog, load_ui_tool_catalog, prepare_ui_tool_packages_for_spec, runnable_ui_tool_package_codes,
+)
 from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
 from deep_agent.skills.script_tool import build_skill_script_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
@@ -207,21 +208,29 @@ async def _build_runner_from_spec(
     )
     if spec.provider_config is not None:
         validate_provider_config(spec.provider_config)
-    invalid_packages = await invalid_tool_package_codes(
-        spec.capabilities, ctx.registry, ctx.stores
-    )
+    selected = set(spec.capabilities)
+    available = set(ctx.registry.codes()) | {"ui:builtin"}
+    mcp_selected = any(code.startswith("mcp:") for code in selected)
+    mcp_rows = await load_mcp_rows(ctx.stores) if mcp_selected else []
+    mcp_packages = await load_mcp_tool_packages(ctx.stores, rows=mcp_rows) if mcp_selected else []
+    available.update(package.code for package in mcp_packages)
+
+    ui_catalog = UiToolCatalog(tools=[], packages={})
+    if any(code.startswith("ui:") and code != "ui:builtin" for code in selected):
+        ui_catalog = await load_ui_tool_catalog(ctx.stores)
+        available.update(await runnable_ui_tool_package_codes(ctx.stores, catalog=ui_catalog))
+    invalid_packages = sorted(selected - available)
     if invalid_packages:
         from deep_agent.core.exceptions import ToolPackageError
 
         raise ToolPackageError(
             "Unknown or unavailable tool packages: " + ", ".join(invalid_packages)
         )
-    mcp_rows = await load_mcp_rows(ctx.stores)
-
-    dynamic_ui_packages, ui_tool_hints = await prepare_ui_tool_packages_for_spec(
-        ctx.stores,
-        spec,
-    )
+    dynamic_ui_packages, ui_tool_hints = ([], {})
+    if any(code.startswith("ui:") for code in selected):
+        dynamic_ui_packages, ui_tool_hints = await prepare_ui_tool_packages_for_spec(
+            ctx.stores, spec, catalog=ui_catalog,
+        )
     tool_display_names = build_tool_display_name_map(
         ctx.registry,
         capabilities=spec.capabilities,
@@ -229,7 +238,7 @@ async def _build_runner_from_spec(
         ui_packages=dynamic_ui_packages,
     )
 
-    mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows)
+    mcp_toolsets = await resolve_mcp_toolsets(ctx.stores, spec, mcp_rows=mcp_rows, mcp_packages=mcp_packages)
     mcp_resource_toolset = build_mcp_resource_toolset(spec, mcp_rows)
     resolved_skills = await resolve_skills_for_run(
         ctx.stores,

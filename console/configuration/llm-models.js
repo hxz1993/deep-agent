@@ -468,7 +468,9 @@ const llmModelsAdmin = {
     const button = document.getElementById("updateLlmModelFromCatalog");
     const dialog = document.getElementById("llmModelModal");
     const modelField = document.getElementById("llmModelModel");
+    const providerField = document.getElementById("llmModelProviderId");
     const modelCode = modelField.value.trim();
+    const providerId = providerField.value;
     if (!state.editingLlmModelId || !modelCode) {
       this.setCatalogFeedback("请先打开一个已有模型配置", true);
       return;
@@ -476,12 +478,15 @@ const llmModelsAdmin = {
 
     this.cancelCatalogRefresh();
     const request = this.catalogRequest = new AbortController();
-    const current = () => this.catalogRequest === request && dialog.open && modelField.value.trim() === modelCode;
+    const current = () => this.catalogRequest === request && dialog.open
+      && modelField.value.trim() === modelCode && providerField.value === providerId;
     this.setCatalogFeedback("正在从模型目录更新…");
     button.disabled = true;
     button.classList.add("is-loading");
     button.title = "正在从模型目录匹配";
     try {
+      const currentProvider = state.llmProviders.find(item => item.id === providerId);
+      const catalogProviderId = window.DeepAgentProviderCatalog?.catalogProviderIdForType(currentProvider?.provider_type);
       const queryCode = [...modelCodeAliases(modelCode)].at(-1) || modelCode;
       const params = new URLSearchParams({
         view: "model",
@@ -489,9 +494,9 @@ const llmModelsAdmin = {
         offset: "0",
         limit: "200",
       });
+      if (catalogProviderId) params.set("provider_id", catalogProviderId);
       const catalog = await apiFetch(`/api/v1/llm-models/catalog?${params}`, { signal: request.signal });
       if (!current()) return;
-      const currentProvider = state.llmProviders.find(item => item.id === document.getElementById("llmModelProviderId").value);
       const exact = (catalog.items || []).flatMap(model => (model.providers || [])
         .filter(provider => (provider.provider_model_id === modelCode || provider.runtime_model === modelCode)
           && (catalogProviderType(provider) === currentProvider?.provider_type

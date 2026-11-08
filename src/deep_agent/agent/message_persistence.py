@@ -6,6 +6,7 @@ from collections.abc import AsyncIterable
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import replace
+from hashlib import sha256
 from typing import Any
 
 from pydantic_ai import AgentStreamEvent, ModelRequestNode, RunContext, ToolDenied
@@ -15,6 +16,7 @@ from pydantic_ai.messages import (
     FunctionToolCallEvent, FunctionToolResultEvent, ModelMessage, ModelRequest,
     ModelResponse, ToolCallPart, ToolReturn, ToolReturnPart, RetryPromptPart,
 )
+from pydantic_core import to_json
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.history import is_user_only_request, same_tool_return
@@ -24,7 +26,9 @@ from deep_agent.agent.planning import (
 )
 from deep_agent.db.run_ownership import live_run
 from deep_agent.db.execution_error import safe_execution_error
+from deep_agent.db.serialization import serialize_message
 from deep_agent.diagnostics.persistence import persistence_failure_fields
+from deep_agent.usage import response_call
 
 
 class MessagePersistenceError(RuntimeError):
@@ -35,6 +39,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
     """Per-run instance, including provider retries; never share across Runs."""
 
     capture_execute_results = True
+    _duplicate_flush_hooks: frozenset[str] = frozenset()
 
     def __init__(self, store: Any, *, history_length: int,
                  skip_user_prompt: bool, model_name: str | None = None,
@@ -54,6 +59,8 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         self._accepted: set[tuple[int, str]] = set()
         self._results: dict[str, Any] = {}
         self._write_lock = asyncio.Lock()
+        self._committed_scope: tuple | None = None
+        self._committed_projection: bytes | None = None
         self._message_identity_merges = 0
         self._response_id_mismatches = 0
         self._executing_parent: ContextVar[tuple[int, str] | None] = ContextVar(
@@ -253,6 +260,22 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 messages.append(request)
         return messages
 
+    def _projection(self, messages: list[ModelMessage]) -> bytes | None:
+        digest = sha256()
+        try:
+            for message in messages:
+                # The event codec uses this serializer, including part positions
+                # and message ordinals. Usage tracks whether zero was reported.
+                usage = (
+                    response_call(message, request_id="", model_id=self.model_name,
+                                  provider_id=self.provider_id, purpose="chat")
+                    if isinstance(message, ModelResponse) else None
+                )
+                digest.update(to_json((serialize_message(message), usage)))
+        except (TypeError, ValueError):
+            return None
+        return digest.digest()
+
     async def _flush(self, ctx: RunContext[AgentDeps], *, hook: str = "unknown") -> None:
         async with self._write_lock:
             if self.persistence_error is not None:
@@ -262,6 +285,19 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             write_stage = "assemble"
             try:
                 messages = self._completed_messages()
+                scope = (deps.session_id, deps.agent_id, deps.user, deps.app_id,
+                         deps.space_id, deps.turn_id, deps.run_id)
+                projection = None
+                if (
+                    hook in self._duplicate_flush_hooks
+                    and scope == self._committed_scope
+                    and len(messages) == len(self.messages)
+                ):
+                    projection = self._projection(messages)
+                    if self._committed_projection is None:
+                        self._committed_projection = self._projection(self.messages)
+                    if projection is not None and projection == self._committed_projection:
+                        return
                 write_stage = "append"
                 async with asyncio.timeout(10):
                     rows = await self.store.append_message_parts(
@@ -274,6 +310,8 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                         usage_provider_id=self.provider_id,
                     )
                 self.messages = messages
+                self._committed_scope = scope
+                self._committed_projection = projection
                 write_stage = "publish"
                 if self.event_queue is not None:
                     for row in rows or []:
@@ -408,6 +446,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
 class StreamMessagePersistenceCapability(MessagePersistenceCapability):
     # Stream events already carry the fully normalized official result parts.
     capture_execute_results = False
+    _duplicate_flush_hooks = frozenset({"after_node_run", "stream_end"})
 
     async def wrap_run_event_stream(
         self, ctx: RunContext[AgentDeps], *, stream: AsyncIterable[AgentStreamEvent],
@@ -422,7 +461,7 @@ class StreamMessagePersistenceCapability(MessagePersistenceCapability):
                     self._results[event.part.tool_call_id] = deepcopy(event.part)
                     await self._save(ctx, hook="wrap_run_event_stream")
                 yield event
-            await self._flush(ctx, hook="wrap_run_event_stream")
+            await self._flush(ctx, hook="stream_end")
         finally:
             close = getattr(stream, "aclose", None)
             if callable(close):

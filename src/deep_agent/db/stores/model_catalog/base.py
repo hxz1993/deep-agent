@@ -7,13 +7,14 @@ from sqlalchemy import delete, select
 
 from deep_agent.db.models import ModelCatalog
 from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.models.catalog import PROVIDER_ALLOWLIST
 
 
 class ModelCatalogStoreBase(SessionBoundMixin):
     async def list_all(self) -> list[ModelCatalog]:
         async with self._read() as db:
             result = await db.execute(
-                select(ModelCatalog).order_by(
+                select(ModelCatalog).where(ModelCatalog.provider_id.in_(PROVIDER_ALLOWLIST)).order_by(
                     ModelCatalog.lab_label,
                     ModelCatalog.model_label,
                     ModelCatalog.provider_label,

@@ -89,7 +89,7 @@ class LlmModelCatalogIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 files={"file": ("catalog.json", raw, "application/json")},
             )
             self.assertEqual(response.status_code, 200, response.text)
-            self.assertEqual(response.json()["rows"], 3)
+            self.assertEqual(response.json()["rows"], 2)
             with patch(
                 "deep_agent.api.v1.llm_models.fetch_models_dev_bundle",
                 new=AsyncMock(side_effect=AssertionError("catalog reads must remain local")),
@@ -108,12 +108,48 @@ class LlmModelCatalogIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(body["total"], 1)
                         self.assertEqual(
                             {item["id"] for item in body["facets"]["providers"]},
-                            set(ADDITIONAL_PROVIDERS),
+                            {"minimax-cn", "stepfun"},
                         )
                         option = body["items"][0]["providers"][0]
                         self.assertEqual(option["provider_id"], provider_id)
                         self.assertEqual(option["adapter"], adapter)
                         self.assertEqual(option["runtime_model"], runtime_model)
+
+    async def test_saved_legacy_minimax_snapshot_exposes_only_domestic_entry(self) -> None:
+        rows, _ = normalize_models_dev_bundle({}, ADDITIONAL_PROVIDERS, [])
+        cn = next(row for row in rows if row["provider_id"] == "minimax-cn")
+        await self.stores.model_catalog.replace_all([
+            *rows, {**cn, "provider_id": "minimax", "provider_label": "MiniMax (International)"},
+        ])
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            for view in ("model", "provider"):
+                response = await client.get(
+                    "/api/v1/llm-models/catalog", params={"view": view, "q": cn["provider_model_id"]},
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                body = response.json()
+                self.assertEqual({item["id"] for item in body["facets"]["providers"]}, {"minimax-cn", "stepfun"})
+                self.assertEqual(body["total"], 1)
+                item = body["items"][0]
+                options = item["providers"] if view == "model" else [item]
+                self.assertEqual([entry["provider_id"] for entry in options], ["minimax-cn"])
+            exported = await client.get("/api/v1/llm-models/catalog/export")
+            self.assertEqual(exported.status_code, 200, exported.text)
+            self.assertEqual(set(exported.json()["providers"]), {"minimax-cn", "stepfun"})
+            provider = await client.post("/api/v1/llm-providers", json={
+                "name": "MiniMax fixture", "provider_type": "minimax", "use_default_base_url": True,
+            })
+            self.assertEqual(provider.status_code, 201, provider.text)
+            model_code = cn["provider_model_id"]
+            payload = {
+                "provider_id": provider.json()["id"], "name": model_code, "model": model_code,
+                "input_modalities": ["text"], "context_window_tokens": 204800, "max_output_tokens": 32768,
+            }
+            for provider_id, status in (("minimax", 422), ("minimax-cn", 201)):
+                response = await client.post("/api/v1/llm-models", json={
+                    **payload, "reasoning_catalog": {"provider_id": provider_id, "provider_model_id": model_code},
+                })
+                self.assertEqual(response.status_code, status, response.text)
 
     async def test_fetch_failure_preserves_old_catalog(self) -> None:
         await self._seed_catalog()

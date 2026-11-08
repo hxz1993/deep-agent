@@ -1,4 +1,5 @@
 import * as reasoning from "../../../console/reasoning-ui.js";
+import * as providerCatalog from "../../../console/provider-catalog.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -47,7 +48,7 @@ function harness(tags = [], providerId = "private") {
   };
   let loaded;
   const context = {
-    state, window: { DeepAgentReasoning: reasoning }, AbortController, URLSearchParams,
+    state, window: { DeepAgentReasoning: reasoning, DeepAgentProviderCatalog: providerCatalog }, AbortController, URLSearchParams,
     escapeHtml: (value) => String(value || ""), providerTypeLabel: (provider) => provider.provider_type,
     document: {
       getElementById: element,
@@ -125,6 +126,32 @@ test("目录刷新只替换能力，不丢兼容设置与其他已有标签", as
   assert.deepEqual(payload.tags, ["structured_output", "custom:existing", "video_url", marker]);
   assert.deepEqual(payload.input_modalities, ["text", "image"]);
   assert.equal(payload.context_window_tokens, 256000);
+});
+
+test("MiniMax 能力刷新仅查询国内目录，国内未命中时保留现有配置", async () => {
+  const h = harness([], "minimax-provider");
+  h.state.llmProviders.push({ id: "minimax-provider", provider_type: "minimax" });
+  h.state.llmProviderTypes.push({ code: "minimax", model_protocol: "anthropic" });
+  h.row.model = "MiniMax-M2.5";
+  h.row.reasoning_catalog = { provider_id: "minimax", provider_model_id: h.row.model };
+  h.context.catalogResponse = () => {
+    const query = h.requests.at(-1).path.split("?")[1];
+    assert.equal(new URLSearchParams(query).get("provider_id"), "minimax-cn");
+    return { items: [] };
+  };
+  await h.admin.openEdit("saved");
+  await h.admin.updateFromCatalog();
+  assert.equal(h.element("llmModelContextWindow").value, String(h.row.context_window_tokens));
+  assert.equal(h.admin.reasoningPayload.reasoning_catalog, undefined);
+  assert.match(h.element("llmModelCatalogFeedback").textContent, /没有找到/);
+  h.context.catalogResponse = () => ({ items: [{ model_label: h.row.model, providers: [{
+    provider_id: "minimax-cn", provider_model_id: h.row.model,
+    context_window_tokens: 204800, max_output_tokens: 32768, input_modalities: ["text"], tags: [],
+    reasoning_options: [{ type: "effort", values: ["high"] }],
+  }] }] });
+  await h.admin.updateFromCatalog();
+  assert.equal(h.element("llmModelContextWindow").value, "204800");
+  assert.equal(h.admin.reasoningPayload.reasoning_catalog.provider_id, "minimax-cn");
 });
 
 test("目录恢复匹配原生模型名，只恢复档位并忽略已离开的弹框请求", async () => {

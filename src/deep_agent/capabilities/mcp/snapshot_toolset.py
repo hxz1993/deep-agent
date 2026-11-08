@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import ssl
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 from urllib.parse import quote
 
+import certifi
+from fastmcp import __version__ as fastmcp_version
 from pydantic_ai import RunContext, ToolDefinition, messages
 from pydantic_ai.exceptions import ModelRetry, RunCancelled, ToolFailed
 from pydantic_ai.mcp import MCPToolset
@@ -27,6 +32,29 @@ _MCP_ARGS_VALIDATOR = SchemaValidator(
         "values_schema": {"type": "any"},
     }
 )
+
+
+@lru_cache(maxsize=1)
+def _load_default_tls_context(ca_file: str, file_version: tuple[int, ...]) -> ssl.SSLContext:
+    # file_version keys the cache to the process and the CA bundle on disk.
+    return ssl.create_default_context(cafile=ca_file)
+
+
+def _default_tls_context() -> ssl.SSLContext | None:
+    # FastMCP 3 uses legacy HTTPX's certifi default. Let other transport
+    # generations and explicitly configured TLS use their original defaults.
+    if not fastmcp_version.startswith("3.") or any(
+        os.environ.get(key) for key in ("SSL_CERT_FILE", "SSL_CERT_DIR", "SSLKEYLOGFILE")
+    ):
+        return None
+    ca_file = certifi.where()
+    try:
+        stat = os.stat(ca_file)
+    except OSError:
+        return None
+    return _load_default_tls_context(
+        ca_file, (os.getpid(), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns),
+    )
 
 
 def _contains_cancellation(exc: BaseException) -> bool:
@@ -186,6 +214,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                 include_instructions=False,
                 init_timeout=self.init_timeout,
                 max_retries=self.max_retries,
+                verify=_default_tls_context(),
             )
             stack = AsyncExitStack()
             try:

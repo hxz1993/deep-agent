@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol, runtime_checkable
 
+import anyio
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -37,6 +38,16 @@ from deep_agent.db.serialization import serialize_message
 _MESSAGE_TERMINAL_STATUSES = {"completed", "pending", "cancelled", "failed", "interrupted"}
 
 __all__ = ["SessionStore", "SqlConversationCoordinator", "SqlConversationStore"]
+
+
+async def _settle_db_task(task: asyncio.Task[Any]) -> Any:
+    with anyio.CancelScope(shield=True):
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+        return task.result()
 
 
 @runtime_checkable
@@ -267,21 +278,36 @@ class SqlConversationCoordinator:
         if terminal_status is not None and terminal_status not in _MESSAGE_TERMINAL_STATUSES:
             raise ValueError("Invalid message terminal status")
         scope, user = self._required_identity(agent_id, user_id)
-        async with self._write() as db:
-            owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
-            if owner.exists and owner.user_id != user:
-                raise PermissionError("Session belongs to another user")
-            session = await self._chat_sessions._ensure(
-                db, session_id, agent_id=scope, user_id=user,
-                app_id=app_id, space_id=space_id,
-                title=first_user_prompt(messages) if not owner.exists else None,
-            )
-            rows = await self._events._append_message_parts(
-                db, session, messages, turn_id=turn_id, run_id=run_id,
-                first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
-                usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
-            )
-            return [SessionEventSnapshot.from_row(row) for row in rows]
+
+        async def append() -> list[SessionEventSnapshot]:
+            async with self._write() as db:
+                owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
+                if owner.exists and owner.user_id != user:
+                    raise PermissionError("Session belongs to another user")
+                session = await self._chat_sessions._ensure(
+                    db, session_id, agent_id=scope, user_id=user,
+                    app_id=app_id, space_id=space_id,
+                    title=first_user_prompt(messages) if not owner.exists else None,
+                )
+                rows = await self._events._append_message_parts(
+                    db, session, messages, turn_id=turn_id, run_id=run_id,
+                    first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
+                    usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
+                )
+                return [SessionEventSnapshot.from_row(row) for row in rows]
+
+        if self._session_factory.kw["bind"].dialect.name != "sqlite":
+            return await append()
+        # aiosqlite can still hold the write lock after a cancelled SQL await.
+        # Finish persisting the already-confirmed facts before cancellation
+        # starts another transaction to close this Run.
+        writing = asyncio.create_task(append())
+        try:
+            return await asyncio.shield(writing)
+        except asyncio.CancelledError:
+            with contextlib.suppress(Exception):
+                await _settle_db_task(writing)
+            raise
 
     async def append_lifecycle(
         self, session_id: str, *, event_type: str, status: LifecycleStatus,
@@ -315,7 +341,6 @@ class SqlConversationCoordinator:
         or blindly retried. Cancellation before commit rolls back. Once commit
         has begun, settle it before closing its session and confirm the fact.
         """
-        import anyio
         from copy import deepcopy
         from deep_agent.agent.structured_output import output_id_for
         from deep_agent.structured_output.schema import json_bytes, validate_output_name
@@ -342,15 +367,6 @@ class SqlConversationCoordinator:
             raise ValueError("Output attempt requires its Turn and Run")
         event_id = output_id_for(session_id, run_id, ordinal, part_index)
         scope, user = self._required_identity(agent_id, user_id)
-
-        async def settle(task):
-            with anyio.CancelScope(shield=True):
-                while not task.done():
-                    try:
-                        await asyncio.shield(task)
-                    except asyncio.CancelledError:
-                        continue
-                return task.result()
 
         async def write_attempt(db):
             owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
@@ -428,15 +444,15 @@ class SqlConversationCoordinator:
                         await acquire_write_barrier(db)
                         expected = await write_attempt(db)
                     except BaseException:
-                        await settle(asyncio.create_task(db.rollback()))
+                        await _settle_db_task(asyncio.create_task(db.rollback()))
                         raise
                     committing = asyncio.create_task(db.commit())
                     try:
                         await asyncio.shield(committing)
                     except asyncio.CancelledError:
-                        await settle(committing)
+                        await _settle_db_task(committing)
                     except BaseException:
-                        await settle(asyncio.create_task(db.rollback()))
+                        await _settle_db_task(asyncio.create_task(db.rollback()))
                         raise
                     return expected
         except BaseException:

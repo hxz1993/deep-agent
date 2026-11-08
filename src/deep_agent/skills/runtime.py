@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
 
 from sqlalchemy import select
+from sqlalchemy.orm import lazyload
 from deep_agent.db.reference_integrity import lock_optional
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,7 @@ from pydantic_ai_harness.skills import Skills
 
 from deep_agent.db.models import SkillPackage
 from deep_agent.db.stores.bundle import DataStores
-from deep_agent.skills.catalog import BUILTIN_SKILLS_ROOT, SkillDescriptor, get_builtin_skill
+from deep_agent.skills.catalog import BUILTIN_SKILLS_ROOT, SkillDescriptor, get_builtin_skill, list_builtin_skills
 from deep_agent.skills.package import ParsedSkillPackage, SkillPackageError, parse_skill_zip
 from deep_agent.files.storage import FileStore, PlatformFileStore
 from deep_agent.time import ensure_utc
@@ -348,6 +349,17 @@ class SkillRuntimeLibrary:
             row = await lock_optional(db, SkillPackage, SkillPackage.code, code)
             yield row
 
+    @asynccontextmanager
+    async def coordinated_rows(self, stores: DataStores, codes: list[str]):
+        """Read current rows and their local definitions under the same locks."""
+        async with stores.skill_package._write() as db:
+            rows = (await db.execute(
+                select(SkillPackage).options(lazyload("*"))
+                .where(SkillPackage.code.in_(codes)).order_by(SkillPackage.code)
+                .with_for_update().execution_options(populate_existing=True)
+            )).scalars()
+            yield {row.code: row for row in rows}
+
     async def materialize(
         self,
         row: SkillPackage,
@@ -435,19 +447,15 @@ class SkillRuntimeLibrary:
             logger.info("Skill runtime ready code={}", row.code)
             return state
 
-    async def resolve(
-        self,
-        row: SkillPackage,
-        *,
-        request_headers: Mapping[str, str],
-    ) -> ResolvedSkill | None:
+    def resolve_materialized(self, row: SkillPackage) -> tuple[bool, ResolvedSkill | None]:
+        """Return whether the current row can be resolved without downloading."""
         current = self.state_for(row)
         if current.status == RUNTIME_READY and (
             self._destination(row.code) / "SKILL.md"
         ).is_file():
-            return self._resolved(row)
+            return True, self._resolved(row)
         if current.status == RUNTIME_ERROR:
-            return None
+            return True, None
         if current.status == RUNTIME_MISSING and self._ready_from_disk(row):
             self._states[row.code] = SkillRuntimeState(
                 code=row.code,
@@ -456,7 +464,18 @@ class SkillRuntimeLibrary:
                 content_hash=row.content_hash,
                 platform_file_id=row.platform_file_id,
             )
-            return self._resolved(row)
+            return True, self._resolved(row)
+        return False, None
+
+    async def resolve(
+        self,
+        row: SkillPackage,
+        *,
+        request_headers: Mapping[str, str],
+    ) -> ResolvedSkill | None:
+        handled, resolved = self.resolve_materialized(row)
+        if handled:
+            return resolved
         state = await self.materialize(row, request_headers=request_headers)
         return self._resolved(row) if state.status == RUNTIME_READY else None
 
@@ -565,6 +584,65 @@ async def resolve_skills_for_run(
     runtime: SkillRuntimeLibrary,
     request_headers: Mapping[str, str],
 ) -> ResolvedSkills:
+    if not codes:
+        return ResolvedSkills(configured=(), items=(), unavailable=(), capability=None)
+    builtins = {item.code: item for item in list_builtin_skills()}
+    uploads = list(dict.fromkeys(code for code in codes if code not in builtins))
+    if not uploads:
+        return _assemble_skills(codes, builtins, {})
+    if len(uploads) == 1:
+        code = uploads[0]
+        async with runtime.coordinated_row(stores, code) as row:
+            resolved = await runtime.resolve(row, request_headers=request_headers) if row is not None else None
+            return _assemble_skills(codes, builtins, {code: _upload_result(runtime, code, row, resolved)})
+
+    cold: list[str] = []
+    async with runtime.coordinated_rows(stores, uploads) as rows:
+        ready = {}
+        for code in uploads:
+            row = rows.get(code)
+            handled, resolved = runtime.resolve_materialized(row) if row is not None else (True, None)
+            if handled:
+                ready[code] = _upload_result(runtime, code, row, resolved)
+            else:
+                cold.append(code)
+        if not cold:
+            return _assemble_skills(codes, builtins, ready)
+
+    # Network and publication stay on the single-package path. Re-read under
+    # the batch locks before the SDK scans definitions, in case a package was
+    # replaced while we were waiting on a cold download.
+    for code in cold:
+        async with runtime.coordinated_row(stores, code) as row:
+            if row is not None:
+                await runtime.resolve(row, request_headers=request_headers)
+    async with runtime.coordinated_rows(stores, uploads) as rows:
+        ready = {}
+        for code in uploads:
+            row = rows.get(code)
+            _, resolved = runtime.resolve_materialized(row) if row is not None else (True, None)
+            ready[code] = _upload_result(runtime, code, row, resolved)
+        return _assemble_skills(codes, builtins, ready)
+
+
+def _upload_result(
+    runtime: SkillRuntimeLibrary, code: str, row: SkillPackage | None, resolved: ResolvedSkill | None,
+) -> ResolvedSkill | SkillRuntimeIssue:
+    if resolved is not None:
+        return resolved
+    if row is None:
+        return SkillRuntimeIssue(code=code, reason="unknown")
+    state = runtime.state_for(row)
+    return SkillRuntimeIssue(
+        code=code,
+        reason=state.error_code or ("version_changed" if state.status == RUNTIME_READY else state.status),
+    )
+
+
+def _assemble_skills(
+    codes: list[str], builtins: dict[str, SkillDescriptor],
+    uploaded: dict[str, ResolvedSkill | SkillRuntimeIssue],
+) -> ResolvedSkills:
     items: list[ResolvedSkill] = []
     unavailable: list[SkillRuntimeIssue] = []
     seen: set[str] = set()
@@ -574,25 +652,11 @@ async def resolve_skills_for_run(
             unavailable.append(SkillRuntimeIssue(code=code, reason="duplicate"))
             continue
         seen.add(code)
-        builtin = get_builtin_skill(code)
-        if builtin is not None:
-            items.append(_resolved_builtin(builtin))
-            continue
-        async with runtime.coordinated_row(stores, code) as row:
-            if row is None:
-                unavailable.append(SkillRuntimeIssue(code=code, reason="unknown"))
-                continue
-            resolved = await runtime.resolve(row, request_headers=request_headers)
-        if resolved is None:
-            state = runtime.state(code)
-            unavailable.append(
-                SkillRuntimeIssue(
-                    code=code,
-                    reason=state.error_code or ("version_changed" if state.status == RUNTIME_READY else state.status),
-                )
-            )
-            continue
-        items.append(resolved)
+        item = _resolved_builtin(builtins[code]) if code in builtins else uploaded[code]
+        if isinstance(item, SkillRuntimeIssue):
+            unavailable.append(item)
+        else:
+            items.append(item)
 
     if not items:
         return ResolvedSkills(

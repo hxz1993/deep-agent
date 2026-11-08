@@ -226,12 +226,14 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
             payload = skill_zip(name=code)
             rows.append(await self._create(payload, file_id=f"file-{index}"))
             await self.runtime.materialize(rows[-1], payload=payload)
-        resolved = await resolve_skills_for_run(
-            self.stores,
-            [row.code for row in rows],
-            runtime=self.runtime,
-            request_headers={},
-        )
+        with patch.object(self.stores.skill_package, "_write", wraps=self.stores.skill_package._write) as write:
+            resolved = await resolve_skills_for_run(
+                self.stores,
+                [row.code for row in rows],
+                runtime=self.runtime,
+                request_headers={},
+            )
+        write.assert_called_once()
         self.assertEqual(
             {item.library_root for item in resolved.items},
             {self.root.resolve()},
@@ -256,6 +258,22 @@ class SkillRuntimeLibraryTests(unittest.IsolatedAsyncioTestCase):
             [tool.name for tool in observed[0].function_tools].count("load_capability"),
             1,
         )
+
+    async def test_batch_uses_single_package_fallback_for_cold_skill(self) -> None:
+        cold = await self._create(skill_zip(name="cold-skill"), file_id="cold")
+        payload = skill_zip(name="ready-skill", scripts=True)
+        ready = await self._create(payload, file_id="ready")
+        await self.runtime.materialize(ready, payload=payload)
+
+        resolved = await resolve_skills_for_run(
+            self.stores, [cold.code, "unknown", ready.code, cold.code],
+            runtime=self.runtime, request_headers={"language": "zh_CN"},
+        )
+        self.assertEqual([item.code for item in resolved.items], [cold.code, ready.code])
+        self.assertEqual([(item.code, item.reason) for item in resolved.unavailable],
+                         [("unknown", "unknown"), (cold.code, "duplicate")])
+        self.assertEqual(set(resolved.scripts), {ready.code})
+        self.assertEqual(_Files.downloads, 1)
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=0160-picker-shared");
+    const module = await import("./configuration.js?v=0161-catalog-provider");
     await module.initConfiguration();
     configurationModule = module;
     return module;

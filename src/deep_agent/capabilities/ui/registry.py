@@ -16,6 +16,7 @@ from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
 from deep_agent.capabilities.ui.external import RetryableExternalToolset, build_args_validator
 from deep_agent.capabilities.ui.types import UIToolRecord
+from deep_agent.db.models import UiToolDefinition, UiToolPackage
 from deep_agent.db.stores.bundle import DataStores
 
 
@@ -24,6 +25,19 @@ class EffectiveUiTools:
     definitions: list[UIToolRecord]
     shadowed: dict[str, str]
     has_dynamic: bool
+
+
+@dataclass(frozen=True)
+class UiToolCatalog:
+    tools: list[UiToolDefinition]
+    packages: dict[str, UiToolPackage]
+
+
+async def load_ui_tool_catalog(stores: DataStores) -> UiToolCatalog:
+    return UiToolCatalog(
+        tools=await stores.ui_tool.list_all(),
+        packages={row.code: row for row in await stores.ui_tool_package.list_all()},
+    )
 
 
 def is_tool_visible(
@@ -165,17 +179,17 @@ async def load_ui_tool_hints(
 async def load_effective_ui_tools(
     stores: DataStores,
     spec: AgentSpec,
+    *,
+    catalog: UiToolCatalog | None = None,
 ) -> EffectiveUiTools:
-    db_rows = await stores.ui_tool.list_all()
-    available_packages = {
-        package.code for package in await stores.ui_tool_package.list_all()
-    }
-    db_records = [UIToolRecord.from_row(row) for row in db_rows if row.source == "manual"]
+    if catalog is None:
+        catalog = await load_ui_tool_catalog(stores)
+    db_records = [UIToolRecord.from_row(row) for row in catalog.tools if row.source == "manual"]
 
     visible_db = [
         record
         for record in db_records
-        if record.package_code in available_packages
+        if record.package_code in catalog.packages
         if is_tool_visible(
             record,
             capabilities=spec.capabilities,
@@ -210,8 +224,12 @@ async def load_selectable_ui_tools(
 async def prepare_ui_tool_packages_for_spec(
     stores: DataStores,
     spec: AgentSpec,
+    *,
+    catalog: UiToolCatalog | None = None,
 ) -> tuple[list[ToolPackage], dict[str, dict[str, Any]]]:
-    effective = await load_effective_ui_tools(stores, spec)
+    if catalog is None:
+        catalog = await load_ui_tool_catalog(stores)
+    effective = await load_effective_ui_tools(stores, spec, catalog=catalog)
     valid_definitions: list[UIToolRecord] = []
     for definition in effective.definitions:
         if definition.name in ENVIRONMENT_TOOL_NAMES:
@@ -226,10 +244,6 @@ async def prepare_ui_tool_packages_for_spec(
     grouped: dict[str, list[UIToolRecord]] = {}
     for definition in valid_definitions:
         grouped.setdefault(definition.package_code, []).append(definition)
-    package_rows = {
-        package.code: package
-        for package in await stores.ui_tool_package.list_all()
-    }
     packages: list[ToolPackage] = []
     for package_code, definitions in sorted(grouped.items()):
         if package_code == "ui:builtin":
@@ -243,7 +257,7 @@ async def prepare_ui_tool_packages_for_spec(
                 )
             )
             continue
-        row = package_rows.get(package_code)
+        row = catalog.packages.get(package_code)
         if row is None:
             logger.error("Skipping UI tool package '{}' because it is unavailable", package_code)
             continue
@@ -259,15 +273,15 @@ async def prepare_ui_tool_packages_for_spec(
     return packages, hints
 
 
-async def runnable_ui_tool_package_codes(stores: DataStores) -> set[str]:
+async def runnable_ui_tool_package_codes(
+    stores: DataStores, *, catalog: UiToolCatalog | None = None,
+) -> set[str]:
     """Return UI package codes that can resolve to a non-empty valid Toolset."""
-    available_packages = {
-        package.code
-        for package in await stores.ui_tool_package.list_all()
-    }
+    if catalog is None:
+        catalog = await load_ui_tool_catalog(stores)
     valid_codes = {"ui:builtin"}
-    for row in await stores.ui_tool.list_all():
-        if row.source != "manual" or row.package_code not in available_packages:
+    for row in catalog.tools:
+        if row.source != "manual" or row.package_code not in catalog.packages:
             continue
         record = UIToolRecord.from_row(row)
         try:

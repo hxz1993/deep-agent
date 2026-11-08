@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 import unittest
-import httpx
 from contextlib import asynccontextmanager
+from pathlib import Path
+from unittest.mock import patch
 
+import certifi
+import httpx
 from fastmcp.exceptions import ToolError
 from mcp import McpError
 from mcp.types import ErrorData
@@ -33,6 +39,28 @@ from deep_agent.capabilities.mcp.toolset_builder import (
 )
 from deep_agent.options import OPTION
 from deep_agent.capabilities.mcp.run_scoped import RunScopedMcpToolset
+from deep_agent.capabilities.mcp.snapshot_toolset import _default_tls_context
+
+
+class McpTlsContextTests(unittest.TestCase):
+    def test_default_bundle_reuses_context_until_replaced(self):
+        with tempfile.TemporaryDirectory(prefix="mcp-tls-TMP-to-delete-") as tmp:
+            original = certifi.where()
+            ca = Path(tmp) / "ca.pem"
+            shutil.copyfile(original, ca)
+            with patch.dict(os.environ, {"SSL_CERT_FILE": "", "SSL_CERT_DIR": "", "SSLKEYLOGFILE": ""}):
+                with patch("certifi.where", return_value=str(ca)), patch(
+                    "deep_agent.capabilities.mcp.snapshot_toolset.fastmcp_version", "3.3.0",
+                ):
+                    first = _default_tls_context()
+                    self.assertIsNotNone(first)
+                    self.assertIs(first, _default_tls_context())
+                    replacement = ca.with_name("new.pem")
+                    shutil.copyfile(original, replacement)
+                    replacement.replace(ca)
+                    self.assertIsNot(first, _default_tls_context())
+                    with patch.dict(os.environ, {"SSL_CERT_FILE": str(ca)}):
+                        self.assertIsNone(_default_tls_context())
 
 
 class McpInstructionIdentityTests(unittest.IsolatedAsyncioTestCase):

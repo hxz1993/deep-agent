@@ -73,7 +73,7 @@ class SkillRuntimePublicationRaceTests(unittest.IsolatedAsyncioTestCase):
                 tasks.append(installing)
                 await asyncio.wait_for(published.wait(), 3)
                 operations = {
-                    'chat': resolve_skills_for_run(self.stores, ['example-skill'], runtime=self.runtime, request_headers={}),
+                    'chat': resolve_skills_for_run(self.stores, ['example-skill', 'missing-skill'], runtime=self.runtime, request_headers={}),
                     'reload': _materialize_current(self.ctx, 'example-skill', request_headers={}, force=True),
                     'resource': resource(),
                     'startup': self.runtime.reconcile(self.stores),
@@ -85,6 +85,8 @@ class SkillRuntimePublicationRaceTests(unittest.IsolatedAsyncioTestCase):
                 release.set()
                 results = await asyncio.wait_for(asyncio.gather(*tasks), 5)
                 self.assertEqual(results[0]['agent'].name, 'After')
+                self.assertEqual(results[1].scripts, {})
+                self.assertEqual([item.code for item in results[1].unavailable], ['missing-skill'])
                 self.assertEqual(results[2][0].content_hash, updated.skills['example-skill'][1]['content_hash'])
                 current = (await self.rows(SkillPackage))[0]
                 self.assertTrue(self.runtime._ready_from_disk(current))

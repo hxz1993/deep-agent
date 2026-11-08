@@ -56,6 +56,8 @@ computed["result"]
   不为逐步查看中间值拆开依赖链；成功、截断和完整性检查可在程序内完成。无需在Agent或Skill中
   固定完整代码、唯一PTC次数或内外层发布位置。需要模型理解或选择的阶段返回少量候选，再继续执行。
 - 字符串／JSON提取、列表去重和简单汇总直接用PTC的Python语法处理，不必再调用`execute_python`。
+  汇总前按工具返回约定检查是否成功、结果是否完整，再检查数组和字段类型。对可空或混合类型字段，
+  用普通循环将有效值累加到同一数值类型，并保留有效值计数。缺失值按任务口径处理。
   内置`web_fetch`读取HTML/文本时返回`url/title/content`，可在PTC中从Markdown提取图片链接或相关行，
   再将少量候选交模型判断；需要查看图片时仍在外层使用`view_image`。单张已知URL直接渠道发送即可。
 - pandas/numpy计算或固定Skill脚本：使用已关联Sandbox的`execute_python` / `execute_skill_script`；可原生调用，也可在PTC里直接传代码字符串和JSON inputs。Skill仍只接受原有参数与已索引脚本，不新增文件输入或发布参数。

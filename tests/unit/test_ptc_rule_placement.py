@@ -112,7 +112,8 @@ class PTCRulePlacementTests(unittest.IsolatedAsyncioTestCase):
                     "only inside `run_code`", "authorized session file", "does not roll back earlier nested side effects",
                     "Execute side-effecting tools sequentially", "instead of blindly repeating the write",
                     "Never inspect, measure, print, or return", "cannot directly access host files",
-                    "Generic authorized-file relay shape", "Generic public-file relay shape"):
+                    "Generic numeric summary shape", "Generic authorized-file relay shape",
+                    "pass `url` instead of `file_id`"):
                     self.assertIn(marker, run_code)
                 for obsolete in ("`default=str` is unsupported", "str.format() is also unsupported",
                                  "not string `%`", "csv and decimal are unavailable",

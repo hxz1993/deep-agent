@@ -225,6 +225,34 @@ class AsyncCodeModeRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parts[6].content, '0.3')
         self.assertTrue(all(p.metadata['ptc_diagnostics']['summary']['call_count'] == 0 for p in parts))
 
+    async def test_numeric_summary_example_handles_untyped_tool_results(self):
+        from deep_agent.ptc.toolset import _USAGE_RULES
+
+        example = _USAGE_RULES.split("Generic numeric summary shape", 1)[1]
+        code = example.split("```python\n", 1)[1].split("\n```", 1)[0]
+        code = code.replace("await fetch_rows()", "await data()")
+        cases = [
+            ({"rows": [{"value": 5}, {"value": 2.5}, {"value": None},
+                       {"value": True}, {"value": "3"}, "invalid", {}]},
+             {"row_count": 7, "numeric_count": 2, "total": 7.5}),
+            ({"rows": [{"value": None}]}, {"row_count": 1, "numeric_count": 0, "total": None}),
+            ({"rows": None}, None),
+        ]
+        for payload, expected in cases:
+            with self.subTest(payload=payload):
+                async def data():
+                    return payload
+
+                agent, deps, _ = self._agent(data, [code])
+                part, = _parts(await agent.run("Synthetic numeric summary", deps=deps))
+                self.assertEqual(part.metadata["ptc_diagnostics"]["summary"]["call_count"], 1)
+                if expected is None:
+                    self.assertEqual(part.outcome, "failed")
+                    self.assertIn("Expected a rows list", part.content["error"])
+                else:
+                    self.assertEqual(part.outcome, "success")
+                    self.assertEqual(part.content, expected)
+
     async def test_new_stdlib_support_does_not_expose_host_files_environment_or_packages(self):
         import tempfile
         from pathlib import Path

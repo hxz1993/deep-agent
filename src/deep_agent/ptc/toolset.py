@@ -40,9 +40,8 @@ _DISCOVERY_HINT = (
 
 _ROUTING_GUIDANCE = """Use `run_code` for bounded tool orchestration and data processing: keep tool results
 in program variables when they feed the next tool, or batch/filter/aggregate data.
-A query -> computation/Skill
--> file/export chain can run here without returning the intermediate rows or HTML
-to the model. Choose the steps from the actual task; no fixed recipe is required.
+Keep intermediate data in code until the model needs it for a decision. Choose
+the steps from the actual task; no fixed recipe is required.
 For one independent call with a small result used directly in the answer, use its
 native tool. For libraries or file creation, call execute_python/execute_skill_script,
 either natively or as a step here.
@@ -50,20 +49,21 @@ Python syntax alone does not require execute_python; strings, lists, loops and
 conditions can process JSON/text values here.
 """
 
-_EXECUTION_GUIDANCE = """Execute bounded Python code in Monty. State is preserved between calls in the
-same Run (REPL-style); restart: true discards that state. The last expression is
-returned, and print output is captured. Keep both compact. Only the current catalog
-is callable; read each ordinary tool schema for its arguments and semantics.
+_EXECUTION_GUIDANCE = """Execute bounded Python code in Monty. REPL state persists within the same Run;
+restart: true clears it. The last expression is returned and print output is captured.
 """
 
 _USAGE_RULES = """
 
 DeepAgent PTC rules:
+- Check each tool's success and completeness markers. For undocumented JSON,
+  inspect a small sample before assuming field names or types. Normalize nullable
+  or mixed-type fields before arithmetic. Use a loop with a numeric accumulator
+  for simple totals; avoid sum or += on raw fields. Treat missing values as zero
+  only when the task defines that rule.
 - Monty runs a Python subset, not full CPython. Custom JSON encoder classes (`cls`)
   and json.loads object_hook/object_pairs_hook are unsupported; transform parsed
   data explicitly or use an authorized execute_python/Skill for custom codecs.
-  For diagnostics prefer compact counts; do not serialize large intermediate data
-  merely to measure its size.
 - For concurrent read-only calls use `await asyncio.gather(a(), b())` without
   keyword arguments; `return_exceptions=True` is unsupported. For per-call error
   handling, catch exceptions explicitly. Do not use create_task, wait_for,
@@ -72,12 +72,9 @@ DeepAgent PTC rules:
   not lazy iterators; prefer ordinary loops or list comprehensions within budgets.
   Standard-library APIs are partial; use an authorized execute_python/Skill for
   unavailable APIs and third-party libraries rather than installing packages here.
-- Use ordinary native calls for an independent small lookup/action, tool discovery, or a stage
-  that needs fresh model interpretation or semantic judgment (such as choosing an
-  image after viewing it). Return compact candidates first when judgment is needed;
-  do not hide that judgment in a program or repeat completed calls. When a result
-  will be input to the next tool, pass it directly here and check success/integrity
-  in code; do not split the chain merely to inspect every intermediate value.
+- Use a native call for an independent small lookup/action. If fresh model interpretation or semantic judgment
+  is needed, return compact candidates for the model to decide. When a tool result feeds
+  the next tool, pass it directly here and check success/integrity in code.
 - Tool discovery and schema inspection belong in ordinary native calls.
   Never use `run_code` to discover or probe available tools.
   `search_tools` is native-only: call it outside `run_code`, then read the disclosed
@@ -89,36 +86,32 @@ DeepAgent PTC rules:
 - Follow the call form shown in the Code Mode catalog: use top-level `await` for
   an async function and call a listed synchronous function directly;
   never wrap it with `asyncio.run()`.
-- For file relay, discover the required schemas and select/verify the destination
-  through native calls first. Only then use PTC to relay the opaque bytes between
-  the known upload/send functions without exposing bytes to the model.
+- Before file relay, discover the schemas and verify the destination natively.
+  Pass the opaque payload between the known tools without exposing it to the model.
 - A failed PTC snippet is a completed failed tool call, not a request to keep probing
   the sandbox. Choose corrected code or a native call based on the actual error.
-  Correct read-only code only after identifying the cause; do not replay completed
-  calls or use another path to repeat an uncertain write. Check already-started writes
-  before any retry; a script error does not roll back earlier nested side effects.
+  After identifying the cause, reuse available REPL values and resume from the
+  failed step. Check already-started calls before retrying. A script error
+  does not roll back earlier nested side effects; never blindly replay an uncertain write.
 - Use `load_file_data` only inside `run_code` when an authorized session file or a
   public HTTP(S) file must be passed unchanged to an MCP string argument. Provide
   exactly one of `file_id` and `url`. Treat the returned value as a mapping,
   access fields with `payload['name']`, and pass `payload['content']` unchanged to the
   next tool. Never inspect, measure, print, or return the `content` value.
-- Return only the compact result needed for the task. Do not print file payloads,
-  Base64, or large intermediate values.
-- For HTML/text pages, web_fetch returns an object with url, title and content;
-  content is Markdown and may contain image links. Extract candidate links or
-  relevant lines here without starting Python or refetching the page with requests.
-  For visual inspection, finish this snippet and call outer view_image with the returned File ID or URL.
-  view_image is not a PTC function: only the primary model can interpret its images/PDF pages.
+- Return only what the task needs. For diagnostics prefer counts to serializing
+  intermediate data. Do not print file payloads, Base64, or large values.
+- For HTML/text pages, web_fetch returns an object with url, title and content.
+  Extract relevant lines or links from its Markdown here without refetching.
+  For visual inspection, return the File ID or URL and call outer view_image.
 - Authorized MCP, web_search, web_fetch, execute_python, execute_skill_script and
   export_file_to_download_center retain their ordinary native entry points. Only
   functions actually listed in this catalog can also be used here. Call Python
   with code and JSON inputs; call a Skill with its exact authorized script path.
   No save_file_data, read_file, parse_document, UI confirmation or Shell function
   is added to this catalog. Python executions still have separate temporary dirs.
-- For Python or Skill code that needs the current user's identity/app scope, pass
-  include_context=True to that execution tool. It receives credential-free JSON in
-  DEEP_AGENT_CONTEXT; ordinary computation and fixed-account APIs keep False.
-  Native and nested calls share the same Run snapshot. Monty itself cannot read it.
+- When Python/Skill needs the current user's identity/app scope, pass
+  include_context=True for credential-free DEEP_AGENT_CONTEXT JSON; otherwise leave
+  False. Native and nested calls share the Run snapshot. Monty cannot read it.
 - In a trusted channel run, channel_message is also available natively and here.
   Forward a known public media URL directly with components=[{'type': 'image',
   'url': public_url}], or use an authorized file_id. No Python or platform upload
@@ -138,22 +131,28 @@ DeepAgent PTC rules:
   schema and the selected Skill for service-specific prerequisites and workflows;
   generic examples below are placeholders, not a fixed business recipe.
 - `run_code` cannot directly access host files, environment variables, network sockets,
-  Shell, pip, or third-party packages. It can call only catalog functions; public-file
-  relay uses `load_file_data(url=...)`, or the trusted channel_message URL input.
+  Shell, pip, or third-party packages. Only listed catalog functions are callable.
 
-Generic authorized-file relay shape:
+Generic numeric summary shape (example tool returns complete rows or raises an
+error; use the actual catalog alias, fields and status checks for your tool):
 ```python
-payload = await load_file_data(file_id="file_001", encoding="base64")
-uploaded = await upload_tool(
-    file_name=payload["name"],
-    payload_string=payload["content"],
-)
-{"uploaded_id": uploaded["id"]}
+result = await fetch_rows()
+rows = result.get("rows") if isinstance(result, dict) else None
+if not isinstance(rows, list):
+    raise ValueError("Expected a rows list")
+total = 0.0
+count = 0
+for row in rows:
+    value = row.get("value") if isinstance(row, dict) else None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        total = total + float(value)
+        count = count + 1
+{"row_count": len(rows), "numeric_count": count, "total": total if count else None}
 ```
 
-Generic public-file relay shape:
+Generic authorized-file relay shape (for a public file, pass `url` instead of `file_id`):
 ```python
-payload = await load_file_data(url="https://example.com/report.png")
+payload = await load_file_data(file_id="file_001", encoding="base64")
 uploaded = await upload_tool(
     file_name=payload["name"],
     payload_string=payload["content"],

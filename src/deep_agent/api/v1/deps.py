@@ -34,6 +34,7 @@ from deep_agent.capabilities.mcp.resources import build_mcp_resource_toolset
 from deep_agent.capabilities.ui.registry import (
     UiToolCatalog, load_ui_tool_catalog, prepare_ui_tool_packages_for_spec, runnable_ui_tool_package_codes,
 )
+from deep_agent.services.integration_app_runtime import RunAppContext
 from deep_agent.skills.runtime import ResolvedSkills, resolve_skills_for_run
 from deep_agent.skills.script_tool import build_skill_script_toolset
 from deep_agent.skills.tools import build_skill_resource_toolset
@@ -147,6 +148,7 @@ async def build_runner_for_agent(
     channel_context: ChannelRunContext | None = None,
     reasoning_effort: str | None = None,
     expected_provider_id: str | None = None,
+    app_context: RunAppContext | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     row = await ctx.stores.agent.get_by_id(agent_id)
@@ -175,7 +177,22 @@ async def build_runner_for_agent(
         spec = replace(spec, instructions=f"{spec.instructions}\n\n{entry_instructions}")
     if capabilities is not None:
         spec.capabilities = canonical_tool_package_codes(capabilities)
-    runner = await _build_runner_from_spec(spec, ctx, request_headers=request_headers, channel_context=channel_context)
+    if app_context is not None:
+        instructions = (
+            f"{spec.instructions}\n\n"
+            f"当前会话应用上下文：app_id={app_context.app_id}，space_id={app_context.space_id}。"
+        )
+        if app_context.skill_scope is not None:
+            instructions += (
+                "\n同一业务口径优先采用当前应用的专用提示词和 Skill。通用 Skill 仍可用，"
+                "并继续遵守平台授权和基础约束。"
+            )
+            if app_context.prompt_append:
+                instructions += f"\n\n当前应用追加提示词：\n{app_context.prompt_append}"
+        spec = replace(spec, instructions=instructions)
+    runner = await _build_runner_from_spec(
+        spec, ctx, request_headers=request_headers, channel_context=channel_context, app_context=app_context,
+    )
     async def load_output_config():
         current = await ctx.stores.agent.get_by_id(agent_id)
         if current is None:
@@ -201,6 +218,7 @@ async def _build_runner_from_spec(
     *,
     request_headers: dict[str, str] | None = None,
     channel_context: ChannelRunContext | None = None,
+    app_context: RunAppContext | None = None,
 ) -> AgentRunner:
     spec = replace(
         spec,
@@ -245,6 +263,7 @@ async def _build_runner_from_spec(
         spec.skills,
         runtime=ctx.skill_runtime,
         request_headers=request_headers or {},
+        **({"app_id": app_context.app_id, "scope_ref": app_context.skill_scope} if app_context and app_context.skill_scope else {}),
     )
     script_execution_available = _skill_script_execution_available(
         spec,

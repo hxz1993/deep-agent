@@ -2815,3 +2815,43 @@ dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface
 .tool-web-search-setting button svg { width: 13px; height: 13px; flex: 0 0 auto; }
 
 .catalog-panel .catalog-results > .models-pagination { width: 100%; }
+
+.context-app-combobox { position: relative; }
+.context-app-combobox #contextAppInput { padding-right: 32px; }
+.context-app-combobox #contextAppInput:focus { border-color: var(--border); box-shadow: none; outline: none; }
+#contextAppOptionsBtn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 100%;
+}
+#contextAppOptionsBtn svg { width: var(--ui-icon-action); height: var(--ui-icon-action); }
+#contextAppChoices {
+  position: absolute;
+  z-index: 2;
+  inset: calc(100% + 4px) 0 auto;
+  max-height: min(244px, 42vh);
+  overflow: auto;
+  padding: 4px;
+  background: var(--console-canvas, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--ui-radius);
+  box-shadow: var(--shadow);
+}
+#contextAppChoices[hidden] { display: none; }
+.context-app-choices-heading { padding: 4px 8px; color: var(--text-dim); font-size: 12px; }
+#contextAppChoices button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: var(--ui-radius);
+}
+#contextAppChoices button:hover,
+#contextAppChoices button:focus-visible,
+#contextAppChoices button[aria-selected="true"] { background: var(--accent-soft); }
+#contextAppChoices small { color: var(--text-dim); }

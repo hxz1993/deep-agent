@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from pydantic_ai import Agent as ModelAgent
 from pydantic_ai.models.test import TestModel
 
-from deep_agent.db.models import Base
 from deep_agent.db.dialect import resolve_dialect
 from deep_agent.db.stores.bundle import create_data_stores
 from deep_agent.db.reference_integrity import acquire_write_barrier
@@ -102,7 +101,7 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(await db.scalar(text("SELECT agent_id FROM channel_accounts WHERE id='channel-1'")), "agent-1")
                     self.assertEqual(await db.scalar(text("SELECT version_num FROM alembic_version")), "012")
                     self.assertEqual(await db.run_sync(lambda c: sum(len(inspect(c).get_foreign_keys(t))
-                                                                     for t in Base.metadata.tables)), 0)
+                                                                     for t in physical.tables)), 0)
                 # Remain on 012 through the complete import/locking contract.
                 await build_configuration_import_plan(backup.path, target_engine=target)
                 # Reverse direction: the importer blocks ordinary writers too.
@@ -123,7 +122,7 @@ class ConfigurationImportDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 # Only current runtime CRUD requires the new ORM columns. Do
                 # not weaken the historical backup/restore assertions above by
                 # replacing their 012 source or target with current metadata.
-                await asyncio.to_thread(_upgrade_target_schema, target_url, "013")
+                await asyncio.to_thread(_upgrade_target_schema, target_url, "head")
                 await self._verify_imported_agent_chat(target, target_url)
         finally:
             if target is not None:

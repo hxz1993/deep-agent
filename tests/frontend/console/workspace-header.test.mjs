@@ -151,7 +151,7 @@ test("测试 App 使用锚定轻量浮层而不是抽屉", () => {
   assert.doesNotMatch(consoleIndex, /contextDrawer|contextBackdrop|context-drawer|drawer-backdrop/);
   assert.match(consoleCss, /\.context-popover\s*\{[\s\S]*position: fixed;[\s\S]*border-radius: 13px/);
   assert.match(consoleIndex, /id="resetContextBtn">不分应用<\/button>/);
-  assert.match(contextSource, /contextAppInput"\)\?\.addEventListener\("input", previewContextFromInput\)/);
+  assert.match(contextSource, /appInput\?\.addEventListener\("input", \(\) => \{\s*previewContextFromInput\(\);/);
   assert.match(contextSource, /\["User ID", identity\?\.user \|\| "未认证"\]/);
   assert.match(contextSource, /identity\?\.username \|\| identity\?\.user \|\| "未认证"/);
   assert.match(contextSource, /api\.currentUser\(\)[\s\S]*catch\(\(\) => null\)/);

@@ -1,12 +1,16 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Request
 
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.integration_routes import IntegrationRoute
+from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.integrations.catalog import INTEGRATION_DEFINITIONS, IntegrationCode, get_integration_definition
-from deep_agent.schemas.integration import IntegrationCatalog, IntegrationSettingsWrite, IntegrationGroup, IntegrationItem
+from deep_agent.schemas.integration import (
+    IntegrationAppValidation, IntegrationCatalog, IntegrationGroup, IntegrationItem, IntegrationSettingsWrite,
+)
+from deep_agent.services.integration_app_access import IntegrationAppAccessError, IntegrationAppDirectory, ManagedApp
 
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES, route_class=IntegrationRoute)
 tag = "integrations"
@@ -56,3 +60,19 @@ async def clear_integration_configuration(code: IntegrationCodePath, ctx: AppCon
     definition = require_definition(code)
     await get_store(ctx).delete(code)
     return integration_item(definition)
+
+
+@router.post("/integrations/{code}/app-configs/validate", response_model=ManagedApp)
+async def validate_integration_app(
+    code: IntegrationCodePath,
+    body: IntegrationAppValidation,
+    request: Request,
+    user: RequestUserDep,
+) -> ManagedApp:
+    """Validate the app and the caller's enterprise scope without saving configuration."""
+    if require_definition(code).code != IntegrationCode.DEEPTABLE_ASSISTANT:
+        raise HTTPException(404, detail="此集成没有应用专用配置。")
+    try:
+        return await IntegrationAppDirectory(request, user).verify(body.app_id.strip())
+    except IntegrationAppAccessError as exc:
+        raise HTTPException(exc.status, detail=str(exc)) from exc

@@ -10,6 +10,9 @@ from loguru import logger
 
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
+from deep_agent.api.v1.integration_apps import verify_app_scope_rows
+from deep_agent.api.v1.request_identity import require_request_user
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE
 from deep_agent.core.context import AppContextDep
 from deep_agent.schemas.configuration_import import (
     ConfigurationImportResponse,
@@ -178,6 +181,9 @@ async def import_configuration(
                 skills_bundle_path=skills_path,
                 active_run_count=ctx.active_runs.active_count(),
             )
+            app_rows = plan.rows.get("integration_scoped_settings", ())
+            if app_rows:
+                await verify_app_scope_rows(request, require_request_user(request.headers.get("user")), app_rows)
             if not apply:
                 return _response(plan, imported=False)
 
@@ -196,8 +202,10 @@ async def import_configuration(
             if result.plan.skills:
                 try:
                     await ctx.skill_runtime.reconcile(ctx.stores)
+                    scopes = {row["code"]: row.get("scope_ref") or GENERAL_SKILL_SCOPE
+                              for row in result.plan.rows["skill_packages"]}
                     for payload in result.plan.skills:
-                        row = await ctx.stores.skill_package.get_by_code(payload.code)
+                        row = await ctx.stores.skill_package.get_by_code(payload.code, scope_ref=scopes[payload.code])
                         if (
                             row is None
                             or ctx.skill_runtime.state_for(row).status != RUNTIME_READY

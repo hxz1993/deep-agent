@@ -41,9 +41,11 @@ class ScopeDirectory:
     apps: dict[str, str] = field(default_factory=dict)
     spaces: dict[str, str] = field(default_factory=dict)
 
+    app_scopes: dict[str, tuple[str, str]] = field(default_factory=dict)
+
     def copy(self) -> ScopeDirectory:
         # Cached maps must not be mutated by an API response's enrichment.
-        return ScopeDirectory(apps=dict(self.apps), spaces=dict(self.spaces))
+        return ScopeDirectory(apps=dict(self.apps), spaces=dict(self.spaces), app_scopes=dict(self.app_scopes))
 
 
 class ScopeDirectoryUnavailableError(RuntimeError):
@@ -84,7 +86,7 @@ def normalize_scope_directory(payload: object) -> ScopeDirectory:
         raise ScopeDirectoryUnavailableError("invalid scope directory")
     directory = ScopeDirectory()
     item_count = 0
-    for spaces in payload.values():
+    for tenant_id, spaces in payload.items():
         if not isinstance(spaces, list):
             raise ScopeDirectoryUnavailableError("invalid scope directory")
         for space in spaces:
@@ -108,6 +110,11 @@ def normalize_scope_directory(payload: object) -> ScopeDirectory:
                 app_id, app_name = _text(app.get("app")), _name(app.get("appName"))
                 if app_id and app_name:
                     directory.apps[app_id] = app_name
+                if (
+                    app_id and space_id and tenant_id and space.get("tenantCode", tenant_id) == tenant_id
+                    and app.get("appType") == "DEEPFOS"
+                ):
+                    directory.app_scopes[app_id] = (space_id, tenant_id)
     return directory
 
 

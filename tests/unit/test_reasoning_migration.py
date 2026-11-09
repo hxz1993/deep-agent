@@ -29,18 +29,18 @@ class ReasoningMigrationTests(unittest.TestCase):
             with sqlite3.connect(path) as db:
                 db.execute("UPDATE alembic_version SET version_num='014'")
             with self.assertRaisesRegex(RuntimeError, "does not match this release"):
-                command.upgrade(config, "head")
+                command.upgrade(config, "014")
             with sqlite3.connect(path) as db:
                 db.execute("UPDATE alembic_version SET version_num='013'")
                 db.execute("ALTER TABLE llm_models ADD COLUMN reasoning_options INTEGER")
             with self.assertRaisesRegex(RuntimeError, "unexpected column definition"):
-                command.upgrade(config, "head")
+                command.upgrade(config, "014")
             with sqlite3.connect(path) as db:
                 self.assertNotIn("reasoning_effort", {item[1] for item in db.execute("PRAGMA table_info(agents)")})
                 db.execute("ALTER TABLE llm_models DROP COLUMN reasoning_options")
                 db.execute("ALTER TABLE llm_models ADD COLUMN reasoning_options TEXT")
-            command.upgrade(config, "head")
-            command.upgrade(config, "head")
+            command.upgrade(config, "014")
+            command.upgrade(config, "014")
             with sqlite3.connect(path) as db:
                 self.assertEqual(db.execute("SELECT payload FROM chat_session_events").fetchone(), (old_event,))
                 self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("014",))

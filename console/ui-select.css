@@ -64,6 +64,13 @@ button.reasoning-picker-trigger:is(:hover, :focus-visible) .reasoning-picker-cur
 .da-select-menu[data-badge-align="end"] .has-badge > span:not(.da-select-badge) { flex: 1; }
 .da-select-menu[data-badge-align="end"] .has-badge .da-select-badge { flex: none; margin-left: auto; }
 
+.da-select-option-with-detail { justify-content: space-between; gap: 16px; }
+.da-select-option-with-detail > span { display: grid; min-width: 0; }
+.da-select-option-with-detail > span:first-child { flex: 1; color: var(--text); }
+.da-select-option-with-detail > span:last-child { max-width: 48%; color: var(--text-dim); text-align: right; }
+.da-select-option-with-detail > span > :is(span, code) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.da-select-option-with-detail code { color: var(--text-faint); font-size: 11px; }
+
 /* Optional option metadata; undecorated selects retain the existing layout. */
 .da-select-option.has-icon { gap: 8px; }
 .da-select-option.has-icon > svg,

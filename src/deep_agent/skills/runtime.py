@@ -18,7 +18,10 @@ from pathlib import Path
 from typing import Mapping
 
 from loguru import logger
+from pydantic_ai.capabilities import AbstractCapability, Capability, CombinedCapability
 from pydantic_ai_harness.skills import Skills
+
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, skill_package_code
 
 from deep_agent.db.models import SkillPackage
 from deep_agent.db.stores.bundle import DataStores
@@ -90,7 +93,7 @@ class ResolvedSkills:
     configured: tuple[str, ...]
     items: tuple[ResolvedSkill, ...]
     unavailable: tuple[SkillRuntimeIssue, ...]
-    capability: Skills | None
+    capability: AbstractCapability | None
 
     @property
     def resources(self) -> dict[str, ResolvedSkill]:
@@ -310,7 +313,7 @@ class SkillRuntimeLibrary:
         destination = self._destination(row.code)
         try:
             parsed = parse_skill_zip(payload, workdir=staging)
-            if parsed.code != row.code:
+            if parsed.code != skill_package_code(row):
                 raise SkillUnavailableError(
                     f"Skill package code changed from {row.code!r} to {parsed.code!r}"
                 )
@@ -583,9 +586,22 @@ async def resolve_skills_for_run(
     *,
     runtime: SkillRuntimeLibrary,
     request_headers: Mapping[str, str],
+    app_id: str | None = None,
+    scope_ref: str | None = None,
 ) -> ResolvedSkills:
+    if not codes and scope_ref is None:
+        return ResolvedSkills(configured=(), items=(), unavailable=(), capability=None)
+    scoped = {
+        row.code: (f"app:{app_id}:{skill_package_code(row)}", row.description)
+        for row in await stores.skill_package.list_all(scope_ref=scope_ref)
+    } if scope_ref is not None else {}
+    codes = [*codes, *scoped]
     if not codes:
         return ResolvedSkills(configured=(), items=(), unavailable=(), capability=None)
+
+    def authorized(row, key):
+        expected = scope_ref if key in scoped else GENERAL_SKILL_SCOPE
+        return row if row is not None and (getattr(row, "scope_ref", None) or GENERAL_SKILL_SCOPE) == expected else None
     builtins = {item.code: item for item in list_builtin_skills()}
     uploads = list(dict.fromkeys(code for code in codes if code not in builtins))
     if not uploads:
@@ -593,36 +609,38 @@ async def resolve_skills_for_run(
     if len(uploads) == 1:
         code = uploads[0]
         async with runtime.coordinated_row(stores, code) as row:
+            row = authorized(row, code)
             resolved = await runtime.resolve(row, request_headers=request_headers) if row is not None else None
-            return _assemble_skills(codes, builtins, {code: _upload_result(runtime, code, row, resolved)})
+            return _assemble_skills(codes, builtins, {code: _upload_result(runtime, code, row, resolved)}, scoped)
 
     cold: list[str] = []
     async with runtime.coordinated_rows(stores, uploads) as rows:
         ready = {}
         for code in uploads:
-            row = rows.get(code)
+            row = authorized(rows.get(code), code)
             handled, resolved = runtime.resolve_materialized(row) if row is not None else (True, None)
             if handled:
                 ready[code] = _upload_result(runtime, code, row, resolved)
             else:
                 cold.append(code)
         if not cold:
-            return _assemble_skills(codes, builtins, ready)
+            return _assemble_skills(codes, builtins, ready, scoped)
 
     # Network and publication stay on the single-package path. Re-read under
     # the batch locks before the SDK scans definitions, in case a package was
     # replaced while we were waiting on a cold download.
     for code in cold:
         async with runtime.coordinated_row(stores, code) as row:
+            row = authorized(row, code)
             if row is not None:
                 await runtime.resolve(row, request_headers=request_headers)
     async with runtime.coordinated_rows(stores, uploads) as rows:
         ready = {}
         for code in uploads:
-            row = rows.get(code)
+            row = authorized(rows.get(code), code)
             _, resolved = runtime.resolve_materialized(row) if row is not None else (True, None)
             ready[code] = _upload_result(runtime, code, row, resolved)
-        return _assemble_skills(codes, builtins, ready)
+        return _assemble_skills(codes, builtins, ready, scoped)
 
 
 def _upload_result(
@@ -642,7 +660,11 @@ def _upload_result(
 def _assemble_skills(
     codes: list[str], builtins: dict[str, SkillDescriptor],
     uploaded: dict[str, ResolvedSkill | SkillRuntimeIssue],
+    scoped: dict[str, tuple[str, str]] | None = None,
 ) -> ResolvedSkills:
+    scoped = scoped or {}
+    configured = tuple(scoped[code][0] if code in scoped else code for code in codes)
+    scoped_capabilities = []
     items: list[ResolvedSkill] = []
     unavailable: list[SkillRuntimeIssue] = []
     seen: set[str] = set()
@@ -653,6 +675,37 @@ def _assemble_skills(
             continue
         seen.add(code)
         item = _resolved_builtin(builtins[code]) if code in builtins else uploaded[code]
+        if code in scoped:
+            alias, description = scoped[code]
+            if isinstance(item, SkillRuntimeIssue):
+                unavailable.append(SkillRuntimeIssue(alias, item.reason))
+                continue
+            try:
+                raw = (item.package_root / "SKILL.md").read_bytes()
+                if hashlib.sha256(raw).hexdigest() != item.definition_hash:
+                    raise ValueError("Skill definition changed")
+                lines = raw.decode("utf-8").splitlines()
+                closing = lines.index("---", 1)
+                body = "\n".join(lines[closing + 1:]).strip()
+            except (OSError, ValueError):
+                unavailable.append(SkillRuntimeIssue(alias, "version_changed"))
+                continue
+            # The SDK reserves colons in capability IDs. Keep the user-facing
+            # resource/script alias intact and point the SDK capability to it.
+            capability_id = alias.replace(":", "--")
+            scoped_capabilities.append(Capability(
+                id=capability_id,
+                description=(
+                    f"当前应用专用 Skill。{description} "
+                    f"加载使用 id={capability_id}；资源和脚本使用 skill_code={alias}。"
+                ),
+                instructions=(
+                    "# 已加载应用专用 Skill\n\n"
+                    f"读取资源或执行脚本时使用 skill_code={alias}。\n\n{body}"
+                ),
+                defer_loading=True,
+            ))
+            object.__setattr__(item, "code", alias)
         if isinstance(item, SkillRuntimeIssue):
             unavailable.append(item)
         else:
@@ -660,20 +713,23 @@ def _assemble_skills(
 
     if not items:
         return ResolvedSkills(
-            configured=tuple(codes),
+            configured=configured,
             items=(),
             unavailable=tuple(unavailable),
             capability=None,
         )
 
     directories: list[Path] = []
-    for item in items:
+    general_items = [item for item in items if not item.code.startswith("app:")]
+    for item in general_items:
         if item.library_root not in directories:
             directories.append(item.library_root)
-    available_codes = [item.code for item in items]
-    capability = Skills(directories, include=available_codes)
+    capability = Skills(directories, include=[item.code for item in general_items]) if directories else None
+    if scoped_capabilities:
+        children = ([capability] if capability is not None else []) + scoped_capabilities
+        capability = CombinedCapability(children)
     return ResolvedSkills(
-        configured=tuple(codes),
+        configured=configured,
         items=tuple(items),
         unavailable=tuple(unavailable),
         capability=capability,

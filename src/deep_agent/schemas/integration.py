@@ -73,3 +73,8 @@ class IntegrationGroup(BaseModel):
 
 class IntegrationCatalog(BaseModel):
     groups: list[IntegrationGroup]
+
+
+class IntegrationAppValidation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    app_id: str = Field(min_length=1, max_length=50)

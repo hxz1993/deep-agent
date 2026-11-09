@@ -91,11 +91,16 @@ class ChatSessionStoreBase(SessionBoundMixin):
         return SessionOwner(exists=user_id is not None, user_id=user_id)
 
     async def get_initial_scope(self, agent_id: str, session_id: str) -> tuple[str | None, str | None]:
+        return await self.find_initial_scope(agent_id, session_id) or (None, None)
+
+    async def find_initial_scope(
+        self, agent_id: str, session_id: str,
+    ) -> tuple[str | None, str | None] | None:
         async with self._read() as db:
             row = (await db.execute(select(ChatSession.app_id, ChatSession.space_id).where(
                 ChatSession.agent_id == agent_id, ChatSession.session_id == session_id,
             ))).one_or_none()
-            return (row.app_id, row.space_id) if row else (None, None)
+            return (row.app_id, row.space_id) if row else None
 
     async def get_source(self, agent_id: str, session_id: str) -> tuple[str, str | None]:
         async with self._read() as db:

@@ -23,6 +23,8 @@ from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_execution_context_headers, extract_forward_headers
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
 from deep_agent.api.v1.deps import build_runner_for_agent
+from deep_agent.services.integration_app_runtime import RunAppContext, ensure_scoped_run_session, resolve_run_app
+from deep_agent.options import OPTION
 from deep_agent.api.v1.channel_auth import ChannelAccountDep, ChannelRequestUserDep
 from deep_agent.api.v1.stream_diagnostics import DiagnosticEventSourceResponse, transport_cancel_reason
 from deep_agent.core.context import AppContextDep
@@ -73,6 +75,7 @@ def _agent_deps(
     request_headers: dict[str, str] | None = None,
     execution_request_headers: dict[str, str] | None = None,
     local_username: str | None = None,
+    app_context: RunAppContext | None = None,
 ) -> AgentDeps:
     conversation_id = conversation_id_for(agent_id, session_id)
     return AgentDeps(
@@ -88,9 +91,19 @@ def _agent_deps(
         local_username=local_username,
         file_store=ctx.file_store,
         upload_settings_store=getattr(ctx.stores, "global_setting", None),
-        app_id=(request_headers or {}).get("app"),
-        space_id=(request_headers or {}).get("space"),
+        app_id=app_context.app_id if app_context else (request_headers or {}).get("app"),
+        space_id=app_context.space_id if app_context else (request_headers or {}).get("space"),
     )
+
+
+def _apply_scoped_run_headers(app, forward_headers, execution_headers) -> None:
+    if app is None or app.skill_scope is None:
+        return
+    allowed = OPTION.agent.mcp_forward_request_headers
+    for name, value in (("app", app.app_id), ("space", app.space_id)):
+        execution_headers[name] = value
+        if any(rule == name or (rule.endswith("*") and name.startswith(rule[:-1])) for rule in allowed):
+            forward_headers[name] = value
 
 
 def _local_execution_username(request: Request, user: str) -> str | None:
@@ -273,6 +286,11 @@ async def chat(
         ctx, body, session_id=session_id, user=user
     )
     message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
+    app_context = await resolve_run_app(
+        request, ctx, agent_id=agent_id, user=user, session_id=body.session_id,
+        headers=execution_request_headers, channel_account=channel_account,
+    )
+    _apply_scoped_run_headers(app_context, request_headers, execution_request_headers)
     try:
         runner = await build_runner_for_agent(
             ctx,
@@ -281,6 +299,7 @@ async def chat(
             **({'reasoning_effort': body.reasoning_effort} if body.reasoning_effort is not None else {}),
             capabilities=body.capabilities,
             request_headers=request_headers,
+            **({"app_context": app_context} if app_context is not None else {}),
             channel_type=channel_account.channel_type if channel_account is not None else None,
             **({"channel_context": message_source} if message_source is not None else {}),
         )
@@ -296,6 +315,7 @@ async def chat(
         request_headers=request_headers,
         execution_request_headers=execution_request_headers,
         local_username=_local_execution_username(request, user),
+        app_context=app_context,
     )
     try:
         active_run = ctx.active_runs.register(
@@ -308,6 +328,7 @@ async def chat(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     deps.cancellation_token = active_run.cancellation_token
     try:
+        await ensure_scoped_run_session(ctx, app_context, agent_id, session_id)
         if message_source is not None:
             await ctx.stores.channel.update_run(message_source.channel_run_id, agent_run_id=deps.run_id)
         await _adopt_channel_session_scope(ctx, channel_account, deps)
@@ -382,6 +403,11 @@ async def chat_stream(
     elif deferred_tool_results is not None:
         effort = DEFAULT_EFFORT
     message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
+    app_context = await resolve_run_app(
+        request, ctx, agent_id=agent_id, user=user, session_id=body.session_id,
+        headers=execution_request_headers, channel_account=channel_account,
+    )
+    _apply_scoped_run_headers(app_context, request_headers, execution_request_headers)
     try:
         runner = await build_runner_for_agent(
             ctx,
@@ -391,6 +417,7 @@ async def chat_stream(
             **({'expected_provider_id': pending_reasoning.provider_id} if pending_reasoning is not None else {}),
             capabilities=body.capabilities,
             request_headers=request_headers,
+            **({"app_context": app_context} if app_context is not None else {}),
             channel_type=channel_account.channel_type if channel_account is not None else None,
             **({"channel_context": message_source} if message_source is not None else {}),
         )
@@ -414,6 +441,7 @@ async def chat_stream(
         request_headers=request_headers,
         execution_request_headers=execution_request_headers,
         local_username=_local_execution_username(request, user),
+        app_context=app_context,
     )
     session_data = {
         "session_id": session_id,
@@ -444,6 +472,13 @@ async def chat_stream(
         stream_run = active_run
         live_key = (deps.agent_id, session_id, deps.user)
         try:
+            try:
+                await ensure_scoped_run_session(ctx, app_context, agent_id, session_id)
+            except HTTPException as exc:
+                yield {"event": "error", "data": json.dumps(
+                    {"type": "error", "code": "session_app_changed", "message": exc.detail}, ensure_ascii=False,
+                )}
+                return
             # A rejected duplicate request must never replace the active source
             # run's identity. Bind only after exclusive run admission succeeds.
             if message_source is not None:

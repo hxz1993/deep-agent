@@ -18,7 +18,7 @@ BACKUP_SCOPE_SCHEMA_VERSION = "1.1"
 # manifests are versioned assets and must not change with ORM FK declarations.
 CONFIGURATION_TABLE_ORDER = (
     "global_settings", "llm_providers", "mcp_servers", "model_catalog",
-    "skill_packages", "ui_tool_packages", "llm_models", "ui_tool_definitions",
+    "integration_scoped_settings", "skill_packages", "ui_tool_packages", "llm_models", "ui_tool_definitions",
     "agents", "agent_output_configs", "wecom_applications", "channel_accounts", "integration_settings",
 )
 
@@ -51,7 +51,7 @@ def backup_scope_manifest(copied_tables: Sequence[str]) -> dict[str, Any]:
                 "included": False,
                 "locator_table": "skill_packages",
                 "locator_column": "platform_file_id",
-                "export_api": "/api/v1/skills/export",
+                "export_api": ("/api/v1/configuration/skills/export" if "integration_scoped_settings" in copied_tables else "/api/v1/skills/export"),
             }
         ],
     }

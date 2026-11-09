@@ -206,6 +206,23 @@ class IntegrationSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class IntegrationScopedSettings(Base):
+    __tablename__ = "integration_scoped_settings"
+    __table_args__ = (
+        UniqueConstraint("integration_code", "scope_type", "scope_key", name="uq_integration_scoped_settings_scope"),
+        Index("ix_integration_scoped_settings_tenant", "integration_code", "scope_type", "tenant_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    integration_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_key: Mapped[str] = mapped_column(KeyText, nullable=False)
+    tenant_id: Mapped[str] = mapped_column(KeyText, nullable=False)
+    settings: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class GlobalSetting(Base):
     __tablename__ = "global_settings"
 
@@ -232,6 +249,7 @@ class SkillPackage(Base):
     __tablename__ = "skill_packages"
 
     code: Mapped[str] = mapped_column(KeyText, primary_key=True)
+    scope_ref: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     label: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str | None] = mapped_column(String(64), nullable=True)

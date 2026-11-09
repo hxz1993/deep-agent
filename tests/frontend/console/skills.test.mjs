@@ -186,7 +186,8 @@ test("配置中心提供独立 Skill 页面而不是工具包分类", () => {
   assert.match(shell, /data-tab="skills"/);
   assert.match(template, /id="panel-skills"/);
   assert.match(template, /Skill 提供任务方法与资源，不会自动授予 MCP/);
-  assert.match(source, /apiFetch\("\/api\/v1\/skills", \{ signal:/);
+  assert.match(source, /return \(this\.appPath \|\| "\/api\/v1\/skills"\) \+ suffix;/);
+  assert.match(source, /apiFetch\(this\.endpoint\(\), \{[^}]*signal:/);
 });
 
 test("Skill 页面区分内置和上传包的可操作边界", () => {
@@ -202,7 +203,7 @@ test("Skill 页面区分内置和上传包的可操作边界", () => {
   assert.match(template, /id="exportAllSkillsBtn"><i data-lucide="download"><\/i>导出全部/);
   assert.match(source, /"\/api\/v1\/skills\/export"/);
   assert.match(source, /重新加载/);
-  assert.match(source, /\/skills\/\$\{encodeURIComponent\(skill\.code\)\}\/reload/);
+  assert.match(source, /this\.endpoint\(\x60\/\$\{encodeURIComponent\(skill\.code\)\}\/reload\x60\)/);
   assert.match(source, /运行文件已就绪/);
   assert.match(source, /运行文件同步失败/);
   assert.doesNotMatch(source, /script_execution_status/);
@@ -275,7 +276,7 @@ test("Skill 使用紧凑表格与第二页文件详情", () => {
   assert.match(source, /data-read-resource="SKILL\.md"/);
   assert.match(source, /<code title="SKILL\.md">SKILL\.md<\/code>/);
   assert.doesNotMatch(source, /控制台索引摘要|索引摘要/);
-  assert.match(source, /const url = `\/api\/v1\/skills\/\$\{encodeURIComponent\(code\)\}\/resources/);
+  assert.match(source, /const url = this\.endpoint\(\x60\/\$\{encodeURIComponent\(code\)\}\/resources/);
   assert.match(source, /await apiFetch\(url/);
   assert.match(source, /selectedResourcePath: null/);
   assert.match(source, /selectedResource\?\.path \|\| "SKILL\.md"/);

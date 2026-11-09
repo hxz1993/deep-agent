@@ -99,7 +99,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def _target_engine(
         self,
         *,
-        revision: str = "014",
+        revision: str = "015",
         baseline: bool = False,
     ) -> AsyncEngine:
         target = self.root / f"target-{revision}-{baseline}.db"
@@ -131,7 +131,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         self,
         *,
         include_skill: bool = False,
-        revision: str = "014",
+        revision: str = "015",
     ) -> tuple[Path, Path | None, bytes | None]:
         source = self.root / f"source-{include_skill}-{revision}.db"
         await config_backup_tests.ConfigBackupTests()._create_source(source, revision=revision)
@@ -167,7 +167,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 connection.execute("UPDATE agents SET skills='[]'")
                 connection.execute("DELETE FROM skill_packages")
 
-        if revision == "014":
+        if revision in {"014", "015"}:
             with sqlite3.connect(source) as connection:
                 connection.execute("UPDATE agents SET reasoning_effort=?", (json.dumps({"value": "high", "binding": "fixture"}),))
                 connection.execute("UPDATE llm_models SET reasoning_options=?", (json.dumps({
@@ -302,7 +302,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 tuple(provider),
                 ("0123456789abcdef0123456789abcdef", "plain-api-key"),
             )
-            self.assertEqual(revision, "014")
+            self.assertEqual(revision, "015")
             self.assertEqual(sessions, 0)
             self.assertEqual(integrations[0]["code"], "deeptable-assistant")
             self.assertEqual(integrations[0]["settings"], {"enabled": True, "options": [1, None, "中文"]})

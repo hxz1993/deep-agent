@@ -130,7 +130,7 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                     )
                 }
                 self.assertTrue(
-                    (set(CONFIG_TABLES) - {"agent_output_configs"})
+                    (set(CONFIG_TABLES) - {"agent_output_configs", "integration_scoped_settings"})
                     | set(SESSION_TABLES)
                     | {"alembic_version", "_backup_info"}
                     <= tables
@@ -247,7 +247,10 @@ class ConfigBackupTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(
                     scope_manifest,
-                    _backup_scope_manifest(tuple(name for name in CONFIG_TABLES if name != "agent_output_configs")),
+                    _backup_scope_manifest(tuple(
+                        name for name in CONFIG_TABLES
+                        if name not in {"agent_output_configs", "integration_scoped_settings"}
+                    )),
                 )
                 self.assertEqual(
                     scope_manifest["schema_version"],

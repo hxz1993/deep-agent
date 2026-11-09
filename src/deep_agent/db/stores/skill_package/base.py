@@ -6,25 +6,37 @@ from sqlalchemy.exc import IntegrityError
 from deep_agent.db.models import Agent, SkillPackage
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_optional
 from deep_agent.db.stores._session import SessionBoundMixin
+from deep_agent.db.stores.integration_app import ensure_app_scope
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, scoped_skill_code, skill_scope_condition, skill_scope_ref
 from deep_agent.schemas.skill import SkillPackageRecord, SkillUpdate
 
 
 class SkillPackageStoreBase(SessionBoundMixin):
-    async def get_by_code(self, code: str) -> SkillPackage | None:
+    async def get_by_code(self, code: str, *, scope_ref: str = GENERAL_SKILL_SCOPE) -> SkillPackage | None:
         async with self._read() as db:
-            result = await db.execute(select(SkillPackage).where(SkillPackage.code == code))
+            result = await db.execute(select(SkillPackage).where(
+                SkillPackage.code == code, skill_scope_condition(SkillPackage.scope_ref, scope_ref)
+            ))
             return result.scalar_one_or_none()
 
-    async def list_all(self) -> list[SkillPackage]:
+    async def list_all(self, *, scope_ref: str = GENERAL_SKILL_SCOPE) -> list[SkillPackage]:
         async with self._read() as db:
-            stmt = select(SkillPackage).order_by(SkillPackage.label, SkillPackage.code)
+            stmt = select(SkillPackage).where(skill_scope_condition(SkillPackage.scope_ref, scope_ref)).order_by(SkillPackage.label, SkillPackage.code)
             result = await db.execute(stmt)
             return list(result.scalars().all())
 
-    async def create(self, data: SkillPackageRecord) -> SkillPackage:
+    async def create(self, data: SkillPackageRecord, *, app=None, expected_scope_id: str | None = None) -> SkillPackage:
         try:
-            async with self._write() as db:
-                row = SkillPackage(**data.model_dump())
+            async with self._write(exclusive=app is not None) as db:
+                values = data.model_dump()
+                if app is not None:
+                    scope = await ensure_app_scope(db, app=app, expected_id=expected_scope_id)
+                    values["scope_ref"] = skill_scope_ref(scope.id)
+                    values["code"] = scoped_skill_code(values["scope_ref"], data.code)
+                    values["manifest"] = {**values["manifest"], "code": data.code}
+                else:
+                    values["scope_ref"] = GENERAL_SKILL_SCOPE
+                row = SkillPackage(**values)
                 db.add(row)
                 await db.flush()
                 await db.refresh(row)
@@ -36,21 +48,33 @@ class SkillPackageStoreBase(SessionBoundMixin):
         self,
         code: str,
         data: SkillPackageRecord,
+        *,
+        scope_ref: str = GENERAL_SKILL_SCOPE,
+        expected_file_id: str | None = None,
     ) -> SkillPackage | None:
         async with self._write() as db:
-            result = await db.execute(select(SkillPackage).where(SkillPackage.code == code))
+            result = await db.execute(select(SkillPackage).where(
+                SkillPackage.code == code, skill_scope_condition(SkillPackage.scope_ref, scope_ref)
+            ).with_for_update())
             row = result.scalar_one_or_none()
             if row is None:
                 return None
-            for field, value in data.model_dump(exclude={"code", "source"}).items():
+            if expected_file_id is not None and row.platform_file_id != expected_file_id:
+                raise ReferenceConflict("Skill changed during replacement; refresh and retry")
+            values = data.model_dump(exclude={"code", "source", "scope_ref"})
+            if scope_ref != GENERAL_SKILL_SCOPE:
+                values["manifest"] = {**values["manifest"], "code": data.code}
+            for field, value in values.items():
                 setattr(row, field, value)
             await db.flush()
             await db.refresh(row)
             return row
 
-    async def update(self, code: str, data: SkillUpdate) -> SkillPackage | None:
+    async def update(self, code: str, data: SkillUpdate, *, scope_ref: str = GENERAL_SKILL_SCOPE) -> SkillPackage | None:
         async with self._write() as db:
-            result = await db.execute(select(SkillPackage).where(SkillPackage.code == code))
+            result = await db.execute(select(SkillPackage).where(
+                SkillPackage.code == code, skill_scope_condition(SkillPackage.scope_ref, scope_ref)
+            ))
             row = result.scalar_one_or_none()
             if row is None:
                 return None
@@ -60,12 +84,15 @@ class SkillPackageStoreBase(SessionBoundMixin):
             await db.refresh(row)
             return row
 
-    async def delete(self, code: str) -> bool:
+    async def delete(self, code: str, *, scope_ref: str = GENERAL_SKILL_SCOPE, expected_file_id: str | None = None) -> bool:
         # Exclude installation/configuration writers until reference validation
         # and deletion commit together. The API preflight can already be stale.
         async with self._write(exclusive=True) as db:
-            if await lock_optional(db, SkillPackage, SkillPackage.code, code) is None:
+            row = await lock_optional(db, SkillPackage, SkillPackage.code, code)
+            if row is None or (row.scope_ref or GENERAL_SKILL_SCOPE) != scope_ref:
                 return False
+            if expected_file_id is not None and row.platform_file_id != expected_file_id:
+                raise ReferenceConflict("Skill changed during deletion; refresh and retry")
             references = await db.execute(select(Agent.skills))
             if any(code in (skills or []) for skills in references.scalars()):
                 raise ReferenceConflict("Skill is still referenced by Agents")

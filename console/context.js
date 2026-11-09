@@ -198,6 +198,73 @@ function positionContextPopover(trigger) {
   popover.style.top = `${Math.min(rect.bottom + 8, window.innerHeight - 240)}px`;
 }
 
+let appOptionsRequest;
+let appOptions = null;
+
+function toggleContextAppChoices(open) {
+  const choices = document.getElementById("contextAppChoices");
+  if (!choices) return;
+  choices.hidden = !open;
+  for (const id of ["contextAppInput", "contextAppOptionsBtn"]) {
+    document.getElementById(id)?.setAttribute("aria-expanded", String(open));
+  }
+  if (!open) {
+    appOptionsRequest?.abort();
+    appOptionsRequest = null;
+    return;
+  }
+  if (appOptions !== null) renderContextAppChoices();
+  if (appOptionsRequest) return;
+  const controller = appOptionsRequest = new AbortController();
+  if (appOptions === null) choices.textContent = "正在加载…";
+  void daFetch(serviceUrl("/api/v1/integrations/deeptable-assistant/app-configs"), {
+    signal: controller.signal, reportStatus: false,
+  }).then(async response => {
+    const data = response.ok ? await response.json() : [];
+    if (appOptionsRequest !== controller) return;
+    appOptions = Array.isArray(data) ? data : [];
+    renderContextAppChoices();
+  }).catch(() => {
+    if (appOptionsRequest === controller) choices.textContent = "暂无法读取应用列表，可直接输入应用 ID。";
+  }).finally(() => { if (appOptionsRequest === controller) appOptionsRequest = null; });
+}
+
+function renderContextAppChoices(filter = false) {
+  const choices = document.getElementById("contextAppChoices");
+  const input = document.getElementById("contextAppInput");
+  if (!choices || !input || choices.hidden) return;
+  const term = input.value.trim().toLowerCase();
+  const rows = (appOptions || []).filter(app => !filter || `${app.app_name} ${app.app_id}`.toLowerCase().includes(term));
+  const heading = document.createElement("div");
+  heading.className = "context-app-choices-heading";
+  heading.textContent = "已配置应用专用内容";
+  choices.replaceChildren(heading);
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "context-app-choices-heading";
+    empty.textContent = "无可选应用，可直接输入应用 ID";
+    choices.append(empty);
+  }
+  for (const app of rows) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(input.value === app.app_id));
+    const title = document.createElement("span");
+    title.textContent = app.app_name || app.app_id;
+    const detail = document.createElement("small");
+    detail.textContent = [app.app_id, app.space_name || app.space_id].filter(Boolean).join(" · ");
+    button.append(title, detail);
+    button.addEventListener("click", () => {
+      input.value = app.app_id;
+      previewContextFromInput();
+      toggleContextAppChoices(false);
+      input.focus();
+    });
+    choices.append(button);
+  }
+}
+
 function openContextPopover(trigger) {
   renderContext();
   const popover = document.getElementById("contextPopover");
@@ -211,6 +278,8 @@ function openContextPopover(trigger) {
 
 function closeContextPopover() {
   const popover = document.getElementById("contextPopover");
+  toggleContextAppChoices(false);
+  appOptions = null;
   if (popover?.contains(document.activeElement)) document.activeElement.blur();
   if (popover) popover.inert = true;
   popover?.classList.add("hidden");
@@ -308,7 +377,33 @@ export function bindContextControls() {
   document.getElementById("closeContextBtn")?.addEventListener("click", closeContextPopover);
   document.getElementById("saveContextBtn")?.addEventListener("click", saveContext);
   document.getElementById("resetContextBtn")?.addEventListener("click", resetContext);
-  document.getElementById("contextAppInput")?.addEventListener("input", previewContextFromInput);
+  const appInput = document.getElementById("contextAppInput");
+  const choices = document.getElementById("contextAppChoices");
+  const appToggle = document.getElementById("contextAppOptionsBtn");
+  appToggle?.addEventListener("click", () => toggleContextAppChoices(choices.hidden));
+  appInput?.addEventListener("input", () => {
+    previewContextFromInput();
+    renderContextAppChoices(true);
+  });
+  appInput?.addEventListener("keydown", event => {
+    if (event.key !== "ArrowDown") return;
+    event.preventDefault();
+    if (choices.hidden) toggleContextAppChoices(true);
+    choices.querySelector("button")?.focus();
+  });
+  choices?.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      toggleContextAppChoices(false);
+      appInput.focus();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
+    event.preventDefault();
+    const rows = [...choices.querySelectorAll("button")];
+    const index = rows.indexOf(event.target) + (event.key === "ArrowDown" ? 1 : -1);
+    (rows[index] || appInput).focus();
+  });
   document.getElementById("retryIdentityBtn")?.addEventListener("click", () => location.reload());
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {

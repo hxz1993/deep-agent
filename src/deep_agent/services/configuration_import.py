@@ -23,6 +23,8 @@ from deep_agent.db.configuration_transfer import (
     validate_table_classification,
 )
 from deep_agent.db.models import Base
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, INTEGRATION, scoped_skill_code, skill_scope_ref
+from deep_agent.services.integration_app_access import IntegrationAppAccessError, app_space
 from deep_agent.integrations.catalog import get_integration_definition
 from deep_agent.schemas.integration import validate_integration_settings
 from deep_agent.files.storage import FileStore, StoredFile
@@ -47,6 +49,11 @@ _BEFORE_014 = {
     ))
     for name, excluded in _REASONING_014_COLUMNS.items()
 }
+_SKILL_BEFORE_015 = Table("skill_packages", MetaData(), *(
+    Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
+    for column in Base.metadata.tables["skill_packages"].columns if column.name != "scope_ref"
+))
+_BEFORE_015 = {"011", "012", "013", "014"}
 # This does not perform cross-revision import or alter an Alembic revision.
 _AGENT_011 = Table("agents", MetaData(), *(
     Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
@@ -62,10 +69,13 @@ _OUTPUT_CONFIG_012 = Table("agent_output_configs", MetaData(), *(
 
 def _configuration_tables(revision: str) -> tuple[str, ...]:
     return tuple(name for name in configuration_table_names()
-                 if revision != "011" or name != "agent_output_configs")
+                 if (revision != "011" or name != "agent_output_configs")
+                 and (revision not in _BEFORE_015 or name != "integration_scoped_settings"))
 
 
 def _contract_table(table_name: str, revision: str):
+    if table_name == "skill_packages" and revision in _BEFORE_015:
+        return _SKILL_BEFORE_015
     if table_name == "agents" and revision == "011":
         return _AGENT_011
     if table_name == "agent_output_configs" and revision == "012":
@@ -232,6 +242,8 @@ def _validate_schema_sync(sync_connection: Any, *, backup: bool) -> None:
     tables = set(Base.metadata.tables)
     if revision == "011":
         tables.discard("agent_output_configs")
+    if revision in _BEFORE_015:
+        tables.discard("integration_scoped_settings")
     expected = tables | {"alembic_version"}
     if backup:
         expected.add("_backup_info")
@@ -320,6 +332,43 @@ def _validate_integration_rows(rows: Sequence[Mapping[str, Any]]) -> None:
             raise ConfigurationImportError("integration_settings contains an invalid JSON configuration") from exc
         if not value:
             raise ConfigurationImportError("integration_settings must not contain empty configurations")
+
+
+def _validate_app_scope_rows(rows) -> None:
+    from uuid import UUID
+
+    scopes = set()
+    scope_keys = set()
+    for row in rows.get("integration_scoped_settings", ()):
+        try:
+            space_id, app_id = row["scope_key"].split("/")
+            settings = row["settings"]
+            if (
+                row["integration_code"] != INTEGRATION or row["scope_type"] != "app"
+                or str(UUID(row["id"])) != row["id"] or app_space(app_id) != space_id
+                or not row["tenant_id"] or len(row["tenant_id"]) > 191
+                or not isinstance(settings, dict) or set(settings) != {"prompt_append"}
+                or not isinstance(settings["prompt_append"], str) or len(settings["prompt_append"]) > 4000
+                or row["scope_key"] in scope_keys
+            ):
+                raise ValueError
+        except (KeyError, TypeError, ValueError, IntegrationAppAccessError) as exc:
+            raise ConfigurationImportError("Backup contains an invalid application configuration") from exc
+        scopes.add(skill_scope_ref(row["id"]))
+        scope_keys.add(row["scope_key"])
+    scoped_codes = set()
+    for row in rows.get("skill_packages", ()):
+        scope = row.get("scope_ref")
+        if scope is None or scope == GENERAL_SKILL_SCOPE:
+            continue
+        if scope not in scopes or not isinstance(row.get("manifest"), dict):
+            raise ConfigurationImportError("Backup contains a Skill with no matching application configuration")
+        original = row["manifest"].get("code")
+        if not isinstance(original, str) or not original or row["code"] != scoped_skill_code(scope, original):
+            raise ConfigurationImportError("Backup contains an invalid application Skill identity")
+        scoped_codes.add(row["code"])
+    if any(scoped_codes.intersection(row.get("skills") or ()) for row in rows.get("agents", ())):
+        raise ConfigurationImportError("An Agent references an application Skill directly")
 
 
 async def _validate_empty_sessions(connection: AsyncConnection, *, target: bool) -> None:
@@ -428,6 +477,7 @@ async def inspect_configuration_backup(
                     row["auth_status"] = "unconfigured"
                     row["auth_revision"] = 0
             _validate_integration_rows(rows.get("integration_settings", []))
+            _validate_app_scope_rows(rows)
             _validate_channel_rows(rows.get("channel_accounts", []))
             for row in rows.get("agents", []):
                 row["capabilities"] = canonical_tool_package_codes(
@@ -507,8 +557,9 @@ def inspect_skills_bundle(
             except (KeyError, UnicodeError, ValueError) as exc:
                 raise ConfigurationImportError("Invalid Skills bundle manifest") from exc
             if (
-                manifest.get("format") != "deepagent-skill-export"
-                or manifest.get("schema_version") != "1.0"
+                not isinstance(manifest, dict)
+                or manifest.get("format") != "deepagent-skill-export"
+                or manifest.get("schema_version") not in {"1.0", "1.1"}
                 or not isinstance(manifest.get("skills"), list)
             ):
                 raise ConfigurationImportError("Unsupported Skills bundle format")
@@ -554,12 +605,16 @@ def inspect_skills_bundle(
                         f"Invalid Skill package in bundle: {code}"
                     ) from exc
                 parsed_roots.append(parsed.package_root.parent)
+                scope = row.get("scope_ref")
+                scoped = scope not in (None, GENERAL_SKILL_SCOPE)
                 if (
-                    parsed.code != code
+                    (scoped and (manifest["schema_version"] != "1.1" or item.get("scope_ref") != scope))
+                    or (not scoped and item.get("scope_ref") not in (None, GENERAL_SKILL_SCOPE))
+                    or parsed.code != (row["manifest"]["code"] if scoped else code)
                     or parsed.content_hash != str(row["content_hash"])
                     or parsed.content_hash != str(item.get("content_hash") or "")
                     or parsed.schema_version != str(row["schema_version"])
-                    or parsed.manifest != row["manifest"]
+                    or ({**parsed.manifest, "code": parsed.code} if scoped else parsed.manifest) != row["manifest"]
                     or parsed.resource_index != row["resource_index"]
                     or parsed.contains_scripts != bool(row["contains_scripts"])
                 ):
@@ -801,6 +856,7 @@ async def apply_configuration_import(
     active_run_count: int = 0,
 ) -> ConfigurationImportResult:
     _validate_integration_rows(plan.rows.get("integration_settings", []))
+    _validate_app_scope_rows(plan.rows)
     _validate_channel_rows(plan.rows.get("channel_accounts", []))
     if active_run_count:
         raise ConfigurationImportConflictError("Target DeepAgent has active runs")

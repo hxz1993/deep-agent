@@ -17,6 +17,7 @@ from deep_agent.agent_packages.runtime_transaction import RuntimeCheckpoint
 from deep_agent.capabilities.codes import canonical_tool_package_codes, ENVIRONMENT_TOOL_NAMES, environment_name_conflict
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.db.ids import new_agent_id
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, skill_scope_condition
 from deep_agent.db.models import (
     Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolDefinition, UiToolPackage,
 )
@@ -45,7 +46,10 @@ def ui_payload(package, tools):
 async def snapshot(db):
     result = {}
     for cls in (Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolPackage, UiToolDefinition):
-        result[cls] = list((await db.execute(select(cls).options(lazyload('*')).execution_options(populate_existing=True))).scalars())
+        statement = select(cls).options(lazyload('*')).execution_options(populate_existing=True)
+        if cls is SkillPackage:
+            statement = statement.where(skill_scope_condition(SkillPackage.scope_ref, GENERAL_SKILL_SCOPE))
+        result[cls] = list((await db.execute(statement)).scalars())
     return result
 
 
@@ -316,7 +320,7 @@ async def _install(ctx, package, options, headers, *, user_id=None):
     agent_id = options.target_agent_id or new_agent_id()
     try:
         async with ctx.stores.agent._read() as db:
-            existing = {s.code: s for s in (await db.execute(select(SkillPackage))).scalars()}
+            existing = {s.code: s for s in (await db.execute(select(SkillPackage).where(skill_scope_condition(SkillPackage.scope_ref, GENERAL_SKILL_SCOPE)))).scalars()}
             original_skills = {c: (r.platform_file_id, r.content_hash) for c, r in existing.items()}
             original_agent = agent_state(await db.get(Agent, agent_id))
         # External file I/O precedes the configuration transaction.
@@ -359,7 +363,7 @@ async def _install(ctx, package, options, headers, *, user_id=None):
                         if code in prepared:
                             row = await db.get(SkillPackage, code)
                             if row is None:
-                                row = SkillPackage(**prepared[code]); db.add(row)
+                                row = SkillPackage(**prepared[code], scope_ref=GENERAL_SKILL_SCOPE); db.add(row)
                             else:
                                 for key, value in prepared[code].items():
                                     setattr(row, key, value)

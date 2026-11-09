@@ -1,12 +1,13 @@
 // Generated sprite poses + non-periodic playback. No runtime dependencies.
 const ROOT = new URL('./final/', import.meta.url);
-const ROWS = { 'standing-blink': 6, 'sitting-blink': 6, daydream: 8, collapse: 8, sway: 8, walk: 8, 'sitting-look': 8, 'sitting-shake': 8, 'sitting-updown': 8, 'sitting-sleep': 8, 'standing-updown': 8, 'standing-rest': 8 };
+const FRAME_WIDTH = 192, FRAME_HEIGHT = 208;
+const TRANSITION_MS = 72;
 const sprites = new Map();
-const loaded = new Set();
+const loaded = new Map();
 function loadSprite(row) {
   if (!sprites.has(row)) sprites.set(row, new Promise((resolve, reject) => {
     const image = new Image();
-    image.onload = () => { loaded.add(row); resolve(); };
+    image.onload = () => { loaded.set(row, image); resolve(); };
     image.onerror = () => { sprites.delete(row); reject(new Error('Cannot load pet sprite: '+row)); };
     image.src = new URL(row+'.webp?v=motions-5',ROOT).href;
   }));
@@ -19,16 +20,17 @@ export class DeepAgentSpritePet extends HTMLElement {
     super();
     this.attachShadow({mode:'open'}).innerHTML = `<style>
       :host{display:inline-block;position:relative;width:38px;height:44px;flex:none;vertical-align:middle;contain:layout style}
-      .viewport{display:block;width:100%;height:100%;overflow:hidden;pointer-events:none}
-      @media(prefers-reduced-motion:reduce){.sprite{transition:none}}
-    </style><svg class="viewport" viewBox="0 0 192 208" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><g class="travel"><svg width="192" height="208" overflow="hidden"><image class="sprite" width="1152" height="208"/></svg></g></svg>`;
-    this.cell=this.shadowRoot.querySelector('.sprite');
-    this.travel=this.shadowRoot.querySelector('.travel');
+      .viewport{display:block;width:100%;height:100%;object-fit:contain;pointer-events:none}
+    </style><canvas class="viewport" width="${FRAME_WIDTH}" height="${FRAME_HEIGHT}" aria-hidden="true"></canvas>`;
+    this.painter=this.shadowRoot.querySelector('.viewport').getContext('2d');
+    this.paintAnimation=null;
+    this.frame=null;
     this.transitionIndex=null;
   }
   get collapsed(){return this.hasAttribute('collapsed')}
   set collapsed(v){this.toggleAttribute('collapsed',Boolean(v))}
   connectedCallback(){
+    if(!this.painter)return; // Leave the static logo visible when canvas is unavailable.
     const connection = this.connectionRevision = (this.connectionRevision || 0) + 1;
     this.controller?.abort();this.controller=new AbortController();
     this.reduced=matchMedia('(prefers-reduced-motion: reduce)');
@@ -48,7 +50,7 @@ export class DeepAgentSpritePet extends HTMLElement {
     }).catch(error=>{if(this.isConnected && connection===this.connectionRevision)this.assetError(error)});
   }
   assetError(error){
-    this.stop();this.ready=false;delete this.dataset.ready;this.dataset.error='assets';
+    this.stop();this.stopPaint();this.ready=false;delete this.dataset.ready;this.dataset.error='assets';
     this.dispatchEvent(new CustomEvent('pet-error',{detail:error}));
   }
   waitForSprite(row, next){
@@ -57,28 +59,57 @@ export class DeepAgentSpritePet extends HTMLElement {
     loadSprite(row).then(()=>{if(this.isConnected && token===this.token)next()}).catch(error=>{if(this.isConnected && token===this.token)this.assetError(error)});
     return true;
   }
-  disconnectedCallback(){this.connectionRevision=(this.connectionRevision || 0)+1;this.controller?.abort();clearTimeout(this.timer);this.token=(this.token||0)+1}
+  disconnectedCallback(){this.connectionRevision=(this.connectionRevision || 0)+1;this.controller?.abort();this.stop();this.stopPaint()}
   attributeChangedCallback(name,oldValue,newValue){
     if(oldValue===newValue || !this.isConnected)return;
     if(name==='collapsed')this.changePose();else this.reset();
   }
   get inactive(){return !this.isConnected || !this.ready || document.hidden || this.hasAttribute('paused') || this.reduced?.matches}
   stop(){clearTimeout(this.timer);this.token=(this.token||0)+1;this.busy=false}
+  stopPaint(){
+    if(this.paintAnimation!==null)cancelAnimationFrame(this.paintAnimation);
+    this.paintAnimation=null;
+  }
+  paintFrame(frame, previous=null, progress=1){
+    const ctx=this.painter;
+    const draw=({image,index,offset})=>ctx.drawImage(image,index*FRAME_WIDTH,0,FRAME_WIDTH,FRAME_HEIGHT,offset,0,FRAME_WIDTH,FRAME_HEIGHT);
+    ctx.clearRect(0,0,FRAME_WIDTH,FRAME_HEIGHT);
+    if(!previous){draw(frame);return}
+    ctx.save();
+    ctx.globalAlpha=1-progress;
+    draw(previous);
+    ctx.globalAlpha=progress;
+    // Combine the two premultiplied frames without dimming their overlap.
+    ctx.globalCompositeOperation='lighter';
+    draw(frame);
+    ctx.restore();
+  }
   draw(row,index,offset=0){
-    if(!loaded.has(row)){
+    const image=loaded.get(row);
+    if(!image){
       const token=this.token, connection=this.connectionRevision;
       loadSprite(row).then(()=>{if(this.isConnected && token===this.token && connection===this.connectionRevision)this.draw(row,index,offset)}).catch(error=>{if(this.isConnected && token===this.token && connection===this.connectionRevision)this.assetError(error)});
       return;
     }
-    this.travel.setAttribute('transform',`translate(${offset} 0)`);
-    this.cell.setAttribute("href",new URL(row+'.webp?v=motions-5',ROOT).href);
-    this.cell.setAttribute("width",String(ROWS[row]*192));
-    this.cell.setAttribute("x",String(-index*192));
+    this.stopPaint();
+    const previous=this.frame, frame={image,row,index,offset};
+    this.frame=frame;
+    if(previous && previous.row!==row && !this.inactive){
+      const start=performance.now();
+      const blend=(now)=>{
+        const progress=Math.max(0,Math.min(1,(now-start)/TRANSITION_MS));
+        this.paintFrame(frame,progress<1?previous:null,progress);
+        this.paintAnimation=progress<1?requestAnimationFrame(blend):null;
+      };
+      this.paintAnimation=requestAnimationFrame(blend);
+    }else{
+      this.paintFrame(frame);
+    }
     this.restIndex=row==='standing-rest'?Math.min(index,4):null;
     this.dataset.action=row;this.dataset.frame=String(index);
   }
   neutral(){if(this.ready)this.draw(this.collapsed?'sitting-blink':'standing-blink',0)}
-  reset(){this.stop();this.transitionIndex=null;this.neutral();this.schedule()}
+  reset(){this.stop();this.stopPaint();this.transitionIndex=null;this.neutral();this.schedule()}
   schedule(){
     if(this.inactive)return;
     if(this.collapsed && !Number.isFinite(this.sleepDueAt))this.sleepDueAt=performance.now()+random(18000,28000);
@@ -112,7 +143,7 @@ export class DeepAgentSpritePet extends HTMLElement {
     this.stop();const row=this.collapsed?'sitting-blink':'standing-blink';
     const finish=()=>{this.neutral();this.schedule()};
     this.sequence(row,[1,2,3,4,5],[38,32,random(45,85),55,75],()=>{
-      if(Math.random()<.18){this.timer=setTimeout(()=>this.sequence(row,[1,2,3,4,5],[28,28,42,52,70],finish),random(130,230))}
+      if(Math.random()<.18){this.neutral();this.timer=setTimeout(()=>this.sequence(row,[1,2,3,4,5],[28,28,42,52,70],finish),random(130,230))}
       else finish();
     });
   }

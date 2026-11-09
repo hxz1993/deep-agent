@@ -116,3 +116,5 @@ KMP 的固定 `authKey` 继续来自 Skill 自读 `.env`；请求 `domainAccount
 原客户包、连接资料及可复测证据只放私有忽略目录，不纳入通用课题或 Git。
 
 后续事项统一登记在 [研发台账](../TODO.md) 的 `ENTERPRISE-AUTH-001`。
+
+对外发布 Agent 时的调用者校验、Python 调用及 MCP 发布见 [44 · 智能输出与 Agent 对外调用](../44-agent-invocation/README.md)。此处适配器处理 DeepAgent 访问客户服务时的账号与授权转换。

@@ -5,7 +5,7 @@ dialog.developer-dialog.modal { width: min(720px, calc(100vw - 32px)); height: f
 .developer-dialog-header h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.5; }
 .developer-dialog-header p { margin: 5px 0 0; font-size: var(--ui-font-helper); color: var(--text-dim); }
 .developer-resources { padding: 8px 26px 28px; }
-.developer-load-state { display: flex; align-items: center; gap: var(--ui-group-content-gap); color: var(--text-dim); font-size: var(--ui-font-helper); margin-bottom: 16px; }
+.developer-catalog-error { display: flex; align-items: center; gap: var(--ui-group-content-gap); color: var(--text-dim); font-size: var(--ui-font-helper); margin-bottom: 16px; }
 .developer-dialog [hidden] { display: none; }
 .developer-resource-row { display: grid; grid-template-columns: minmax(0, 1fr) 260px; column-gap: 24px; row-gap: 8px; align-items: center; }
 .developer-resource-row + .developer-resource-row { margin-top: 30px; }

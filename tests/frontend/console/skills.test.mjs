@@ -48,7 +48,7 @@ function installHarness(replies, timers = {}) {
   const context = {
     window: { AdminFormFeedback: { formatDetail: (value) => String(value) } },
     document: { addEventListener() {}, getElementById(id) {
-      if (!elements.has(id)) elements.set(id, { textContent: "", innerHTML: "", value: "", disabled: false, showModal() { this.open = true; } });
+      if (!elements.has(id)) elements.set(id, { textContent: "", innerHTML: "", value: "", disabled: false, classList: { remove() {} }, showModal() { this.open = true; } });
       return elements.get(id);
     } },
     escapeHtml: (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;"),
@@ -68,7 +68,9 @@ function installHarness(replies, timers = {}) {
   admin.refresh = async () => { refreshes++; };
   return { admin, calls, elements, refreshes: () => refreshes };
 }
-const installReply = (status, code = "example-skill") => ({ ok: status === 201, status, json: async () => ({ skill: { code }, detail: "test error" }) });
+const installReply = (status, code = "example-skill", detail = "test error") => ({
+  ok: status === 201, status, json: async () => ({ skill: { code }, detail }),
+});
 
 test("上传约束集中于问号提示，安装包横向卡片以图标文字区分五种状态", () => {
   const h = installHarness([]);
@@ -81,8 +83,8 @@ test("上传约束集中于问号提示，安装包横向卡片以图标文字�
   assert.ok(html.includes("&lt;long-package>.zip"));
   assert.ok(html.includes("&lt;safe detail>"));
   assert.match(template, /<span>Skill 安装包<\/span><small class="field-subtitle">ZIP · 每包 ≤ 10 MiB<\/small>/);
-  assert.match(template, /id="skillInstallHelp" role="tooltip">支持多包新建，已有编码不覆盖；更新请用详情“上传”。ZIP 须包含 SKILL.md，每包不超过 10 MiB；解压后不超过 50 MiB、256 个文件。“导出全部”请先解压，再选择其中的包。<\/span>/);
-  assert.match(template, /<strong>选择 ZIP 文件<\/strong><small>可多选<\/small>/);
+  assert.match(template, /合集（包括“导出全部”）请先解压，再选择其中的 DeepAgent Skill ZIP/);
+  assert.match(template, /点击选择或拖拽 ZIP 文件到此处/);
   assert.doesNotMatch(template, /skill-install-note-number|skill-install-note-label/);
   assert.match(consoleStyles, /\.skill-install-picker \{[^}]*width: 100%;[^}]*min-height: 88px;/);
   assert.match(consoleStyles, /\.skill-install-card \{[^}]*display: flex;[^}]*border: 0;/);
@@ -90,7 +92,11 @@ test("上传约束集中于问号提示，安装包横向卡片以图标文字�
 });
 
 test("批量安装逐包 POST，冲突不覆盖，失败不回滚其他成功包", async () => {
-  const h = installHarness([installReply(201, "one"), installReply(409), installReply(422), installReply(201, "four")]);
+  const layoutError = "ZIP must contain SKILL.md at its root or inside one wrapper directory";
+  const h = installHarness([
+    installReply(201, "one"), installReply(409, "two", "Skill already exists: two"),
+    installReply(422, "three", layoutError), installReply(201, "four"),
+  ]);
   h.admin.openInstallDialog();
   assert.equal(h.elements.get("skillInstallDialog").open, true);
   assert.equal(h.elements.get("skillInstallMessage").textContent, "");
@@ -98,6 +104,9 @@ test("批量安装逐包 POST，冲突不覆盖，失败不回滚其他成功包
   await h.admin.installSelected();
   assert.deepEqual(Array.from(h.admin.installQueue, (item) => item.status), ["done", "error", "error", "done"]);
   assert.match(h.admin.installQueue[1].message, /未覆盖/);
+  assert.match(h.admin.installQueue[1].message, /HTTP 409\nSkill already exists: two/);
+  assert.ok(h.admin.installQueue[2].message.startsWith(`HTTP 422\n${layoutError}\n`));
+  assert.match(h.admin.installQueue[2].message, /先解压/);
   assert.equal(h.calls.length, 4);
   assert.ok(h.calls.every((call) => call.method === "POST" && call.path === "/api/v1/skills"));
   assert.equal(h.refreshes(), 1);
@@ -140,6 +149,7 @@ test("安装返回网关或服务错误时标记待确认，不能声称未安�
   h.admin.selectInstallFiles([{ name: "one.zip", size: 1 }, { name: "two.zip", size: 1 }]);
   await h.admin.installSelected();
   assert.deepEqual(Array.from(h.admin.installQueue, (item) => item.status), ["unknown", "unknown"]);
+  assert.match(h.admin.installQueue[0].message, /HTTP 502\ntest error\n未确认安装结果/);
   assert.equal(h.refreshes(), 1);
   assert.equal(h.calls.length, 2);
 });

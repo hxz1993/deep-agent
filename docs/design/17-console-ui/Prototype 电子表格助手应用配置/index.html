@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>电子表格助手应用配置 · DeepAgent 交互原型</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNzggMzQwIiB3aWR0aD0iMjc4IiBoZWlnaHQ9IjM0MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsbGVkYnk9InRpdGxlIj48dGl0bGUgaWQ9InRpdGxlIj5EZWVwQWdlbnQgRCByb3VuZGVkIOKAlCByZWZlcmVuY2UgdHJhY2VkPC90aXRsZT48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9InB1cnBsZSIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPjxzdG9wIHN0b3AtY29sb3I9IiM2MzQ4RkYiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM1ODQwRjUiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48ZyBpZD0ic2lsaG91ZXR0ZSIgZmlsbD0idXJsKCNwdXJwbGUpIj48cGF0aCBkPSJNMTMzLjY2LDE4LjExTDEzMy42NiwxOC4xMVExMzIuMDAsMTcuMDAgMTMwLjAyLDE2Ljc1TDExNy45OCwxNS4yNVExMTYuMDAsMTUuMDAgMTE0LjEzLDE1LjcyTDEwNC44NywxOS4yOFExMDMuMDAsMjAuMDAgMTAxLjUxLDIxLjMzTDk1LjQ5LDI2LjY3UTk0LjAwLDI4LjAwIDkzLjE3LDI5LjgyTDg5LjgzLDM3LjE4UTg5LjAwLDM5LjAwIDg5LjAwLDQxLjAwTDg5LjAwLDUyLjAwUTg5LjAwLDU0LjAwIDg5LjcwLDU1Ljg3TDkxLjMwLDYwLjEzUTkyLjAwLDYyLjAwIDkzLjM1LDYzLjQ4TDEwMC44Nyw3MS43NlExMDIuMDAsNzMuMDAgMTAzLjUwLDczLjc1TDEwNi41MCw3NS4yNVExMDguMDAsNzYuMDAgMTA3Ljk1LDc3LjY4TDEwNy4wNiwxMDcuMDBRMTA3LjAwLDEwOS4wMCAxMDUuMDAsMTA5LjAwTDMzLjAwLDEwOS4wMFEzMS4wMCwxMDkuMDAgMjkuMTMsMTA5LjcwTDI0Ljg3LDExMS4zMFEyMy4wMCwxMTIuMDAgMjEuNzMsMTEzLjU1TDE1LjI3LDEyMS40NVExNC4wMCwxMjMuMDAgMTMuOTksMTI1LjAwTDEzLjAxLDMxMC4wMFExMy4wMCwzMTIuMDAgMTMuOTYsMzEzLjc2TDE4LjE0LDMyMS40MlExOS4wMCwzMjMuMDAgMjAuNTAsMzI0LjAwTDIzLjY4LDMyNi4xMlEyNS4wMCwzMjcuMDAgMjYuNTAsMzI3LjUwTDI5LjUwLDMyOC41MFEzMS4wMCwzMjkuMDAgMzIuNTgsMzI4Ljk5TDE5OC4wMCwzMjguMDFRMjAwLjAwLDMyOC4wMCAyMDEuOTAsMzI3LjM3TDIxNi4xMCwzMjIuNjNRMjE4LjAwLDMyMi4wMCAyMTkuNjksMzIwLjkzTDIzOC4zMSwzMDkuMDdRMjQwLjAwLDMwOC4wMCAyNDEuMzYsMzA2LjUzTDI1MS42NCwyOTUuNDdRMjUzLjAwLDI5NC4wMCAyNTMuOTYsMjkyLjI1TDI2My4wNCwyNzUuNzVRMjY0LjAwLDI3NC4wMCAyNjQuNjMsMjcyLjEwTDI2Ni4zNywyNjYuOTBRMjY3LjAwLDI2NS4wMCAyNjcuMjgsMjYzLjAyTDI2OS43MiwyNDUuOThRMjcwLjAwLDI0NC4wMCAyNzAuMDAsMjQyLjAwTDI3MC4wMCwxOTguMDBRMjcwLjAwLDE5Ni4wMCAyNjkuNzIsMTk0LjAyTDI2Ny4yOCwxNzYuOThRMjY3LjAwLDE3NS4wMCAyNjYuMzEsMTczLjEyTDI2MC42OSwxNTcuODhRMjYwLjAwLDE1Ni4wMCAyNTguOTcsMTU0LjI5TDI1NS4wMywxNDcuNzFRMjU0LjAwLDE0Ni4wMCAyNTIuNzEsMTQ0LjQ3TDI0NC4yOSwxMzQuNTNRMjQzLjAwLDEzMy4wMCAyNDEuNDEsMTMxLjc5TDIyNy41OSwxMjEuMjFRMjI2LjAwLDEyMC4wMCAyMjQuMjEsMTE5LjExTDIxNS43OSwxMTQuODlRMjE0LjAwLDExNC4wMCAyMTIuMDUsMTEzLjU0TDE5NC45NSwxMDkuNDZRMTkzLjAwLDEwOS4wMCAxOTEuMDAsMTA4Ljk3TDEzNS4wMCwxMDguMDNRMTMzLjAwLDEwOC4wMCAxMzMuMDAsMTA2LjAwTDEzMy4wMCw3OC4wMFExMzMuMDAsNzYuMDAgMTM0Ljc0LDc1LjAxTDEzOC4yNiw3Mi45OVExNDAuMDAsNzIuMDAgMTQxLjMzLDcwLjUxTDE0Ni42Nyw2NC40OVExNDguMDAsNjMuMDAgMTQ4LjY4LDYxLjEyTDE1MS4zMiw1My44OFExNTIuMDAsNTIuMDAgMTUxLjg3LDUwLjAwTDE1MS4xMywzOS4wMFExNTEuMDAsMzcuMDAgMTQ5Ljk5LDM1LjI3TDE0NS4wMSwyNi43M1ExNDQuMDAsMjUuMDAgMTQyLjM0LDIzLjg5WiIvPjwvZz48ZyBpZD0iZmFjZSIgZmlsbD0iI0ZDRkNGRiI+PHBhdGggZD0iTTU4LjQxLDE3OS41OUw1OC40MSwxNzkuNTlRNTcuMDAsMTgxLjAwIDU2LjM3LDE4Mi45MEw1Mi42MywxOTQuMTBRNTIuMDAsMTk2LjAwIDUyLjAwLDE5OC4wMEw1Mi4wMCwyNDMuMDBRNTIuMDAsMjQ1LjAwIDUyLjQ5LDI0Ni45NEw1NC41MSwyNTUuMDZRNTUuMDAsMjU3LjAwIDU2LjE4LDI1OC42Mkw2MS44MiwyNjYuMzhRNjMuMDAsMjY4LjAwIDY0LjY2LDI2OS4xMUw3MC4zNCwyNzIuODlRNzIuMDAsMjc0LjAwIDczLjkyLDI3NC41N0w4MC4wOCwyNzYuNDNRODIuMDAsMjc3LjAwIDg0LjAwLDI3Ny4wMEwxODUuMDAsMjc3LjAwUTE4Ny4wMCwyNzcuMDAgMTg4LjkzLDI3Ni40N0wxOTYuNTksMjc0LjM4UTE5OC4wMCwyNzQuMDAgMTk5LjI1LDI3My4yNUwyMDEuNzUsMjcxLjc1UTIwMy4wMCwyNzEuMDAgMjAzLjk1LDI2OS44OUwyMTMuNzAsMjU4LjUyUTIxNS4wMCwyNTcuMDAgMjE1LjUzLDI1NS4wN0wyMTcuNDcsMjQ3LjkzUTIxOC4wMCwyNDYuMDAgMjE4LjAwLDI0NC4wMEwyMTguMDAsMTk3LjAwUTIxOC4wMCwxOTUuMDAgMjE3LjMzLDE5My4xMkwyMTMuNjcsMTgyLjg4UTIxMy4wMCwxODEuMDAgMjExLjY3LDE3OS41MUwyMDYuMzMsMTczLjQ5UTIwNS4wMCwxNzIuMDAgMjAzLjI2LDE3MS4wMUwxOTkuNzQsMTY4Ljk5UTE5OC4wMCwxNjguMDAgMTk2LjEwLDE2Ny4zN0wxOTAuOTAsMTY1LjYzUTE4OS4wMCwxNjUuMDAgMTg3LjAwLDE2NS4wMEw4My4wMCwxNjUuMDBRODEuMDAsMTY1LjAwIDc5LjEzLDE2NS43Mkw2OS44NywxNjkuMjhRNjguMDAsMTcwLjAwIDY2LjU5LDE3MS40MVoiLz48L2c+PGcgaWQ9ImV5ZXMiIGZpbGw9IiM2MDQ1RkEiPjxwYXRoIGQ9Ik0xNjkuMDAsMTg2LjAwTDE2OS4wMCwxODYuMDBRMTY3LjAwLDE4Ni4wMCAxNjUuNDAsMTg3LjIwTDE2MC4wOCwxOTEuMTlRMTU5LjAwLDE5Mi4wMCAxNTguNTAsMTkzLjI1TDE1Ny41MCwxOTUuNzVRMTU3LjAwLDE5Ny4wMCAxNTcuMDAsMTk4LjM1TDE1Ny4wMCwyNDIuNDJRMTU3LjAwLDI0NC4wMCAxNTcuNTAsMjQ1LjUwTDE1OC41NSwyNDguNjZRMTU5LjAwLDI1MC4wMCAxNjAuMDAsMjUxLjAwTDE2Mi4wNSwyNTMuMDVRMTYzLjAwLDI1NC4wMCAxNjQuMjUsMjU0LjUwTDE2Ni43NSwyNTUuNTBRMTY4LjAwLDI1Ni4wMCAxNjkuMzUsMjU2LjAwTDE3My4yNSwyNTYuMDBRMTc1LjAwLDI1Ni4wMCAxNzYuNDAsMjU0Ljk1TDE4MS45MiwyNTAuODFRMTgzLjAwLDI1MC4wMCAxODMuNTAsMjQ4Ljc1TDE4NC41MCwyNDYuMjVRMTg1LjAwLDI0NS4wMCAxODUuMDAsMjQzLjY1TDE4NS4wMCwxOTguMzVRMTg1LjAwLDE5Ny4wMCAxODQuNTAsMTk1Ljc1TDE4My41MCwxOTMuMjVRMTgzLjAwLDE5Mi4wMCAxODIuMDUsMTkxLjA1TDE3OS43OSwxODguNzlRMTc5LjAwLDE4OC4wMCAxNzguMDAsMTg3LjUwTDE3Ni4wMCwxODYuNTBRMTc1LjAwLDE4Ni4wMCAxNzMuODgsMTg2LjAwWiIvPjxwYXRoIGQ9Ik05Ny4wMCwxODYuMDBMOTcuMDAsMTg2LjAwUTk1LjAwLDE4Ni4wMCA5My40MCwxODcuMjBMODguMDgsMTkxLjE5UTg3LjAwLDE5Mi4wMCA4Ni41MCwxOTMuMjVMODUuNTAsMTk1Ljc1UTg1LjAwLDE5Ny4wMCA4NS4wMCwxOTguMzVMODUuMDAsMjQyLjQyUTg1LjAwLDI0NC4wMCA4NS41MCwyNDUuNTBMODYuNTUsMjQ4LjY2UTg3LjAwLDI1MC4wMCA4OC4wMCwyNTEuMDBMOTAuMjEsMjUzLjIxUTkxLjAwLDI1NC4wMCA5Mi4wMCwyNTQuNTBMOTQuMDAsMjU1LjUwUTk1LjAwLDI1Ni4wMCA5Ni4xMiwyNTYuMDBMMTAwLjY1LDI1Ni4wMFExMDIuMDAsMjU2LjAwIDEwMy4yNSwyNTUuNTBMMTA1Ljc1LDI1NC41MFExMDcuMDAsMjU0LjAwIDEwNy45NSwyNTMuMDVMMTEwLjA1LDI1MC45NVExMTEuMDAsMjUwLjAwIDExMS41MCwyNDguNzVMMTEyLjUwLDI0Ni4yNVExMTMuMDAsMjQ1LjAwIDExMy4wMCwyNDMuNjVMMTEzLjAwLDE5OC4zNVExMTMuMDAsMTk3LjAwIDExMi41MCwxOTUuNzVMMTExLjUwLDE5My4yNVExMTEuMDAsMTkyLjAwIDExMC4wNSwxOTEuMDVMMTA3Ljc5LDE4OC43OVExMDcuMDAsMTg4LjAwIDEwNi4wMCwxODcuNTBMMTA0LjAwLDE4Ni41MFExMDMuMDAsMTg2LjAwIDEwMS44OCwxODYuMDBaIi8+PC9nPjxnIGlkPSJoaWdobGlnaHRzIiBmaWxsPSIjQTg5N0ZGIj48L2c+PC9zdmc+">
+<style>
+:root{--accent:#5141e5;--accent-text:#4936cf;--accent-soft:#efedff;--text:#202630;--muted:#596473;--subtle:#657181;--line:#dbe2e9;--line-soft:#e9edf2;--panel:#f4f6f9;--rail:#f4f6f8;--surface:#fff;--green:#18734a;--green-bg:#eaf7ef;--error:#ac2737;--error-bg:#fff0f2;--radius:8px;--rail-width:190px;color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface);color:var(--text);font:13px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+button,input,textarea,select{font:inherit;color:inherit}button{cursor:pointer}button:disabled{cursor:default;opacity:.48}
+button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input:focus,textarea:focus,select:focus{outline:none;box-shadow:none}
+[hidden]{display:none!important}.icon{width:16px;height:16px;flex:none;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.shell{display:grid;grid-template-columns:var(--rail-width) minmax(0,1fr);height:100dvh;min-height:0}.rail{background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;padding:13px 10px 10px}
+.brand{display:flex;gap:10px;align-items:center;padding:0 5px 13px}.brand img{width:34px;height:40px}.brand strong{display:block;font-size:15px}.presence{color:var(--subtle);font-size:11px}.presence::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#2f9f71;margin-right:5px}
+.nav{display:grid;gap:3px}.nav-item{border:0;background:none;text-align:left;display:flex;align-items:center;gap:10px;width:100%;border-radius:8px;padding:8px 10px;color:#344154;text-decoration:none;font-weight:500}
+button.nav-item:not(:disabled):hover,.nav-item.selected{background:#e7e4fb;color:var(--accent-text)}.nav-item.static{color:#566172}
+.nav-group{padding:15px 10px 4px;color:var(--subtle);font-size:11px}.rail-end{margin-top:auto;display:grid;gap:4px}
+.identity{border-top:1px solid var(--line);padding:12px 8px 0;color:var(--muted);display:flex;align-items:center;gap:8px}
+main{min-width:0;overflow:auto;position:relative}.page{padding:22px 24px 36px}.page-body{max-width:1120px}.page-head,.bar,.section-head,.detail-head,.subbar{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.page-head{margin-bottom:24px;align-items:flex-start}.detail-head{align-items:flex-start}.detail-head .actions{padding-top:2px}
+h1,h2,h3,p{margin:0}h1{font-size:16px;line-height:24px}h2{font-size:14px;line-height:23px}h3{font-size:13px}
+.subtitle,.muted{color:var(--muted)}.subtitle{margin-top:5px;font-size:12px}.meta{font-size:11px;color:var(--subtle)}.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;overflow-wrap:anywhere}
+.tag{display:inline-flex;align-items:center;gap:4px;border-radius:5px;padding:2px 7px;font-size:11px;font-weight:500;color:var(--accent-text);background:var(--accent-soft);white-space:nowrap}
+.tag.ok{color:var(--green);background:var(--green-bg)}.tag.neutral{background:var(--panel);color:var(--muted)}.tag.error{background:var(--error-bg);color:var(--error)}
+.prototype{background:var(--panel);color:var(--subtle);border:1px solid var(--line-soft)}.actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);min-height:32px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:4px 10px;white-space:nowrap;font-weight:500}
+.btn:not(:disabled):hover{background:#f5f6fa;border-color:#c6cdd7}.btn.primary{background:var(--accent);border-color:var(--accent);color:white}.btn.primary:not(:disabled):hover{background:#4434d3;border-color:#4434d3}
+.btn.text{border-color:transparent;background:transparent;color:var(--accent-text)}.btn.danger{color:var(--error)}.btn.icon-only{min-width:32px;padding:0}
+.table-wrap{border:1px solid var(--line);border-radius:8px;overflow:auto}.table{width:100%;border-collapse:collapse;text-align:left}.table th{font-size:12px;font-weight:500;color:#505e70;background:#f3f5f8;white-space:nowrap}
+.table td,.table th{padding:9px 12px;border-bottom:1px solid var(--line-soft)}.table td{height:52px}.table tbody tr:last-child td{border-bottom:0}.table td:last-child,.table th:last-child{text-align:right}
+.table td:last-child .actions{justify-content:flex-end}.table tr:hover td{background:#fafbfc}.entity{display:flex;gap:10px;align-items:center;min-width:0}.entity-icon{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:7px;background:var(--accent-soft);color:var(--accent-text)}
+.entity strong{display:block;font-weight:600}.breadcrumb{display:flex;align-items:center;gap:7px;color:var(--subtle);margin:-4px 0 14px}.breadcrumb .btn{padding-left:0;min-height:26px}
+.select,.input,.textarea{border:1px solid #d2dae4;border-radius:var(--radius);background:white;min-height:32px;padding:5px 10px;min-width:0}.select{max-width:100%;padding-right:20px}
+.tabs{display:flex;gap:21px;border-bottom:1px solid var(--line);margin-bottom:17px}.tab{border:0;border-bottom:2px solid transparent;padding:9px 1px 7px;background:none;color:var(--muted);font-weight:500}.tab.active{color:var(--accent-text);border-bottom-color:var(--accent)}
+.subbar{margin:0 0 10px}.subbar .actions{flex:1;min-width:0}.search{display:flex;align-items:center;gap:7px;border:1px solid #d2dae4;border-radius:var(--radius);height:32px;padding:0 8px;color:var(--subtle);width:min(245px,100%)}.search input{border:none;background:none;width:100%;min-width:0}
+.empty{text-align:center!important;color:var(--muted);padding:28px 12px!important}
+.detail-section{margin-top:24px}.detail-section+.detail-section{border-top:1px solid var(--line-soft);padding-top:19px}.section-head{align-items:flex-start;margin-bottom:9px}
+.textarea{width:100%;min-height:132px;resize:vertical;font-size:13px;line-height:1.75;padding:9px 12px}.counter{text-align:right;color:var(--subtle);font-size:11px;margin-top:3px}
+.scope-line{display:flex;gap:6px 14px;align-items:center;flex-wrap:wrap}.scope-line .icon{width:14px;height:14px}.scope-line>span{display:flex;gap:5px;align-items:center}
+pre{padding:13px;background:var(--panel);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap;font-size:12px;overflow-wrap:anywhere}
+dialog{padding:0;border:1px solid var(--line);border-radius:12px;width:min(490px,calc(100% - 28px));color:var(--text);box-shadow:0 20px 48px #14223a30;max-height:calc(100dvh - 40px)}
+dialog.wide{width:min(635px,calc(100% - 28px))}dialog::backdrop{background:#20283848}.dialog-head,.dialog-body,.dialog-foot{padding:14px 17px}.dialog-head,.dialog-foot{display:flex;align-items:center;justify-content:space-between;gap:10px}.dialog-head{border-bottom:1px solid var(--line)}.dialog-foot{justify-content:flex-end;border-top:1px solid var(--line)}.dialog-head .btn{border-color:transparent}.dialog-body>p{margin-bottom:10px}
+.inline-form{display:flex;gap:7px;margin:6px 0 9px}.inline-form .input{flex:1}.feedback{margin:8px 0 0;padding:8px 9px;border-radius:7px;background:var(--panel);font-size:12px;color:var(--muted)}.feedback.ok{background:var(--green-bg);color:var(--green)}.feedback.error{background:var(--error-bg);color:var(--error)}
+.drop{display:flex;align-items:center;gap:10px;width:100%;border:1px dashed #bfc9d8;border-radius:8px;background:white;text-align:left;padding:13px 12px}.drop .icon{color:var(--accent);width:22px;height:22px}.drop.drag,.drop:hover{border-color:var(--accent);background:var(--accent-soft)}
+.file-list{padding:0;margin:8px 0 0;list-style:none;display:grid;gap:5px}.file-list li,.library-row{display:flex;align-items:center;gap:8px;justify-content:space-between;border:1px solid var(--line-soft);padding:6px 8px;border-radius:6px;overflow-wrap:anywhere}
+.library-row{justify-content:flex-start;cursor:pointer}.library-row+.library-row{margin-top:6px}.library-row input{accent-color:var(--accent)}
+.toast{position:fixed;z-index:8;bottom:22px;left:calc(50% + var(--rail-width)/2);transform:translateX(-50%);background:#2e3547;color:white;border-radius:7px;padding:8px 13px;box-shadow:0 3px 12px #24283f30;max-width:calc(100% - 24px)}
+.test{height:100%;display:grid;grid-template-columns:232px minmax(0,1fr);min-height:570px}.sessions{padding:11px 10px;border-right:1px solid var(--line);min-width:0}.sessions .select,.sessions .search{width:100%;margin-bottom:8px}.session-item{padding:8px 9px;border-radius:7px}.session-item.current{background:var(--accent-soft);color:var(--accent-text)}.session-item+.session-item{margin-top:3px}
+.conversation{position:relative;min-width:0;display:grid;grid-template-rows:48px minmax(0,1fr)}.chat-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--line)}
+.btn.popover-trigger{background:var(--panel);border-color:transparent}.btn.popover-trigger:hover{border-color:var(--line)}
+.chat-content{display:grid;place-items:center;padding:20px}.welcome{text-align:center;width:min(530px,100%);min-width:0}.welcome img{width:34px;height:39px}.welcome h1{font-size:21px;margin:6px 0}.welcome p{color:var(--muted);font-size:12px;margin:0 0 13px}
+.composer{width:100%;text-align:left;border:1px solid #cdd6e1;border-radius:12px;box-shadow:0 2px 7px #1a285b0d;padding:7px 9px}.composer textarea{display:block;width:100%;border:0;resize:vertical;min-height:52px;padding:5px 4px}.composer .actions{justify-content:flex-end}
+.popover{position:absolute;z-index:5;top:43px;right:12px;width:min(350px,calc(100% - 20px));border:1px solid var(--line);background:white;box-shadow:0 10px 35px #1a254527;border-radius:11px;padding:12px}.popover header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}.popover header .btn{border-color:transparent;min-height:26px;min-width:26px}
+.popover footer{display:flex;justify-content:flex-end;gap:7px;border-top:1px solid var(--line);padding-top:10px;margin-top:10px}.popover .context-summary{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;padding-top:8px}.context-summary dt,.context-summary dd{margin:0}.context-summary dd{text-align:right;color:var(--muted);overflow-wrap:anywhere}.popover .inline-form{margin-bottom:5px}
+.options{max-height:182px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px;margin:5px 0 8px}.options-label{font-size:11px;padding:3px 7px;color:var(--subtle)}.option{border:0;background:white;display:flex;align-items:center;gap:8px;justify-content:space-between;width:100%;text-align:left;padding:5px 7px;border-radius:5px}.option:hover,.option:focus-visible{background:var(--accent-soft)}.option .meta{display:block}
+.debug-result{margin-top:9px;text-align:left}.ghost-link{background:none;border:0;padding:0;color:var(--accent-text);text-decoration:none}
+@media(max-width:900px){:root{--rail-width:155px}.page{padding:17px 17px 28px}.table td,.table th{padding:7px 9px}.test{grid-template-columns:175px 1fr}.chat-head{padding:0 8px}}
+@media(max-width:670px){:root{--rail-width:48px}.rail{padding:10px 5px}.brand{padding:0 1px 10px}.brand div,.nav-item span,.nav-group,.identity span{display:none}.nav-item{justify-content:center;padding:8px 5px}.identity{justify-content:center;padding-inline:0}.test{grid-template-columns:1fr}.sessions{display:none}.page-head,.detail-head,.section-head,.subbar{flex-wrap:wrap}.table{min-width:500px}.page{padding:13px}.chat-head .btn .debug-word{display:none}.chat-content{padding:12px}}
+.integration-split{display:grid;grid-template-columns:215px minmax(0,1fr);min-height:calc(100dvh - 122px)}
+.integration-list{border-right:1px solid var(--line);padding-right:14px;display:flex;flex-direction:column;gap:5px}
+.integration-list .nav-group{padding:4px 8px}.integration-item{display:flex;align-items:center;gap:8px;border:0;border-radius:7px;background:transparent;text-align:left;padding:9px 8px;width:100%}
+.integration-item:hover{background:var(--panel)}.integration-item[aria-current]{background:var(--accent-soft);color:var(--accent-text)}
+.integration-item strong,.integration-item .meta{display:block}.integration-item strong{font-weight:600}.integration-item .icon:last-child{margin-left:auto;width:14px}
+.integration-config{padding-left:20px;min-width:0}
+.integration-config .detail-heading{margin-bottom:12px}.integration-config .detail-heading .subtitle{line-height:1.65}
+.integration-agent{display:grid;grid-template-columns:max-content minmax(0,320px);align-items:center;gap:8px;margin:8px 0 13px}
+.integration-agent-label{font-weight:500;white-space:nowrap}
+.integration-agent-picker{position:relative;min-width:0}
+.integration-agent-trigger{width:100%;justify-content:space-between;text-align:left}
+.integration-agent-trigger:focus-visible{outline:none;border-color:var(--subtle)}
+.integration-agent-trigger .icon{width:14px;height:14px;color:var(--muted)}
+.integration-agent-trigger[aria-expanded="true"] .icon{transform:rotate(180deg)}
+.integration-agent-value{overflow:hidden;text-overflow:ellipsis}
+.integration-agent-menu.popover{inset:calc(100% + 5px) auto auto 0;width:100%}
+.integration-agent-menu .options{margin:0}
+.integration-agent-menu .option{min-height:30px}
+.integration-agent-menu .option[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-text)}
+.integration-guide{max-width:700px}
+.integration-api-example{margin-top:9px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel)}
+.integration-api-example pre{border:0;background:transparent;padding:0;margin:3px 0 0}
+.integration-api-example pre+div{margin-top:9px}
+@media(max-width:480px){.integration-agent{grid-template-columns:minmax(0,320px);gap:5px}}
+.app-page{min-height:100%;display:flex;flex-direction:column}.app-page .page-body{max-width:1480px;flex:1;display:flex;flex-direction:column;min-width:0}
+.app-workspace{flex:1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:20px;margin-top:22px}
+.app-title{display:flex;align-items:flex-start;gap:14px;min-width:0}.app-title .btn{flex:none;margin-top:-3px;padding-left:0}
+.app-title .scope-line{margin-top:3px}.app-toolbar{justify-content:flex-end}.app-toolbar .btn{font-size:12px}
+.app-prompt{display:flex;flex-direction:column;min-width:0}
+.app-prompt-heading{display:flex;align-items:center;gap:5px}
+.app-workspace .section-head :is(label,h2){font-size:13px;font-weight:400}
+.prompt-help{position:relative;display:inline-flex}.prompt-help button{border:0;background:transparent;color:var(--subtle);padding:3px}
+.prompt-help .icon{width:14px;height:14px}
+.prompt-help [role=tooltip]{display:none;position:absolute;z-index:2;top:100%;left:0;width:190px;padding:7px 9px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 4px 12px #14223a18;color:var(--muted);font-size:12px}
+.prompt-help:hover [role=tooltip],.prompt-help:focus-within [role=tooltip]{display:block}
+.app-prompt .textarea{flex:1;min-height:260px;resize:none}
+.app-prompt .prompt-estimate{color:var(--subtle);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.app-skills{border-left:1px solid var(--line);padding-left:20px;min-width:0}.app-workspace .section-head{align-items:center;min-height:32px;margin-bottom:8px}
+.skill-table{min-width:550px}.skill-table td,.skill-table th{padding-inline:8px}
+.skill-table :is(th,td):last-child{width:35px;color:var(--subtle)}
+.skill-row,.app-row{cursor:pointer}
+.table-name-button{display:flex;align-items:center;border:0;background:transparent;padding:0;text-align:left;max-width:100%;color:inherit}
+.table-name-button:hover strong{color:var(--accent-text)}
+.resource-count{display:inline-flex;align-items:center;gap:9px;white-space:nowrap}
+.resource-count span,.app-skill-count{display:inline-flex;align-items:center;gap:4px}
+.resource-count .icon,.app-skill-count .icon{width:13px;height:13px;color:var(--subtle)}
+.app-test-cell{width:1%;white-space:nowrap}
+.app-test-cell .btn{min-height:28px}
+.skill-updated{white-space:nowrap;color:var(--subtle);font-size:12px}
+.btn.danger-solid{color:white;background:#a72e3c;border-color:#a72e3c}.btn.danger-solid:hover{color:var(--error)}
+dialog.skill-preview{width:min(1130px,calc(100% - 32px));height:min(730px,calc(100dvh - 48px));max-height:none;overflow:hidden}
+.skill-preview-frame{display:block;width:100%;height:100%;border:0}
+.debug-combo{position:relative;margin:6px 0 5px}.debug-combo-field{display:flex;align-items:stretch;border:1px solid #d2dae4;border-radius:var(--radius);background:var(--surface);min-height:33px}
+.debug-combo-field .input{border:0;border-radius:var(--radius);flex:1;background:transparent;min-height:31px}
+.debug-combo-field .btn{border:0;min-height:31px;color:var(--muted);background:transparent}
+.debug-combo-field .btn[aria-expanded="true"] .icon{transform:rotate(180deg)}.debug-combo .options{position:absolute;z-index:1;inset:100% 0 auto;margin:4px 0 0;max-height:210px;background:var(--surface);box-shadow:0 8px 20px #1a254522}
+.option.active{background:var(--accent-soft);color:var(--accent-text)}
+@media(max-width:1120px){.app-workspace{grid-template-columns:1fr;align-content:start}.app-prompt .textarea{min-height:225px;resize:vertical}.app-skills{border-left:0;border-top:1px solid var(--line);padding:16px 0 0}.app-workspace .section-head{min-height:0}}
+@media(max-width:850px){.integration-split{grid-template-columns:165px minmax(0,1fr)}.integration-list{padding-right:9px}.integration-config{padding-left:12px}}
+@media(max-width:670px){.integration-split{grid-template-columns:1fr;min-height:0}.integration-list{flex-direction:row;border-right:0;border-bottom:1px solid var(--line);padding:0 0 9px;margin-bottom:12px}.integration-list .nav-group{display:none}.integration-config{padding-left:0}.integration-item strong{font-size:12px}.integration-item .meta,.integration-item .icon:last-child{display:none}.app-toolbar{justify-content:flex-start}.skill-table .skill-updated{display:none}.skill-table{min-width:360px}}
+</style>
+</head>
+<body>
+<div class="shell">
+<aside class="rail" aria-label="控制台主导航">
+  <div class="brand"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNzggMzQwIiB3aWR0aD0iMjc4IiBoZWlnaHQ9IjM0MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsbGVkYnk9InRpdGxlIj48dGl0bGUgaWQ9InRpdGxlIj5EZWVwQWdlbnQgRCByb3VuZGVkIOKAlCByZWZlcmVuY2UgdHJhY2VkPC90aXRsZT48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9InB1cnBsZSIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPjxzdG9wIHN0b3AtY29sb3I9IiM2MzQ4RkYiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM1ODQwRjUiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48ZyBpZD0ic2lsaG91ZXR0ZSIgZmlsbD0idXJsKCNwdXJwbGUpIj48cGF0aCBkPSJNMTMzLjY2LDE4LjExTDEzMy42NiwxOC4xMVExMzIuMDAsMTcuMDAgMTMwLjAyLDE2Ljc1TDExNy45OCwxNS4yNVExMTYuMDAsMTUuMDAgMTE0LjEzLDE1LjcyTDEwNC44NywxOS4yOFExMDMuMDAsMjAuMDAgMTAxLjUxLDIxLjMzTDk1LjQ5LDI2LjY3UTk0LjAwLDI4LjAwIDkzLjE3LDI5LjgyTDg5LjgzLDM3LjE4UTg5LjAwLDM5LjAwIDg5LjAwLDQxLjAwTDg5LjAwLDUyLjAwUTg5LjAwLDU0LjAwIDg5LjcwLDU1Ljg3TDkxLjMwLDYwLjEzUTkyLjAwLDYyLjAwIDkzLjM1LDYzLjQ4TDEwMC44Nyw3MS43NlExMDIuMDAsNzMuMDAgMTAzLjUwLDczLjc1TDEwNi41MCw3NS4yNVExMDguMDAsNzYuMDAgMTA3Ljk1LDc3LjY4TDEwNy4wNiwxMDcuMDBRMTA3LjAwLDEwOS4wMCAxMDUuMDAsMTA5LjAwTDMzLjAwLDEwOS4wMFEzMS4wMCwxMDkuMDAgMjkuMTMsMTA5LjcwTDI0Ljg3LDExMS4zMFEyMy4wMCwxMTIuMDAgMjEuNzMsMTEzLjU1TDE1LjI3LDEyMS40NVExNC4wMCwxMjMuMDAgMTMuOTksMTI1LjAwTDEzLjAxLDMxMC4wMFExMy4wMCwzMTIuMDAgMTMuOTYsMzEzLjc2TDE4LjE0LDMyMS40MlExOS4wMCwzMjMuMDAgMjAuNTAsMzI0LjAwTDIzLjY4LDMyNi4xMlEyNS4wMCwzMjcuMDAgMjYuNTAsMzI3LjUwTDI5LjUwLDMyOC41MFEzMS4wMCwzMjkuMDAgMzIuNTgsMzI4Ljk5TDE5OC4wMCwzMjguMDFRMjAwLjAwLDMyOC4wMCAyMDEuOTAsMzI3LjM3TDIxNi4xMCwzMjIuNjNRMjE4LjAwLDMyMi4wMCAyMTkuNjksMzIwLjkzTDIzOC4zMSwzMDkuMDdRMjQwLjAwLDMwOC4wMCAyNDEuMzYsMzA2LjUzTDI1MS42NCwyOTUuNDdRMjUzLjAwLDI5NC4wMCAyNTMuOTYsMjkyLjI1TDI2My4wNCwyNzUuNzVRMjY0LjAwLDI3NC4wMCAyNjQuNjMsMjcyLjEwTDI2Ni4zNywyNjYuOTBRMjY3LjAwLDI2NS4wMCAyNjcuMjgsMjYzLjAyTDI2OS43MiwyNDUuOThRMjcwLjAwLDI0NC4wMCAyNzAuMDAsMjQyLjAwTDI3MC4wMCwxOTguMDBRMjcwLjAwLDE5Ni4wMCAyNjkuNzIsMTk0LjAyTDI2Ny4yOCwxNzYuOThRMjY3LjAwLDE3NS4wMCAyNjYuMzEsMTczLjEyTDI2MC42OSwxNTcuODhRMjYwLjAwLDE1Ni4wMCAyNTguOTcsMTU0LjI5TDI1NS4wMywxNDcuNzFRMjU0LjAwLDE0Ni4wMCAyNTIuNzEsMTQ0LjQ3TDI0NC4yOSwxMzQuNTNRMjQzLjAwLDEzMy4wMCAyNDEuNDEsMTMxLjc5TDIyNy41OSwxMjEuMjFRMjI2LjAwLDEyMC4wMCAyMjQuMjEsMTE5LjExTDIxNS43OSwxMTQuODlRMjE0LjAwLDExNC4wMCAyMTIuMDUsMTEzLjU0TDE5NC45NSwxMDkuNDZRMTkzLjAwLDEwOS4wMCAxOTEuMDAsMTA4Ljk3TDEzNS4wMCwxMDguMDNRMTMzLjAwLDEwOC4wMCAxMzMuMDAsMTA2LjAwTDEzMy4wMCw3OC4wMFExMzMuMDAsNzYuMDAgMTM0Ljc0LDc1LjAxTDEzOC4yNiw3Mi45OVExNDAuMDAsNzIuMDAgMTQxLjMzLDcwLjUxTDE0Ni42Nyw2NC40OVExNDguMDAsNjMuMDAgMTQ4LjY4LDYxLjEyTDE1MS4zMiw1My44OFExNTIuMDAsNTIuMDAgMTUxLjg3LDUwLjAwTDE1MS4xMywzOS4wMFExNTEuMDAsMzcuMDAgMTQ5Ljk5LDM1LjI3TDE0NS4wMSwyNi43M1ExNDQuMDAsMjUuMDAgMTQyLjM0LDIzLjg5WiIvPjwvZz48ZyBpZD0iZmFjZSIgZmlsbD0iI0ZDRkNGRiI+PHBhdGggZD0iTTU4LjQxLDE3OS41OUw1OC40MSwxNzkuNTlRNTcuMDAsMTgxLjAwIDU2LjM3LDE4Mi45MEw1Mi42MywxOTQuMTBRNTIuMDAsMTk2LjAwIDUyLjAwLDE5OC4wMEw1Mi4wMCwyNDMuMDBRNTIuMDAsMjQ1LjAwIDUyLjQ5LDI0Ni45NEw1NC41MSwyNTUuMDZRNTUuMDAsMjU3LjAwIDU2LjE4LDI1OC42Mkw2MS44MiwyNjYuMzhRNjMuMDAsMjY4LjAwIDY0LjY2LDI2OS4xMUw3MC4zNCwyNzIuODlRNzIuMDAsMjc0LjAwIDczLjkyLDI3NC41N0w4MC4wOCwyNzYuNDNRODIuMDAsMjc3LjAwIDg0LjAwLDI3Ny4wMEwxODUuMDAsMjc3LjAwUTE4Ny4wMCwyNzcuMDAgMTg4LjkzLDI3Ni40N0wxOTYuNTksMjc0LjM4UTE5OC4wMCwyNzQuMDAgMTk5LjI1LDI3My4yNUwyMDEuNzUsMjcxLjc1UTIwMy4wMCwyNzEuMDAgMjAzLjk1LDI2OS44OUwyMTMuNzAsMjU4LjUyUTIxNS4wMCwyNTcuMDAgMjE1LjUzLDI1NS4wN0wyMTcuNDcsMjQ3LjkzUTIxOC4wMCwyNDYuMDAgMjE4LjAwLDI0NC4wMEwyMTguMDAsMTk3LjAwUTIxOC4wMCwxOTUuMDAgMjE3LjMzLDE5My4xMkwyMTMuNjcsMTgyLjg4UTIxMy4wMCwxODEuMDAgMjExLjY3LDE3OS41MUwyMDYuMzMsMTczLjQ5UTIwNS4wMCwxNzIuMDAgMjAzLjI2LDE3MS4wMUwxOTkuNzQsMTY4Ljk5UTE5OC4wMCwxNjguMDAgMTk2LjEwLDE2Ny4zN0wxOTAuOTAsMTY1LjYzUTE4OS4wMCwxNjUuMDAgMTg3LjAwLDE2NS4wMEw4My4wMCwxNjUuMDBRODEuMDAsMTY1LjAwIDc5LjEzLDE2NS43Mkw2OS44NywxNjkuMjhRNjguMDAsMTcwLjAwIDY2LjU5LDE3MS40MVoiLz48L2c+PGcgaWQ9ImV5ZXMiIGZpbGw9IiM2MDQ1RkEiPjxwYXRoIGQ9Ik0xNjkuMDAsMTg2LjAwTDE2OS4wMCwxODYuMDBRMTY3LjAwLDE4Ni4wMCAxNjUuNDAsMTg3LjIwTDE2MC4wOCwxOTEuMTlRMTU5LjAwLDE5Mi4wMCAxNTguNTAsMTkzLjI1TDE1Ny41MCwxOTUuNzVRMTU3LjAwLDE5Ny4wMCAxNTcuMDAsMTk4LjM1TDE1Ny4wMCwyNDIuNDJRMTU3LjAwLDI0NC4wMCAxNTcuNTAsMjQ1LjUwTDE1OC41NSwyNDguNjZRMTU5LjAwLDI1MC4wMCAxNjAuMDAsMjUxLjAwTDE2Mi4wNSwyNTMuMDVRMTYzLjAwLDI1NC4wMCAxNjQuMjUsMjU0LjUwTDE2Ni43NSwyNTUuNTBRMTY4LjAwLDI1Ni4wMCAxNjkuMzUsMjU2LjAwTDE3My4yNSwyNTYuMDBRMTc1LjAwLDI1Ni4wMCAxNzYuNDAsMjU0Ljk1TDE4MS45MiwyNTAuODFRMTgzLjAwLDI1MC4wMCAxODMuNTAsMjQ4Ljc1TDE4NC41MCwyNDYuMjVRMTg1LjAwLDI0NS4wMCAxODUuMDAsMjQzLjY1TDE4NS4wMCwxOTguMzVRMTg1LjAwLDE5Ny4wMCAxODQuNTAsMTk1Ljc1TDE4My41MCwxOTMuMjVRMTgzLjAwLDE5Mi4wMCAxODIuMDUsMTkxLjA1TDE3OS43OSwxODguNzlRMTc5LjAwLDE4OC4wMCAxNzguMDAsMTg3LjUwTDE3Ni4wMCwxODYuNTBRMTc1LjAwLDE4Ni4wMCAxNzMuODgsMTg2LjAwWiIvPjxwYXRoIGQ9Ik05Ny4wMCwxODYuMDBMOTcuMDAsMTg2LjAwUTk1LjAwLDE4Ni4wMCA5My40MCwxODcuMjBMODguMDgsMTkxLjE5UTg3LjAwLDE5Mi4wMCA4Ni41MCwxOTMuMjVMODUuNTAsMTk1Ljc1UTg1LjAwLDE5Ny4wMCA4NS4wMCwxOTguMzVMODUuMDAsMjQyLjQyUTg1LjAwLDI0NC4wMCA4NS41MCwyNDUuNTBMODYuNTUsMjQ4LjY2UTg3LjAwLDI1MC4wMCA4OC4wMCwyNTEuMDBMOTAuMjEsMjUzLjIxUTkxLjAwLDI1NC4wMCA5Mi4wMCwyNTQuNTBMOTQuMDAsMjU1LjUwUTk1LjAwLDI1Ni4wMCA5Ni4xMiwyNTYuMDBMMTAwLjY1LDI1Ni4wMFExMDIuMDAsMjU2LjAwIDEwMy4yNSwyNTUuNTBMMTA1Ljc1LDI1NC41MFExMDcuMDAsMjU0LjAwIDEwNy45NSwyNTMuMDVMMTEwLjA1LDI1MC45NVExMTEuMDAsMjUwLjAwIDExMS41MCwyNDguNzVMMTEyLjUwLDI0Ni4yNVExMTMuMDAsMjQ1LjAwIDExMy4wMCwyNDMuNjVMMTEzLjAwLDE5OC4zNVExMTMuMDAsMTk3LjAwIDExMi41MCwxOTUuNzVMMTExLjUwLDE5My4yNVExMTEuMDAsMTkyLjAwIDExMC4wNSwxOTEuMDVMMTA3Ljc5LDE4OC43OVExMDcuMDAsMTg4LjAwIDEwNi4wMCwxODcuNTBMMTA0LjAwLDE4Ni41MFExMDMuMDAsMTg2LjAwIDEwMS44OCwxODYuMDBaIi8+PC9nPjxnIGlkPSJoaWdobGlnaHRzIiBmaWxsPSIjQTg5N0ZGIj48L2c+PC9zdmc+" alt=""><div><strong>DeepAgent</strong><div class="presence">设计预览</div></div></div>
+  <nav class="nav" id="nav"></nav>
+  <div class="rail-end"><div class="nav-group">系统</div><div class="nav-item static"><span data-icon="settings"></span><span>全局配置</span></div><div class="nav-item static"><span data-icon="book"></span><span>开发调试</span></div><div class="identity"><span data-icon="user"></span><span>平台管理员</span></div></div>
+</aside>
+<main id="main"></main>
+</div>
+<dialog id="appDialog" aria-labelledby="appDialogTitle">
+  <div class="dialog-head"><h2 id="appDialogTitle" tabindex="-1" autofocus>添加应用配置</h2><button class="btn icon-only" data-close="appDialog" aria-label="关闭"><span data-icon="x"></span></button></div>
+  <form id="appForm">
+    <div class="dialog-body">
+      <p class="muted">只能配置当前账号有管理员权限的企业下的应用。</p>
+      <label for="newCode">应用编码</label>
+      <div class="inline-form"><input class="input code" id="newCode" autocomplete="off" placeholder="输入 App 编码" required><button class="btn" id="verifyBtn" type="button">验证</button></div>
+      <p class="meta">可验证示例：<button class="ghost-link code" type="button" data-fill="demobg003">demobg003</button> · 无权限示例：<button class="ghost-link code" type="button" data-fill="external001">external001</button></p>
+      <div class="feedback" id="appFeedback" role="status" hidden></div>
+    </div>
+    <div class="dialog-foot"><button type="button" class="btn" data-close="appDialog">取消</button><button class="btn primary" id="continueBtn" disabled>继续配置</button></div>
+  </form>
+</dialog>
+<dialog id="skillDialog" class="wide" aria-labelledby="skillDialogTitle">
+  <div class="dialog-head"><h2 id="skillDialogTitle">上传安装 Skill</h2><button class="btn icon-only" data-close="skillDialog" aria-label="关闭"><span data-icon="x"></span></button></div>
+  <div class="dialog-body" id="skillDialogBody"></div>
+  <div class="dialog-foot"><button type="button" class="btn" data-close="skillDialog">取消</button><button type="button" class="btn primary" id="skillDialogConfirm" disabled>开始安装</button></div>
+</dialog>
+<dialog id="skillPreviewDialog" class="skill-preview" aria-label="Skill 详情">
+  <iframe id="skillPreviewFrame" class="skill-preview-frame" src="skill-detail.html" title="Skill 详情"></iframe>
+</dialog>
+<dialog id="removeDialog" aria-labelledby="removeTitle">
+  <div class="dialog-head"><h2 id="removeTitle">移除应用配置</h2><button class="btn icon-only" data-close="removeDialog" aria-label="关闭"><span data-icon="x"></span></button></div>
+  <div class="dialog-body"><p id="removeCopy"></p></div>
+  <div class="dialog-foot"><button class="btn" data-close="removeDialog">取消</button><button class="btn danger-solid" id="removeConfirm">确认移除</button></div>
+</dialog>
+<dialog id="editSkillDialog" aria-labelledby="editSkillTitle">
+  <div class="dialog-head"><h2 id="editSkillTitle">编辑 Skill 信息</h2><button class="btn icon-only" data-close="editSkillDialog" aria-label="关闭"><span data-icon="x"></span></button></div>
+  <form id="editSkillForm">
+    <div class="dialog-body" style="display:grid;gap:8px">
+      <label for="editSkillName">显示名称</label><input id="editSkillName" class="input" required>
+      <label for="editSkillDescription">描述</label><textarea id="editSkillDescription" class="textarea"></textarea>
+    </div>
+    <div class="dialog-foot"><button type="button" class="btn" data-close="editSkillDialog">取消</button><button class="btn primary">保存</button></div>
+  </form>
+</dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+<script>
+const CONFIGURED_APPS_LABEL='已配置应用专用内容';
+const I={
+grid:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',bot:'<rect x="4" y="7" width="16" height="13" rx="2"/><path d="M12 7V3H9M2 13h2m16 0h2m-13 0v2m6-2v2"/>',chat:'<path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l1.4-4.1A8.5 8.5 0 1 1 21 11.5Z"/><path d="m9 10-2 2 2 2m5-4 2 2-2 2"/>',puzzle:'<path d="M19.4 15.1c-.8-.8-2.4-.1-2.4 1v3.9h-4.4c0-2.8-3.9-2.8-3.9 0H4v-5c2.7 0 2.7-4 0-4V6h5c0-2.8 4-2.8 4 0h4v4c0 1.4 1.5 1.8 2.4 1 1.6-1.5 3.6 1.9 0 4.1Z"/>',rss:'<path d="M4 4a16 16 0 0 1 16 16M4 10a10 10 0 0 1 10 10"/><circle cx="5" cy="19" r="1"/>',box:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M7 9h10m-10 4h10m-10 3h5"/>',tool:'<path d="M15 3a5 5 0 0 0-5 6L3 16l5 5 7-7a5 5 0 0 0 6-5l-4 2-4-4 2-4Z"/>',plug:'<path d="M9 3v5m6-5v5M7 8h10v4a5 5 0 0 1-10 0V8Zm5 9v4"/>',book:'<path d="M12 6c-3-2-7-2-9-1v14c3-1 6-1 9 1 3-2 6-2 9-1V5c-2-1-6-1-9 1v14"/>',hist:'<path d="M3 12a9 9 0 1 1 3 7M3 5v7h7m2-5v5l3 2"/>',chart:'<path d="M4 18V6m0 12h16M8 15l4-5 4 2 4-6"/>',logs:'<path d="M8 6h12M8 12h12M8 18h12M4 6h.1M4 12h.1M4 18h.1"/>',settings:'<path d="M4 7h16M4 17h16M8 4v6m8 4v6"/>',user:'<circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>',chev:'<path d="m6 9 6 6 6-6"/>',right:'<path d="m9 6 6 6-6 6"/>',back:'<path d="M20 12H4m7-7-7 7 7 7"/>',plus:'<path d="M12 5v14M5 12h14"/>',search:'<circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5"/>',check:'<path d="m5 12 4 4L19 6"/>',x:'<path d="m6 6 12 12M18 6 6 18"/>',upload:'<path d="M12 16V4m-5 5 5-5 5 5M4 15v5h16v-5"/>',download:'<path d="M12 4v12m-5-5 5 5 5-5M4 16v4h16v-4"/>',external:'<path d="M13 5h6v6m0-6-8 8M9 5H5v14h14v-4"/>',send:'<path d="m3 4 18 8-18 8 3-8-3-8Zm3 8h15"/>',layers:'<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>'};
+Object.assign(I,{
+ help:'<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.7 1.3c0 2-2.8 2.4-2.8 4m0 3h.01"/>',
+ paperclip:'<path d="M21.4 11.6 12.2 20.8a5.2 5.2 0 0 1-7.4-7.4L14 4.2a3.5 3.5 0 1 1 5 5l-9.2 9.2a1.8 1.8 0 1 1-2.5-2.5l8.5-8.5"/>',
+ terminal:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="m7 8 3 3-3 3m6 1h4"/>',
+ eye:'<path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.4"/>',
+ trash:'<path d="M3 6h18m-14 0 1 14h8l1-14M10 3h4m-4 7v6m4-6v6"/>',
+ file:'<path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10Zm0 0v7h7M8 14h8m-8 3h8"/>'
+});
+const icon=n=>'<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">'+I[n]+'</svg>';
+const E=id=>document.getElementById(id);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const btn=(txt,action,cls='',i='',attr='')=>'<button type="button" class="btn '+cls+'" data-action="'+action+'" '+attr+'>'+(i?icon(i):'')+esc(txt)+'</button>';
+const apps=Object.assign(Object.create(null),{
+ demobg001:{name:'年度预算',space:'预算管理空间',spaceId:'demobg',tenant:'先胜演示集团'},
+ demoop002:{name:'月度经营分析',space:'经营分析空间',spaceId:'demoop',tenant:'先胜演示集团'},
+ demobg003:{name:'费用滚动预测',space:'预算管理空间',spaceId:'demobg',tenant:'先胜演示集团'},
+ retail001:{name:'零售经营看板',space:'门店经营空间',spaceId:'retail',tenant:'远山零售'}
+});
+const generic=[
+ {code:'deeptable-assistant-workflows',name:'电子表格常见取数与填数',version:'1.4.18'},
+ {code:'deepfos-financial-charts',name:'商务财务图表',version:'2.0.6'},
+ {code:'file-reading-verification',name:'文件读取与核验',version:'内置'}
+];
+const profiles={
+ demobg001:{prompt:'分析年度预算执行时，优先按部门和费用科目汇总，以实际对比预算。未指定期间时使用当前电子表格选区。生成报告时采用年度预算执行分析模板，并标明数据来源。',skills:[
+  {code:'annual-budget-report',name:'年度预算执行分析',version:'1.2.0',description:'按部门和费用科目核对实际与预算，生成年度预算执行分析。',files:[
+   {path:'references/report-outline.md',text:'# 报告结构\n\n1. 预算执行概览\n2. 部门与科目差异\n3. 待核实事项\n4. 数据来源与期间'},
+   {path:'assets/report-columns.csv',text:'部门,费用科目,实际,预算,差异,差异率\n示例部门,差旅费,120,100,20,20%'}]},
+  {code:'budget-dimension-rules',name:'预算维度与口径',version:'1.0.0',description:'定义此应用的预算分析维度及取数口径。',files:[
+   {path:'references/dimensions.md',text:'# 取数口径\n\n- 期间与组织优先使用当前选区。\n- 按部门、费用科目汇总。\n- 核对实际与预算的单位和期间。'}]}
+ ]},
+ demoop002:{prompt:'生成经营分析时按品牌和渠道组织结果，使用经营快报模板。异常差异需附上可核验的数据来源。',skills:[
+  {code:'monthly-business-brief',name:'经营快报模板',version:'2.1.0',description:'按品牌和渠道输出月度经营快报。'}]},
+ retail001:{prompt:'按门店和区域汇总经营数据，默认以月为期间。',skills:[
+  {code:'retail-brief',name:'门店经营快报',version:'1.0.0',description:'按门店与区域汇总销售和经营差异。'}]}
+};
+let agent='电子表格智能助手',cubeAgent='DeepCube 助手',page='integrations',current=null,draft=null,verified=null,filter='',tenant='',debugApp='',debugDraft='',debugAgent='',testQuestion='',debugOption=-1,pendingRemove=null,skillMode='',uploadTarget='',uploadFiles=[],toastTimer;
+let integrationAgentDraft=null,editingSkillCode=null;
+function notify(text){const t=E('toast');t.textContent=text;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{t.hidden=true},2600)}
+function nav(){
+ const active=page==='test'?'test':page==='skills'?'skills':'integrations';
+ const items=[['测试','chat','test'],['Agent','bot'],['集成','puzzle','integrations'],['渠道','rss'],['设置'],['模型','box'],['工具','tool'],['MCP','plug'],['Skill','book','skills'],['诊断'],['会话','hist'],['用量','chart'],['日志','logs']];
+ E('nav').innerHTML=items.map(([label,i,key])=>!i?'<div class="nav-group">'+label+'</div>':key?'<button class="nav-item '+(active===key?'selected':'')+'" aria-label="'+label+'" '+(active===key?'aria-current="page"':'')+' data-action="nav-'+key+'">'+icon(i)+'<span>'+label+'</span></button>':'<div class="nav-item static">'+icon(i)+'<span>'+label+'</span></div>').join('');
+}
+function header(title,sub){return '<div class="page-head"><div><h1>'+title+'</h1><p class="subtitle">'+sub+'</p></div><span class="tag prototype">交互原型 · 模拟数据</span></div>'}
+function entity(n,c,i){return '<span class="entity">'+(i?'<span class="entity-icon">'+icon(i)+'</span>':'')+'<span class="entity-copy"><strong>'+esc(n)+'</strong><span class="meta code">'+esc(c)+'</span></span></span>'}
+function crumb(name,action){return '<div class="breadcrumb">'+btn(name,action,'text','back')+'</div>'}
+function table(head,body){return '<div class="table-wrap"><table class="table"><thead><tr>'+head.map(s=>'<th scope="col">'+s+'</th>').join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>'}
+const agentNames=['电子表格智能助手','电子表格助手 · 验收','通用分析 Agent','DeepCube 助手'];
+function agentOptions(selected){return agentNames.map(n=>'<option'+(selected===n?' selected':'')+'>'+esc(n)+'</option>').join('')}
+function integrationForPage(name){
+ if(name==='cube')return 'deepcube-assistant';
+ if(['integrations','apps','api'].includes(name))return 'deeptable-assistant';
+ return null;
+}
+function go(next,code){
+ if(page==='app'&&draft&&next!=='app'&&next!=='test'&&JSON.stringify(draft)!==JSON.stringify(profiles[current]||{prompt:'',skills:[]})){
+   if(!window.confirm('应用配置尚未保存。放弃本次编辑？'))return;
+ }
+ integrationAgentDraft=null;
+ current=code||null;page=next;history.pushState(null,'','#'+(next==='app'?'app/'+code:next));
+ if(next==='app')draft=structuredClone(profiles[code]||{prompt:'',skills:[]});
+ if(next==='test'&&!debugAgent)debugAgent=agent||agentNames[0];
+ render();
+}
+function render(){
+ nav();const main=E('main');main.scrollTop=0;
+ if(page==='test'){renderTest();return;}
+ let body='';
+ if(integrationForPage(page)){
+  body=renderIntegrations();
+ }else if(page==='app'){
+  const a=apps[current];body=
+  '<div class="detail-head"><div class="app-title">'+btn('返回','nav-apps','text','back','aria-label="返回应用配置"')+'<div><h1>'+esc(a.name)+'</h1><div class="scope-line subtitle"><span class="code">'+esc(current)+'</span><span>'+icon('layers')+esc(a.space)+'</span><span>'+esc(a.tenant)+'</span><span class="tag '+(profiles[current]?'ok':'neutral')+'">'+(profiles[current]?'已配置':'待保存')+'</span></div></div></div>'+
+  '<div class="actions app-toolbar">'+(profiles[current]?btn('移除应用配置','remove-app','danger','trash'):'')+btn('保存','save-app','primary')+'</div></div>'+
+  '<div class="app-workspace"><section class="app-prompt"><div class="section-head"><div class="app-prompt-heading"><label for="appPrompt">追加提示词</label><span class="prompt-help"><button type="button" aria-label="追加提示词说明" aria-describedby="promptHelp">'+icon('help')+'</button><span id="promptHelp" role="tooltip">在此应用下补充分析维度、取数口径或报告要求。</span></span></div>'+
+  '<span class="prompt-estimate" id="promptCount" title="原型估算，仅统计这段追加提示词。">'+promptEstimate(draft.prompt)+'</span></div>'+
+  '<textarea class="textarea" id="appPrompt" maxlength="4000" placeholder="例如：默认按品牌与渠道汇总，报告使用本应用的经营快报模板。">'+esc(draft.prompt)+'</textarea></section>'+
+  '<section class="app-skills"><div class="section-head"><h2>专用 Skill <span class="meta">'+draft.skills.length+'</span></h2>'+btn('上传 Skill','skill-upload','','upload')+'</div>'+
+  '<div id="appSkillTable">'+skillTable(draft.skills,true)+'</div></section></div>';
+ }else if(page==='skills'){
+  body=header('Skill','Skill 提供任务方法与资源，不会自动授予 MCP 或其他工具权限。')+
+  '<div class="subbar"><label class="search">'+icon('search')+'<input id="generalSearch" type="search" aria-label="搜索 Skill" placeholder="搜索 Skill"></label>'+btn('上传安装','skill-generic','primary','upload')+'</div><div id="generalTable">'+skillTable(generic,false)+'</div>';
+ }
+ main.innerHTML='<div class="page'+(page==='app'?' app-page':'')+'"><div class="page-body">'+body+'</div></div>';
+}
+function renderIntegrationAgent(){
+ const selected=page==='cube'?cubeAgent:agent;
+ const open=integrationAgentDraft!==null,value=integrationAgentDraft??selected;
+ const options=agentNames.map(name=>'<button class="option" type="button" data-action="integration-agent-pick" data-code="'+esc(name)+'" aria-pressed="'+(name===value)+'">'+
+  '<span>'+esc(name)+'</span>'+(name===value?icon('check'):'')+'</button>').join('');
+ return '<div class="integration-agent" id="integrationAgentRow"><span class="integration-agent-label" id="integrationAgentLabel">关联 Agent</span>'+
+  '<div class="integration-agent-picker"><button class="btn popover-trigger integration-agent-trigger" type="button" id="integrationAgentTrigger" data-action="integration-agent-toggle" aria-expanded="'+open+'" aria-haspopup="dialog" aria-controls="integrationAgentMenu" aria-labelledby="integrationAgentLabel integrationAgentValue">'+
+  '<span class="integration-agent-value'+(selected?'':' muted')+'" id="integrationAgentValue">'+esc(selected||'未配置')+'</span>'+icon('chev')+'</button>'+
+  '<aside class="popover integration-agent-menu" id="integrationAgentMenu" role="dialog" aria-labelledby="integrationAgentMenuTitle"'+(open?'':' hidden')+'>'+
+  '<header><h2 id="integrationAgentMenuTitle">关联 Agent</h2>'+btn('','integration-agent-cancel','icon-only','x','aria-label="关闭关联 Agent 浮层"')+'</header>'+
+  '<div class="options" role="group" aria-label="可选 Agent">'+options+'</div>'+
+  '<footer>'+btn('清空','integration-agent-clear','','','id="clearIntegrationAgent"'+(value?'':' disabled'))+
+  btn('确定','integration-agent-save','primary','','id="saveIntegrationAgent"'+(value===selected?' disabled':''))+'</footer></aside></div></div>';
+}
+function refreshIntegrationAgentEditor(focus){
+ E('integrationAgentRow').outerHTML=renderIntegrationAgent();
+ if(focus)document.querySelector(focus)?.focus();
+}
+function renderIntegrations(){
+ const cube=page==='cube',api=page==='api',code=integrationForPage(page);
+ const title=cube?'DeepCube 助手':'电子表格助手';
+ const subtitle=cube
+  ?'Python Server 会使用所选 Agent 发起 DeepCube 助手对话，模型、工具和指令由该 Agent 的配置决定。'
+  :'电子表格组件使用所选 Agent 发起对话，模型、工具和指令由该 Agent 的配置决定。当前应用有专用配置时，会追加该应用的提示词和 Skill。';
+ const side=(title,code,i,action,active)=>'<button type="button" class="integration-item" data-action="'+action+'"'+(active?' aria-current="true"':'')+'>'+icon(i)+'<span><strong>'+title+'</strong><span class="meta code">'+code+'</span></span>'+icon('right')+'</button>';
+ return header('集成','配置组件服务使用的 Agent，管理电子表格助手的应用个性化。')+
+  '<div class="integration-split"><nav class="integration-list" aria-label="集成列表"><div class="nav-group">集成列表</div>'+
+  side('电子表格助手','deeptable-assistant','grid','nav-apps',!cube)+side('DeepCube 助手','deepcube-assistant','box','nav-cube',cube)+
+  '</nav><div class="integration-config"><div class="detail-heading"><h2>'+title+'</h2><p class="subtitle">'+subtitle+'</p></div>'+renderIntegrationAgent()+
+  (cube?renderIntegrationGuide(code):
+   '<nav class="tabs" aria-label="电子表格助手配置"><button type="button" class="tab '+(!api?'active':'')+'" data-action="nav-apps"'+(!api?' aria-current="page"':'')+'>应用配置</button><button type="button" class="tab '+(api?'active':'')+'" data-action="nav-api"'+(api?' aria-current="page"':'')+'>接口示例</button></nav>'+
+   (api?renderIntegrationGuide(code):
+   '<div class="subbar"><div class="actions"><label class="search">'+icon('search')+'<input type="search" id="appSearch" aria-label="搜索应用" placeholder="搜索应用名称或编码" value="'+esc(filter)+'"></label><select id="tenantFilter" class="select" aria-label="企业范围"><option value="">全部可管理企业</option>'+[...new Set(Object.values(apps).map(a=>a.tenant))].map(t=>'<option'+(tenant===t?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select></div>'+btn('添加应用','add-app','primary','plus')+'</div>'+
+   '<div id="appTable">'+appTable()+'</div>'))+'</div></div>';
+}
+function renderIntegrationGuide(code){
+ const cube=code==='deepcube-assistant';
+ const client=cube?'Python Server':'电子表格组件';
+ const response=JSON.stringify({code,settings:{agent_id:cube?'00000000-0000-0000-0000-000000000002':'00000000-0000-0000-0000-000000000001'}},null,2);
+ return `<div class="integration-guide">
+   <p class="subtitle">${client}通过此接口获取发起对话所用的 Agent ID。</p>
+   <div class="integration-api-example">
+    <div class="meta">请求</div>
+    <pre><code>GET /api/v1/integrations/${code}</code></pre>
+    <div class="meta">响应示例</div>
+    <pre><code>${esc(response)}</code></pre>
+   </div>
+ </div>`;
+}
+function appTable(){
+ const rows=Object.entries(profiles).filter(([k])=>{const a=apps[k];return a&&(!tenant||a.tenant===tenant)&&[a.name,k,a.space].some(v=>v.toLowerCase().includes(filter.toLowerCase()))});
+ return table(['应用','所属空间 / 企业','专用 Skill',''],rows.map(([k,d])=>{
+  const a=apps[k];
+  return '<tr class="app-row" data-app-row><td><button class="table-name-button" type="button" data-action="edit-app" data-code="'+esc(k)+'">'+entity(a.name,k)+'</button></td>'+
+   '<td>'+esc(a.space)+'<div class="meta">'+esc(a.tenant)+'</div></td><td><span class="app-skill-count">'+icon('book')+d.skills.length+'</span></td>'+
+   '<td class="app-test-cell">'+btn('测试','test-app','text','external','data-code="'+esc(k)+'" aria-label="在测试页验证'+esc(a.name)+'"')+'</td></tr>';
+ }).join('')||'<tr><td class="empty" colspan="4">没有匹配的应用配置</td></tr>');
+}
+function skillTable(items,special){
+ const rows=items.map(s=>{
+  const counts=skillCounts(s);
+  const resources=[['book','reference_count','References'],['paperclip','asset_count','Assets'],['terminal','script_count','脚本']]
+   .map(([i,key,label])=>'<span title="'+label+'" aria-label="'+label+' '+counts[key]+'">'+icon(i)+counts[key]+'</span>').join('');
+  return '<tr class="skill-row" data-skill-row><td><button type="button" class="table-name-button" aria-haspopup="dialog" data-action="skill-preview" data-code="'+esc(s.code)+'">'+entity(s.name,s.code)+'</button></td>'+
+   '<td class="code">'+esc(s.version)+'</td><td><span class="tag ok">已就绪</span></td><td><div class="resource-count">'+resources+'</div></td>'+
+   '<td class="skill-updated">'+esc(formatSkillDate(s))+'</td><td>'+icon('right')+'</td></tr>';
+ });
+ return '<div class="table-wrap"><table class="table skill-table"><thead><tr><th scope="col">Skill</th><th scope="col">版本</th><th scope="col">状态</th><th scope="col">资源</th><th scope="col" class="skill-updated">更新时间</th><th scope="col"></th></tr></thead><tbody>'+
+  (rows.join('')||'<tr><td class="empty" colspan="6">'+(special?'此应用暂无专用 Skill，上传 ZIP 后即可使用。':'没有匹配的 Skill。')+'</td></tr>')+'</tbody></table></div>';
+}
+function renderTest(){
+ const a=apps[debugApp],profile=profiles[debugApp],hit=profile&&debugAgent===agent;
+ E('main').innerHTML='<div class="test"><aside class="sessions"><select class="select" id="testAgent" aria-label="测试 Agent">'+agentOptions(debugAgent)+'</select><label class="search">'+icon('search')+'<input type="search" aria-label="搜索会话" placeholder="搜索会话名称或 ID"></label><div class="session-item current">新对话</div><div class="session-item">预算执行分析<div class="meta">昨天 · 示例历史</div></div><div class="session-item">本月经营情况<div class="meta">昨天 · 示例历史</div></div></aside>'+
+  '<section class="conversation"><header class="chat-head"><strong>新对话</strong><div class="actions"><span class="tag prototype">原型</span><button class="btn popover-trigger" type="button" data-action="open-debug" id="debugTrigger" aria-expanded="false" aria-haspopup="dialog">'+icon('settings')+'<span class="debug-word">调试</span> '+esc(a?.name||'不分应用')+icon('chev')+'</button></div></header>'+
+  '<div class="chat-content"><div class="welcome"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNzggMzQwIiB3aWR0aD0iMjc4IiBoZWlnaHQ9IjM0MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsbGVkYnk9InRpdGxlIj48dGl0bGUgaWQ9InRpdGxlIj5EZWVwQWdlbnQgRCByb3VuZGVkIOKAlCByZWZlcmVuY2UgdHJhY2VkPC90aXRsZT48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9InB1cnBsZSIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPjxzdG9wIHN0b3AtY29sb3I9IiM2MzQ4RkYiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM1ODQwRjUiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48ZyBpZD0ic2lsaG91ZXR0ZSIgZmlsbD0idXJsKCNwdXJwbGUpIj48cGF0aCBkPSJNMTMzLjY2LDE4LjExTDEzMy42NiwxOC4xMVExMzIuMDAsMTcuMDAgMTMwLjAyLDE2Ljc1TDExNy45OCwxNS4yNVExMTYuMDAsMTUuMDAgMTE0LjEzLDE1LjcyTDEwNC44NywxOS4yOFExMDMuMDAsMjAuMDAgMTAxLjUxLDIxLjMzTDk1LjQ5LDI2LjY3UTk0LjAwLDI4LjAwIDkzLjE3LDI5LjgyTDg5LjgzLDM3LjE4UTg5LjAwLDM5LjAwIDg5LjAwLDQxLjAwTDg5LjAwLDUyLjAwUTg5LjAwLDU0LjAwIDg5LjcwLDU1Ljg3TDkxLjMwLDYwLjEzUTkyLjAwLDYyLjAwIDkzLjM1LDYzLjQ4TDEwMC44Nyw3MS43NlExMDIuMDAsNzMuMDAgMTAzLjUwLDczLjc1TDEwNi41MCw3NS4yNVExMDguMDAsNzYuMDAgMTA3Ljk1LDc3LjY4TDEwNy4wNiwxMDcuMDBRMTA3LjAwLDEwOS4wMCAxMDUuMDAsMTA5LjAwTDMzLjAwLDEwOS4wMFEzMS4wMCwxMDkuMDAgMjkuMTMsMTA5LjcwTDI0Ljg3LDExMS4zMFEyMy4wMCwxMTIuMDAgMjEuNzMsMTEzLjU1TDE1LjI3LDEyMS40NVExNC4wMCwxMjMuMDAgMTMuOTksMTI1LjAwTDEzLjAxLDMxMC4wMFExMy4wMCwzMTIuMDAgMTMuOTYsMzEzLjc2TDE4LjE0LDMyMS40MlExOS4wMCwzMjMuMDAgMjAuNTAsMzI0LjAwTDIzLjY4LDMyNi4xMlEyNS4wMCwzMjcuMDAgMjYuNTAsMzI3LjUwTDI5LjUwLDMyOC41MFEzMS4wMCwzMjkuMDAgMzIuNTgsMzI4Ljk5TDE5OC4wMCwzMjguMDFRMjAwLjAwLDMyOC4wMCAyMDEuOTAsMzI3LjM3TDIxNi4xMCwzMjIuNjNRMjE4LjAwLDMyMi4wMCAyMTkuNjksMzIwLjkzTDIzOC4zMSwzMDkuMDdRMjQwLjAwLDMwOC4wMCAyNDEuMzYsMzA2LjUzTDI1MS42NCwyOTUuNDdRMjUzLjAwLDI5NC4wMCAyNTMuOTYsMjkyLjI1TDI2My4wNCwyNzUuNzVRMjY0LjAwLDI3NC4wMCAyNjQuNjMsMjcyLjEwTDI2Ni4zNywyNjYuOTBRMjY3LjAwLDI2NS4wMCAyNjcuMjgsMjYzLjAyTDI2OS43MiwyNDUuOThRMjcwLjAwLDI0NC4wMCAyNzAuMDAsMjQyLjAwTDI3MC4wMCwxOTguMDBRMjcwLjAwLDE5Ni4wMCAyNjkuNzIsMTk0LjAyTDI2Ny4yOCwxNzYuOThRMjY3LjAwLDE3NS4wMCAyNjYuMzEsMTczLjEyTDI2MC42OSwxNTcuODhRMjYwLjAwLDE1Ni4wMCAyNTguOTcsMTU0LjI5TDI1NS4wMywxNDcuNzFRMjU0LjAwLDE0Ni4wMCAyNTIuNzEsMTQ0LjQ3TDI0NC4yOSwxMzQuNTNRMjQzLjAwLDEzMy4wMCAyNDEuNDEsMTMxLjc5TDIyNy41OSwxMjEuMjFRMjI2LjAwLDEyMC4wMCAyMjQuMjEsMTE5LjExTDIxNS43OSwxMTQuODlRMjE0LjAwLDExNC4wMCAyMTIuMDUsMTEzLjU0TDE5NC45NSwxMDkuNDZRMTkzLjAwLDEwOS4wMCAxOTEuMDAsMTA4Ljk3TDEzNS4wMCwxMDguMDNRMTMzLjAwLDEwOC4wMCAxMzMuMDAsMTA2LjAwTDEzMy4wMCw3OC4wMFExMzMuMDAsNzYuMDAgMTM0Ljc0LDc1LjAxTDEzOC4yNiw3Mi45OVExNDAuMDAsNzIuMDAgMTQxLjMzLDcwLjUxTDE0Ni42Nyw2NC40OVExNDguMDAsNjMuMDAgMTQ4LjY4LDYxLjEyTDE1MS4zMiw1My44OFExNTIuMDAsNTIuMDAgMTUxLjg3LDUwLjAwTDE1MS4xMywzOS4wMFExNTEuMDAsMzcuMDAgMTQ5Ljk5LDM1LjI3TDE0NS4wMSwyNi43M1ExNDQuMDAsMjUuMDAgMTQyLjM0LDIzLjg5WiIvPjwvZz48ZyBpZD0iZmFjZSIgZmlsbD0iI0ZDRkNGRiI+PHBhdGggZD0iTTU4LjQxLDE3OS41OUw1OC40MSwxNzkuNTlRNTcuMDAsMTgxLjAwIDU2LjM3LDE4Mi45MEw1Mi42MywxOTQuMTBRNTIuMDAsMTk2LjAwIDUyLjAwLDE5OC4wMEw1Mi4wMCwyNDMuMDBRNTIuMDAsMjQ1LjAwIDUyLjQ5LDI0Ni45NEw1NC41MSwyNTUuMDZRNTUuMDAsMjU3LjAwIDU2LjE4LDI1OC42Mkw2MS44MiwyNjYuMzhRNjMuMDAsMjY4LjAwIDY0LjY2LDI2OS4xMUw3MC4zNCwyNzIuODlRNzIuMDAsMjc0LjAwIDczLjkyLDI3NC41N0w4MC4wOCwyNzYuNDNRODIuMDAsMjc3LjAwIDg0LjAwLDI3Ny4wMEwxODUuMDAsMjc3LjAwUTE4Ny4wMCwyNzcuMDAgMTg4LjkzLDI3Ni40N0wxOTYuNTksMjc0LjM4UTE5OC4wMCwyNzQuMDAgMTk5LjI1LDI3My4yNUwyMDEuNzUsMjcxLjc1UTIwMy4wMCwyNzEuMDAgMjAzLjk1LDI2OS44OUwyMTMuNzAsMjU4LjUyUTIxNS4wMCwyNTcuMDAgMjE1LjUzLDI1NS4wN0wyMTcuNDcsMjQ3LjkzUTIxOC4wMCwyNDYuMDAgMjE4LjAwLDI0NC4wMEwyMTguMDAsMTk3LjAwUTIxOC4wMCwxOTUuMDAgMjE3LjMzLDE5My4xMkwyMTMuNjcsMTgyLjg4UTIxMy4wMCwxODEuMDAgMjExLjY3LDE3OS41MUwyMDYuMzMsMTczLjQ5UTIwNS4wMCwxNzIuMDAgMjAzLjI2LDE3MS4wMUwxOTkuNzQsMTY4Ljk5UTE5OC4wMCwxNjguMDAgMTk2LjEwLDE2Ny4zN0wxOTAuOTAsMTY1LjYzUTE4OS4wMCwxNjUuMDAgMTg3LjAwLDE2NS4wMEw4My4wMCwxNjUuMDBRODEuMDAsMTY1LjAwIDc5LjEzLDE2NS43Mkw2OS44NywxNjkuMjhRNjguMDAsMTcwLjAwIDY2LjU5LDE3MS40MVoiLz48L2c+PGcgaWQ9ImV5ZXMiIGZpbGw9IiM2MDQ1RkEiPjxwYXRoIGQ9Ik0xNjkuMDAsMTg2LjAwTDE2OS4wMCwxODYuMDBRMTY3LjAwLDE4Ni4wMCAxNjUuNDAsMTg3LjIwTDE2MC4wOCwxOTEuMTlRMTU5LjAwLDE5Mi4wMCAxNTguNTAsMTkzLjI1TDE1Ny41MCwxOTUuNzVRMTU3LjAwLDE5Ny4wMCAxNTcuMDAsMTk4LjM1TDE1Ny4wMCwyNDIuNDJRMTU3LjAwLDI0NC4wMCAxNTcuNTAsMjQ1LjUwTDE1OC41NSwyNDguNjZRMTU5LjAwLDI1MC4wMCAxNjAuMDAsMjUxLjAwTDE2Mi4wNSwyNTMuMDVRMTYzLjAwLDI1NC4wMCAxNjQuMjUsMjU0LjUwTDE2Ni43NSwyNTUuNTBRMTY4LjAwLDI1Ni4wMCAxNjkuMzUsMjU2LjAwTDE3My4yNSwyNTYuMDBRMTc1LjAwLDI1Ni4wMCAxNzYuNDAsMjU0Ljk1TDE4MS45MiwyNTAuODFRMTgzLjAwLDI1MC4wMCAxODMuNTAsMjQ4Ljc1TDE4NC41MCwyNDYuMjVRMTg1LjAwLDI0NS4wMCAxODUuMDAsMjQzLjY1TDE4NS4wMCwxOTguMzVRMTg1LjAwLDE5Ny4wMCAxODQuNTAsMTk1Ljc1TDE4My41MCwxOTMuMjVRMTgzLjAwLDE5Mi4wMCAxODIuMDUsMTkxLjA1TDE3OS43OSwxODguNzlRMTc5LjAwLDE4OC4wMCAxNzguMDAsMTg3LjUwTDE3Ni4wMCwxODYuNTBRMTc1LjAwLDE4Ni4wMCAxNzMuODgsMTg2LjAwWiIvPjxwYXRoIGQ9Ik05Ny4wMCwxODYuMDBMOTcuMDAsMTg2LjAwUTk1LjAwLDE4Ni4wMCA5My40MCwxODcuMjBMODguMDgsMTkxLjE5UTg3LjAwLDE5Mi4wMCA4Ni41MCwxOTMuMjVMODUuNTAsMTk1Ljc1UTg1LjAwLDE5Ny4wMCA4NS4wMCwxOTguMzVMODUuMDAsMjQyLjQyUTg1LjAwLDI0NC4wMCA4NS41MCwyNDUuNTBMODYuNTUsMjQ4LjY2UTg3LjAwLDI1MC4wMCA4OC4wMCwyNTEuMDBMOTAuMjEsMjUzLjIxUTkxLjAwLDI1NC4wMCA5Mi4wMCwyNTQuNTBMOTQuMDAsMjU1LjUwUTk1LjAwLDI1Ni4wMCA5Ni4xMiwyNTYuMDBMMTAwLjY1LDI1Ni4wMFExMDIuMDAsMjU2LjAwIDEwMy4yNSwyNTUuNTBMMTA1Ljc1LDI1NC41MFExMDcuMDAsMjU0LjAwIDEwNy45NSwyNTMuMDVMMTEwLjA1LDI1MC45NVExMTEuMDAsMjUwLjAwIDExMS41MCwyNDguNzVMMTEyLjUwLDI0Ni4yNVExMTMuMDAsMjQ1LjAwIDExMy4wMCwyNDMuNjVMMTEzLjAwLDE5OC4zNVExMTMuMDAsMTk3LjAwIDExMi41MCwxOTUuNzVMMTExLjUwLDE5My4yNVExMTEuMDAsMTkyLjAwIDExMC4wNSwxOTEuMDVMMTA3Ljc5LDE4OC43OVExMDcuMDAsMTg4LjAwIDEwNi4wMCwxODcuNTBMMTA0LjAwLDE4Ni41MFExMDMuMDAsMTg2LjAwIDEwMS44OCwxODYuMDBaIi8+PC9nPjxnIGlkPSJoaWdobGlnaHRzIiBmaWxsPSIjQTg5N0ZGIj48L2c+PC9zdmc+" alt=""><h1>'+esc(debugAgent)+'</h1><p>当前 <button type="button" class="ghost-link" data-action="open-debug">'+esc(a?a.name+' · '+debugApp:'不分应用')+'</button>'+ (hit?' <span class="tag ok">个性化已生效</span>':profile?' <span class="tag neutral">当前 Agent 未套用</span>':'')+'</p>'+
+  '<div class="composer"><textarea id="question" aria-label="输入消息" placeholder="输入消息…">'+esc(testQuestion)+'</textarea><div class="actions">'+btn('发送','mock-send','primary','send')+'</div></div><div id="runPreview" class="feedback debug-result" role="status" hidden></div></div></div>'+
+  '<aside class="popover" id="debugPopover" role="dialog" aria-label="调试 App" hidden><header><div><h2>调试</h2><div class="meta">仅影响当前控制台请求</div></div>'+btn('','close-debug','icon-only','x','aria-label="关闭调试浮层"')+'</header>'+
+  '<label for="debugCode">应用编码 App</label><div class="debug-combo"><div class="debug-combo-field"><input id="debugCode" class="input code" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="debugOptions" autocomplete="off" placeholder="输入 App 编码或下拉选择">'+btn('','toggle-options','icon-only','chev','aria-label="展开已配置应用" aria-controls="debugOptions" aria-expanded="false" tabindex="-1"')+'</div>'+
+  '<div class="options" id="debugOptions" role="listbox" aria-label="'+CONFIGURED_APPS_LABEL+'" hidden></div></div>'+
+  '<div class="feedback" id="debugFeedback" role="status" hidden></div><dl class="context-summary" id="debugSummary"></dl>'+
+  '<footer>'+btn('不分应用','reset-debug')+btn('确定','apply-debug','primary')+'</footer></aside></section></div>';
+}
+function debugSummary(code,preview=false){
+ const a=apps[code],p=profiles[code],hit=p&&debugAgent===agent;
+ return [['App',a?a.name+' · '+code:'—'],['Space',a?a.space+' · '+a.spaceId:'—'],['个性化',hit?(preview?'确定后生效 · ':'已生效 · ')+p.skills.length+' 个专用 Skill':p?'应用已配置，当前 Agent 未套用':a?'未配置，沿用通用设置':'不分应用']].map(([k,v])=>'<dt>'+k+'</dt><dd>'+esc(v)+'</dd>').join('');
+}
+function openOptions(on=true,showAll=false){
+ const box=E('debugOptions'),input=E('debugCode');
+ const q=showAll?'':input.value.trim().toLowerCase();
+ debugOption=-1;
+ box.hidden=!on;input.setAttribute('aria-expanded',String(on));input.removeAttribute('aria-activedescendant');
+ E('debugPopover').querySelector('[data-action=toggle-options]').setAttribute('aria-expanded',String(on));
+ if(!on)return;
+ const candidates=Object.keys(profiles).filter(k=>apps[k]&&(!q||k.toLowerCase().includes(q)||apps[k].name.toLowerCase().includes(q)||apps[k].space.toLowerCase().includes(q)));
+ box.innerHTML='<div class="options-label" aria-hidden="true">'+CONFIGURED_APPS_LABEL+'</div>'+candidates.map((k,index)=>'<button id="debugOption'+index+'" class="option" type="button" role="option" tabindex="-1" aria-selected="'+(k===debugDraft)+'" data-action="pick-debug" data-code="'+k+'"><span>'+esc(apps[k].name)+'<span class="meta">'+esc(k)+' · '+esc(apps[k].space)+'</span></span>'+(k===debugDraft?icon('check'):'')+'</button>').join('')+(candidates.length?'':'<div class="options-label" role="status">没有匹配项，可直接输入其他 App 编码</div>');
+}
+function stepDebugOption(delta){
+ const box=E('debugOptions');
+ if(box.hidden)openOptions(true,true);
+ const rows=[...box.querySelectorAll('[role=option]')];
+ if(!rows.length)return;
+ debugOption=debugOption<0?(delta>0?0:rows.length-1):(debugOption+delta+rows.length)%rows.length;
+ rows.forEach((row,index)=>row.classList.toggle('active',index===debugOption));
+ const selected=rows[debugOption];
+ E('debugCode').setAttribute('aria-activedescendant',selected.id);
+ selected.scrollIntoView({block:'nearest'});
+}
+function showDebug(preset=debugApp){
+ const pop=E('debugPopover');if(!pop.hidden){closeDebug();return;}
+ debugDraft=preset;pop.hidden=false;E('debugTrigger').setAttribute('aria-expanded','true');E('debugFeedback').hidden=true;
+ E('debugCode').value=debugDraft;E('debugSummary').innerHTML=debugSummary(preset,preset!==debugApp);E('debugCode').focus();
+}
+function closeDebug(){const p=E('debugPopover');if(!p)return;p.hidden=true;E('debugTrigger').setAttribute('aria-expanded','false');openOptions(false);}
+function verifyApp(){
+ const code=E('newCode').value.trim(),f=E('appFeedback');verified=null;f.hidden=false;
+ if(!apps[code]){f.className='feedback error';f.textContent=code?'应用不存在，或不属于当前账号可管理的企业。':'请输入应用编码。';}
+ else if(profiles[code]){f.className='feedback error';f.textContent='此应用已有配置，请返回列表打开。';}
+ else {verified=code;f.className='feedback ok';f.textContent='验证通过 · '+apps[code].name+' / '+apps[code].space+' / '+apps[code].tenant;}
+ E('continueBtn').disabled=!verified;
+}
+function showSkillUpload(mode,code=''){
+ skillMode=mode;uploadFiles=[];uploadTarget=code;
+ const item=code?findSkill(code):null;
+ const body=E('skillDialogBody'),confirm=E('skillDialogConfirm');
+ E('skillDialogTitle').textContent=code?'上传 Skill ZIP':'上传安装 Skill';
+ body.innerHTML='<p class="muted">'+(mode==='generic'?'通用 Skill':esc(apps[current].name)+' · 应用专用')+
+ (item?' · '+esc(item.name):'')+'</p><button type="button" class="drop" id="dropTarget">'+icon('upload')+'<span><strong>点击选择或拖拽 ZIP 文件到此处</strong><br><span class="meta">每包 ≤ 10 MiB'+(code?' · 仅选择一包，更新当前 Skill':' · 支持多选，每个 ZIP 对应一个 Skill')+'</span></span></button><input type="file" id="zipFiles" accept=".zip" '+(code?'':'multiple')+' hidden><ul class="file-list" id="zipList"></ul>';
+ confirm.textContent=code?'确认上传':'开始安装';
+ const drop=E('dropTarget');
+ drop.onclick=()=>E('zipFiles').click();E('zipFiles').onchange=e=>stageFiles(e.target.files);
+ drop.ondragover=e=>{e.preventDefault();drop.classList.add('drag')};drop.ondragleave=()=>drop.classList.remove('drag');
+ drop.ondrop=e=>{e.preventDefault();drop.classList.remove('drag');stageFiles(e.dataTransfer.files)};
+ confirm.disabled=true;E('skillDialog').showModal();
+}
+function stageFiles(files){
+ uploadFiles=Array.from(files).map(file=>({file,valid:/\.zip$/i.test(file.name)&&file.size<=10485760&&file.size>0}));
+ if(uploadTarget&&uploadFiles.length!==1)uploadFiles.forEach(f=>f.valid=false);
+ E('zipList').innerHTML=uploadFiles.map(({file,valid})=>'<li><span>'+esc(file.name)+'</span><span class="tag '+(valid?'neutral':'error')+'">'+(valid?'待安装':'请选择有效 ZIP')+'</span></li>').join('');
+ E('skillDialogConfirm').disabled=!uploadFiles.some(item=>item.valid);
+}
+function finishSkill(){
+ const accepted=uploadFiles.filter(x=>x.valid);
+ if(!accepted.length)return;
+ const target=skillMode==='generic'?generic:draft.skills;
+ for(const {file} of accepted){
+  const name=file.name.replace(/\.zip$/i,'');
+  const code=uploadTarget||name.toLowerCase().replace(/[^a-z0-9-]+/g,'-').replace(/^-+|-+$/g,'')||'demo-skill-'+(target.length+1);
+  const index=target.findIndex(s=>s.code===code);
+  const item={code,name:target[index]?.name||name,version:'示例',description:'已模拟上传 '+file.name+'。原型未读取 ZIP 内部文件。',updatedAt:new Date().toISOString()};
+  if(index<0)target.push(item);else target[index]=item;
+ }
+ E('skillDialog').close();render();
+ notify(skillMode==='generic'?'已模拟上传。':'已模拟上传，保存应用配置后生效。');
+}
+function skillFiles(skill){
+ return [{path:'SKILL.md',text:'---\nname: '+skill.code+'\ndescription: '+JSON.stringify(skill.description||skill.name)+'\n---\n\n# '+skill.name+'\n\n'+(skill.description||'此文件为原型示例。')},...(skill.files||[])];
+}
+function promptEstimate(value){
+ const chars=Array.from(value.trim());
+ const tokens=chars.reduce((sum,c)=>sum+(/\s/u.test(c)?.05:/\p{Script=Han}/u.test(c)?1:.25),0);
+ return chars.length.toLocaleString('zh-CN')+' 字 / '+Math.ceil(tokens).toLocaleString('zh-CN')+' Token';
+}
+const skillDateFormat=new Intl.DateTimeFormat('sv-SE',{dateStyle:'short',timeStyle:'medium',timeZone:'Asia/Shanghai'});
+const skillUpdatedAt=skill=>skill.updatedAt||'2026-11-09T10:00:00+08:00';
+const formatSkillDate=skill=>skillDateFormat.format(new Date(skillUpdatedAt(skill)));
+const currentSkills=()=>page==='skills'?generic:draft.skills;
+const findSkill=code=>currentSkills().find(skill=>skill.code===code);
+function skillCounts(skill){
+ const count=prefix=>(skill.files||[]).filter(f=>f.path.startsWith(prefix+'/')).length;
+ return {reference_count:count('references'),asset_count:count('assets'),script_count:count('scripts')};
+}
+function skillFixture(skill){
+ const files=skillFiles(skill),items=files.slice(1);
+ return {files,zip:makeSampleZip(files),detail:{
+  code:skill.code,label:skill.name,description:skill.description||skill.name,version:skill.version,schema_version:1,source:skill.version==='内置'?'builtin':'uploaded',
+  runtime_status:'ready',...skillCounts(skill),updated_at:skillUpdatedAt(skill),
+  resources:items.map(f=>({path:f.path,category:f.path.startsWith('scripts/')?'script':'resource',read_format:'text',size:new TextEncoder().encode(f.text).length}))
+ }};
+}
+const previewFrame=E('skillPreviewFrame'),previewDialog=E('skillPreviewDialog');
+const previewReady=new Promise(resolve=>{
+ const ready=()=>resolve(previewFrame.contentWindow);
+ if(previewFrame.contentDocument?.readyState==='complete'&&previewFrame.contentWindow?.openPrototypeSkill)ready();
+ else previewFrame.addEventListener('load',ready,{once:true});
+});
+async function skillView(){
+ const frame=await previewReady;
+ if(!frame.openPrototypeSkill||!frame.skillsAdmin)throw new Error('Skill 详情组件未加载，请刷新原型。');
+ return frame;
+}
+let previewSequence=0;
+async function showSkillPreview(skill){
+ const seq=++previewSequence;
+ previewDialog.setAttribute('aria-label',skill.name+' · Skill 详情');
+ if(!previewDialog.open)previewDialog.showModal();
+ try{
+  const frame=await skillView();
+  if(seq===previewSequence&&previewDialog.open)await frame.openPrototypeSkill(skillFixture(skill));
+ }catch(error){if(seq===previewSequence&&previewDialog.open){previewDialog.close();notify(error.message);}}
+}
+window.closeSkillPreview=()=>{if(previewDialog.open)previewDialog.close();};
+previewDialog.addEventListener('close',()=>{++previewSequence;previewFrame.contentWindow?.closePrototypeSkill?.();});
+window.handlePrototypeSkillAction=(action,code)=>{
+ const skill=findSkill(code);
+ if(!skill)return;
+ if(action==='replace'){
+  window.closeSkillPreview();
+  showSkillUpload(page==='skills'?'generic':'upload',code);
+ }
+ if(action==='edit'){
+  editingSkillCode=code;
+  E('editSkillName').value=skill.name;
+  E('editSkillDescription').value=skill.description||'';
+  E('editSkillDialog').showModal();
+  E('editSkillName').focus();
+ }
+ if(action==='reload'){
+  void showSkillPreview(skill);
+  notify('已模拟重新加载 Skill。');
+ }
+ if(action==='delete')confirmRemoval('skill',code);
+};
+function confirmRemoval(kind,code){
+ const isApp=kind==='app',item=isApp?apps[code]:findSkill(code);
+ if(!item)return;
+ pendingRemove={kind,code};
+ E('removeTitle').textContent=isApp?'移除应用配置':page==='skills'?'删除 Skill':'删除专用 Skill';
+ E('removeConfirm').textContent=isApp?'确认移除':'确认删除';
+ E('removeCopy').textContent=isApp?'将移除「'+item.name+'」的追加提示词和全部专用 Skill。其他应用不受影响。':'将删除「'+item.name+'」。'+(page==='skills'?'':'保存应用配置后生效。');
+ E('removeDialog').showModal();
+}
+function makeSampleZip(files){
+ const enc=new TextEncoder(),entries=files.map(f=>({name:enc.encode(f.path),content:enc.encode(f.text)}));
+ const start=entries.reduce((n,e)=>n+30+e.name.length+e.content.length,0),size=entries.reduce((n,e)=>n+46+e.name.length,0),z=new Uint8Array(start+size+22),v=new DataView(z.buffer);
+ const w=(p,n)=>v.setUint16(p,n,true),d=(p,n)=>v.setUint32(p,n,true);
+ let local=0,dir=start;
+ for(const {name,content} of entries){
+  let crc=0xffffffff;for(const b of content){crc^=b;for(let k=0;k<8;k++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}crc=(crc^0xffffffff)>>>0;
+  d(local,0x04034b50);w(local+4,20);d(local+14,crc);d(local+18,content.length);d(local+22,content.length);w(local+26,name.length);z.set(name,local+30);z.set(content,local+30+name.length);
+  d(dir,0x02014b50);w(dir+4,20);w(dir+6,20);d(dir+16,crc);d(dir+20,content.length);d(dir+24,content.length);w(dir+28,name.length);d(dir+42,local);z.set(name,dir+46);
+  local+=30+name.length+content.length;dir+=46+name.length;
+ }
+ d(dir,0x06054b50);w(dir+8,entries.length);w(dir+10,entries.length);d(dir+12,size);d(dir+16,start);
+ return new Blob([z],{type:'application/zip'});
+}
+document.addEventListener('input',e=>{
+ const id=e.target.id;
+ if(id==='appSearch'){filter=e.target.value;E('appTable').innerHTML=appTable();}
+ if(id==='appPrompt'){draft.prompt=e.target.value;E('promptCount').textContent=promptEstimate(draft.prompt);}
+ if(id==='newCode'){verified=null;E('continueBtn').disabled=true;E('appFeedback').hidden=true;}
+ if(id==='debugCode'){debugDraft=e.target.value;E('debugFeedback').hidden=true;E('debugSummary').innerHTML=debugSummary(debugApp);openOptions(true);}
+ if(id==='question')testQuestion=e.target.value;
+ if(id==='generalSearch'){const q=e.target.value.toLowerCase();E('generalTable').innerHTML=skillTable(generic.filter(s=>(s.name+s.code).toLowerCase().includes(q)),false);}
+});
+document.addEventListener('change',e=>{
+ if(e.target.id==='tenantFilter'){tenant=e.target.value;E('appTable').innerHTML=appTable();}
+ if(e.target.id==='testAgent'){debugAgent=e.target.value;renderTest();}
+});
+document.addEventListener('keydown',e=>{
+ if(e.key==='Escape'&&integrationAgentDraft!==null){
+  integrationAgentDraft=null;
+  refreshIntegrationAgentEditor('#integrationAgentTrigger');
+ }
+ if(e.key==='Escape'&&E('debugPopover')&&!E('debugPopover').hidden){
+  if(!E('debugOptions').hidden){openOptions(false);E('debugCode').focus();}
+  else{closeDebug();E('debugTrigger').focus();}
+ }
+ if(e.target.id==='debugCode'&&['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();stepDebugOption(e.key==='ArrowDown'?1:-1);}
+ if(e.target.id==='debugCode'&&e.key==='Enter'){
+  e.preventDefault();
+  if(debugOption>=0)E('debugOption'+debugOption)?.click();
+  else document.querySelector('[data-action=apply-debug]')?.click();
+ }
+ if(e.target.id==='newCode'&&e.key==='Enter'&&!verified){e.preventDefault();verifyApp();}
+});
+document.addEventListener('click',e=>{
+ if(integrationAgentDraft!==null&&!e.target.closest('#integrationAgentRow')){
+  integrationAgentDraft=null;
+  refreshIntegrationAgentEditor();
+ }
+ const pop=E('debugPopover');
+ if(pop&&!pop.hidden){
+  if(pop.contains(e.target)&&!e.target.closest('.debug-combo'))openOptions(false);
+  else if(!pop.contains(e.target)&&!e.target.closest('[data-action=open-debug]'))closeDebug();
+ }
+ const close=e.target.closest('[data-close]');if(close){E(close.dataset.close).close();return;}
+ const fill=e.target.closest('[data-fill]');if(fill){E('newCode').value=fill.dataset.fill;verified=null;E('continueBtn').disabled=true;E('appFeedback').hidden=true;E('newCode').focus();return;}
+ const b=e.target.closest('[data-action]');
+ if(!b){
+  if(e.target.id==='debugCode'&&E('debugOptions').hidden)openOptions(true,true);
+  e.target.closest('[data-app-row], [data-skill-row]')?.querySelector('.table-name-button').click();
+  return;
+ }
+ const action=b.dataset.action,code=b.dataset.code;
+ if(action.startsWith('nav-')){go(action.slice(4));return;}
+ if(action==='edit-app'){go('app',code);return;}
+ if(action==='add-app'){verified=null;E('newCode').value='';E('continueBtn').disabled=true;E('appFeedback').hidden=true;E('appDialog').showModal();}
+ if(action==='integration-agent-toggle'){
+  integrationAgentDraft=integrationAgentDraft===null?(page==='cube'?cubeAgent:agent):null;
+  refreshIntegrationAgentEditor('#integrationAgentTrigger');
+  return;
+ }
+ if(action==='integration-agent-cancel'){
+  integrationAgentDraft=null;
+  refreshIntegrationAgentEditor('#integrationAgentTrigger');
+  return;
+ }
+ if(action==='integration-agent-pick'){
+  integrationAgentDraft=code;
+  refreshIntegrationAgentEditor('#integrationAgentMenu .option[aria-pressed="true"]');
+  return;
+ }
+ if(action==='integration-agent-clear'){
+  integrationAgentDraft='';
+  refreshIntegrationAgentEditor('#saveIntegrationAgent');
+  return;
+ }
+ if(action==='integration-agent-save'){
+  if(page==='cube')cubeAgent=integrationAgentDraft;
+  else agent=integrationAgentDraft;
+  integrationAgentDraft=null;
+  refreshIntegrationAgentEditor('#integrationAgentTrigger');
+  notify('Agent 配置已保存（原型）');
+  return;
+ }
+ if(action==='save-app'){
+  if(!draft.prompt.trim()&&!draft.skills.length){notify('请填写追加系统提示词，或上传至少一个专用 Skill。');return;}
+  profiles[current]=structuredClone(draft);render();notify('应用配置已保存（原型）');
+ }
+ if(action==='test-app'){
+  if(!profiles[code])return;
+  if(!agent){notify('请先为电子表格助手配置 Agent。');return;}
+  debugAgent=agent;
+  go('test');
+  showDebug(code);
+  return;
+ }
+ if(action==='remove-app')confirmRemoval('app',current);
+ if(action.startsWith('skill-')){
+  const mode=action.slice(6);
+  const skill=code?findSkill(code):null;
+  if(mode==='preview'&&skill)void showSkillPreview(skill);
+  if(mode==='upload'||mode==='generic')showSkillUpload(mode,code);
+  return;
+ }
+ if(action==='open-debug')showDebug();
+ if(action==='close-debug'){closeDebug();E('debugTrigger').focus();}
+ if(action==='toggle-options'){openOptions(E('debugOptions').hidden,true);E('debugCode').focus();}
+ if(action==='pick-debug'){debugDraft=code;E('debugCode').value=code;E('debugFeedback').hidden=true;E('debugSummary').innerHTML=debugSummary(code,code!==debugApp);openOptions(false);E('debugCode').focus();}
+ if(action==='reset-debug'){debugApp='';renderTest();notify('调试上下文已重置');}
+ if(action==='apply-debug'){
+  const code=E('debugCode').value.trim();
+  if(code&&!apps[code]){const f=E('debugFeedback');f.hidden=false;f.className='feedback error';f.textContent='应用不存在，或不属于当前账号可管理的企业。';openOptions(false);return;}
+  debugApp=code;renderTest();notify('调试 App 已应用到新对话');
+ }
+ if(action==='mock-send'){
+  if(!E('question').value.trim()){E('question').focus();return;}
+  const p=profiles[debugApp],run=E('runPreview');run.hidden=false;
+  run.textContent=p&&debugAgent===agent?'模拟装配：基础提示词 + 应用追加提示词；可用专用 Skill '+p.skills.length+' 个。':'模拟装配：仅使用当前 Agent 的通用配置。';
+ }
+});
+E('verifyBtn').onclick=verifyApp;
+E('appForm').onsubmit=e=>{e.preventDefault();if(!verified)return;E('appDialog').close();go('app',verified);};
+E('skillDialogConfirm').onclick=finishSkill;
+E('editSkillForm').onsubmit=e=>{
+ e.preventDefault();
+ const skill=findSkill(editingSkillCode),name=E('editSkillName').value.trim();
+ if(!skill||!name)return;
+ skill.name=name;
+ skill.description=E('editSkillDescription').value.trim();
+ skill.updatedAt=new Date().toISOString();
+ E('editSkillDialog').close();
+ render();
+ void showSkillPreview(skill);
+};
+E('removeConfirm').onclick=()=>{
+ if(!pendingRemove)return;
+ const {kind,code}=pendingRemove;pendingRemove=null;E('removeDialog').close();
+ if(kind==='skill'){
+  const items=currentSkills(),index=items.findIndex(s=>s.code===code);
+  if(index<0)return;
+  items.splice(index,1);
+  window.closeSkillPreview();
+  render();
+  notify(page==='skills'?'已删除 Skill（原型）。':'已从此应用删除，保存后生效。');
+  return;
+ }
+ delete profiles[code];draft={prompt:'',skills:[]};go('apps');notify('已移除应用配置及其专用 Skill。');
+};
+document.querySelectorAll('[data-icon]').forEach(el=>{el.outerHTML=icon(el.dataset.icon);});
+function readHash(){
+ const path=location.hash.slice(1).replace(/^\//,'');const [next,code]=path.split('/');
+ integrationAgentDraft=null;
+ if(next==='app'&&apps[code]){page=next;current=code;draft=structuredClone(profiles[code]||{prompt:'',skills:[]});}
+ else if(['apps','integrations','api','test','skills','cube'].includes(next)){page=next;if(page==='test'&&!debugAgent)debugAgent=agent||agentNames[0];}
+ render();
+}
+window.addEventListener('popstate',readHash);
+readHash();
+</script>
+</body>
+</html>

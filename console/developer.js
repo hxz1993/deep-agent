@@ -1,6 +1,7 @@
 /** Administrator resources. No credential or anonymous download URL is copied into prompts. */
 const CODES = ["initialization-guide", "development-skill"];
 const TYPES = { "initialization-guide": "application/pdf", "development-skill": "application/zip" };
+const FORMAT = { "initialization-guide": "PDF", "development-skill": "ZIP" };
 
 export function codingPrompt(baseUrl) {
   const base = new URL(baseUrl);
@@ -105,9 +106,6 @@ export function openDeveloper() {
 export function closeDeveloper() { if (dialog?.open) dialog.close(); }
 export function initDeveloper() {
   if (controller) return;
-  const css = document.createElement("link"); css.rel = "stylesheet";
-  css.href = new URL("./developer.css?v=20261106-developer-dialog3", import.meta.url).href;
-  document.head.append(css);
   const root = document.getElementById("developerHost");
   root.innerHTML = `
     <dialog class="modal console-detail-dialog developer-dialog" aria-labelledby="developerTitle">
@@ -115,7 +113,7 @@ export function initDeveloper() {
         <h2 id="developerTitle">开发调试</h2><p>下载资料，完成初始化与 Coding Agent 接入。</p>
       </div><button type="button" class="icon-action" data-close aria-label="关闭开发调试"><i data-lucide="x"></i></button></header>
       <div class="developer-resources">
-        <div class="developer-load-state" role="status"><span data-catalog-status>正在读取资料…</span><button type="button" class="btn small" data-retry hidden>重试</button></div>
+        <div class="developer-catalog-error" hidden><span data-catalog-status role="status"></span><button type="button" class="btn small" data-retry>重试</button></div>
         <section class="developer-resource-row" data-resource="initialization-guide">
           <div class="developer-section-heading">
             <h2 class="console-section-title">快速上手</h2>
@@ -146,14 +144,29 @@ export function initDeveloper() {
     </dialog>`;
   dialog = root.querySelector("dialog");
   root.querySelector("[data-close]").addEventListener("click", closeDeveloper);
+  const isBackdrop = (event) => {
+    if (event.target !== dialog) return false;
+    const { left, right, top, bottom } = dialog.getBoundingClientRect();
+    return event.clientX < left || event.clientX >= right || event.clientY < top || event.clientY >= bottom;
+  };
+  let startedOnBackdrop = false;
+  dialog.addEventListener("pointerdown", (event) => {
+    startedOnBackdrop = event.button === 0 && isBackdrop(event);
+  });
+  dialog.addEventListener("click", (event) => {
+    if (startedOnBackdrop && isBackdrop(event)) closeDeveloper();
+    startedOnBackdrop = false;
+  });
   dialog.addEventListener("close", () => {
+    startedOnBackdrop = false;
     controller.setActive(false);
     document.querySelector('[data-page="developer"]')?.setAttribute("aria-expanded", "false");
     if (location.hash === "#/developer") history.replaceState(null, "", "#/" + (document.body.dataset.consolePage || "workspace"));
   });
   const text = codingPrompt(serviceUrl(""));
   root.querySelector("[data-prompt]").textContent = text;
-  const state = root.querySelector(".developer-load-state"), status = root.querySelector("[data-catalog-status]"), retry = root.querySelector("[data-retry]");
+  const resources = root.querySelector(".developer-resources");
+  const state = root.querySelector(".developer-catalog-error"), status = root.querySelector("[data-catalog-status]"), retry = root.querySelector("[data-retry]");
   const row = code => root.querySelector(`[data-resource="${code}"]`);
   controller = createResourcesController({ request: daFetch, url: serviceUrl, saveBlob: downloadBlob, view: {
     catalog(items) {
@@ -167,7 +180,17 @@ export function initDeveloper() {
     },
     busy(key, busy) {
       if (key === "catalog") {
-        if (busy) { state.hidden = false; status.textContent = "正在读取资料…"; retry.hidden = true; CODES.forEach(code => row(code).querySelector("[data-download]").disabled = true); }
+        resources.setAttribute("aria-busy", String(busy));
+        if (busy) {
+          state.hidden = true;
+          for (const code of CODES) {
+            const target = row(code), button = target.querySelector("[data-download]");
+            button.disabled = true;
+            button.title = button.getAttribute("aria-label");
+            target.querySelector("[data-metadata]").textContent = `${FORMAT[code]} · 读取中…`;
+            target.querySelector("[data-error]").hidden = true;
+          }
+        }
         return;
       }
       const button = row(key).querySelector("[data-download]");
@@ -175,7 +198,11 @@ export function initDeveloper() {
       if (busy) row(key).querySelector("[data-error]").hidden = true;
     },
     error(key, message) {
-      if (key === "catalog") { state.hidden = false; status.textContent = message; retry.hidden = false; }
+      if (key === "catalog") {
+        for (const code of CODES) row(code).querySelector("[data-metadata]").textContent = FORMAT[code];
+        status.textContent = message;
+        state.hidden = false;
+      }
       else { const el = row(key).querySelector("[data-error]"); el.textContent = message; el.hidden = false; }
     },
   }});

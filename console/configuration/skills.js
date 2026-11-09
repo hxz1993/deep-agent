@@ -42,6 +42,7 @@ const skillsAdmin = {
       </li>`;
     }).join("");
     window.lucide?.createIcons();
+    if (this.installing) document.getElementById("chooseSkillPackagesBtn").classList.remove("dragging");
     for (const id of ["chooseSkillPackagesBtn", "closeSkillInstallBtn", "dismissSkillInstallBtn"]) {
       document.getElementById(id).disabled = this.installing;
     }
@@ -91,14 +92,22 @@ const skillsAdmin = {
           if (!response.ok) {
             // A gateway/server failure may happen after the package was committed.
             rejected = response.status >= 400 && response.status < 500 && response.status !== 408;
-            let detail = `安装失败（HTTP ${response.status}）`;
+            const details = [`HTTP ${response.status}`];
             try {
               const body = await response.json();
-              detail = window.AdminFormFeedback?.formatDetail(body.detail || body.message) || detail;
+              const detail = body?.detail ?? body?.message;
+              if (detail) details.push(window.AdminFormFeedback?.formatDetail(detail) || String(detail));
+              if (detail === "ZIP must contain SKILL.md at its root or inside one wrapper directory") {
+                details.push("如果上传的是合集，请先解压，再选择里面的 DeepAgent Skill ZIP；单个 Skill 包的 SKILL.md 应位于根目录或仅套一层目录。");
+              }
+              if (response.status === 409 && typeof detail === "string" && detail.startsWith("Skill already exists:")) {
+                details.push("已有 Skill 未覆盖；如需更新，请到对应 Skill 详情上传替换。");
+              }
             } catch { /* Retain HTTP status when no JSON is available. */ }
+            const requestId = response.headers?.get("X-Request-ID");
+            if (requestId) details.push(`请求 ID：${requestId}`);
             stop = response.status === 401 || response.status === 403;
-            if (response.status === 409) detail = "编码已存在，未覆盖；请到对应 Skill 详情上传替换。";
-            throw new Error(detail);
+            throw new Error(details.join("\n"));
           }
           const result = await response.json();
           item.status = "done";
@@ -107,7 +116,10 @@ const skillsAdmin = {
           this.selectedCode = result.skill.code;
         } catch (error) {
           item.status = rejected ? "error" : "unknown";
-          item.message = rejected ? error.message : "未确认安装结果，请刷新列表核实后再操作；不会自动重试。";
+          const detail = controller.signal.aborted ? "上传请求超时。" : error.message;
+          item.message = rejected
+            ? detail
+            : `${detail}\n未确认安装结果，请刷新列表核实后再操作；不会自动重试。`;
           if (controller.signal.aborted) stop = true;
         } finally {
           clearTimeout(timeout);
@@ -923,18 +935,44 @@ const skillsAdmin = {
     document.getElementById("installSkillBtn")?.addEventListener("click", () => {
       this.openInstallDialog();
     });
-    document.getElementById("chooseSkillPackagesBtn")?.addEventListener("click", () => document.getElementById("skillInstallFiles").click());
+    const picker = document.getElementById("chooseSkillPackagesBtn");
+    const installDialog = document.getElementById("skillInstallDialog");
+    picker?.addEventListener("click", () => document.getElementById("skillInstallFiles").click());
+    if (picker && installDialog) {
+      this.bindInstallDrop(picker, installDialog);
+    }
     document.getElementById("skillInstallFiles")?.addEventListener("change", (event) => this.selectInstallFiles(event.target.files));
     document.getElementById("startSkillInstallBtn")?.addEventListener("click", () => this.installSelected());
     for (const id of ["closeSkillInstallBtn", "dismissSkillInstallBtn"]) {
       document.getElementById(id)?.addEventListener("click", () => {
-        if (!this.installing) document.getElementById("skillInstallDialog").close();
+        if (!this.installing) installDialog?.close();
       });
     }
-    document.getElementById("skillInstallDialog")?.addEventListener("cancel", (event) => {
+    installDialog?.addEventListener("cancel", (event) => {
       if (this.installing) event.preventDefault();
     });
     document.getElementById("skillPackageInput")?.addEventListener("change", (event) => this.upload(event.target.files?.[0]));
+  },
+
+  bindInstallDrop(picker, dialog) {
+    dialog.addEventListener("dragover", (event) => {
+      if (!event.dataTransfer?.types.includes("Files")) return;
+      event.preventDefault();
+      const canDrop = !this.installing && picker.contains(event.target);
+      event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
+      picker.classList.toggle("dragging", canDrop);
+    });
+    picker?.addEventListener("dragleave", (event) => {
+      if (!picker.contains(event.relatedTarget)) picker.classList.remove("dragging");
+    });
+    dialog.addEventListener("drop", (event) => {
+      const files = event.dataTransfer?.files;
+      if (!files?.length) return;
+      event.preventDefault();
+      picker.classList.remove("dragging");
+      if (picker.contains(event.target)) this.selectInstallFiles(files);
+    });
+    dialog.addEventListener("close", () => picker.classList.remove("dragging"));
   },
 };
 

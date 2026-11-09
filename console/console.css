@@ -1299,7 +1299,7 @@ body.console-nav-collapsed .console-rail-header .console-brand-copy { pointer-ev
 .skill-install-note p { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
 .skill-install-note strong { color: var(--text); font-weight: 600; }
 .skill-install-picker { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 88px; margin-top: 16px; padding: 18px 20px; border: 1px dashed var(--border); border-radius: 10px; background: var(--bg); color: var(--accent); text-align: left; cursor: pointer; font: inherit; }
-.skill-install-picker:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.skill-install-picker:is(:hover, .dragging):not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
 .skill-install-picker:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .skill-install-picker > svg { width: 24px; height: 24px; flex-shrink: 0; }
 .skill-install-picker > span { display: grid; gap: 5px; flex: 1; min-width: 0; }
@@ -1314,7 +1314,7 @@ body.console-nav-collapsed .console-rail-header .console-brand-copy { pointer-ev
 .skill-install-file { flex: 1; min-width: 0; display: grid; gap: 3px; }
 .skill-install-file strong { color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .skill-install-file-meta { font-size: 12px; color: var(--text-faint); }
-.skill-install-detail { color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.skill-install-detail { color: var(--text-muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .skill-install-status { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; padding: 5px 8px; border-radius: 6px; color: var(--text-muted); background: var(--bg-hover); font-size: 12px; font-weight: 500; white-space: nowrap; }
 .skill-install-status svg { width: 13px; height: 13px; }
 .skill-install-card[data-status="uploading"] .skill-install-status { color: var(--accent); background: var(--accent-soft); }

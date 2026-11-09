@@ -1,5 +1,5 @@
 import { initSecretInputs } from "./ui-secret-input.js?v=20260929-component-webhook";
-import "./assets/deepagent-pet/sprite-pet.js?v=20261023-console-load1";
+import "./assets/deepagent-pet/sprite-pet.js?v=0161-pet-transitions";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
 import { initConsoleSelects } from "./ui-select.js?v=0160-session-groups";
@@ -26,13 +26,13 @@ let diagnosticsModule = null;
 let developerModule = null;
 const loadPage = createPageLoader({
   developer: async () => {
-    const module = await import("./developer.js?v=0160-resource-status");
+    const module = await import("./developer.js?v=0161-developer-stable-open");
     module.initDeveloper();
     developerModule = module;
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=0161-catalog-provider");
+    const module = await import("./configuration.js?v=0161-skill-install-drop");
     await module.initConfiguration();
     configurationModule = module;
     return module;

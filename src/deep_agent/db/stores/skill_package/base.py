@@ -7,7 +7,9 @@ from deep_agent.db.models import Agent, SkillPackage
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_optional
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.db.stores.integration_app import ensure_app_scope
-from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, scoped_skill_code, skill_scope_condition, skill_scope_ref
+from deep_agent.integrations.app_scope import (
+    GENERAL_SKILL_SCOPE, scoped_skill_storage_keys, skill_package_code, skill_scope_condition, skill_scope_ref,
+)
 from deep_agent.schemas.skill import SkillPackageRecord, SkillUpdate
 
 
@@ -25,6 +27,14 @@ class SkillPackageStoreBase(SessionBoundMixin):
             result = await db.execute(stmt)
             return list(result.scalars().all())
 
+    async def get_scoped_package(self, package_code: str, *, scope_ref: str) -> SkillPackage | None:
+        keys = scoped_skill_storage_keys(scope_ref, package_code)
+        async with self._read() as db:
+            rows = await db.scalars(select(SkillPackage).where(
+                SkillPackage.code.in_(keys), SkillPackage.scope_ref == scope_ref,
+            ))
+            return next((row for row in rows if row.code in keys and skill_package_code(row) == package_code), None)
+
     async def create(self, data: SkillPackageRecord, *, app=None, expected_scope_id: str | None = None) -> SkillPackage:
         try:
             async with self._write(exclusive=app is not None) as db:
@@ -32,7 +42,10 @@ class SkillPackageStoreBase(SessionBoundMixin):
                 if app is not None:
                     scope = await ensure_app_scope(db, app=app, expected_id=expected_scope_id)
                     values["scope_ref"] = skill_scope_ref(scope.id)
-                    values["code"] = scoped_skill_code(values["scope_ref"], data.code)
+                    key, *legacy_keys = scoped_skill_storage_keys(values["scope_ref"], data.code)
+                    if legacy_keys and await db.get(SkillPackage, legacy_keys[0]) is not None:
+                        raise ValueError(f"Skill already exists: {data.code}")
+                    values["code"] = key
                     values["manifest"] = {**values["manifest"], "code": data.code}
                 else:
                     values["scope_ref"] = GENERAL_SKILL_SCOPE

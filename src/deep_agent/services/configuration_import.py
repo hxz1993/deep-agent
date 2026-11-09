@@ -23,7 +23,7 @@ from deep_agent.db.configuration_transfer import (
     validate_table_classification,
 )
 from deep_agent.db.models import Base
-from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, INTEGRATION, scoped_skill_code, skill_scope_ref
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, INTEGRATION, scoped_skill_storage_keys, skill_scope_ref
 from deep_agent.services.integration_app_access import IntegrationAppAccessError, app_space
 from deep_agent.integrations.catalog import get_integration_definition
 from deep_agent.schemas.integration import validate_integration_settings
@@ -357,6 +357,7 @@ def _validate_app_scope_rows(rows) -> None:
         scopes.add(skill_scope_ref(row["id"]))
         scope_keys.add(row["scope_key"])
     scoped_codes = set()
+    scoped_packages = set()
     for row in rows.get("skill_packages", ()):
         scope = row.get("scope_ref")
         if scope is None or scope == GENERAL_SKILL_SCOPE:
@@ -364,8 +365,11 @@ def _validate_app_scope_rows(rows) -> None:
         if scope not in scopes or not isinstance(row.get("manifest"), dict):
             raise ConfigurationImportError("Backup contains a Skill with no matching application configuration")
         original = row["manifest"].get("code")
-        if not isinstance(original, str) or not original or row["code"] != scoped_skill_code(scope, original):
+        if not isinstance(original, str) or not original or row["code"] not in scoped_skill_storage_keys(scope, original):
             raise ConfigurationImportError("Backup contains an invalid application Skill identity")
+        if (scope, original) in scoped_packages:
+            raise ConfigurationImportError("Backup contains duplicate Skill codes in an application")
+        scoped_packages.add((scope, original))
         scoped_codes.add(row["code"])
     if any(scoped_codes.intersection(row.get("skills") or ()) for row in rows.get("agents", ())):
         raise ConfigurationImportError("An Agent references an application Skill directly")

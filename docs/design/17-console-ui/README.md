@@ -14,6 +14,8 @@
 
 - [数据流节点 AI 辅助用模型集成原型](<Prototype 数据流AI集成/README.md>)：保存三项集成的独立交互设计；数据流配置仍为设计方案，正式目录只保留电子表格与 DeepCube。
 
+- [电子表格助手应用配置平台接口核验](电子表格助手应用配置平台接口核验.md)保留 Test 接口选型与实测数据。正式入口见[集成配置](../../guides/integrations.md)。
+
 - [Logo SVG 设计资产](assets/logos/)：保留 11 个历史图标方案的 SVG 源文件；PNG 预览已清理，正式使用版本以 `console/assets/` 为准。
 
 ## 一句话方向

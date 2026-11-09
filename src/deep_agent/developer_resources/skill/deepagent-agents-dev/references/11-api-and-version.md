@@ -19,6 +19,8 @@
 | Skill列表/安装 | GET、POST /api/v1/skills | 管理员 |
 | Skill原包下载/替换 | GET、PUT /api/v1/skills/{code}/package | 管理员 |
 | Skill资源索引 | GET /api/v1/skills/{code}/resources | 管理员 |
+| 电子表格助手关联的 Agent | GET /api/v1/integrations/deeptable-assistant | 当前认证用户 |
+| 电子表格应用配置、专用 Skill | /api/v1/integrations/deeptable-assistant/app-configs | 应用所属企业管理员 |
 | 普通/流式聊天 | POST /api/v1/chat、/api/v1/chat/stream | 业务用户 |
 | 会话列表 | GET /api/v1/sessions | 本人范围 |
 | 历史/事件/状态 | GET /api/v1/sessions/{id}/history、/events、/run-status | 本人范围 |
@@ -33,6 +35,8 @@
 
 不要依据目录表猜测请求Body、上传字段或覆盖语义；先查看目标OpenAPI及本包对应章节。管理接口不是模型工具，Coding Agent调用这些API仍必须按任务授权执行。
 
+应用配置前缀下的 `GET /available` 列出可管理的候选应用，`GET /{app_id}` 读取详情，`PUT /{app_id}` 保存 `config_id` 和 `prompt_append`。`/{app_id}/skills` 下的列表、上传和下载均限定到对应应用。
+
 ## 有源码时如何继续定位
 
 项目README/AGENTS作为入口；当前实现集中在src/deep_agent，接口在api/v1，运行在agent，Skill/文件/模型/MCP有各自模块。console是内置静态管理界面；业务电子表格或BOM/合同页面属于外部客户端，不能顺手混改。
@@ -41,7 +45,7 @@
 
 ## 资料来源与取舍
 
-本包由以下资料提炼，核验基线为DeepAgent{{DEEP_AGENT_VERSION}}（2026-11-06）：
+本包对应 DeepAgent {{DEEP_AGENT_VERSION}}。应用配置、专用 Skill 和迁移基线于 2026-11-10 更新。
 
 - DeepAgent仓库README、根AGENTS及console管理规范。
 - guides中的Agent包、Skill、结构化输出、SSE、会话/日志诊断、文档解析、图片查看和平台接入说明。

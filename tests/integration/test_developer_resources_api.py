@@ -79,6 +79,8 @@ class DeveloperResourceApiTests(unittest.TestCase):
             ):
                 response = self.client.get("/api/v1" + endpoint, headers=self.headers)
                 self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.headers["x-deepagent-error"], "developer_resources_unavailable")
+                self.assertEqual(response.headers["cache-control"], "no-store")
                 self.assertNotIn("content-disposition", response.headers)
                 self.assertIn("开发资料暂不可用", response.json()["detail"])
 

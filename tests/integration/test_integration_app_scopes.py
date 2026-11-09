@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 import zipfile
+from hashlib import sha256
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -101,6 +102,14 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         await self._request("POST", path, 201, files={"file": (name + ".zip", raw, "application/zip")})
         return raw
 
+    async def _install_legacy(self, app, name):
+        scope = await self.stores.integration_app.get(app.app_id, app.space_id)
+        digest = sha256(name.encode()).hexdigest()
+        key = f"app--{scope.id}--{digest}"
+        with patch("deep_agent.db.stores.skill_package.base.scoped_skill_storage_keys", return_value=(key,)):
+            raw = await self._install(f"{PATH}/{app.app_id}/skills", name=name)
+        return key, raw
+
     async def test_same_zip_independent_lifecycle_and_backup_bundle(self):
         code = "scoped-report"
         base_a, base_b = f"{PATH}/{APP_A.app_id}", f"{PATH}/{APP_B.app_id}"
@@ -117,6 +126,7 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
                          [(APP_A.app_id, 1), (APP_B.app_id, 1)])
         detail = (await self._request("GET", base_a, 200)).json()
         self.assertEqual(detail["skill_count"], 1)
+        self.assertTrue((self.root / "runtime" / f"app-skill--{detail['config_id']}--{code}" / "SKILL.md").is_file())
         updated = (await self._request("PUT", base_a, 200, json={
             "config_id": detail["config_id"], "prompt_append": "按部门汇总",
         })).json()
@@ -146,6 +156,35 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         await self._request("GET", f"{base_a}/skills/{code}", 404)
         await self._request("GET", f"{base_b}/skills/{code}", 200)
         await self._request("GET", f"/api/v1/skills/{code}", 200)
+
+    async def test_legacy_scope_keeps_its_cache_and_cannot_be_installed_twice(self):
+        code = "scoped-report"
+        base = f"{PATH}/{APP_A.app_id}/skills"
+        await self._save()
+        key, original = await self._install_legacy(APP_A, code)
+        cached = self.root / "runtime" / key / "SKILL.md"
+        self.assertTrue(cached.is_file())
+        self.assertEqual((await self._request("GET", f"{base}/{code}/package", 200)).content, original)
+        await self._request("GET", f"{base}/{code}/resources/references/guide.md", 200)
+        await self._request("POST", base, 409, files={"file": ("duplicate.zip", original)})
+
+        # A legal package code can equal the old key's hash suffix.
+        hash_name = sha256(code.encode()).hexdigest()
+        hash_named = await self._install(base, name=hash_name)
+        self.assertEqual((await self._request("GET", f"{base}/{hash_name}/package", 200)).content, hash_named)
+        unicode_named = await self._install(base, name="预算报告")
+        self.assertEqual((await self._request("GET", f"{base}/预算报告/package", 200)).content, unicode_named)
+
+        replacement = skill_zip(name=code, scripts=True)
+        await self._request("PUT", f"{base}/{code}/package", 200, files={"file": ("updated.zip", replacement)})
+        await self._request("PATCH", f"{base}/{code}", 200, json={"label": "旧包可编辑"})
+        await self._request("POST", f"{base}/{code}/reload", 200)
+        self.assertEqual((await self._request("GET", f"{base}/{code}/package", 200)).content, replacement)
+        self.assertTrue(cached.is_file())
+        await self._request("DELETE", f"{base}/{code}", 200)
+        self.assertFalse(cached.exists())
+        await self._request("GET", f"{base}/{code}", 404)
+        await self._request("GET", f"{base}/{hash_name}", 200)
 
     async def test_run_reads_fresh_access_and_keeps_original_session_scope(self):
         await self._save()
@@ -202,7 +241,7 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
             skills=["scoped-report"], capabilities=["ui:builtin"],
         ))
         await self._save()
-        await self._install(f"{PATH}/{APP_A.app_id}/skills")
+        await self._install_legacy(APP_A, "scoped-report")
         self.fetch_scope.return_value = ScopeDirectory(app_scopes={
             APP_A.app_id: (APP_A.space_id, APP_A.tenant_id),
             APP_B.app_id: (APP_B.space_id, APP_B.tenant_id),
@@ -285,6 +324,7 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
     async def test_scoped_configuration_backup_restore_checks_app_authorization(self):
         await self._save()
         await self._install(f"{PATH}/{APP_A.app_id}/skills")
+        _, legacy = await self._install_legacy(APP_A, "old-report")
         async with self.engine.begin() as db:
             await db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
             await db.execute(text("INSERT INTO alembic_version VALUES ('015')"))
@@ -306,3 +346,4 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         imported = await self.stores.integration_app.get(APP_A.app_id, APP_A.space_id)
         self.assertEqual((imported.id, imported.settings), (original.id, original.settings))
         await self._request("GET", f"{PATH}/{APP_A.app_id}/skills/scoped-report/package", 200)
+        self.assertEqual((await self._request("GET", f"{PATH}/{APP_A.app_id}/skills/old-report/package", 200)).content, legacy)

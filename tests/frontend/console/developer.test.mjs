@@ -39,7 +39,20 @@ test('valid binary downloads save once while auth/errors/HTML and stale metadata
   assert.equal(h.saved.length,i===0?1:0); if(i)assert.equal(h.events.filter(e=>e[0]==='error').length,1);h.ctl.setActive(false);
  }
 });
-test('catalog failures can retry without enabling nonexistent files',async()=>{
- let count=0;const h=harness(()=>Promise.resolve(++count===1?new Response('',{status:403}):catalog()));h.ctl.setActive(true);await tick();assert.match(h.events.find(e=>e[0]==='error')[2],/管理员/);
- await h.ctl.download('development-skill');assert.equal(count,1);await h.ctl.reload();assert.equal(h.events.filter(e=>e[0]==='catalog').length,1);h.ctl.setActive(false);
+test('transient catalog failures can retry without enabling nonexistent files',async()=>{
+ for (const status of [502,503]) {
+  let count=0;const h=harness(()=>Promise.resolve(++count===1?new Response('',{status}):catalog()));h.ctl.setActive(true);await tick();
+  assert.deepEqual(h.events.find(e=>e[0]==='error'),['error','catalog',`资料请求失败（${status}），请稍后重试。`,true]);
+  await h.ctl.download('development-skill');assert.equal(count,1);await h.ctl.reload();assert.equal(h.events.filter(e=>e[0]==='catalog').length,1);h.ctl.setActive(false);
+ }
+});
+test('catalog authentication and release file errors do not offer retry',async()=>{
+ const legacy = Response.json({detail:'开发资料暂不可用，请联系管理员检查发行文件'},{status:503});
+ const releaseUnavailable = new Response('发行文件校验失败',{status:503,headers:{'X-DeepAgent-Error':'developer_resources_unavailable'}});
+ for (const response of [...[401,403,404].map(status=>new Response('',{status})),legacy,releaseUnavailable]) {
+  const h=harness(()=>Promise.resolve(response));
+  h.ctl.setActive(true);await tick();
+  assert.equal(h.events.find(e=>e[0]==='error')[3],false);
+  h.ctl.setActive(false);
+ }
 });

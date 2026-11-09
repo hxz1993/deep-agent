@@ -1,6 +1,6 @@
 # 数据库迁移、配置备份与初始化
 
-资料核对：2026-11-06，DeepAgent {{DEEP_AGENT_VERSION}} / Head013；目标环境须另读 /info 和 OpenAPI。0.14.4／0.14.5相对0.14.3未增加或改写迁移；运行代码回退与数据库降级分开评估。单Agent迁移使用[Agent安装包](agent-packages-and-migration.md)；本页用于实际DDL、全量配置备份和初始化。源码Head不证明目标数据库或镜像已升级。
+资料基线为 DeepAgent {{DEEP_AGENT_VERSION}} / Head 015。运行代码回退与数据库降级分开评估。单 Agent 迁移使用 [Agent 安装包](agent-packages-and-migration.md)。实际迁移前检查目标环境的接口、数据库和镜像。
 
 ## 授权与启动边界
 
@@ -28,13 +28,19 @@
 011 channel_webhook_credentials
 012 structured_output
 013 allow_text_output
+014 reasoning_effort
+015 integration_app_settings
 ```
 
-已发布迁移（当前001–013）保持不变。不要用历史同名／错号迁移映射、手工stamp或旧005/007开发期补列办法“修复”当前共享库。历史维护／rebaseline工具仅限其文档规定的原始结构，不能通用补列。003后的逻辑引用由Store／Service事务锁与reference_schema校验，物理外键为空不证明逻辑引用有效。
+已发布迁移（当前 001–015）保持不变。不要用历史同名／错号迁移映射、手工stamp或旧005/007开发期补列办法“修复”当前共享库。历史维护／rebaseline工具仅限其文档规定的原始结构，不能通用补列。003后的逻辑引用由Store／Service事务锁与reference_schema校验，物理外键为空不证明逻辑引用有效。
 
 012新增agent_output_configs及agents的structured_output_enabled（非空默认false）、updated_by（可空）；不添加结果表或Run表。输出事实仍在chat_session_events。升级后核对实际列/表、旧Agent默认关闭、旧会话可读；显式启用需另外满足客户端及完整Schema验收。已有定义/更新人/输出事实时保护性拒绝降级，不自动删除数据换取回退。
 
 012升级到013新增agent_output_configs.allow_text_output Boolean NOT NULL DEFAULT false，不在agents加第二个策略字段。无配置按false；删除定义清策略，关闭总开关保留草稿。配置备份／复制保留策略，历史011/012备份只投影其真实物理字段。013降级到012会删除该列；先检查true草稿与历史冻结mixed策略，并在MySQL首个隐式DDL前预检完整降级路径，不能013已删列后才发现012保护拒绝。
+
+014 增加可空的 `llm_models.reasoning_options` 和 `agents.reasoning_effort`。015 增加 `integration_scoped_settings`、`skill_packages.scope_ref` 及索引，历史空作用域按通用包读取。存在应用配置或专用包时，015 拒绝降到 014。
+
+专用 Skill 的 `scope_ref` 负责应用归属。新装的 ASCII 包编码可直接从存储键 `app-skill--<配置 ID>--<包编码>` 识别，原有哈希键及 Unicode 包仍可管理。配置备份可同时恢复两种格式，旧服务只识别哈希键时需要先升级服务。
 
 ## 验证与交付
 
@@ -58,10 +64,13 @@ PYTHONPATH=src .venv/bin/python -m maintenance.config_backup \
 ```text
 global_settings, llm_providers, mcp_servers, model_catalog,
 skill_packages, ui_tool_packages, llm_models, ui_tool_definitions,
-agents, agent_output_configs, wecom_applications, channel_accounts, integration_settings
+agents, agent_output_configs, wecom_applications, channel_accounts, integration_settings,
+integration_scoped_settings
 ```
 
 配置备份保留原生关闭草稿及开关/定义状态；会话/事件、channel_session_bindings/channel_message_runs和wecom_user_profiles仅建结构，不复制运行数据/成员缓存。Skill元数据只含来源File ID，另需导出原包；Token缓存/进行中任务不备份，OAuth凭据及状态的脱敏规则以当前备份器为准。历史ui_tool_selection不恢复为运行授权。
+
+015 的完整 Skill 原包通过管理员 `GET /api/v1/configuration/skills/export` 导出。导入时按同 Revision 检查应用归属、企业管理权限、包作用域和摘要。
 
 备份可能含Provider/MCP、Bot/App Secret等敏感配置；物理备份还包含更多原始凭据。文件权限600、目录700，不打印行内容、不入Git。检查SQLite完整性、Revision、表形状/行数与逻辑引用，不能把配置备份当完整业务/会话备份。
 
@@ -75,3 +84,5 @@ agents, agent_output_configs, wecom_applications, channel_accounts, integration_
 - 配置整体事务替换保留主键，Skill目标上传后生成新File ID；不写备份的alembic_version，不负责跨Revision升级/降级。
 - 原配置会被替换，目标与摘要须在用户授权范围；安装不确定先回读核实，不重复提交或清空。
 - 导入后读回配置、Agent与资源；按任务再做对话冒烟。配置安装、完整Agent ZIP、单Skill ZIP是不同契约。
+
+应用专用 Skill 的原包通过 `GET /api/v1/configuration/skills/export` 与配置库配套导出。恢复前按目标平台身份复核 App、Space 和企业归属，并核对每包的作用域与内容摘要。

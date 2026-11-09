@@ -5,7 +5,7 @@ description: 配置、开发和排查 DeepAgent 业务助手，包括模型与MC
 
 # DeepAgent 业务助手开发
 
-本 Skill 在 Coding Agent 中使用。首次安装和连接读 [README](README.md)；资料基线 **{{DEEP_AGENT_VERSION}} / 数据库 013**，目标版本和接口以 `/info`、`/openapi.json` 为准。
+本 Skill 在 Coding Agent 中使用。首次安装和连接读 [README](README.md)；资料基线 **{{DEEP_AGENT_VERSION}} / 数据库 015**，目标版本和接口以 `/info`、`/openapi.json` 为准。
 
 先确定目标服务、Agent 和任务范围，再从下表选择资料。只读相关章节，不一次加载整个包。配置和排障无需取得框架源码。
 

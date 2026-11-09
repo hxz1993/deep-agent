@@ -65,6 +65,12 @@ UI Tool 不再从 MCP 自动发现。当前已删除 UI Tool 和工具包的资�
 
 前端仓库交付的 Skill 以目录为源，至少包含 `SKILL.md`；推荐用 `manifest.yaml` 固定 `code/label/version/schema_version=1.0`，references 按需加载。打 ZIP 时允许 Skill 文件位于根或唯一同名包目录，禁止把 token、测试输出和 `.DS_Store` 打进去。
 
+### 电子表格助手应用专用配置
+
+组件先用 `GET /api/v1/integrations/deeptable-assistant` 获取关联 Agent，再沿既有聊天协议传递当前应用上下文。DeepAgent 根据会话 App/Space 与调用者权限追加应用提示词和专用 Skill。切换调试 App 后用新会话验收，已有会话沿用原应用。
+
+专用包在应用详情上传与下载。复用原 Skill ZIP 和包内编码；交付通用 Agent ZIP 时单独移交环境专用配置。测试同名包时在目标 App 和未配置 App 发同一问题，核对轨迹中实际加载的应用 Skill 别名。客户端保持平台权限边界，内部存储键只用于服务端排查。
+
 ## Schema、metadata 与 result_schema
 
 - `parameters_json_schema` 保存时会校验 JSON Schema 合法性和大小，运行时还会用于参数校验与模型纠错。

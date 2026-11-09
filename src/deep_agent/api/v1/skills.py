@@ -23,7 +23,7 @@ from deep_agent.api.v1.integration_apps import APP_CONFIG_PATH, AppConfigAccess,
 from deep_agent.api.v1.request_identity import RequestUserDep
 from sqlalchemy import select
 from deep_agent.api.v1.integration_routes import IntegrationRoute
-from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, scoped_skill_code, skill_package_code
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, skill_package_code
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.models import IntegrationScopedSettings, SkillPackage
 from deep_agent.db.reference_integrity import ReferenceConflict
@@ -69,14 +69,6 @@ def _skill_access(request: Request) -> AppConfigAccess | None:
 
 
 SkillAccess = Annotated[AppConfigAccess | None, Depends(_skill_access)]
-
-
-def _storage_key(code: str, scope: AppConfigAccess | None) -> tuple[str, str]:
-    if scope is None:
-        return code, GENERAL_SKILL_SCOPE
-    if scope.skill_scope is None:
-        raise HTTPException(404, detail=f"Skill not found: {code}")
-    return scoped_skill_code(scope.skill_scope, code), scope.skill_scope
 
 
 def _matches_scope(row, scope_ref):
@@ -152,11 +144,22 @@ def _summary(detail: SkillDetail) -> SkillSummary:
 
 
 async def _row_or_404(ctx: AppContextDep, code: str, scope: AppConfigAccess | None = None) -> SkillPackage:
-    key, scope_ref = _storage_key(code, scope)
-    row = await ctx.stores.skill_package.get_by_code(key, scope_ref=scope_ref)
+    if scope is None:
+        row = await ctx.stores.skill_package.get_by_code(code, scope_ref=GENERAL_SKILL_SCOPE)
+    elif scope.skill_scope is not None:
+        row = await ctx.stores.skill_package.get_scoped_package(code, scope_ref=scope.skill_scope)
+    else:
+        row = None
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill not found: {code}")
     return row
+
+
+async def _storage_key(ctx: AppContextDep, code: str, scope: AppConfigAccess | None) -> tuple[str, str]:
+    if scope is None:
+        return code, GENERAL_SKILL_SCOPE
+    row = await _row_or_404(ctx, code, scope)
+    return row.code, row.scope_ref or GENERAL_SKILL_SCOPE
 
 
 def _reject_builtin(code: str) -> None:
@@ -435,7 +438,7 @@ async def replace_skill_package(
     if scope is None:
         _reject_builtin(code)
     current = await _row_or_404(ctx, code, scope)
-    key, scope_ref = _storage_key(code, scope)
+    key, scope_ref = current.code, current.scope_ref or GENERAL_SKILL_SCOPE
     raw, filename = await _read_zip(file)
     parsed: ParsedSkillPackage | None = None
     try:
@@ -539,7 +542,7 @@ async def update_skill(
 ) -> SkillDetail:
     if scope is None:
         _reject_builtin(code)
-    key, scope_ref = _storage_key(code, scope)
+    key, scope_ref = await _storage_key(ctx, code, scope)
     row = await ctx.stores.skill_package.update(key, body, scope_ref=scope_ref)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill not found: {code}")
@@ -552,7 +555,7 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep, scope: S
     if scope is None:
         _reject_builtin(code)
     row = await _row_or_404(ctx, code, scope)
-    key, scope_ref = _storage_key(code, scope)
+    key, scope_ref = row.code, row.scope_ref or GENERAL_SKILL_SCOPE
     agents = await ctx.stores.agent.list_referencing_skill(code) if scope is None else []
     if agents:
         raise HTTPException(
@@ -593,7 +596,7 @@ async def cleanup_deleted_skill(ctx, request: Request, row: SkillPackage) -> Non
 async def reload_skill(code: str, request: Request, ctx: AppContextDep, scope: SkillAccess = None) -> SkillReloadResult:
     if scope is None:
         _reject_builtin(code)
-    key, scope_ref = _storage_key(code, scope)
+    key, scope_ref = await _storage_key(ctx, code, scope)
     request_headers = extract_forward_headers(request)
     _, runtime_state = await _materialize_current(
         ctx, key, request_headers=request_headers, force=True, scope_ref=scope_ref,
@@ -655,7 +658,7 @@ async def _resource_root(code: str, request: Request, ctx: AppContextDep, scope=
     if builtin is not None:
         yield builtin.package_root, builtin.resource_index
         return
-    key, scope_ref = _storage_key(code, scope)
+    key, scope_ref = await _storage_key(ctx, code, scope)
     async with ctx.skill_runtime.coordinated_row(ctx.stores, key) as row:
         if not _matches_scope(row, scope_ref):
             raise HTTPException(status_code=404, detail=f"Skill not found: {code}")

@@ -1,6 +1,6 @@
 # 原生输出接入与业务采用
 
-资料核对：2026-11-06，DeepAgent {{DEEP_AGENT_VERSION}} / Head013；目标环境须另读 /info 和 OpenAPI。适用于有业务产物的Agent客户端；普通文字聊天和真正Deferred按各自契约。平台指南为`<deep-agent>/docs/guides/structured-output.md`和`sse-protocol.md`；目标环境仍需独立核验。
+资料核对：2026-11-06，历史参考基线 Head 013；目标环境须另读 /info 和 OpenAPI。适用于有业务产物的Agent客户端；普通文字聊天和真正Deferred按各自契约。平台指南为`<deep-agent>/docs/guides/structured-output.md`和`sse-protocol.md`；目标环境仍需独立核验。
 
 ## 配置与启用
 

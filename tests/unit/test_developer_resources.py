@@ -5,9 +5,12 @@ import io
 import json
 import tempfile
 import unittest
+import unicodedata
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
+
+from pypdf import PdfReader
 
 from deep_agent import __version__
 from deep_agent.developer_resources import (
@@ -33,8 +36,10 @@ class DeveloperResourcePackageTests(unittest.TestCase):
                 self.assertEqual(len(resource.content), item["size_bytes"])
                 self.assertEqual(hashlib.sha256(resource.content).hexdigest(), item["sha256"])
                 self.assertEqual(item["download_url"], f"api/v1/developer-resources/{item['code']}/download")
-        self.assertEqual(items[0]["page_count"], 10)
-        self.assertEqual(items[0]["sha256"], "a6dcf5491114b4e0d7024baa0ac15c5a72167bbba7e35855fa3d8762a58cac88")
+        guide = PdfReader(io.BytesIO(read_resource("initialization-guide").content))
+        self.assertEqual(items[0]["page_count"], len(guide.pages))
+        guide_text = unicodedata.normalize("NFKC", "".join(page.extract_text() for page in guide.pages))
+        self.assertIn("按应用配置专用内容", "".join(guide_text.split()))
 
     def test_skill_is_portable_complete_and_parseable(self):
         resource = read_resource("development-skill")

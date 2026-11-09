@@ -68,7 +68,7 @@ def build_outputs() -> dict[Path, bytes]:
     manifest = {
         "version": __version__,
         "items": [
-            metadata("initialization-guide", "电子表格初始化", "DeepAgent-电子表格初始化.pdf", "application/pdf", pdf,
+            metadata("initialization-guide", "电子表格助手初始化", "DeepAgent-电子表格助手初始化.pdf", "application/pdf", pdf,
                      page_count=len(PdfReader(io.BytesIO(pdf)).pages)),
             metadata("development-skill", "DeepAgent 开发 Skill", f"{SKILL_CODE}-{__version__}.zip",
                      "application/zip", zipped, document_count=sum(name.endswith(".md") for name in documents)),

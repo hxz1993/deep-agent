@@ -17,10 +17,18 @@ export function resourceSummary(item) {
 }
 
 async function requestError(response) {
-  if (response.status === 401) return "登录已失效，请重新登录后重试。";
-  if (response.status === 403) return "需要管理员权限才能下载开发资料。";
-  if (response.status === 404 || response.status === 503) return "资料暂不可用，请联系管理员核对发行文件。";
-  return `资料请求失败（${response.status}），请稍后重试。`;
+  const message = {
+    401: "登录已失效，请重新登录。",
+    403: "需要管理员权限才能下载开发资料。",
+    404: "资料暂不可用，请联系管理员核对发行文件。",
+  }[response.status];
+  const releaseUnavailable = response.status === 503
+    && (response.headers.get("X-DeepAgent-Error") === "developer_resources_unavailable"
+      || (await response.json().catch(() => null))?.detail === "开发资料暂不可用，请联系管理员检查发行文件");
+  const explanation = releaseUnavailable ? "资料暂不可用，请联系管理员核对发行文件。" : message;
+  const error = new Error(explanation || `资料请求失败（${response.status}），请稍后重试。`);
+  error.retryable = !explanation;
+  return error;
 }
 
 /** Lifecycle and downloads are independent of workspace streaming. */
@@ -36,7 +44,7 @@ export function createResourcesController({ request, url, view, saveBlob, timeou
     const current = () => active && ticket === generation && pending.get(key) === controller;
     try { await task(controller.signal, current); }
     catch (error) {
-      if (current()) view.error(key, error.name === "AbortError" ? "请求超时，请重试。" : error.message || "请求失败，请重试。");
+      if (current()) view.error(key, error.name === "AbortError" ? "请求超时，请重试。" : error.message || "请求失败，请重试。", error.retryable !== false);
     } finally {
       clearTimeout(timer);
       if (current()) { pending.delete(key); view.busy(key, false); }
@@ -47,7 +55,7 @@ export function createResourcesController({ request, url, view, saveBlob, timeou
     view.busy("catalog", true);
     return run("catalog", async (signal, current) => {
       const response = await request(url("api/v1/developer-resources"), { signal, reportStatus: false });
-      if (!response.ok) throw new Error(await requestError(response));
+      if (!response.ok) throw await requestError(response);
       const payload = await response.json();
       if (!current()) return;
       const next = new Map();
@@ -77,7 +85,7 @@ export function createResourcesController({ request, url, view, saveBlob, timeou
       return run(code, async (signal, current) => {
         // Fixed resource codes, never follow an arbitrary catalog-provided destination.
         const response = await request(url(`api/v1/developer-resources/${code}/download`), { signal, reportStatus: false });
-        if (!response.ok) throw new Error(await requestError(response));
+        if (!response.ok) throw await requestError(response);
         if (response.headers.get("Content-Type")?.split(";")[0].trim() !== TYPES[code]) throw new Error("下载内容格式不正确，请重新登录或重试。");
         const blob = await response.blob();
         if (!current()) return;
@@ -197,10 +205,11 @@ export function initDeveloper() {
       button.disabled = busy; button.setAttribute("aria-busy", String(busy)); button.classList.toggle("is-downloading", busy);
       if (busy) row(key).querySelector("[data-error]").hidden = true;
     },
-    error(key, message) {
+    error(key, message, retryable) {
       if (key === "catalog") {
         for (const code of CODES) row(code).querySelector("[data-metadata]").textContent = FORMAT[code];
         status.textContent = message;
+        retry.hidden = !retryable;
         state.hidden = false;
       }
       else { const el = row(key).querySelector("[data-error]"); el.textContent = message; el.hidden = false; }

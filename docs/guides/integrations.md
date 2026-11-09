@@ -56,6 +56,8 @@ Alembic `004` 在 `003` 后仅新增 `integration_settings`，不改旧表、旧
 
 同一 ZIP 可以分别上传到通用 Skill 和不同 App，显示原包名，各自独立更新。历史 `NULL` 和新写入的 `general` 均视为通用包。专用包归当前应用配置所有，使用相同的上传、替换、资源预览和下载流程。Agent 安装包只包含通用包。全量配置备份中的专用包通过 `GET /api/v1/configuration/skills/export` 下载，恢复时核对同 Revision、应用归属、企业权限和包摘要。
 
+专用 Skill 的归属由 `scope_ref` 标记。新装的 ASCII 包编码使用 `app-skill--<应用配置 ID>--<包编码>` 作为内部存储键。Unicode 包编码沿用哈希键，以适配文件路径长度和数据库排序规则。历史哈希键及解包目录照常读取，两种格式都可随配置备份恢复。若回退到只识别哈希键的版本，新格式专用包的管理和备份恢复需要新版服务。
+
 运行时按当前用户的平台访问权核验 App 与 Space，每轮只向模型提供应用上下文。仅当前 Agent 为电子表格助手的关联 Agent 且该 App 有配置时，追加该应用的提示词和 Skill。同一业务口径优先采用应用专用内容，通用内容和平台授权照常生效。专用 Skill 的 `load_capability` 使用目录提供的 ID，例如 `app--budget001--monthly-report`。读取资源、执行脚本及 PTC 使用 `skill_code`，例如 `app:budget001:monthly-report`。旧会话使用已保存的 App 与 Space，新选择的调试 App 用于新会话。权限目录暂时无法核验时，本轮使用通用配置。
 
 管理接口以 `/api/v1/integrations/deeptable-assistant/app-configs` 为前缀。

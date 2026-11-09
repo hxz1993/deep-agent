@@ -17,7 +17,7 @@ Console 的“开发调试”弹框提供初始化 PDF 和一份 `deepagent-agen
 
 固定编码是 `initialization-guide`、`development-skill`。每项有 `name`、`filename`、`media_type`、`version`、`size_bytes`、`sha256`、`download_url`，PDF 另有 `page_count`，Skill 另有 `document_count`（Markdown 文档数，不包括诊断脚本）。`download_url` 相对服务根、不以 `/` 开头，Console 通过 `serviceUrl` 保留网关前缀。
 
-未认证 401，非管理员 403，未知编码 404，发行资源缺失/版本过期/摘要不匹配 503。只从产品固定文件路径读取，参数不能成为文件路径；响应不披露部署路径。成功响应 `Cache-Control: no-store`，下载带 `nosniff`。浏览器通过 `daFetch` 继承登录身份，检查响应后保存 Blob，不把错误 JSON 当下载文件。
+未认证返回 401，非管理员返回 403，未知编码返回 404。发行文件缺失、与服务版本不一致或摘要异常时返回 503，并用 `X-DeepAgent-Error: developer_resources_unavailable` 标识；Console 显示处理提示，临时网络和网关失败仍可重试。只从产品固定文件路径读取，错误响应不披露部署路径。成功及发行文件异常响应均为 `Cache-Control: no-store`，下载带 `nosniff`。浏览器通过 `daFetch` 继承登录身份，检查响应后保存 Blob，不把错误 JSON 当下载文件。
 
 Skill ZIP 不放公开 Console 静态目录。旧 `console/downloads/spreadsheet-initialization.pdf` 地址保留，因此旧 PDF 并未全面私有化。
 
@@ -50,11 +50,11 @@ PYTHONPATH=src:. .venv/bin/python -m unittest \
 
 构建固定 ZIP 文件顺序、时间戳、权限和压缩等级，生成实际字节数、SHA256、PDF 页数及文档数。默认命令只检查提交的生成文件是否仍与源一致。生成物是正式产品资料，和源文档一起发行；运行时不依赖 `scripts/`、原型目录、维护者机器或构建环境中的 PDF 解析器。当前 Jenkins 使用完整 `git archive` 打包仓库，已跟踪的上述产品目录会进入发行包，不需要另复制私有文件。
 
-本轮 PDF 原字节保留（10 页）；未重做截图。Skill 是一个安装包，不拆分多个必装 Skill，不修改维护者本机已安装 Skills。
+初始化 PDF 维护自 [语雀初始化指南](https://proinnova.yuque.com/ys1krd/ky4q6u/deepagent-initialization)。本次发行版由已发布正文排版，共 7 页，更新了关联 Agent、调试 App 和应用专用 Skill 的截图。Skill 继续使用一个 ZIP 安装包，产品源与本机 Codex Skill 各自维护。
 
 ## 内容核验记录
 
-核验日期 2026-11-06；目标部署仍应通过 `/info`、OpenAPI 和真实回读独立确认。
+应用配置与开发资料于 2026-11-10 复核。目标部署通过 `/info`、OpenAPI 和真实回读独立确认。
 
 | 内容 | 核验来源与处理 |
 | --- | --- |
@@ -62,6 +62,7 @@ PYTHONPATH=src:. .venv/bin/python -m unittest \
 | 脚本与上下文 | 对照执行工具、`deepagent_files.py`；区分普通 Python 与 Skill 输入，包含 include_context、共享 Run 缓存与无凭据上下文 |
 | 工具目录、PTC、图片 | 移除旧“Skill 源码不可读”说明；时间默认运行时，PTC 使用授权 Python/Skill；图片在外层查看，文件来源仍受会话授权 |
 | 安装与原生输出 | 保留当前 Agent ZIP、独立 Skill ZIP、平台接受/客户端采用/业务保存的不同边界；版本历史只用于说明升级方向 |
+| 应用专用配置 | 复核作用域权限、同名安装、原包回读、旧哈希键与可读新键、备份恢复及 `015` 的字段归属 |
 | Codex 后端开发参考 | 导入主路由及完整 13 篇参考，补充当前 API/运行边界；保留解释器检查和 SSE 汇总脚本 |
 | Codex 业务前端参考 | 导入主路由及完整 9 篇参考，保留独立电子表格与 Planning 交付区别及 SSE 汇总脚本 |
 | 可移植性 | 移除维护者绝对路径和固定私有 Profile；只保留任务相关的源码相对路径，不携带 Codex 专用 agents 元数据 |

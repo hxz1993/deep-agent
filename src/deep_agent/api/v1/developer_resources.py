@@ -10,6 +10,7 @@ from deep_agent.developer_resources import ResourceUnavailableError, list_resour
 
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 tag = "Developer resources"
+_UNAVAILABLE_HEADERS = {"Cache-Control": "no-store", "X-DeepAgent-Error": "developer_resources_unavailable"}
 
 
 @router.get("/developer-resources", summary="列出开发助手资料")
@@ -17,7 +18,7 @@ def developer_resources() -> JSONResponse:
     try:
         items = list_resources()
     except ResourceUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=str(exc), headers=_UNAVAILABLE_HEADERS) from exc
     return JSONResponse({"items": items}, headers={"Cache-Control": "no-store"})
 
 
@@ -28,7 +29,7 @@ def download_developer_resource(code: str) -> Response:
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="开发资料不存在") from exc
     except ResourceUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=str(exc), headers=_UNAVAILABLE_HEADERS) from exc
     metadata = resource.metadata
     return Response(
         content=resource.content,

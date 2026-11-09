@@ -1,6 +1,6 @@
 # Agent 安装包：安装、升级与跨环境迁移
 
-资料核对：2026-11-06，DeepAgent {{DEEP_AGENT_VERSION}} / Head013；目标环境须另读 /info 和 OpenAPI。操作时以目标环境OpenAPI和预检响应为准，不能假定源码版本已部署。
+资料核对：2026-11-06，历史参考基线 Head 013；目标环境须另读 /info 和 OpenAPI。操作时以目标环境OpenAPI和预检响应为准，不能假定源码版本已部署。
 
 0.14.4／0.14.5清理的是运行中的输出配置副本，不改Agent配置表、正式ZIP schema_version1、导出入口或草稿规则。ZIP不含会话／Pending／输出尝试，包安装兼容不等于旧Runner可接续新版Pending；反向回退限制见[结构化输出](structured-output.md#历史兼容与回退)。全量配置备份仍保留关闭草稿，会话备份保留原事件，不附带批量删除旧快照。
 

@@ -127,6 +127,12 @@ Request/session state
 - 两个执行工具均支持 include_context=false。显式开启才注入 DEEP_AGENT_CONTEXT JSON，同 Run 共用资料查询缓存；PTC 调相同入口。它含非凭据的当前用户资料和 app/space/language，不含 Cookie、Token、Key，也不构成客户接口鉴权。具体字段及失败降级见 [脚本与上下文](../../../04-skill-python-files.md)。
 - 输入文件用 deepagent_files.input_path，产物用 publish_path 显式登记才上传；返回顶层 files 的真实 File ID。PTC 汇总可信上传产物，外层可继续 read_file / view_image。未登记文件不会自动上传，后续步骤失败不抹掉此前已成功上传的文件事实。
 
+### 电子表格助手应用专用 Skill
+
+- 应用配置归 `deeptable-assistant` 集成。管理员用 `/api/v1/integrations/deeptable-assistant/app-configs/{app_id}/skills` 管理专用包，路径里的 Skill 编码使用 ZIP 原编码。通用 Skill 和不同应用可以同名，同一应用内重复安装返回 409。
+- 每轮先核对会话的 App/Space、调用者访问权与集成关联 Agent，再追加对应提示词和专用包。模型通过目录给出的 `app--<App ID>--<包编码>` 加载说明，通过 `app:<App ID>:<包编码>` 读取资源或执行脚本。两种编码都与数据库存储键分开。
+- 管理、运行、配置备份都以 `scope_ref` 判断归属。新旧存储键共存时保留旧行和缓存；普通 Agent ZIP 只含通用 Skill。
+
 ## 安全扩展规则
 
 1. 仅当一个包代码代表一个内聚的产品选择单元时，才添加该代码。

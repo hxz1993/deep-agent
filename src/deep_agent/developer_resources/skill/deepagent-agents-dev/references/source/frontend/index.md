@@ -2,7 +2,7 @@
 
 用于已经取得源码的聊天、电子表格或其他业务客户端，包括其 Prompt、Schema、Agent manifest、Skill 和 UI Tool 资产。内置 `/console/` 属于[后端开发](../backend/index.md)；没有源码的配置与排查使用[业务接口指南](../../11-api-and-version.md)。
 
-先读取目标仓库 AGENTS、分支和现有改动，并分别核对服务 `/info`、OpenAPI、客户端实际加载版本和 Agent 配置。资料基线为 **{{DEEP_AGENT_VERSION}} / 数据库 013**；本地资产变化不表示目标环境已更新。
+先读取目标仓库 AGENTS、分支和现有改动，并分别核对服务 `/info`、OpenAPI、客户端实际加载版本和 Agent 配置。资料基线为 **{{DEEP_AGENT_VERSION}} / 数据库 015**；本地资产变化不表示目标环境已更新。
 
 ## 定位与按需阅读
 

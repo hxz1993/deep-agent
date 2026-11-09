@@ -26,7 +26,7 @@ let diagnosticsModule = null;
 let developerModule = null;
 const loadPage = createPageLoader({
   developer: async () => {
-    const module = await import("./developer.js?v=0161-developer-stable-open");
+    const module = await import("./developer.js?v=0164-developer-catalog");
     module.initDeveloper();
     developerModule = module;
     return module;

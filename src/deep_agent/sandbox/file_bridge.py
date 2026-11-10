@@ -10,13 +10,17 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 from pydantic_ai import ModelRetry, RunContext, ToolFailed, ToolReturn
 
-from deep_agent.agent.attachments import _download_file
+from deep_agent.agent.attachments import AttachmentDownloadError, _download_file
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
-from deep_agent.files.storage import FileStore, PlatformFileStore
+from deep_agent.files.storage import FileStore, FileStoreSizeLimitError, PlatformFileStore
 from deep_agent.files.upload_settings import UploadSettings
-from deep_agent.sandbox.types import ExecuteResult, SandboxInputFile
+from deep_agent.sandbox.types import (
+    ExecuteResult,
+    MAX_SANDBOX_FILE_BATCH_BYTES,
+    MAX_SCRIPT_RESOURCE_FILES,
+    SandboxInputFile,
+)
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 _HOST_TEMP_PATH = re.compile(
@@ -74,7 +78,8 @@ async def _authorized_input(
     *,
     index: int,
     tool_name: str,
-) -> SandboxInputFile:
+    remaining_bytes: int,
+) -> tuple[SandboxInputFile, int]:
     file_id = item.file_id.strip()
     if not file_id:
         raise ModelRetry("files.file_id 不能为空")
@@ -94,6 +99,7 @@ async def _authorized_input(
         file_name = str(artifact.get("file_name") or f"input-{index}")
         cache_key = f"session-file:{file_id}"
 
+    limit_message = f"沙箱输入文件合计超过 {MAX_SANDBOX_FILE_BATCH_BYTES} 字节上限"
     data = ctx.deps.file_bytes.get(cache_key)
     if data is None:
         try:
@@ -102,23 +108,24 @@ async def _authorized_input(
                     file_id,
                     _request_headers(ctx),
                     file_store=_file_store(ctx),
+                    max_bytes=remaining_bytes,
                 )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            if isinstance(exc, AttachmentDownloadError) and isinstance(exc.__cause__, FileStoreSizeLimitError):
+                raise ModelRetry(limit_message) from exc
             raise ToolFailed(tool_error_message("当前会话文件读取失败", exc, _request_headers(ctx))) from exc
-        ctx.deps.file_bytes[cache_key] = data
-    if len(data) > max_upload_bytes():
-        raise ModelRetry(
-            f"输入文件超过 {max_upload_bytes()} 字节读取安全上限"
-        )
+    if len(data) > remaining_bytes:
+        raise ModelRetry(limit_message)
+    ctx.deps.file_bytes[cache_key] = data
 
     path = item.path
     if path is None:
         base_name = PurePosixPath(file_name.replace("\\", "/")).name
         path = f"inputs/{index}-{base_name or 'file.bin'}"
     try:
-        return SandboxInputFile.from_bytes(path, data, file_id=file_id)
+        return SandboxInputFile.from_bytes(path, data, file_id=file_id), len(data)
     except ValueError as exc:
         raise ModelRetry(f"沙箱输入路径无效: {path}") from exc
 
@@ -145,8 +152,9 @@ async def prepare_input_files(ctx: RunContext[AgentDeps], files: list[SandboxFil
                               reserve_skill: bool = False) -> tuple[SandboxInputFile, ...]:
     requested = [item if isinstance(item, SandboxFileInput) else SandboxFileInput.model_validate(item)
                  for item in (files or [])]
-    if len(requested) > settings.max_count:
-        raise ModelRetry(f"files 最多允许 {settings.max_count} 个文件")
+    max_count = min(settings.max_count, MAX_SCRIPT_RESOURCE_FILES)
+    if len(requested) > max_count:
+        raise ModelRetry(f"files 最多允许 {max_count} 个文件")
     ids = [item.file_id.strip() for item in requested]
     if len(ids) != len(set(ids)):
         raise ModelRetry("files.file_id 不能重复")
@@ -157,13 +165,24 @@ async def prepare_input_files(ctx: RunContext[AgentDeps], files: list[SandboxFil
                 "skill", "outputs", "inputs.json", "main.py", ".deepagent-files.json",
             }:
                 raise ModelRetry("附件路径不能覆盖 Skill 执行副本")
-    return tuple([await _authorized_input(ctx, item, index=index, tool_name=tool_name)
-                  for index, item in enumerate(requested, start=1)])
+    prepared = []
+    remaining_bytes = MAX_SANDBOX_FILE_BATCH_BYTES
+    for index, item in enumerate(requested, start=1):
+        attachment, size = await _authorized_input(
+            ctx, item, index=index, tool_name=tool_name,
+            remaining_bytes=remaining_bytes,
+        )
+        prepared.append(attachment)
+        remaining_bytes -= size
+    return tuple(prepared)
 
 
 async def publish_execution_result(ctx: RunContext[AgentDeps], result: ExecuteResult,
                                    settings: UploadSettings, *, tool_name: str,
                                    input_files: tuple[SandboxInputFile, ...] = ()) -> ToolReturn:
+    if result.error is not None and result.error.code == "OUTPUT_LIMIT":
+        raise ModelRetry(result.error.message)
+
     sandbox_paths = tuple(
         [item.path for item in input_files]
         + [f"outputs/{item.file_name}" for item in result.published_files]

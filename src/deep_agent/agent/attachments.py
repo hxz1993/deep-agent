@@ -206,12 +206,15 @@ async def _download_file(
     request_headers: Mapping[str, str],
     *,
     file_store: FileStore | None = None,
+    max_bytes: int | None = None,
 ) -> bytes:
     try:
-        data = await (file_store or PlatformFileStore()).download(
-            file_id,
-            request_headers,
-        )
+        store = file_store or PlatformFileStore()
+        bounded_download = getattr(store, "download_bounded", None)
+        if max_bytes is not None and bounded_download is not None:
+            data = await bounded_download(file_id, request_headers, max_bytes=max_bytes)
+        else:
+            data = await store.download(file_id, request_headers)
     except FileStoreError as exc:
         raise AttachmentDownloadError(f"File download failed for {file_id}") from exc
     if _looks_like_platform_error_json(data):

@@ -96,6 +96,7 @@ def build_python_sandbox_tool_package(
             inputs=inputs or {},
             timeout_ms=timeout_ms,
             files=sandbox_files,
+            output_file_max_bytes=upload_settings.max_bytes,
             context_env=await execution_context_env(ctx.deps, include_context=include_context),
         )
         result = await backend.execute(request)

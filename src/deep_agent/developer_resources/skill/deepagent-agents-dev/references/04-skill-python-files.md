@@ -46,6 +46,8 @@ Path("outputs/result.json").write_text(
 
 `files=[{"file_id":"<授权File ID>","path":"inputs/source.pdf"}]`让宿主下载已授权文件。input_path不读取任意宿主路径。publish_path只登记产物，宿主在执行成功后上传，工具顶层files返回真实File ID、名称、MIME、大小与摘要。没有上传成功不能声称有File ID；文件上传也不等于登记下载中心。
 
+已授权的会话输入文件可在调低上传限额后继续读取，新产物跟随全局附件配置的单文件上限。同次执行的输入、输出各最多 200 MiB。Skill 包自己的脚本与资源另计。
+
 会话排查时可从Console“导出轨迹 → 轨迹与文件”下载已上传的可信产物和用户附件；读取ZIP前先核对manifest.json的缺失项、大小及SHA256。它不包含未登记/未上传的临时文件，也不代替Agent或Skill安装包；详见[轨迹导出与诊断](09-session-diagnostics.md#console-轨迹导出与离线排查)。
 
 Skill执行目录为独立临时根，含skill/副本、inputs.json、inputs/和outputs/。工作目录不是Skill根；通过`__file__`定位资源。入口不改名，不要求main函数，同Skill Python模块自动携带，支持包内相对导入。非代码资源通过resource_paths明确选择，不开放跨Skill或宿主缓存。

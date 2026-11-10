@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
 
 from deep_agent.sandbox.backend import PythonExecutionBackend
 from deep_agent.sandbox.types import (
@@ -97,21 +98,27 @@ class SandboxTypesTests(unittest.TestCase):
         )
         self.assertEqual(request.files[0].file_id, "file-1")
 
-    def test_script_request_rejects_oversized_resource_payload(self) -> None:
-        with self.assertRaises(ValueError):
+    def test_script_request_rejects_oversized_skill_bundle(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Skill bundle exceeds"):
             ExecuteRequest(
                 request_id="script-files",
                 mode="script",
                 code="",
                 script_entry="scripts/check.py",
-                skill_files=(SandboxInputFile.from_bytes("scripts/check.py", b"pass"),),
-                files=(
-                    SandboxInputFile.from_bytes(
-                        "assets/input.bin",
-                        b"x" * (MAX_SCRIPT_RESOURCE_BYTES + 1),
-                    ),
+                skill_files=(
+                    SandboxInputFile.from_bytes("scripts/check.py", b"pass"),
+                    SandboxInputFile.from_bytes("assets/input.bin", b"x" * MAX_SCRIPT_RESOURCE_BYTES),
                 ),
             )
+
+    def test_request_rejects_oversized_session_file_batch(self) -> None:
+        files = (
+            SandboxInputFile.from_bytes("inputs/first.txt", b"123"),
+            SandboxInputFile.from_bytes("inputs/second.txt", b"456"),
+        )
+        with patch("deep_agent.sandbox.types.MAX_SANDBOX_FILE_BATCH_BYTES", 5):
+            with self.assertRaisesRegex(ValueError, "sandbox input batch exceeds"):
+                ExecuteRequest(request_id="oversized-session-batch", code="pass", files=files)
 
     def test_execute_result_rejects_oversized_stdout(self) -> None:
         with self.assertRaises(ValueError):

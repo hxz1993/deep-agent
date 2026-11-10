@@ -10,6 +10,8 @@
 
 read_file对文本源码不按后缀封死，Python/JS/SQL等可读；二进制不会伪装成文本。PDF没有文字层或提取为空不能断言页面空白。专业解析失败也不应引导模型无休止编写Python重复OCR。
 
+PDF 文本层读取和 OCR 页数预检允许可恢复的元数据问题。加密或页数无法读取时，预检会在调用 OCR 服务前报错。
+
 存在has_more时，必须同时把next_offset和next_char_offset复制为下一次的offset和char_offset，防止长项内的正文被跳过或重复。offset从1开始，char_offset从0开始；limit是源项数，不是字符数。文本按行、DOCX/PPTX按逻辑块、XLSX按物理行、PDF按物理页，不能把一种文件的游标套到另一种文件。
 
 ## 图片与PDF原页

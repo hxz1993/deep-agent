@@ -33,6 +33,7 @@ from deep_agent.documents.providers import can_resume_document, parse_document
 from deep_agent.documents.runtime import build_document_runtime
 from deep_agent.documents.settings import DocumentParsingRuntimeConfig
 from deep_agent.documents.toolset import build_document_toolset, read_cached_document
+from deep_agent.files.pdf_reading import pdf_document
 from deep_agent.files.reading_budget import ReadingBudget
 from deep_agent.files.schema import AttachmentFileRef
 from deep_agent.schemas.attachment import AttachmentRef
@@ -409,6 +410,25 @@ class DocumentToolTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ModelRetry, "PDF"):
             await (await self.tool(ctx)).call_func({"resource": RESOURCE}, ctx)
         self.parse.assert_not_awaited()
+
+    async def test_duplicate_pdf_metadata_allows_ocr_preflight_and_text_read(self):
+        # The duplicate is in the trailer, after all cross-reference offsets.
+        info = b"/Info 1 0 R\n"
+        original = pdf()
+        self.assertIn(info, original)
+        data = original.replace(info, info * 2, 1)
+        self.download.return_value = data
+        ctx = self.context()
+        with self.assertLogs("pypdf", level="WARNING"):
+            result = await (await self.tool(ctx)).call_func({"resource": RESOURCE}, ctx)
+            text_pages, metadata = pdf_document(data)
+        self.parse.assert_awaited_once()
+        source = self.parse.call_args.args[1]
+        self.assertEqual(source.source_pages, 2)
+        self.assertEqual(source.data, data)
+        self.assertEqual(len(result.pages), 2)
+        self.assertEqual(len(text_pages), 2)
+        self.assertEqual(metadata["pages_without_text"], [1, 2])
 
     async def test_skill_resource_hash_authorization_and_scripts(self):
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete_document_skill_") as path:

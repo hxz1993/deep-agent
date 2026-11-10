@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from deep_agent.files.upload_settings import MAX_ATTACHMENT_BYTES, UploadSettings
 from deep_agent.sandbox.context_env import EXECUTION_CONTEXT_ENV, MAX_EXECUTION_CONTEXT_BYTES
 
 JsonValue = Any
@@ -36,10 +37,10 @@ MAX_CODE_BYTES = 64 * 1024
 MAX_INPUTS_JSON_BYTES = 16 * 1024 * 1024
 MAX_SCRIPT_RESOURCE_FILES = 16
 MAX_SKILL_BUNDLE_FILES = 256
-# FileStore attachments and generated files share the product's default 20 MiB
-# per-file ceiling. The tool layer additionally applies the current runtime
-# configuration before a request reaches the backend.
+# Skill source bundles have their own fixed limit. Session files use the
+# fixed batch limit. Published files also follow the current upload policy.
 MAX_SCRIPT_RESOURCE_BYTES = 20 * 1024 * 1024
+MAX_SANDBOX_FILE_BATCH_BYTES = MAX_ATTACHMENT_BYTES
 MAX_SCRIPT_ARGUMENTS = 64
 MAX_SCRIPT_ARGUMENT_BYTES = 4 * 1024
 MAX_STDOUT_BYTES = 64 * 1024
@@ -144,6 +145,10 @@ class ExecuteRequest(BaseModel):
     mode: ExecuteMode = "expression"
     arguments: tuple[str, ...] = ()
     files: tuple[SandboxInputFile, ...] = ()
+    # Host-only policy for collecting published files.
+    output_file_max_bytes: int = Field(
+        default=UploadSettings().max_bytes, gt=0, le=MAX_ATTACHMENT_BYTES, exclude=True,
+    )
     # Internal host/worker contract, never a model-supplied directory or file ID.
     # Paths in skill_files are relative to the selected Skill root.
     script_entry: str | None = None
@@ -238,11 +243,11 @@ class ExecuteRequest(BaseModel):
         paths = [item.path for item in self.files]
         if len(paths) != len(set(paths)):
             raise ValueError("sandbox input file paths must be unique")
+        input_total = 0
         for item in self.files:
-            if len(item.decoded()) > MAX_SCRIPT_RESOURCE_BYTES:
-                raise ValueError(
-                    f"sandbox input file exceeds {MAX_SCRIPT_RESOURCE_BYTES} bytes"
-                )
+            input_total += len(item.decoded())
+            if input_total > MAX_SANDBOX_FILE_BATCH_BYTES:
+                raise ValueError(f"sandbox input batch exceeds {MAX_SANDBOX_FILE_BATCH_BYTES} bytes")
         return self
 
 

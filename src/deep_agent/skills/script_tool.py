@@ -223,6 +223,7 @@ def build_skill_script_toolset(
                 arguments=tuple(arguments or ()),
                 inputs=inputs or {},
                 files=input_files,
+                output_file_max_bytes=upload_settings.max_bytes,
                 context_env=await execution_context_env(ctx.deps, include_context=include_context),
                 timeout_ms=timeout_ms,
             )

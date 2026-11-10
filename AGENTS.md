@@ -31,7 +31,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.16.4`，数据库 Head 为 `015` |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.16.5`，数据库 Head 为 `015` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | 按影响面运行定向测试；可先用 `scripts/run_tests.py --suite affected --base HEAD --list` 查看选测范围 |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -48,7 +48,7 @@ Python／Skill 的 `include_context=False` 默认不查用户、不注入身份�
 
 中间业务草稿另归[43 中间产物管理与报告流水线](docs/design/43-budget-report-pipeline/README.md)：Dot 原文已归档，原生 JSON＋服务端受控 patch 为设计方向；拟做可选模块，未启用不改变聊天／结构化输出／文件链路。当前未实施，不把既有 File ID 产物、历史回放或沙箱目录当作该业务内容库；具体 DDL 仍须单独批准。
 
-附件上传大小和数量统一读取 `global_settings.attachment_upload` 一行 JSON（格式版本 1），不写初始化行；无记录或缺字段分别使用 20 MB、10 个。大小可配 1～200 MB，数量可配 1～20 个；旧 `UPLOAD_MAX_SIZE_MB` / `UPLOAD_MAX_COUNT` 环境变量停止使用，MIME 环境策略保留。每个新增上传、产物发布批次或数量校验操作读取一次，不做启动缓存，不存入会话事件。已上传授权文件不按后来调低的大小再次拒绝；读取安全上界为 200 MB，解析器与 Python 的独立资源限制仍生效。正式入口见[附件上传限制](docs/guides/attachment-upload.md)，位于全局配置常规页的“附件上传”，管理员接口 `/api/v1/global-settings/attachment-upload`；运维只保留允许类型。
+附件上传大小和数量统一读取 `global_settings.attachment_upload` 一行 JSON（格式版本 1），不写初始化行；无记录或缺字段分别使用 20 MB、10 个。大小可配 1～200 MB，数量可配 1～20 个；旧 `UPLOAD_MAX_SIZE_MB` / `UPLOAD_MAX_COUNT` 环境变量停止使用，MIME 环境策略保留。每批上传、每次 Python／Skill 执行及其他文件发布批次读取一次配置。Python／Skill 沙箱读取已有授权文件时遵循 200 MiB 总量上限，上传限额调低后仍可使用。新产物按当前单文件上限发布，每批也受 200 MiB 总量限制。正式入口见[附件上传限制](docs/guides/attachment-upload.md)，位于全局配置常规页的“附件上传”，管理员接口 `/api/v1/global-settings/attachment-upload`；运维只保留允许类型。
 
 Console 加载和资源缓存见[加载说明](docs/guides/console-loading.md)：身份／权限校验后仅初始化当前页；配置脚本并行下载、有序执行。静态 UI 资源使用内容 ETag 每次校验，入口／错误／下载不缓存；不要恢复无条件预热或长期 immutable。数据库摘要可用 `include_charset=false` 跳过字符集 SQL，完整字符集检查由运维页按钮主动触发。此处属于当前本地实现，部署状态仍以目标环境核验为准。
 

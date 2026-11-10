@@ -100,6 +100,13 @@ class AppContext:
             logger.exception("Startup aborted: database migration failed")
             raise
 
+        if bundle.stores.integration_app is not None:
+            try:
+                await bundle.stores.integration_app.require_app_skill_conversion()
+            except Exception:
+                await close_db(bundle.engine)
+                raise
+
         logger.info(
             "{} started (database={})",
             OPTION.agent.app_name,

@@ -306,3 +306,16 @@ Provider、Skill、MCP、UI工具包和UI工具仍无启停字段，Agent关联�
 共享环境从010升级011前使用010代码导出配置备份，停止旧实例后执行标准`alembic upgrade head`。
 迁移后核验模型数量不变、`enabled`全部非空，并验证停用模型从业务模型列表消失、管理列表仍可读取和
 重新启用。升级后的配置备份文件名使用`v011`。
+
+## 应用 Skill 数据转换
+
+数据库保持 `015`。新版启动前转换以集成配置 ID 为归属的旧应用包及引用清单。命令使用明确指定的目标数据库配置，
+默认只读预检并输出需转换的包和配置数量。预检会拒绝无归属、重名或非法引用。
+
+```bash
+PYTHONPATH=src .venv/bin/python -m maintenance.app_skill_ownership --config <目标数据库配置>
+```
+
+停止同库旧 API 和其他配置写入端，完成数据库备份，再用同一命令追加 `--apply`。转换在一个配置独占事务内更新
+`skill_packages.scope_ref` 和 `integration_scoped_settings.settings.skills`，保留内部主键、原 ZIP、File ID 和缓存。
+随后重跑预检，两个计数均为零时启动新版。新版支持直接恢复同 Revision 的旧备份。切回旧服务时使用转换前备份。

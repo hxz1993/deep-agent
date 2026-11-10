@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from fastapi import HTTPException
 from loguru import logger
 
-from deep_agent.integrations.app_scope import INTEGRATION, skill_scope_ref
+from deep_agent.integrations.app_scope import INTEGRATION, app_skill_scope
 from deep_agent.security.console_admin import ConsoleAdminAuthenticationError, forwarded_platform_auth_headers
 from deep_agent.services.scope_names import PlatformScopeDirectoryFetcher, ScopeDirectoryUnavailableError
 
@@ -19,6 +19,7 @@ class RunAppContext:
     space_id: str
     prompt_append: str = ""
     skill_scope: str | None = None
+    skill_codes: tuple[str, ...] = ()
 
 
 async def resolve_run_app(
@@ -70,7 +71,8 @@ async def resolve_run_app(
     return RunAppContext(
         app_id, space_id,
         prompt_append=scope.settings.get("prompt_append", ""),
-        skill_scope=skill_scope_ref(scope.id),
+        skill_scope=app_skill_scope(app_id),
+        skill_codes=tuple(scope.settings["skills"]),
     )
 
 

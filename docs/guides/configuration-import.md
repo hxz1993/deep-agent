@@ -25,7 +25,8 @@ confirm=false                          正式执行时必须为true
 也不做升级、降级、改标或跨版本转换。备份表范围必须与当前代码ORM一致，两侧会话表必须为空，目标
 当前不能有活动Run。SQLite完整性、表/列、主键、约束形状、行数和逻辑引用任一校验失败都会拒绝。
 预检覆盖模型与 Provider、Agent 与模型、UI 工具与工具包、渠道账号与 Agent 的逻辑引用。
-备份含应用专用配置时，还会核对目标 App 与 Space、当前管理员的企业权限、Skill 归属和原包摘要。
+备份含应用配置或应用 Skill 时，还会核对目标 App 与 Space、当前管理员的企业权限、Skill 归属和原包摘要。
+恢复旧 `015` 备份时，先按原始归属校验原包清单，再在同一导入事务中保存 App 归属和集成引用清单。
 
 正式导入按明确的逻辑依赖顺序在一个事务中整体替换配置，原样保留Agent、Provider、Model和其他业务主键，
 并且不写入备份的`alembic_version`和`_backup_info`。SQLite使用`BEGIN IMMEDIATE`；MySQL/PostgreSQL

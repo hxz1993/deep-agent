@@ -18,8 +18,8 @@
       "filename": "deepagent-agents-dev-0.16.4.zip",
       "media_type": "application/zip",
       "version": "0.16.4",
-      "size_bytes": 153803,
-      "sha256": "aaa2a4bb48440d88ef059fc0361f58c0659ec1e89e97632acc153faf6753ead9",
+      "size_bytes": 152140,
+      "sha256": "0b06ed3a6bc5c069feaaea31645e020afb7874e671c866a730617459c0f9be89",
       "download_url": "api/v1/developer-resources/development-skill/download",
       "document_count": 37
     }

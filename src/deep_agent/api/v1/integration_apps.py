@@ -15,7 +15,7 @@ from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.models import IntegrationScopedSettings
 from deep_agent.db.reference_integrity import ReferenceConflict
-from deep_agent.integrations.app_scope import INTEGRATION, skill_scope_ref
+from deep_agent.integrations.app_scope import APP_SKILL_SCOPE_PREFIX, GENERAL_SKILL_SCOPE, INTEGRATION, LEGACY_SKILL_SCOPE_PREFIX, app_skill_scope
 from deep_agent.services.integration_app_access import IntegrationAppAccessError, IntegrationAppDirectory, ManagedApp
 from deep_agent.services.scope_names import resolve_scope_directory
 
@@ -52,7 +52,11 @@ class AppConfigAccess:
 
     @property
     def skill_scope(self) -> str | None:
-        return skill_scope_ref(self.row.id) if self.row is not None else None
+        return app_skill_scope(self.app.app_id) if self.row is not None else None
+
+    @property
+    def skill_codes(self) -> tuple[str, ...]:
+        return tuple(self.row.settings["skills"]) if self.row is not None else ()
 
 
 def _store(ctx):
@@ -61,15 +65,26 @@ def _store(ctx):
     return ctx.stores.integration_app
 
 
-async def verify_app_scope_rows(request: Request, user: str, rows) -> None:
-    if not rows:
+async def verify_app_scope_rows(request: Request, user: str, rows, *, skill_scopes=()) -> None:
+    owners: dict[str, set[tuple[str, str]]] = {}
+    legacy_owners = set()
+    for row in rows:
+        space_id, _, app_id = row["scope_key"].partition("/")
+        owners.setdefault(app_id, set()).add((space_id, row["tenant_id"]))
+        legacy_owners.add(LEGACY_SKILL_SCOPE_PREFIX + row["id"])
+    for scope in skill_scopes:
+        if scope in (None, GENERAL_SKILL_SCOPE) or scope in legacy_owners:
+            continue
+        if not scope.startswith(APP_SKILL_SCOPE_PREFIX):
+            raise HTTPException(403, detail="无法验证备份中的应用归属。")
+        owners.setdefault(scope.removeprefix(APP_SKILL_SCOPE_PREFIX), set())
+    if not owners:
         return
     try:
         directory = IntegrationAppDirectory(request, user)
-        for row in rows:
-            space_id, _, app_id = row["scope_key"].partition("/")
+        for app_id, expected in owners.items():
             app = await directory.verify(app_id)
-            if (app.space_id, app.tenant_id) != (space_id, row["tenant_id"]):
+            if app.app_id != app_id or expected - {(app.space_id, app.tenant_id)}:
                 raise IntegrationAppAccessError(403, "无法验证备份中的应用归属。")
     except IntegrationAppAccessError as exc:
         raise HTTPException(exc.status, detail=str(exc)) from exc
@@ -140,7 +155,7 @@ async def get_app_config(
     facts["space_name"] = names.spaces.get(access.app.space_id, access.app.space_name)
     return AppConfigDetail(
         **facts, config_id=row.id if row else None,
-        skill_count=await _store(ctx).count_skills(row.id) if row else 0,
+        skill_count=len(access.skill_codes),
         prompt_append=row.settings.get("prompt_append", "") if row else "",
     )
 
@@ -158,7 +173,7 @@ async def save_app_config(body: AppConfigWrite, access: AppConfigAccessDep, ctx:
         raise HTTPException(409, detail=str(exc)) from exc
     return AppConfigDetail(
         **asdict(access.app), config_id=row.id, prompt_append=row.settings["prompt_append"],
-        skill_count=await store.count_skills(row.id),
+        skill_count=len(row.settings["skills"]),
     )
 
 

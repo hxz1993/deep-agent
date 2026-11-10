@@ -146,8 +146,9 @@ def _summary(detail: SkillDetail) -> SkillSummary:
 async def _row_or_404(ctx: AppContextDep, code: str, scope: AppConfigAccess | None = None) -> SkillPackage:
     if scope is None:
         row = await ctx.stores.skill_package.get_by_code(code, scope_ref=GENERAL_SKILL_SCOPE)
-    elif scope.skill_scope is not None:
-        row = await ctx.stores.skill_package.get_scoped_package(code, scope_ref=scope.skill_scope)
+    elif scope.skill_scope is not None and code in scope.skill_codes:
+        packages = await ctx.stores.skill_package.list_app_packages(scope.skill_scope, (code,))
+        row = packages[0] if packages else None
     else:
         row = None
     if row is None:
@@ -262,11 +263,9 @@ async def list_skills(ctx: AppContextDep, scope: SkillAccess = None) -> list[Ski
     if scope is not None and scope.skill_scope is None:
         return []
     details = [_builtin_detail(item) for item in list_builtin_skills()] if scope is None else []
-    scope_ref = scope.skill_scope if scope else GENERAL_SKILL_SCOPE
-    details.extend(
-        _row_detail(row, ctx.skill_runtime)
-        for row in await ctx.stores.skill_package.list_all(scope_ref=scope_ref)
-    )
+    store = ctx.stores.skill_package
+    rows = await store.list_app_packages(scope.skill_scope, scope.skill_codes) if scope else await store.list_all()
+    details.extend(_row_detail(row, ctx.skill_runtime) for row in rows)
     return [_summary(item) for item in sorted(details, key=lambda value: (value.source != "builtin", value.label, value.code))]
 
 
@@ -286,9 +285,10 @@ async def export_configuration_skills(request: Request, ctx: AppContextDep, user
     async with ctx.stores.skill_package._read() as db:
         scopes = list((await db.scalars(select(IntegrationScopedSettings))).all())
         rows = list((await db.scalars(select(SkillPackage).order_by(SkillPackage.code))).all())
-    await verify_app_scope_rows(request, user, [
-        {"scope_key": row.scope_key, "tenant_id": row.tenant_id} for row in scopes
-    ])
+    await verify_app_scope_rows(
+        request, user, [{"id": row.id, "scope_key": row.scope_key, "tenant_id": row.tenant_id} for row in scopes],
+        skill_scopes=(row.scope_ref for row in rows),
+    )
     return await _export_skill_bundle(request, ctx, rows, configuration=True)
 
 
@@ -498,6 +498,7 @@ async def replace_skill_package(
             )
             row = await ctx.stores.skill_package.replace_package(
                 key, replacement, scope_ref=scope_ref, expected_file_id=current.platform_file_id,
+                **({"app": scope.app, "expected_scope_id": scope.row.id} if scope else {}),
             )
             if row is None:
                 raise ReferenceConflict(f"Skill disappeared during package update: {code}")
@@ -543,7 +544,10 @@ async def update_skill(
     if scope is None:
         _reject_builtin(code)
     key, scope_ref = await _storage_key(ctx, code, scope)
-    row = await ctx.stores.skill_package.update(key, body, scope_ref=scope_ref)
+    row = await ctx.stores.skill_package.update(
+        key, body, scope_ref=scope_ref,
+        **({"app": scope.app, "expected_scope_id": scope.row.id} if scope else {}),
+    )
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Skill not found: {code}")
     return _row_detail(row, ctx.skill_runtime)
@@ -566,7 +570,10 @@ async def delete_skill(code: str, request: Request, ctx: AppContextDep, scope: S
             },
         )
     try:
-        if not await ctx.stores.skill_package.delete(key, scope_ref=scope_ref, expected_file_id=row.platform_file_id):
+        if not await ctx.stores.skill_package.delete(
+            key, scope_ref=scope_ref, expected_file_id=row.platform_file_id,
+            **({"app": scope.app, "expected_scope_id": scope.row.id} if scope else {}),
+        ):
             raise ReferenceConflict("Skill changed during deletion; refresh and retry")
     except ReferenceConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

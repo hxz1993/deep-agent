@@ -182,8 +182,14 @@ async def import_configuration(
                 active_run_count=ctx.active_runs.active_count(),
             )
             app_rows = plan.rows.get("integration_scoped_settings", ())
-            if app_rows:
-                await verify_app_scope_rows(request, require_request_user(request.headers.get("user")), app_rows)
+            skill_scopes = [
+                row["scope_ref"] for row in plan.rows.get("skill_packages", ())
+                if row.get("scope_ref") not in (None, GENERAL_SKILL_SCOPE)
+            ]
+            if app_rows or skill_scopes:
+                await verify_app_scope_rows(
+                    request, require_request_user(request.headers.get("user")), app_rows, skill_scopes=skill_scopes,
+                )
             if not apply:
                 return _response(plan, imported=False)
 

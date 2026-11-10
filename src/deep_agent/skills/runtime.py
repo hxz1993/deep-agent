@@ -21,7 +21,7 @@ from loguru import logger
 from pydantic_ai.capabilities import AbstractCapability, Capability, CombinedCapability
 from pydantic_ai_harness.skills import Skills
 
-from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, skill_package_code
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, app_skill_storage_key, skill_package_code
 
 from deep_agent.db.models import SkillPackage
 from deep_agent.db.stores.bundle import DataStores
@@ -588,13 +588,16 @@ async def resolve_skills_for_run(
     request_headers: Mapping[str, str],
     app_id: str | None = None,
     scope_ref: str | None = None,
+    app_skill_codes: tuple[str, ...] = (),
 ) -> ResolvedSkills:
-    if not codes and scope_ref is None:
-        return ResolvedSkills(configured=(), items=(), unavailable=(), capability=None)
-    scoped = {
-        row.code: (f"app:{app_id}:{skill_package_code(row)}", row.description)
-        for row in await stores.skill_package.list_all(scope_ref=scope_ref)
-    } if scope_ref is not None else {}
+    scoped = {}
+    if app_id is not None and scope_ref is not None and app_skill_codes:
+        rows = await stores.skill_package.list_app_packages(scope_ref, app_skill_codes)
+        for row in rows:
+            scoped[row.code] = (f"app:{app_id}:{skill_package_code(row)}", row.description)
+        missing = set(app_skill_codes) - {skill_package_code(row) for row in rows}
+        for name in sorted(missing):
+            scoped[app_skill_storage_key(app_id, name)] = (f"app:{app_id}:{name}", "")
     codes = [*codes, *scoped]
     if not codes:
         return ResolvedSkills(configured=(), items=(), unavailable=(), capability=None)

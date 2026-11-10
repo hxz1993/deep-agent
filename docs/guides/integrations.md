@@ -52,13 +52,14 @@ Alembic `004` 在 `003` 后仅新增 `integration_settings`，不改旧表、旧
 
 在「集成 → 电子表格助手 → 应用配置 → 添加应用」可在应用输入框按名称、ID 或所属空间搜索。选择可管理的应用后，点「确定」进入详情。详情左侧保存追加提示词，右侧上传 App 专用 Skill。在测试工作台的调试菜单可输入 App ID 或选择已配置的应用。
 
-015 新增 `integration_scoped_settings`。应用配置独立于共用 Agent，作用域键使用已验证的 `space_id/app_id`，企业 ID 用于管理范围和列表筛选。`settings.prompt_append` 最多 4000 字。移除配置会一并移除此 App 的专用包，清空关联 Agent 只清除集成使用的 Agent。
+应用配置独立于共用 Agent。作用域键是平台验证后的 `space_id/app_id`，企业 ID 用于核验和筛选。
+`settings.prompt_append` 最多 4000 字，`settings.skills` 存当前集成启用的原包编码。上传同时保存 App 包和引用，保存提示词保留引用。移除配置会删除其独占的包，共享包继续供其他引用使用。清空关联 Agent 只清除集成使用的 Agent。
 
-同一 ZIP 可以分别上传到通用 Skill 和不同 App，显示原包名，各自独立更新。历史 `NULL` 和新写入的 `general` 均视为通用包。专用包归当前应用配置所有，使用相同的上传、替换、资源预览和下载流程。Agent 安装包只包含通用包。全量配置备份中的专用包通过 `GET /api/v1/configuration/skills/export` 下载，恢复时核对同 Revision、应用归属、企业权限和包摘要。
+Skill 包直接归 App，`skill_packages.scope_ref` 存 `app:<App ID>`。同一 ZIP 可以分别上传到通用入口和不同 App，显示原包名，各自独立更新。历史 `NULL` 和新写入的 `general` 均按通用处理。集成页的上传、替换、预览和下载沿用原入口。Agent 安装包只包含通用包。
 
-专用 Skill 的归属由 `scope_ref` 标记。新装的 ASCII 包编码使用 `app-skill--<应用配置 ID>--<包编码>` 作为内部存储键。Unicode 包编码沿用哈希键，以适配文件路径长度和数据库排序规则。历史哈希键及解包目录照常读取，两种格式都可随配置备份恢复。若回退到只识别哈希键的版本，新格式专用包的管理和备份恢复需要新版服务。
+新 ASCII 包的内部键为 `app-pkg--<App ID>--<包编码>`，Unicode 包使用哈希键。已安装的旧包保留原主键、文件和缓存路径。已有 `015` 数据按[应用 Skill 数据转换](../../src/maintenance/README.md#应用-skill-数据转换)处理。全量配置备份中的专用包由 `GET /api/v1/configuration/skills/export` 导出，恢复时核验同 Revision、App 归属、企业权限和包摘要。
 
-运行时按当前用户的平台访问权核验 App 与 Space，每轮只向模型提供应用上下文。仅当前 Agent 为电子表格助手的关联 Agent 且该 App 有配置时，追加该应用的提示词和 Skill。同一业务口径优先采用应用专用内容，通用内容和平台授权照常生效。专用 Skill 的 `load_capability` 使用目录提供的 ID，例如 `app--budget001--monthly-report`。读取资源、执行脚本及 PTC 使用 `skill_code`，例如 `app:budget001:monthly-report`。旧会话使用已保存的 App 与 Space，新选择的调试 App 用于新会话。权限目录暂时无法核验时，本轮使用通用配置。
+运行时按当前用户的平台访问权核验 App 与 Space，每轮只向模型提供应用上下文。仅当前 Agent 为电子表格助手的关联 Agent 且该 App 有配置时，追加该应用的提示词及配置清单引用的 Skill。同一业务口径优先采用应用专用内容，通用内容和平台授权照常生效。专用 Skill 的 `load_capability` 使用目录提供的 ID，例如 `app--budget001--monthly-report`。读取资源、执行脚本及 PTC 使用 `skill_code`，例如 `app:budget001:monthly-report`。旧会话使用已保存的 App 与 Space，新选择的调试 App 用于新会话。权限目录暂时无法核验时，本轮使用通用配置。
 
 管理接口以 `/api/v1/integrations/deeptable-assistant/app-configs` 为前缀。
 
@@ -69,7 +70,7 @@ Alembic `004` 在 `003` 后仅新增 `integration_settings`，不改旧表、旧
 | `POST /validate` | 验证 App ID 与所属企业 |
 | `GET /{app_id}` | 读取已验证的应用及配置 |
 | `PUT /{app_id}` | 保存 `config_id`（新配置可空）和 `prompt_append` |
-| `DELETE /{app_id}?config_id=…` | 移除应用配置和专用 Skill |
+| `DELETE /{app_id}?config_id=…` | 移除应用配置及其独占 Skill |
 | `/{app_id}/skills` | 与通用 Skill 接口相同的列表、安装和详情操作，权限限定到该应用 |
 
 原组件读取接口 `GET /api/v1/integrations/{code}` 沿用已有响应。应用配置在聊天服务端根据会话 App 选择。

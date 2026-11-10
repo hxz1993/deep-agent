@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import tempfile
@@ -10,20 +11,24 @@ import zipfile
 from hashlib import sha256
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
-from sqlalchemy import text, update
+from sqlalchemy import delete, select, text, update
 
+from maintenance.app_skill_ownership import convert_app_skill_ownership
 from maintenance.config_backup import export_backup
 
 from deep_agent.api.v1 import api_router
+from deep_agent.api.v1.skills import _upload_file
 from deep_agent.core.context import AppContext, init_context, reset_context
-from deep_agent.db.models import SkillPackage
+from deep_agent.db.models import IntegrationScopedSettings, SkillPackage
 from deep_agent.files.storage import LocalFileStore
-from deep_agent.integrations.app_scope import INTEGRATION
+from deep_agent.integrations.app_scope import INTEGRATION, app_skill_scope, app_skill_storage_key
+from deep_agent.integrations.app_skill_data import AppSkillDataError
 from deep_agent.schemas.agent import AgentUpdate
 from deep_agent.security import ConsoleAdminAuthorizer
 from deep_agent.services.integration_app_access import IntegrationAppAccessError, ManagedApp
@@ -102,13 +107,32 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         await self._request("POST", path, 201, files={"file": (name + ".zip", raw, "application/zip")})
         return raw
 
-    async def _install_legacy(self, app, name):
-        scope = await self.stores.integration_app.get(app.app_id, app.space_id)
-        digest = sha256(name.encode()).hexdigest()
-        key = f"app--{scope.id}--{digest}"
-        with patch("deep_agent.db.stores.skill_package.base.scoped_skill_storage_keys", return_value=(key,)):
+    @property
+    def _database_url(self):
+        return f"sqlite+aiosqlite:///{self.root / 'test.db'}"
+
+    async def _mark_revision(self):
+        async with self.engine.begin() as db:
+            await db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
+            await db.execute(text("INSERT INTO alembic_version VALUES ('015')"))
+
+    async def _install_with_old_key(self, app, name, *, hashed):
+        config = await self.stores.integration_app.get(app.app_id, app.space_id)
+        key = f"app--{config.id}--{sha256(name.encode()).hexdigest()}" if hashed else f"app-skill--{config.id}--{name}"
+        with patch("deep_agent.db.stores.skill_package.base.app_skill_storage_key", return_value=key):
             raw = await self._install(f"{PATH}/{app.app_id}/skills", name=name)
         return key, raw
+
+    async def _mark_legacy(self, app):
+        config = await self.stores.integration_app.get(app.app_id, app.space_id)
+        async with self.engine.begin() as db:
+            await db.execute(update(IntegrationScopedSettings).where(
+                IntegrationScopedSettings.id == config.id,
+            ).values(settings={"prompt_append": config.settings["prompt_append"]}))
+            await db.execute(update(SkillPackage).where(
+                SkillPackage.scope_ref == app_skill_scope(app.app_id),
+            ).values(scope_ref=f"integration-scope:{config.id}"))
+        return config
 
     async def test_same_zip_independent_lifecycle_and_backup_bundle(self):
         code = "scoped-report"
@@ -126,7 +150,10 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
                          [(APP_A.app_id, 1), (APP_B.app_id, 1)])
         detail = (await self._request("GET", base_a, 200)).json()
         self.assertEqual(detail["skill_count"], 1)
-        self.assertTrue((self.root / "runtime" / f"app-skill--{detail['config_id']}--{code}" / "SKILL.md").is_file())
+        key = app_skill_storage_key(APP_A.app_id, code)
+        self.assertTrue((self.root / "runtime" / key / "SKILL.md").is_file())
+        app_row = await self.stores.skill_package.get_by_code(key, scope_ref=app_skill_scope(APP_A.app_id))
+        self.assertEqual(app_row.scope_ref, "app:budget001")
         updated = (await self._request("PUT", base_a, 200, json={
             "config_id": detail["config_id"], "prompt_append": "按部门汇总",
         })).json()
@@ -161,7 +188,19 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         code = "scoped-report"
         base = f"{PATH}/{APP_A.app_id}/skills"
         await self._save()
-        key, original = await self._install_legacy(APP_A, code)
+        key, original = await self._install_with_old_key(APP_A, code, hashed=True)
+        readable_key, _ = await self._install_with_old_key(APP_A, "old-readable", hashed=False)
+        await self._mark_legacy(APP_A)
+        await self._mark_revision()
+        with self.assertRaisesRegex(RuntimeError, "App Skill data needs conversion"):
+            await self.stores.integration_app.require_app_skill_conversion()
+        self.assertEqual(await convert_app_skill_ownership(self._database_url), (2, 1))
+        with self.assertRaises(RuntimeError):
+            await self.stores.integration_app.require_app_skill_conversion()
+        self.assertEqual(await convert_app_skill_ownership(self._database_url, apply=True), (2, 1))
+        self.assertEqual(await convert_app_skill_ownership(self._database_url, apply=True), (0, 0))
+        await self.stores.integration_app.require_app_skill_conversion()
+        self.assertTrue((self.root / "runtime" / readable_key / "SKILL.md").is_file())
         cached = self.root / "runtime" / key / "SKILL.md"
         self.assertTrue(cached.is_file())
         self.assertEqual((await self._request("GET", f"{base}/{code}/package", 200)).content, original)
@@ -189,6 +228,12 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_reads_fresh_access_and_keeps_original_session_scope(self):
         await self._save()
         await self._install(f"{PATH}/{APP_A.app_id}/skills", scripts=True)
+        await self._install(f"{PATH}/{APP_A.app_id}/skills", name="hidden-report")
+        config = await self.stores.integration_app.get(APP_A.app_id, APP_A.space_id)
+        async with self.engine.begin() as db:
+            await db.execute(update(IntegrationScopedSettings).where(
+                IntegrationScopedSettings.id == config.id,
+            ).values(settings={**config.settings, "skills": ["scoped-report"]}))
         recorded = []
 
         def run_model(messages, info):
@@ -222,8 +267,15 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
             await self._request("POST", "/api/v1/chat", 409, headers={"x-deep-agent-app": APP_B.app_id}, json={
                 "agent_id": self.agent, "session_id": scoped["session_id"], "message": "切换应用",
             })
+            async with self.engine.begin() as db:
+                await db.execute(update(IntegrationScopedSettings).where(
+                    IntegrationScopedSettings.id == config.id,
+                ).values(settings={**config.settings, "skills": []}))
+            await send(app=APP_A.app_id)
+        self.assertNotIn("app:budget001:scoped-report", recorded[-1][0])
+        self.assertTrue(all("hidden-report" not in instructions for instructions, _ in recorded))
         self.assertEqual([("fixture-app-rule" in value, "app_id=" in value) for value, _ in recorded],
-                         [(False, False), (True, True), (False, True), (False, True), (False, False), (False, False), (True, True)])
+                         [(False, False), (True, True), (False, True), (False, True), (False, False), (False, False), (True, True), (True, True)])
         for index in (1, 6):
             instructions, _ = recorded[index]
             self.assertIn("fixture-app-rule", instructions)
@@ -241,7 +293,7 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
             skills=["scoped-report"], capabilities=["ui:builtin"],
         ))
         await self._save()
-        await self._install_legacy(APP_A, "scoped-report")
+        await self._install_with_old_key(APP_A, "scoped-report", hashed=True)
         self.fetch_scope.return_value = ScopeDirectory(app_scopes={
             APP_A.app_id: (APP_A.space_id, APP_A.tenant_id),
             APP_B.app_id: (APP_B.space_id, APP_B.tenant_id),
@@ -323,27 +375,113 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_scoped_configuration_backup_restore_checks_app_authorization(self):
         await self._save()
-        await self._install(f"{PATH}/{APP_A.app_id}/skills")
-        _, legacy = await self._install_legacy(APP_A, "old-report")
+        _, legacy = await self._install_with_old_key(APP_A, "old-report", hashed=True)
+        await self._install_with_old_key(APP_A, "scoped-report", hashed=False)
+        original = await self._mark_legacy(APP_A)
+        await self._mark_revision()
+        for attempt in ("legacy", "converted"):
+            if attempt == "converted":
+                await self._install(f"{PATH}/{APP_A.app_id}/skills", name="app-owned")
+                original = await self.stores.integration_app.get(APP_A.app_id, APP_A.space_id)
+            backup = await export_backup(
+                self._database_url, environment=attempt, output_root=self.root / "backup", git_commit="test",
+            )
+            bundle = await self._request("GET", "/api/v1/configuration/skills/export", 200)
+            uploads = {"database_file": ("backup.db", backup.path.read_bytes()),
+                       "skills_bundle": ("skills.zip", bundle.content)}
+            await self._request("POST", "/api/v1/configuration/import", 200, files=uploads)
+            with patch("deep_agent.services.integration_app_access.IntegrationAppDirectory.verify",
+                       side_effect=IntegrationAppAccessError(404, "应用不可用")):
+                await self._request("POST", "/api/v1/configuration/import", 404, files=uploads,
+                                    data={"apply": "true", "confirm": "true"})
+            await self._request("POST", "/api/v1/configuration/import", 200, files=uploads,
+                                data={"apply": "true", "confirm": "true"})
+            imported = await self.stores.integration_app.get(APP_A.app_id, APP_A.space_id)
+            self.assertEqual(imported.id, original.id)
+            self.assertEqual(imported.settings, original.settings)
+            await self._request("GET", f"{PATH}/{APP_A.app_id}/skills/scoped-report/package", 200)
+            self.assertEqual((await self._request(
+                "GET", f"{PATH}/{APP_A.app_id}/skills/old-report/package", 200,
+            )).content, legacy)
+
+    async def test_delete_configuration_keeps_shared_and_unreferenced_app_packages(self):
+        base = f"{PATH}/{APP_A.app_id}"
+        await self._install(f"{base}/skills", name="shared")
+        await self._install(f"{base}/skills", name="exclusive")
+        await self._install(f"{base}/skills", name="unreferenced")
+        config = await self.stores.integration_app.get(APP_A.app_id, APP_A.space_id)
+        async with self.factory.begin() as db:
+            db.add(IntegrationScopedSettings(
+                id=str(uuid4()), integration_code="deepcube-assistant", scope_type="app",
+                scope_key=config.scope_key, tenant_id=config.tenant_id,
+                settings={"prompt_append": "", "skills": ["shared"]},
+            ))
+            await db.execute(update(IntegrationScopedSettings).where(
+                IntegrationScopedSettings.id == config.id,
+            ).values(settings={**config.settings, "skills": ["shared", "exclusive"]}))
+        self.assertEqual({row["code"] for row in (await self._request("GET", f"{base}/skills", 200)).json()},
+                         {"shared", "exclusive"})
+        await self._request("GET", f"{base}/skills/unreferenced/package", 404)
+        await self._request("DELETE", f"{base}/skills/shared", 409)
+        await self._request("DELETE", f"{base}?config_id={config.id}", 200)
+        async with self.factory() as db:
+            owners = (await db.scalars(select(SkillPackage).where(
+                SkillPackage.scope_ref == app_skill_scope(APP_A.app_id),
+            ))).all()
+        self.assertEqual({row.manifest["code"] for row in owners}, {"shared", "unreferenced"})
+        self.assertTrue(all((self.root / "runtime" / row.code / "SKILL.md").is_file() for row in owners))
+        # Once there are no integration rows, package ownership must still
+        # trigger the same platform authorization for configuration exports.
         async with self.engine.begin() as db:
-            await db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
-            await db.execute(text("INSERT INTO alembic_version VALUES ('015')"))
-        backup = await export_backup(
-            f"sqlite+aiosqlite:///{self.root / 'test.db'}",
-            environment="test", output_root=self.root / "backup", git_commit="test",
-        )
-        bundle = await self._request("GET", "/api/v1/configuration/skills/export", 200)
-        uploads = {"database_file": ("backup.db", backup.path.read_bytes()),
-                   "skills_bundle": ("skills.zip", bundle.content)}
-        await self._request("POST", "/api/v1/configuration/import", 200, files=uploads)
-        original = await self.stores.integration_app.get(APP_A.app_id, APP_A.space_id)
+            await db.execute(delete(IntegrationScopedSettings))
         with patch("deep_agent.services.integration_app_access.IntegrationAppDirectory.verify",
                    side_effect=IntegrationAppAccessError(404, "应用不可用")):
-            await self._request("POST", "/api/v1/configuration/import", 404, files=uploads,
-                                data={"apply": "true", "confirm": "true"})
-        await self._request("POST", "/api/v1/configuration/import", 200, files=uploads,
-                            data={"apply": "true", "confirm": "true"})
-        imported = await self.stores.integration_app.get(APP_A.app_id, APP_A.space_id)
-        self.assertEqual((imported.id, imported.settings), (original.id, original.settings))
-        await self._request("GET", f"{PATH}/{APP_A.app_id}/skills/scoped-report/package", 200)
-        self.assertEqual((await self._request("GET", f"{PATH}/{APP_A.app_id}/skills/old-report/package", 200)).content, legacy)
+            await self._request("GET", "/api/v1/configuration/skills/export", 404)
+        await self._request("GET", "/api/v1/configuration/skills/export", 200)
+
+    async def test_conflicting_conversion_preserves_legacy_rows(self):
+        await self._save()
+        await self._install_with_old_key(APP_A, "scoped-report", hashed=True)
+        config = await self._mark_legacy(APP_A)
+        await self._mark_revision()
+        # Simulate a separately written App-owned row with the same original name.
+        table = SkillPackage.__table__
+        async with self.engine.begin() as db:
+            row = dict((await db.execute(select(table))).mappings().one())
+            await db.execute(table.insert().values({
+                **row, "code": app_skill_storage_key(APP_A.app_id, "scoped-report"),
+                "scope_ref": app_skill_scope(APP_A.app_id),
+            }))
+        with self.assertRaisesRegex(AppSkillDataError, "Duplicate Skill codes"):
+            await convert_app_skill_ownership(self._database_url, apply=True)
+        current = await self.stores.integration_app.get(APP_A.app_id, APP_A.space_id)
+        self.assertEqual(current.settings, {"prompt_append": config.settings["prompt_append"]})
+        async with self.factory() as db:
+            scopes = set(await db.scalars(select(SkillPackage.scope_ref)))
+        self.assertIn(f"integration-scope:{config.id}", scopes)
+
+    async def test_concurrent_upload_and_config_removal_leave_no_dangling_reference(self):
+        base = f"{PATH}/{APP_A.app_id}"
+        config = await self._save()
+        original = skill_zip(name="racing")
+        ready, deleted = asyncio.Event(), asyncio.Event()
+
+        async def delayed_upload(*args, **kwargs):
+            result = await _upload_file(*args, **kwargs)
+            ready.set()
+            await asyncio.wait_for(deleted.wait(), timeout=5)
+            return result
+
+        with patch("deep_agent.api.v1.skills._upload_file", side_effect=delayed_upload):
+            async with asyncio.TaskGroup() as group:
+                task = group.create_task(self.client.post(
+                    f"{base}/skills", files={"file": ("racing.zip", original)},
+                ))
+                await asyncio.wait_for(ready.wait(), timeout=5)
+                await self._request("DELETE", f"{base}?config_id={config['config_id']}", 200)
+                deleted.set()
+        self.assertEqual(task.result().status_code, 409)
+        await self._request("GET", f"{base}/skills/racing", 404)
+        self.assertIsNone(await self.stores.skill_package.get_by_code(
+            app_skill_storage_key(APP_A.app_id, "racing"), scope_ref=app_skill_scope(APP_A.app_id),
+        ))

@@ -23,8 +23,8 @@ from deep_agent.db.configuration_transfer import (
     validate_table_classification,
 )
 from deep_agent.db.models import Base
-from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, INTEGRATION, scoped_skill_storage_keys, skill_scope_ref
-from deep_agent.services.integration_app_access import IntegrationAppAccessError, app_space
+from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE
+from deep_agent.integrations.app_skill_data import AppSkillDataError, app_skill_data_updates
 from deep_agent.integrations.catalog import get_integration_definition
 from deep_agent.schemas.integration import validate_integration_settings
 from deep_agent.files.storage import FileStore, StoredFile
@@ -334,45 +334,15 @@ def _validate_integration_rows(rows: Sequence[Mapping[str, Any]]) -> None:
             raise ConfigurationImportError("integration_settings must not contain empty configurations")
 
 
-def _validate_app_scope_rows(rows) -> None:
-    from uuid import UUID
-
-    scopes = set()
-    scope_keys = set()
-    for row in rows.get("integration_scoped_settings", ()):
-        try:
-            space_id, app_id = row["scope_key"].split("/")
-            settings = row["settings"]
-            if (
-                row["integration_code"] != INTEGRATION or row["scope_type"] != "app"
-                or str(UUID(row["id"])) != row["id"] or app_space(app_id) != space_id
-                or not row["tenant_id"] or len(row["tenant_id"]) > 191
-                or not isinstance(settings, dict) or set(settings) != {"prompt_append"}
-                or not isinstance(settings["prompt_append"], str) or len(settings["prompt_append"]) > 4000
-                or row["scope_key"] in scope_keys
-            ):
-                raise ValueError
-        except (KeyError, TypeError, ValueError, IntegrationAppAccessError) as exc:
-            raise ConfigurationImportError("Backup contains an invalid application configuration") from exc
-        scopes.add(skill_scope_ref(row["id"]))
-        scope_keys.add(row["scope_key"])
-    scoped_codes = set()
-    scoped_packages = set()
-    for row in rows.get("skill_packages", ()):
-        scope = row.get("scope_ref")
-        if scope is None or scope == GENERAL_SKILL_SCOPE:
-            continue
-        if scope not in scopes or not isinstance(row.get("manifest"), dict):
-            raise ConfigurationImportError("Backup contains a Skill with no matching application configuration")
-        original = row["manifest"].get("code")
-        if not isinstance(original, str) or not original or row["code"] not in scoped_skill_storage_keys(scope, original):
-            raise ConfigurationImportError("Backup contains an invalid application Skill identity")
-        if (scope, original) in scoped_packages:
-            raise ConfigurationImportError("Backup contains duplicate Skill codes in an application")
-        scoped_packages.add((scope, original))
-        scoped_codes.add(row["code"])
-    if any(scoped_codes.intersection(row.get("skills") or ()) for row in rows.get("agents", ())):
-        raise ConfigurationImportError("An Agent references an application Skill directly")
+def _validate_app_scope_rows(rows):
+    try:
+        return app_skill_data_updates(
+            rows.get("integration_scoped_settings", ()),
+            rows.get("skill_packages", ()),
+            (row.get("skills") for row in rows.get("agents", ())),
+        )
+    except AppSkillDataError as exc:
+        raise ConfigurationImportError(f"Backup application Skill data is invalid: {exc}") from exc
 
 
 async def _validate_empty_sessions(connection: AsyncConnection, *, target: bool) -> None:
@@ -671,6 +641,15 @@ async def build_configuration_import_plan(
         )
     source, rows = await inspect_configuration_backup(backup_path)
     skills = await asyncio.to_thread(inspect_skills_bundle, skills_bundle_path, rows)
+    # The source ZIP manifest still contains the original ownership values.
+    # Convert only after it has been checked against the original backup rows.
+    scopes, settings = _validate_app_scope_rows(rows)
+    for row in rows.get("skill_packages", ()):
+        if row["code"] in scopes:
+            row["scope_ref"] = scopes[row["code"]]
+    for row in rows.get("integration_scoped_settings", ()):
+        if row["id"] in settings:
+            row["settings"] = settings[row["id"]]
     async with target_engine.connect() as connection:
         target_revision = await _validate_target(
             connection,
@@ -860,7 +839,8 @@ async def apply_configuration_import(
     active_run_count: int = 0,
 ) -> ConfigurationImportResult:
     _validate_integration_rows(plan.rows.get("integration_settings", []))
-    _validate_app_scope_rows(plan.rows)
+    if any(_validate_app_scope_rows(plan.rows)):
+        raise ConfigurationImportError("Application Skill data must be converted before import")
     _validate_channel_rows(plan.rows.get("channel_accounts", []))
     if active_run_count:
         raise ConfigurationImportConflictError("Target DeepAgent has active runs")

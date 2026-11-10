@@ -5,12 +5,11 @@ from typing import Any
 from urllib.parse import quote
 
 from loguru import logger
-from deep_agent.capabilities.codes import ENVIRONMENT_TOOL_NAMES, environment_name_conflict
-from deep_agent.core.exceptions import ToolPackageError
 from pydantic_ai import ExternalToolset
 from pydantic_ai.tools import ToolDefinition
 
 from deep_agent.agent.spec import AgentSpec
+from deep_agent.agent.tool_names import ScopedToolset, ToolName
 from deep_agent.capabilities.registry import ToolInfo, ToolPackage
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.constants import SOURCE_PRIORITY
@@ -96,13 +95,13 @@ def build_ui_tool_package(
     description: str = "",
 ) -> ToolPackage:
     """Wrap one package of validated UI definitions in one ExternalToolset."""
+    toolset = build_external_toolset(definitions, toolset_id=f"ui-package-{quote(code, safe='')}")
+    if source == "manual":
+        toolset = ScopedToolset(toolset, "ui", code.removeprefix("ui:"))
     return ToolPackage(
         code=code,
         category="ui",
-        toolset=build_external_toolset(
-            definitions,
-            toolset_id=f"ui-package-{quote(code, safe='')}",
-        ),
+        toolset=toolset,
         label=label,
         source=source,
         description=description,
@@ -147,7 +146,7 @@ def enrich_tool_event(event: dict[str, Any], hints: dict[str, dict[str, Any]]) -
     if not extra:
         return event
     merged = dict(event)
-    merged.update(extra)
+    merged.update({key: value for key, value in extra.items() if key != "wire_name"})
     return merged
 
 
@@ -160,7 +159,8 @@ def enrich_deferred(deferred: dict[str, Any], hints: dict[str, dict[str, Any]]) 
         if not isinstance(parts, list):
             continue
         enriched[key] = [
-            {**part, **hints.get(part.get("tool", ""), {})} if isinstance(part, dict) else part
+            {**part, **{key: value for key, value in hints.get(part.get("tool", ""), {}).items()
+                         if key != "wire_name"}} if isinstance(part, dict) else part
             for part in parts
         ]
     return enriched
@@ -232,8 +232,6 @@ async def prepare_ui_tool_packages_for_spec(
     effective = await load_effective_ui_tools(stores, spec, catalog=catalog)
     valid_definitions: list[UIToolRecord] = []
     for definition in effective.definitions:
-        if definition.name in ENVIRONMENT_TOOL_NAMES:
-            raise ToolPackageError(environment_name_conflict(definition.name))
         try:
             build_args_validator(definition)
         except ValueError as exc:
@@ -241,6 +239,11 @@ async def prepare_ui_tool_packages_for_spec(
             continue
         valid_definitions.append(definition)
     hints = build_tool_hints(valid_definitions)
+    for definition in valid_definitions:
+        if definition.source == "manual":
+            hints[definition.name]["wire_name"] = ToolName(
+                "ui", definition.name, definition.package_code.removeprefix("ui:"),
+            ).wire
     grouped: dict[str, list[UIToolRecord]] = {}
     for definition in valid_definitions:
         grouped.setdefault(definition.package_code, []).append(definition)

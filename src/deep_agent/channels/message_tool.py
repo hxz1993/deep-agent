@@ -222,11 +222,29 @@ def build_channel_message_toolset(store, gateway, source: ChannelRunContext, cap
     if caps.supports_reply:
         async def channel_message(ctx: RunContext[AgentDeps], components: list[MessageComponent],
                                   action: Literal["send"] = "send", reply_to: Literal["current"] | None = None) -> dict:
-            """Send ordered content to this conversation only. Media accepts exactly one authorized file_id or public HTTP(S) url; known URLs need no Python or platform upload. Downloads stay in call-local memory. Cards use payload: textcard needs title/description/url, news needs 1-8 articles. Use reply_to=current to quote this turn. Unsupported native media is sent as a file. Do not repeat successful or unconfirmed sends; interruption after dispatch may leave delivery unknown. Normal answers are delivered automatically."""
             return await send(ctx, components, reply_to == "current")
     else:
         async def channel_message(ctx: RunContext[AgentDeps], components: list[MessageComponent],
                                   action: Literal["send"] = "send") -> dict:
-            """Send ordered content to this conversation only. Media accepts exactly one authorized file_id or public HTTP(S) url; known URLs need no Python or platform upload. Downloads stay in call-local memory. Cards use payload: textcard needs title/description/url, news needs 1-8 articles. This channel does not support native message quotes. Unsupported native media is sent as a file. Do not repeat successful or unconfirmed sends; interruption after dispatch may leave delivery unknown. Normal answers are delivered automatically."""
             return await send(ctx, components, False)
-    return FunctionToolset([channel_message], id="runtime:channel")
+
+    description = (
+        'Send ordered messages to the current conversation. Normal answers are delivered automatically. '
+        'To send a picture, use a component such as {"type":"image","file_id":"<authorized file ID>"}. '
+        'For image, file, audio or video components, supply exactly one authorized file_id or public HTTP(S) url. '
+        'Known public URLs need no Python or upload. Downloads stay in call-local memory. '
+    )
+    if "textcard" in caps.kinds or "news" in caps.kinds:
+        description += "Cards use payload: textcard needs title/description/url, news needs 1-8 articles. "
+    if caps.supports_reply:
+        description += "Use reply_to=current to quote this turn. "
+    else:
+        description += "Native quotes are unavailable in this channel. "
+    if caps.media_fallback_to_file:
+        description += "Unsupported native media may be sent as a file. "
+    else:
+        description += "Use type=file explicitly to send media as an attachment. "
+    description += "Do not repeat successful or unconfirmed sends. Interruption after dispatch may leave delivery unknown."
+    toolset = FunctionToolset(id="runtime:channel")
+    toolset.add_function(channel_message, description=description)
+    return toolset

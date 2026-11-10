@@ -5,6 +5,7 @@ from typing import Any, Iterable
 from loguru import logger
 
 from deep_agent.agent.spec import AgentSpec
+from deep_agent.agent.tool_names import ToolName
 from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.capabilities.registry import ToolPackage, ToolPackageRegistry
 from deep_agent.capabilities.system_tools import list_system_tool_domains
@@ -47,7 +48,12 @@ def build_tool_display_name_map(
         for tool in domain.tools:
             mapping[tool.name] = _display_name(tool.display_name, tool.name)
 
-    _add_packages(mapping, ui_packages)
+    for package in ui_packages:
+        for tool in package.tools:
+            if package.source == "manual":
+                identity = ToolName("ui", tool.name, package.code.removeprefix("ui:"))
+                mapping[identity.wire] = _display_name(tool.display_name, tool.name)
+            mapping.setdefault(tool.name, _display_name(tool.display_name, tool.name))
 
     for row in mcp_rows:
         server_name = str(getattr(row, "name", "") or "").strip()
@@ -65,7 +71,9 @@ def build_tool_display_name_map(
             continue
         for definition in snapshot.definitions:
             tool_name = f"{server_name}_{definition.name}"
-            mapping[tool_name] = _display_name(definition.title, tool_name)
+            display_name = _display_name(definition.title, tool_name)
+            mapping[ToolName("mcp", definition.name, server_name).wire] = display_name
+            mapping.setdefault(tool_name, display_name)
 
     return mapping
 
@@ -138,7 +146,7 @@ def enrich_deferred_display_names(
         enriched[key] = [
             {
                 **part,
-                "display_name": mapping.get(str(part.get("tool") or ""))
+                "display_name": part.get("display_name") or mapping.get(str(part.get("tool") or ""))
                 or str(part.get("tool") or "tool"),
             }
             if isinstance(part, dict)

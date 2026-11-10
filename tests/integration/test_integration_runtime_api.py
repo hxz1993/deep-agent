@@ -115,11 +115,11 @@ class IntegrationRuntimeApiTests(unittest.IsolatedAsyncioTestCase):
         path = "/api/v1/integrations/deeptable-assistant/app-configs/validate"
         payload = {"app_id": "budget001"}
 
-        async def platform(_service, resource, *, space=None, params=None):
-            if resource == "user/get-user-detail":
-                return {"userId": "enterprise-user", "enterpriseDTOList": [
-                    {"enterpriseCode": "tenant-a", "roleList": [{"roleCode": "DEFAULT_ADMIN"}]},
-                ]}
+        async def platform(_service, resource, *, space=None, app=None, params=None):
+            if resource == "api/enterprise/list":
+                return [{"enterpriseCode": "tenant-a", "id": "tenant-a-pk"}]
+            if resource == "user/permission":
+                return {"appAdmin": False, "developerRole": app == "budget001"}
             if resource == "space/get-tenant-code":
                 return "tenant-a" if space == "budget" else "tenant-b"
             return [{"id": "budget001", "appType": "DEEPFOS", "appName": "年度预算"}]
@@ -136,7 +136,7 @@ class IntegrationRuntimeApiTests(unittest.IsolatedAsyncioTestCase):
             denied = await self.client.post(path, json={"app_id": "outside001"}, headers=self.headers)
             self.assertEqual(denied.status_code, 404, denied.text)
             self.assertNotIn("tenant-b", denied.text)
-            self.assertEqual(request.await_count, 5)
+            self.assertEqual(request.await_count, 6)
             self.assertEqual((await self.client.post(path, json=payload)).status_code, 401)
             self.assertEqual((await self.client.post(path.replace("deeptable", "deepcube"),
                              json=payload, headers=self.headers)).status_code, 404)

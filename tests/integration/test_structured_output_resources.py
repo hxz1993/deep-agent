@@ -75,7 +75,7 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
             if enabled:
                 await self.stores.agent.update_unique(aid, AgentUpdate(structured_output_enabled=True), user_id="resource-operator")
             def response(messages, info):
-                return ModelResponse(parts=[ToolCallPart("resource_result", {"ok": True}, "resource-output")] if enabled else [TextPart("ordinary")])
+                return ModelResponse(parts=[ToolCallPart("output__resource_result", {"ok": True}, "resource-output")] if enabled else [TextPart("ordinary")])
             statements, capture = self.sql_capture()
             event.listen(self.engine.sync_engine, "before_cursor_execute", capture)
             started = perf_counter()
@@ -207,7 +207,7 @@ class StructuredOutputResourceTests(unittest.IsolatedAsyncioTestCase):
         state = StructuredOutputState(contract)
         def response(messages, info):
             captured.append(info)
-            return ModelResponse(parts=[ToolCallPart("resource_result", {"text": "synthetic"}, "resource-call")])
+            return ModelResponse(parts=[ToolCallPart("output__resource_result", {"text": "synthetic"}, "resource-call")])
         await SdkAgent(FunctionModel(response), output_type=state.output_types).run("synthetic")
         self.assertEqual(captured[0].output_tools[0].parameters_json_schema["properties"]["text"]["description"], contract["json_schema"]["properties"]["text"]["description"])
         estimator = TokenEstimator.for_model("synthetic-resource", provider_type="test")

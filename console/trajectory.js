@@ -119,7 +119,7 @@ function newEvent({
 }
 
 function partKind(part, toolName) {
-  if (toolName === "write_plan") return "planning";
+  if (toolName === "write_plan" && !["ui", "mcp"].includes(part?.source)) return "planning";
   if (part?.type === "tool_call" && (part?.widget || part?.metadata?.widget)) return "deferred";
   return "tool";
 }
@@ -555,6 +555,7 @@ export function buildTrajectory(history = {}) {
       if (!role || !callId) return;
       if (part.part_kind === "retry-prompt" && !part.tool_name && message.metadata?.deepagent_output_budget) return;
       const outputMetadata = message.metadata?.deepagent_output;
+      const wire = message.metadata?.deepagent_wire_names?.[String(offset)];
       const absolutePartIndex = Number(event.payload?.source?.part_index || 0) + offset;
       const outputCallKey = `${event.run_id || ""}:${callId}`;
       if (role === "call") outputCallsByRun.set(outputCallKey,
@@ -562,7 +563,7 @@ export function buildTrajectory(history = {}) {
         || outputFacts.some(fact => outputSourceMatches(fact, event, part, offset)));
       // SDK RetryPrompt may omit tool_name. Pair it with the nearest actual call
       // in this Run, rather than creating a normal tool or guessing by its name.
-      if (outputCallsByRun.get(outputCallKey)) return;
+      if (typeof wire === "string" ? wire.startsWith("output__") : outputCallsByRun.get(outputCallKey)) return;
       const toolName = part.tool_name || null;
       const sameId = tools.get(callId) || [];
       const matching = sameId.filter(row => sameTool(row, callId, toolName));
@@ -577,7 +578,7 @@ export function buildTrajectory(history = {}) {
           tool_call_id: callId,
           args: part.args ?? null,
           result: part.content ?? null,
-          source: toolSource(toolName),
+          source: typeof wire === "string" ? wire.split("__", 1)[0] : toolSource(toolName),
           widget: part.metadata?.widget || null,
           metadata: part.metadata || null,
         };
@@ -616,7 +617,7 @@ export function buildTrajectory(history = {}) {
         tool.result = redactTrajectoryValue(jsonClone({
           result: part.content ?? null,
           outcome: part.outcome || null,
-          plan: toolName === "write_plan" ? metadata.deepagent_plan || null : null,
+          plan: tool.kind === "planning" ? metadata.deepagent_plan || null : null,
           artifacts: toolResultArtifacts(metadata),
           metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls, ptc_diagnostics: metadata.ptc_diagnostics, ...(toolName === "view_image" ? { view_image: metadata.view_image } : {}) },
         }));

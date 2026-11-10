@@ -91,7 +91,7 @@ class AgentOutputConfigurationApiTests(unittest.IsolatedAsyncioTestCase):
         config = await self.client.get(f'/api/v1/agents/{installed.json()["agent"]["id"]}/output-config', headers=self.headers)
         self.assertEqual(config.json()["output_config"], OUTPUT_CONFIG)
 
-    async def test_known_output_tool_name_collision_is_rejected_before_save(self):
+    async def test_output_business_name_can_equal_a_runtime_tool(self):
         from deep_agent.capabilities import build_registry
         self.ctx.registry = build_registry()
         package = self.ctx.registry.get("builtin:ptc")
@@ -101,8 +101,11 @@ class AgentOutputConfigurationApiTests(unittest.IsolatedAsyncioTestCase):
             "name": "collision fixture", "prompt": "test", "capabilities": ["builtin:ptc"],
             "structured_output_enabled": True, "output_config": collision,
         })
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertEqual(await self.stores.agent.list_all(), [])
+        self.assertEqual(response.status_code, 201, response.text)
+        config = await self.client.get(
+            f'/api/v1/agents/{response.json()["id"]}/output-config', headers=self.headers,
+        )
+        self.assertEqual(config.json()["output_config"], collision)
 
     async def test_duplicate_name_and_unavailable_model_do_not_partially_update_output(self):
         from deep_agent.db.models import LlmModel

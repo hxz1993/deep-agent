@@ -19,6 +19,7 @@ from pydantic_ai.messages import (
 from pydantic_core import to_json
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import public_tool_messages
 from deep_agent.agent.history import is_user_only_request, same_tool_return
 from deep_agent.agent.observability import log_event
 from deep_agent.agent.planning import (
@@ -304,7 +305,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                         deps.session_id, agent_id=deps.agent_id, user_id=deps.user,
                         app_id=deps.app_id, space_id=deps.space_id,
                         turn_id=deps.turn_id, run_id=deps.run_id,
-                        messages=messages,
+                        messages=public_tool_messages(messages, deps.tool_names),
                         first_message_ordinal=1 if self.skip_user_prompt else 0,
                         usage_model_id=self.model_name,
                         usage_provider_id=self.provider_id,

@@ -12,7 +12,7 @@ from pydantic_ai import DeferredToolRequests, ModelRetry, StructuredDict, ToolOu
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart
-from deep_agent.capabilities.codes import ENVIRONMENT_TOOL_NAMES, environment_name_conflict
+from deep_agent.agent.tool_names import ToolName
 from deep_agent.structured_output.feedback import (
     OutputArgumentsError, correction_feedback, decode_output_arguments, protocol_error,
 )
@@ -37,7 +37,7 @@ def _output_type(serialized: str):
     # Other roots use the SDK's transparent `response` argument wrapper.
     value_type = (StructuredDict(schema) if schema.get("type") == "object"
                   else Annotated[Any, WithJsonSchema(schema)])
-    return ToolOutput(value_type, name=contract["name"], description=contract.get("description") or None,
+    return ToolOutput(value_type, name=ToolName("output", contract["name"]).wire, description=contract.get("description") or None,
                       strict=False, max_retries=2)
 
 
@@ -46,8 +46,7 @@ class StructuredOutputState(AbstractCapability):
         from deep_agent.structured_output.schema import normalize_schema, schema_digest, validate_output_name
         schema = normalize_schema(contract["json_schema"])
         validate_output_name(contract["name"])
-        if contract["name"] in ENVIRONMENT_TOOL_NAMES:
-            raise ValueError(environment_name_conflict(contract["name"]))
+        self.tool_name = ToolName("output", contract["name"])
         allow_text = contract.get("allow_text_output", False)
         if type(allow_text) is not bool:
             raise ValueError("Output contract allow_text_output must be a boolean")
@@ -89,7 +88,7 @@ class StructuredOutputState(AbstractCapability):
     async def before_model_request(self, ctx, request_context):
         parameters = request_context.model_request_parameters
         names = {tool.name for tool in parameters.function_tools}
-        if self.contract["name"] in names:
+        if self.tool_name.wire in names:
             raise ValueError("Output name conflicts with an authorized tool")
         return request_context
 
@@ -107,11 +106,12 @@ class StructuredOutputState(AbstractCapability):
         self.pending = None
         self.result_kind = None
         calls = [(i, part) for i, part in enumerate(response.parts) if isinstance(part, ToolCallPart)]
-        outputs = [(i, part) for i, part in calls if part.tool_name == self.contract["name"]]
+        outputs = [(i, part) for i, part in calls if part.tool_name == self.tool_name.wire]
         if outputs:
             response.metadata = {**(response.metadata or {}), "deepagent_output": {
                 "name": self.contract["name"], "part_indices": [i for i, _ in outputs],
                 "schema_digest": self.contract["schema_digest"],
+                **({"allow_text_output": True} if self.allow_text_output else {}),
             }}
         native = [i for i, part in enumerate(response.parts)
                   if getattr(part, "part_kind", "") in {"builtin-tool-call", "native-tool-call"}]
@@ -147,7 +147,7 @@ class StructuredOutputState(AbstractCapability):
                 "rejected": True, "reason": reason,
                 "not_dispatched_part_indices": [i for i, _ in calls],
             }}
-        if outputs or reason:
+        if reason and not outputs:
             response.metadata = {**(response.metadata or {}), "deepagent_output": {
                 "name": self.contract["name"], "part_indices": [i for i, _ in outputs],
                 "schema_digest": self.contract["schema_digest"],
@@ -178,7 +178,7 @@ class StructuredOutputState(AbstractCapability):
         if reason:
             if len(self.rejected_keys) > 2:
                 raise UnexpectedModelBehavior("output_retry_exhausted: output correction limit reached")
-            raise ModelRetry(correction_feedback(reason, errors, self.contract["name"]))
+            raise ModelRetry(correction_feedback(reason, errors, self.tool_name.wire))
         if (not calls and self.allow_text_output
                 and any(isinstance(part, TextPart) and part.content for part in response.parts)):
             # The SDK's unadorned str processor can bypass output-validation
@@ -213,7 +213,7 @@ class StructuredOutputState(AbstractCapability):
             self.result_kind = "text"
             self.pending = None
             return output
-        if call.tool_name != self.contract["name"] or not self.pending or "output" not in self.pending:
+        if call.tool_name != self.tool_name.wire or not self.pending or "output" not in self.pending:
             raise UnexpectedModelBehavior("Output does not match a validated output call")
         self.result_kind = "structured"
         # The raw JSON already passed full validation before dispatch. Preserve

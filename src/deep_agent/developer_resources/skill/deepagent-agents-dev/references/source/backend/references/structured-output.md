@@ -5,7 +5,7 @@
 ## 定义与Run内装配
 
 - 默认关闭。管理员POST/PATCH Agent一次保存顶层structured_output_enabled、allow_text_output及output_config:{name,description,json_schema}，不逐次Chat传Schema。允许文本默认false、strict boolean，省略保持、null拒绝；没有定义不能单独保存true。
-- name为1–64位ASCII字母/数字/下划线，以字母开头，不与已授权工具编码冲突。使用完整业务Schema，不用`{text:string}`桩替代真实契约；首轮和续轮由同一Schema表达。
+- `name` 为 1–64 位 ASCII 字母、数字或下划线，以字母开头。业务名可与已授权工具相同。模型侧使用 `output__<name>`，超长时生成稳定短名。配置、安装包、`output_info.name` 和历史继续使用原业务名。使用完整业务 Schema 表达首轮与续轮契约。
 - PATCH省略保持；关闭保留草稿。显式`output_config:null`只允许最终关闭状态；开启而无定义须整个事务拒绝。更新人取可信身份，不接受Body/包伪造。
 - GET /api/v1/agents/{id}/output-config回读两开关及完整定义；普通详情只给bool，不加载管理Schema。普通聊天初始化不依赖管理接口。
 - 每个Run开始读取一次当前Agent的Schema和allow_text_output，在内存构造Output Type与校验器；UI续跑也重新装配当前配置。同一会话约定配置保持一致，改定义／策略后新建会话，不支持恢复历史配置版本。

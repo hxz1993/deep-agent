@@ -77,10 +77,10 @@ async def validate_deferred_results(store, session_id: str, results: DeferredToo
     return DeferredReasoning(effort, model_id, provider_id)
 
 
-def serialize_deferred(requests: DeferredToolRequests) -> dict[str, Any]:
+def serialize_deferred(requests: DeferredToolRequests, tool_names=None, display_names=None) -> dict[str, Any]:
     return {
-        "calls": [_tool_call_part_dict(part) for part in requests.calls],
-        "approvals": [_tool_call_part_dict(part) for part in requests.approvals],
+        "calls": [_tool_call_part_dict(part, tool_names or {}, display_names or {}) for part in requests.calls],
+        "approvals": [_tool_call_part_dict(part, tool_names or {}, display_names or {}) for part in requests.approvals],
     }
 
 
@@ -99,9 +99,12 @@ def build_deferred_tool_results(items: list[DeferredToolResultItem]) -> Deferred
     return results
 
 
-def _tool_call_part_dict(part: ToolCallPart) -> dict[str, Any]:
+def _tool_call_part_dict(part: ToolCallPart, tool_names, display_names) -> dict[str, Any]:
+    identity = tool_names.get(part.tool_name)
+    display_name = display_names.get(part.tool_name)
     return {
-        "tool": part.tool_name,
+        "tool": identity.public if identity else part.tool_name,
         "args": part.args_as_dict(),
         "tool_call_id": part.tool_call_id,
+        **({"display_name": display_name} if display_name else {}),
     }

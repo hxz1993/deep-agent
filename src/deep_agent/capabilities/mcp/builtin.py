@@ -41,7 +41,7 @@ def load_builtin_mcp_tool_packages(mcps_dir: str) -> list[ToolPackage]:
                 toolset=server,
                 label=name,
                 source="builtin",
-                description=f"Builtin MCP server '{name}'. Tools are prefixed with '{name}_'.",
+                description=f"Builtin MCP server '{name}'.",
                 tools=[],
             )
         )

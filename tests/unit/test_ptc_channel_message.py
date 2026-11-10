@@ -21,6 +21,7 @@ from deep_agent.agent.factory import _toolsets_for_spec, build_agent
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.registry import ToolPackage
+from deep_agent.channels.doc_tool import build_channel_doc
 from deep_agent.channels.message_tool import MessageComponent, build_channel_message_toolset
 from deep_agent.channels.outbound import ChannelRunContext, MessageCapabilities, MessageTarget
 from deep_agent.files.storage import LocalFileStore
@@ -87,18 +88,15 @@ class ChannelPtcRegistrationTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(ptc=ptc):
                 source = build_channel_message_toolset(_store(), None, _source(), _caps())
 
-                async def channel_helper() -> str:
-                    return "helper"
-
-                source = FunctionToolset([*source.tools.values(), channel_helper])
+                source.add_function(build_channel_doc("wecom", _caps()))
                 original = (await source.get_tools(_context()))["channel_message"]
                 assembled = _toolsets_for_spec(build_registry(), _spec(ptc=ptc), channel_toolset=source)
                 tools = {}
                 for toolset in assembled:
                     tools.update(await toolset.get_tools(_context()))
                 tool = tools["channel_message"]
-                self.assertNotIn("deepagent_code_mode", tools["channel_helper"].tool_def.metadata or {})
-                self.assertNotIn("deepagent_ptc_builtin", tools["channel_helper"].tool_def.metadata or {})
+                self.assertNotIn("deepagent_code_mode", tools["channel_doc"].tool_def.metadata or {})
+                self.assertNotIn("deepagent_ptc_builtin", tools["channel_doc"].tool_def.metadata or {})
                 self.assertEqual(tool.tool_def.parameters_json_schema,
                                  original.tool_def.parameters_json_schema)
                 self.assertIs(tool.args_validator, original.args_validator)

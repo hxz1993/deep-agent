@@ -38,10 +38,10 @@ class StructuredOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
             requests.append(info)
             if mixed and len(requests) == 1:
                 return ModelResponse(parts=[ToolCallPart("lookup", {}, "lookup-1"),
-                                            ToolCallPart("lease_result", {}, "out-1")])
+                                            ToolCallPart("output__lease_result", {}, "out-1")])
             actual = {} if invalid and len(requests) == 1 else value
             args = actual if schema.get("type") == "object" else {"response": actual}
-            return ModelResponse(parts=[ToolCallPart("lease_result", args, f"out-{len(requests)}")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", args, f"out-{len(requests)}")])
 
         async def streaming(messages, info):
             result = response(messages, info)
@@ -117,10 +117,10 @@ class StructuredOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
             calls.append(info)
             step = len(calls)
             if step in (1, 3):
-                return ModelResponse(parts=[ToolCallPart("lease_result", {}, f"bad-{step}")])
+                return ModelResponse(parts=[ToolCallPart("output__lease_result", {}, f"bad-{step}")])
             if step == 2:
                 return ModelResponse(parts=[ToolCallPart("confirm", {}, "confirm-1")])
-            return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "accepted-1")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "accepted-1")])
         external = ExternalToolset([ToolDefinition(name="confirm", parameters_json_schema={"type": "object", "properties": {}})])
         agent = Agent(FunctionModel(response), deps_type=AgentDeps, toolsets=[external], retries=2)
         runner = AgentRunner(agent, self.stores.coordinator, UsageLimits(request_limit=10))
@@ -150,7 +150,7 @@ class StructuredOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
         requests = []
         def response(messages, info):
             requests.append(info)
-            return ModelResponse(parts=[ToolCallPart("lease_result", {}, f"bad-{len(requests)}")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", {}, f"bad-{len(requests)}")])
         runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.stores.coordinator, UsageLimits(request_limit=10))
         runner._output_config_loader = AsyncMock(return_value={"name": "lease_result", "json_schema": {
             "type": "object", "required": ["id"]}})

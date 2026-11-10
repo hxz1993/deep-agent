@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import asdict, dataclass
 from typing import Annotated
 
@@ -83,7 +82,7 @@ async def verify_app_scope_rows(request: Request, user: str, rows, *, skill_scop
     try:
         directory = IntegrationAppDirectory(request, user)
         for app_id, expected in owners.items():
-            app = await directory.verify(app_id)
+            app = await directory.verify(app_id, enterprise_admin_only=True)
             if app.app_id != app_id or expected - {(app.space_id, app.tenant_id)}:
                 raise IntegrationAppAccessError(403, "无法验证备份中的应用归属。")
     except IntegrationAppAccessError as exc:
@@ -114,31 +113,28 @@ async def list_app_configs(request: Request, user: RequestUserDep, ctx: AppConte
         rows = await _store(ctx).list_for_tenants(set(tenants))
         if not rows:
             return []
-        names = await resolve_scope_directory(request, user)
-
-        async def describe(row, count):
+        candidates = {
+            app_id: (space_id, row.tenant_id)
+            for row, _ in rows
+            for space_id, _, app_id in (row.scope_key.partition("/"),)
+        }
+        allowed = {
+            app.app_id: app for app in await directory.available_apps(candidates=candidates, tenants=tenants)
+        }
+        items = []
+        for row, count in rows:
             space_id, _, app_id = row.scope_key.partition("/")
-            try:
-                app = await directory.verify(app_id)
-            except IntegrationAppAccessError as exc:
-                if exc.status in (403, 404):
-                    return None
-                raise
-            if app.space_id != space_id or app.tenant_id != row.tenant_id:
-                return None
-            facts = asdict(app)
-            facts["space_name"] = names.spaces.get(space_id, app.space_name)
-            return AppConfigSummary(**facts, config_id=row.id, skill_count=count)
-
-        items = await asyncio.gather(*(describe(row, count) for row, count in rows))
-        return [item for item in items if item is not None]
+            app = allowed.get(app_id)
+            if app and (app.space_id, app.tenant_id) == (space_id, row.tenant_id):
+                items.append(AppConfigSummary(**asdict(app), config_id=row.id, skill_count=count))
+        return items
     except IntegrationAppAccessError as exc:
         raise HTTPException(exc.status, detail=str(exc)) from exc
 
 
 @router.get("/available", response_model=list[ManagedApp])
 async def list_available_apps(request: Request, user: RequestUserDep) -> list[ManagedApp]:
-    """List applications visible to the caller in enterprises they administer."""
+    """List applications that the current caller may configure."""
     try:
         return await IntegrationAppDirectory(request, user).available_apps()
     except IntegrationAppAccessError as exc:

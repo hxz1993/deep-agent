@@ -39,7 +39,9 @@ class DeveloperResourcePackageTests(unittest.TestCase):
         guide = PdfReader(io.BytesIO(read_resource("initialization-guide").content))
         self.assertEqual(items[0]["page_count"], len(guide.pages))
         guide_text = unicodedata.normalize("NFKC", "".join(page.extract_text() for page in guide.pages))
-        self.assertIn("按应用配置专用内容", "".join(guide_text.split()))
+        guide_text = "".join(guide_text.split())
+        self.assertIn("首次初始化请忽略「应用配置」", guide_text)
+        self.assertEqual(guide_text.count("应用配置"), 1)
 
     def test_skill_is_portable_complete_and_parseable(self):
         resource = read_resource("development-skill")

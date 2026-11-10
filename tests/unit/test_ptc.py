@@ -17,6 +17,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai.usage import RunUsage
 from pydantic_core import SchemaValidator
 
+from deep_agent.agent.tool_names import ScopedToolset
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities import build_registry
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
@@ -968,6 +969,12 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         def second(value: int) -> int:
             return value
 
+        mcp = FunctionToolset[AgentDeps]()
+
+        @mcp.tool_plain(name="code")
+        def third() -> str:
+            return "MCP tool with legacy name run_code"
+
         seen: dict[str, str] = {}
 
         def respond(_messages, info: AgentInfo) -> ModelResponse:
@@ -980,6 +987,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             toolsets=[
                 build_code_mode_tool_package().toolset,
                 FilePayloadResolvingToolset(toolset),
+                FilePayloadResolvingToolset(ScopedToolset(mcp, "mcp", "run")),
             ],
             capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
         )
@@ -987,6 +995,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("a-b", seen)
         self.assertIn("a.b", seen)
         self.assertIn("run_code", seen)
+        self.assertIn("mcp__run__code", seen)
 
     async def test_code_only_helper_never_falls_back_native_on_alias_collision(self) -> None:
         helpers = FunctionToolset[AgentDeps]()

@@ -23,6 +23,7 @@ from deep_agent.agent.context.estimator import (
     canonical_json,
 )
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import MCP_IDENTITY
 from deep_agent.search import (
     FieldRole,
     SearchConfig,
@@ -171,6 +172,13 @@ def mcp_original_tool_name(name: str, server_names: Sequence[str]) -> str | None
     return name[len(server) + 1 :]
 
 
+def mcp_definition_identity(tool: ToolDefinition, server_names: Sequence[str]) -> tuple[str, str | None]:
+    identity = (tool.metadata or {}).get(MCP_IDENTITY)
+    if isinstance(identity, (tuple, list)) and len(identity) == 2:
+        return identity[0], identity[1]
+    return _server_for_tool(tool.name, server_names), mcp_original_tool_name(tool.name, server_names)
+
+
 def build_return_schema_selector(
     *,
     server_names: Sequence[str],
@@ -178,7 +186,7 @@ def build_return_schema_selector(
     """Select the small evidence-backed MCP output-schema allowlist."""
 
     async def selector(ctx: RunContext[AgentDeps], tool: ToolDefinition) -> bool:
-        original_name = mcp_original_tool_name(tool.name, server_names)
+        _, original_name = mcp_definition_identity(tool, server_names)
         return original_name in MCP_RETURN_SCHEMA_TOOLS and bool(tool.return_schema)
 
     return selector
@@ -193,14 +201,15 @@ def build_search_documents(
     for tool in tools:
         properties = _schema_properties(dict(tool.parameters_json_schema or {}))
         description = tool.description or ""
-        server = _server_for_tool(tool.name, server_names)
-        original_name = mcp_original_tool_name(tool.name, server_names)
+        server, original_name = mcp_definition_identity(tool, server_names)
         metadata = tool.metadata or {}
         annotations = metadata.get("annotations")
         title = str(metadata.get("title") or "")
         if not title and isinstance(annotations, dict):
             title = str(annotations.get("title") or "")
         fields = [SearchField("protocol_name", tool.name, FieldRole.CODE)]
+        if (tool.metadata or {}).get(MCP_IDENTITY):
+            fields.append(SearchField("legacy_protocol_name", f"{server}_{original_name}", FieldRole.CODE))
         if original_name and original_name != tool.name:
             fields.append(SearchField("original_protocol_name", original_name, FieldRole.CODE))
         if title:
@@ -433,7 +442,7 @@ def _return_schema_telemetry(
     for tool in tools:
         if tool.name not in disclosed_names:
             continue
-        if mcp_original_tool_name(tool.name, server_names) not in MCP_RETURN_SCHEMA_TOOLS:
+        if mcp_definition_identity(tool, server_names)[1] not in MCP_RETURN_SCHEMA_TOOLS:
             continue
         if not tool.return_schema:
             unavailable.append(tool.name)
@@ -503,6 +512,18 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                         dict.fromkeys([*selected, *supplemental_selected])
                     )[:MCP_PRESELECT_LIMIT]
             selected_set = set(selected)
+            legacy_names: dict[str, list[str]] = defaultdict(list)
+            for tool in definitions:
+                if (tool.metadata or {}).get(MCP_IDENTITY):
+                    server, original = mcp_definition_identity(tool, self.server_names)
+                    legacy_names[f"{server}_{original}"].append(tool.name)
+            # Old sessions recorded server_tool. Only inherit a reveal if
+            # that name still identifies exactly one authorized definition.
+            inherited = {
+                names[0] for legacy, names in legacy_names.items()
+                if legacy in ctx.discovered_tool_names and len(names) == 1
+            }
+            selected_set.update(inherited)
             prepared = [
                 replace(tool, defer_loading=False)
                 if tool.name in selected_set
@@ -539,7 +560,7 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
             telemetry.candidate_tools = [tool.name for tool in definitions]
             telemetry.direct_count = len(disclosed_names)
             telemetry.deferred_count = len(definitions) - len(disclosed_names)
-            telemetry.preselected_tools = selected
+            telemetry.preselected_tools = list(dict.fromkeys([*selected, *sorted(inherited)]))
             telemetry.estimated_full_schema_tokens = full_tokens
             telemetry.estimated_disclosed_schema_tokens = direct_tokens
             telemetry.estimated_saved_schema_tokens = max(0, full_tokens - direct_tokens)
@@ -602,7 +623,9 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
         if deferred_names:
             grouped: dict[str, list[str]] = defaultdict(list)
             for name in deferred_names:
-                grouped[_server_for_tool(name, self.server_names)].append(name)
+                identity = ctx.deps.tool_names.get(name)
+                server = identity.scope if identity and identity.group == "mcp" else _server_for_tool(name, self.server_names)
+                grouped[server].append(name)
             rows = [
                 "以下 MCP 工具当前仅提供名称；需要其完整参数时调用 search_tools，"
                 "不要猜测未披露工具的参数。已知完整协议名时，一次批量加载本轮需要的工具，"
@@ -683,8 +706,10 @@ def search_deferred_tools(
             normalized_query = query.casefold()
             query_matches: list[str] = []
             for tool in corpus.values():
-                original_name = mcp_original_tool_name(tool.name, telemetry.server_names)
+                server, original_name = mcp_definition_identity(tool, telemetry.server_names)
                 candidates = {tool.name.casefold()}
+                if (tool.metadata or {}).get(MCP_IDENTITY):
+                    candidates.add(f"{server}_{original_name}".casefold())
                 if original_name:
                     candidates.add(original_name.casefold())
                 if not any(
@@ -702,7 +727,7 @@ def search_deferred_tools(
                 query_matches.append(tool.name)
             exact_names.extend(query_matches)
             if not query_matches and re.fullmatch(
-                r"[a-zA-Z][a-zA-Z0-9-]*(?:_[a-zA-Z0-9-]+)+", query,
+                r"[a-zA-Z][a-zA-Z0-9-]*(?:_+[a-zA-Z0-9-]+)+", query,
             ):
                 missing_names.append(query)
 

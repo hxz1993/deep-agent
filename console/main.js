@@ -32,7 +32,7 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=0162-integration-app-space-label");
+    const module = await import("./configuration.js?v=0165-scenario-skill-dismiss");
     await module.initConfiguration();
     configurationModule = module;
     return module;

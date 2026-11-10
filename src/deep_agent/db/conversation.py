@@ -1122,8 +1122,10 @@ SqlConversationStore = SqlConversationCoordinator
 
 
 def _common_message_suffix(raw: list[ModelMessage], projected: list[ModelMessage]) -> int:
-    raw_payloads = [serialize_message(message) for message in raw]
-    projected_payloads = [serialize_message(message) for message in projected]
+    from deep_agent.agent.tool_names import model_tool_history
+
+    raw_payloads = [serialize_message(message) for message in model_tool_history(raw)]
+    projected_payloads = [serialize_message(message) for message in model_tool_history(projected)]
     count = 0
     while count < min(len(raw_payloads), len(projected_payloads)):
         original = raw_payloads[-1 - count]

@@ -7,6 +7,7 @@ from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.toolsets import FunctionToolset
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import ScopedToolset
 from deep_agent.capabilities.mcp.builtin_config import normalize_mcp_config
 from deep_agent.capabilities.mcp.request_context import inject_request_meta
 from deep_agent.capabilities.mcp.run_scoped import RunScopedMcpToolset
@@ -39,18 +40,19 @@ def build_mcp_toolset(
     """Build a registry-ready MCP toolset with request header forwarding."""
     transport, config = normalize_mcp_config(name, transport, config)
     if transport == "builtin":
-        return RunScopedMcpToolset(server_name=name, config=config).prefixed(name)
+        return ScopedToolset(RunScopedMcpToolset(server_name=name, config=config), "mcp", name)
     if transport == "url":
         parsed = McpInspection.from_value(inspection, transport=transport)
         if parsed.tools.snapshot_status != "ready" or parsed.tools.snapshot is None:
             return FunctionToolset(id=f"mcp-unavailable-{quote(name, safe='')}")
-        return SnapshotMcpToolset(
+        toolset = SnapshotMcpToolset(
             server_name=name,
             config=config,
             snapshot=parsed.tools.snapshot,
             init_timeout=resolve_mcp_init_timeout(config),
             max_retries=resolve_mcp_max_retries(),
-        ).prefixed(name)
+        )
+        return ScopedToolset(toolset, "mcp", name)
     raise ValueError(f"Unsupported MCP transport: {transport!r}")
 
 

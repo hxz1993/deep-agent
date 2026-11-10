@@ -576,10 +576,11 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 
 ### 渠道消息系统工具
 
-`channel_message` 归入系统工具目录 `runtime:channel`，不是 Agent 需要勾选的能力或 MCP。
-仅由可信渠道 Run 自动加载，同时支持飞书和企微；来源来自渠道 Run/Binding，不能靠正文或
-context_refs 授权。每次执行重新检查账号、Agent、会话、Run 与文件权限，只发本轮群或私聊。
-普通 Console 和历史浏览不加载；首轮不必有附件，沙箱新生成的授权 file_id 也可发送。
+`channel_message` 和 `channel_doc()` 归入系统工具目录 `runtime:channel`，由可信渠道 Run 自动加载。
+来源来自渠道 Run/Binding，不能靠正文或 context_refs 授权。渠道 Run 屏蔽 Agent 配置及请求指定的 UI 工具。
+`channel_doc()` 以当前渠道返回快捷命令和收发说明，复用网关命令目录和适配器的出站限制。
+`channel_message` 执行时重新检查账号、Agent、会话、Run 与文件权限，只发本轮群或私聊。
+普通 Console 和历史浏览不加载这两个工具。首轮不必有附件，沙箱新生成的授权 file_id 也可发送。
 
 v0.14.8：可信装配位只把准确`channel_message`加入PTC双入口，其他同名来源不扩权。
 媒体来源允许授权`file_id`或公开HTTP(S)`url`二选一；`files/public_download.py`复用原PTC公开读取的
@@ -631,6 +632,8 @@ channel_message_operations 及其中回执，保留已发布迁移；不改变�
 `POST /api/v1/agents` 或 Alembic 种子；流式请求带 `agent_id`（UUID）。
 
 ### UI 工具
+
+模型工具名由 `agent/tool_names.py` 按来源生成。手工 UI、MCP、结构化输出分别使用 `ui__`、`mcp__`、`output__`，内置工具沿用原名。公开事件保留业务名，模型回放只从持久化的部件身份或旧待操作调用 ID 恢复模型名，禁止按当前配置猜测历史输出身份。
 
 代码内置 `builtin__confirm`、`builtin__choice` 同属只读包 `ui:builtin`。手工包保存于
 `ui_tool_packages`，工具通过 `package_code` 归属；Agent 的 `capabilities` 只保存包编码，

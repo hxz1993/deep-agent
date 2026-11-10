@@ -50,7 +50,9 @@ PYTHONPATH=src:. .venv/bin/python -m unittest \
 
 构建固定 ZIP 文件顺序、时间戳、权限和压缩等级，生成实际字节数、SHA256、PDF 页数及文档数。默认命令只检查提交的生成文件是否仍与源一致。生成物是正式产品资料，和源文档一起发行；运行时不依赖 `scripts/`、原型目录、维护者机器或构建环境中的 PDF 解析器。当前 Jenkins 使用完整 `git archive` 打包仓库，已跟踪的上述产品目录会进入发行包，不需要另复制私有文件。
 
-初始化 PDF 维护自 [语雀初始化指南](https://proinnova.yuque.com/ys1krd/ky4q6u/deepagent-initialization)。本次发行版由已发布正文排版，共 7 页，更新了关联 Agent、调试 App 和应用专用 Skill 的截图。Skill 继续使用一个 ZIP 安装包，产品源与本机 Codex Skill 各自维护。
+初始化 PDF 维护自 [语雀初始化指南](https://proinnova.yuque.com/ys1krd/ky4q6u/deepagent-initialization)。当前 PDF 共 6 页，使用当前控制台和演示数据截图。首次初始化只需在「场景」关联 Agent，可忽略「应用配置」。
+
+更新时先在隔离浏览器中用演示数据重拍受影响的操作，再更新语雀正文并回读确认。用已发布的正文和截图排版 PDF，检查截图、分页和目录后，运行上方的资源构建与校验命令，从控制台重新下载核对页数和摘要。Skill 继续使用一个 ZIP 安装包，产品源与本机 Codex Skill 各自维护。
 
 ## 内容核验记录
 

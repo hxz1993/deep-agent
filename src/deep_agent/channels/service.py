@@ -618,10 +618,10 @@ class ChannelService:
         try:
             binding = await self.store.get_binding(job.account.id, job.message.peer_type, job.message.peer_id)
             session_id = binding.session_id if binding else None
-            if command == "/help":
-                text = help_text()
-            elif command == "unknown":
-                text = "未知命令或参数。请单独发送以下命令：\n\n" + help_text()
+            if command in {"/help", "unknown"}:
+                text = help_text(channel_type=job.account.channel_type)
+                if command == "unknown":
+                    text = "未知命令或参数。请单独发送以下命令：\n\n" + text
             elif command == "/whoami":
                 text = f"User ID：{job.message.sender_id}"
                 if job.message.peer_type == "group":

@@ -20,6 +20,7 @@ from deep_agent.agent.context_references import (
     format_context_reference_prompt,
     is_context_reference,
 )
+from deep_agent.agent.tool_names import WIRE_NAMES
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.files.storage import FileStore, FileStoreError, PlatformFileStore
@@ -168,7 +169,11 @@ async def resolve_history_for_llm(
             continue
         full_turn = idx == current_user_index
         new_parts = []
-        for part in message.parts:
+        wire_names = (message.metadata or {}).get(WIRE_NAMES) or {}
+        for index, part in enumerate(message.parts):
+            if isinstance(part, ToolReturnPart) and wire_names.get(str(index)):
+                new_parts.append(part)
+                continue
             if isinstance(part, ToolReturnPart) and part.tool_name == "view_image":
                 from deep_agent.web.images import view_image_tool_value
                 # Viewer pixels are Run-local; historical sources can be viewed

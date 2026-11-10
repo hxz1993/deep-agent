@@ -14,7 +14,7 @@ from deep_agent.agent_packages.archive import (
     PackageUi, build_zip, canonical, digest, parse_package,
 )
 from deep_agent.agent_packages.runtime_transaction import RuntimeCheckpoint
-from deep_agent.capabilities.codes import canonical_tool_package_codes, ENVIRONMENT_TOOL_NAMES, environment_name_conflict
+from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.db.ids import new_agent_id
 from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, skill_scope_condition
@@ -99,21 +99,6 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     builtin_names = {t.name for t in builtin_ui_records()}
     available = set(ctx.registry.codes()) | builtin_ui
     resources, blocked = [], []
-    if package.agent.output_config is not None:
-        output_name = package.agent.output_config.name
-        known_names = set(ENVIRONMENT_TOOL_NAMES)
-        known_names.update(tool.name for incoming in package.ui for tool in incoming.tools)
-        known_names.update(tool.name for tool in builtin_ui_records()
-                           if tool.package_code in package.agent.capabilities)
-        known_names.update(tool.name for tool in data[UiToolDefinition]
-                           if tool.package_code in package.agent.capabilities)
-        selected = getattr(ctx.registry, 'selected', None)
-        if selected is not None:
-            known_names.update(tool.name for resource in selected(package.agent.capabilities) for tool in resource.tools)
-        if output_name in ENVIRONMENT_TOOL_NAMES:
-            blocked.append(environment_name_conflict(output_name))
-        elif output_name in known_names:
-            blocked.append('输出编码与已关联工具名称冲突')
     def add(kind, code, label, status, **extra):
         refs = []
         if status == 'update':

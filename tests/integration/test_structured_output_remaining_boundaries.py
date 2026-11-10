@@ -87,9 +87,9 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     def respond(messages, info):
                         requests.append(info)
                         self.assertFalse(info.function_tools)
-                        self.assertEqual([t.name for t in info.output_tools], ["lease_result"])
+                        self.assertEqual([t.name for t in info.output_tools], ["output__lease_result"])
                         self.assertFalse(info.allow_text_output)
-                        output = ToolCallPart("lease_result", {}, "invalid")
+                        output = ToolCallPart("output__lease_result", {}, "invalid")
                         business = ToolCallPart("lookup", {}, "forbidden")
                         return ModelResponse(parts=[output, business] if kind == "mixed" else
                                              [business] if kind == "business" else [output])
@@ -115,7 +115,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                         if info.function_tools and (limit is not None or len(requests) < 3):
                             return ModelResponse(parts=[ToolCallPart("lookup", {}, f"q-{len(requests)}")])
                         self.assertFalse(info.allow_text_output)
-                        return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "accepted")])
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "accepted")])
                     runner = self.runner(respond, tools=[lookup], limit=limit)
                     sid = uuid4().hex
                     result, _ = await self.execute(runner, sid, stream=streaming)
@@ -127,7 +127,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     failed_calls = []
                     def invalid(messages, info):
                         failed_calls.append(info)
-                        return ModelResponse(parts=[ToolCallPart("lease_result", {}, f"bad-{len(failed_calls)}")])
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result", {}, f"bad-{len(failed_calls)}")])
                     await self.assert_failed(self.runner(invalid, limit=limit), uuid4().hex, streaming)
                     self.assertEqual(len(failed_calls), min(limit, 3) if limit is not None else 3)
 
@@ -141,9 +141,9 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 def respond(messages, info):
                     requests.append(info)
                     self.assertFalse(info.function_tools)
-                    self.assertEqual([t.name for t in info.output_tools], ["lease_result"])
+                    self.assertEqual([t.name for t in info.output_tools], ["output__lease_result"])
                     self.assertFalse(info.allow_text_output)
-                    return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "summary-final")])
+                    return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "summary-final")])
                 runner = self.runner(respond, tools=[lookup], limit=2, capabilities=[SpendSummaryRequest()])
                 sid = uuid4().hex
                 result, _ = await self.execute(runner, sid, stream=streaming)
@@ -174,7 +174,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(len(requests), 1)
                     self.assertEqual(config, original)
                     self.assertEqual(loader.await_count, 1)
-                    self.assertEqual([t.name for t in requests[0].output_tools], ["lease_result"])
+                    self.assertEqual([t.name for t in requests[0].output_tools], ["output__lease_result"])
                     self.assertFalse(requests[0].allow_text_output)
                     self.assertFalse([r for r in await self.rows(sid) if r.event_type == "output/attempt"])
 
@@ -184,7 +184,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(streaming=streaming):
                 requests, collisions = [], []
                 async def reveal(ctx, definition):
-                    return (definition.__class__(name="lease_result", parameters_json_schema=definition.parameters_json_schema)
+                    return (definition.__class__(name="output__lease_result", parameters_json_schema=definition.parameters_json_schema)
                             if requests else None)
                 async def later_tool():
                     collisions.append(True)
@@ -217,7 +217,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     requests.append(info)
                     if len(requests) <= 2:
                         return ModelResponse(parts=[ToolCallPart("lookup", {}, f"lookup-{len(requests)}")])
-                    return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "accepted")])
+                    return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "accepted")])
                 runner = self.runner(respond, tools=[lookup])
                 sid = uuid4().hex
                 result, frames = await self.execute(runner, sid, stream=streaming)
@@ -244,7 +244,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                         return ModelResponse(parts=[TextPart("ordinary unchanged")])
                     name = info.output_tools[0].name
                     return ModelResponse(parts=[ToolCallPart(name,
-                        {"ok": True} if name == "lease_result" else {"different": 0}, uuid4().hex)])
+                        {"ok": True} if name == "output__lease_result" else {"different": 0}, uuid4().hex)])
                 runner = self.runner(respond, loader=load)
                 sid, sid2 = uuid4().hex, uuid4().hex
                 first, _ = await self.execute(runner, sid, stream=streaming)
@@ -270,7 +270,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 requests = []
                 def respond(messages, info):
                     requests.append(info)
-                    return ModelResponse(parts=[ToolCallPart("lease_result", {}, f"bad-{len(requests)}")])
+                    return ModelResponse(parts=[ToolCallPart("output__lease_result", {}, f"bad-{len(requests)}")])
                 sid = uuid4().hex
                 await self.assert_failed(self.runner(respond), sid, streaming)
                 raw = await self.stores.coordinator.get_raw_history(sid, agent_id=self.agent_id)
@@ -294,7 +294,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     calls = []
                     def respond(messages, info):
                         calls.append(True)
-                        return ModelResponse(parts=[ToolCallPart("lease_result",
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result",
                             raw if len(calls) == 1 else {"ok": True}, f"json-{len(calls)}")])
                     sid = uuid4().hex
                     final, _ = await self.execute(self.runner(respond), sid, stream=streaming)
@@ -320,7 +320,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                     return "host side effect"
                 def respond(messages, info):
                     requests.append(info)
-                    output = ToolCallPart("lease_result", {"ok": True}, f"out-{len(requests)}")
+                    output = ToolCallPart("output__lease_result", {"ok": True}, f"out-{len(requests)}")
                     if len(requests) == 1:
                         remote_actions.append("provider already executed web search")
                         return ModelResponse(parts=[NativeToolCallPart("web_search", {"query": "fixture"}, "native"),
@@ -347,7 +347,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 def respond(messages, info):
                     calls.append(info)
                     step = len(calls)
-                    name = "confirm" if step in (1, 3) else "lookup" if step == 2 else "lease_result"
+                    name = "confirm" if step in (1, 3) else "lookup" if step == 2 else "output__lease_result"
                     return ModelResponse(parts=[ToolCallPart(name, {"ok": True} if step == 4 else {}, f"step-{step}")])
                 runner = self.runner(respond, tools=[lookup], toolsets=[ExternalToolset([fixture.CONFIRM])])
                 sid = uuid4().hex
@@ -384,7 +384,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                         returns = [p.content for m in messages if isinstance(m, ModelRequest)
                                    for p in m.parts if isinstance(p, ToolReturnPart) and p.tool_call_id == "answer"]
                         self.assertEqual(returns, [answer])
-                        return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": False}, "accepted")])
+                        return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": False}, "accepted")])
                     runner = self.runner(respond, toolsets=[ExternalToolset([fixture.CONFIRM])])
                     sid = uuid4().hex
                     self.assertEqual((await self.execute(runner, sid, stream=streaming))[0]["status"], "pending")
@@ -399,7 +399,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 calls = []
                 def respond(messages, info):
                     calls.append(info)
-                    name = "confirm" if len(calls) <= 2 else "lease_result"
+                    name = "confirm" if len(calls) <= 2 else "output__lease_result"
                     return ModelResponse(parts=[ToolCallPart(name, {"ok": True} if len(calls) == 3 else {}, f"id-{len(calls)}")])
                 runner = self.runner(respond, toolsets=[ExternalToolset([fixture.CONFIRM])])
                 sid = uuid4().hex
@@ -454,7 +454,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
         def respond(messages, info):
             calls.append(True)
             return ModelResponse(parts=[ToolCallPart("confirm", {}, "confirmation")]
-                if len(calls) == 1 else [ToolCallPart("lease_result", {"ok": True}, "accepted-after-ui")])
+                if len(calls) == 1 else [ToolCallPart("output__lease_result", {"ok": True}, "accepted-after-ui")])
         runner = self.runner(respond, toolsets=[ExternalToolset([fixture.CONFIRM])])
         sid = uuid4().hex
         pending, _ = await self.execute(runner, sid, stream=True)
@@ -494,7 +494,7 @@ class StructuredOutputRemainingBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 def respond(messages, info):
                     requests.append(messages)
                     self.assertIn("fixture.txt", str(messages))
-                    return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "first")])
+                    return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "first")])
                 runner = self.runner(respond)
                 deps = self.deps(sid)
                 attachment = AttachmentRef(id="synthetic-file", name="fixture.txt", mime="text/plain", input_mode="reference")
@@ -541,7 +541,7 @@ class StructuredOutputDeferredOwnershipTests(unittest.IsolatedAsyncioTestCase):
         def respond(messages, info):
             calls.append(True)
             return ModelResponse(parts=[ToolCallPart("builtin__confirm", {"message": "fixture approval"}, "owner-ui")]
-                if len(calls) == 1 else [ToolCallPart("public_result", {"done": True}, "owner-output")])
+                if len(calls) == 1 else [ToolCallPart("output__public_result", {"done": True}, "owner-output")])
         async def stream(messages, info):
             for i, part in enumerate(respond(messages, info).parts):
                 yield {i: DeltaToolCall(name=part.tool_name, json_args=json.dumps(part.args), tool_call_id=part.tool_call_id)}

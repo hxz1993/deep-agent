@@ -22,6 +22,7 @@ from deep_agent.agent.context_references import (
     context_reference_title,
     context_references_from_content,
 )
+from deep_agent.agent.tool_names import WIRE_NAMES
 from deep_agent.time import ensure_utc
 
 
@@ -410,15 +411,13 @@ def repair_unprocessed_tool_calls(
             if (pending and any(isinstance(part, UserPromptPart) for part in message.parts)
                     and not any(isinstance(part, (BaseToolReturnPart, RetryPromptPart)) for part in message.parts)):
                 flush_pending()
-            kept_parts = []
+            kept_indices = []
             current_retry_resolved: set[tuple[str, str | None]] = set()
-            for part in message.parts:
+            for index, part in enumerate(message.parts):
                 if isinstance(part, RetryPromptPart) and part.tool_call_id:
                     pending.pop(part.tool_call_id, None)
                     current_retry_resolved.add((part.tool_call_id, part.tool_name))
-                    kept_parts.append(part)
-                    continue
-                if isinstance(part, BaseToolReturnPart) and part.tool_call_id:
+                elif isinstance(part, BaseToolReturnPart) and part.tool_call_id:
                     key = (part.tool_call_id, part.tool_name)
                     if key in retry_resolved and _is_tool_denied_content(
                         getattr(part, "content", None)
@@ -426,10 +425,20 @@ def repair_unprocessed_tool_calls(
                         changed = True
                         continue
                     pending.pop(part.tool_call_id, None)
-                kept_parts.append(part)
-            if kept_parts:
-                if len(kept_parts) != len(message.parts):
-                    message = replace(message, parts=kept_parts)
+                kept_indices.append(index)
+            if kept_indices:
+                if len(kept_indices) != len(message.parts):
+                    metadata = message.metadata
+                    if aliases := (metadata or {}).get(WIRE_NAMES):
+                        remaining_aliases = {
+                            str(new_index): aliases[str(old_index)]
+                            for new_index, old_index in enumerate(kept_indices) if str(old_index) in aliases
+                        }
+                        metadata = {key: value for key, value in metadata.items() if key != WIRE_NAMES}
+                        if remaining_aliases:
+                            metadata[WIRE_NAMES] = remaining_aliases
+                    message = replace(message, parts=[message.parts[index] for index in kept_indices],
+                                      metadata=metadata)
                 repaired.append(message)
             else:
                 changed = True

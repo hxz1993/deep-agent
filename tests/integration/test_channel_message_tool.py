@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai import RunContext
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
@@ -19,6 +21,7 @@ from deep_agent.channels.message_tool import MessageComponent, build_channel_mes
 from deep_agent.channels.operations import ChannelOperationService, MessageOperationRequest
 from deep_agent.channels.outbound import ComponentReceipt, DeliveryError, MessageCapabilities, PreparedComponent, resolve_run_context
 from deep_agent.files.storage import LocalFileStore
+from deep_agent.schemas.agent import AgentUpdate
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
@@ -225,17 +228,106 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "unknown")
         gateway.send_message.assert_awaited_once()
 
-    async def test_ordinary_agent_runner_has_no_channel_tool_even_when_channel_type_given(self):
-        from deep_agent.api.v1 import deps as api_deps
+    async def test_trusted_runner_can_query_current_channel_and_cannot_call_ui_tools(self):
+        from deep_agent.api.v1.deps import build_runner_for_agent
         from deep_agent.capabilities import build_registry
         from deep_agent.core.context import AppContext
         ctx = AppContext.for_testing(registry=build_registry(), stores=self.stores, db_engine=self.engine, db_session_factory=self.factory)
-        with patch("deep_agent.agent.factory._resolve_model", return_value=TestModel()), patch.object(api_deps, "build_agent", wraps=api_deps.build_agent) as build:
-            await api_deps.build_runner_for_agent(ctx, self.agent_id, channel_type="wecom")
-            self.assertIsNone(build.call_args.kwargs["channel_toolset"])
-            await api_deps.build_runner_for_agent(ctx, self.agent_id, channel_type="wecom", channel_context=self.source)
-            self.assertIn("channel_message", build.call_args.kwargs["channel_toolset"].tools)
-        await ctx.event_persister.aclose()
+        self.addAsyncCleanup(ctx.event_persister.aclose)
+        settings = self.stores.global_setting
+        deps = AgentDeps(session_id=self.session_id, agent_id=self.agent_id, user="owner", run_id="agent-run",
+                         upload_settings_store=settings)
+
+        def respond(messages, info):
+            tools = {tool.name: tool for tool in info.function_tools}
+            self.assertIn("channel_message", tools)
+            self.assertIn("channel_doc", tools)
+            self.assertFalse(any(tool.name.startswith("builtin__") for tool in info.output_tools))
+            self.assertFalse(any(name.startswith("builtin__") for name in tools))
+            self.assertIn("企业微信机器人", info.instructions)
+            self.assertIn("禁止调用 UI 工具", info.instructions)
+            self.assertNotIn("/new", info.instructions)
+            self.assertIn("参照 channel_message 的工具说明", info.instructions)
+            self.assertNotIn("媒体使用会话file_id", info.instructions)
+            schema = tools["channel_doc"].parameters_json_schema
+            self.assertFalse(schema.get("required"))
+            self.assertFalse(schema.get("properties"))
+            self.assertIn('"type":"image"', tools["channel_message"].description)
+
+            result = next((part for part in messages[-1].parts if isinstance(part, ToolReturnPart)), None)
+            if result is None:
+                return ModelResponse(parts=[ToolCallPart("channel_doc", {}, tool_call_id="doc")])
+            self.assertEqual(result.tool_name, "channel_doc")
+            self.assertTrue(result.content.startswith("# 企业微信机器人（wecom）"))
+            self.assertIn("合并转发不会展开", result.content)
+            self.assertIn("AMR", result.content)
+            self.assertNotIn("飞书", result.content)
+            return ModelResponse(parts=[TextPart("渠道说明已查到")])
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+            runner = await build_runner_for_agent(
+                ctx, self.agent_id, capabilities=["ui:builtin"], channel_type="wecom", channel_context=self.source,
+            )
+        for size in (1, 3):
+            await settings.upsert("attachment_upload", value={"max_size_mb": size, "max_count": 10}, version=1)
+            run = await runner.agent.run("这里能收到合并转发吗？", deps=deps)
+            self.assertEqual(run.output, "渠道说明已查到")
+            doc = next(part.content for message in run.new_messages()
+                       for part in message.parts if isinstance(part, ToolReturnPart))
+            self.assertIn(f"图片：PNG、JPEG，最多 {size} MiB", doc)
+            self.assertIn(f"语音：AMR，最多 {min(size, 2)} MiB", doc)
+        self.adapter.send_component.assert_not_awaited()
+
+        for channel_type in (None, "wecom"):
+            with self.subTest(channel_type=channel_type):
+                def ordinary_response(messages, info):
+                    names = {tool.name for tool in (*info.function_tools, *info.output_tools)}
+                    self.assertNotIn("channel_message", names)
+                    self.assertNotIn("channel_doc", names)
+                    self.assertEqual("builtin__confirm" in names, channel_type is None)
+                    return ModelResponse(parts=[TextPart("普通回复")])
+
+                with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(ordinary_response)):
+                    runner = await build_runner_for_agent(ctx, self.agent_id, capabilities=["ui:builtin"], channel_type=channel_type)
+                self.assertEqual((await runner.agent.run("你好", deps=deps)).output, "普通回复")
+
+    async def test_channel_doc_does_not_shadow_a_saved_output_contract(self):
+        from deep_agent.agent.runner import AgentRunner
+        from deep_agent.api.v1.deps import build_runner_for_agent
+        from deep_agent.capabilities import build_registry
+        from deep_agent.core.context import AppContext
+
+        await self.stores.agent.update_unique(self.agent_id, AgentUpdate(
+            structured_output_enabled=True,
+            output_config={"name": "channel_doc", "json_schema": {
+                "type": "object", "properties": {"answer": {"type": "string"}}, "required": ["answer"],
+            }},
+        ), user_id="owner")
+        ctx = AppContext.for_testing(registry=build_registry(), stores=self.stores, db_engine=self.engine,
+                                     db_session_factory=self.factory)
+        self.addAsyncCleanup(ctx.event_persister.aclose)
+
+        def respond(messages, info):
+            self.assertIn("channel_doc", {tool.name for tool in info.function_tools})
+            self.assertIn("channel_message", {tool.name for tool in info.function_tools})
+            self.assertEqual([tool.name for tool in info.output_tools], ["output__channel_doc"])
+            if not any(isinstance(part, ToolReturnPart) and part.tool_name == "channel_doc"
+                       for message in messages for part in message.parts):
+                return ModelResponse(parts=[ToolCallPart("channel_doc", {}, tool_call_id="doc")])
+            return ModelResponse(parts=[
+                ToolCallPart("output__channel_doc", {"answer": "fixture"}, tool_call_id="output"),
+            ])
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+            runner = await build_runner_for_agent(ctx, self.agent_id, channel_type="wecom", channel_context=self.source)
+        deps = AgentDeps(session_id=self.session_id, agent_id=self.agent_id, user="owner")
+        with patch.object(AgentRunner, "_generate_model_title", new_callable=AsyncMock):
+            result = await runner.run(self.session_id, "返回结构化结果", deps)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["output_info"]["name"], "channel_doc")
+        history = await self.stores.coordinator.get_history(self.session_id, agent_id=self.agent_id)
+        self.assertTrue(any(isinstance(part, ToolReturnPart) and part.tool_name == "channel_doc"
+                            and part.tool_call_id == "doc" for message in history for part in message.parts))
 
     async def test_gateway_card_metadata_without_media_part(self):
         from dataclasses import replace

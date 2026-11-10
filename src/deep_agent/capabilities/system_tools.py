@@ -18,12 +18,19 @@ _SYSTEM_TOOL_DOMAINS = (
     ),
     SystemToolDomain(
         code="runtime:channel", label="渠道消息",
-        description="向本轮来源群聊或私聊发送消息和附件，无需配置MCP。",
-        tools=(SystemToolDescription(
-            name="channel_message", display_name="渠道消息", source="DeepAgent",
-            injection_condition="来自已启用飞书或企微渠道的可信当前会话Run",
-            description="按顺序发送文字、图片、文件和已有音视频；媒体使用授权File ID或公开URL，飞书支持引用当前消息。",
-        ),),
+        description="向当前渠道聊天发送消息和附件，并按渠道查询使用说明。",
+        tools=(
+            SystemToolDescription(
+                name="channel_message", display_name="渠道消息", source="DeepAgent",
+                injection_condition="来自已启用渠道的可信会话 Run",
+                description="按顺序发送文字、图片、文件和已有音视频。媒体使用授权 File ID 或公开 URL，飞书支持引用当前消息。",
+            ),
+            SystemToolDescription(
+                name="channel_doc", display_name="渠道说明", source="DeepAgent",
+                injection_condition="来自已启用渠道的可信会话 Run",
+                description="查询当前渠道的快捷命令、收发限制及引用和转发支持情况。",
+            ),
+        ),
     ),
     SystemToolDomain(
         code="runtime:planning",

@@ -72,20 +72,66 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test", headers=HEADERS)
         self.addAsyncCleanup(self.client.aclose)
 
-        async def verify(app_id):
-            if app_id in (APP_A.app_id, APP_B.app_id):
-                return APP_A if app_id == APP_A.app_id else APP_B
-            raise IntegrationAppAccessError(404, "应用不存在或当前账号无权管理。")
+        self.tenant_admin = {"tenant-1": True, "tenant-2": False}
+        self.space_admin = set()
+        self.app_roles = {}
+        self.apps = {
+            item.app_id: item for item in (
+                APP_A, APP_B, APP_C, ManagedApp("other002", "other", "tenant-2", "普通应用", "另一企业"),
+            )
+        }
 
+        async def platform(_service, path, *, space=None, app=None, params=None):
+            if path == "api/enterprise/list":
+                return [
+                    {"enterpriseCode": "tenant-1", "id": "db-key-1", "enterpriseName": "企业"},
+                    {"enterpriseCode": "tenant-2", "id": "db-key-2", "enterpriseName": "另一企业"},
+                ]
+            if path == "user-permission":
+                self.assertIsNone(space)
+                self.assertIsNone(app)
+                tenant = {"db-key-1": "tenant-1", "db-key-2": "tenant-2"}[params["enterpriseId"]]
+                return {
+                    "permission": self.tenant_admin[tenant],
+                    "spaceIds": sorted({item.space_id for item in self.apps.values()
+                                        if item.tenant_id == tenant and item.space_id in self.space_admin}),
+                    "appIds": [item.app_id for item in self.apps.values()
+                               if item.tenant_id == tenant and self.app_roles.get(item.app_id) in {"admin", "developer"}],
+                }
+            if path == "user/get-user-detail":
+                return {"userId": HEADERS["user"], "enterpriseDTOList": [
+                    {"enterpriseCode": tenant, "roleList": [{"roleCode": "DEFAULT_ADMIN"}]}
+                    for tenant, is_admin in self.tenant_admin.items() if is_admin
+                ]}
+            if path == "space/get-tenant-code":
+                return next((item.tenant_id for item in self.apps.values() if item.space_id == space), None)
+            if path == "api/space/app/query-app-info-list/by-space-id":
+                return [{"id": item.app_id, "appType": "DEEPFOS", "appName": item.app_name}
+                        for item in self.apps.values() if item.space_id == space]
+            if path == "user/permission":
+                item = self.apps[app]
+                self.assertEqual(item.space_id, space)
+                return {
+                    "appAdmin": self.tenant_admin[item.tenant_id] or space in self.space_admin
+                    or self.app_roles.get(app) == "admin",
+                    "developerRole": self.app_roles.get(app) == "developer",
+                }
+            self.fail(f"unexpected platform request: {path}")
+
+        self.platform = self.enterContext(patch(
+            "deep_agent.services.integration_app_access.IntegrationAppDirectory._get", side_effect=platform,
+        ))
+        catalog = ScopeDirectory(
+            apps={item.app_id: item.app_name for item in self.apps.values()},
+            spaces={item.space_id: item.space_name for item in self.apps.values()},
+            app_scopes={item.app_id: (item.space_id, item.tenant_id) for item in self.apps.values()},
+        )
+        self.directory = AsyncMock(return_value=catalog)
         self.enterContext(patch(
-            "deep_agent.services.integration_app_access.IntegrationAppDirectory.verify", side_effect=verify,
+            "deep_agent.services.integration_app_access.PlatformScopeDirectoryFetcher", return_value=self.directory,
         ))
         self.enterContext(patch(
-            "deep_agent.services.integration_app_access.IntegrationAppDirectory.tenants", return_value={"tenant-1": "企业"},
-        ))
-        self.enterContext(patch(
-            "deep_agent.api.v1.integration_apps.resolve_scope_directory",
-            return_value=ScopeDirectory(spaces={APP_A.space_id: APP_A.space_name}),
+            "deep_agent.api.v1.integration_apps.resolve_scope_directory", return_value=catalog,
         ))
         self.fetch_scope = AsyncMock()
         self.enterContext(patch(
@@ -133,6 +179,66 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
                 SkillPackage.scope_ref == app_skill_scope(app.app_id),
             ).values(scope_ref=f"integration-scope:{config.id}"))
         return config
+
+    async def test_single_app_developer_can_list_save_and_manage_only_that_app(self):
+        self.app_roles[APP_C.app_id] = "developer"
+        self.app_roles["other002"] = "reader"
+        self.assertEqual((await self._request("GET", PATH, 200)).json(), [])
+        self.platform.reset_mock()
+        candidates = (await self._request("GET", f"{PATH}/available", 200)).json()
+        self.assertEqual({row["app_id"] for row in candidates}, {APP_A.app_id, APP_B.app_id, APP_C.app_id})
+        self.assertEqual([call.args[1] for call in self.platform.await_args_list],
+                         ["api/enterprise/list", "user-permission", "user-permission"])
+        self.directory.assert_awaited_once()
+        route = f"{PATH}/{APP_C.app_id}"
+        self.assertIsNone((await self._request("GET", route, 200)).json()["config_id"])
+        saved = await self._save(APP_C)
+        saved_rows = (await self._request("GET", PATH, 200)).json()
+        self.assertEqual([(row["app_id"], row["tenant_id"]) for row in saved_rows], [(APP_C.app_id, "tenant-2")])
+        await self._request("GET", f"{PATH}/other002", 404)
+        await self._request("PUT", f"{PATH}/other002", 404, json={"prompt_append": "denied"})
+        raw = await self._install(f"{route}/skills", name="developer-report")
+        self.assertEqual((await self._request("GET", f"{route}/skills/developer-report/package", 200)).content, raw)
+        await self._request("GET", "/api/v1/configuration/skills/export", 404)
+
+        del self.app_roles[APP_C.app_id]
+        self.assertEqual((await self._request("GET", PATH, 200)).json(), [])
+        await self._request("GET", route, 404)
+        await self._request("PUT", route, 404, json={"config_id": saved["config_id"], "prompt_append": "denied"})
+        await self._request("GET", f"{route}/skills/developer-report/package", 404)
+        await self._request("DELETE", f"{route}?config_id={saved['config_id']}", 404)
+        self.assertIsNotNone(await self.stores.integration_app.get(APP_C.app_id, APP_C.space_id))
+
+    async def test_space_admin_and_app_admin_have_distinct_access(self):
+        self.app_roles[APP_C.app_id] = "admin"
+        route = f"{PATH}/{APP_C.app_id}"
+        await self._request("GET", route, 200)
+        await self._request("GET", f"{PATH}/other002", 404)
+        del self.app_roles[APP_C.app_id]
+        self.space_admin.add(APP_C.space_id)
+        candidates = (await self._request("GET", f"{PATH}/available", 200)).json()
+        self.assertEqual({row["app_id"] for row in candidates if row["tenant_id"] == APP_C.tenant_id},
+                         {APP_C.app_id, "other002"})
+        await self._save(APP_C)
+        await self._request("GET", f"{PATH}/other002", 200)
+
+    async def test_batch_permission_failure_does_not_disguise_itself_as_empty_list(self):
+        await self._save()
+        with patch("deep_agent.services.integration_app_access.PlatformScopeDirectoryFetcher", return_value=AsyncMock(
+            side_effect=TimeoutError,
+        )):
+            await self._request("GET", PATH, 503)
+            await self._request("GET", f"{PATH}/available", 503)
+        real_platform = self.platform.side_effect
+
+        async def malformed(*args, **kwargs):
+            if args[1] == "user-permission":
+                return {"permission": "false", "spaceIds": [], "appIds": []}
+            return await real_platform(*args, **kwargs)
+
+        self.platform.side_effect = malformed
+        await self._request("GET", PATH, 503)
+        await self._request("GET", f"{PATH}/available", 503)
 
     async def test_same_zip_independent_lifecycle_and_backup_bundle(self):
         code = "scoped-report"

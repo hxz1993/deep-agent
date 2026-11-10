@@ -80,7 +80,7 @@ class StructuredOutputCorrectionFeedbackTests(unittest.IsolatedAsyncioTestCase):
                        if isinstance(p, RetryPromptPart) and isinstance(p.content, str)]
             retries.append(prompts[-1] if prompts else None)
             parts = (copy.deepcopy(bad_parts) if len(requests) == 1 or persistent else
-                     [ToolCallPart(_OUTPUT_NAME, copy.deepcopy(valid), "good-result")])
+                     [ToolCallPart("output__" + _OUTPUT_NAME, copy.deepcopy(valid), "good-result")])
             return ModelResponse(parts=parts, finish_reason="stop" if isinstance(parts[0], ThinkingPart) else "tool_call")
 
         async def stream(messages, info):
@@ -178,9 +178,9 @@ class StructuredOutputCorrectionFeedbackTests(unittest.IsolatedAsyncioTestCase):
         excess["recon_analysis"]["questions"] = [_PRIVATE_VALUE] * 5
         cases = (
             ("missing_output", [ThinkingPart(_PRIVATE_VALUE)], "missing_output"),
-            ("duplicate", [ToolCallPart(_OUTPUT_NAME, duplicate, "bad-result")], "invalid_json"),
-            ("syntax", [ToolCallPart(_OUTPUT_NAME, incomplete, "bad-result")], "invalid_json"),
-            ("nullable_max_items", [ToolCallPart(_OUTPUT_NAME, excess, "bad-result")], "schema_validation_failed"),
+            ("duplicate", [ToolCallPart("output__" + _OUTPUT_NAME, duplicate, "bad-result")], "invalid_json"),
+            ("syntax", [ToolCallPart("output__" + _OUTPUT_NAME, incomplete, "bad-result")], "invalid_json"),
+            ("nullable_max_items", [ToolCallPart("output__" + _OUTPUT_NAME, excess, "bad-result")], "schema_validation_failed"),
         )
         for streaming in (False, True):
             for label, parts, code in cases:
@@ -209,9 +209,9 @@ class StructuredOutputCorrectionFeedbackTests(unittest.IsolatedAsyncioTestCase):
     async def test_protocol_guards_give_actions_without_dispatching_tools(self):
         cases = (
             ("mixed_output_calls", [ToolCallPart("lookup", {}, "lookup-rejected"),
-                                    ToolCallPart(_OUTPUT_NAME, _VALID, "bad-result")]),
-            ("multiple_output_calls", [ToolCallPart(_OUTPUT_NAME, _VALID, "bad-first"),
-                                       ToolCallPart(_OUTPUT_NAME, _VALID, "bad-second")]),
+                                    ToolCallPart("output__" + _OUTPUT_NAME, _VALID, "bad-result")]),
+            ("multiple_output_calls", [ToolCallPart("output__" + _OUTPUT_NAME, _VALID, "bad-first"),
+                                       ToolCallPart("output__" + _OUTPUT_NAME, _VALID, "bad-second")]),
         )
         for streaming in (False, True):
             for code, parts in cases:
@@ -227,7 +227,7 @@ class StructuredOutputCorrectionFeedbackTests(unittest.IsolatedAsyncioTestCase):
         for streaming in (False, True):
             with self.subTest(streaming=streaming):
                 feedback, retries, attempts = await self.exercise(
-                    [ToolCallPart(_OUTPUT_NAME, "{", "bad-result")], streaming=streaming, persistent=True)
+                    [ToolCallPart("output__" + _OUTPUT_NAME, "{", "bad-result")], streaming=streaming, persistent=True)
                 self.assertEqual(feedback["code"], "invalid_json")
                 self.assertEqual(len([retry for retry in retries if retry is not None]), 2)
                 self.assertEqual(len(attempts), 3)
@@ -237,7 +237,7 @@ class StructuredOutputCorrectionFeedbackTests(unittest.IsolatedAsyncioTestCase):
         schema = {"type": "object", "properties": {key: {"type": "string"} for key in keys},
                   "required": keys, "additionalProperties": False}
         feedback, retries, attempts = await self.exercise(
-            [ToolCallPart(_OUTPUT_NAME, {}, "bad-result")], streaming=False,
+            [ToolCallPart("output__" + _OUTPUT_NAME, {}, "bad-result")], streaming=False,
             schema=schema, valid={key: "ok" for key in keys})
         self.assertEqual(feedback["code"], "schema_validation_failed")
         self.assertGreater(feedback.get("truncated_errors", 0), 0)

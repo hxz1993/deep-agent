@@ -32,7 +32,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
             [[tool.name for tool in domain.tools] for domain in domains],
             [
                 ["get_current_time"],
-                ["channel_message"],
+                ["channel_message", "channel_doc"],
                 ["write_plan"],
                 ["search_conversation_history", "read_conversation_event"],
                 ["load_capability", "list_skill_resources", "execute_skill_script"],

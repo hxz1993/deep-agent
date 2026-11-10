@@ -189,7 +189,7 @@ Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP�
 增量`002`增加企微Channel的Account、Session Binding和Message Run三表；渠道用户由管理员配置
 `session_user_id`，Peer键名使用`userid/chatid`。
 增量 `003` 移除 10 条数据库外键，由后端事务、记录锁和逻辑引用校验维持原有删除规则。
-增量 `004` 新增 `integration_settings`，保存组件 AI 功能的 JSON 配置，不插入初始记录。见[集成配置](docs/guides/integrations.md)。
+增量 `004` 新增 `integration_settings`，保存业务场景的 JSON 配置，不插入初始记录。见[场景配置](docs/guides/integrations.md)。
 增量 `005` 允许 Agent 不配置模型；降级前须先补齐空模型。安装包支持导出、上传安装和自带目录安装，见[Agent 安装包](docs/guides/agent-packages.md)。
 
 增量 `006` 新增企微应用及成员缓存，见[企微应用说明](docs/guides/wecom-applications.md)。

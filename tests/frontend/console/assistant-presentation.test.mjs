@@ -401,6 +401,7 @@ test("Python 生成文件显示文件信息、下载与可复制 File ID", () =>
 test("任务计划在消息区底部浮层展示最新快照", () => {
   assert.equal(isPlanningToolEvent({ source: "planning", tool: "anything" }), false);
   assert.equal(isPlanningToolEvent({ tool: "write_plan" }), true);
+  assert.equal(isPlanningToolEvent({ source: "ui", tool: "write_plan" }), false);
   assert.equal(isPlanningToolEvent({ source: "planning", tool: "update_task_statuses" }), false);
   assert.equal(isPlanningToolEvent({ tool: "execute_python" }), false);
 

@@ -55,7 +55,7 @@ console/
 资料来自管理员 `GET /api/v1/developer-resources`；下载通过 `daFetch` 和 Blob，关闭时中止未完成请求并忽略迟到结果，不中断后台聊天流。
 固定安装与验收步骤在包内 README；提示词只包含服务地址和安装连接引导，不含凭据与下载链接。初始化 PDF 原静态地址仅为旧链接兼容，开发 Skill 仍仅由管理员接口提供。
 
-“集成”由 `configuration/integrations.js` 管理，一级导航使用 `puzzle` 图标。左侧显示固定集成目录，右侧显示当前集成说明和接口示例。条目取自 `GET /api/v1/integrations`，前端不补条目或初始化配置。关联 Agent 的触发区直接展开选项，回填当前 Agent。下拉底部清空只修改草稿，点击保存才生效。JSON 是底层存储。切页中止目录和接口示例读取，保存期间防重复提交，超时提示核对保存结果。契约见[集成配置](../docs/guides/integrations.md)。
+「场景配置」由 `configuration/integrations.js` 管理，一级导航显示「场景」并使用 `puzzle` 图标。左侧显示场景列表，右侧显示当前场景的配置和接口示例。条目取自 `GET /api/v1/integrations`，前端不补条目或初始化配置。关联 Agent 的触发区直接展开选项，回填当前 Agent。下拉底部清空只修改草稿，点击保存才生效。JSON 是底层存储。切页中止目录和接口示例读取，保存期间防重复提交，超时提示核对保存结果。契约见[场景配置](../docs/guides/integrations.md)。
 
 观察页面先读取 Run Status；已有活动 Run 时，`session-observer.js` 通过带固定 `run_id` 的只读
 `GET /sessions/{id}/live`接收原有 SSE 实时变化，当前 POST SSE 页面不重复订阅。

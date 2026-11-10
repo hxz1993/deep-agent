@@ -14,7 +14,6 @@ from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.services.resource_deletion import DeleteConfirmation, delete_resource
 from deep_agent.core.context import AppContextDep
 from deep_agent.capabilities.catalog import invalid_tool_package_codes
-from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.db.deps import get_agent_store, get_llm_model_store
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.db.stores.agent import AgentStoreBase
@@ -111,26 +110,6 @@ async def _validate_skills(
         )
 
 
-async def _validate_output_name(config, capabilities, ctx) -> None:
-    if config is None:
-        return
-    from deep_agent.capabilities.codes import ENVIRONMENT_TOOL_NAMES, environment_name_conflict
-    if config.name in ENVIRONMENT_TOOL_NAMES:
-        raise HTTPException(status_code=422, detail=environment_name_conflict(config.name))
-    # Only existing catalogs are consulted here. Dynamic MCP disclosure is
-    # checked again against the actual assembled tool definitions at Run time.
-    capabilities = canonical_tool_package_codes(capabilities)
-    selected = ctx.registry.selected(capabilities)
-    known = {tool.name for package in selected for tool in package.tools}
-    from deep_agent.capabilities.ui.builtin import builtin_ui_records
-    known.update(tool.name for tool in builtin_ui_records() if tool.package_code in capabilities)
-    for tool in await ctx.stores.ui_tool.list_all():
-        if tool.package_code in capabilities:
-            known.add(tool.name)
-    if config.name in known:
-        raise HTTPException(status_code=422, detail="output_config.name conflicts with an enabled tool")
-
-
 @router.get(
     "/agents",
     response_model=list[AgentResponse],
@@ -217,8 +196,6 @@ async def create_agent(
 ) -> AgentResponse:
     await _validate_tool_packages(body.capabilities, ctx)
     await _validate_skills(body.skills, ctx)
-    if body.output_config is not None:
-        await _validate_output_name(body.output_config, body.capabilities, ctx)
     normalized_model_id = None
     if body.model_id is not None:
         normalized_model_id = await _ensure_model_selectable(model_store, body.model_id, ctx)
@@ -256,12 +233,6 @@ async def update_agent(
         await _validate_tool_packages(body.capabilities, ctx)
     if "skills" in body.model_fields_set:
         await _validate_skills(body.skills or [], ctx)
-    output_config = body.output_config
-    enabled = body.structured_output_enabled if "structured_output_enabled" in body.model_fields_set else current.structured_output_enabled
-    if enabled and "output_config" not in body.model_fields_set:
-        output_config = await store.get_output_config(normalized_id)
-    if output_config is not None:
-        await _validate_output_name(output_config, body.capabilities if body.capabilities is not None else current.capabilities, ctx)
     if body.model_id is not None and body.model_id != current.model_id:
         normalized_model_id = await _ensure_model_selectable(
             model_store,

@@ -327,7 +327,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             output_config={key: value for key, value in CONTRACT.items() if key != "schema_digest"}), user_id="trusted-config-editor")
         baseline = (configured.updated_by, configured.updated_at)
         def response(messages, info):
-            return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "out-actor")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "out-actor")])
         runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
         runner._output_config_loader = AsyncMock(return_value=CONTRACT)
         result = await runner.run(self.sid, "synthetic", AgentDeps(session_id=self.sid, agent_id=self.agent_id, user="owner"))
@@ -394,7 +394,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 def response(messages, info):
                     calls.append(True)
                     return (ModelResponse(parts=[TextPart(candidate)]) if len(calls) == 1 else
-                            ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "accepted")]))
+                            ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "accepted")]))
                 async def stream(messages, info):
                     result = response(messages, info)
                     for index, part in enumerate(result.parts):
@@ -438,7 +438,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
         requested = []
         def response(messages, info):
             requested.append(True)
-            return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "output-1")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "output-1")])
         runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.store, UsageLimits(request_limit=10))
         runner._output_config_loader = AsyncMock(return_value=CONTRACT)
         deps = AgentDeps(session_id=self.sid, agent_id=self.agent_id, user="owner")
@@ -464,9 +464,9 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(streaming=streaming):
                 sid = uuid4().hex
                 def response(messages, info):
-                    return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "out-1")])
+                    return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "out-1")])
                 async def stream(messages, info):
-                    yield {0: DeltaToolCall(name="lease_result", json_args='{"ok":true}', tool_call_id="out-1")}
+                    yield {0: DeltaToolCall(name="output__lease_result", json_args='{"ok":true}', tool_call_id="out-1")}
                 runner = AgentRunner(Agent(FunctionModel(response, stream_function=stream), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
                 runner._output_config_loader = AsyncMock(return_value=CONTRACT)
                 deps = AgentDeps(session_id=sid, agent_id=self.agent_id, user="owner")
@@ -492,7 +492,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             return await original(progress, ctx, hook=hook)
         def response(messages, info):
             calls.append(True)
-            return ModelResponse(parts=[ToolCallPart("lease_result", {}, f"bad-{len(calls)}")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", {}, f"bad-{len(calls)}")])
         runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
         runner._output_config_loader = AsyncMock(return_value=CONTRACT)
         with patch.object(MessagePersistenceCapability, "_save", reject_checkpoint):
@@ -511,9 +511,9 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(stage=stage, streaming=streaming):
                 sid = uuid4().hex
                 def response(messages, info):
-                    return ModelResponse(parts=[ToolCallPart("lease_result", {"ok": True}, "out-1")])
+                    return ModelResponse(parts=[ToolCallPart("output__lease_result", {"ok": True}, "out-1")])
                 async def stream(messages, info):
-                    yield {0: DeltaToolCall(name="lease_result", json_args='{"ok":true}', tool_call_id="out-1")}
+                    yield {0: DeltaToolCall(name="output__lease_result", json_args='{"ok":true}', tool_call_id="out-1")}
                 runner = AgentRunner(Agent(FunctionModel(response, stream_function=stream), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
                 runner._output_config_loader = AsyncMock(return_value=CONTRACT)
                 deps = AgentDeps(session_id=sid, agent_id=self.agent_id, user="owner")
@@ -563,7 +563,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
             nonlocal count
             count += 1
             value = {"ok": "SYNTHETIC_PRIVATE_VALUE"} if count == 1 else {"ok": True}
-            return ModelResponse(parts=[ToolCallPart("lease_result", value, f"out-{count}")])
+            return ModelResponse(parts=[ToolCallPart("output__lease_result", value, f"out-{count}")])
         runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.store, UsageLimits(request_limit=5))
         runner._output_config_loader = AsyncMock(return_value=CONTRACT)
         with patch("deep_agent.diagnostics.emit", side_effect=lambda name, **fields: logs.append((name, fields))):
@@ -651,7 +651,7 @@ class StructuredOutputLiveTests(unittest.IsolatedAsyncioTestCase):
         async def stream(messages, info):
             nonlocal model_calls
             model_calls += 1
-            yield {0: DeltaToolCall(name="lease_result", json_args='{"ok":', tool_call_id="once")}
+            yield {0: DeltaToolCall(name="output__lease_result", json_args='{"ok":', tool_call_id="once")}
             ready.set()
             await release.wait()
             yield {0: DeltaToolCall(json_args='true}')}

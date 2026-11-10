@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import and_, case, exists, func, literal, or_, select
 from sqlalchemy.orm import aliased
 
+from deep_agent.agent.tool_names import is_output_call
 from deep_agent.agent.observability import token_usage_available
 from deep_agent.agent.cache_usage import summarize_cache_usage
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
@@ -471,11 +472,10 @@ def detail_event_metadata(events, active_run_id=None):
             continue
         message_count += 1
         metadata = message.get("metadata") or {}
-        output_name = (metadata.get("deepagent_output") or {}).get("name")
         dispatch_rejected = (metadata.get("deepagent_dispatch") or {}).get("rejected")
-        for part in message.get("parts") or []:
+        for index, part in enumerate(message.get("parts") or []):
             if (part.get("part_kind") in ("tool-call", "builtin-tool-call")
-                    and not dispatch_rejected and part.get("tool_name") != output_name):
+                    and not dispatch_rejected and not is_output_call(metadata, part, index)):
                 tool_call_count += 1
             if part.get("part_kind") == "user-prompt" and isinstance(part.get("content"), list):
                 attachment_count += sum(isinstance(item, dict) and item.get("kind") == "attachment-ref"

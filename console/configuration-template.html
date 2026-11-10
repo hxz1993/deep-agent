@@ -271,9 +271,9 @@
     </section>
 
     <section class="panel integrations-admin-panel" id="panel-integrations">
-      <div class="panel-toolbar" id="integrationPageToolbar"><div><h2>集成</h2><p class="panel-subtitle">配置组件服务中 AI 功能的关联关系，统一管理各项功能使用的 Agent。</p></div></div>
+      <div class="panel-toolbar" id="integrationPageToolbar"><div><h2>场景配置</h2><p class="panel-subtitle">为各个业务场景选择 Agent，并按需配置专用提示词和 Skill。</p></div></div>
       <div class="integration-workspace" id="integrationWorkspace">
-        <nav id="integrationDirectory" class="integration-directory" aria-label="集成列表"></nav>
+        <nav id="integrationDirectory" class="integration-directory" aria-label="场景列表"></nav>
         <div class="integration-details" id="integrationDetails" hidden>
           <h3 class="console-section-title" id="integrationConfigTitle"></h3>
           <p class="panel-subtitle" id="integrationConfigDescription"></p>
@@ -295,30 +295,51 @@
             <div class="integration-app-controls">
               <div class="integration-app-filters">
                 <label class="console-search"><i data-lucide="search"></i><input type="search" id="integrationAppSearch" aria-label="搜索应用" placeholder="搜索应用名称或 ID"></label>
-                <select id="integrationTenantFilter" aria-label="企业筛选"><option value="">全部可管理企业</option></select>
+                <select id="integrationTenantFilter" aria-label="企业筛选"><option value="">全部企业</option></select>
               </div>
-              <button class="btn primary" type="button" id="addIntegrationAppBtn"><i data-lucide="plus"></i>添加应用</button>
+              <div class="integration-app-actions">
+                <button class="btn" type="button" id="refreshIntegrationAppsBtn"><i data-lucide="refresh-cw" aria-hidden="true"></i>刷新列表</button>
+                <button class="btn primary" type="button" id="addIntegrationAppBtn"><i data-lucide="plus"></i>添加应用</button>
+              </div>
             </div>
             <div class="integration-app-status">
               <p class="field-hint" id="integrationAppsStatus" role="status"></p>
               <button class="btn" type="button" id="retryIntegrationAppsBtn" hidden>重试</button>
             </div>
-            <div class="table-wrap" id="integrationAppsTable" hidden><table class="data-table integration-app-table"><thead><tr><th>应用</th><th>所属空间 / 企业</th><th>专用 Skill</th></tr></thead><tbody id="integrationAppsBody"></tbody></table></div>
+            <div class="table-wrap console-list-a" id="integrationAppsTable" hidden><table class="data-table integration-app-table"><thead><tr><th>应用</th><th>所属空间</th><th>企业</th><th>专用 Skill</th></tr></thead><tbody id="integrationAppsBody"></tbody></table></div>
+            <div class="integration-app-empty" id="integrationAppsEmpty" hidden>
+              <span>暂无应用配置</span>
+              <p class="field-hint">添加应用后，可为它设置专用提示词和 Skill。</p>
+            </div>
           </div>
           <div id="integrationApiPanel"><div id="integrationApiContent"></div><button type="button" class="btn" id="retryIntegrationApiBtn" hidden>重试</button></div>
         </div>
-        <p id="integrationStatus" class="field-hint" role="status">正在加载集成…</p>
+        <p id="integrationStatus" class="field-hint" role="status">正在加载场景…</p>
       </div>
       <dialog class="console-action-dialog integration-app-picker" data-variant="form" id="integrationAppPicker" aria-labelledby="integrationAppPickerTitle">
         <form id="integrationAppPickerForm">
-          <div class="console-action-dialog-copy">
+          <div class="console-action-dialog-copy integration-app-picker-title">
             <h3 id="integrationAppPickerTitle">添加应用</h3>
-            <p>选择当前账号可管理的应用。</p>
-            <div class="console-action-dialog-fields">
-              <label for="integrationAppPickerInput"><span>应用</span></label>
-              <input id="integrationAppPickerInput" type="text" autocomplete="off" spellcheck="false"
-                placeholder="搜索应用、空间或输入 ID" aria-label="应用">
-            </div>
+            <p>选择当前账号有权配置的应用。</p>
+          </div>
+          <div class="integration-app-picker-grid">
+            <section class="integration-app-picker-tenants" aria-labelledby="integrationAppPickerTenantLabel">
+              <span id="integrationAppPickerTenantLabel">企业</span>
+              <div id="integrationAppPickerTenants" role="group" aria-label="筛选企业"></div>
+            </section>
+            <section class="integration-app-picker-apps" aria-label="应用列表">
+              <label class="console-search"><i data-lucide="search"></i>
+                <input id="integrationAppPickerInput" type="search" autocomplete="off" spellcheck="false"
+                  placeholder="搜索应用、空间或输入 ID" aria-label="搜索应用、空间或输入 ID" autofocus>
+              </label>
+              <div class="integration-app-picker-head" aria-hidden="true"><span>应用</span><span>空间</span></div>
+              <div class="integration-app-picker-results">
+                <div id="integrationAppPickerStatus" class="field-hint" role="status"></div>
+                <button type="button" class="btn" id="retryIntegrationAppPickerBtn" hidden>重试</button>
+                <div id="integrationAppPickerOptions" role="group" aria-label="可选应用"></div>
+                <button type="button" class="btn text compact" id="moreIntegrationAppPickerBtn" hidden>显示更多</button>
+              </div>
+            </section>
           </div>
           <footer>
             <button class="btn" type="button" id="cancelIntegrationAppPickerBtn">取消</button>
@@ -339,13 +360,13 @@
         <div class="integration-app-editor">
           <section class="field integration-app-prompt">
             <div class="integration-app-prompt-header"><div class="field-label-row">
-              <h3 class="console-section-title"><label for="integrationAppPrompt">追加提示词</label></h3>
+              <label class="integration-app-field-label" for="integrationAppPrompt">追加提示词</label>
               <span class="field-help" tabindex="0" aria-label="追加提示词说明" aria-describedby="integrationAppPromptHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="integrationAppPromptHelp" role="tooltip">在当前应用下补充分析维度、取数口径或报告要求。</span></span>
             </div><span class="prompt-estimate" id="integrationAppPromptCount"></span></div>
             <textarea id="integrationAppPrompt" maxlength="4000" aria-describedby="integrationAppPromptHelp"></textarea>
           </section>
           <section class="integration-app-skills">
-            <header><h3 class="console-section-title">专用 Skill <span id="integrationAppSkillCount"></span></h3><button class="btn" type="button" id="installIntegrationSkillBtn"><i data-lucide="upload"></i>上传 Skill</button></header>
+            <header><h3 class="integration-app-field-label">专用 Skill <span id="integrationAppSkillCount"></span></h3><button class="btn" type="button" id="installIntegrationSkillBtn"><i data-lucide="upload"></i>上传 Skill</button></header>
             <div id="integrationAppSkillList"></div>
           </section>
         </div>
@@ -965,8 +986,8 @@
               <tr><th scope="row">私聊 / 群聊</th><td>支持，群聊请 @</td><td>支持，群聊需 @</td><td>支持，群聊需 @</td><td>私聊；不接普通群聊</td></tr>
               <tr><th scope="row">流式文字回复</th><td>支持</td><td>支持，流式卡片</td><td>支持，AI 流式卡片</td><td>完整文本分段回复</td></tr>
               <tr><th scope="row">接收图片 / 文件</th><td>支持</td><td>支持</td><td>支持</td><td>图片、文件经媒体下载接入</td></tr>
-              <tr><th scope="row">发送图片 / 文件</th><td>支持</td><td>支持</td><td>支持</td><td>暂不支持</td></tr>
-              <tr><th scope="row">发送音频 / 视频</th><td>支持；不兼容格式按文件发送</td><td>支持；不兼容格式按文件发送</td><td>语音 AMR / OGG(Opus)，最长 60 秒；视频 MP4</td><td>暂不支持</td></tr>
+              <tr><th scope="row">发送图片 / 文件</th><td>支持</td><td>支持</td><td>支持</td><td>支持</td></tr>
+              <tr><th scope="row">发送音频 / 视频</th><td>支持；不兼容格式按文件发送</td><td>支持；不兼容格式按文件发送</td><td>语音 AMR / OGG(Opus)，最长 60 秒；视频 MP4</td><td>语音 AMR、视频 MP4；不兼容格式按文件发送</td></tr>
               <tr><th scope="row">引用本轮消息</th><td>原生引用暂未接入</td><td>支持</td><td>原生引用暂未接入</td><td>暂不支持</td></tr>
               <tr><th scope="row">语音转文字</th><td>接收企微转写结果</td><td>请先转成文字发送</td><td>接收平台转写文本（若有）</td><td>接收语音，交给音频输入链路</td></tr>
               <tr><th scope="row">用户姓名</th><td>开启查询并关联企微应用</td><td>开启查询并授权当前应用</td><td>开启后使用消息昵称，同 ID 更新缓存</td><td>显示原始用户 ID</td></tr>

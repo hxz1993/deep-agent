@@ -20,6 +20,9 @@ from .worker import run
 from .cards import StreamingCards
 
 
+_AUDIO_MAX_SECONDS = 60
+
+
 class DingTalkAdapter:
     def __init__(self, account, infinite_retry=True):
         self.account = account
@@ -149,7 +152,8 @@ class DingTalkAdapter:
         return MessageCapabilities(('text', 'image', 'file', 'audio', 'video'), False, 20000,
             20 * 1024 * 1024, 20 * 1024 * 1024, 2 * 1024 * 1024, 20 * 1024 * 1024,
             audio_formats=('amr', 'opus'), video_formats=('mp4',),
-            image_formats=('png', 'jpeg', 'gif', 'bmp'), media_fallback_to_file=False)
+            image_formats=('png', 'jpeg', 'gif', 'bmp'), media_fallback_to_file=False,
+            audio_max_seconds=_AUDIO_MAX_SECONDS)
 
     async def send_component(self, target, component, *, reply_to_current=False):
         if target.account_id != self.account.id or target.peer_type not in {'single', 'group'}:
@@ -172,8 +176,8 @@ class DingTalkAdapter:
         elif component.kind in {'audio', 'video'}:
             from deep_agent.channels.media_metadata import inspect_media
             metadata = await inspect_media(component.data or b'', video=component.kind == 'video')
-            if component.kind == 'audio' and metadata.duration_ms > 60000:
-                raise DeliveryError('audio_too_long', '钉钉原生语音最长 60 秒，请缩短音频')
+            if component.kind == 'audio' and metadata.duration_ms > _AUDIO_MAX_SECONDS * 1000:
+                raise DeliveryError('audio_too_long', f'钉钉原生语音最长 {_AUDIO_MAX_SECONDS} 秒，请缩短音频')
             if component.kind == 'audio':
                 opus = (component.data or b'').startswith(b'OggS')
                 component = replace(component,

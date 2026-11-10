@@ -5,6 +5,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from httpx import AsyncClient
+from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from deep_agent.core.context import get_context
@@ -42,6 +44,49 @@ class ChannelSessionControlTests(ChannelAccountsFixture, unittest.IsolatedAsynci
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].payload["source"], "channel")
         self.assertEqual(events[0].payload["title"], "wecom｜User｜external")
+
+    async def test_both_chat_endpoints_assemble_tools_only_for_trusted_channel_run(self):
+        account_id, session, headers = await self.prepare()
+        binding = await self.stores.channel.get_binding(account_id, "single", "external")
+        claim = await self.stores.channel.claim_message(
+            account_id=account_id, binding_id=binding.id, external_message_id="inbound",
+            external_request_id=None, sender_id="external", session_id=session.session_id, payload_hash="f" * 64,
+        )
+        await self.stores.channel.update_run(claim.run.id, processing_status="running")
+        run_headers = {**headers, "X-Deep-Agent-Channel-Run": claim.run.id}
+        requests = []
+
+        def respond(messages, info):
+            requests.append(info)
+            return ModelResponse(parts=[TextPart("渠道回复")])
+
+        async def stream(messages, info):
+            yield respond(messages, info).parts[0].content
+
+        body = {"agent_id": self.agent_id, "session_id": session.session_id, "message": "渠道测试",
+                "capabilities": ["ui:builtin"]}
+        model = FunctionModel(respond, stream_function=stream)
+        with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "fixture-internal"}), \
+             patch("deep_agent.agent.factory._resolve_model", return_value=model), mock_request_disconnect():
+            async with AsyncClient(transport=self.transport, base_url="http://test") as client:
+                for endpoint in ("/api/v1/chat", "/api/v1/chat/stream"):
+                    with self.subTest(endpoint=endpoint):
+                        response = await client.post(endpoint, headers=run_headers, json=body)
+                        self.assertEqual(response.status_code, 200, response.text)
+                        if endpoint.endswith("/stream"):
+                            self.assertTrue(any(event["type"] == "final" for event in parse_sse_events(response.text)))
+                        else:
+                            self.assertEqual(response.json()["status"], "completed")
+                        info = requests.pop()
+                        tools = {tool.name for tool in (*info.function_tools, *info.output_tools)}
+                        self.assertTrue({"channel_message", "channel_doc"} <= tools)
+                        self.assertNotIn("builtin__confirm", tools)
+                        self.assertIn("本轮消息来自企业微信机器人", info.instructions)
+                        denied = await client.post(endpoint, json=body, headers={
+                            "user": "session-user", "X-Deep-Agent-Channel-Run": claim.run.id,
+                        })
+                        self.assertEqual(denied.status_code, 403, denied.text)
+                        self.assertEqual(requests, [])
 
     async def test_commands_catalog_has_admin_gate_and_no_gateway_dependency(self):
         with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_GATEWAY_URL": ""}):

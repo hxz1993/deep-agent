@@ -110,7 +110,7 @@ class StructuredOutputClientContractTests(unittest.IsolatedAsyncioTestCase):
             requested.append(info)
             value = values[index]
             index += 1
-            return ModelResponse(parts=[ToolCallPart(name, value, f"business-output-{index}")])
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, value, f"business-output-{index}")])
         async def streaming(messages, info):
             model_response = response(messages, info)
             part = model_response.parts[0]
@@ -197,7 +197,7 @@ class StructuredOutputClientContractTests(unittest.IsolatedAsyncioTestCase):
             def response(messages, info):
                 nonlocal calls
                 calls += 1
-                return ModelResponse(parts=[ToolCallPart("lease_result", invalid if calls == 1 else valid, f"mutex-{calls}")])
+                return ModelResponse(parts=[ToolCallPart("output__lease_result", invalid if calls == 1 else valid, f"mutex-{calls}")])
             runner = AgentRunner(Agent(FunctionModel(response), deps_type=AgentDeps), self.stores.coordinator,
                                  UsageLimits(request_limit=10))
             runner._output_config_loader = AsyncMock(return_value={"name": "lease_result", "json_schema": LEASE_SCHEMA})

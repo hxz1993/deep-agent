@@ -499,15 +499,16 @@ class FilePayloadResolvingToolset(WrapperToolset[AgentDeps]):
         for name, tool in tools.items():
             from deep_agent.agent.tool_discovery import (
                 MCP_RETURN_SCHEMA_TOOLS,
-                mcp_original_tool_name,
+                mcp_definition_identity,
             )
 
             metadata = dict(tool.tool_def.metadata or {})
             # Upstream MCP metadata cannot identify a trusted host builtin.
             metadata.pop("deepagent_ptc_builtin", None)
             metadata[CODE_MODE_METADATA_KEY] = CODE_MODE_HYBRID
-            metadata[CODE_MODE_ORIGINAL_NAME_KEY] = name
-            original_name = mcp_original_tool_name(name, self.server_names)
+            identity = ctx.deps.tool_names.get(name)
+            metadata[CODE_MODE_ORIGINAL_NAME_KEY] = identity.public if identity else name
+            _, original_name = mcp_definition_identity(tool.tool_def, self.server_names)
             metadata[CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY] = bool(
                 original_name in MCP_RETURN_SCHEMA_TOOLS
                 and tool.tool_def.return_schema
@@ -538,7 +539,8 @@ class FilePayloadResolvingToolset(WrapperToolset[AgentDeps]):
         error_detail: dict[str, str] | None = None
         collector = current_collector.get()
         if collector is not None:
-            collector.begin(ctx.tool_call_id, name, tool_args)
+            public_name = (tool.tool_def.metadata or {}).get(CODE_MODE_ORIGINAL_NAME_KEY, name)
+            collector.begin(ctx.tool_call_id, public_name, tool_args)
         try:
             resolved = _resolve_payload_value(tool_args, ctx.deps)
             result = await self.wrapped.call_tool(

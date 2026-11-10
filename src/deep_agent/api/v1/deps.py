@@ -177,6 +177,8 @@ async def build_runner_for_agent(
         spec = replace(spec, instructions=f"{spec.instructions}\n\n{entry_instructions}")
     if capabilities is not None:
         spec.capabilities = canonical_tool_package_codes(capabilities)
+    if channel_type or channel_context is not None:
+        spec.capabilities = [code for code in spec.capabilities if not code.startswith("ui:")]
     if app_context is not None:
         instructions = (
             f"{spec.instructions}\n\n"
@@ -342,13 +344,21 @@ async def _build_runner_from_spec(
     history_toolset = build_history_toolset(ctx.store)
     channel_toolset = None
     if channel_context is not None:
+        from deep_agent.channels.doc_tool import build_channel_doc
         from deep_agent.channels.message_tool import build_channel_message_toolset
         from deep_agent.channels.registry import default_registry
         from deep_agent.services.channel_gateway_client import ChannelGatewayClient
         account = await ctx.stores.channel.get_account(channel_context.account_id)
         caps = default_registry().message_capabilities(account.channel_type)
         channel_toolset = build_channel_message_toolset(ctx.stores.channel, ChannelGatewayClient(), channel_context, caps)
-        spec = replace(spec, instructions=spec.instructions + "\n本轮已提供channel_message：向当前聊天发图片、文件和已有音视频使用此内置工具，无需MCP；媒体使用会话file_id。普通回答由渠道自动投递。工具已确认发送的内容不要重复贴出；发送结果未知时不得盲目补发。")
+        channel_toolset.add_function(build_channel_doc(account.channel_type, caps))
+        spec = replace(
+            spec,
+            instructions=(
+                f"{spec.instructions}\n需要另发渠道消息时，参照 channel_message 的工具说明。"
+                "用户询问当前渠道用法或收发限制时，如有渠道说明工具 channel_doc，调用它并以返回的说明为准。"
+            ),
+        )
 
     web_runtime = None
     if WEB_PACKAGE_CODE in spec.capabilities:

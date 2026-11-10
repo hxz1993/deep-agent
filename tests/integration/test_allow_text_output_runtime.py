@@ -51,7 +51,7 @@ class AllowTextOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(final["output"], "请先上传文件。")
                 self.assertNotIn("output_info", final)
                 self.assertTrue(requests[0].allow_text_output)
-                self.assertEqual([t.name for t in requests[0].output_tools], ["lease_result"])
+                self.assertEqual([t.name for t in requests[0].output_tools], ["output__lease_result"])
                 self.assertFalse([r for r in await self.rows(sid) if r.event_type == "output/attempt"])
                 items = await self.history(sid)
                 self.assertEqual([i.text for i in items if i.kind == "assistant_message"], ["请先上传文件。"])
@@ -66,7 +66,7 @@ class AllowTextOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
                                   (None, {"type": "null"}), (False, {"type": "boolean"})]:
                 with self.subTest(streaming=streaming, value=value):
                     args = value if schema.get("type") == "object" else {"response": value}
-                    respond, calls = self.sequence([[ToolCallPart("lease_result", args, "out-1")]])
+                    respond, calls = self.sequence([[ToolCallPart("output__lease_result", args, "out-1")]])
                     runner = self.runner(respond, loader=AsyncMock(return_value={**BASE, "json_schema": schema}))
                     sid = uuid4().hex
                     final, _ = await self.execute(runner, sid, stream=streaming)
@@ -80,7 +80,7 @@ class AllowTextOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_text_with_json_keeps_both_live_and_history_without_two_outputs(self):
         for streaming in (False, True):
-            respond, _ = self.sequence([[TextPart("结果如下。"), ToolCallPart("lease_result", {"ok": True}, "out-1")]])
+            respond, _ = self.sequence([[TextPart("结果如下。"), ToolCallPart("output__lease_result", {"ok": True}, "out-1")]])
             runner = self.runner(respond, loader=AsyncMock(return_value=deepcopy(BASE)))
             sid = uuid4().hex
             final, frames = await self.execute(runner, sid, stream=streaming)
@@ -112,7 +112,7 @@ class AllowTextOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_output_then_text_retains_failure_but_accepts_no_json(self):
         for streaming in (False, True):
-            respond, calls = self.sequence([[ToolCallPart("lease_result", {}, "bad-1")], [TextPart("还需要确认信息。")]])
+            respond, calls = self.sequence([[ToolCallPart("output__lease_result", {}, "bad-1")], [TextPart("还需要确认信息。")]])
             runner = self.runner(respond, loader=AsyncMock(return_value=deepcopy(BASE)))
             sid = uuid4().hex
             final, _ = await self.execute(runner, sid, stream=streaming)
@@ -133,8 +133,8 @@ class AllowTextOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 async def lookup():
                     executed.append(True)
                     return "must not execute"
-                extra = ToolCallPart("lease_result" if multiple else "lookup", {"ok": True} if multiple else {}, "extra")
-                respond, calls = self.sequence([[ToolCallPart("lease_result", {"ok": True}, "out-1"), extra], [TextPart("需要重新确认。")]])
+                extra = ToolCallPart("output__lease_result" if multiple else "lookup", {"ok": True} if multiple else {}, "extra")
+                respond, calls = self.sequence([[ToolCallPart("output__lease_result", {"ok": True}, "out-1"), extra], [TextPart("需要重新确认。")]])
                 runner = self.runner(respond, loader=AsyncMock(return_value=deepcopy(BASE)), tools=[Tool(lookup)])
                 sid = uuid4().hex
                 final, _ = await self.execute(runner, sid, stream=streaming)
@@ -151,12 +151,12 @@ class AllowTextOutputRuntimeTests(unittest.IsolatedAsyncioTestCase):
             final, _ = await self.execute(runner, uuid4().hex, stream=streaming)
             self.assertEqual(final["status"], "completed")
             self.assertTrue(calls[0].allow_text_output)
-            self.assertEqual([t.name for t in calls[0].output_tools], ["lease_result"])
+            self.assertEqual([t.name for t in calls[0].output_tools], ["output__lease_result"])
             self.assertFalse(calls[0].function_tools)
 
     async def test_deferred_resume_loads_current_mixed_policy_once_and_keeps_correction_budget(self):
         for streaming in (False, True):
-            respond, calls = self.sequence([[ToolCallPart("lease_result", {}, "bad-1")],
+            respond, calls = self.sequence([[ToolCallPart("output__lease_result", {}, "bad-1")],
                 [TextPart("请确认。"), ToolCallPart("confirm", {}, "confirm-1")], [TextPart("已确认。")]])
             external = ExternalToolset([ToolDefinition(name="confirm", parameters_json_schema={"type": "object", "properties": {}})])
             runner = self.runner(respond, loader=AsyncMock(return_value=deepcopy(BASE)), toolsets=[external])

@@ -181,7 +181,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                     tools = await run.get_tools(ctx)
                     for _ in range(2):
                         with self.assertRaises(ToolFailed) as failure:
-                            await run.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                            await run.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
                         self.assertIn("HTTP 401", str(failure.exception))
                         self.assertNotIn("temporarily unavailable", str(failure.exception))
                         self.assertNotIn("credential-never-log", str(failure.exception))
@@ -251,7 +251,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             try:
-                await run_toolset.call_tool("pipeline_query", {}, ctx, tools["pipeline_query"])
+                await run_toolset.call_tool("mcp__pipeline__query", {}, ctx, tools["mcp__pipeline__query"])
             except Exception as raised:
                 return raised, inner.call_tool.await_count
         self.fail("Expected the MCP tool call to fail")
@@ -277,8 +277,8 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                 instructions = await run_toolset.get_instructions(ctx)
 
         mcp_toolset_cls.assert_not_called()
-        self.assertEqual(list(tools), ["biz_query"])
-        self.assertEqual(tools["biz_query"].tool_def.return_schema, {"type": "object"})
+        self.assertEqual(list(tools), ["mcp__biz__query"])
+        self.assertEqual(tools["mcp__biz__query"].tool_def.return_schema, {"type": "object"})
         self.assertEqual([part.content for part in instructions], ["Use the business catalog."])
 
     async def test_connects_on_first_call_and_reuses_connection(self) -> None:
@@ -308,10 +308,10 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             async with run_toolset:
                 tools = await run_toolset.get_tools(ctx)
                 self.assertEqual(
-                    await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"]),
+                    await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"]),
                     {"ok": True},
                 )
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
         mcp_toolset_cls.assert_called_once()
         _, kwargs = mcp_toolset_cls.call_args
@@ -341,9 +341,9 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             with self.assertRaises(ToolFailed) as first:
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
             with self.assertRaises(ToolFailed) as second:
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
         self.assertNotIn("secret", str(first.exception))
         self.assertEqual(str(first.exception), str(second.exception))
@@ -375,7 +375,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             with self.assertRaises(ToolFailed) as raised:
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
         self.assertNotIn("private timeout detail", str(raised.exception))
         self.assertIn("timed out or is temporarily unavailable", str(raised.exception))
@@ -458,7 +458,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             with self.assertRaises(ModelRetry) as raised:
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
         self.assertEqual(str(raised.exception), "choose a unique workbook path")
         self.assertEqual(inner.call_tool.await_count, 1)
@@ -490,7 +490,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             return ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="pipeline_query",
+                        tool_name="mcp__pipeline__query",
                         args={"attempt": len(retries) + 1},
                         tool_call_id=f"canvas-validation-{len(retries) + 1}",
                     )
@@ -571,7 +571,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                 return ModelResponse(
                     parts=[
                         ToolCallPart(
-                            tool_name="pipeline_query",
+                            tool_name="mcp__pipeline__query",
                             args={},
                             tool_call_id="canvas-timeout-call",
                         )
@@ -650,7 +650,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             run_toolset = await toolset.for_run(ctx)
             tools = await run_toolset.get_tools(ctx)
             with self.assertRaises(RunCancelled):
-                await run_toolset.call_tool("biz_query", {}, ctx, tools["biz_query"])
+                await run_toolset.call_tool("mcp__biz__query", {}, ctx, tools["mcp__biz__query"])
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ HEADER_ECHO_SERVER = (
     Path(__file__).resolve().parents[1] / "fixtures" / "header_echo_server.py"
 )
 ECHO_TOOL_NAME = "echo_echo_request_headers"
+ECHO_TOOL_WIRE_NAME = "mcp__echo__echo_request_headers"
 
 
 def free_tcp_port() -> int:
@@ -91,10 +92,10 @@ async def call_echo_tool(toolset: Any, request_headers: dict[str, str]) -> dict[
 
     async with active:
         tools = await active.get_tools(ctx)
-        if ECHO_TOOL_NAME not in tools:
-            raise AssertionError(f"Expected tool {ECHO_TOOL_NAME!r}, got {sorted(tools)}")
+        if ECHO_TOOL_WIRE_NAME not in tools:
+            raise AssertionError(f"Expected tool {ECHO_TOOL_WIRE_NAME!r}, got {sorted(tools)}")
 
-        raw = await active.call_tool(ECHO_TOOL_NAME, {}, ctx, tools[ECHO_TOOL_NAME])
+        raw = await active.call_tool(ECHO_TOOL_WIRE_NAME, {}, ctx, tools[ECHO_TOOL_WIRE_NAME])
         if isinstance(raw, str):
             return json.loads(raw)
         if isinstance(raw, dict):

@@ -86,7 +86,7 @@ class AgentPackageLifecycleRegressions(unittest.IsolatedAsyncioTestCase):
         async def runner_for(row):
             spec=AgentSpec(name=row.name,model='test',instructions=row.prompt,capabilities=row.capabilities)
             packages,hints=await prepare_ui_tool_packages_for_spec(self.stores,spec)
-            model=TestModel(call_tools=['package_fixture_choice'],custom_output_text='Confirmed after upgrade')
+            model=TestModel(call_tools=['ui__package-fixture__package_fixture_choice'],custom_output_text='Confirmed after upgrade')
             agent=RuntimeAgent(model,deps_type=AgentDeps,toolsets=[p.toolset for p in packages],output_type=[str,DeferredToolRequests])
             return AgentRunner(agent,coordinator,UsageLimits(request_limit=10),ui_tool_hints=hints)
         try:

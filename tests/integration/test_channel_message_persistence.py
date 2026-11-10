@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.messages import RetryPromptPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from sqlalchemy import select
 
@@ -253,7 +254,7 @@ class ChannelMessagePersistenceIntegrationTests(unittest.IsolatedAsyncioTestCase
     async def test_provider_failure_ends_channel_loading_and_preserves_completed_tool(self):
         await self._interrupted_after_tool(cancel=False)
 
-    async def test_ui_wait_is_durable_before_channel_ends_with_console_notice(self):
+    async def test_channel_does_not_defer_when_model_attempts_an_unavailable_ui_tool(self):
         account, service, adapter, handler, requests = await self._create_ingress(stream_interval=0)
         await self.ctx.stores.agent.update_unique(self._agent_id, AgentUpdate(capabilities=["ui:builtin"]))
         delivered_histories = []
@@ -262,8 +263,13 @@ class ChannelMessagePersistenceIntegrationTests(unittest.IsolatedAsyncioTestCase
         async def answer(messages, info):
             nonlocal model_calls
             model_calls += 1
-            yield "PLEASE_CONFIRM"
-            yield {1: DeltaToolCall(name="builtin__confirm", json_args='{"message":"Synthetic confirmation"}', tool_call_id="pending-confirm")}
+            self.assertNotIn("builtin__confirm", {tool.name for tool in (*info.function_tools, *info.output_tools)})
+            if model_calls == 1:
+                yield {1: DeltaToolCall(name="builtin__confirm", json_args='{"message":"Synthetic confirmation"}',
+                                        tool_call_id="unavailable-confirm")}
+            else:
+                self.assertTrue(any(isinstance(part, RetryPromptPart) for part in messages[-1].parts))
+                yield "请直接在聊天里确认。"
 
         async def deliver(_frame, _stream_id, _text, finish):
             if finish:
@@ -271,18 +277,14 @@ class ChannelMessagePersistenceIntegrationTests(unittest.IsolatedAsyncioTestCase
 
         adapter.client.reply_stream.side_effect = deliver
         with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(stream_function=answer)), mock_request_disconnect():
-            await self._send(handler, adapter, message_id="durable-ui-wait")
+            await self._send(handler, adapter, message_id="blocked-channel-ui")
             await self._drain(service)
-        self.assertEqual(model_calls, 1)
+        self.assertEqual(model_calls, 2)
         self.assertEqual(len(delivered_histories), 1)
-        tools = self._assert_items(delivered_histories[0], texts=["PLEASE_CONFIRM"], tool_count=1)
-        self.assertEqual((tools[0]["call_id"], tools[0]["status"]), ("pending-confirm", "awaiting_input"))
+        self._assert_items(delivered_histories[0], texts=["请直接在聊天里确认。"], tool_count=0)
         final = adapter.client.reply_stream.await_args.args
-        self.assertTrue(final[3])
-        self.assertIn("DeepAgent 控制台继续完成", final[2])
-        self.assertNotIn("<think>", final[2])
-        self.assertNotIn("pending-confirm", final[2])
-        record = await self._run_record(account.id, "durable-ui-wait")
+        self.assertEqual(final[2:], ("请直接在聊天里确认。", True))
+        record = await self._run_record(account.id, "blocked-channel-ui")
         self.assertEqual((record.processing_status, record.delivery_status), ("completed", "sent"))
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
-        await self._assert_fact_events(requests[0]["session_id"], status="pending")
+        await self._assert_fact_events(requests[0]["session_id"], status="completed")

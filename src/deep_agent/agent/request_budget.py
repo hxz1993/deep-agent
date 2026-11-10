@@ -134,7 +134,7 @@ class TurnRequestBudget(AbstractCapability[AgentDeps]):
             BUDGET_METADATA: {"run_requests": ctx.usage.requests},
         }
         if self.final_request and any(isinstance(part, ToolCallPart)
-                and (ctx.deps.output_state is None or part.tool_name != ctx.deps.output_state.contract["name"])
+                and (ctx.deps.output_state is None or part.tool_name != ctx.deps.output_state.tool_name.wire)
                 for part in response.parts):
             # A provider ignoring the no-tools contract must not execute one or
             # silently get an extra model request. This is a real protocol error.

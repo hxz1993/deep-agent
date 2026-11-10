@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
+from deep_agent.agent.tool_names import WIRE_NAMES, is_output_call
 from deep_agent.agent.observability import token_usage_available
 from deep_agent.agent.planning import is_planning_tool
 from deep_agent.agent.tool_output_limits import artifacts_from_metadata
@@ -49,12 +50,7 @@ def project_session_events(
     items: list[ConversationItem] = []
     tool_by_call: dict[str, ToolConversationItem | PlanConversationItem] = {}
     terminal_by_run: dict[str, str] = {}
-    output_names = {}
-    for raw in ordered:
-        metadata = ((_message(raw) or {}).get("metadata") or {})
-        name = (metadata.get("deepagent_output") or {}).get("name")
-        if name:
-            output_names[_get(raw, "run_id")] = name
+    output_calls: set[tuple[str | None, str, str]] = set()
 
     for event in group_message_events(ordered):
         event_type = str(_get(event, "event_type", ""))
@@ -86,8 +82,6 @@ def project_session_events(
         if message is None:
             continue
         metadata = message.get("metadata") or {}
-        output_call_ids = {part.get("tool_call_id") for part in _parts(message)
-                          if part.get("tool_name") == (metadata.get("deepagent_output") or {}).get("name")}
         rejected_dispatch = (metadata.get("deepagent_dispatch") or {}).get("rejected")
         if event_type == "user/message":
             item = _user_item(event, message)
@@ -105,9 +99,18 @@ def project_session_events(
             for part_offset, part in enumerate(_parts(message)):
                 part_kind = str(part.get("part_kind") or "")
                 call_id = _optional_str(part.get("tool_call_id"))
-                if rejected_dispatch or call_id in output_call_ids:
-                    continue
                 if not call_id:
+                    continue
+                if part_kind == "tool-call" and (tool_name := part.get("tool_name")):
+                    key = (run_id, call_id, tool_name)
+                    is_output = is_output_call(metadata, part, part_offset)
+                    if is_output:
+                        output_calls.add(key)
+                    else:
+                        output_calls.discard(key)
+                    if is_output:
+                        continue
+                if rejected_dispatch:
                     continue
                 if part_kind in _TOOL_CALL_KINDS:
                     tool = _tool_call_item(event, part, part_offset)
@@ -127,12 +130,15 @@ def project_session_events(
             for part_offset, part in enumerate(_parts(message)):
                 if metadata.get("deepagent_output_budget") and part.get("part_kind") == "retry-prompt":
                     continue
-                if part.get("tool_name") and part.get("tool_name") == output_names.get(_get(event, "run_id")):
-                    continue
                 if str(part.get("part_kind") or "") not in _TOOL_RESULT_KINDS:
                     continue
                 call_id = _optional_str(part.get("tool_call_id"))
                 if not call_id:
+                    continue
+                wire_name = (metadata.get(WIRE_NAMES) or {}).get(str(part_offset))
+                if wire_name and wire_name.startswith("output__"):
+                    continue
+                if not wire_name and (_get(event, "run_id"), call_id, part.get("tool_name")) in output_calls:
                     continue
                 existing = tool_by_call.get(call_id)
                 if existing is None:
@@ -354,8 +360,10 @@ def _tool_call_item(
     call_id = str(part["tool_call_id"])
     tool_name = _optional_str(part.get("tool_name"))
     pending_status = _pending_tool_status(event, part)
+    wire = (((_message(event) or {}).get("metadata") or {}).get(WIRE_NAMES) or {}).get(str(part_offset))
+    is_planning = not wire and is_planning_tool(tool_name)
     common = dict(
-        item_id=(f"plan:{call_id}" if is_planning_tool(tool_name) else f"tool:{call_id}"),
+        item_id=(f"plan:{call_id}" if is_planning else f"tool:{call_id}"),
         status=pending_status,
         turn_id=_optional_str(_get(event, "turn_id")),
         run_id=_optional_str(_get(event, "run_id")),
@@ -369,16 +377,18 @@ def _tool_call_item(
         call_id=call_id,
         input=part.get("args"),
     )
-    if is_planning_tool(tool_name):
+    if is_planning:
         return PlanConversationItem(**common)
     metadata = dict(part["metadata"]) if isinstance(part.get("metadata"), Mapping) else None
-    return ToolConversationItem(
+    item = ToolConversationItem(
         **common,
         tool_name=tool_name,
-        mode=("deferred" if pending_status == "awaiting_input" else _tool_mode(tool_name, part)),
+        mode=("deferred" if pending_status == "awaiting_input" else _tool_mode(None if wire else tool_name, part)),
         widget=_optional_str((metadata or {}).get("widget")) if pending_status == "awaiting_input" else None,
         metadata=metadata if pending_status == "awaiting_input" or not (metadata or {}).get("widget") else None,
     )
+    item._wire_name = wire
+    return item
 
 
 def _orphan_tool_result_item(
@@ -409,10 +419,11 @@ def _apply_result(
         if source_id not in item.source_event_ids:
             item.source_event_ids.append(source_id)
     item.updated_at = _event_datetime(event, "updated_at")
+    unscoped = not isinstance(item, ToolConversationItem) or not item._wire_name
     item.output = (view_image_tool_value(part.get("content"), part.get("metadata"))
-                   if part.get("tool_name") == "view_image" else
+                   if unscoped and part.get("tool_name") == "view_image" else
                    web_image_tool_value(part.get("content"), part.get("metadata"))
-                   if part.get("tool_name") == "web_image_view"
+                   if unscoped and part.get("tool_name") == "web_image_view"
                    else safe_web_image_value(part.get("content")))
     outcome = _optional_str(part.get("outcome"))
     item.status = _result_status(part, outcome)

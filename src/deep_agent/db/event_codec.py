@@ -11,6 +11,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from pydantic_ai.messages import ModelMessage
 
+from deep_agent.agent.tool_names import WIRE_NAMES
 from deep_agent.db.serialization import deserialize_message, serialize_message
 
 
@@ -112,7 +113,10 @@ def encode_message_parts(
             if part_key in seen_part_keys:
                 part_key += f":part:{part_index}"
             seen_part_keys.add(part_key)
-            piece = {**serialized, "parts": [part]}
+            piece_metadata = {key: value for key, value in metadata.items() if key != WIRE_NAMES}
+            if wire := (metadata.get(WIRE_NAMES) or {}).get(str(local_index)):
+                piece_metadata[WIRE_NAMES] = {"0": wire}
+            piece = {**serialized, "parts": [part], "metadata": piece_metadata or None}
             event_type = event_type_for_message(piece)
             if has_results and kind == "user-prompt":
                 event_type = "model/request"
@@ -154,8 +158,11 @@ def group_message_events(events: Sequence[Any]) -> list[Any]:
             grouped[key] = target
             result.append(target)
         message = payload["message"]
-        target["_parts"].extend((int(source["part_index"]), part)
-                                for part in message.get("parts", []))
+        aliases = (message.get("metadata") or {}).get(WIRE_NAMES) or {}
+        target["_parts"].extend(
+            (int(source["part_index"]), part, aliases.get(str(index)))
+            for index, part in enumerate(message.get("parts", []))
+        )
         target["source_event_ids"].append(str(_get(event, "event_id")))
         target["through_sequence"] = max(target["through_sequence"], int(_get(event, "sequence")))
         target["updated_at"] = max(target["updated_at"], _get(event, "updated_at"))
@@ -165,9 +172,12 @@ def group_message_events(events: Sequence[Any]) -> list[Any]:
         # finalize usage/state without replacing any already persisted content.
         target["payload"]["message"].update({k: deepcopy(v) for k, v in message.items() if k != "parts"})
     for target in grouped.values():
-        target["payload"]["message"]["parts"] = [
-            part for _, part in sorted(target.pop("_parts"), key=lambda entry: entry[0])
-        ]
+        parts = sorted(target.pop("_parts"), key=lambda entry: entry[0])
+        message = target["payload"]["message"]
+        message["parts"] = [part for _, part, _ in parts]
+        aliases = {str(index): alias for index, (_, _, alias) in enumerate(parts) if alias}
+        if aliases:
+            message["metadata"] = {**(message.get("metadata") or {}), WIRE_NAMES: aliases}
         target["event_type"] = event_type_for_message(target["payload"]["message"])
     return result
 

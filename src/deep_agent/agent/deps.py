@@ -10,6 +10,7 @@ from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.files.upload_settings import DefaultUploadSettingsStore
 
 if TYPE_CHECKING:
+    from deep_agent.agent.tool_names import ToolName
     from deep_agent.sandbox.context import ExecutionContextState
     from deep_agent.agent.request_budget import TurnRequestBudget
     from deep_agent.agent.context.runtime import ContextRunState
@@ -53,6 +54,7 @@ class AgentDeps:
     upload_settings_store: Any = field(default_factory=DefaultUploadSettingsStore, repr=False)
     context_state: "ContextRunState | None" = None
     request_budget: "TurnRequestBudget | None" = None
+    tool_names: dict[str, "ToolName"] = field(default_factory=dict, repr=False)
     output_state: Any = field(default=None, repr=False)
     output_store: Any = field(default=None, repr=False)
     tool_discovery: "ToolDiscoveryTelemetry | None" = None

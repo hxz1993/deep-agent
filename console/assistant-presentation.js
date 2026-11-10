@@ -33,7 +33,7 @@ export const ASSISTANT_PRESENTATION_ACTIONS = Object.freeze({
 export const PLANNING_TOOL_NAMES = new Set(["write_plan"]);
 
 export function isPlanningToolEvent(event = {}) {
-  return PLANNING_TOOL_NAMES.has(event.tool);
+  return PLANNING_TOOL_NAMES.has(event.tool) && !["ui", "manual", "mcp"].includes(event.source);
 }
 
 export function toolResultPresentation(result = {}) {
@@ -53,7 +53,7 @@ function toolCallFromConversationItem(item = {}) {
     display_name: item.display_name,
     args: item.input,
     tool_call_id: item.call_id,
-    source: item.mode === "tool_search" ? "tool_search" : null,
+    source: item.mode === "tool_search" ? "tool_search" : item.mode === "deferred" ? "ui" : null,
     widget: item.widget,
     metadata: item.metadata,
   };

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from deep_agent.time import UtcDatetime
 
@@ -79,6 +79,7 @@ class AssistantConversationItem(ConversationItemBase):
 
 
 class ToolConversationItem(ConversationItemBase):
+    _wire_name: str | None = PrivateAttr(default=None)
     kind: Literal["tool"] = "tool"
     call_id: str
     tool_name: str | None = None

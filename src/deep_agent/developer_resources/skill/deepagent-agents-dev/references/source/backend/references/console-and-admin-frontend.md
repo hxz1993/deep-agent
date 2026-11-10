@@ -94,7 +94,9 @@ UI确认的Call与Return可能跨Run。按已持久来源Event／Part和同Turn�
 
 ## 配置中心
 
-当前导航以 `console/index.html` 和 `configuration-template.html` 为准；Agent、渠道/集成、模型、工具、MCP、Skill 和诊断各有独立职责。安装 Agent 不增加“去配置集成”操作。
+「场景 → 电子表格助手」的已配置列表与添加应用共用后端授权范围。外层列表有独立企业列，企业筛选从有权且已保存的记录去重。切页和返回复用列表，保存和删除更新对应行，主动刷新可重新读取平台权限和配置。添加弹窗左侧按企业筛选，右侧搜索应用和空间；一次打开只发一次候选列表请求，筛选和搜索在已返回数据内完成。选择后打开应用详情，详情、写入和专用 Skill 操作仍由后端校验。保留 `/api/v1/integrations` 与既有编码。
+
+当前导航以 `console/index.html` 和 `configuration-template.html` 为准。Agent、场景、渠道、模型、工具、MCP、Skill 和诊断各有独立职责。安装 Agent 后在「场景」关联对应助手，管理接口继续使用 `/api/v1/integrations`。
 
 规则：
 

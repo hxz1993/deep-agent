@@ -8,7 +8,6 @@ from deep_agent.db.models import UiToolDefinition, UiToolPackage, Agent
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.ui_tools import UiToolCreate, UiToolUpdate
-from deep_agent.capabilities.codes import ENVIRONMENT_TOOL_NAMES, environment_name_conflict
 
 
 class UiToolStoreBase(SessionBoundMixin):
@@ -55,8 +54,6 @@ class UiToolStoreBase(SessionBoundMixin):
             row = await self._get_by_name(db, name)
             if row is None:
                 return None
-            if name in ENVIRONMENT_TOOL_NAMES:
-                raise ValueError(environment_name_conflict(name))
             previous_package = row.package_code
             for code in sorted({previous_package, data.package_code or previous_package}):
                 await lock_reference(db, UiToolPackage, UiToolPackage.code, code, "UI tool package")

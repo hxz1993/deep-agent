@@ -123,6 +123,18 @@ test('应用列表只显示专用 Skill 数量，保留整行进入详情', asyn
  assert.equal(h.node('integrationAppsTable').hidden,true);
 });
 
+test('保存应用配置后，缓存列表保留详情中已解析的空间名称', async () => {
+ const app = { app_id:'budget001', app_name:'年度预算', space_id:'budget',
+  space_name:'预算空间', tenant_id:'tenant', tenant_name:'企业', skill_count:2, config_id:'config-1' };
+ const h = harness(async () => ({ ...app, space_name:'', prompt_append:'预算口径' }));
+ h.admin.setApps([app]);
+ h.admin.app = { ...app };
+ h.node('integrationAppPrompt').value = '预算口径';
+ await h.admin.saveApp();
+ assert.equal(h.admin.app.space_name, '预算空间');
+ assert.match(h.node('integrationAppsBody').innerHTML, /<td>预算空间<\/td>/);
+});
+
 test('离开应用列表中止读取，丢弃迟到配置', async () => {
  const result=deferred();
  const h=harness(()=>result.promise);
@@ -138,6 +150,26 @@ test('追加提示词计数在输入框外，应用 Skill 预览使用正式容�
  assert.match(detail,/integrationAppPromptCount[^]*?<textarea id="integrationAppPrompt"/);
  assert.match(detail,/integration-skill-dialog/);
  assert.match(detail,/移除应用配置/);
+});
+
+test('添加应用的搜索能直接找到尚未显示的应用', async () => {
+ const apps = Array.from({length: 101}, (_, index) => ({
+  app_id: `space${index}`, app_name: `应用 ${index}`, space_id: 'space',
+  space_name: '测试空间', tenant_id: 'tenant', tenant_name: '测试企业',
+ }));
+ const h = harness(async () => apps);
+ const picker = h.admin.appPicker = {apps: [], tenant: '', selection: null, limit: 100};
+ const options = h.node('integrationAppPickerOptions');
+ options.parentElement = {scrollTop: 0};
+ await h.admin.loadAppChoices(picker);
+ assert.equal(h.node('moreIntegrationAppPickerBtn').hidden, false);
+ assert.doesNotMatch(options.innerHTML, /value="space100"/);
+
+ h.node('integrationAppPickerInput').value = '测试空间 space100';
+ h.admin.renderAppChoices(picker);
+ assert.match(options.innerHTML, /value="space100"/);
+ assert.equal(h.node('moreIntegrationAppPickerBtn').hidden, true);
+ assert.equal(h.requests.length, 1);
 });
 
 test('加载或重试失败时输入筛选，不会提前显示空状态', async () => {

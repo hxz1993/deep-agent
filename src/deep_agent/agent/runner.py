@@ -66,6 +66,7 @@ from deep_agent.agent.attachments import (
     resolve_user_prompt,
 )
 from deep_agent.agent.deferred import serialize_deferred
+from deep_agent.agent.tool_names import model_tool_history, public_tool_messages
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.sandbox.context import execution_context_scope
 from deep_agent.agent.event_persister import EventPersister, PersistEvent
@@ -326,6 +327,8 @@ class AgentRunner:
                     break
                 after = page[-1].sequence
         deps.output_state = StructuredOutputState(config, rejected_keys=rejected, attempts=attempts)
+        identity = deps.output_state.tool_name
+        deps.tool_names[identity.wire] = identity
 
     @staticmethod
     def _output_types(deps):
@@ -1179,7 +1182,8 @@ class AgentRunner:
             if state.event_queue is not None:
                 state.event_queue.put_nowait({"type": "session_event_updated", "persisted": True,
                                              "event": event.public_dict()})
-            return await self.store.get_history(session_id, agent_id=deps.agent_id)
+            visible = await self.store.get_history(session_id, agent_id=deps.agent_id)
+            return model_tool_history(visible)
 
         state.commit_projection = commit_projection
         started: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -1422,6 +1426,7 @@ class AgentRunner:
         deps: AgentDeps,
         *,
         pre_persisted_user: bool,
+        deferred_tool_results: DeferredToolResults | None = None,
     ) -> tuple[list[ModelMessage], str | list[UserContent] | None]:
         current_user_index = len(history) - 1 if pre_persisted_user else None
         llm_history = await resolve_history_for_llm(
@@ -1429,6 +1434,13 @@ class AgentRunner:
             current_user_index=current_user_index,
             request_headers=deps.request_headers,
             file_store=deps.file_store,
+        )
+        llm_history = model_tool_history(
+            llm_history,
+            pending_ids=(set(deferred_tool_results.calls) | set(deferred_tool_results.approvals)
+                         if deferred_tool_results else set()),
+            ui_aliases={name: hint["wire_name"] for name, hint in self.ui_tool_hints.items()
+                        if "wire_name" in hint},
         )
         llm_history = deduplicate_adjacent_tool_returns(llm_history)
         if pre_persisted_user:
@@ -1505,7 +1517,7 @@ class AgentRunner:
             async with asyncio.timeout(_TERMINAL_WRITE_TIMEOUT):
                 rows = await self.store.append(
                     session_id,
-                    to_append,
+                    public_tool_messages(to_append, deps.tool_names),
                     agent_id=deps.agent_id,
                     user_id=deps.user,
                     app_id=deps.app_id,
@@ -1889,6 +1901,7 @@ class AgentRunner:
                     context_refs,
                     deps,
                     pre_persisted_user=prepared.pre_persisted_user,
+                    deferred_tool_results=deferred_tool_results,
                 )
             except BaseException as exc:
                 self._log_run_terminal(run_event, status="cancelled" if isinstance(exc, (RunCancelled, asyncio.CancelledError)) else "failed",
@@ -2014,6 +2027,7 @@ class AgentRunner:
             result,
             self.ui_tool_hints,
             self.tool_display_names,
+            deps.tool_names,
         )
         response["conversation_id"] = result.conversation_id or deps.conversation_id
         response["run_id"] = result.run_id or deps.run_id
@@ -2272,7 +2286,7 @@ class AgentRunner:
         cancelled_run: RunCancelled | None = None
         cancelled_messages: list[ModelMessage] = []
         cancel_persistence_failed = False
-        published_tool_calls: dict[str, str] = {}
+        published_tool_calls: dict[str, tuple[str, str | None]] = {}
         buffered_ui_tool_calls: dict[str, dict[str, Any]] = {}
         session_events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         title_task: asyncio.Task[None] | None = None
@@ -2340,6 +2354,7 @@ class AgentRunner:
                     context_refs,
                     deps,
                     pre_persisted_user=prepared.pre_persisted_user,
+                    deferred_tool_results=deferred_tool_results,
                 )
             except Exception as exc:  # attachment/media validation before model start
                 self._log_run_terminal(run_event, status="failed", started_at=started_at, error=exc, phase="input")
@@ -2454,6 +2469,14 @@ class AgentRunner:
                                 if mapped is not None:
                                     if not _should_publish_tool_call(event, mapped):
                                         continue
+                                    identity = deps.tool_names.get(mapped.get("tool"))
+                                    is_ui = identity.group == "ui" if identity else (
+                                        mapped.get("tool") in self.ui_tool_hints
+                                        and "wire_name" not in self.ui_tool_hints[mapped["tool"]]
+                                    )
+                                    if identity is not None:
+                                        mapped["tool"] = identity.public
+                                        mapped["source"] = identity.group
                                     mapped_type = mapped.get("type")
                                     mapped_call_id = mapped.get("tool_call_id")
                                     if mapped_type in {"text", "thinking"}:
@@ -2465,21 +2488,20 @@ class AgentRunner:
                                     } and mapped_call_id:
                                         prefix = (
                                             "plan"
-                                            if is_planning_tool(mapped.get("tool"))
+                                            if identity is None and is_planning_tool(mapped.get("tool"))
                                             else "tool"
                                         )
                                         mapped["item_id"] = f"{prefix}:{mapped_call_id}"
                                     provider_retry_safe = False
                                     event_type = mapped.get("type")
                                     tool_call_id = mapped.get("tool_call_id")
-                                    enriched = enrich_tool_event(mapped, self.ui_tool_hints)
-                                    enriched = enrich_tool_event_display_name(
-                                        enriched,
-                                        self.tool_display_names,
-                                    )
+                                    enriched = enrich_tool_event(mapped, self.ui_tool_hints) if is_ui else mapped
+                                    if identity is not None and identity.wire in self.tool_display_names:
+                                        enriched = {**enriched, "display_name": self.tool_display_names[identity.wire]}
+                                    else:
+                                        enriched = enrich_tool_event_display_name(enriched, self.tool_display_names)
                                     if event_type == "tool_call" and tool_call_id:
-                                        tool_name = str(mapped.get("tool") or "tool")
-                                        if tool_name in self.ui_tool_hints:
+                                        if is_ui:
                                             buffered_ui_tool_calls[tool_call_id] = enriched
                                             continue
                                     if event_type == "tool_call_removed" and tool_call_id:
@@ -2488,8 +2510,8 @@ class AgentRunner:
                                     if event_type == "tool_result" and tool_call_id:
                                         buffered_call = buffered_ui_tool_calls.pop(tool_call_id, None)
                                         if buffered_call is not None:
-                                            published_tool_calls[tool_call_id] = str(
-                                                buffered_call.get("tool") or "tool"
+                                            published_tool_calls[tool_call_id] = (
+                                                str(buffered_call.get("tool") or "tool"), buffered_call.get("source"),
                                             )
                                             yield buffered_call
                                     if event_type == "tool_call_removed":
@@ -2497,7 +2519,9 @@ class AgentRunner:
                                             continue
                                         published_tool_calls.pop(tool_call_id, None)
                                     elif event_type == "tool_call" and tool_call_id:
-                                        published_tool_calls[tool_call_id] = str(mapped.get("tool") or "tool")
+                                        published_tool_calls[tool_call_id] = (
+                                            str(mapped.get("tool") or "tool"), mapped.get("source"),
+                                        )
                                     elif event_type == "tool_result" and tool_call_id:
                                         published_tool_calls.pop(tool_call_id, None)
                                     yield enriched
@@ -2648,10 +2672,12 @@ class AgentRunner:
                 # Ordinary tools may have already been shown before execution
                 # failed. Close every unresolved live card as well as history;
                 # rejected UI calls remain buffered and are never published.
-                for call_id, tool_name in published_tool_calls.items():
+                for call_id, (tool_name, source) in published_tool_calls.items():
                     failed_tool = events.tool_result(tool_name, failure_diagnostic["message"], call_id)
                     failed_tool["outcome"] = "failed"
-                    prefix = "plan" if is_planning_tool(tool_name) else "tool"
+                    if source:
+                        failed_tool["source"] = source
+                    prefix = "plan" if source == "planning" else "tool"
                     failed_tool["item_id"] = f"{prefix}:{call_id}"
                     yield enrich_tool_event_display_name(
                         enrich_tool_event(failed_tool, self.ui_tool_hints), self.tool_display_names,
@@ -2740,13 +2766,15 @@ class AgentRunner:
                     session_id,
                     exc,
                 )
-            for tool_call_id, tool_name in list(published_tool_calls.items()):
+            for tool_call_id, (tool_name, source) in list(published_tool_calls.items()):
                 removed = events.tool_call_removed(
                     tool_name,
                     tool_call_id,
                     reason="cancelled",
                 )
-                prefix = "plan" if is_planning_tool(tool_name) else "tool"
+                if source:
+                    removed["source"] = source
+                prefix = "plan" if source == "planning" else "tool"
                 removed["item_id"] = f"{prefix}:{tool_call_id}"
                 yield enrich_tool_event_display_name(
                     removed,
@@ -2813,7 +2841,7 @@ class AgentRunner:
                 tool_call_id = str(buffered_call.get("tool_call_id") or "")
                 tool_name = str(buffered_call.get("tool") or "tool")
                 if tool_call_id:
-                    published_tool_calls[tool_call_id] = tool_name
+                    published_tool_calls[tool_call_id] = (tool_name, buffered_call.get("source"))
                 yield buffered_call
             buffered_ui_tool_calls.clear()
         if title_task is not None:
@@ -2901,6 +2929,7 @@ class AgentRunner:
             result,
             self.ui_tool_hints,
             self.tool_display_names,
+            deps.tool_names,
             context=final_context,
             conversation_id=deps.conversation_id,
             run_id=deps.run_id,
@@ -2915,10 +2944,11 @@ def _build_run_result(
     result: Any,
     ui_tool_hints: dict[str, dict[str, Any]],
     tool_display_names: dict[str, str],
+    tool_names=None,
 ) -> dict[str, Any]:
     output = result.output
     if isinstance(output, DeferredToolRequests):
-        deferred = serialize_deferred(output)
+        deferred = serialize_deferred(output, tool_names, tool_display_names)
         return {
             "output": None,
             "status": "pending",
@@ -2939,6 +2969,7 @@ def _final_event(
     result: Any,
     ui_tool_hints: dict[str, dict[str, Any]],
     tool_display_names: dict[str, str],
+    tool_names=None,
     *,
     context: dict[str, Any] | None = None,
     conversation_id: str | None = None,
@@ -2949,7 +2980,7 @@ def _final_event(
     usage = _usage_dict(result)
     if isinstance(output, DeferredToolRequests):
         deferred = enrich_deferred_display_names(
-            enrich_deferred(serialize_deferred(output), ui_tool_hints),
+            enrich_deferred(serialize_deferred(output, tool_names, tool_display_names), ui_tool_hints),
             tool_display_names,
         )
         return events.final(

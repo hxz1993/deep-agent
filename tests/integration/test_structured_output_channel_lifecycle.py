@@ -40,7 +40,7 @@ class StructuredOutputChannelLifecycleTests(unittest.IsolatedAsyncioTestCase):
             requests.append(info)
             if info.output_tools:
                 name = info.output_tools[0].name
-                value = {"new": False} if name == "changed_result" else {"text": f"native-{len(requests)}"}
+                value = {"new": False} if name == "output__changed_result" else {"text": f"native-{len(requests)}"}
                 return ModelResponse(parts=[ToolCallPart(name, value, f"output-{len(requests)}")])
             return ModelResponse(parts=[TextPart(f"plain-{len(requests)}")])
         async def stream(messages, info):

@@ -81,9 +81,20 @@ Request/session state
 
 保持包与 Toolset 一一对应，不要把一个 UI 包拆成多个运行时 Toolset。标题生成、压缩、Provider 测试等内部辅助请求不因此获得时间工具；时间工具不进入 PTC。
 
+## 模型调用名与业务编码
+
+| 来源 | Provider 调用名 | SSE 与历史中的业务名 |
+| --- | --- | --- |
+| 内置工具 | 原名，例如 `channel_doc` | 原名 |
+| 手工 UI 工具 | `ui__<包标识>__<工具名>` | UI 工具业务名 |
+| MCP 工具 | `mcp__<服务名>__<工具名>` | 原有 `<服务名>_<工具名>` |
+| 结构化输出 | `output__<输出编码>` | 输出编码，例如 `output_info.name` |
+
+实际名称以本轮披露为准。超长或含不兼容字符时生成稳定短名。同名的不同类型工具可以共存，手工 UI 工具目录仍沿用原有的唯一编码规则。MCP 上游收到原协议工具名，PTC 继续使用原 Python 函数名。旧历史保留原事件，待交互调用按原 `tool_call_id` 恢复。
+
 ## MCP 包
 
-- 一个服务名称同时确定包标识 `mcp:<name>` 和模型工具前缀 `<name>_`。
+- 服务名确定包标识 `mcp:<name>` 和 Provider 调用名中的服务段。
 - URL/内置 MCP 的运行时 Toolset 可以包含 Server Instructions。Resources/Prompts 不会自动成为 Function Tools。
 - `/tools` 可以报告检查数量/状态，而不缓存完整 MCP schema。
 - 远程检查应先完成，再将配置和快照在同一事务中提交。

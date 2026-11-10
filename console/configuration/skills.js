@@ -321,6 +321,7 @@ const skillsAdmin = {
       if (!request.current()) return;
       if (!Array.isArray(skills)) throw new Error("Skill 列表响应格式错误");
       this.setSkillRows(skills);
+      if (this.appPath) window.integrationsAdmin?.onAppSkillsLoaded(this.appPath, skills.length);
       this.listLoaded = true;
       this.buildReferenceIndex();
       showDbBanner(false);
@@ -968,9 +969,23 @@ const skillsAdmin = {
       if (this.appPath) this.unmountApp();
       if (event.detail?.name !== "skills") this.deactivate();
     });
-    document.getElementById("integrationSkillDialog")?.addEventListener("cancel", event => {
+    const appSkillDialog = document.getElementById("integrationSkillDialog");
+    appSkillDialog?.addEventListener("cancel", event => {
       event.preventDefault();
       this.backToList();
+    });
+    const isBackdrop = event => {
+      if (event.target !== appSkillDialog) return false;
+      const { left, right, top, bottom } = appSkillDialog.getBoundingClientRect();
+      return event.clientX < left || event.clientX >= right || event.clientY < top || event.clientY >= bottom;
+    };
+    let startedOnBackdrop = false;
+    appSkillDialog?.addEventListener("pointerdown", event => {
+      startedOnBackdrop = event.button === 0 && isBackdrop(event);
+    });
+    appSkillDialog?.addEventListener("click", event => {
+      if (startedOnBackdrop && isBackdrop(event)) this.backToList();
+      startedOnBackdrop = false;
     });
     window.addEventListener("pagehide", () => this.deactivate());
     window.addEventListener("resize", () => this.closeReferences());

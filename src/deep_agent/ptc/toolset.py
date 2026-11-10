@@ -267,18 +267,19 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         }
 
         aliases: dict[str, list[str]] = {}
-        for name in candidates:
-            aliases.setdefault(sanitize_python_name(name), []).append(name)
+        for name, candidate in candidates.items():
+            public_name = (candidate.tool_def.metadata or {}).get(CODE_MODE_ORIGINAL_NAME_KEY, name)
+            aliases.setdefault(sanitize_python_name(public_name), []).append(name)
         collisions = {
             name
-            for names in aliases.values()
-            if len(names) > 1
+            for alias, names in aliases.items()
+            if len(names) > 1 or alias == _RUN_CODE_NAME
             for name in names
         }
         for alias, names in aliases.items():
-            if len(names) > 1:
+            if len(names) > 1 or alias == _RUN_CODE_NAME:
                 logger.warning(
-                    "Code mode alias collision alias={} tools={}; keeping native only",
+                    "Code mode alias conflict alias={} tools={}; keeping native only",
                     alias,
                     sorted(names),
                 )
@@ -364,7 +365,19 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         self,
         wrapped_tools: dict[str, ToolsetTool[AgentDeps]],
     ) -> tuple[dict[str, Any], dict[str, str]]:
-        callable_defs, aliases = super()._partition_callable_tools(wrapped_tools)
+        public_to_wire = {
+            (tool.tool_def.metadata or {}).get(CODE_MODE_ORIGINAL_NAME_KEY, wire): wire
+            for wire, tool in wrapped_tools.items()
+        }
+        legacy_tools = {
+            name: replace(wrapped_tools[wire], tool_def=replace(wrapped_tools[wire].tool_def, name=name))
+            for name, wire in public_to_wire.items()
+        }
+        callable_defs, aliases = super()._partition_callable_tools(legacy_tools)
+        aliases = {
+            name: wire for name in callable_defs
+            if (wire := public_to_wire[aliases.get(name, name)]) != name
+        }
         # MCP output schemas are third-party input. Only the existing evidence-backed
         # allowlist may shape Monty's generated return types; everything else remains
         # canonical JSON/Any rather than inventing a structure from a tool name.

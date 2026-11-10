@@ -46,6 +46,7 @@ class MessageCapabilities:
     video_formats: tuple[str, ...] = ("mp4",)
     image_formats: tuple[str, ...] = ("png", "jpeg", "gif", "webp", "bmp")
     media_fallback_to_file: bool = True
+    audio_max_seconds: int | None = None
 
 
 class DeliveryError(Exception):

@@ -125,7 +125,7 @@ C02 已在 v0.10.18 完成，缓存统计展示已在 v0.10.19 完成。C04 与 
 | ID | 方向 | 不预埋的原因 | 重新启动条件 |
 | --- | --- | --- | --- |
 | `TICKET-REPO-001` | [工单助手委派本地仓库排查](41-ticket-repo-investigation/README.md) | 2026-11-04 补充 Autoloop／Symphony／SuperAgent 的部署与复用边界；内部先用、少改造，当前为方案研究 | 先确认执行机系统与网络，选一条只读工单验证 Autoloop 的提交、补料、原 thread 恢复、结果回读及隔离；不适用再评估其他执行服务 |
-| `ENTERPRISE-AUTH-001` | [企业集成与鉴权适配器](42-enterprise-auth-adapters/README.md) | 2026-11-05 归档：MCP／Skill 共用可信身份、客户账号映射、固定 Key／Token 兑换与版本化适配；尚未实施。当前 include_context 只披露非凭据资料，不决定授权 | 明确客户映射及认证协议，评审配置入口、凭据保护、执行期通信、多 Pod 更新及回滚后单独实施；不合入客户材料或任意 STDIO 包运行环境 |
+| `ENTERPRISE-AUTH-001` | [企业集成与鉴权适配器](42-enterprise-auth-adapters/README.md) | [MCP 绑定应用](42-enterprise-auth-adapters/mcp-bound-app.md) 已实现并完成本地验证 | 统一适配器的客户账号映射、换票、配置及执行期通信待单独评审 |
 | `AGENT-INVOCATION-001` | [智能输出与 Agent 对外调用](44-agent-invocation/README.md) | 11-09 归档 Python 按次生成、运行固定 Agent、内网发布 MCP 工具三种调用形态。新能力待评审 | 用审批意见与只读分析 Agent 验证接口和返回契约，确认调用身份及授权范围，按接入方实际需求决定 OpenAI 兼容入口与长任务协议 |
 | `C11-IMAGE` | 图片生成与连续编辑 | 2026-09-24 暂不实施：财务与图表优先代码/结构化生成，生成式图片主要用于低频设计探索，暂不新增图片Provider、配置与计费链路 | 出现明确高频业务需求后再恢复；届时独立验证模型配置、文件权限、版本关系与显式参考图编辑 |
 | `D04-CHOICES` | 动态候选集与结构化选择 | 2026-09-25 用户确认当前不接，保留潜力记录：Choices 是应用显式构造的动态枚举类型，Harness 无法自动推断前后 MCP 工具的业务关联；通用 Agent 不为此增加候选绑定、固定分流或业务工具封装。已有 enum 继续沿用，MCP 入参校验属于独立改进，不随此项实施 | 出现明确、局部、可由程序可靠取得候选集的结构化输出或封装流程，且用户明确恢复后再评估；不对全部 MCP 工具做动态 Choices 改造 |

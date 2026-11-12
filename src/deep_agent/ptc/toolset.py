@@ -64,8 +64,8 @@ DeepAgent PTC rules:
 - Monty runs a Python subset, not full CPython. Custom JSON encoder classes (`cls`)
   and json.loads object_hook/object_pairs_hook are unsupported; transform parsed
   data explicitly or use an authorized execute_python/Skill for custom codecs.
-- For concurrent read-only calls use `await asyncio.gather(a(), b())` without
-  keyword arguments; `return_exceptions=True` is unsupported. For per-call error
+- For concurrent read-only calls, write `import asyncio` before first use, then
+  use `await asyncio.gather(a(), b())` without keyword arguments; `return_exceptions=True` is unsupported. For per-call error
   handling, catch exceptions explicitly. Do not use create_task, wait_for,
   or as_completed; they are unavailable in this environment.
 - Do not use `yield`/`yield from`. Generator expressions eagerly produce lists,

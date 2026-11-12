@@ -41,7 +41,6 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
                 ["search_tools"],
                 [
                     "list_mcp_resources",
-                    "list_mcp_resource_templates",
                     "read_mcp_resource",
                 ],
             ],

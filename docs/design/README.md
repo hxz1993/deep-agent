@@ -43,7 +43,7 @@
 | `39` | [`Agent 与 Skill 评测`](39-agent-evaluation/README.md) | 2026-11-02 | 三种图片原型已归档：列表工作台、案例与结果双栏、版本对比矩阵；布局待确认，尚未实施 |
 | `40` | [图像查看与PDF原页核验](40-image-viewing/README.md) | 2026-11-03 | 纳入 v0.15.2；v0.15.1 基线不含此功能 |
 | `41` | [工单助手委派本地仓库排查](41-ticket-repo-investigation/README.md) | 2026-11-04 | 补充 Autoloop／Symphony／SuperAgent 部署与复用比较、最小适配及原会话恢复缺口；内部原型优先少改造，尚未实施 |
-| `42` | [企业集成与鉴权适配器](42-enterprise-auth-adapters/README.md) | 2026-11-05 | 记录 MCP／Skill 统一账号映射、取票、配置与可更新适配器方向；统一鉴权尚未实施；非凭据 include_context 已纳入 v0.15.6 |
+| `42` | [企业集成与鉴权适配器](42-enterprise-auth-adapters/README.md) | 2026-11-12 | MCP 绑定应用已实现，固定目标 App 和 Space 并继承本轮用户。统一账号映射与换票待评审 |
 | `43` | [中间产物管理与报告流水线](43-budget-report-pipeline/README.md) | 2026-11-06 | 11-09 补充财务场景和工作台映射。已有 Dot 交接、可选模块与财务交付规范，具体实施及 DDL 尚未批准 |
 | `44` | [智能输出与 Agent 对外调用](44-agent-invocation/README.md) | 2026-11-09 | Python 传提示词生成、调用已配置 Agent、内网 MCP 发布的设计建议，待评审 |
 

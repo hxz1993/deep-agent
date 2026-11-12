@@ -6,13 +6,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
+from deep_agent.api.v1.request_identity import RequestUserDep, require_request_user
 from deep_agent.capabilities.mcp.inspection import (
     inspect_mcp_server,
     mark_mcp_inspection_stale,
 )
 from deep_agent.db.deps import get_agent_store, get_mcp_store
+from deep_agent.db.reference_integrity import ReferenceConflict
 from deep_agent.db.stores.agent import AgentStoreBase
 from deep_agent.db.stores.mcp import McpServerStoreBase
+from deep_agent.mcp_request_context import resolve_mcp_request_context_mode
+from deep_agent.security.console_admin import ConsoleAdminAuthenticationError, forwarded_platform_auth_headers
+from deep_agent.services.integration_app_access import IntegrationAppAccessError, IntegrationAppDirectory, ManagedApp
+from deep_agent.services.mcp_bound_app import bound_login_headers, bound_mcp_target
+from deep_agent.services.scope_names import resolve_scope_directory
 from deep_agent.schemas.mcp import (
     McpBuiltinConfig,
     McpCatalogResponse,
@@ -29,22 +36,78 @@ from deep_agent.schemas.mcp import (
 )
 
 router = APIRouter(dependencies=CONSOLE_ADMIN_DEPENDENCIES)
+_RESERVED_MCP_NAME = "bound-apps"
+
+
+def _bound_directory(request: Request, user: str) -> tuple[IntegrationAppDirectory, dict[str, str]]:
+    try:
+        login = bound_login_headers(user, forwarded_platform_auth_headers(request, user))
+    except ConsoleAdminAuthenticationError as exc:
+        raise IntegrationAppAccessError(401, "平台身份凭据无效。") from exc
+    return IntegrationAppDirectory(request, user), login
+
+
+async def _validate_bound_configs(request: Request, configs: list[dict]) -> list[tuple[dict, dict]]:
+    if not configs:
+        return []
+    user = require_request_user(request.headers.get("user"))
+    try:
+        directory, login = _bound_directory(request, user)
+        apps = {}
+        targets = [bound_mcp_target(config) for config in configs]
+        for app_id, space_id in set(targets):
+            app = await directory.verify(app_id)
+            if (app.app_id, app.space_id) != (app_id, space_id):
+                raise IntegrationAppAccessError(403, "无法验证绑定应用的归属。")
+            apps[app_id] = app
+        names = await resolve_scope_directory(request, user)
+        return [
+            (
+                {**config, "request_context": {
+                    "mode": "bound_app",
+                    "target_app_id": app_id,
+                    "target_space_id": space_id,
+                    "target_app_name": apps[app_id].app_name,
+                    "target_space_name": names.spaces.get(space_id) or space_id,
+                }},
+                {**login, "app": app_id, "space": space_id},
+            )
+            for config, (app_id, space_id) in zip(configs, targets, strict=True)
+        ]
+    except IntegrationAppAccessError as exc:
+        raise HTTPException(exc.status, detail=str(exc)) from exc
+
+
+async def validate_bound_mcp_import(request: Request, rows) -> None:
+    bound = [row for row in rows if resolve_mcp_request_context_mode(row["transport"], row["config"]) == "bound_app"]
+    validated = await _validate_bound_configs(request, [row["config"] for row in bound])
+    for row, (config, _) in zip(bound, validated, strict=True):
+        row["config"] = config
+
+
+async def _inspect_row(row, request: Request, verified_headers: dict | None = None):
+    if resolve_mcp_request_context_mode(row.transport, row.config) == "bound_app":
+        if verified_headers is None:
+            (_, verified_headers), = await _validate_bound_configs(request, [row.config])
+        return await inspect_mcp_server(row, verified_bound_headers=verified_headers)
+    return await inspect_mcp_server(row, request_headers=extract_forward_headers(request))
 
 
 async def _inspect_and_store(
     store: McpServerStoreBase,
     row,
     request: Request,
-):
-    result = await inspect_mcp_server(
-        row,
-        request_headers=extract_forward_headers(request),
-    )
-    updated = await store.update_inspection(
-        row.name,
-        result.inspection.to_storage_value(),
-    )
-    return updated, result
+) -> McpInspectionResult:
+    result = await _inspect_row(row, request)
+    try:
+        updated = await store.update_inspection(
+            row.name, result.inspection.to_storage_value(), expected=row,
+        )
+    except ReferenceConflict as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {row.name}")
+    return result
 
 
 def _validate_row_update(row, body: McpServerUpdate) -> McpServerUpdate:
@@ -105,6 +168,15 @@ async def list_mcp_servers(
     return [McpServerResponse.from_row(row) for row in rows]
 
 
+@router.get("/mcp/bound-apps", response_model=list[ManagedApp])
+async def list_bound_apps(request: Request, user: RequestUserDep) -> list[ManagedApp]:
+    try:
+        directory, _ = _bound_directory(request, user)
+        return await directory.available_apps()
+    except IntegrationAppAccessError as exc:
+        raise HTTPException(exc.status, detail=str(exc)) from exc
+
+
 @router.get("/mcp/{name}", response_model=McpServerResponse)
 async def get_mcp_server(
     name: str,
@@ -155,6 +227,8 @@ async def create_mcp_server(
     request: Request,
     store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> McpServerResponse:
+    if body.name == _RESERVED_MCP_NAME:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="该名称保留给 MCP 应用目录接口。")
     existing = await store.get_by_name(body.name)
     if existing is not None:
         raise HTTPException(
@@ -170,10 +244,11 @@ async def create_mcp_server(
             description=body.description,
             inspection=None,
         )
-        result = await inspect_mcp_server(
-            candidate,
-            request_headers=extract_forward_headers(request),
-        )
+        verified_headers = None
+        if resolve_mcp_request_context_mode(candidate.transport, candidate.config) == "bound_app":
+            (candidate.config, verified_headers), = await _validate_bound_configs(request, [candidate.config])
+            body = body.model_copy(update={"config": candidate.config})
+        result = await _inspect_row(candidate, request, verified_headers)
         inspection = result.inspection.to_storage_value()
     try:
         row = await store.create_unique(body, inspection=inspection)
@@ -195,17 +270,25 @@ async def update_mcp_server(
     body = _validate_row_update(row, body)
     candidate = _candidate_row(row, body)
     config_changed = bool({"transport", "config"} & body.model_fields_set)
+    verified_headers = None
+    if resolve_mcp_request_context_mode(candidate.transport, candidate.config) == "bound_app":
+        (candidate.config, verified_headers), = await _validate_bound_configs(request, [candidate.config])
+        if config_changed:
+            body = body.model_copy(update={"config": candidate.config})
     if config_changed:
         candidate.inspection = mark_mcp_inspection_stale(row).to_storage_value()
-    inspection = candidate.inspection
-    if _should_reinspect(row, body):
-        result = await inspect_mcp_server(
-            candidate,
-            request_headers=extract_forward_headers(request),
-        )
-        inspection = result.inspection.to_storage_value()
-    updated = await store.update(name, body, inspection=inspection)
-    assert updated is not None
+        if _should_reinspect(row, body):
+            result = await _inspect_row(candidate, request, verified_headers)
+            candidate.inspection = result.inspection.to_storage_value()
+    try:
+        if config_changed:
+            updated = await store.update(name, body, inspection=candidate.inspection, expected=row)
+        else:
+            updated = await store.update(name, body, expected=row)
+    except ReferenceConflict as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
     return McpServerResponse.from_row(updated)
 
 
@@ -215,6 +298,8 @@ async def rename_mcp_server(
     body: McpServerRenameRequest,
     store: McpServerStoreBase = Depends(get_mcp_store),
 ) -> McpServerRenameResponse:
+    if body.new_name == _RESERVED_MCP_NAME:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="该名称保留给 MCP 应用目录接口。")
     try:
         result = await store.rename_with_agent_references(name, body.new_name)
     except PermissionError as exc:
@@ -281,5 +366,4 @@ async def inspect_mcp(
     row = await store.get_by_name(name)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"MCP server not found: {name}")
-    _, result = await _inspect_and_store(store, row, request)
-    return result
+    return await _inspect_and_store(store, row, request)

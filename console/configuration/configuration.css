@@ -1025,7 +1025,15 @@ dialog#documentParsingSettingsDialog {
 .mcp-list-table { table-layout: fixed; min-width: 1000px; }
 .mcp-list-table th:nth-child(1) { width: 12%; }
 .mcp-list-table th:nth-child(2) { width: 160px; }
-.mcp-list-table th:nth-child(3) { width: 104px; }
+.mcp-list-table th:nth-child(3) { width: 205px; }
+.mcp-context-summary { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mcp-context-summary > .badge { flex-shrink: 0; }
+.mcp-context-target { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); }
+.mcp-context-app-name,
+.mcp-context-app-id { display: block; overflow: hidden; text-overflow: ellipsis; line-height: 1.35; }
+.mcp-context-app-name { color: var(--text); font-weight: 500; }
+.mcp-context-app-id { font-family: var(--mono); font-size: var(--ui-font-meta); color: var(--text-dim); }
+#mcpBoundAppSpace { flex: 0 1 auto; max-width: 40%; color: var(--text-dim); }
 .mcp-list-table th:nth-child(5) { width: 190px; }
 .mcp-list-table th:nth-child(6) { width: 170px; }
 .mcp-list-table th:nth-child(7) { width: 112px; }
@@ -1042,6 +1050,7 @@ dialog#documentParsingSettingsDialog {
 .mcp-inspection-counts > button.mcp-resource-warning { color: var(--warning-text, #9a6700); }
 .mcp-description-text { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #configurationHost .mcp-list-table .badge.mcp-transport-http,
+#configurationHost .mcp-list-table .badge.mcp-context-bound_app,
 #configurationHost .mcp-list-table .badge.mcp-context-inherit { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
 #configurationHost .mcp-list-table .badge.mcp-transport-stdio { color: var(--text-dim); background: var(--console-readonly-surface); border-color: transparent; }
 #configurationHost .mcp-list-table .badge.mcp-context-isolated { color: var(--warning-text, #9a6700); background: color-mix(in srgb, var(--warning-text, #9a6700) 10%, transparent); border-color: transparent; }

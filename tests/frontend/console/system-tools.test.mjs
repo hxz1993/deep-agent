@@ -197,7 +197,7 @@ test("运行时目录收拢为五组，所有工具及各自注入条件保留",
     ["runtime:file", ["read_file", "view_image", "export_file_to_download_center"]],
     ["runtime:tool-result", ["read_tool_result"]],
     ["runtime:mcp-tool-search", ["search_tools"]],
-    ["runtime:mcp-resource", ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]],
+    ["runtime:mcp-resource", ["list_mcp_resources", "read_mcp_resource"]],
   ];
   const domains = definitions.map(([code, names]) => Object.freeze({
     code,
@@ -211,7 +211,7 @@ test("运行时目录收拢为五组，所有工具及各自注入条件保留",
   const merged = Array.from(ui.mergeSystemToolDomains(domains));
   assert.deepEqual(merged.map(d => d.label), ["基础运行", "文件与结果", "Skill", "MCP", "渠道消息"]);
   assert.deepEqual(merged.map(d => d.code), ["runtime:basic", "runtime:file", "runtime:skill", "runtime:mcp", "runtime:channel"]);
-  assert.deepEqual(merged.map(d => d.tools.length), [4, 4, 3, 4, 1]);
+  assert.deepEqual(merged.map(d => d.tools.length), [4, 4, 3, 3, 1]);
   assert.deepEqual(Array.from(merged[0].tools, t => t.name), ["get_current_time", "write_plan", "search_conversation_history", "read_conversation_event"]);
   assert.deepEqual(Array.from(merged[1].tools, t => t.name), ["read_file", "view_image", "export_file_to_download_center", "read_tool_result"]);
   const originalTools = domains.flatMap(d => d.tools);

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from pydantic_ai import FunctionToolset, ModelRetry, RunContext, ToolFailed
@@ -10,7 +11,9 @@ from deep_agent.agent.tool_errors import tool_error_message
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.mcp.toolset_builder import build_resource_client
 from deep_agent.db.models import McpServer
+from deep_agent.mcp_request_context import resolve_mcp_request_context_mode
 from deep_agent.schemas.mcp import McpInspection
+from deep_agent.services.mcp_bound_app import bound_mcp_headers, restricted_mcp_http_client
 
 MAX_RESOURCE_TEXT_BYTES = 256 * 1024
 
@@ -37,25 +40,16 @@ def _selected_resource_rows(spec: AgentSpec, rows: list[McpServer]) -> dict[str,
     return eligible
 
 
-def _resource_summary(item: Any, *, template: bool = False) -> dict[str, Any]:
-    mime_type = getattr(item, "mimeType", None) or getattr(item, "mime_type", None)
+def _resource_summary(item: Any) -> dict[str, Any]:
+    uri = getattr(item, "uri", None)
     result = {
         "name": getattr(item, "name", None),
         "title": getattr(item, "title", None),
         "description": getattr(item, "description", None),
-        "mime_type": mime_type,
+        "mime_type": getattr(item, "mimeType", None) or getattr(item, "mime_type", None),
+        "uri": str(uri) if uri is not None else None,
+        "size": getattr(item, "size", None),
     }
-    if template:
-        uri_template = getattr(item, "uriTemplate", None) or getattr(
-            item,
-            "uri_template",
-            None,
-        )
-        result["uri_template"] = str(uri_template) if uri_template is not None else None
-    else:
-        uri = getattr(item, "uri", None)
-        result["uri"] = str(uri) if uri is not None else None
-        result["size"] = getattr(item, "size", None)
     return {key: value for key, value in result.items() if value is not None}
 
 
@@ -69,7 +63,7 @@ def _normalize_resource_content(content: Any) -> dict[str, Any]:
             if text_bytes > MAX_RESOURCE_TEXT_BYTES:
                 raise ModelRetry(
                     f"Resource text exceeds the {MAX_RESOURCE_TEXT_BYTES}-byte safety limit; "
-                    "read a narrower resource or template URI."
+                    "read a narrower resource URI."
                 )
             normalized.append({"type": "text", "text": part})
         elif isinstance(part, BinaryContent):
@@ -113,21 +107,32 @@ def build_mcp_resource_toolset(
             )
         return row
 
-    def _client(ctx: RunContext[AgentDeps], server_name: str):
+    @asynccontextmanager
+    async def _client(ctx: RunContext[AgentDeps], server_name: str):
         row = _row(server_name)
-        return build_resource_client(
-            row.name,
-            row.transport,
-            row.config,
-            request_headers=dict(ctx.deps.request_headers or {}),
-        )
+        if resolve_mcp_request_context_mode(row.transport, row.config) != "bound_app":
+            yield build_resource_client(
+                row.name, row.transport, row.config, request_headers=dict(ctx.deps.request_headers),
+            )
+            return
+        connector = ctx.deps.bound_mcp_connectors.get(server_name)
+        if connector is not None:
+            yield await connector(ctx)
+            return
+        headers = await bound_mcp_headers(row.config, ctx.deps)
+        http_client = restricted_mcp_http_client(row.config["url"], headers)
+        try:
+            yield build_resource_client(row.name, row.transport, row.config, http_client=http_client)
+        finally:
+            await http_client.aclose()
 
     @toolset.tool
     async def list_mcp_resources(ctx: RunContext[AgentDeps], server_name: str) -> dict[str, Any]:
         """List static resources exposed by one resource-capable MCP server."""
         try:
-            resources = await _client(ctx, server_name).list_resources()
-        except ModelRetry:
+            async with _client(ctx, server_name) as client:
+                resources = await client.list_resources()
+        except (ModelRetry, ToolFailed):
             raise
         except Exception as exc:
             raise ToolFailed(
@@ -139,27 +144,6 @@ def build_mcp_resource_toolset(
         }
 
     @toolset.tool
-    async def list_mcp_resource_templates(
-        ctx: RunContext[AgentDeps],
-        server_name: str,
-    ) -> dict[str, Any]:
-        """List parameterized resource URI templates exposed by one MCP server."""
-        try:
-            templates = await _client(ctx, server_name).list_resource_templates()
-        except ModelRetry:
-            raise
-        except Exception as exc:
-            raise ToolFailed(
-                tool_error_message(f"Could not list resource templates from {server_name!r}", exc, ctx.deps.request_headers)
-            ) from exc
-        return {
-            "server_name": server_name,
-            "resource_templates": [
-                _resource_summary(item, template=True) for item in templates
-            ],
-        }
-
-    @toolset.tool
     async def read_mcp_resource(
         ctx: RunContext[AgentDeps],
         server_name: str,
@@ -167,9 +151,10 @@ def build_mcp_resource_toolset(
     ) -> dict[str, Any]:
         """Read a text resource by exact URI from one resource-capable MCP server."""
         try:
-            content = await _client(ctx, server_name).read_resource(uri)
+            async with _client(ctx, server_name) as client:
+                content = await client.read_resource(uri)
             normalized = _normalize_resource_content(content)
-        except ModelRetry:
+        except (ModelRetry, ToolFailed):
             raise
         except Exception as exc:
             raise ToolFailed(

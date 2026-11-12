@@ -11,7 +11,7 @@ from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
-from deep_agent.schemas.mcp import McpServerCreate
+from deep_agent.schemas.mcp import McpInspectionResult, McpServerCreate, McpServerUpdate
 from deep_agent.schemas.agent import AgentCreate
 from tests.helpers.admin_auth import allow_console_admin
 from tests.helpers.sqlite_stores import make_sqlite_stores
@@ -96,6 +96,37 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row.config["url"], "http://old.example.test/mcp")
         self.assertEqual(row.inspection["status"], "healthy")
+
+    async def test_late_inspection_cannot_overwrite_reconfigured_mcp(self) -> None:
+        for method, route in (("POST", "/inspect"), ("PATCH", "")):
+            with self.subTest(method=method):
+                name = f"stale-{method.lower()}"
+                await self.stores.mcp.create_unique(
+                    McpServerCreate(name=name, transport="url", config={"url": "https://old.example.test/mcp"}),
+                )
+                async def delayed_inspection(*args, **kwargs):
+                    await self.stores.mcp.update(
+                        name, McpServerUpdate(config={"url": "https://latest.example.test/mcp"}),
+                        inspection={"status": "stale"},
+                    )
+                    return McpInspectionResult.model_validate({
+                        "inspection": {"status": "healthy"},
+                        "changes": {
+                            "status": {"before": "unknown", "after": "healthy"},
+                            "tool_count": {"before": 0, "after": 0},
+                            "resource_count": {"before": 0, "after": 0},
+                            "template_count": {"before": 0, "after": 0},
+                        },
+                    })
+
+                with patch("deep_agent.api.v1.mcp.inspect_mcp_server", side_effect=delayed_inspection):
+                    async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                        options = {"json": {"config": {"url": "https://candidate.example.test/mcp"}}} if method == "PATCH" else {}
+                        response = await client.request(method, f"/api/v1/mcp/{name}{route}", **options)
+                self.assertEqual(response.status_code, 409, response.text)
+                row = await self.stores.mcp.get_by_name(name)
+                self.assertEqual(row.config["url"], "https://latest.example.test/mcp")
+                self.assertEqual(row.inspection, {"status": "stale"})
 
     async def test_rename_write_failure_rolls_back_mcp_and_agent_references(self) -> None:
         await self.stores.mcp.create_unique(

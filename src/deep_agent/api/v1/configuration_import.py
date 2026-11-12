@@ -11,6 +11,7 @@ from loguru import logger
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.integration_apps import verify_app_scope_rows
+from deep_agent.api.v1.mcp import validate_bound_mcp_import
 from deep_agent.api.v1.request_identity import require_request_user
 from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE
 from deep_agent.core.context import AppContextDep
@@ -190,6 +191,7 @@ async def import_configuration(
                 await verify_app_scope_rows(
                     request, require_request_user(request.headers.get("user")), app_rows, skill_scopes=skill_scopes,
                 )
+            await validate_bound_mcp_import(request, plan.rows.get("mcp_servers", ()))
             if not apply:
                 return _response(plan, imported=False)
 

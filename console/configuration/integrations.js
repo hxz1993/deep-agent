@@ -3,8 +3,6 @@
   const el = id => document.getElementById(id);
   const spreadsheetCode = 'deeptable-assistant';
   const appPath = '/api/v1/integrations/deeptable-assistant/app-configs';
-  const pickerPageSize = 100;
-  const pickerCacheMs = 30_000;
   const pathFor = id => `${appPath}/${encodeURIComponent(id)}`;
   const agentEditor = {
     summary(settings, agents) {
@@ -235,98 +233,11 @@
       window.lucide?.createIcons();
     },
     addApp() {
-      if (this.appPicker || this.selectedCode !== spreadsheetCode) return;
-      const picker = this.appPicker = {
-        apps: [], tenant: '', selection: null, limit: pickerPageSize, directoryRequest: null, state: 'loading',
-      };
-      el('integrationAppPickerInput').value = '';
-      el('integrationAppPickerTenants').replaceChildren();
-      this.renderAppChoices(picker);
-      el('integrationAppPicker').showModal();
-      const cached = this.appChoicesCache;
-      if (cached && cached.expiresAt > Date.now()) this.setAppChoices(picker, cached.apps);
-      else void this.loadAppChoices(picker);
-    },
-    setAppChoices(picker, apps) {
-      picker.apps = apps;
-      picker.state = 'ready';
-      const tenants = new Map(apps.map(app => [app.tenant_id, app.tenant_name || app.tenant_id]));
-      const choices = [...tenants].sort((a, b) => a[1].localeCompare(b[1], 'zh-CN'));
-      el('integrationAppPickerTenants').innerHTML = [['', '全部企业'], ...choices].map(([id, name]) =>
-        `<button type="button" class="integration-directory-item" data-picker-tenant="${escapeHtml(id)}" aria-pressed="false"><span title="${escapeHtml(name)}">${escapeHtml(name)}</span></button>`
-      ).join('');
-      this.renderAppChoices(picker);
-    },
-    async loadAppChoices(picker) {
-      if (this.appPicker !== picker || picker.directoryRequest) return;
-      const controller = picker.directoryRequest = new AbortController();
-      const status = el('integrationAppPickerStatus');
-      el('retryIntegrationAppPickerBtn').hidden = true;
-      picker.state = 'loading';
-      status.textContent = '正在加载应用…';
-      try {
-        const apps = await apiFetch(`${appPath}/available`, { signal: controller.signal, reportStatus: false });
-        if (this.appPicker !== picker) return;
-        if (!Array.isArray(apps)) throw new Error('应用列表加载失败。');
-        this.appChoicesCache = { apps, expiresAt: Date.now() + pickerCacheMs };
-        this.setAppChoices(picker, apps);
-      } catch (error) {
-        if (this.appPicker !== picker) return;
-        picker.state = 'error';
-        status.textContent = error.message || '应用列表加载失败。';
-        el('retryIntegrationAppPickerBtn').hidden = false;
-      } finally {
-        picker.directoryRequest = null;
-      }
-    },
-    renderAppChoices(picker, resetScroll = true) {
-      const terms = el('integrationAppPickerInput').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-      const matches = picker.apps.filter(app => {
-        if (picker.tenant && app.tenant_id !== picker.tenant) return false;
-        if (!terms.length) return true;
-        const text = [app.app_name, app.app_id, app.space_name, app.space_id, app.tenant_name].join(' ').toLowerCase();
-        return terms.every(term => text.includes(term));
+      if (this.selectedCode !== spreadsheetCode) return;
+      window.DeepAgentAppPicker.open({
+        owner: 'integration', path: `${appPath}/available`, title: '添加应用',
+        onSelect: app => { void this.openApp(app.app_id); },
       });
-      const visible = matches.slice(0, picker.limit);
-      if (!visible.some(app => app.app_id === picker.selection)) picker.selection = null;
-      for (const button of el('integrationAppPickerTenants').querySelectorAll('[data-picker-tenant]')) {
-        const selected = picker.tenant === button.dataset.pickerTenant;
-        button.classList.toggle('active', selected);
-        button.setAttribute('aria-pressed', String(selected));
-      }
-      const options = el('integrationAppPickerOptions');
-      const container = options.parentElement;
-      const scrollTop = resetScroll ? 0 : container.scrollTop;
-      options.innerHTML = visible.map(app => {
-        const id = escapeHtml(app.app_id), name = escapeHtml(app.app_name || app.app_id);
-        return `<label class="integration-app-picker-option"><span class="integration-app-picker-name"><strong title="${name}">${name}</strong><code title="${id}">${id}</code></span>
-          <span class="integration-app-picker-meta"><span>${escapeHtml(app.space_name || app.space_id)}</span><code>${escapeHtml(app.space_id)}</code></span>
-          <input type="radio" name="integrationAppChoice" value="${id}"${app.app_id === picker.selection ? ' checked' : ''}>
-          <i data-lucide="check" aria-hidden="true" class="integration-app-picker-check"></i></label>`;
-      }).join('');
-      window.lucide?.createIcons({ root: options });
-      container.scrollTop = scrollTop;
-      el('moreIntegrationAppPickerBtn').hidden = matches.length <= picker.limit;
-      el('confirmIntegrationAppPickerBtn').disabled = !picker.selection;
-      const status = el('integrationAppPickerStatus');
-      if (picker.state === 'loading') status.textContent = '正在加载应用…';
-      if (picker.state === 'ready') {
-        status.textContent = matches.length ? '' : (picker.apps.length ? '没有匹配的应用' : '暂无可配置的应用');
-      }
-    },
-    closeAppPicker() {
-      const picker = this.appPicker;
-      if (!picker) return;
-      this.appPicker = null;
-      picker.directoryRequest?.abort();
-      el('integrationAppPicker').close();
-    },
-    confirmAppSelection(event) {
-      event.preventDefault();
-      const selection = this.appPicker?.selection;
-      if (!selection) return;
-      this.closeAppPicker();
-      void this.openApp(selection);
     },
     async openApp(appId) {
       const generation = ++this.appGeneration;
@@ -480,8 +391,8 @@ ${escapeHtml(JSON.stringify(spec.response_example, null, 2))}</code></pre>`;
     },
     deactivate() {
       if (this.busy || this.appBusy || (this.app && window.skillsAdmin?.installing)) return false;
-      this.appChoicesCache = null;
-      this.closeAppPicker();
+      window.DeepAgentAppPicker.invalidate(`${appPath}/available`);
+      window.DeepAgentAppPicker.close('integration');
       this.closeApp(false);
       ++this.listGeneration; ++this.apiGeneration; this.listController?.abort(); this.apiController?.abort(); this.closeConfig(false); return true;
     },
@@ -505,48 +416,12 @@ ${escapeHtml(JSON.stringify(spec.response_example, null, 2))}</code></pre>`;
     el('integrationApiTab')?.addEventListener('click', () => admin.openTab('api'));
     el('retryIntegrationAppsBtn')?.addEventListener('click', () => admin.loadApps());
     el('refreshIntegrationAppsBtn')?.addEventListener('click', () => {
-      admin.appChoicesCache = null;
+      window.DeepAgentAppPicker.invalidate(`${appPath}/available`);
       void admin.loadApps();
     });
     el('integrationAppSearch')?.addEventListener('input', () => admin.renderApps());
     el('integrationTenantFilter')?.addEventListener('change', () => admin.renderApps());
     el('addIntegrationAppBtn')?.addEventListener('click', () => admin.addApp());
-    el('integrationAppPickerForm')?.addEventListener('submit', event => admin.confirmAppSelection(event));
-    el('cancelIntegrationAppPickerBtn')?.addEventListener('click', () => admin.closeAppPicker());
-    el('retryIntegrationAppPickerBtn')?.addEventListener('click', () => {
-      if (admin.appPicker) void admin.loadAppChoices(admin.appPicker);
-    });
-    el('integrationAppPickerInput')?.addEventListener('input', () => {
-      const picker = admin.appPicker;
-      if (!picker) return;
-      picker.limit = pickerPageSize;
-      admin.renderAppChoices(picker);
-    });
-    el('integrationAppPickerTenants')?.addEventListener('click', event => {
-      const button = event.target.closest('[data-picker-tenant]');
-      const picker = admin.appPicker;
-      if (!picker || !button) return;
-      picker.tenant = button.dataset.pickerTenant;
-      picker.limit = pickerPageSize;
-      admin.renderAppChoices(picker);
-    });
-    el('integrationAppPickerOptions')?.addEventListener('change', event => {
-      if (!admin.appPicker || event.target.name !== 'integrationAppChoice') return;
-      admin.appPicker.selection = event.target.value;
-      el('confirmIntegrationAppPickerBtn').disabled = false;
-    });
-    el('moreIntegrationAppPickerBtn')?.addEventListener('click', () => {
-      const picker = admin.appPicker;
-      if (!picker) return;
-      const count = picker.limit;
-      picker.limit += pickerPageSize;
-      admin.renderAppChoices(picker, false);
-      el('integrationAppPickerOptions').children[count]?.querySelector('input')?.focus();
-    });
-    el('integrationAppPicker')?.addEventListener('cancel', event => {
-      event.preventDefault();
-      admin.closeAppPicker();
-    });
     el('integrationAppBack')?.addEventListener('click', () => admin.closeApp());
     el('integrationAppPrompt')?.addEventListener('input', () => admin.scheduleEstimate());
     el('saveIntegrationAppBtn')?.addEventListener('click', () => admin.saveApp());

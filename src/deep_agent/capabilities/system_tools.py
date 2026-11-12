@@ -154,7 +154,7 @@ _SYSTEM_TOOL_DOMAINS = (
     SystemToolDomain(
         code="runtime:mcp-resource",
         label="MCP Resource",
-        description="按需访问已授权 URL MCP 提供的 Resource 和 Resource Template。",
+        description="按需列出和读取已授权 URL MCP 提供的资源。",
         tools=(
             SystemToolDescription(
                 name="list_mcp_resources",
@@ -162,13 +162,6 @@ _SYSTEM_TOOL_DOMAINS = (
                 source="DeepAgent",
                 injection_condition="Agent 已选择检测到 Resource 能力的可用 URL MCP",
                 description="列出指定 MCP Server 当前提供的 Resource。",
-            ),
-            SystemToolDescription(
-                name="list_mcp_resource_templates",
-                display_name="查看 MCP 资源模板",
-                source="DeepAgent",
-                injection_condition="Agent 已选择检测到 Resource 能力的可用 URL MCP",
-                description="列出指定 MCP Server 当前提供的 Resource Template。",
             ),
             SystemToolDescription(
                 name="read_mcp_resource",

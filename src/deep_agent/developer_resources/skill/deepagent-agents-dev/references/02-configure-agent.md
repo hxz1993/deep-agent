@@ -39,7 +39,11 @@ Content-Type: application/json
 
 ## MCP配置
 
-先确认目标MCP的传输方式、地址、认证与工具目录。固定认证和继承当前请求身份的MCP按实际连接配置区别处理，不能把平台Token发送到任意外部服务。保存前/后按现有界面检测并回读快照；读取旧快照不证明当前网络可用。
+在 Console 的 MCP 编辑页检查「请求上下文」。外部固定使用该服务的固定请求头。会话应用沿用提问所在的 App、Space 和允许透传的请求头。绑定应用使用管理员选定的目标 App／Space，运行时沿用当前用户的平台登录并检查目标访问权限。绑定模式只支持当前环境的 DeepFOS HTTPS MCP 网关，应用 Key 无法用于跨应用。
+
+管理员可用 `GET /api/v1/mcp/bound-apps` 获取候选。MCP 的 `config.request_context` 写入 `mode: bound_app`、`target_app_id` 和 `target_space_id`，显示名由服务端核对后保存。检测并回读工具快照。入口应用继续决定提示词与 Skill，原生调用、PTC 和资源读取使用各 MCP 的目标。
+
+同一地址配置多份时，给每份 MCP 独立名称，并写明业务用途。用完整调用名做精确搜索，或用应用名称加能力描述查找。多个应用都符合时先明确目标。验收以实际工具返回的范围为准。
 
 业务 Skill 中按模型实际披露的工具名调用。新版 MCP 模型侧通常是 `mcp__<服务名>__<工具名>`，控制台、历史和 Agent 包仍沿用业务编码。PTC 内的 Python 函数使用 `run_code` 当轮提供的名称。遇到 Tool Search 或缩短后的名称，直接使用实际披露值。MCP Resource、Prompt 和可调用工具各自有独立用途，写权限以当前授权为准。
 

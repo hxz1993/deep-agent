@@ -16,6 +16,7 @@
 | 可用模型 | GET /api/v1/llm-models | 当前认证用户 |
 | 模型管理全目录 | GET /api/v1/llm-models?selectable_only=false | 管理员 |
 | MCP目录与配置 | /api/v1/mcp | 管理员，实际方法见OpenAPI |
+| MCP 绑定应用候选 | GET /api/v1/mcp/bound-apps | 管理员，返回当前账号可配置的应用与空间 |
 | Skill列表/安装 | GET、POST /api/v1/skills | 管理员 |
 | Skill原包下载/替换 | GET、PUT /api/v1/skills/{code}/package | 管理员 |
 | Skill资源索引 | GET /api/v1/skills/{code}/resources | 管理员 |

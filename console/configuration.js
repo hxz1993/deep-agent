@@ -118,6 +118,7 @@ async function loadAdminScripts() {
     "./vendor/qrcode.js",
     "./configuration/channel-registration.js",
     "./configuration/channels.js",
+    "./configuration/app-picker.js",
     "./configuration/integrations.js",
   ];
   const scriptUrls = new Set(scripts.map((src) => versionedAsset(src).href));

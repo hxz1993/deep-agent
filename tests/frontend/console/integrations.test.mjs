@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 const source = await readFile(new URL('../../../console/configuration/integrations.js', import.meta.url), 'utf8');
+const pickerSource = await readFile(new URL('../../../console/configuration/app-picker.js', import.meta.url), 'utf8');
 const template = await readFile(new URL('../../../console/configuration-template.html', import.meta.url), 'utf8');
 function deferred() { let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject}; }
 const agents=[{id:'agent-a',name:'电子表格分析'},{id:'agent-b',name:'计算助手'}];
@@ -15,7 +16,7 @@ function harness(fetcher=async path=>path.endsWith('/api')?spec:path.endsWith('/
  escapeHtml:v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),
  apiFetch(path,options={}){requests.push({path,options});return fetcher(path,options)},
  AdminFormFeedback:{clear(){errors.length=0},show(form,error){errors.push(error.message)},setSubmitting(){}},showToast(message){toasts.push(message)}});
- vm.runInContext(source,ctx);return {admin:ctx.window.integrationsAdmin,editors:ctx.window.DeepAgentIntegrationEditors,node,errors,requests,toasts};
+ vm.runInContext(pickerSource,ctx);vm.runInContext(source,ctx);return {admin:ctx.window.integrationsAdmin,picker:ctx.window.DeepAgentAppPicker,editors:ctx.window.DeepAgentIntegrationEditors,node,errors,requests,toasts};
 }
 const normalize=v=>JSON.parse(JSON.stringify(v));
 test('关联 Agent 直接展开选项，底部提供清空与保存',()=>{
@@ -158,15 +159,15 @@ test('添加应用的搜索能直接找到尚未显示的应用', async () => {
   space_name: '测试空间', tenant_id: 'tenant', tenant_name: '测试企业',
  }));
  const h = harness(async () => apps);
- const picker = h.admin.appPicker = {apps: [], tenant: '', selection: null, limit: 100};
+ const picker = h.picker.current = {path: '/available', apps: [], tenant: '', selection: null, limit: 100};
  const options = h.node('integrationAppPickerOptions');
  options.parentElement = {scrollTop: 0};
- await h.admin.loadAppChoices(picker);
+ await h.picker.loadAppChoices(picker);
  assert.equal(h.node('moreIntegrationAppPickerBtn').hidden, false);
  assert.doesNotMatch(options.innerHTML, /value="space100"/);
 
  h.node('integrationAppPickerInput').value = '测试空间 space100';
- h.admin.renderAppChoices(picker);
+ h.picker.renderAppChoices(picker);
  assert.match(options.innerHTML, /value="space100"/);
  assert.equal(h.node('moreIntegrationAppPickerBtn').hidden, true);
  assert.equal(h.requests.length, 1);
@@ -174,7 +175,8 @@ test('添加应用的搜索能直接找到尚未显示的应用', async () => {
 
 test('短时间内重开添加应用复用候选，过期后重新读取', async () => {
  const app = { app_id:'budget001', app_name:'年度预算', space_id:'budget', tenant_id:'tenant' };
- const h = harness(async () => [app]);
+ let now = 1000;
+ const h = harness(async () => [app], { setTimeout, clearTimeout, Date: { now: () => now } });
  h.admin.selectedCode = 'deeptable-assistant';
  h.node('integrationAppPickerOptions').parentElement = { scrollTop: 0 };
  const dialog = h.node('integrationAppPicker');
@@ -182,20 +184,55 @@ test('短时间内重开添加应用复用候选，过期后重新读取', async
  dialog.close = () => { dialog.open = false; };
  h.admin.addApp();
  await new Promise(resolve => setImmediate(resolve));
- assert.equal(h.admin.appPicker.apps[0].app_id, 'budget001');
+ assert.equal(h.picker.current.apps[0].app_id, 'budget001');
 
- h.admin.closeAppPicker();
+ h.picker.close();
  h.admin.addApp();
- assert.equal(h.admin.appPicker.state, 'ready');
+ assert.equal(h.picker.current.state, 'ready');
  assert.equal(h.requests.length, 1);
 
- h.admin.closeAppPicker();
- h.admin.appChoicesCache.expiresAt = 0;
+ h.picker.close();
+ now += 31_000;
  h.admin.addApp();
  assert.equal(h.requests.length, 2);
  await new Promise(resolve => setImmediate(resolve));
  h.admin.deactivate();
- assert.equal(h.admin.appChoicesCache, null);
+ assert.equal(h.picker.current, null);
+ h.admin.addApp();
+ assert.equal(h.requests.length, 3);
+ await new Promise(resolve => setImmediate(resolve));
+ h.picker.close();
+});
+
+test('MCP 复用选择弹框，已绑定应用在首屏回显，确认返回对应空间', async () => {
+ const apps = Array.from({length: 101}, (_, index) => ({
+  app_id: `space${index}`, app_name: `应用 ${index}`, space_id: 'space', tenant_id: 'tenant',
+ }));
+ const h = harness(async () => apps);
+ const dialog = h.node('integrationAppPicker');
+ dialog.showModal = () => { dialog.open = true; };
+ dialog.close = () => { dialog.open = false; };
+ const options = h.node('integrationAppPickerOptions');
+ options.parentElement = { scrollTop: 0 };
+ const chosen = [];
+ const request = {
+  owner: 'mcp', path: '/api/v1/mcp/bound-apps', title: '选择目标应用',
+  selectedAppId: 'space100', onSelect: app => chosen.push(app),
+ };
+ h.picker.open(request);
+ await new Promise(resolve => setImmediate(resolve));
+ assert.equal(h.requests[0].path, request.path);
+ assert.match(options.innerHTML, /value="space100" checked/);
+ assert.equal(h.node('moreIntegrationAppPickerBtn').hidden, false);
+ h.picker.close('integration');
+ assert.equal(dialog.open, true);
+ h.picker.confirmAppSelection({preventDefault() {}});
+ assert.equal(dialog.open, false);
+ assert.deepEqual(chosen, [apps[100]]);
+
+ h.picker.open(request);
+ h.picker.close('mcp');
+ assert.deepEqual(chosen, [apps[100]]);
 });
 
 test('加载或重试失败时输入筛选，不会提前显示空状态', async () => {

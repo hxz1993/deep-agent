@@ -14,8 +14,7 @@ resources/list  # 服务声明资源能力时，单独限时检查
 ```
 
 从 v0.14.10 起，创建、更新、检测 URL MCP 和刷新内置 MCP 均不再主动请求
-`resources/templates/list`。模板列表工具仍保留按需调用；已有模板计数作为历史元数据保留，
-不再在检测提示中宣称刷新了模板数量，也不改写旧检测记录。
+`resources/templates/list`。模型工具目录仅提供资源列表和按 URI 读取，已有模板计数和历史调用记录继续保留。已知的具体 URI 仍可交给资源读取工具。
 
 资源列表属于可选能力，最多等待 3 秒，并受检测总预算的剩余时间约束，预留 SDK 关闭连接时间；
 预算不足则跳过并记录资源超时告警。资源列表格式错误、接口不支持或超时，不使已成功的工具清单
@@ -69,15 +68,14 @@ Header及检测快照保持不变，因此无需重启或重新检测。Builtin 
 
 ## 模型工具
 
-Agent 至少关联一个整体检测状态为 `healthy/degraded` 且 Resource 状态为 `supported` 的 URL MCP 时，DeepAgent 才动态加入三个宿主代理工具：
+Agent 至少关联一个整体检测状态为 `healthy/degraded` 且 Resource 状态为 `supported` 的 URL MCP 时，DeepAgent 才动态加入两个宿主代理工具：
 
 ```text
 list_mcp_resources(server_name)
-list_mcp_resource_templates(server_name)
 read_mcp_resource(server_name, uri)
 ```
 
-没有符合条件的 MCP 时，这三个工具不会进入模型工具列表。`server_name` 只能使用当前 Agent 已关联的 MCP，不能越过 Agent 能力配置读取其他服务。
+没有符合条件的 MCP 时，这两个工具不会进入模型工具列表。`server_name` 只能使用当前 Agent 已关联的 MCP，不能越过 Agent 能力配置读取其他服务。
 
 ## 请求上下文与安全
 

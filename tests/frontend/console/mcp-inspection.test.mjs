@@ -126,17 +126,20 @@ test("MCP 高亮层与输入层共用字形度量且高亮不撑大输入框", (
   assert.match(styles, /\.json-input > \.json-input-highlight\s*\{[^}]*position: absolute;[^}]*height: 100%;/);
 });
 
-test("MCP Header 来源使用互斥的外部固定和内部继承", () => {
-  assert.match(template, /Headers JSON/);
-  assert.doesNotMatch(template, /Headers JSON（可选）/);
+test("MCP 请求上下文使用互斥的外部固定、会话应用和绑定应用", () => {
+  assert.match(template, /<span>请求上下文<\/span>/);
+  assert.doesNotMatch(template, /Headers JSON/);
   assert.match(template, /value="isolated" checked[\s\S]*外部固定/);
-  assert.match(template, /value="inherit"[\s\S]*内部继承/);
+  assert.match(template, /value="inherit"[\s\S]*会话应用/);
+  assert.match(template, /value="bound_app"[\s\S]*绑定应用/);
+  assert.match(template, /id="mcpBoundApp" aria-haspopup="dialog"\s+aria-controls="integrationAppPicker"/);
   assert.match(template, /class="json-input" id="mcpFixedHeaders"/);
   assert.match(template, /id="mcpHeadersHighlight"/);
+  assert.match(template, /id="mcpHeaders"[^>]*aria-label="固定请求头"/);
   assert.doesNotMatch(template, /mcp-json-editor-bar/);
-  assert.match(source, /mcpFixedHeaders"\)\?\.classList\.toggle\("hidden", mode === "inherit"\)/);
+  assert.match(source, /mcpFixedHeaders"\)\?\.classList\.toggle\("hidden", mode !== "isolated"\)/);
   assert.match(source, /if \(mode === "isolated"\) \{[\s\S]*config\.headers = headers;/);
-  assert.match(source, /允许透传：/);
+  assert.match(source, /允许透传其他请求头：/);
   assert.doesNotMatch(source, /data-context-help/);
   assert.doesNotMatch(source, /仅发送这里配置的固定 Header/);
   assert.match(styles, /\.json-input:focus-within/);
@@ -417,4 +420,21 @@ test("未取得的资源清单不能误报为资源为空", () => {
   assert.match(html, /尚未取得资源清单/);
   assert.doesNotMatch(html, /此服务暂无资源/);
   assert.match(ui.renderMcpCatalog({resources: {count: 0, snapshot_status: "ready", definitions: []}}, "resources"), /此服务暂无资源/);
+});
+
+test("MCP 列表同列显示模式，绑定项分行回显应用名和编码", () => {
+  const ui = loadInspectionUi();
+  const bound = ui.renderMcpContext({ request_context: {
+    mode: "bound_app", target_app_name: "年度预算", target_app_id: "budget001",
+    target_space_name: "预算空间", target_space_id: "budget",
+  }});
+  assert.match(bound, /title="年度预算 · budget001 · 预算空间 · budget"/);
+  assert.match(bound, /绑定应用[\s\S]*<span class="mcp-context-app-name">年度预算<\/span>\s*<code class="mcp-context-app-id">budget001<\/code>/);
+  const codeOnly = ui.renderMcpContext({ request_context: { mode: "bound_app", target_app_id: "budget001" } });
+  assert.doesNotMatch(codeOnly, /mcp-context-app-name/);
+  assert.match(codeOnly, /<code class="mcp-context-app-id">budget001<\/code>/);
+  const inherited = ui.renderMcpContext({ request_context: { mode: "inherit" } });
+  assert.match(inherited, /会话应用/);
+  assert.doesNotMatch(inherited, /提问应用|mcp-context-target/);
+  assert.doesNotMatch(ui.renderMcpContext({ request_context: { mode: "isolated" } }), /mcp-context-target/);
 });

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
+from httpx import AsyncClient
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.toolsets import FunctionToolset
 
@@ -36,6 +37,7 @@ def build_mcp_toolset(
     config: dict[str, Any],
     *,
     inspection: dict[str, Any] | None = None,
+    description: str | None = None,
 ) -> Any:
     """Build a registry-ready MCP toolset with request header forwarding."""
     transport, config = normalize_mcp_config(name, transport, config)
@@ -51,6 +53,7 @@ def build_mcp_toolset(
             snapshot=parsed.tools.snapshot,
             init_timeout=resolve_mcp_init_timeout(config),
             max_retries=resolve_mcp_max_retries(),
+            description=description,
         )
         return ScopedToolset(toolset, "mcp", name)
     raise ValueError(f"Unsupported MCP transport: {transport!r}")
@@ -62,18 +65,20 @@ def build_resource_client(
     config: dict[str, Any],
     *,
     request_headers: dict[str, str] | None = None,
+    http_client: AsyncClient | None = None,
 ) -> Any:
     """Unprefixed MCP client for host-side Resource detection and proxy calls."""
     transport, config = normalize_mcp_config(name, transport, config)
     if transport != "url":
         raise ValueError(f"Resource access requires url transport, got {transport!r}")
     url = config["url"]
-    headers = resolve_mcp_headers(transport, config, request_headers)
+    headers = resolve_mcp_headers(transport, config, request_headers) if http_client is None else None
     init_timeout = resolve_mcp_init_timeout(config)
     return MCPToolset(
         url,
         id=f"resources-{quote(name, safe='')}",
         headers=headers,
+        http_client=http_client,
         init_timeout=init_timeout,
         max_retries=resolve_mcp_max_retries(),
     )

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from deep_agent.files.storage import FileStore
     from deep_agent.documents.cache import DocumentRunCache
     from deep_agent.files.image_view.runtime import ImageViewState
+    from deep_agent.services.integration_app_access import PlatformAppAccessClient
 
 
 @dataclass
@@ -47,6 +48,9 @@ class AgentDeps:
     request_headers: Mapping[str, str] = field(default_factory=dict)
     # Trusted execution-only inputs, independent of the configurable MCP allowlist.
     execution_request_headers: Mapping[str, str] | None = field(default=None, repr=False)
+    bound_mcp_access: "PlatformAppAccessClient | None" = field(default=None, repr=False)
+    bound_mcp_login: dict[str, str] = field(default_factory=dict, repr=False)
+    bound_mcp_connectors: dict[str, Any] = field(default_factory=dict, repr=False)
     # Local development identity is populated from trusted server scope only.
     local_username: str | None = field(default=None, repr=False)
     execution_context_state: "ExecutionContextState | None" = field(default=None, repr=False)

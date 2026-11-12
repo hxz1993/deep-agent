@@ -9,9 +9,11 @@ function mcpTransportLabel(transport) {
 }
 
 const MCP_CONTEXT_LABELS = {
-  inherit: "内部继承",
+  inherit: "会话应用",
+  bound_app: "绑定应用",
   isolated: "外部固定",
 };
+const MCP_QUESTION_APP_LABEL = "提问应用";
 
 function escapeJsonEditorHtml(value) {
   return String(value ?? "")
@@ -19,6 +21,27 @@ function escapeJsonEditorHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderMcpContext(server) {
+  const scope = server.request_context || server.config?.request_context || {};
+  const mode = Object.hasOwn(MCP_CONTEXT_LABELS, scope.mode) ? scope.mode : "inherit";
+  const appName = scope.target_app_name;
+  const appId = scope.target_app_id;
+  let target = "";
+  let title = [];
+  if (mode === "bound_app") {
+    const name = appName && appName !== appId
+      ? `<span class="mcp-context-app-name">${escapeHtml(appName)}</span>` : "";
+    const id = appId ? `<code class="mcp-context-app-id">${escapeHtml(appId)}</code>` : "";
+    if (name || id) target = `<span class="mcp-context-target">${name}${id}</span>`;
+    title = [appName, appId, scope.target_space_name, scope.target_space_id];
+  }
+  const tooltip = [...new Set(title)].filter(Boolean).join(" · ");
+  return `<span class="mcp-context-summary"${tooltip ? ` title="${escapeJsonEditorHtml(tooltip)}"` : ""}>
+    <span class="badge mcp-context-${mode}">${MCP_CONTEXT_LABELS[mode]}</span>
+    ${target}
+  </span>`;
 }
 
 function inspectionErrorMessage(error) {
@@ -285,6 +308,7 @@ const mcpAdmin = {
     ) return false;
     this.editorDirty = false;
     state.editingMcp = null;
+    window.DeepAgentAppPicker.close("mcp");
     editor.close();
     return true;
   },
@@ -313,7 +337,7 @@ const mcpAdmin = {
         <tr class="mcp-list-row${s.transport === "stdio" ? " is-readonly" : ""}" ${s.transport === "stdio" ? "" : `data-open-mcp="${escapeHtml(s.name)}" tabindex="0"`}>
           <td><strong>${escapeHtml(s.name)}</strong></td>
           <td><span class="badge mcp-transport-${s.transport === "url" ? "http" : "stdio"}">${escapeHtml(mcpTransportLabel(s.transport))}</span></td>
-          <td><span class="badge mcp-context-${s.request_context?.mode === "isolated" ? "isolated" : "inherit"}">${escapeHtml(MCP_CONTEXT_LABELS[s.request_context?.mode] || "内部继承")}</span></td>
+          <td>${renderMcpContext(s)}</td>
           <td class="mcp-description-cell">
             <div class="mcp-description-text" title="${escapeJsonEditorHtml(s.description || "")}">${escapeHtml(s.description || "")}</div>
           </td><td class="mcp-capabilities-cell">
@@ -463,26 +487,59 @@ const mcpAdmin = {
   },
 
   fillRequestContextFields(server = null) {
-    const mode = server?.request_context?.mode || server?.config?.request_context?.mode || "isolated";
+    const scope = server?.request_context || server?.config?.request_context || {};
+    const mode = Object.hasOwn(MCP_CONTEXT_LABELS, scope.mode) ? scope.mode : "isolated";
     const input = document.querySelector(`input[name="mcpRequestContextMode"][value="${mode}"]`);
     if (input) input.checked = true;
-    const inherited = server?.request_context?.inherited_headers || state.mcpInheritedHeaders || [];
-    this.updateRequestContextDescription(inherited);
+    window.DeepAgentAppPicker.close("mcp");
+    const selected = scope.target_app_id ? {
+      app_id: scope.target_app_id, app_name: scope.target_app_name,
+      space_id: scope.target_space_id, space_name: scope.target_space_name,
+    } : null;
+    this.setBoundApp(selected);
+    this.updateRequestContextDescription(scope.inherited_headers || state.mcpInheritedHeaders || []);
   },
 
   updateRequestContextDescription(inheritedHeaders = state.mcpInheritedHeaders || []) {
     const mode = this.readRequestContextMode();
-    document.getElementById("mcpFixedHeaders")?.classList.toggle("hidden", mode === "inherit");
+    document.getElementById("mcpFixedHeaders")?.classList.toggle("hidden", mode !== "isolated");
+    document.getElementById("mcpBoundAppFields")?.classList.toggle("hidden", mode !== "bound_app");
+    if (mode !== "bound_app") window.DeepAgentAppPicker.close("mcp");
     const description = document.getElementById("mcpRequestContextDescription");
-    if (description) {
-      description.classList.toggle("hidden", mode !== "inherit");
-      const allowedHeaders = inheritedHeaders?.length
-        ? inheritedHeaders.join("、")
-        : "由后端白名单控制";
-      description.innerHTML = mode === "inherit"
-        ? `<span>DeepAgent 会将当前请求中的允许 Header 直接透传给 MCP。</span><small>允许透传：${escapeHtml(allowedHeaders)}</small>`
-        : "";
-    }
+    if (!description) return;
+    description.classList.toggle("hidden", mode === "isolated");
+    const authHeaders = inheritedHeaders.filter(header => !["app", "space"].includes(header.toLowerCase()));
+    const allowedHeaders = authHeaders.length ? authHeaders.join("、") : "由后端白名单控制";
+    description.innerHTML = mode === "inherit"
+      ? `<span><strong>目标应用</strong>　${MCP_QUESTION_APP_LABEL}，空间随会话确定。</span>
+        <small>沿用本轮登录身份。允许透传其他请求头：${escapeHtml(allowedHeaders)}</small>`
+      : "使用目标应用及其空间，沿用本轮的平台登录身份。调用前检查当前用户对目标的访问权限。";
+  },
+
+  setBoundApp(app) {
+    this.boundApp = app;
+    const value = document.getElementById("mcpBoundAppValue");
+    const space = document.getElementById("mcpBoundAppSpace");
+    value.classList.toggle("da-select-placeholder", !app);
+    value.textContent = app
+      ? [...new Set([app.app_name, app.app_id])].filter(Boolean).join(" · ")
+      : "选择目标应用";
+    space.textContent = app?.space_name || app?.space_id || "";
+    space.hidden = !space.textContent;
+    document.getElementById("mcpBoundApp").title = [value.textContent, space.textContent].filter(Boolean).join(" · ");
+  },
+
+  openBoundAppPicker() {
+    window.DeepAgentAppPicker.open({
+      owner: "mcp", path: "/api/v1/mcp/bound-apps", title: "选择目标应用",
+      selectedAppId: this.boundApp?.app_id,
+      onSelect: app => {
+        if (this.boundApp?.app_id !== app.app_id || this.boundApp?.space_id !== app.space_id) {
+          this.editorDirty = true;
+        }
+        this.setBoundApp(app);
+      },
+    });
   },
 
   syncHeadersHighlight() {
@@ -709,6 +766,11 @@ const mcpAdmin = {
         url: document.getElementById("mcpUrl").value.trim(),
         request_context: { mode },
       };
+      if (mode === "bound_app") {
+        if (!this.boundApp?.app_id || !this.boundApp.space_id) throw new Error("请选择绑定应用。");
+        config.request_context.target_app_id = this.boundApp.app_id;
+        config.request_context.target_space_id = this.boundApp.space_id;
+      }
       if (mode === "isolated") {
         const headers = parseJsonOrEmpty(document.getElementById("mcpHeaders").value);
         if (headers) {
@@ -831,6 +893,7 @@ const mcpAdmin = {
 window.mcpAdmin = mcpAdmin;
 window.__McpInspectionUI = {
   renderMcpCatalog,
+  renderMcpContext,
   renderInspectionCounts,
   missingInspectionAppHint,
   inspectionFailureMessage,
@@ -845,6 +908,10 @@ window.__McpInspectionUI = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("mcpBoundApp")?.addEventListener("click", () => mcpAdmin.openBoundAppPicker());
+  document.getElementById("mcpModal")?.addEventListener("close", event => {
+    if (!event.currentTarget.open) window.DeepAgentAppPicker.close("mcp");
+  });
   const catalogModal = document.getElementById("mcpCatalogModal");
   document.getElementById("mcpCatalogSearch")?.addEventListener("input", () => mcpAdmin.renderCatalogResults());
   document.getElementById("closeMcpCatalogModal")?.addEventListener("click", () => catalogModal.close());

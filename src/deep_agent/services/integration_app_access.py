@@ -137,20 +137,11 @@ def active_apps(payload: object) -> dict[str, str]:
     }
 
 
-class IntegrationAppDirectory:
-    """Reuse authoritative results within a request and batch names by space."""
+class PlatformAppAccessClient:
+    """Bounded Platform requests with one trusted identity."""
 
-    def __init__(self, request: Request, user_id: str):
-        try:
-            self._headers = forwarded_platform_auth_headers(request, user_id)
-        except ConsoleAdminAuthenticationError as exc:
-            raise IntegrationAppAccessError(401, "平台身份凭据无效。") from exc
-        if not any(self._headers.get(name) for name in (
-            "authorization", "cookie", "token", "x-user-token", "x-deepfos-key",
-        )):
-            raise IntegrationAppAccessError(401, "请使用平台登录身份验证应用权限。")
-        self._headers["language"] = "zh-cn"
-        self._user_id = user_id
+    def __init__(self, headers: Mapping[str, str]):
+        self._headers = dict(headers)
         self._results: dict[tuple, asyncio.Task] = {}
         self._parallel = asyncio.Semaphore(8)
 
@@ -220,6 +211,29 @@ class IntegrationAppDirectory:
         if key not in self._results:
             self._results[key] = asyncio.create_task(self._get(service, path, space=space, app=app, params=params))
         return await self._results[key]
+
+    async def verify_app_access(self, app_id: str, space_id: str) -> None:
+        access = await self._once("system", "check-permission-by-space-app", app=app_id, space=space_id)
+        if not isinstance(access, Mapping) or any(type(access.get(key)) is not bool for key in ("app", "space")):
+            raise IntegrationAppAccessError(503, "平台未返回可验证的 App 或 Space 权限。")
+        if not (access["app"] and access["space"]):
+            raise IntegrationAppAccessError(403, "当前用户无权访问绑定的应用或空间。")
+
+
+class IntegrationAppDirectory(PlatformAppAccessClient):
+    """Reuse authoritative results within a request and batch names by space."""
+
+    def __init__(self, request: Request, user_id: str):
+        try:
+            headers = forwarded_platform_auth_headers(request, user_id)
+        except ConsoleAdminAuthenticationError as exc:
+            raise IntegrationAppAccessError(401, "平台身份凭据无效。") from exc
+        if not any(headers.get(name) for name in (
+            "authorization", "cookie", "token", "x-user-token", "x-deepfos-key",
+        )):
+            raise IntegrationAppAccessError(401, "请使用平台登录身份验证应用权限。")
+        super().__init__({**headers, "language": "zh-cn"})
+        self._user_id = user_id
 
     async def tenants(self) -> dict[str, Enterprise]:
         return enterprises_for_user(await self._once("account", "api/enterprise/list"))

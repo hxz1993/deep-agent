@@ -118,3 +118,9 @@ KMP 的固定 `authKey` 继续来自 Skill 自读 `.env`；请求 `domainAccount
 后续事项统一登记在 [研发台账](../TODO.md) 的 `ENTERPRISE-AUTH-001`。
 
 对外发布 Agent 时的调用者校验、Python 调用及 MCP 发布见 [44 · 智能输出与 Agent 对外调用](../44-agent-invocation/README.md)。此处适配器处理 DeepAgent 访问客户服务时的账号与授权转换。
+
+## MCP 绑定应用
+
+在 MCP 的「请求上下文」选择「绑定应用」，可固定这份 MCP 访问的 App 和 Space。运行时沿用本轮用户身份。入口应用继续决定会话提示词和 Skill。
+
+应用选择复用场景弹框。配置者的候选范围、保存权限和会话用户的目标访问权限分别校验。用法和滚动更新边界见[跨应用访问方案](mcp-bound-app.md)。

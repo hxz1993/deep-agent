@@ -316,37 +316,6 @@
         </div>
         <p id="integrationStatus" class="field-hint" role="status">正在加载场景…</p>
       </div>
-      <dialog class="console-action-dialog integration-app-picker" data-variant="form" id="integrationAppPicker" aria-labelledby="integrationAppPickerTitle">
-        <form id="integrationAppPickerForm">
-          <div class="console-action-dialog-copy integration-app-picker-title">
-            <h3 id="integrationAppPickerTitle">添加应用</h3>
-            <p>选择当前账号有权配置的应用。</p>
-          </div>
-          <div class="integration-app-picker-grid">
-            <section class="integration-app-picker-tenants" aria-labelledby="integrationAppPickerTenantLabel">
-              <span id="integrationAppPickerTenantLabel">企业</span>
-              <div id="integrationAppPickerTenants" role="group" aria-label="筛选企业"></div>
-            </section>
-            <section class="integration-app-picker-apps" aria-label="应用列表">
-              <label class="console-search"><i data-lucide="search"></i>
-                <input id="integrationAppPickerInput" type="search" autocomplete="off" spellcheck="false"
-                  placeholder="搜索应用、空间或输入 ID" aria-label="搜索应用、空间或输入 ID" autofocus>
-              </label>
-              <div class="integration-app-picker-head" aria-hidden="true"><span>应用</span><span>空间</span></div>
-              <div class="integration-app-picker-results">
-                <div id="integrationAppPickerStatus" class="field-hint" role="status"></div>
-                <button type="button" class="btn" id="retryIntegrationAppPickerBtn" hidden>重试</button>
-                <div id="integrationAppPickerOptions" role="group" aria-label="可选应用"></div>
-                <button type="button" class="btn text compact" id="moreIntegrationAppPickerBtn" hidden>显示更多</button>
-              </div>
-            </section>
-          </div>
-          <footer>
-            <button class="btn" type="button" id="cancelIntegrationAppPickerBtn">取消</button>
-            <button class="btn primary" type="submit" id="confirmIntegrationAppPickerBtn" disabled>确定</button>
-          </footer>
-        </form>
-      </dialog>
       <section class="agent-editor-page integration-app-detail" id="integrationAppDetail" hidden>
         <header class="modal-header integration-app-header">
           <button type="button" class="agent-editor-back" id="integrationAppBack"><i data-lucide="arrow-left"></i>返回</button>
@@ -1167,6 +1136,38 @@
     </form>
   </dialog>
 
+  <dialog class="console-action-dialog integration-app-picker" data-variant="form" id="integrationAppPicker" aria-labelledby="integrationAppPickerTitle">
+    <form id="integrationAppPickerForm">
+      <div class="console-action-dialog-copy integration-app-picker-title">
+        <h3 id="integrationAppPickerTitle">添加应用</h3>
+        <p>选择当前账号有权配置的应用。</p>
+      </div>
+      <div class="integration-app-picker-grid">
+        <section class="integration-app-picker-tenants" aria-labelledby="integrationAppPickerTenantLabel">
+          <span id="integrationAppPickerTenantLabel">企业</span>
+          <div id="integrationAppPickerTenants" role="group" aria-label="筛选企业"></div>
+        </section>
+        <section class="integration-app-picker-apps" aria-label="应用列表">
+          <label class="console-search"><i data-lucide="search"></i>
+            <input id="integrationAppPickerInput" type="search" autocomplete="off" spellcheck="false"
+              placeholder="搜索应用、空间或输入 ID" aria-label="搜索应用、空间或输入 ID" autofocus>
+          </label>
+          <div class="integration-app-picker-head" aria-hidden="true"><span>应用</span><span>空间</span></div>
+          <div class="integration-app-picker-results">
+            <div id="integrationAppPickerStatus" class="field-hint" role="status"></div>
+            <button type="button" class="btn" id="retryIntegrationAppPickerBtn" hidden>重试</button>
+            <div id="integrationAppPickerOptions" role="group" aria-label="可选应用"></div>
+            <button type="button" class="btn text compact" id="moreIntegrationAppPickerBtn" hidden>显示更多</button>
+          </div>
+        </section>
+      </div>
+      <footer>
+        <button class="btn" type="button" id="cancelIntegrationAppPickerBtn">取消</button>
+        <button class="btn primary" type="submit" id="confirmIntegrationAppPickerBtn" disabled>确定</button>
+      </footer>
+    </form>
+  </dialog>
+
   <!-- MCP modal -->
   <dialog class="modal agent-editor-page mcp-editor-page" id="mcpModal">
     <form id="mcpForm" method="dialog">
@@ -1210,21 +1211,35 @@
               </label>
               <div class="field mcp-header-policy">
                 <div class="mcp-header-policy-head">
-                  <label for="mcpHeaders">Headers JSON</label>
-                  <div class="context-mode-options" role="radiogroup" aria-label="MCP Header 来源">
+                  <span>请求上下文</span>
+                  <div class="context-mode-options" role="radiogroup" aria-label="MCP 请求上下文来源">
                     <label class="context-mode-option">
                       <input type="radio" name="mcpRequestContextMode" value="isolated" checked />
                       <span>外部固定</span>
                     </label>
                     <label class="context-mode-option">
                       <input type="radio" name="mcpRequestContextMode" value="inherit" />
-                      <span>内部继承</span>
+                      <span>会话应用</span>
+                    </label>
+                    <label class="context-mode-option">
+                      <input type="radio" name="mcpRequestContextMode" value="bound_app" />
+                      <span>绑定应用</span>
                     </label>
                   </div>
                 </div>
                 <div class="json-input" id="mcpFixedHeaders">
                   <pre class="json-input-highlight json-view" aria-hidden="true"><code id="mcpHeadersHighlight"></code></pre>
-                  <textarea id="mcpHeaders" class="json-input-text" rows="7" spellcheck="false" placeholder='{"Authorization": "Bearer ..."}'></textarea>
+                  <textarea id="mcpHeaders" class="json-input-text" rows="7" spellcheck="false" aria-label="固定请求头" placeholder='{"Authorization": "Bearer ..."}'></textarea>
+                </div>
+                <div id="mcpBoundAppFields" class="field hidden">
+                  <span id="mcpBoundAppLabel">目标应用</span>
+                  <button type="button" class="da-select-trigger" id="mcpBoundApp" aria-haspopup="dialog"
+                          aria-controls="integrationAppPicker" aria-labelledby="mcpBoundAppLabel"
+                          aria-describedby="mcpBoundAppValue mcpBoundAppSpace">
+                    <span id="mcpBoundAppValue" class="da-select-placeholder">选择目标应用</span>
+                    <span id="mcpBoundAppSpace" hidden></span>
+                    <i data-lucide="chevron-down" aria-hidden="true"></i>
+                  </button>
                 </div>
                 <div class="context-mode-description hidden" id="mcpRequestContextDescription"></div>
               </div>

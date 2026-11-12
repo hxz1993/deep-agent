@@ -16,6 +16,7 @@ from deep_agent.capabilities.mcp.toolset_builder import (
     resolve_mcp_init_timeout,
 )
 from deep_agent.db.models import McpServer
+from deep_agent.services.mcp_bound_app import restricted_mcp_http_client
 from deep_agent.schemas.mcp import (
     McpInspection,
     McpInspectionChanges,
@@ -53,8 +54,7 @@ async def _inspect_resources(
 ) -> McpResourcesInspection:
     """Probe optional static resources without probing URI templates.
 
-    Template counts are historical metadata only. Preserve previously discovered
-    template-only servers so their explicit, on-demand Resource tools still work.
+    Historical template counts preserve eligibility for reading known URIs.
     """
     try:
         budget = RESOURCE_INSPECTION_TIMEOUT
@@ -277,6 +277,7 @@ async def inspect_mcp_server(
     row: McpServer,
     *,
     request_headers: dict[str, str] | None = None,
+    verified_bound_headers: dict[str, str] | None = None,
 ) -> McpInspectionResult:
     """Inspect one URL MCP and retain the previous useful snapshot on hard failures."""
     previous = McpInspection.from_value(
@@ -297,15 +298,21 @@ async def inspect_mcp_server(
         )
 
     started = perf_counter()
+    http_client = None
     try:
+        if verified_bound_headers is not None:
+            http_client = restricted_mcp_http_client(row.config["url"], verified_bound_headers)
         client = build_resource_client(
             row.name,
             row.transport,
             row.config,
             request_headers=request_headers,
+            **({"http_client": http_client} if http_client is not None else {}),
         )
         timeout = max(15.0, resolve_mcp_init_timeout(row.config) + 10.0)
     except Exception as exc:
+        if http_client is not None:
+            await http_client.aclose()
         logger.warning(
             "MCP inspection client build failed for {!r} ({})",
             row.name,
@@ -441,6 +448,9 @@ async def inspect_mcp_server(
             resources=previous.resources,
             error=_safe_error("inspection", exc),
         )
+    finally:
+        if http_client is not None:
+            await http_client.aclose()
 
     return McpInspectionResult(
         inspection=current,

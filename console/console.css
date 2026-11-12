@@ -1706,7 +1706,7 @@ dialog.agent-editor-page::backdrop { display: none; }
   justify-content: space-between;
   gap: 12px;
 }
-.mcp-header-policy-head > label { color: var(--text-dim); font-size: 13px; }
+.mcp-header-policy-head > span { color: var(--text-dim); font-size: 13px; }
 .mcp-editor-page .context-mode-options {
   display: inline-flex;
   align-items: center;

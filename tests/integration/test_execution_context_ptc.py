@@ -20,7 +20,6 @@ from deep_agent.capabilities import build_registry
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.options import OPTION
 from deep_agent.security.current_user import CurrentUserProfileResolver
-from deep_agent.services.scope_names import ScopeDirectory
 from deep_agent.skills.runtime import SkillRuntimeLibrary
 from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
@@ -55,10 +54,6 @@ class ExecutionContextRequestTests(unittest.IsolatedAsyncioTestCase):
         self.app.include_router(api_router)
         install_test_user_header(self.app)
         self.app.state.test_agent_id = await seed_default_agent(stores)
-        self.enterContext(patch(
-            "deep_agent.services.integration_app_runtime.PlatformScopeDirectoryFetcher",
-            return_value=AsyncMock(return_value=ScopeDirectory()),
-        ))
 
         async def fetch(user, _headers):
             return context_profile(user)
@@ -140,7 +135,7 @@ class ExecutionContextRequestTests(unittest.IsolatedAsyncioTestCase):
             await self._request(headers, stream=stream)
             deps = self.deps[-1]
             self.assertEqual(deps.request_headers, {"user": "request-user", "x-tenant-id": "execution-tenant"})
-            self.assertEqual((deps.app_id, deps.space_id), (None, None))
+            self.assertEqual((deps.app_id, deps.space_id), ("execution007", "execution"))
             self.assertNotIn("x-private", deps.execution_request_headers)
             self.assertNotIn("execution-fixture", repr(deps))
         self.assertEqual(len(self.backend.requests), 4)

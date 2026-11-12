@@ -73,7 +73,7 @@ class SkillRuntimePublicationRaceTests(unittest.IsolatedAsyncioTestCase):
                 tasks.append(installing)
                 await asyncio.wait_for(published.wait(), 3)
                 operations = {
-                    'chat': resolve_skills_for_run(self.stores, ['example-skill', 'missing-skill'], runtime=self.runtime, request_headers={}),
+                    'chat': resolve_skills_for_run(self.stores, ['example-skill', 'missing-skill'], runtime=self.runtime),
                     'reload': _materialize_current(self.ctx, 'example-skill', request_headers={}, force=True),
                     'resource': resource(),
                     'startup': self.runtime.reconcile(self.stores),

@@ -65,7 +65,7 @@ Skill 包直接归 App，`skill_packages.scope_ref` 存 `app:<App ID>`。同一 
 
 新 ASCII 包的内部键为 `app-pkg--<App ID>--<包编码>`，Unicode 包使用哈希键。已安装的旧包保留原主键、文件和缓存路径。已有 `015` 数据按[应用 Skill 数据转换](../../src/maintenance/README.md#应用-skill-数据转换)处理。全量配置备份中的专用包由 `GET /api/v1/configuration/skills/export` 导出，恢复时核验同 Revision、App 归属、企业权限和包摘要。
 
-运行时按当前用户的平台访问权核验 App 与 Space。当前 Agent 为电子表格助手的关联 Agent 且该 App 有配置时，按配置所属企业查询权限，校验通过后追加该应用的提示词及引用的 Skill。同一业务口径优先采用应用专用内容，通用内容和平台授权照常生效。专用 Skill 的 `load_capability` 使用目录提供的 ID，例如 `app--budget001--monthly-report`。读取资源、执行脚本及 PTC 使用 `skill_code`，例如 `app:budget001:monthly-report`。旧会话使用已保存的 App 与 Space，新选择的调试 App 用于新会话。权限目录暂时无法核验时，本轮使用通用配置。排查可查看 `integration_app_context` 诊断记录中的状态与耗时。
+每轮按会话的 App、Space 和关联 Agent 从数据库读取最新应用配置，并追加提示词及引用的 Skill。配置管理接口负责校验管理权限，业务工具按各自的权限执行。同一业务口径优先采用应用专用内容。专用 Skill 的 `load_capability` 使用目录提供的 ID，例如 `app--budget001--monthly-report`。读取资源、执行脚本及 PTC 使用 `skill_code`，例如 `app:budget001:monthly-report`。旧会话使用已保存的 App 与 Space，新选择的调试 App 用于新会话。排查可查看 `integration_app_context` 诊断记录中的加载状态和读取耗时。
 
 管理接口以 `/api/v1/integrations/deeptable-assistant/app-configs` 为前缀。
 

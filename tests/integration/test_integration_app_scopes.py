@@ -32,7 +32,7 @@ from deep_agent.integrations.app_skill_data import AppSkillDataError
 from deep_agent.schemas.agent import AgentUpdate
 from deep_agent.security import ConsoleAdminAuthorizer
 from deep_agent.services.integration_app_access import IntegrationAppAccessError, ManagedApp
-from deep_agent.services.scope_names import ScopeDirectory
+from deep_agent.services.scope_names import PlatformScopeDirectoryFetcher, ScopeDirectory
 from deep_agent.skills.runtime import SkillRuntimeLibrary
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 from tests.integration.helpers.chat import mock_request_disconnect, parse_sse_events
@@ -132,10 +132,6 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         ))
         self.enterContext(patch(
             "deep_agent.api.v1.integration_apps.resolve_scope_directory", return_value=catalog,
-        ))
-        self.fetch_scope = AsyncMock()
-        self.enterContext(patch(
-            "deep_agent.services.integration_app_runtime.PlatformScopeDirectoryFetcher", return_value=self.fetch_scope,
         ))
 
     async def _request(self, method, url, expected, **kwargs):
@@ -333,7 +329,7 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         await self._request("GET", f"{base}/{code}", 404)
         await self._request("GET", f"{base}/{hash_name}", 200)
 
-    async def test_run_reads_fresh_access_and_keeps_original_session_scope(self):
+    async def test_run_reads_current_app_configuration_without_a_directory_lookup(self):
         await self._save()
         await self._install(f"{PATH}/{APP_A.app_id}/skills", scripts=True)
         await self._install(f"{PATH}/{APP_A.app_id}/skills", name="hidden-report")
@@ -350,18 +346,13 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
                 recorded.append((info.instructions or "", tool_names))
             return ModelResponse(parts=[TextPart("差额 20，差异率 20%。")])
 
-        async def directory(headers, *, tenant_code):
-            scopes = {APP_A.app_id: (APP_A.space_id, APP_A.tenant_id), APP_B.app_id: (APP_B.space_id, APP_B.tenant_id)}
-            if tenant_code is not None:
-                scopes = {app_id: scope for app_id, scope in scopes.items() if scope[1] == tenant_code}
-            return ScopeDirectory(app_scopes=scopes if headers.get("authorization") == "Bearer fixture-only" else {})
-
-        self.fetch_scope.side_effect = directory
+        directory = self.enterContext(patch.object(PlatformScopeDirectoryFetcher, "__call__",
+            side_effect=AssertionError("Chat must not read the platform app directory")))
+        self.client.headers.pop("authorization")
         with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(run_model)), mock_request_disconnect():
-            async def send(*, app=None, agent=self.agent, session=None, auth=None):
+            async def send(*, app=None, agent=self.agent, session=None, extra_headers=None):
                 headers = {"x-deep-agent-app": app} if app else {}
-                if auth is not None:
-                    headers["authorization"] = auth
+                headers.update(extra_headers or {})
                 body = {"agent_id": agent, "message": "实际120，预算100，给出差额。"}
                 if session:
                     body["session_id"] = session
@@ -369,10 +360,11 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
 
             legacy = await send()
             scoped = await send(app=APP_A.app_id)
-            self.assertEqual(self.fetch_scope.await_args.kwargs, {"tenant_code": APP_A.tenant_id})
             await send(app=APP_B.app_id)
             await send(app=APP_A.app_id, agent=self.other_agent)
-            await send(app=APP_A.app_id, auth="Bearer unauthorized")
+            await send(app=APP_A.app_id, extra_headers={
+                "x-deepfos-key": "fixture-key", "app": APP_B.app_id, "space": APP_B.space_id,
+            })
             await send(app=APP_A.app_id, session=legacy["session_id"])
             await send(session=scoped["session_id"])
             await self._request("POST", "/api/v1/chat", 409, headers={"x-deep-agent-app": APP_B.app_id}, json={
@@ -382,7 +374,8 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
                 await db.execute(update(IntegrationScopedSettings).where(
                     IntegrationScopedSettings.id == config.id,
                 ).values(settings={**config.settings, "skills": []}))
-            await send(app=APP_A.app_id)
+            await send(session=scoped["session_id"])
+        directory.assert_not_called()
         self.assertNotIn("app:budget001:scoped-report", recorded[-1][0])
         self.assertTrue(all("hidden-report" not in instructions for instructions, _ in recorded))
         self.assertEqual([("fixture-app-rule" in value, "app_id=" in value) for value, _ in recorded],
@@ -405,10 +398,7 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         ))
         await self._save()
         await self._install_with_old_key(APP_A, "scoped-report", hashed=True)
-        self.fetch_scope.return_value = ScopeDirectory(app_scopes={
-            APP_A.app_id: (APP_A.space_id, APP_A.tenant_id),
-            APP_B.app_id: (APP_B.space_id, APP_B.tenant_id),
-        })
+        self.client.headers.pop("authorization")
         seen = []
 
         async def respond(messages, info):
@@ -446,10 +436,6 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
     async def test_scoped_skill_scripts_share_native_and_ptc_authorization(self):
         await self._save()
         await self._install(f"{PATH}/{APP_A.app_id}/skills", scripts=True)
-        self.fetch_scope.return_value = ScopeDirectory(app_scopes={
-            APP_A.app_id: (APP_A.space_id, APP_A.tenant_id),
-            APP_B.app_id: (APP_B.space_id, APP_B.tenant_id),
-        })
         alias = "app:budget001:scoped-report"
 
         def respond(messages, info):

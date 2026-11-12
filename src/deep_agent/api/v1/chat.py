@@ -287,7 +287,7 @@ async def chat(
     )
     message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
     app_context = await resolve_run_app(
-        request, ctx, agent_id=agent_id, user=user, session_id=body.session_id,
+        request, ctx, agent_id=agent_id, session_id=body.session_id,
         headers=execution_request_headers, channel_account=channel_account,
     )
     _apply_scoped_run_headers(app_context, request_headers, execution_request_headers)
@@ -404,7 +404,7 @@ async def chat_stream(
         effort = DEFAULT_EFFORT
     message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
     app_context = await resolve_run_app(
-        request, ctx, agent_id=agent_id, user=user, session_id=body.session_id,
+        request, ctx, agent_id=agent_id, session_id=body.session_id,
         headers=execution_request_headers, channel_account=channel_account,
     )
     _apply_scoped_run_headers(app_context, request_headers, execution_request_headers)

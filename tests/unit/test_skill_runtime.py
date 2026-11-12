@@ -44,7 +44,6 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.stores,
             ["deepagent-diagnostics"],
             runtime=self.runtime,
-            request_headers={},
         )
         seen_instructions: list[str] = []
         seen_messages: list[str] = []
@@ -116,7 +115,6 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.stores,
             ["deepagent-diagnostics"],
             runtime=self.runtime,
-            request_headers={},
         )
         resource_toolset = build_skill_resource_toolset(resolved.resources)
         file_toolset = build_file_toolset(resolved.resources)
@@ -185,13 +183,13 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_file_verification_skill_is_explicit_and_grants_no_scripts(self) -> None:
         unselected = await resolve_skills_for_run(
-            self.stores, [], runtime=self.runtime, request_headers={}
+            self.stores, [], runtime=self.runtime
         )
         self.assertEqual(unselected.available_codes, [])
         self.assertIsNone(unselected.capability)
         selected = await resolve_skills_for_run(
             self.stores, ["file-reading-verification"],
-            runtime=self.runtime, request_headers={},
+            runtime=self.runtime,
         )
         self.assertEqual(selected.available_codes, ["file-reading-verification"])
         self.assertEqual(selected.scripts, {})
@@ -206,7 +204,7 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_selected_file_verification_reference_is_readable(self) -> None:
         selected = await resolve_skills_for_run(
             self.stores, ["file-reading-verification"],
-            runtime=self.runtime, request_headers={},
+            runtime=self.runtime,
         )
         calls = 0
         def respond(_messages, _info: AgentInfo) -> ModelResponse:

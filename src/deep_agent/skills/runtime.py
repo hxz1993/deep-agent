@@ -139,7 +139,8 @@ def skill_platform_file_headers(
     Uploaded Skill packages are shared configuration, not Space-owned business
     files. Preserve the caller/service identity but deliberately strip the
     App/Space/Language business context so upload, restart recovery and
-    Run-time fallback all address the same system-level file.
+    Run-time fallback all address the same system-level file. Runs only use
+    the service identity.
     """
 
     headers = dict(request_headers or {})
@@ -474,7 +475,7 @@ class SkillRuntimeLibrary:
         self,
         row: SkillPackage,
         *,
-        request_headers: Mapping[str, str],
+        request_headers: Mapping[str, str] | None = None,
     ) -> ResolvedSkill | None:
         handled, resolved = self.resolve_materialized(row)
         if handled:
@@ -585,7 +586,6 @@ async def resolve_skills_for_run(
     codes: list[str],
     *,
     runtime: SkillRuntimeLibrary,
-    request_headers: Mapping[str, str],
     app_id: str | None = None,
     scope_ref: str | None = None,
     app_skill_codes: tuple[str, ...] = (),
@@ -602,7 +602,7 @@ async def resolve_skills_for_run(
     if not codes:
         return ResolvedSkills(configured=(), items=(), unavailable=(), capability=None)
 
-    def authorized(row, key):
+    def matching_scope(row, key):
         expected = scope_ref if key in scoped else GENERAL_SKILL_SCOPE
         return row if row is not None and (getattr(row, "scope_ref", None) or GENERAL_SKILL_SCOPE) == expected else None
     builtins = {item.code: item for item in list_builtin_skills()}
@@ -612,15 +612,15 @@ async def resolve_skills_for_run(
     if len(uploads) == 1:
         code = uploads[0]
         async with runtime.coordinated_row(stores, code) as row:
-            row = authorized(row, code)
-            resolved = await runtime.resolve(row, request_headers=request_headers) if row is not None else None
+            row = matching_scope(row, code)
+            resolved = await runtime.resolve(row) if row is not None else None
             return _assemble_skills(codes, builtins, {code: _upload_result(runtime, code, row, resolved)}, scoped)
 
     cold: list[str] = []
     async with runtime.coordinated_rows(stores, uploads) as rows:
         ready = {}
         for code in uploads:
-            row = authorized(rows.get(code), code)
+            row = matching_scope(rows.get(code), code)
             handled, resolved = runtime.resolve_materialized(row) if row is not None else (True, None)
             if handled:
                 ready[code] = _upload_result(runtime, code, row, resolved)
@@ -634,13 +634,13 @@ async def resolve_skills_for_run(
     # replaced while we were waiting on a cold download.
     for code in cold:
         async with runtime.coordinated_row(stores, code) as row:
-            row = authorized(row, code)
+            row = matching_scope(row, code)
             if row is not None:
-                await runtime.resolve(row, request_headers=request_headers)
+                await runtime.resolve(row)
     async with runtime.coordinated_rows(stores, uploads) as rows:
         ready = {}
         for code in uploads:
-            row = authorized(rows.get(code), code)
+            row = matching_scope(rows.get(code), code)
             _, resolved = runtime.resolve_materialized(row) if row is not None else (True, None)
             ready[code] = _upload_result(runtime, code, row, resolved)
         return _assemble_skills(codes, builtins, ready, scoped)

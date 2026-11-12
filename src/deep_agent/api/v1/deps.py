@@ -264,7 +264,6 @@ async def _build_runner_from_spec(
         ctx.stores,
         spec.skills,
         runtime=ctx.skill_runtime,
-        request_headers=request_headers or {},
         app_id=app_context.app_id if app_context else None,
         scope_ref=app_context.skill_scope if app_context else None,
         app_skill_codes=app_context.skill_codes if app_context else (),

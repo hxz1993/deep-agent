@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from deep_agent.db.models import IntegrationScopedSettings, SkillPackage
+from deep_agent.db.models import IntegrationScopedSettings, IntegrationSettings, SkillPackage
 from deep_agent.db.reference_integrity import ReferenceConflict
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.integrations.app_scope import (
@@ -73,6 +73,18 @@ class IntegrationAppStore(SessionBoundMixin):
         async with self._read() as db:
             row = (await db.scalars(_select_scope(key))).one_or_none()
             return row if row is not None and row.scope_key == key else None
+
+    async def get_for_agent(self, app_id: str, space_id: str, agent_id: str) -> IntegrationScopedSettings | None:
+        key = app_scope_key(app_id, space_id)
+        query = _select_scope(key).join(
+            IntegrationSettings, IntegrationSettings.code == IntegrationScopedSettings.integration_code,
+        ).add_columns(IntegrationSettings.settings)
+        async with self._read() as db:
+            match = (await db.execute(query)).one_or_none()
+            if match is None:
+                return None
+            scope, binding = match
+            return scope if scope.scope_key == key and binding.get("agent_id") == agent_id else None
 
     async def list_for_tenants(self, tenant_ids: set[str]) -> list[tuple[IntegrationScopedSettings, int]]:
         if not tenant_ids:

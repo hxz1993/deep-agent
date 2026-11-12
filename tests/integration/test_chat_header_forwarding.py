@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from pydantic_ai.models.test import TestModel
 
@@ -50,7 +50,6 @@ class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
         from httpx import ASGITransport, AsyncClient
         from deep_agent.core.context import get_context
         from deep_agent.schemas.channel import ChannelAccountCreate, ChannelAccountUpdate
-        from deep_agent.services.scope_names import ScopeDirectory
 
         from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, UserPromptPart
         from pydantic_ai.models.function import DeltaToolCall, FunctionModel
@@ -86,8 +85,7 @@ class ChatHeaderForwardingStreamTest(unittest.IsolatedAsyncioTestCase):
             body = {"agent_id": app.state.test_agent_id, "session_id": session_id, "message": "inspect headers", "capabilities": ["mcp:echo"]}
             with patch.dict(os.environ, {"DEEP_AGENT_CHANNEL_INTERNAL_TOKEN": "fixture-internal"}), patch(
                 "deep_agent.agent.factory._resolve_model", return_value=model
-            ), patch("deep_agent.services.integration_app_runtime.PlatformScopeDirectoryFetcher",
-                     return_value=AsyncMock(return_value=ScopeDirectory())):
+            ):
                 for app_id, key in (("first001", None), ("second002", "fixture-only-space-key"), (None, None)):
                     await store.update_account(account.id, ChannelAccountUpdate(settings={
                         "deepfos": {"enabled": app_id is not None, "app_id": app_id, "api_key": key},

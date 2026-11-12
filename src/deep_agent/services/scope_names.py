@@ -142,15 +142,20 @@ class PlatformScopeDirectoryFetcher:
         on_success, on_failure, base_url = await discovery.get_url(self._service)
         return concat_url(base_url, "space-app-list"), on_success, on_failure
 
-    async def __call__(self, headers: Mapping[str, str]) -> ScopeDirectory:
+    async def __call__(
+        self, headers: Mapping[str, str], *, tenant_code: str | None = None, timeout_seconds: float = 2.0,
+    ) -> ScopeDirectory:
         response = None
         on_failure = None
         try:
             url, on_success, on_failure = await self._resolve_url()
+            params = {"enableSpecialGroup": "false"}
+            if tenant_code:
+                params["tenantCode"] = tenant_code
             response = await AioHttpCli.post(
-                url, params={"enableSpecialGroup": "false"}, headers=dict(headers),
+                url, params=params, headers=dict(headers),
                 json=[],
-                timeout=aiohttp.ClientTimeout(connect=2.0, total=2.0), allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(connect=2.0, total=timeout_seconds), allow_redirects=False,
             )
             if not 200 <= response.status < 300:
                 raise ScopeDirectoryUnavailableError("scope directory unavailable")

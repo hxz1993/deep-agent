@@ -4,6 +4,7 @@
   const spreadsheetCode = 'deeptable-assistant';
   const appPath = '/api/v1/integrations/deeptable-assistant/app-configs';
   const pickerPageSize = 100;
+  const pickerCacheMs = 30_000;
   const pathFor = id => `${appPath}/${encodeURIComponent(id)}`;
   const agentEditor = {
     summary(settings, agents) {
@@ -242,7 +243,19 @@
       el('integrationAppPickerTenants').replaceChildren();
       this.renderAppChoices(picker);
       el('integrationAppPicker').showModal();
-      void this.loadAppChoices(picker);
+      const cached = this.appChoicesCache;
+      if (cached && cached.expiresAt > Date.now()) this.setAppChoices(picker, cached.apps);
+      else void this.loadAppChoices(picker);
+    },
+    setAppChoices(picker, apps) {
+      picker.apps = apps;
+      picker.state = 'ready';
+      const tenants = new Map(apps.map(app => [app.tenant_id, app.tenant_name || app.tenant_id]));
+      const choices = [...tenants].sort((a, b) => a[1].localeCompare(b[1], 'zh-CN'));
+      el('integrationAppPickerTenants').innerHTML = [['', '全部企业'], ...choices].map(([id, name]) =>
+        `<button type="button" class="integration-directory-item" data-picker-tenant="${escapeHtml(id)}" aria-pressed="false"><span title="${escapeHtml(name)}">${escapeHtml(name)}</span></button>`
+      ).join('');
+      this.renderAppChoices(picker);
     },
     async loadAppChoices(picker) {
       if (this.appPicker !== picker || picker.directoryRequest) return;
@@ -255,14 +268,8 @@
         const apps = await apiFetch(`${appPath}/available`, { signal: controller.signal, reportStatus: false });
         if (this.appPicker !== picker) return;
         if (!Array.isArray(apps)) throw new Error('应用列表加载失败。');
-        picker.apps = apps;
-        picker.state = 'ready';
-        const tenants = new Map(apps.map(app => [app.tenant_id, app.tenant_name || app.tenant_id]));
-        const choices = [...tenants].sort((a, b) => a[1].localeCompare(b[1], 'zh-CN'));
-        el('integrationAppPickerTenants').innerHTML = [['', '全部企业'], ...choices].map(([id, name]) =>
-          `<button type="button" class="integration-directory-item" data-picker-tenant="${escapeHtml(id)}" aria-pressed="false"><span title="${escapeHtml(name)}">${escapeHtml(name)}</span></button>`
-        ).join('');
-        this.renderAppChoices(picker);
+        this.appChoicesCache = { apps, expiresAt: Date.now() + pickerCacheMs };
+        this.setAppChoices(picker, apps);
       } catch (error) {
         if (this.appPicker !== picker) return;
         picker.state = 'error';
@@ -473,6 +480,7 @@ ${escapeHtml(JSON.stringify(spec.response_example, null, 2))}</code></pre>`;
     },
     deactivate() {
       if (this.busy || this.appBusy || (this.app && window.skillsAdmin?.installing)) return false;
+      this.appChoicesCache = null;
       this.closeAppPicker();
       this.closeApp(false);
       ++this.listGeneration; ++this.apiGeneration; this.listController?.abort(); this.apiController?.abort(); this.closeConfig(false); return true;
@@ -496,7 +504,10 @@ ${escapeHtml(JSON.stringify(spec.response_example, null, 2))}</code></pre>`;
     el('integrationAppsTab')?.addEventListener('click', () => admin.openTab('apps'));
     el('integrationApiTab')?.addEventListener('click', () => admin.openTab('api'));
     el('retryIntegrationAppsBtn')?.addEventListener('click', () => admin.loadApps());
-    el('refreshIntegrationAppsBtn')?.addEventListener('click', () => admin.loadApps());
+    el('refreshIntegrationAppsBtn')?.addEventListener('click', () => {
+      admin.appChoicesCache = null;
+      void admin.loadApps();
+    });
     el('integrationAppSearch')?.addEventListener('input', () => admin.renderApps());
     el('integrationTenantFilter')?.addEventListener('change', () => admin.renderApps());
     el('addIntegrationAppBtn')?.addEventListener('click', () => admin.addApp());

@@ -5,7 +5,7 @@ import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSel
 import { diagnosticTime } from "./diagnostics.js?v=20261019-release0138";
 import { diagnosticTarget, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
-import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261019-release0138";
+import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261112-busy-retry";
 import { createReadonlySessionView } from "./diagnostic-detail.js?v=0160-audit";
 import { ensureSessionViewTemplate } from "./session-view-shell.js?v=20261025-readonly-load2";
 

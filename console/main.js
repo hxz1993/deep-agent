@@ -3,7 +3,7 @@ import "./assets/deepagent-pet/sprite-pet.js?v=0161-pet-transitions";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
 import { initConsoleSelects } from "./ui-select.js?v=0160-session-groups";
-import { bindContextControls, refreshIdentity } from "./context.js?v=0162-integration-apps";
+import { bindContextControls, refreshIdentity } from "./context.js?v=0167-app-directory";
 import { createPageLoader } from "./page-loader.js?v=20261023-console-load1";
 import "./time.js?v=20260913-49";
 import "./configuration-directory.js?v=20261019-release0137";
@@ -32,19 +32,19 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=0165-scenario-skill-dismiss");
+    const module = await import("./configuration.js?v=0167-app-directory");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=0160-session-audit");
+    const module = await import("./workspace.js?v=0166-connection-status");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=0160-audit");
+    const module = await import("./diagnostics-center.js?v=20261112-busy-retry");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;
@@ -78,6 +78,33 @@ async function loadProductVersion() {
   } catch (error) {
     target.textContent = "v—";
     target.title = `版本信息加载失败：${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+let connectionStatusRevision = 0;
+
+function setConnectionStatus(kind, text) {
+  const status = document.getElementById("connStatus");
+  if (!status) return;
+  connectionStatusRevision += 1;
+  status.classList.toggle("ok", kind === "ok");
+  status.classList.toggle("err", kind === "err");
+  status.querySelector(".conn-text").textContent = text;
+}
+
+async function checkHealth() {
+  const revision = connectionStatusRevision;
+  try {
+    const response = await daFetch(serviceUrl("health"), {
+      includeContext: false,
+      reportStatus: false,
+      signal: AbortSignal.timeout(5000),
+    });
+    if (revision !== connectionStatusRevision) return;
+    if (response.ok) setConnectionStatus("ok", "已连接");
+    else setConnectionStatus("err", `HTTP ${response.status}`);
+  } catch {
+    if (revision === connectionStatusRevision) setConnectionStatus("err", "未连接");
   }
 }
 
@@ -392,7 +419,7 @@ function hideAccessLock() {
 }
 
 async function boot() {
-  window.DeepAgentConsole = { showPage, toast };
+  window.DeepAgentConsole = { showPage, toast, setConnectionStatus };
   bindNavigation();
   bindThemes();
   bindContextControls();
@@ -450,6 +477,7 @@ async function boot() {
     return;
   }
 
+  void checkHealth();
   await showPage(pageFromLocation(), { updateHash: true });
 }
 

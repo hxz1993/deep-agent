@@ -220,12 +220,16 @@ function toggleContextAppChoices(open) {
   void daFetch(serviceUrl("/api/v1/integrations/deeptable-assistant/app-configs"), {
     signal: controller.signal, reportStatus: false,
   }).then(async response => {
-    const data = response.ok ? await response.json() : [];
+    if (!response.ok) throw new Error("应用列表读取失败");
+    const data = await response.json();
     if (appOptionsRequest !== controller) return;
-    appOptions = Array.isArray(data) ? data : [];
+    if (!Array.isArray(data)) throw new Error("应用列表返回格式错误");
+    appOptions = data;
     renderContextAppChoices();
   }).catch(() => {
-    if (appOptionsRequest === controller) choices.textContent = "暂无法读取应用列表，可直接输入应用 ID。";
+    if (appOptionsRequest === controller && appOptions === null) {
+      choices.textContent = "暂无法读取应用列表，可直接输入应用 ID。";
+    }
   }).finally(() => { if (appOptionsRequest === controller) appOptionsRequest = null; });
 }
 

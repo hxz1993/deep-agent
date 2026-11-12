@@ -11,7 +11,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "0165-scenario-skill-dismiss";
+const CONFIGURATION_ASSET_VERSION = "0167-app-directory";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",

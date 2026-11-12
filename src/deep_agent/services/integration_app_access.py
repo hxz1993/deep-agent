@@ -16,7 +16,7 @@ from deep_agent.security.console_admin import (
     ConsoleAdminAuthenticationError,
     forwarded_platform_auth_headers,
 )
-from deep_agent.services.scope_names import PlatformScopeDirectoryFetcher, _name
+from deep_agent.services.scope_names import PlatformScopeDirectoryFetcher, ScopeDirectory, _name
 from deepfos_platform.discovery import ServiceDiscovery
 from deepfos_platform.discovery.target import normalize_service_target
 from deepfos_platform.lib.httpcli import AioHttpCli
@@ -229,41 +229,75 @@ class IntegrationAppDirectory:
             self._headers.get("app"), self._headers.get("space")
         ) == (app_id, space_id)
 
+    async def _app_directories(self, candidates, tenants) -> list[ScopeDirectory]:
+        fetch = PlatformScopeDirectoryFetcher()
+        if candidates is None:
+            # The picker explicitly requests the full catalog.
+            async with asyncio.timeout(5):
+                return [await fetch(self._headers, timeout_seconds=5)]
+
+        async def load(tenant_code: str) -> ScopeDirectory:
+            async with self._parallel:
+                return await fetch(self._headers, tenant_code=tenant_code)
+
+        codes = sorted({tenant_code for _, tenant_code in candidates.values()} & tenants.keys())
+        async with asyncio.timeout(5):
+            results = await asyncio.gather(*(load(code) for code in codes), return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        return results
+
     async def available_apps(
         self, *, candidates: Mapping[str, tuple[str, str]] | None = None,
         tenants: Mapping[str, Enterprise] | None = None,
     ) -> list[ManagedApp]:
-        if tenants is None:
-            tenants = await self.tenants()
-        if not tenants or candidates == {}:
+        if candidates == {}:
             return []
         try:
-            async with asyncio.timeout(2):
-                directory = await PlatformScopeDirectoryFetcher()(self._headers)
+            if tenants is None and candidates is None:
+                tenants, directories = await asyncio.gather(
+                    self.tenants(), self._app_directories(None, {}), return_exceptions=True,
+                )
+                if isinstance(tenants, BaseException):
+                    raise tenants
+                if not tenants:
+                    return []
+                if isinstance(directories, BaseException):
+                    raise directories
+            else:
+                if tenants is None:
+                    tenants = await self.tenants()
+                if not tenants:
+                    return []
+                directories = await self._app_directories(candidates, tenants)
+        except IntegrationAppAccessError:
+            raise
         except Exception as exc:
             raise IntegrationAppAccessError(503, "应用目录暂不可用，请稍后重试。") from exc
 
-        apps = []
-        for app_id, (space_id, tenant_id) in directory.app_scopes.items():
-            if tenant_id not in tenants or not self._allows_app(app_id, space_id):
-                continue
-            if candidates is not None and candidates.get(app_id) != (space_id, tenant_id):
-                continue
-            try:
-                if app_space(app_id) != space_id:
+        apps = {}
+        for directory in directories:
+            for app_id, (space_id, tenant_id) in directory.app_scopes.items():
+                if tenant_id not in tenants or not self._allows_app(app_id, space_id):
                     continue
-            except IntegrationAppAccessError:
-                continue
-            apps.append(ManagedApp(
-                app_id, space_id, tenant_id, directory.apps.get(app_id, app_id),
-                tenants[tenant_id].name, directory.spaces.get(space_id, ""),
-            ))
+                if candidates is not None and candidates.get(app_id) != (space_id, tenant_id):
+                    continue
+                try:
+                    if app_space(app_id) != space_id:
+                        continue
+                except IntegrationAppAccessError:
+                    continue
+                apps[app_id] = ManagedApp(
+                    app_id, space_id, tenant_id, directory.apps.get(app_id, app_id),
+                    tenants[tenant_id].name, directory.spaces.get(space_id, ""),
+                )
 
         if self._headers.get("x-deepfos-key"):
             # The bulk endpoint seeds its result with supplied App/Space headers.
             # A scoped key must retain those headers and use the point check.
-            return [app for app in apps if await self._can_configure(app.app_id, app.space_id)]
-        tenant_codes = sorted({app.tenant_id for app in apps})
+            return [app for app in apps.values() if await self._can_configure(app.app_id, app.space_id)]
+        tenant_codes = sorted({app.tenant_id for app in apps.values()})
 
         async def load_permissions(code: str) -> EnterprisePermissions:
             return enterprise_permissions(await self._once(
@@ -277,7 +311,7 @@ class IntegrationAppDirectory:
                 raise result
             permissions[code] = result
         return sorted(
-            (app for app in apps if permissions[app.tenant_id].allows(app)),
+            (app for app in apps.values() if permissions[app.tenant_id].allows(app)),
             key=lambda app: (app.app_name.casefold(), app.app_id),
         )
 

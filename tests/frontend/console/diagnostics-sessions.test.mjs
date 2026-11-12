@@ -91,6 +91,27 @@ function sessionHarness(request = async () => overview()) {
   };
 }
 
+test("a busy diagnostic read retries once and a cancelled read never retries", async () => {
+  const busy = Object.assign(new Error("诊断查询繁忙，请稍后重试"), { status: 503 });
+  let attempts = 0;
+  const reader = createSessionReader(async () => {
+    if (++attempts === 1) throw busy;
+    return session();
+  });
+  assert.equal((await reader.begin().get("session")).session_id, "session-full-id");
+  assert.equal(attempts, 2);
+
+  const cancelled = createSessionReader(async () => {
+    attempts += 1;
+    throw busy;
+  });
+  const pending = cancelled.begin().get("session");
+  await turn();
+  cancelled.cancel();
+  await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(attempts, 3);
+});
+
 test("direct detail waits for its readonly template without starting workspace requests", async () => {
   const gate = deferred(), h = sessionHarness(async () => session());
   h.context.ensureSessionViewTemplate = () => gate.promise;

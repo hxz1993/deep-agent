@@ -227,7 +227,6 @@ const el = {
   sessionList: $("sessionList"),
   capList: $("capList"),
   agentSelect: $("agentSelect"),
-  connStatus: $("connStatus"),
   sessionBadge: $("sessionBadge"),
   copySessionIdBtn: $("copySessionIdBtn"),
   chatTitle: $("chatTitle"),
@@ -688,7 +687,6 @@ function init() {
   document.getElementById("sessionSearchInput")?.addEventListener("input", scheduleSessionSearch);
   document.getElementById("sessionSearchInput")?.addEventListener("compositionend", scheduleSessionSearch);
   bindSessionListFeedback();
-  checkHealth();
   loadCapabilities();
   loadUploadCapabilities();
   window.addEventListener("document-parsing-settings-changed", () => { void loadUploadCapabilities({ force: true }); });
@@ -2053,24 +2051,7 @@ function startInlineEdit(session, titleElement) {
   });
 }
 
-/* --------------------------- 健康检查 / 能力 --------------------------- */
-async function checkHealth() {
-  setConn("pending", "检测中…");
-  try {
-    const r = await daFetch(serviceUrl("health"), { method: "GET" });
-    if (r.ok) setConn("ok", "已连接");
-    else setConn("err", `HTTP ${r.status}`);
-  } catch (_) {
-    setConn("err", "未连接");
-  }
-}
-
-function setConn(kind, text) {
-  el.connStatus.classList.toggle("ok", kind === "ok");
-  el.connStatus.classList.toggle("err", kind === "err");
-  el.connStatus.querySelector(".conn-text").textContent = text;
-}
-
+/* ------------------------------- 能力 ------------------------------- */
 async function loadAgents({ isCurrent = () => true } = {}) {
   if (!el.agentSelect) return;
   if (!state.agents.length) el.agentSelect.innerHTML = '<option value="">加载中…</option>';
@@ -2626,7 +2607,7 @@ async function runChatStream(payload, assistant) {
       } catch { /* Non-JSON upstream errors keep their response text. */ }
       throw new Error(detail || `HTTP ${resp.status}`);
     }
-    if (current()) setConn("ok", "已连接");
+    if (current()) window.DeepAgentConsole?.setConnectionStatus?.("ok", "已连接");
 
     await readSse(resp.body, (evt) => {
       if (streamController.signal.aborted) return;
@@ -2660,7 +2641,7 @@ async function runChatStream(payload, assistant) {
       // Transport cleanup (page unload/network teardown), not a user stop result.
       applyAssistantPresentationActions(assistant, assistantActionsFromSse("error"));
     } else {
-      setConn("err", "请求失败");
+      window.DeepAgentConsole?.setConnectionStatus?.("err", "请求失败");
       trajectory?.ingest({ event: "error", data: { message: e.message } });
       failAutomaticContextCompaction("上下文压缩后续请求失败，未生成压缩事件");
       clearComposerPlan();

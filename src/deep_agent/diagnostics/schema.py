@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from .messages import describe
 
 EVENTS = {
+    "integration_app_context": "已检查会话应用专用配置",
     "document_configuration_updated": "文档解析配置已更新",
     "document_parse_started": "文档解析开始",
     "document_parse_phase": "文档解析阶段更新",

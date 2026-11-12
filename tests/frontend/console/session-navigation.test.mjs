@@ -71,7 +71,8 @@ function streamHarness() {
       indicator, remove };
   });
   const h=vm.createContext({state,frames,calls,AbortController,Set,readSse,
-    el:{sessionList:{querySelectorAll:()=>rows}},serviceUrl:x=>x,setConn:noop,
+    el:{sessionList:{querySelectorAll:()=>rows}},serviceUrl:x=>x,
+    window:{DeepAgentConsole:{setConnectionStatus:noop}},
     sessionLookupKey:s=>`${s.agentId}:${s.id}`,updateHitlInputState:noop,
     stopHistoryObservation:noop,setStreaming:v=>{state.streaming=v;},
     applyAssistantPresentationActions:noop,assistantActionsFromSse:noop,

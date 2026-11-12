@@ -109,7 +109,8 @@ function streamHarness() {
   const calls = [];
   const noop = () => {};
   const context = { state, calls, AbortController, boundedStreamRequest,
-    serviceUrl: (url) => url, setConn: noop, trajectory: null,
+    serviceUrl: (url) => url, trajectory: null,
+    window: { DeepAgentConsole: { setConnectionStatus: noop } },
     updateSessionRunIndicators: noop,
     applyAssistantPresentationActions: noop, assistantActionsFromSse: noop,
     failAutomaticContextCompaction: noop, clearComposerPlan: noop, addErrorTo: noop,

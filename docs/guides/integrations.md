@@ -56,7 +56,7 @@ Alembic `004` 在 `003` 后仅新增 `integration_settings`，不改旧表、旧
 
 进入 Console 仍需企业管理员身份。能管理哪一个 App 由目标 App 的平台权限决定：其所属企业管理员、所属空间管理员、该 App 的管理员或开发者均可配置；普通 App 访问权不够。配置备份导入和全量 Skill 导出仍按原企业管理员权限核验。
 
-两个列表复用平台账户的企业范围与空间／应用目录，再按相关企业批量读取企业管理员、空间管理员和 App 管理员／开发者授权；普通登录不逐 App 调接口。弹窗确定后直接读详情，详情和每次写入仍由服务端核验目标 App；App 绑定 API Key 始终限定到其绑定应用。
+已配置列表只查有相关配置的企业。添加应用时并行读取平台企业范围和完整候选目录，再按企业批量核验配置权限。弹窗短时间重开可复用候选，刷新列表或离开场景页面后重新读取。弹窗确定后直接读详情，详情和每次写入仍由服务端核验目标 App；App 绑定 API Key 始终限定到其绑定应用。
 
 应用配置独立于共用 Agent。作用域键是平台验证后的 `space_id/app_id`，企业 ID 用于核验和筛选。
 `settings.prompt_append` 最多 4000 字，`settings.skills` 存当前集成启用的原包编码。上传同时保存 App 包和引用，保存提示词保留引用。移除配置会删除其独占的包，共享包继续供其他引用使用。清空关联 Agent 只清除集成使用的 Agent。
@@ -65,7 +65,7 @@ Skill 包直接归 App，`skill_packages.scope_ref` 存 `app:<App ID>`。同一 
 
 新 ASCII 包的内部键为 `app-pkg--<App ID>--<包编码>`，Unicode 包使用哈希键。已安装的旧包保留原主键、文件和缓存路径。已有 `015` 数据按[应用 Skill 数据转换](../../src/maintenance/README.md#应用-skill-数据转换)处理。全量配置备份中的专用包由 `GET /api/v1/configuration/skills/export` 导出，恢复时核验同 Revision、App 归属、企业权限和包摘要。
 
-运行时按当前用户的平台访问权核验 App 与 Space，每轮只向模型提供应用上下文。仅当前 Agent 为电子表格助手的关联 Agent 且该 App 有配置时，追加该应用的提示词及配置清单引用的 Skill。同一业务口径优先采用应用专用内容，通用内容和平台授权照常生效。专用 Skill 的 `load_capability` 使用目录提供的 ID，例如 `app--budget001--monthly-report`。读取资源、执行脚本及 PTC 使用 `skill_code`，例如 `app:budget001:monthly-report`。旧会话使用已保存的 App 与 Space，新选择的调试 App 用于新会话。权限目录暂时无法核验时，本轮使用通用配置。
+运行时按当前用户的平台访问权核验 App 与 Space。当前 Agent 为电子表格助手的关联 Agent 且该 App 有配置时，按配置所属企业查询权限，校验通过后追加该应用的提示词及引用的 Skill。同一业务口径优先采用应用专用内容，通用内容和平台授权照常生效。专用 Skill 的 `load_capability` 使用目录提供的 ID，例如 `app--budget001--monthly-report`。读取资源、执行脚本及 PTC 使用 `skill_code`，例如 `app:budget001:monthly-report`。旧会话使用已保存的 App 与 Space，新选择的调试 App 用于新会话。权限目录暂时无法核验时，本轮使用通用配置。排查可查看 `integration_app_context` 诊断记录中的状态与耗时。
 
 管理接口以 `/api/v1/integrations/deeptable-assistant/app-configs` 为前缀。
 

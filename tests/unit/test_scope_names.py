@@ -104,6 +104,16 @@ class PlatformScopeDirectoryFetcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args["timeout"].total, 2)
         self.assertTrue(response.released)
 
+    async def test_tenant_filter_preserves_caller_auth_and_restricts_platform_query(self):
+        response = Response(DIRECTORY)
+        with patch("deep_agent.services.scope_names.AioHttpCli.post", AsyncMock(return_value=response)) as post:
+            await PlatformScopeDirectoryFetcher(system_service="https://system.example")(
+                {"user": "caller", "authorization": "Bearer test"}, tenant_code="enterprise-a",
+            )
+        self.assertEqual(post.call_args.kwargs["params"], {"enableSpecialGroup": "false", "tenantCode": "enterprise-a"})
+        self.assertEqual(post.call_args.kwargs["headers"]["user"], "caller")
+        self.assertTrue(response.released)
+
     async def test_logical_http_service_uses_discovery_and_configured_gateway_does_not(self):
         discovery = Mock(closed=False)
         success, failure = Mock(), Mock()

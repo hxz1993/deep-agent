@@ -190,10 +190,12 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call.args[1] for call in self.platform.await_args_list],
                          ["api/enterprise/list", "user-permission", "user-permission"])
         self.directory.assert_awaited_once()
+        self.assertEqual(self.directory.await_args.kwargs, {"timeout_seconds": 5})
         route = f"{PATH}/{APP_C.app_id}"
         self.assertIsNone((await self._request("GET", route, 200)).json()["config_id"])
         saved = await self._save(APP_C)
         saved_rows = (await self._request("GET", PATH, 200)).json()
+        self.assertEqual(self.directory.await_args.kwargs, {"tenant_code": APP_C.tenant_id})
         self.assertEqual([(row["app_id"], row["tenant_id"]) for row in saved_rows], [(APP_C.app_id, "tenant-2")])
         await self._request("GET", f"{PATH}/other002", 404)
         await self._request("PUT", f"{PATH}/other002", 404, json={"prompt_append": "denied"})
@@ -348,8 +350,10 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
                 recorded.append((info.instructions or "", tool_names))
             return ModelResponse(parts=[TextPart("差额 20，差异率 20%。")])
 
-        async def directory(headers):
+        async def directory(headers, *, tenant_code):
             scopes = {APP_A.app_id: (APP_A.space_id, APP_A.tenant_id), APP_B.app_id: (APP_B.space_id, APP_B.tenant_id)}
+            if tenant_code is not None:
+                scopes = {app_id: scope for app_id, scope in scopes.items() if scope[1] == tenant_code}
             return ScopeDirectory(app_scopes=scopes if headers.get("authorization") == "Bearer fixture-only" else {})
 
         self.fetch_scope.side_effect = directory
@@ -365,6 +369,7 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
 
             legacy = await send()
             scoped = await send(app=APP_A.app_id)
+            self.assertEqual(self.fetch_scope.await_args.kwargs, {"tenant_code": APP_A.tenant_id})
             await send(app=APP_B.app_id)
             await send(app=APP_A.app_id, agent=self.other_agent)
             await send(app=APP_A.app_id, auth="Bearer unauthorized")

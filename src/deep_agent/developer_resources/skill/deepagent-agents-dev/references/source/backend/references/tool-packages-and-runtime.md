@@ -142,6 +142,7 @@ Request/session state
 
 - 应用配置归 `deeptable-assistant` 集成。管理员用 `/api/v1/integrations/deeptable-assistant/app-configs/{app_id}/skills` 管理专用包，路径里的 Skill 编码使用 ZIP 原编码。通用 Skill 和不同应用可以同名，同一应用内重复安装返回 409。
 - 每轮先核对会话的 App/Space、调用者访问权与集成关联 Agent，再追加对应提示词和专用包。模型通过目录给出的 `app--<App ID>--<包编码>` 加载说明，通过 `app:<App ID>:<包编码>` 读取资源或执行脚本。两种编码都与数据库存储键分开。
+- 有应用配置时按其所属企业查询权限。目录超时或权限无法确认时本轮使用通用配置。用 `integration_app_context` 诊断记录核对状态与耗时，再判断是否需要调整提示词。
 - `scope_ref=app:<App ID>` 标识包归属，集成的 `settings.skills` 决定追加哪些包。移除集成应用配置时清理独占包，共享包保留。旧包的主键和缓存保留，普通 Agent ZIP 只含通用 Skill。
 
 ## 安全扩展规则

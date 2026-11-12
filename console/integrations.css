@@ -142,6 +142,9 @@ dialog.console-action-dialog.integration-app-picker[data-variant="form"] {
 .integration-app-picker-tenants,
 .integration-app-picker-apps { min-width: 0; }
 .integration-app-picker-tenants {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding-right: 10px;
   border-right: 1px solid var(--border);
 }
@@ -152,7 +155,10 @@ dialog.console-action-dialog.integration-app-picker[data-variant="form"] {
   font-size: var(--ui-font-helper);
 }
 #integrationAppPickerTenants {
-  max-height: clamp(170px, 41dvh, 346px);
+  flex: 1;
+  min-height: 0;
+  /* Let the app pane size the grid row, regardless of the tenant count. */
+  contain: size;
   overflow: auto;
   overscroll-behavior: contain;
 }

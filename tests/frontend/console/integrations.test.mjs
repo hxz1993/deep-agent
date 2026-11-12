@@ -172,6 +172,32 @@ test('添加应用的搜索能直接找到尚未显示的应用', async () => {
  assert.equal(h.requests.length, 1);
 });
 
+test('短时间内重开添加应用复用候选，过期后重新读取', async () => {
+ const app = { app_id:'budget001', app_name:'年度预算', space_id:'budget', tenant_id:'tenant' };
+ const h = harness(async () => [app]);
+ h.admin.selectedCode = 'deeptable-assistant';
+ h.node('integrationAppPickerOptions').parentElement = { scrollTop: 0 };
+ const dialog = h.node('integrationAppPicker');
+ dialog.showModal = () => { dialog.open = true; };
+ dialog.close = () => { dialog.open = false; };
+ h.admin.addApp();
+ await new Promise(resolve => setImmediate(resolve));
+ assert.equal(h.admin.appPicker.apps[0].app_id, 'budget001');
+
+ h.admin.closeAppPicker();
+ h.admin.addApp();
+ assert.equal(h.admin.appPicker.state, 'ready');
+ assert.equal(h.requests.length, 1);
+
+ h.admin.closeAppPicker();
+ h.admin.appChoicesCache.expiresAt = 0;
+ h.admin.addApp();
+ assert.equal(h.requests.length, 2);
+ await new Promise(resolve => setImmediate(resolve));
+ h.admin.deactivate();
+ assert.equal(h.admin.appChoicesCache, null);
+});
+
 test('加载或重试失败时输入筛选，不会提前显示空状态', async () => {
  const pending=deferred();
  const h=harness(()=>pending.promise);

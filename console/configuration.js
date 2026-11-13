@@ -11,7 +11,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "0167-app-directory";
+const CONFIGURATION_ASSET_VERSION = "0170a1-agent-service";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -20,6 +20,7 @@ const CONFIGURATION_TABS = new Set([
   "mcp",
   "channels",
   "integrations",
+  "agent-service",
   "global-settings",
 ]);
 let activeConfigurationTab = "agents";
@@ -119,6 +120,7 @@ async function loadAdminScripts() {
     "./configuration/channel-registration.js",
     "./configuration/channels.js",
     "./configuration/app-picker.js",
+    "./configuration/agent-service.js",
     "./configuration/integrations.js",
   ];
   const scriptUrls = new Set(scripts.map((src) => versionedAsset(src).href));
@@ -182,6 +184,7 @@ export function refreshCurrentConfiguration() {
   if (active === "tools") return window.toolsAdmin?.refresh();
   if (active === "skills") return window.skillsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();
+  if (active === "agent-service") return window.agentServiceAdmin?.refresh();
   if (active === "integrations") return window.integrationsAdmin?.refresh();
   if (active === "channels") return window.channelsAdmin?.refresh();
   return null;

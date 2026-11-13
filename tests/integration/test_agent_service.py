@@ -1,0 +1,465 @@
+"""Exercise the standard A2A wire contract with the real Runner and SQLite."""
+from __future__ import annotations
+
+import asyncio
+import base64
+import io
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from a2a import types as wire
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from PIL import Image
+from pydantic_ai.messages import BinaryContent, ModelResponse, TextPart, ToolCallPart, UserPromptPart
+from pydantic_ai.models.function import FunctionModel
+
+from deep_agent.agent_service.publications import PublicationCreate, PublicationStore
+from deep_agent.agent_service.tasks import Result
+from deep_agent.api.v1 import api_router
+from deep_agent.capabilities import build_registry
+from deep_agent.sandbox import SubprocessBackend
+from deep_agent.schemas.agent import AgentCreate, AgentUpdate
+from tests.helpers.sandbox import sandbox_test_python
+
+from deep_agent.core.context import AppContext, init_context, reset_context
+from deep_agent.files.storage import LocalFileStore
+from deep_agent.security import ConsoleAdminAuthorizer
+from deep_agent.services.integration_app_access import IntegrationAppAccessError
+from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
+
+ROOT = "/api/v1/agent-service"
+HEADERS = {"authorization": "Bearer fixture-owner", "app": "budget001", "space": "budget", "A2A-Version": "1.0"}
+
+
+class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        tmp = tempfile.TemporaryDirectory(prefix="TMP_to_delete_a2a_")
+        self.addCleanup(tmp.cleanup)
+        directory = Path(tmp.name)
+        stores, engine, factory = await make_sqlite_stores(f"sqlite+aiosqlite:///{directory / 'test.db'}")
+        self.agent = await seed_default_agent(stores)
+        files = LocalFileStore(directory / "files")
+        await files.initialize()
+        self.ctx = AppContext.for_testing(
+            stores=stores, db_engine=engine, db_session_factory=factory, file_store=files,
+            console_admin_authorizer=ConsoleAdminAuthorizer(AsyncMock(return_value=True)),
+        )
+        init_context(self.ctx)
+        self.addCleanup(reset_context)
+        self.addAsyncCleanup(self.ctx.aclose)
+        app = FastAPI()
+        app.include_router(api_router)
+        self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        self.addAsyncCleanup(self.client.aclose)
+        self.enterContext(patch.dict("os.environ", {
+            "DEEP_AGENT_AGENT_SERVICE_ADMIN_USERS": "fixture-admin",
+            "DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": "http://127.0.0.1:8002",
+        }))
+        self.revoked = False
+
+        async def platform(client, _service, path, **_kwargs):
+            auth = client._headers.get("token")
+            if path == "api/user/full-detail":
+                self.assertNotIn("user", client._headers)
+                if auth not in {"fixture-owner", "fixture-other"}:
+                    raise IntegrationAppAccessError(401, "Fixture token rejected")
+                return {"id": auth.split("-")[-1]}
+            if path == "check-permission-by-space-app":
+                return {"app": not self.revoked, "space": not self.revoked}
+            self.fail(f"Unexpected platform request {path}")
+
+        self.enterContext(patch(
+            "deep_agent.services.integration_app_access.PlatformAppAccessClient._get",
+            autospec=True, side_effect=platform,
+        ))
+        self.admin = {"user": "fixture-admin", "authorization": "Bearer fixture-admin"}
+        await PublicationStore(factory).create(PublicationCreate.model_validate({
+            "code": "budget-report", "name": "预算报告", "agent_id": self.agent,
+            "scope": {"apps": {"mode": "selected", "items": [
+                {"app_id": app, "space_id": "budget"} for app in ("budget001", "budget002")
+            ]}},
+        }))
+        self.url = f"{ROOT}/a2a/budget-report"
+
+    async def rpc(self, method, params, *, headers=HEADERS):
+        return await self.client.post(self.url, headers=headers, json={
+            "jsonrpc": "2.0", "id": 1, "method": method, "params": params,
+        })
+
+    @staticmethod
+    def message(id, content, **bindings):
+        return {"messageId": id, "role": "ROLE_USER", "parts": [{"text": content}], **bindings}
+
+    def result(self, response):
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("result", response.json(), response.text)
+        return response.json()["result"]
+
+    async def test_card_runner_history_scope_and_idempotency(self):
+        card = await self.client.get(f"{self.url}/agent-card.json", headers=HEADERS)
+        self.assertEqual(card.status_code, 200, card.text)
+        self.assertEqual(card.json()["supportedInterfaces"][0]["protocolVersion"], "1.0")
+        model = FunctionModel(lambda _messages, _info: ModelResponse(parts=[TextPart("预算差异 20")]))
+        with patch("deep_agent.agent.factory._resolve_model", return_value=model):
+            params = {"message": self.message("m1", "计算预算差异")}
+            task = self.result(await self.rpc("SendMessage", params))["task"]
+            self.assertEqual(task["status"]["state"], "TASK_STATE_COMPLETED", task)
+            self.assertEqual(task["artifacts"][0]["parts"][0]["text"], "预算差异 20")
+            self.assertEqual(self.result(await self.rpc("SendMessage", params))["task"]["id"], task["id"])
+            self.assertIn("error", (await self.rpc("SendMessage", {"message": self.message("m1", "不同内容")})).json())
+            next_task = self.result(await self.rpc("SendMessage", {
+                "message": self.message("m2", "再算一次", contextId=task["contextId"]),
+            }))["task"]
+            self.assertNotEqual(next_task["id"], task["id"])
+            self.assertEqual(next_task["contextId"], task["contextId"])
+        page = self.result(await self.rpc("ListTasks", {"pageSize": 1, "includeArtifacts": True}))
+        self.assertEqual(page["totalSize"], 2)
+        self.assertEqual(page["tasks"][0]["id"], next_task["id"])
+        older = self.result(await self.rpc("ListTasks", {
+            "pageSize": 1, "pageToken": page["nextPageToken"], "includeArtifacts": True,
+        }))
+        self.assertEqual(older["tasks"][0]["id"], task["id"])
+        item = self.result(await self.rpc("GetTask", {"id": task["id"], "historyLength": 0}))
+        self.assertNotIn("history", item)
+        other = await self.rpc("GetTask", {"id": task["id"]}, headers={
+            **HEADERS, "authorization": "Bearer fixture-other", "user": "owner",
+        })
+        self.assertIn("error", other.json())
+        self.assertEqual((await self.rpc("GetTask", {"id": task["id"]}, headers={
+            **HEADERS, "app": "budget/nope",
+        })).status_code, 400)
+        self.revoked = True
+        self.assertEqual((await self.rpc("GetTask", {"id": task["id"]})).status_code, 403)
+
+    async def test_question_and_continuation(self):
+        from deep_agent.agent_service.output import QUESTION_NAME
+
+        output_name = "output__budget_result"
+        await self.ctx.stores.agent.update_unique(self.agent, AgentUpdate(
+            structured_output_enabled=True,
+            output_config={
+                "name": "budget_result", "description": "预算分析结果",
+                "json_schema": {"type": "object", "properties": {"month": {"type": "string"}}, "required": ["month"]},
+            },
+        ), user_id="fixture-admin")
+
+        def respond(_messages, info):
+            if not info.output_tools:
+                return ModelResponse(parts=[TextPart("预算分析")])
+            names = {tool.name for tool in info.output_tools}
+            self.assertTrue({QUESTION_NAME, output_name} <= names)
+            return ModelResponse(parts=[ToolCallPart(QUESTION_NAME, {"question": "请提供预算月份"})])
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+            task = self.result(await self.rpc("SendMessage", {"message": self.message("q", "预算分析")}))["task"]
+        self.assertEqual(task["status"]["state"], "TASK_STATE_INPUT_REQUIRED", task)
+        self.assertEqual(task["status"]["message"]["parts"][0]["text"], "请提供预算月份")
+        bindings = {"taskId": task["id"], "contextId": task["contextId"]}
+        wrong = self.message("wrong", "十月", **bindings, metadata={"replyTo": "stale"})
+        self.assertIn("error", (await self.rpc("SendMessage", {"message": wrong})).json())
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+            lambda *_: ModelResponse(parts=[ToolCallPart(output_name, {"month": "十月"})]),
+        )):
+            answer = self.message("answer", "十月", **bindings)
+            task2 = self.result(await self.rpc("SendMessage", {"message": answer}))["task"]
+        self.assertEqual(task2["id"], task["id"])
+        self.assertEqual(task2["status"]["state"], "TASK_STATE_COMPLETED", task2)
+        self.assertEqual(task2["artifacts"][0]["parts"][0]["data"], {"month": "十月"})
+
+    async def test_inline_image_reaches_model_in_original_task(self):
+        from deep_agent.agent_service.output import QUESTION_NAME
+
+        card = await self.client.get(f"{self.url}/agent-card.json", headers=HEADERS)
+        self.assertIn("image/png", card.json()["defaultInputModes"])
+        png = io.BytesIO()
+        Image.new("RGBA", (32, 32), (255, 0, 0, 180)).save(png, "PNG")
+
+        def respond(messages, _info):
+            latest = next(part for part in reversed(messages[-1].parts) if isinstance(part, UserPromptPart))
+            if isinstance(latest.content, str):
+                return ModelResponse(parts=[ToolCallPart(QUESTION_NAME, {"question": "请上传图片"})])
+            images = [part for part in latest.content if isinstance(part, BinaryContent)]
+            self.assertEqual([image.media_type for image in images], ["image/png"])
+            with Image.open(io.BytesIO(images[0].data)) as image:
+                self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 0, 0))
+            return ModelResponse(parts=[TextPart("红色")])
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+            paused = self.result(await self.rpc("SendMessage", {
+                "message": self.message("need-image", "图片是什么颜色？"),
+            }))["task"]
+            self.assertEqual(paused["status"]["state"], "TASK_STATE_INPUT_REQUIRED")
+            message = {
+                "messageId": "image-answer", "role": "ROLE_USER", "taskId": paused["id"],
+                "contextId": paused["contextId"], "metadata": {"replyTo": paused["status"]["message"]["messageId"]},
+                "parts": [{"raw": base64.b64encode(png.getvalue()).decode(),
+                           "mediaType": "image/png", "filename": "color.png"}],
+            }
+            completed = self.result(await self.rpc("SendMessage", {"message": message}))["task"]
+        self.assertEqual(completed["id"], paused["id"])
+        self.assertEqual(completed["contextId"], paused["contextId"])
+        self.assertEqual(completed["status"]["state"], "TASK_STATE_COMPLETED")
+        self.assertEqual(completed["artifacts"][0]["parts"][0]["text"], "红色")
+        self.assertTrue(all("raw" not in part for item in completed["history"] for part in item["parts"]))
+
+    async def test_publication_routing_api_key_and_disabled_task(self):
+        original = await self.ctx.stores.agent.get_by_id(self.agent)
+        agent = await self.ctx.stores.agent.create_unique(AgentCreate(
+            name="Reconciliation fixture", prompt="Always use the marker RECON",
+            model_id=original.model_id,
+        ), user_id="fixture-admin")
+        with patch("deep_agent.api.v1.agent_service.IntegrationAppDirectory.available_apps", return_value=[
+            SimpleNamespace(app_id="budget001", space_id="budget"),
+        ]):
+            response = await self.client.post(f"{ROOT}/publications", headers=self.admin, json={
+                "code": "recon", "name": "对账", "agent_id": agent.id,
+                "scope": {"apps": {"mode": "selected", "items": [{"app_id": "budget001", "space_id": "budget"}]}},
+            })
+        self.assertEqual(response.status_code, 201, response.text)
+        self.url = f"{ROOT}/a2a/recon"
+        key_headers = {name: value for name, value in HEADERS.items() if name != "authorization"}
+        key_headers["x-deepfos-key"] = "test-key"
+        key_headers["user"] = "untrusted"
+        with patch("deep_agent.agent_service.security.PlatformEnterpriseAdminChecker.resolve_api_key_user",
+                   return_value="key-owner") as resolve_key:
+            self.assertEqual((await self.client.get(f"{self.url}/agent-card.json", headers={
+                **key_headers, "app": "budget002",
+            })).status_code, 403)
+            self.assertEqual((await self.client.get(f"{self.url}/agent-card.json", headers={
+                **key_headers, "authorization": HEADERS["authorization"],
+            })).status_code, 401)
+            model = FunctionModel(lambda _, info: ModelResponse(parts=[
+                TextPart("对账" if "RECON" in (info.instructions or "") else "预算"),
+            ]))
+            with patch("deep_agent.agent.factory._resolve_model", return_value=model):
+                task = self.result(await self.rpc("SendMessage", {
+                    "message": self.message("route", "开始"),
+                }, headers=key_headers))["task"]
+            self.assertEqual(task["artifacts"][0]["parts"][0]["text"], "对账")
+            resolve_key.assert_awaited_with("test-key", "budget001", "budget")
+            response = await self.client.patch(f"{ROOT}/publications/recon", headers=self.admin, json={
+                "revision": 1, "enabled": False,
+            })
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual((await self.client.get(f"{self.url}/agent-card.json", headers=key_headers)).status_code, 404)
+            self.assertEqual(self.result(await self.rpc("GetTask", {"id": task["id"]}, headers=key_headers))["id"], task["id"])
+            self.assertIn("error", (await self.rpc("SendMessage", {
+                "message": self.message("disabled", "再算一次"),
+            }, headers=key_headers)).json())
+        with patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": ""}):
+            response = await self.client.get(f"{ROOT}/publications", headers=self.admin)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIsNone(response.json()[0]["card_url"])
+            response = await self.client.patch(f"{ROOT}/publications/recon", headers=self.admin, json={
+                "revision": 2, "enabled": True,
+            })
+            self.assertEqual(response.status_code, 503)
+
+    async def test_fixed_app_uses_configured_scope_with_caller_credentials(self):
+        app = {"app_id": "budget001", "space_id": "budget"}
+        scope = {"apps": {"mode": "fixed", "items": [app]}}
+        card_url = f"{self.url}/agent-card.json"
+        token = {"authorization": HEADERS["authorization"], "A2A-Version": "1.0"}
+        missing_app = await self.client.get(card_url, headers=token)
+        self.assertEqual(missing_app.status_code, 400)
+        self.assertIn("app Header", missing_app.json()["detail"])
+        self.assertEqual((await self.client.get(card_url, headers={**token, "app": "budget001"})).status_code, 200)
+
+        with patch("deep_agent.api.v1.agent_service.IntegrationAppDirectory.available_apps",
+                   return_value=[SimpleNamespace(**app)]):
+            for items in ([], [app, {"app_id": "budget002", "space_id": "budget"}]):
+                response = await self.client.patch(f"{ROOT}/publications/budget-report", headers=self.admin, json={
+                    "revision": 1, "scope": {"apps": {"mode": "fixed", "items": items}},
+                })
+                self.assertEqual(response.status_code, 422, response.text)
+            response = await self.client.patch(f"{ROOT}/publications/budget-report", headers=self.admin, json={
+                "revision": 1, "scope": scope,
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["scope"], scope)
+        missing_key = await self.client.get(card_url)
+        self.assertEqual(missing_key.status_code, 401)
+        self.assertIn("Authorization: Bearer", missing_key.json()["detail"])
+        self.assertEqual((await self.client.get(card_url, headers=token)).status_code, 200)
+        key = {"x-deepfos-key": "test-key", "A2A-Version": "1.0"}
+        other_scope_headers = {**key, "app": "budget002", "space": "other"}
+        with patch("deep_agent.agent_service.security.PlatformEnterpriseAdminChecker.resolve_api_key_user",
+                   return_value="key-owner") as resolve_key:
+            card = await self.client.get(card_url, headers=other_scope_headers)
+            self.assertEqual(card.status_code, 200, card.text)
+            self.assertEqual(card.json()["securitySchemes"]["platformKey"]["apiKeySecurityScheme"]["name"], "X-Deepfos-Key")
+            with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+                lambda *_: ModelResponse(parts=[TextPart("固定应用")]),
+            )):
+                task = self.result(await self.rpc("SendMessage", {
+                    "message": self.message("fixed", "开始"),
+                }, headers=other_scope_headers))["task"]
+            self.assertEqual(self.result(await self.rpc("GetTask", {"id": task["id"]}, headers=key))["id"], task["id"])
+            resolve_key.assert_awaited_with("test-key", "budget001", "budget")
+            self.revoked = True
+            self.assertEqual((await self.rpc("GetTask", {"id": task["id"]}, headers=key)).status_code, 403)
+
+    async def test_all_apps_scope_still_checks_platform_access_and_filters_recent_tasks(self):
+        publication = f"{ROOT}/publications/budget-report"
+        card_url = f"{self.url}/agent-card.json"
+        app = {"app_id": "budget001", "space_id": "budget"}
+        outside = {**HEADERS, "app": "budget003"}
+        scope = {"apps": {"mode": "all", "items": []}}
+        self.assertEqual((await self.client.get(card_url, headers=outside)).status_code, 403)
+        response = await self.client.patch(publication, headers=self.admin, json={
+            "revision": 1, "scope": {"apps": {"mode": "all", "items": [app]}},
+        })
+        self.assertEqual(response.status_code, 422)
+        response = await self.client.post(f"{ROOT}/publications", headers=self.admin, json={
+            "code": "another", "name": "另一个发布", "agent_id": self.agent, "scope": scope,
+        })
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["scope"], scope)
+        response = await self.client.patch(publication, headers=self.admin, json={
+            "revision": 1, "scope": scope,
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["scope"], scope)
+        self.assertEqual((await self.client.get(card_url, headers=outside)).status_code, 200)
+        token_only = {"authorization": HEADERS["authorization"]}
+        self.assertEqual((await self.client.get(card_url, headers=token_only)).status_code, 400)
+        self.revoked = True
+        self.assertEqual((await self.client.get(card_url, headers=outside)).status_code, 403)
+        self.revoked = False
+
+        model = FunctionModel(lambda *_: ModelResponse(parts=[TextPart("预算差异 20")]))
+        with patch("deep_agent.agent.factory._resolve_model", return_value=model):
+            for app_id in ("budget001", "budget002"):
+                self.result(await self.rpc("SendMessage", {
+                    "message": self.message(app_id, f"查看 {app_id}"),
+                }, headers={**HEADERS, "app": app_id}))
+
+        for params, count in (({}, 2), ({"app_id": "budget001"}, 1), ({"app_id": "budget001", "q": "budget002"}, 0)):
+            with self.subTest(params=params):
+                response = await self.client.get(f"{publication}/tasks", headers=self.admin, params=params)
+                self.assertEqual(response.status_code, 200, response.text)
+                result = response.json()
+                self.assertEqual(result["total"], count)
+                self.assertEqual(result["app_ids"], ["budget001", "budget002"])
+                if params.get("app_id") and count:
+                    self.assertEqual(result["items"][0]["app_id"], params["app_id"])
+
+        with patch("deep_agent.api.v1.agent_service.IntegrationAppDirectory.available_apps",
+                   return_value=[SimpleNamespace(**app)]):
+            response = await self.client.patch(publication, headers=self.admin, json={
+                "revision": 2, "scope": {"apps": {"mode": "selected", "items": [app]}},
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((await self.client.get(card_url, headers=HEADERS)).status_code, 200)
+        self.assertEqual((await self.client.get(card_url, headers=outside)).status_code, 403)
+
+    async def test_download_xlsx_published_by_python_sandbox(self):
+        from openpyxl import load_workbook
+
+        backend = SubprocessBackend(python_executable=sandbox_test_python(), max_concurrency=1)
+        self.ctx.sandbox_backend = backend
+        self.ctx.registry = build_registry(sandbox_backend=backend)
+        await self.ctx.stores.agent.update_unique(self.agent, AgentUpdate(capabilities=["builtin:sandbox"]))
+        script = """
+from openpyxl import Workbook
+from deepagent_files import publish_path
+w = Workbook()
+w.active.append(["预算", "实际", "差额"])
+w.active.append([100, 120, 20])
+w.save(publish_path("预算.xlsx"))
+"""
+
+        def respond(messages, info):
+            if not any(tool.name == "execute_python" for tool in info.function_tools):
+                return ModelResponse(parts=[TextPart("预算差异报告")])
+            if any(getattr(part, "tool_name", None) == "execute_python"
+                   and part.part_kind == "tool-return" for message in messages for part in message.parts):
+                return ModelResponse(parts=[TextPart("差异 20")])
+            return ModelResponse(parts=[ToolCallPart("execute_python", {"code": script})])
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+            task = self.result(await self.rpc("SendMessage", {
+                "message": self.message("xlsx", "输出预算报告 Excel"),
+            }))["task"]
+        self.assertEqual(task["status"]["state"], "TASK_STATE_COMPLETED", task)
+        artifacts = [part for artifact in task["artifacts"] for part in artifact["parts"] if "url" in part]
+        self.assertEqual(len(artifacts), 1, task)
+        artifact = artifacts[0]
+        response = await self.client.get(artifact["url"], headers=HEADERS)
+        self.assertEqual(response.status_code, 200, response.text[:300])
+        self.assertEqual(response.headers["content-type"], artifact["mediaType"])
+        self.assertIn("%E9%A2%84%E7%AE%97.xlsx", response.headers["content-disposition"])
+        book = load_workbook(io.BytesIO(response.content))
+        self.assertEqual(book.active["C2"].value, 20)
+        denied = await self.client.get(artifact["url"], headers={**HEADERS, "app": "budget002"})
+        self.assertEqual(denied.status_code, 404)
+        self.revoked = True
+        self.assertEqual((await self.client.get(artifact["url"], headers=HEADERS)).status_code, 403)
+
+    async def test_cancel_while_runner_is_still_preparing(self):
+        preparing = asyncio.Event()
+        stopped = asyncio.Event()
+
+        async def execute(_entry, _message, _continuing):
+            preparing.set()
+            try:
+                await asyncio.Future()
+            finally:
+                stopped.set()
+
+        with patch("deep_agent.agent_service.protocol.RunnerExecution", return_value=execute):
+            task = self.result(await self.rpc("SendMessage", {
+                "message": self.message("preparing", "准备运行"),
+                "configuration": {"returnImmediately": True},
+            }))["task"]
+            await asyncio.wait_for(preparing.wait(), 2)
+            response = await asyncio.wait_for(self.rpc("CancelTask", {"id": task["id"]}), 2)
+            self.assertTrue(stopped.is_set())
+            self.assertEqual(self.result(response)["status"]["state"], "TASK_STATE_CANCELED")
+
+    async def test_stream_and_subscribe_cancel(self):
+        ready = asyncio.Event()
+        done = asyncio.Event()
+
+        async def execute(entry, _message, _continuing):
+            entry.stop = done.set
+            ready.set()
+            await done.wait()
+            return Result(state=wire.TaskState.TASK_STATE_CANCELED if entry.cancellation_requested
+                          else wire.TaskState.TASK_STATE_COMPLETED)
+
+        def events(response):
+            return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+
+        with patch("deep_agent.agent_service.protocol.RunnerExecution", return_value=execute):
+            task = self.result(await self.rpc("SendMessage", {
+                "message": self.message("pending", "慢任务"), "configuration": {"returnImmediately": True},
+            }))["task"]
+            await asyncio.wait_for(ready.wait(), 2)
+            subscribers = [asyncio.create_task(self.rpc("SubscribeToTask", {"id": task["id"]})) for _ in range(2)]
+            for _ in range(100):
+                entry = self.ctx.agent_tasks.entries[task["id"]]
+                if len(entry.subscribers) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertEqual(len(entry.subscribers), 2)
+            cancelled = self.result(await self.rpc("CancelTask", {"id": task["id"]}))
+            self.assertEqual(cancelled["status"]["state"], "TASK_STATE_CANCELED")
+            for response in await asyncio.gather(*subscribers):
+                self.assertEqual(events(response)[0]["result"]["task"]["id"], task["id"])
+                self.assertEqual(events(response)[-1]["result"]["statusUpdate"]["status"]["state"], "TASK_STATE_CANCELED")
+            self.assertEqual(self.result(await self.rpc("CancelTask", {"id": task["id"]}))["id"], task["id"])
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+            lambda *_: ModelResponse(parts=[TextPart("流式报告")]),
+        )):
+            response = await self.rpc("SendStreamingMessage", {"message": self.message("stream", "生成报告")})
+        self.assertIn("text/event-stream", response.headers.get("content-type", ""), response.text)
+        frames = events(response)
+        self.assertIn("task", frames[0]["result"])
+        self.assertTrue(any("artifactUpdate" in frame["result"] for frame in frames))
+        self.assertEqual(frames[-1]["result"]["statusUpdate"]["status"]["state"], "TASK_STATE_COMPLETED")

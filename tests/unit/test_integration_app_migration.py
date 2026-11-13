@@ -20,8 +20,8 @@ class IntegrationAppMigrationTests(unittest.TestCase):
                 db.execute("""INSERT INTO skill_packages
                   (code,label,description,schema_version,source,platform_file_id,file_name,file_size,content_hash,manifest,resource_index)
                   VALUES ('legacy','Legacy','description','1.0','upload','file','legacy.zip',10,'hash','{}','[]')""")
-            command.upgrade(config, "head")
-            command.upgrade(config, "head")
+            command.upgrade(config, "015")
+            command.upgrade(config, "015")
             with sqlite3.connect(path) as db:
                 self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("015",))
                 self.assertEqual(db.execute("SELECT code,scope_ref FROM skill_packages").fetchall(), [("legacy", None)])

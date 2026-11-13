@@ -366,6 +366,7 @@ function initTabs() {
         return window.skillsAdmin.refresh();
       }
       if (name === "mcp" && window.mcpAdmin) return window.mcpAdmin.refresh();
+      if (name === "agent-service") return window.agentServiceAdmin?.refresh();
       if (name === "integrations") return window.integrationsAdmin?.refresh();
       if (name === "channels" && window.channelsAdmin) return window.channelsAdmin.refresh();
     };

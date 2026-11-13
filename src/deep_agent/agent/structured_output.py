@@ -118,6 +118,17 @@ class StructuredOutputState(AbstractCapability):
         reason = None
         errors = []
         value = None
+        if getattr(ctx.deps, "a2a", False):
+            from deep_agent.agent_service.output import QUESTION_NAME
+            questions = [part for _, part in calls if part.tool_name == QUESTION_NAME]
+            if questions and len(calls) == 1 and not native:
+                self.result_kind = "question"
+                if progress is not None:
+                    progress._record(response)
+                    await progress._save(ctx, hook="a2a_question")
+                return
+            if questions:
+                raise ModelRetry("Return the A2A question by itself, without other tool calls.")
         if len(outputs) > 1:
             reason = "multiple_output_calls"
         elif outputs and (len(calls) != 1 or native):
@@ -207,6 +218,10 @@ class StructuredOutputState(AbstractCapability):
         if ctx.partial_output:
             return output
         call = output_context.tool_call
+        if self.result_kind == "question":
+            from deep_agent.agent_service.output import A2AQuestion, QUESTION_NAME
+            if call is not None and call.tool_name == QUESTION_NAME and isinstance(output, A2AQuestion):
+                return output
         if call is None:
             if not self.allow_text_output:
                 raise UnexpectedModelBehavior("Text output is not allowed by the output configuration")
@@ -251,6 +266,6 @@ class StructuredOutputState(AbstractCapability):
         return row
 
     async def accept(self, deps):
-        if self.result_kind == "text":
+        if self.result_kind in {"text", "question"}:
             return None
         return await self._append_attempt(deps, accepted=True)

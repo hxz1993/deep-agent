@@ -31,7 +31,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.16.8`，数据库 Head 为 `015` |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.17.0a1`，数据库 Head 为 `016` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | 按影响面运行定向测试；可先用 `scripts/run_tests.py --suite affected --base HEAD --list` 查看选测范围 |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -62,6 +62,8 @@ Console 加载和资源缓存见[加载说明](docs/guides/console-loading.md)�
 日志消息在后端写入时生成，格式为 `时间 | 进程 | 等级 | request-id | 来源 - 消息 | key=value`，管道、换行和反斜杠统一转义；查询返回真实 `raw`。旧行只保留原文，不增加 JSON 兼容解析。新增日志仍只提交安全白名单字段，禁止业务正文、完整参数、结果、凭据和异常原文。消息从已校验的工具名、模型名、Agent名称、状态和耗时生成；查询的message/summary只返回实际写入正文，附加字段独立返回。
 
 控制台「场景」见[场景配置](docs/guides/integrations.md)：固定目录由后端定义，`004` 新增 `integration_settings`，仅保存非空配置时写入，清空删除记录。组件按 `/api/v1/integrations/{code}` 读取 JSON，未配置返回 409。共用配置管理需企业管理员。015 新增电子表格助手的 App 专用配置；进入 Console 后，目标企业或空间管理员、应用管理员和应用开发者均可配置对应 App，配置备份仍按原企业管理员范围校验。平台权限按当前身份验证，Harness 按会话 App/Space 追加专用提示词与 Skill。通用 Skill 读取兼容 `NULL`／`general`，新写入使用 `general`。
+
+控制台「集成」见[A2A 服务端指南](docs/guides/agent-service.md)。`016` 的 `agent_publications` 保存发布编码、关联 Agent、应用范围和启停配置。A2A 接入由 `/api/v1/agent-service` 提供，平台凭据和应用权限按请求校验。Task 与 Context 由单 API 进程保存，生成文件沿用 FileStore。后续 MCP、CLI 和 SDK 共用发布配置及任务服务，设计见[45 号课题](docs/design/45-a2a-access/README.md)。
 
 Agent 安装包见[安装包说明](docs/guides/agent-packages.md)。自带包唯一位置为 `src/deep_agent/agent_packages/builtin/<code>.zip`，每个完整 ZIP 集中保存 Agent、上传 Skill 和自定义 UI 工具，与导出/上传格式相同；当前电子表格包同步独立电子表格前端已提交的 V124 提示词、工作流 Skill 1.4.18、智能分析 2.18.5 与财务图表 2.0.6 等交付资产（不会自动更新已安装 Agent），DeepCube 保留 2026-09-14 Test 官方导出包，来源及哈希见自带包 README。服务从安装功能模块相对路径读取，不保留散文件副本；测试包使用隔离目录。安装可新建或显式覆盖指定 Agent；共享 Skill/UI 同编码同内容复用、内容不同更新并提示影响，UI 多余工具保留供其他 Agent 使用。旧 Agent.ui_tool_selection 列仅为历史数据库兼容保留，运行与安装只按 capabilities 启用整包；旧 ZIP 名单忽略，新保存清空旧列，新导出不携带名单。MCP 同编码自动关联，缺失只提示；模型同名优先、其次首个可用模型、无则留空。005 支持空模型；运行需请求模型或 Agent 模型，禁止环境默认回退。预检只读，安装用配置独占屏障二次校验摘要，文件补偿先核对数据库引用，避免提交确认失败后误删已落库资源。
 

@@ -11,7 +11,10 @@ const channelAdminState = {
   saving: false,
   apiKeyDraft: "",
   clearApiKey: false,
+  deepfosApp: null,
 };
+
+const channelDeepfosAppDirectory = "/api/v1/mcp/bound-apps";
 
 const channelPlatforms = {
   wecom_app: { name: "企微应用", logo: "wecom-app.svg", consoleUrl: "https://work.weixin.qq.com/", consoleLabel: "企业微信管理后台", subtitle: "企微应用" },
@@ -378,16 +381,45 @@ function setChannelDeepfosEnabled(enabled) {
   button.classList.toggle("off", !enabled);
   setChannelExtensionStatus("channelDeepfosTab", enabled);
   document.getElementById("channelDeepfosAppField").hidden = !enabled;
-  const input = document.getElementById("channelDeepfosAppId");
-  input.required = enabled;
-  input.disabled = !enabled;
+  document.getElementById("channelDeepfosApp").disabled = !enabled;
+  if (!enabled) window.DeepAgentAppPicker?.close("channel");
   document.getElementById("channelDeepfosApiKey").disabled = !enabled;
+}
+
+function setChannelDeepfosApp(app) {
+  channelAdminState.deepfosApp = app;
+  const button = document.getElementById("channelDeepfosApp");
+  const value = document.getElementById("channelDeepfosAppValue");
+  const space = document.getElementById("channelDeepfosAppSpace");
+  value.classList.toggle("da-select-placeholder", !app);
+  value.textContent = app ? [...new Set([app.app_name, app.app_id])].filter(Boolean).join(" · ") : "选择应用";
+  space.textContent = app?.space_name || app?.space_id || "";
+  space.hidden = !space.textContent;
+  button.title = [value.textContent, space.textContent, app?.space_name && app.space_id].filter(Boolean).join(" · ");
+  button.removeAttribute("aria-invalid");
+}
+
+async function loadChannelDeepfosApp(appId) {
+  let spaceId = "";
+  if (appId) {
+    try { spaceId = window.DeepAgentConsoleAPI.deriveSpaceFromApp(appId); } catch { /* Keep the saved ID visible. */ }
+  }
+  const selection = appId ? { app_id: appId, space_id: spaceId } : null;
+  setChannelDeepfosApp(selection);
+  if (!selection) return;
+  try {
+    const apps = await window.DeepAgentAppPicker.getApps(channelDeepfosAppDirectory);
+    const app = apps.find(item => item.app_id === appId);
+    if (app && channelAdminState.deepfosApp === selection && document.getElementById("channelAccountModal").open) {
+      setChannelDeepfosApp(app);
+    }
+  } catch { /* The picker can retry loading the directory. */ }
 }
 
 async function prepareChannelApplicationEditor(settings = {}) {
   selectChannelExtension("deepfos");
   setChannelApiKeyEditor(settings?.deepfos || {});
-  document.getElementById("channelDeepfosAppId").value = settings?.deepfos?.app_id || "";
+  void loadChannelDeepfosApp(settings?.deepfos?.app_id);
   setChannelDeepfosEnabled(settings?.deepfos?.enabled === true);
   const webhook = channelAdminState.channelType === "wecom_app";
   const select = document.getElementById(webhook ? "channelWebhookApplicationId" : "channelWecomApplicationId");
@@ -617,6 +649,15 @@ const channelsAdmin = {
     if (channelAdminState.saving || !form.reportValidity()) return;
     const editingId = channelAdminState.editingId;
     const account = channelAdminState.accounts.find(item => item.id === editingId);
+    const deepfosEnabled = document.getElementById("channelDeepfosEnabled").getAttribute("aria-checked") === "true";
+    const deepfosAppId = channelAdminState.deepfosApp?.app_id || null;
+    if (deepfosEnabled && !deepfosAppId) {
+      const pickerButton = document.getElementById("channelDeepfosApp");
+      pickerButton.setAttribute("aria-invalid", "true");
+      pickerButton.focus();
+      AdminFormFeedback.show(form, "请选择要关联的 DeepFOS 应用。");
+      return;
+    }
     const enabled = document.getElementById("channelUserDetailsEnabled").getAttribute("aria-checked") === "true";
     const webhook = channelAdminState.channelType === "wecom_app";
     const applicationSelect = document.getElementById(webhook ? "channelWebhookApplicationId" : "channelWecomApplicationId");
@@ -636,8 +677,8 @@ const channelsAdmin = {
         ...(webhook ? { ...account?.settings, wecom_app: { ...account?.settings?.wecom_app, application_id: applicationId } } : dingtalk ? { ...account?.settings, dingtalk: { ...account?.settings?.dingtalk, user_details_enabled: enabled } } : feishu ? { ...account?.settings, feishu: { domain: "feishu", require_mention: true, ...account?.settings?.feishu, user_details_enabled: enabled } } : channelUserDetailsSettings(account?.settings || {}, enabled, applicationId)),
         deepfos: {
           ...channelApiKeySettings(account?.settings?.deepfos),
-          enabled: document.getElementById("channelDeepfosEnabled").getAttribute("aria-checked") === "true",
-          app_id: document.getElementById("channelDeepfosAppId").value.trim() || null,
+          enabled: deepfosEnabled,
+          app_id: deepfosAppId,
         },
       },
       name: document.getElementById("channelName").value.trim(),
@@ -857,6 +898,10 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
   document.getElementById("channelDeepfosEnabled")?.addEventListener("click", event => setChannelDeepfosEnabled(event.currentTarget.getAttribute("aria-checked") !== "true"));
+  document.getElementById("channelDeepfosApp")?.addEventListener("click", () => window.DeepAgentAppPicker.open({
+    owner: "channel", path: channelDeepfosAppDirectory, title: "选择应用",
+    selectedAppId: channelAdminState.deepfosApp?.app_id, onSelect: setChannelDeepfosApp,
+  }));
   document.getElementById("channelUserDetailsCheckBtn")?.addEventListener("click", checkChannelUserDetails);
   ["channelBotId", "channelSecret"].forEach(id => document.getElementById(id)?.addEventListener("input", clearChannelPermissionCheck));
   document.getElementById("channelUserDetailsEnabled")?.addEventListener("click", event => setChannelUserDetailsEnabled(event.currentTarget.getAttribute("aria-checked") !== "true"));
@@ -908,6 +953,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("channelAccountModal")?.addEventListener("close", () => {
     clearChannelUserQuery();
     clearChannelPermissionCheck();
+    window.DeepAgentAppPicker?.close("channel");
     channelRegistration?.reset();
     channelAdminState.applicationLoadGeneration++;
     document.getElementById("channelSecret").value = "";

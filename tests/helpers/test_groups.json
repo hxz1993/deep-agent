@@ -67,6 +67,7 @@
   ],
   "files": [
     "tests/integration/test_integration_app_scopes.py",
+    "tests/integration/test_agent_service.py",
     "tests/integration/test_trajectory_export.py",
     "tests/integration/test_agent_package_cross_version_http.py",
     "tests/integration/test_agent_packages_api.py",

@@ -69,7 +69,8 @@ _OUTPUT_CONFIG_012 = Table("agent_output_configs", MetaData(), *(
 
 def _configuration_tables(revision: str) -> tuple[str, ...]:
     return tuple(name for name in configuration_table_names()
-                 if (revision != "011" or name != "agent_output_configs")
+                 if (revision == "016" or name != "agent_publications")
+                 and (revision != "011" or name != "agent_output_configs")
                  and (revision not in _BEFORE_015 or name != "integration_scoped_settings"))
 
 
@@ -240,6 +241,8 @@ def _validate_schema_sync(sync_connection: Any, *, backup: bool) -> None:
         raise ConfigurationImportError("Database is missing alembic_version")
     revision = str(sync_connection.scalar(text("SELECT version_num FROM alembic_version")) or "")
     tables = set(Base.metadata.tables)
+    if revision != "016":
+        tables.discard("agent_publications")
     if revision == "011":
         tables.discard("agent_output_configs")
     if revision in _BEFORE_015:
@@ -320,6 +323,20 @@ def _validate_channel_rows(rows: Sequence[Mapping[str, Any]]) -> None:
                 raise ValueError("Robot credentials are required and must not contain webhook credentials")
         except (ValueError, TypeError) as exc:
             raise ConfigurationImportError("channel_accounts contains an invalid channel configuration") from exc
+
+
+def _validate_publication_rows(rows: Sequence[Mapping[str, Any]]) -> None:
+    from deep_agent.agent_service.publications import PublicationCreate
+    from pydantic import ValidationError
+
+    fields = PublicationCreate.model_fields
+    try:
+        for row in rows:
+            PublicationCreate.model_validate({key: row[key] for key in fields})
+            if type(row.get("revision")) is not int or row["revision"] < 1:
+                raise ValueError("invalid revision")
+    except (ValidationError, KeyError, ValueError) as exc:
+        raise ConfigurationImportError("Invalid Agent publication in backup") from exc
 
 
 def _validate_integration_rows(rows: Sequence[Mapping[str, Any]]) -> None:
@@ -451,6 +468,7 @@ async def inspect_configuration_backup(
                     row["auth_status"] = "unconfigured"
                     row["auth_revision"] = 0
             _validate_integration_rows(rows.get("integration_settings", []))
+            _validate_publication_rows(rows.get("agent_publications", []))
             _validate_app_scope_rows(rows)
             _validate_channel_rows(rows.get("channel_accounts", []))
             for row in rows.get("agents", []):
@@ -839,6 +857,7 @@ async def apply_configuration_import(
     active_run_count: int = 0,
 ) -> ConfigurationImportResult:
     _validate_integration_rows(plan.rows.get("integration_settings", []))
+    _validate_publication_rows(plan.rows.get("agent_publications", []))
     if any(_validate_app_scope_rows(plan.rows)):
         raise ConfigurationImportError("Application Skill data must be converted before import")
     _validate_channel_rows(plan.rows.get("channel_accounts", []))

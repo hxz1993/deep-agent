@@ -83,7 +83,7 @@ class ProjectLayoutTest(unittest.TestCase):
             "src/deep_agent/channels/gateway", "deploy/jenkins",
             "src/deep_agent/agent_packages/builtin",
             "src/deep_agent/ptc", "src/deep_agent/web",
-            "src/deep_agent/models", "src/deep_agent/capabilities/general",
+            "src/deep_agent/models", "src/deep_agent/agent_service",
         ):
             with self.subTest(path=name):
                 path = REPO_ROOT / name
@@ -281,7 +281,7 @@ class ProjectLayoutTest(unittest.TestCase):
                         values[target.id] = ast.literal_eval(statement.value)
             if "revision" in values:
                 revision_chain[values["revision"]] = values["down_revision"]
-        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003", "005": "004", "006": "005", "007": "006", "008": "007", "009": "008", "010": "009", "011": "010", "012": "011", "013": "012", "014": "013", "015": "014"})
+        self.assertEqual(revision_chain, {"001": None, "002": "001", "003": "002", "004": "003", "005": "004", "006": "005", "007": "006", "008": "007", "009": "008", "010": "009", "011": "010", "012": "011", "013": "012", "014": "013", "015": "014", "016": "015"})
         configuration = configparser.ConfigParser(defaults={"here": str(REPO_ROOT)})
         configuration.read(REPO_ROOT / "alembic.ini", encoding="utf-8")
         self.assertEqual(

@@ -311,6 +311,11 @@ class _PageParser(HTMLParser):
         self.stack[-1].children.append(_Text(start, len(self.source) if end < 0 else end + 1, True))
 
     def finish(self):
+        # Some HTMLParser versions consume an unfinished start tag on close()
+        # without calling handle_data. Keep the pending source and its position.
+        if re.match(r"<[A-Za-z][^>]*\Z", self.rawdata):
+            self.handle_data(self.rawdata)
+            self.rawdata = ""
         self.close()
         for node in self.stack[1:]:
             node.invalid = True

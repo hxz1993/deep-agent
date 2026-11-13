@@ -53,6 +53,16 @@ def _get_header(request: Request, target: str) -> str | None:
     return None
 
 
+def filter_verified_mcp_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Apply the MCP forwarding allowlist to a verified request identity."""
+    exact, wildcard_prefixes = _split_rules(OPTION.agent.mcp_forward_request_headers)
+    return {
+        name: value for name, value in headers.items()
+        if _is_allowed_header(name, exact, wildcard_prefixes)
+        or (name == "token" and _is_allowed_header("authorization", exact, wildcard_prefixes))
+    }
+
+
 def extract_forward_headers(
     request: Request,
     allowed: frozenset[str] | None = None,

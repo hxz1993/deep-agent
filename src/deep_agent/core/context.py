@@ -75,6 +75,7 @@ class AppContext:
     sandbox_backend: PythonExecutionBackend | None = None
     sandbox_profile: ResolvedSandboxProfile | None = None
     session_live: SessionLiveHub = field(default_factory=SessionLiveHub)
+    agent_tasks: object | None = None
     wecom_profiles: object | None = None
     wecom_import_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -256,6 +257,8 @@ class AppContext:
         )
 
     async def aclose(self) -> None:
+        if self.agent_tasks is not None:
+            await self.agent_tasks.close()
         if self.wecom_profiles is not None:
             await self.wecom_profiles.close()
         self.session_live.close()

@@ -21,7 +21,7 @@ class ChannelMigrationTests(unittest.TestCase):
             with patch("deep_agent.db.migrate.get_database_url", return_value=url):
                 config = migrate._build_alembic_config()
             config.attributes["database_url"] = url
-            self.assertEqual(ScriptDirectory.from_config(config).get_heads(), ["015"])
+            self.assertEqual(ScriptDirectory.from_config(config).get_heads(), ["016"])
             command.upgrade(config, "head")
             with sqlite3.connect(path) as db:
                 db.execute("PRAGMA foreign_keys=ON")
@@ -41,7 +41,7 @@ class ChannelMigrationTests(unittest.TestCase):
                             'completed','sent',CURRENT_TIMESTAMP)""")
             command.upgrade(config, "head")
             with sqlite3.connect(path) as db:
-                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("015",))
+                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("016",))
                 self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
                 self.assertEqual(db.execute("SELECT session_user_id,secret FROM channel_accounts").fetchone(),
                                  ("operator", "test-secret"))
@@ -58,6 +58,35 @@ class ChannelMigrationTests(unittest.TestCase):
             # The receipt removal is irreversible; ordinary upgrades remain safe.
             with self.assertRaisesRegex(RuntimeError, "011 cannot be downgraded"):
                 command.downgrade(config, "001")
+
+    def test_016_keeps_publications_and_refuses_downgrade_with_rows(self):
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_publications_") as directory:
+            path = Path(directory) / "db.sqlite"
+            url = f"sqlite+aiosqlite:///{path}"
+            with patch("deep_agent.db.migrate.get_database_url", return_value=url):
+                config = migrate._build_alembic_config()
+            config.attributes["database_url"] = url
+            command.upgrade(config, "015")
+            command.upgrade(config, "016")
+            command.upgrade(config, "016")
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute("PRAGMA foreign_key_list(agent_publications)").fetchall(), [])
+                self.assertIn("ix_agent_publications_agent_id",
+                              {row[1] for row in db.execute("PRAGMA index_list(agent_publications)")})
+                agent = db.execute("SELECT id FROM agents LIMIT 1").fetchone()[0]
+                db.execute("""INSERT INTO agent_publications (id,code,name,description,agent_id,scope)
+                  VALUES ('publication','budget','预算','',?,?)""",
+                           (agent, '{"apps":{"mode":"fixed","items":[{"app_id":"budget001","space_id":"budget"}]}}'))
+            with self.assertRaisesRegex(RuntimeError, "would discard Agent publications"):
+                command.downgrade(config, "015")
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("016",))
+                self.assertEqual(db.execute("SELECT code FROM agent_publications").fetchone(), ("budget",))
+                db.execute("DELETE FROM agent_publications")
+            command.downgrade(config, "015")
+            with sqlite3.connect(path) as db:
+                self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("015",))
+                self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='agent_publications'").fetchone())
 
     def test_007_keeps_event_data_and_refuses_usage_loss_on_downgrade(self):
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete_usage_migration_") as directory:

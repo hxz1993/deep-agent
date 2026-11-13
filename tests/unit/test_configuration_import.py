@@ -105,7 +105,10 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         target = self.root / f"target-{revision}-{baseline}.db"
         engine = create_async_engine(self._url(target))
         async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+            await connection.run_sync(lambda conn: Base.metadata.create_all(
+                conn, tables=[table for table in Base.metadata.sorted_tables
+                              if revision == "016" or table.name != "agent_publications"],
+            ))
             await connection.execute(
                 text(
                     "CREATE TABLE alembic_version "

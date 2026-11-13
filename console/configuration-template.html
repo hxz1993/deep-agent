@@ -270,6 +270,132 @@
       </div>
     </section>
 
+    <section class="panel" id="panel-agent-service">
+      <div class="panel-toolbar"><div><h2>集成</h2><p class="panel-subtitle">发布选定的 Agent，供授权的外部 Agent 和业务程序调用。</p></div></div>
+      <div class="agent-service-layout">
+        <div id="agentServiceTop" class="agent-service-top">
+          <section id="agentServicePublications" class="console-section agent-service-publications">
+            <div class="console-section-heading"><h3 class="console-section-title">Agent 发布</h3><button type="button" class="btn primary" id="newAgentPublication"><i data-lucide="plus"></i>发布 Agent</button></div>
+            <div class="table-wrap console-list-a agent-service-scroll"><table class="data-table agent-service-table"><thead><tr><th scope="col">发布名称</th><th scope="col">关联 Agent</th><th scope="col">应用范围</th><th scope="col">最近更新</th><th scope="col">操作</th></tr></thead><tbody id="agentPublicationRows"></tbody></table></div>
+          </section>
+          <div id="agentServiceTopSplitter" class="workspace-resizer agent-service-splitter" role="separator" aria-label="调整发布列表宽度" aria-controls="agentServicePublications" aria-orientation="vertical" aria-valuemin="55" aria-valuemax="72" aria-valuenow="68" tabindex="0"></div>
+          <section class="console-section agent-service-access">
+            <div class="agent-service-access-heading">
+              <div id="agentServiceTabs" class="console-segmented agent-service-tabs" role="tablist" aria-label="接入方式">
+                <button id="agentServiceTabA2a" class="active" type="button" role="tab" data-service-access="a2a" aria-selected="true" aria-controls="agentServiceAccess"><i data-lucide="network" aria-hidden="true"></i>A2A</button>
+                <button id="agentServiceTabMcp" type="button" role="tab" data-service-access="mcp" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><i data-lucide="plug" aria-hidden="true"></i>MCP</button>
+                <button id="agentServiceTabCli" type="button" role="tab" data-service-access="cli" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>CLI</button>
+                <button id="agentServiceTabSdk" type="button" role="tab" data-service-access="sdk" aria-selected="false" aria-controls="agentServiceAccess" aria-label="Python SDK" title="Python SDK" tabindex="-1"><i data-lucide="code-xml" aria-hidden="true"></i>SDK</button>
+              </div>
+              <button type="button" class="btn channel-help-btn" id="agentServiceProtocolBtn" aria-haspopup="dialog"><i data-lucide="book-open" aria-hidden="true"></i><span>协议</span></button>
+            </div>
+            <div id="agentServiceAccess" class="agent-service-access-body" role="tabpanel" aria-labelledby="agentServiceTabA2a"></div>
+          </section>
+        </div>
+        <section class="console-section agent-service-recent">
+          <div class="console-section-heading"><div class="field-label-row"><h3 class="console-section-title">近期任务</h3><span class="field-help" tabindex="0" aria-label="近期任务保留说明" aria-describedby="agentTaskRetentionHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="agentTaskRetentionHelp" role="tooltip">任务受理后出现在列表中。结束后最多保留 24 小时，实例最多保留 500 条已结束任务。服务重启后清空列表。</span></span></div><div class="agent-service-filters">
+            <label class="console-search"><i data-lucide="search"></i><input type="search" id="agentTaskSearch" aria-label="搜索任务" placeholder="搜索任务名称或 ID"></label>
+            <select id="agentTaskApp" aria-label="调用应用"><option value="">全部调用应用</option></select>
+            <select id="agentTaskState" aria-label="任务状态"><option value="">全部状态</option><option value="TASK_STATE_COMPLETED">已完成</option><option value="TASK_STATE_WORKING">进行中</option><option value="TASK_STATE_SUBMITTED">排队中</option><option value="TASK_STATE_INPUT_REQUIRED">待补材料</option><option value="TASK_STATE_AUTH_REQUIRED">待鉴权</option><option value="TASK_STATE_FAILED">失败</option><option value="TASK_STATE_CANCELED">已取消</option><option value="TASK_STATE_REJECTED">已拒绝</option></select>
+          </div></div>
+          <div id="agentTaskWorkbench" class="agent-service-task-workbench">
+            <div id="agentTaskList" class="agent-service-task-list"><div class="table-wrap console-list-a agent-service-scroll"><table class="data-table agent-service-table"><thead><tr><th scope="col">任务</th><th scope="col">状态</th><th scope="col">接入方式</th><th scope="col" class="agent-task-wide">调用方</th><th scope="col" class="agent-task-wide">提交时间</th><th scope="col" class="agent-task-wide">耗时</th><th scope="col">交付产物</th></tr></thead><tbody id="agentTaskRows"></tbody></table></div>
+              <footer><nav class="console-pagination" aria-label="任务分页">
+                <button type="button" class="btn btn-sm" id="prevAgentTasks" hidden>上一页</button>
+                <span class="models-page-info" id="agentTaskPage" aria-live="polite"></span>
+                <button type="button" class="btn btn-sm" id="nextAgentTasks" hidden>下一页</button>
+              </nav></footer>
+            </div>
+            <div id="agentTaskSplitter" class="workspace-resizer workspace-resizer-inspector agent-service-splitter" role="separator" aria-label="调整任务列表宽度" aria-controls="agentTaskList" aria-orientation="vertical" aria-valuemin="40" aria-valuemax="75" aria-valuenow="65" tabindex="0"></div>
+            <section id="agentTaskDetail" class="inspector-content agent-service-task-detail" aria-label="任务详情"></section>
+          </div>
+        </section>
+      </div>
+      <dialog class="modal console-detail-dialog agent-service-dialog" id="agentPublicationDialog" aria-labelledby="agentPublicationTitle">
+        <form id="agentPublicationForm" autocomplete="off">
+          <header class="modal-header"><h3 id="agentPublicationTitle">发布 Agent</h3><button type="button" class="icon-btn" data-service-close aria-label="关闭"><i data-lucide="x" aria-hidden="true"></i></button></header>
+          <div class="modal-body">
+            <div class="dialog-field-grid agent-service-fields">
+              <div class="field">
+                <div class="field-label-row"><label for="agentPublicationCode"><span>发布编码</span></label><span class="field-help" tabindex="0" aria-label="发布编码说明" aria-describedby="agentPublicationCodeHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span id="agentPublicationCodeHelp" class="field-help-tooltip" role="tooltip">用于生成接入地址，保存后固定。使用小写字母、数字或连字符。</span></span></div>
+                <input id="agentPublicationCode" name="code" required maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="例如 budget-report">
+              </div>
+              <label class="field"><span class="field-label-row">发布名称</span><input name="name" required maxlength="80"></label>
+              <label class="field"><span class="field-label-row">关联 Agent</span><select name="agent_id" required></select></label>
+              <label class="field agent-service-description"><span class="field-label-row">用途说明</span><textarea name="description" rows="2" maxlength="240" placeholder="说明可委托的任务"></textarea></label>
+            </div>
+            <section class="agent-service-app-config" aria-labelledby="agentPublicationAppSource">
+              <div class="channel-connection-heading"><h4 id="agentPublicationAppSource">应用来源</h4><div class="console-segmented" role="group" aria-labelledby="agentPublicationAppSource"><button type="button" data-service-app-source="fixed" aria-pressed="false">固定应用</button><button type="button" data-service-app-source="caller" aria-pressed="true">调用方指定</button></div></div>
+              <button type="button" class="da-select-trigger" id="pickAgentPublicationFixedApp" aria-haspopup="dialog" aria-controls="integrationAppPicker" hidden><span id="agentPublicationFixedAppValue">选择应用</span><span id="agentPublicationFixedAppSpace" hidden></span><i data-lucide="chevron-down" aria-hidden="true"></i></button>
+              <div id="agentPublicationAppControls" role="group" aria-label="允许的应用" hidden>
+                <div class="agent-service-app-choices">
+                  <span id="agentPublicationAllApps" class="agent-service-app-tag agent-service-all-apps" hidden>全部应用</span>
+                  <div id="agentPublicationAppTags"></div>
+                  <button type="button" class="btn text compact agent-service-add-app" id="addAgentPublicationApp" hidden><i data-lucide="plus" aria-hidden="true"></i>添加允许的应用</button>
+                </div>
+                <button type="button" class="btn text compact agent-service-app-scope-toggle" id="toggleAgentPublicationAppScope"><i data-lucide="arrow-left-right" aria-hidden="true"></i>切换</button>
+              </div>
+            </section>
+            <section class="agent-service-auth" aria-labelledby="agentPublicationAuthTitle">
+              <h4 class="channel-extension-heading" id="agentPublicationAuthTitle">请求 Header</h4>
+              <div class="agent-service-auth-summary">
+                <section aria-labelledby="agentPublicationAppHeaderTitle">
+                  <h5 id="agentPublicationAppHeaderTitle">应用</h5>
+                  <p id="agentPublicationAuthContext" aria-live="polite"></p>
+                </section>
+                <section aria-labelledby="agentPublicationCredentialTitle">
+                  <h5 id="agentPublicationCredentialTitle">鉴权凭据<span>二选一</span></h5>
+                  <dl><dt>平台 Token</dt><dd><code>Authorization: Bearer &lt;Token&gt;</code></dd><dt>DeepFOS API Key</dt><dd><code>X-Deepfos-Key: &lt;API Key&gt;</code></dd></dl>
+                </section>
+              </div>
+            </section>
+            <p class="form-feedback" id="agentPublicationError" role="alert" hidden></p>
+          </div>
+          <footer class="modal-footer"><button type="button" class="btn" data-service-close>取消</button><button type="submit" class="btn primary">保存</button></footer>
+        </form>
+      </dialog>
+      <dialog class="modal console-detail-dialog channel-help-modal agent-service-guide" id="agentServiceProtocol" aria-labelledby="agentServiceProtocolTitle">
+        <header class="modal-header"><h3 id="agentServiceProtocolTitle">接入帮助</h3><button type="button" class="icon-btn" data-service-close aria-label="关闭接入帮助"><i data-lucide="x" aria-hidden="true"></i></button></header>
+        <div class="modal-body">
+          <nav class="cap-tabs channel-help-tabs" id="agentServiceGuideTabs" role="tablist" aria-label="接入帮助">
+            <button type="button" class="cap-tab active" id="agentServiceMethodsTab" role="tab" aria-selected="true" aria-controls="agentServiceMethodsPanel"><i data-lucide="book-open" aria-hidden="true"></i>A2A 协议</button>
+            <button type="button" class="cap-tab" id="agentServiceTestTab" role="tab" aria-selected="false" aria-controls="agentServiceTestPanel" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>联调工具</button>
+          </nav>
+          <section class="channel-help-panel" id="agentServiceMethodsPanel" role="tabpanel" aria-labelledby="agentServiceMethodsTab">
+            <div class="agent-service-guide-heading">
+              <p>每个发布有独立的 Agent Card。客户端读取卡片后，使用 A2A 1.0 JSON-RPC 调用。</p>
+              <a class="btn-link" href="https://a2a-protocol.org/v1.0.1/specification/#53-method-mapping-reference" target="_blank" rel="noopener noreferrer">官方规范 <i data-lucide="external-link" aria-hidden="true"></i></a>
+            </div>
+            <div class="table-wrap console-list-a agent-service-methods" tabindex="0" role="region" aria-label="A2A 方法列表">
+              <table class="data-table"><thead><tr><th scope="col">发现 / JSON-RPC 方法</th><th scope="col">要支持</th><th scope="col">备注</th></tr></thead><tbody>
+                <tr><td><code>Agent Card · HTTP GET</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>每个发布有独立 Card URL，通过平台鉴权后读取。</td></tr>
+                <tr><td><code>SendMessage</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>可等待结果或立即获得 Task ID。补材料时带原 Task ID。</td></tr>
+                <tr><td><code>SendStreamingMessage</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>断开连接后任务继续执行。</td></tr>
+                <tr><td><code>GetTask</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>可查看当前状态和已交付产物。任务超过保留期后不可查询。</td></tr>
+                <tr><td><code>ListTasks</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>只列出当前发布下该调用方有权查看的近期任务。</td></tr>
+                <tr><td><code>CancelTask</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>返回任务状态，实际停止后进入已取消。</td></tr>
+                <tr><td><code>SubscribeToTask</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>用于订阅进行中的任务。终态任务用 GetTask 查询。</td></tr>
+                <tr><td><code>CreateTaskPushNotificationConfig</code></td><td><span role="img" aria-label="未支持">—</span></td><td>登记任务状态回调地址。</td></tr>
+                <tr><td><code>GetTaskPushNotificationConfig</code></td><td><span role="img" aria-label="未支持">—</span></td><td>读取一条回调配置。</td></tr>
+                <tr><td><code>ListTaskPushNotificationConfigs</code></td><td><span role="img" aria-label="未支持">—</span></td><td>列出任务的回调配置。</td></tr>
+                <tr><td><code>DeleteTaskPushNotificationConfig</code></td><td><span role="img" aria-label="未支持">—</span></td><td>删除一条回调配置。</td></tr>
+                <tr><td><code>GetExtendedAgentCard</code></td><td><span role="img" aria-label="未支持">—</span></td><td>认证后读取扩展 Card。</td></tr>
+                <tr><td><code>Artifact 下载 · DeepAgent 扩展</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>使用 Task 返回的授权链接取件。A2A 标准没有单独的下载方法。</td></tr>
+              </tbody></table>
+            </div>
+          </section>
+          <section class="channel-help-panel" id="agentServiceTestPanel" role="tabpanel" aria-labelledby="agentServiceTestTab" hidden>
+            <ul class="agent-service-links">
+              <li><a class="btn-link" href="https://a2playground.a2d-ai.com/" target="_blank" rel="noopener noreferrer">在线 A2D Playground <i data-lucide="external-link" aria-hidden="true"></i></a><p>适合公网可达的 Agent Card。</p></li>
+              <li><a class="btn-link" href="https://github.com/a2aproject/a2a-inspector" target="_blank" rel="noopener noreferrer">官方 A2A Inspector <i data-lucide="external-link" aria-hidden="true"></i></a><p>在本机启动网页，连接本地或内网地址，查看请求和响应。</p></li>
+              <li><a class="btn-link" href="https://github.com/a2aproject/a2a-cli#usage" target="_blank" rel="noopener noreferrer">官方 A2A CLI <i data-lucide="external-link" aria-hidden="true"></i></a><p>在终端调用，适合调试或重复验证。</p></li>
+            </ul>
+          </section>
+        </div>
+        <footer class="modal-footer"><button type="button" class="btn" data-service-close>关闭</button></footer>
+      </dialog>
+    </section>
+
     <section class="panel integrations-admin-panel" id="panel-integrations">
       <div class="panel-toolbar" id="integrationPageToolbar"><div><h2>场景配置</h2><p class="panel-subtitle">为各个业务场景选择 Agent，并按需配置专用提示词和 Skill。</p></div></div>
       <div class="integration-workspace" id="integrationWorkspace">
@@ -733,6 +859,7 @@
               <span class="provider-auth-section-title">账号授权</span>
               <div class="provider-auth-actions">
                 <button type="button" class="btn danger hidden" id="llmProviderDisconnectAuthorization">断开授权</button>
+                <a class="btn hidden" id="llmProviderAuthorizationLink" target="_blank" rel="noopener noreferrer">打开授权页面</a>
                 <button type="button" class="btn" id="llmProviderStartAuthorization">前往授权</button>
               </div>
             </div>
@@ -977,7 +1104,7 @@
         <button type="button" class="btn" id="retryChannelCommandsBtn" hidden>重新加载</button>
       </section>
     </div>
-    <div class="modal-footer"><button type="button" class="btn" id="dismissChannelHelpBtn">关闭</button></div>
+    <footer class="modal-footer"><button type="button" class="btn" id="dismissChannelHelpBtn">关闭</button></footer>
   </dialog>
 
   <!-- Channel account modal -->
@@ -1082,10 +1209,16 @@
                 <label for="channelDeepfosEnabled">启用应用关联</label></div><small class="field-subtitle">设置应用上下文与访问凭据</small>
               </div>
               <div class="channel-extension-fields" id="channelDeepfosAppField" hidden>
-              <label class="field">
-                <span>App ID</span>
-                <input type="text" id="channelDeepfosAppId" maxlength="191" pattern="[^\s]+[0-9]{3}" placeholder="请输入" autocomplete="off" title="填写 Space 编码加三位数字组成的 App ID" />
-              </label>
+              <div class="field">
+                <span id="channelDeepfosAppLabel">应用</span>
+                <button type="button" class="da-select-trigger" id="channelDeepfosApp" aria-haspopup="dialog"
+                        aria-controls="integrationAppPicker" aria-labelledby="channelDeepfosAppLabel"
+                        aria-describedby="channelDeepfosAppValue channelDeepfosAppSpace">
+                  <span id="channelDeepfosAppValue" class="da-select-placeholder">选择应用</span>
+                  <span id="channelDeepfosAppSpace" hidden></span>
+                  <i data-lucide="chevron-down" aria-hidden="true"></i>
+                </button>
+              </div>
               <div class="field">
                 <div class="field-label-actions"><span class="field-label-row"><label for="channelDeepfosApiKey">X-Deepfos-Key</label><span class="field-help" tabindex="0" aria-label="如何获取 X-Deepfos-Key" aria-describedby="channelDeepfosKeyHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="channelDeepfosKeyHelp" role="tooltip">前往「配置管理 → 目标空间 → API 密钥 → 新建」。必须使用「会话关联用户」本人的 API Key，且属于当前 App 所在空间，并授权访问该 App。</span></span></span><button type="button" class="field-text-action" id="clearChannelDeepfosApiKeyBtn">清空</button></div>
                 <input type="password" id="channelDeepfosApiKey" placeholder="请输入" autocomplete="new-password" />

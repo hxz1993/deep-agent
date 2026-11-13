@@ -9,6 +9,9 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, s
 from loguru import logger
 
 from deep_agent.agent.headers import extract_forward_headers
+from deep_agent.agent_service.publications import PublicationScope, PublicationStore
+from deep_agent.agent_service.tasks import TERMINAL
+from deep_agent.api.v1.agent_service import require_publication_admin, task_store, verify_scopes
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.integration_apps import verify_app_scope_rows
 from deep_agent.api.v1.mcp import validate_bound_mcp_import
@@ -22,6 +25,7 @@ from deep_agent.schemas.configuration_import import (
 from deep_agent.services.configuration_import import (
     MAX_CONFIGURATION_BACKUP_BYTES,
     MAX_SKILLS_BUNDLE_BYTES,
+    ConfigurationImportBusyError,
     ConfigurationImportConflictError,
     ConfigurationImportError,
     ConfigurationImportFileStoreError,
@@ -191,6 +195,10 @@ async def import_configuration(
                 await verify_app_scope_rows(
                     request, require_request_user(request.headers.get("user")), app_rows, skill_scopes=skill_scopes,
                 )
+            publication_rows = plan.rows.get("agent_publications", ())
+            if publication_rows:
+                user = await require_publication_admin(require_request_user(request.headers.get("user")))
+                await verify_scopes(request, user, [PublicationScope.model_validate(row["scope"]) for row in publication_rows])
             await validate_bound_mcp_import(request, plan.rows.get("mcp_servers", ()))
             if not apply:
                 return _response(plan, imported=False)
@@ -198,7 +206,13 @@ async def import_configuration(
             request_headers = skill_platform_file_headers(
                 extract_forward_headers(request)
             )
-            async with _pause_wecom_runtime(ctx):
+            tasks = task_store(ctx)
+            async with tasks.admission, _pause_wecom_runtime(ctx):
+                if not publication_rows and await PublicationStore(ctx.db_session_factory).list():
+                    await require_publication_admin(require_request_user(request.headers.get("user")))
+                tasks.prune()
+                if any(entry.state not in TERMINAL for entry in tasks.entries.values()):
+                    raise ConfigurationImportBusyError("存在未结束的 A2A 任务，请结束后再恢复配置")
                 result = await apply_configuration_import(
                     plan,
                     target_engine=ctx.db_engine,

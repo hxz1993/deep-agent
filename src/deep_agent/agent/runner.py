@@ -332,7 +332,11 @@ class AgentRunner:
 
     @staticmethod
     def _output_types(deps):
-        return deps.output_state.output_types if deps.output_state is not None else _STREAM_OUTPUT_TYPE
+        types = deps.output_state.output_types if deps.output_state is not None else _STREAM_OUTPUT_TYPE
+        if deps.a2a:
+            from deep_agent.agent_service.output import question_output
+            return [*types, question_output()]
+        return types
 
     def _bind_tool_output_store(
         self,
@@ -2029,6 +2033,10 @@ class AgentRunner:
             self.tool_display_names,
             deps.tool_names,
         )
+        if deps.a2a:
+            from deep_agent.agent_service.output import A2AQuestion
+            if isinstance(result.output, A2AQuestion):
+                response["a2a_question"] = result.output.question
         response["conversation_id"] = result.conversation_id or deps.conversation_id
         response["run_id"] = result.run_id or deps.run_id
         if deps.output_state is not None and deps.output_state.accepted is not None:

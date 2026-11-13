@@ -111,6 +111,13 @@ function setProviderAuthState(message, status = "idle") {
   text.closest(".provider-auth-status").dataset.state = status;
 }
 
+function setProviderAuthorizationLink(url = "") {
+  const link = document.getElementById("llmProviderAuthorizationLink");
+  link.classList.toggle("hidden", !url);
+  if (url) link.href = url;
+  else link.removeAttribute("href");
+}
+
 function syncProviderAccessMode(mode, { editing = false } = {}) {
   providerAdminState.accessMode = mode;
   const subscription = mode === "subscription";
@@ -144,6 +151,7 @@ function syncProviderAccessMode(mode, { editing = false } = {}) {
 }
 
 async function cancelProviderAuthorization() {
+  setProviderAuthorizationLink();
   const flowId = providerAdminState.flowId;
   providerAdminState.flowId = null;
   providerAdminState.verified = false;
@@ -687,20 +695,30 @@ document.addEventListener("DOMContentLoaded", () => {
     const form = document.getElementById("llmProviderForm");
     const providerId = form.dataset.providerId || null;
     AdminFormFeedback.clear(form);
-    const tab = window.open("about:blank", "_blank");
+    const button = document.getElementById("llmProviderStartAuthorization");
+    button.disabled = true;
+    let tab;
     try {
+      try { tab = window.open("about:blank", "_blank"); } catch (_) { /* Use the link below. */ }
       await cancelProviderAuthorization();
       const result = await apiFetch("/api/v1/llm-providers/codex/authorization", {
         method: "POST", body: JSON.stringify({ provider_id: providerId }),
       });
       providerAdminState.flowId = result.flow_id;
       providerAdminState.verified = false;
-      setProviderAuthState("授权页面已打开，请回填完整回调地址", "pending");
-      if (tab) tab.location.replace(result.authorization_url);
-      else showToast("浏览器拦截了新标签，请允许弹窗后重试", true);
+      setProviderAuthorizationLink(result.authorization_url);
+      setProviderAuthState("请打开授权页面，登录后回填完整回调地址", "pending");
+      if (tab && !tab.closed) {
+        try {
+          tab.opener = null;
+          tab.location.replace(result.authorization_url);
+        } catch (_) { tab.close(); }
+      }
     } catch (error) {
       tab?.close();
       AdminFormFeedback.show(form, error);
+    } finally {
+      button.disabled = false;
     }
   });
   document.getElementById("llmProviderVerifyAuthorization")?.addEventListener("click", async () => {
@@ -713,6 +731,7 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify({ provider_id: form.dataset.providerId || null, callback_url: document.getElementById("llmProviderCallbackUrl").value.trim() }),
       });
       providerAdminState.verified = true;
+      setProviderAuthorizationLink();
       document.getElementById("llmProviderCallbackUrl").value = "";
       setProviderAuthState(`验证成功 ${result.account_hint}，点击保存后生效`, "connected");
     } catch (error) { AdminFormFeedback.show(form, error); }

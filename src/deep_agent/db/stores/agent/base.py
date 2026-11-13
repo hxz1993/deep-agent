@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 
-from deep_agent.db.models import Agent, AgentOutputConfig, LlmModel, LlmProvider, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
+from deep_agent.db.models import AgentPublication, Agent, AgentOutputConfig, LlmModel, LlmProvider, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
 from deep_agent.db.deletion import DeletionImpact, DeletionConfirmationRequired
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference, lock_optional, is_unique_conflict
 from deep_agent.db.stores._session import SessionBoundMixin
@@ -225,6 +225,9 @@ class AgentStoreBase(SessionBoundMixin):
         if (await db.execute(select(ChannelAccount.id).where(
             ChannelAccount.agent_id == agent_id).limit(1).with_for_update())).first():
             raise ReferenceConflict("Agent 正被渠道配置使用，请先将对应渠道改绑到其他 Agent 或删除渠道；仅停用渠道不会解除关联")
+        if (await db.execute(select(AgentPublication.id).where(
+            AgentPublication.agent_id == agent_id).limit(1).with_for_update())).first():
+            raise ReferenceConflict("Agent 正被发布配置引用，请先解除关联")
         sessions = (await db.execute(select(ChatSession.session_id, ChatSession.user_id, ChatSession.created_at)
             .where(ChatSession.agent_id == agent_id).order_by(ChatSession.session_id).with_for_update())).all()
         return DeletionImpact.build("agent", agent_id, user_id, sessions=[tuple(row) for row in sessions])

@@ -4,6 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from packaging.version import Version
+
 from deep_agent import __version__
 from deep_agent.main import app, info
 
@@ -21,7 +23,8 @@ class ProductVersionTests(unittest.IsolatedAsyncioTestCase):
         ):
             payload = await info(ctx)
 
-        self.assertRegex(__version__, r"^\d+\.\d+\.\d+$")
+        self.assertEqual(str(Version(__version__)), __version__)
+        self.assertEqual(len(Version(__version__).release), 3)
         self.assertEqual(app.version, __version__)
         self.assertEqual(payload["name"], "DeepAgent")
         self.assertEqual(payload["version"], __version__)

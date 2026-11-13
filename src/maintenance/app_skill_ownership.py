@@ -1,4 +1,4 @@
-"""Convert existing App Skill data within database revision 015."""
+"""Convert existing App Skill data within database revisions 015 and 016."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ async def convert_app_skill_ownership(database_url: str, *, apply: bool = False)
     try:
         async with transaction as db:
             revision = await db.scalar(text("SELECT version_num FROM alembic_version"))
-            if revision != "015":
-                raise AppSkillDataError("App Skill conversion requires database revision 015")
+            if revision not in {"015", "016"}:
+                raise AppSkillDataError("App Skill conversion requires database revision 015 or 016")
             configs = (await db.execute(select(
                 config.c.id, config.c.integration_code, config.c.scope_type,
                 config.c.scope_key, config.c.tenant_id, config.c.settings,

@@ -156,7 +156,7 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
     async def _mark_revision(self):
         async with self.engine.begin() as db:
             await db.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
-            await db.execute(text("INSERT INTO alembic_version VALUES ('015')"))
+            await db.execute(text("INSERT INTO alembic_version VALUES ('016')"))
 
     async def _install_with_old_key(self, app, name, *, hashed):
         config = await self.stores.integration_app.get(app.app_id, app.space_id)

@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import re
+from urllib.parse import urlsplit
+
+from fastapi import HTTPException, Request
+
+from deep_agent.agent.request_context import DEFAULT_LANGUAGE
+from deep_agent.security.console_admin import ConsoleAdminAuthenticationError, ConsoleAdminUnavailableError, PlatformEnterpriseAdminChecker
+from deep_agent.services.integration_app_access import (
+    IntegrationAppAccessError, PlatformAppAccessClient, app_space,
+)
+
+from .publications import AppScopeItem
+
+_CREDENTIALS = ("authorization", "token", "x-user-token", "x-deepfos-key")
+
+
+def public_base_url(value: str) -> str:
+    parsed = urlsplit(value)
+    loopback = parsed.hostname in {"127.0.0.1", "::1", "localhost"}
+    if (parsed.scheme not in {"https", "http"} or (parsed.scheme == "http" and not loopback)
+            or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment or any(ch.isspace() for ch in value)):
+        raise ValueError("Agent Service public URL must use HTTPS or loopback HTTP")
+    return value.rstrip("/")
+
+
+async def platform_caller(request: Request, *, fixed_app: AppScopeItem | None = None) -> dict[str, str]:
+    headers = {}
+    header_names = (*_CREDENTIALS, "language") if fixed_app else (*_CREDENTIALS, "language", "app", "space")
+    for name in header_names:
+        values = request.headers.getlist(name)
+        if len(values) > 1:
+            raise HTTPException(400, f"{name} Header 重复，请只发送一次。")
+        if any(len(value) > 8192 or any(ord(ch) < 32 or ord(ch) == 127 for ch in value) for value in values):
+            raise HTTPException(400, f"{name} Header 格式无效。")
+        if values and values[0].strip():
+            headers[name] = values[0].strip()
+    if fixed_app:
+        app, space = fixed_app.app_id, fixed_app.space_id
+    else:
+        app = headers.get("app")
+        if not app:
+            raise HTTPException(400, "此发布由调用方指定应用，请在 app Header 中传入 App ID。")
+        try:
+            space = app_space(app)
+        except IntegrationAppAccessError as exc:
+            raise HTTPException(400, "app Header 不是有效的 App ID。") from exc
+        if "space" in headers and headers["space"] != space:
+            raise HTTPException(400, "space Header 与 App 所属空间不一致，请更正或省略 space。")
+    headers.update(app=app, space=space)
+    credentials = [name for name in _CREDENTIALS if name in headers]
+    if not credentials:
+        raise HTTPException(401, "缺少调用凭据。请通过 Authorization: Bearer <Token> 或 X-Deepfos-Key 提供一种凭据。")
+    if len(credentials) > 1:
+        raise HTTPException(401, "收到多种调用凭据。请仅保留平台 Token 或 DeepFOS API Key。")
+    name = credentials[0]
+    if name == "authorization":
+        match = re.fullmatch(r"Bearer ([^ ,]+)", headers[name], flags=re.I)
+        if not match:
+            raise HTTPException(401, "Authorization Header 格式无效，请使用 Bearer <Token>。")
+        headers["token"] = match[1]
+        del headers[name]
+    elif name == "x-user-token":
+        headers["token"] = headers.pop(name)
+    headers.setdefault("language", DEFAULT_LANGUAGE)
+    try:
+        key = headers.get("x-deepfos-key")
+        if key:
+            user = await PlatformEnterpriseAdminChecker().resolve_api_key_user(key, app, space)
+        else:
+            # The account service resolves the actual owner from the credential.
+            # An untrusted inbound user header never reaches this request.
+            profile = await PlatformAppAccessClient(
+                {"token": headers["token"], "language": headers["language"]},
+            )._get("account", "api/user/full-detail")
+            ids = {str(profile[key]).strip() for key in ("id", "userId")
+                   if isinstance(profile, dict) and profile.get(key) is not None}
+            if len(ids) != 1 or not re.fullmatch(r"[A-Za-z0-9_.@:-]{1,128}", next(iter(ids))):
+                raise HTTPException(401, "Platform did not verify the caller identity")
+            user = ids.pop()
+        headers["user"] = user
+        await PlatformAppAccessClient(headers).verify_app_access(app, space)
+    except IntegrationAppAccessError as exc:
+        if exc.status == 401:
+            raise HTTPException(401, "平台无法验证调用凭据，请检查凭据是否有效。") from exc
+        raise HTTPException(exc.status, str(exc)) from exc
+    except ConsoleAdminAuthenticationError as exc:
+        raise HTTPException(401, "平台拒绝了 API Key，请检查 Key 是否有效并已授权访问目标应用。") from exc
+    except ConsoleAdminUnavailableError as exc:
+        raise HTTPException(503, "Platform authentication is temporarily unavailable") from exc
+    return headers

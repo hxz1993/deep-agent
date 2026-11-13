@@ -1,6 +1,6 @@
 # DeepAgent 后端与内置 Console 开发
 
-本章用于已取得 DeepAgent 源码且需要修改的任务；没有源码时使用[业务接口指南](../../11-api-and-version.md)。内置 `console/` 归后端仓库，外部业务客户端见[前端开发](../frontend/index.md)。资料基线为 **{{DEEP_AGENT_VERSION}} / 数据库 015**，操作前核对目标 `/info`、OpenAPI、仓库 AGENTS、分支和已有改动。
+本章用于已取得 DeepAgent 源码且需要修改的任务；没有源码时使用[业务接口指南](../../11-api-and-version.md)。内置 `console/` 归后端仓库，外部业务客户端见[前端开发](../frontend/index.md)。资料基线为 **{{DEEP_AGENT_VERSION}} / 数据库 016**，操作前核对目标 `/info`、OpenAPI、仓库 AGENTS、分支和已有改动。
 
 ## 按任务读取
 

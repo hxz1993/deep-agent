@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import unittest
 import tempfile
 from pathlib import Path
@@ -10,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai.providers.openai_codex import OpenAICodexCredentials
+from sqlalchemy.engine import URL
 
 from deep_agent.api.v1 import api_router
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
@@ -20,6 +23,41 @@ from tests.helpers.sqlite_stores import make_sqlite_stores
 
 
 class CodexProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_owner_lock_is_per_local_sqlite_database(self):
+        from deep_agent.services import codex_provider
+
+        home = self.lock_test_home
+        database = home / "first.db"
+        alias = home / "alias.db"
+        alias.symlink_to(database)
+        holder = """
+import fcntl
+import sys
+
+with open(sys.argv[1], 'a+') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    print('locked', flush=True)
+    sys.stdin.read()
+"""
+        engine = get_context().db_engine
+        url = URL.create("sqlite+aiosqlite", database=str(database))
+        with patch.object(engine.sync_engine, "url", url):
+            lock_path = codex_provider._owner_lock_path()
+        lock_path.parent.mkdir(parents=True)
+        with subprocess.Popen(
+            [sys.executable, "-c", holder, str(lock_path)], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, text=True,
+        ) as process:
+            try:
+                self.assertEqual(process.stdout.readline().strip(), "locked")
+                with patch.object(engine.sync_engine, "url", url.set(database=str(alias))):
+                    with self.assertRaisesRegex(CodexUnavailable, "当前数据库"):
+                        codex_provider._claim_single_owner()
+                with patch.object(engine.sync_engine, "url", url.set(database=str(home / "second.db"))):
+                    codex_provider._claim_single_owner()
+            finally:
+                process.stdin.close()
+
     async def test_codex_model_requests_summary_without_overriding_default_effort(self):
         from deep_agent.services.codex_provider import codex_model, evict_provider
         provider_id = 'fixture-summary-only'
@@ -38,17 +76,18 @@ class CodexProviderTests(unittest.IsolatedAsyncioTestCase):
         from deep_agent.services import codex_provider
         temporary = tempfile.TemporaryDirectory(prefix="TMP_to_delete_codex_owner_")
         self.addCleanup(temporary.cleanup)
+        self.lock_test_home = Path(temporary.name)
         path_patch = patch("deep_agent.services.codex_provider.Path", wraps=Path)
         path_proxy = path_patch.start()
-        path_proxy.home.return_value = Path(temporary.name)
+        path_proxy.home.return_value = self.lock_test_home
         self.addCleanup(path_patch.stop)
-        owner_patch = patch("deep_agent.services.codex_provider._owner_file", None)
+        owner_patch = patch("deep_agent.services.codex_provider._owner_files", {})
         owner_patch.start()
         self.addCleanup(owner_patch.stop)
         def release_test_owner():
-            if codex_provider._owner_file is not None:
-                codex_provider._owner_file.close()
-                codex_provider._owner_file = None
+            for file in codex_provider._owner_files.values():
+                file.close()
+            codex_provider._owner_files.clear()
         self.addCleanup(release_test_owner)
         self._env = patch.dict(os.environ, {"DEEP_AGENT_ENABLE_SUBSCRIPTION_PROVIDER": "true"})
         self._env.start()

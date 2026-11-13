@@ -1,4 +1,4 @@
-/* Shared single-app selector for scene and MCP configuration. */
+/* Shared single-app selector for configuration. */
 (() => {
   const el = id => document.getElementById(id);
   const pageSize = 100;
@@ -27,6 +27,14 @@
     invalidate(path) {
       cache.delete(path);
     },
+    async getApps(path, { signal } = {}) {
+      const cached = cache.get(path);
+      if (cached && cached.expiresAt > Date.now()) return cached.apps;
+      const apps = await apiFetch(path, { signal, reportStatus: false });
+      if (!Array.isArray(apps)) throw new Error('应用列表加载失败。');
+      cache.set(path, { apps, expiresAt: Date.now() + cacheMs });
+      return apps;
+    },
     setAppChoices(picker, apps) {
       const selectedIndex = apps.findIndex(app => app.app_id === picker.selection);
       // Keep an existing selection visible without expanding the initial page.
@@ -49,10 +57,8 @@
       picker.state = 'loading';
       status.textContent = '正在加载应用…';
       try {
-        const apps = await apiFetch(picker.path, { signal: controller.signal, reportStatus: false });
+        const apps = await this.getApps(picker.path, { signal: controller.signal });
         if (this.current !== picker) return;
-        if (!Array.isArray(apps)) throw new Error('应用列表加载失败。');
-        cache.set(picker.path, { apps, expiresAt: Date.now() + cacheMs });
         this.setAppChoices(picker, apps);
       } catch (error) {
         if (this.current !== picker) return;

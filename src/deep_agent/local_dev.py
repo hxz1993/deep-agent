@@ -159,6 +159,10 @@ class LocalIdentityAdapter:
                 )(scope, receive, send)
                 return
 
+        if scope.get("path", "").startswith("/api/v1/agent-service/a2a/"):
+            await self.app(scope, receive, send)
+            return
+
         forwarded_scope = dict(scope)
         incoming_headers = scope.get("headers") or []
         headers = [

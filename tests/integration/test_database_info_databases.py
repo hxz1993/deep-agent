@@ -28,7 +28,7 @@ class DatabaseInfoDialectTests(unittest.IsolatedAsyncioTestCase):
             ctx = SimpleNamespace(db_session_factory=async_sessionmaker(engine))
             with patch.object(database_info, "get_database_url", return_value=url):
                 light = await database_info.get_database_info(_user=None, ctx=ctx, include_charset=False)
-                self.assertEqual(light.schema_version, "015")
+                self.assertEqual(light.schema_version, "016")
                 self.assertIsNone(light.charset)
                 self.assertEqual(len(statements), 1)
                 self.assertIn("alembic_version", statements[0])

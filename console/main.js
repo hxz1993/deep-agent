@@ -32,7 +32,7 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=0167-app-directory");
+    const module = await import("./configuration.js?v=0170a1-agent-service");
     await module.initConfiguration();
     configurationModule = module;
     return module;
@@ -296,6 +296,8 @@ function bindNavigation() {
   if (integrationTab) document.querySelector(".console-rail .console-nav")?.append(integrationTab);
   const channelTab = resourceNav?.querySelector('[data-tab="channels"]');
   if (channelTab) document.querySelector(".console-rail .console-nav")?.append(channelTab);
+  const serviceTab = resourceNav?.querySelector('[data-tab="agent-service"]');
+  if (serviceTab) document.querySelector(".console-rail .console-nav")?.append(serviceTab);
   document.querySelectorAll(".console-rail [data-tab]").forEach((button) => {
     const label = button.querySelector("span")?.textContent.trim();
     if (label) { button.title = label; button.setAttribute("aria-label", label); }

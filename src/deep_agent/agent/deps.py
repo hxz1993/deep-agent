@@ -59,6 +59,7 @@ class AgentDeps:
     context_state: "ContextRunState | None" = None
     request_budget: "TurnRequestBudget | None" = None
     tool_names: dict[str, "ToolName"] = field(default_factory=dict, repr=False)
+    a2a: bool = False
     output_state: Any = field(default=None, repr=False)
     output_store: Any = field(default=None, repr=False)
     tool_discovery: "ToolDiscoveryTelemetry | None" = None

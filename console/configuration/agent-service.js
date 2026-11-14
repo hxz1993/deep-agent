@@ -9,7 +9,6 @@
   let selected = "", selectedTask = "", access = "a2a", page = 1;
   let draft, detailRequest, taskRequest, timer, searchTimer;
   let taskRowsMarkup = "", taskDetailSnapshot = "", shownTask = "";
-  const relativeTime = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
   const icon = (name) => `<i data-lucide="${name}"></i>`;
   const attr = (value) => escapeHtml(value).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
   const refreshIcons = () => window.lucide?.createIcons();
@@ -29,15 +28,12 @@
   }
 
   function publicationUpdate(row) {
-    const date = window.DeepAgentTime.parseServerTimestamp(row.updated_at);
-    const elapsed = date ? Math.max(0, (Date.now() - date.getTime()) / 1000) : 0;
-    const time = !date ? "—" : elapsed < 60 ? "刚刚" : elapsed < 3600
-      ? relativeTime.format(-Math.floor(elapsed / 60), "minute")
-      : elapsed < 86400 ? relativeTime.format(-Math.floor(elapsed / 3600), "hour")
-      : relativeTime.format(-Math.floor(elapsed / 86400), "day");
-    const operator = row.updated_by_user?.username || row.updated_by;
-    return `<div class="agent-service-update">${operator ? `<span title="更新人：${attr(operator)}">${escapeHtml(operator)}</span>` : ""}
-      ${date ? `<time datetime="${date.toISOString()}" title="${attr(formatDate(row.updated_at))}">${escapeHtml(time)}</time>` : '<span>—</span>'}</div>`;
+    const operator = row.updated_by_user?.username || row.updated_by || "—";
+    const time = formatDate(row.updated_at);
+    return `<div class="agent-update-cell">
+      <span class="agent-updater" title="更新人：${attr(operator)}">${icon("user-round")}<span class="agent-updater-name">${escapeHtml(operator)}</span></span>
+      <span class="agent-update-time" title="${attr(time)}">${escapeHtml(time)}</span>
+    </div>`;
   }
 
   function renderPublications(message = "") {
@@ -69,22 +65,23 @@
       if (active) card.setAttribute("aria-labelledby", button.id);
     });
     const row = rows.find((item) => item.agent_code === selected);
+    const publication = row ? `<h4 class="agent-service-current-publication">${icon("bot")}<span>当前发布</span><strong>${escapeHtml(row.name)}</strong></h4>` : "";
     if (access !== "a2a") card.textContent = "接入方式待定。";
     else if (!row) card.textContent = "请选择一项发布";
     else if (!row.card_url) {
-      card.innerHTML = `<h4>${escapeHtml(row.name)}</h4><p>${row.enabled ? "尚未配置接入地址。" : "该发布已停用。"}</p>`;
+      card.innerHTML = `${publication}<p>${row.enabled ? "尚未配置接入地址。" : "该发布已停用。"}</p>`;
     } else {
       const cards = [
-        { label: "通用 Agent Card", url: row.card_url, help: "在 app Header 填应用 ID，并传凭据。" },
-        { label: "带应用的 Agent Card", url: row.app_card_url_template, help: "将 {app_id} 替换为应用 ID，无需 app Header。" },
+        { label: "通用 Agent Card", url: row.card_url, help: "在请求 Header 的 <code>app</code> 中填写应用 ID，并传凭据。" },
+        { label: "带应用的 Agent Card", url: row.app_card_url_template, help: "将地址中的 <code>{app_id}</code> 替换为应用 ID，请求只需传凭据。" },
       ];
-      card.innerHTML = `<h4>${escapeHtml(row.name)}</h4>
+      card.innerHTML = `${publication}
         <div class="agent-service-card-options">${cards.map(({ label, url, help }, index) => `
-          <section aria-labelledby="agentServiceCardLabel${index}">
-            <div class="agent-service-card-heading"><span id="agentServiceCardLabel${index}">${label}</span>
+          <section class="agent-service-card-option" aria-labelledby="agentServiceCardLabel${index}">
+            <div class="agent-service-card-heading"><h5 id="agentServiceCardLabel${index}">${label}</h5>
               <button type="button" class="btn text compact" aria-label="复制${label}地址" data-card-copy="${index}">复制地址</button></div>
-            <div class="agent-service-card-url"><code title="${attr(url)}">${escapeHtml(url)}</code></div>
             <p class="agent-service-access-help">${help}</p>
+            <div class="agent-service-card-url"><code title="${attr(url)}">${escapeHtml(url)}</code></div>
           </section>`).join("")}</div>`;
       card.querySelectorAll("[data-card-copy]").forEach((button) => {
         button.addEventListener("click", () => void copy(cards[Number(button.dataset.cardCopy)].url));
@@ -170,7 +167,7 @@
       <tr data-agent-task="${attr(row.id)}" class="${row.id === selectedTask ? "selected" : ""}">
         <td><button type="button" class="btn text agent-service-select" aria-controls="agentTaskDetail" aria-pressed="${row.id === selectedTask}"><span title="${attr(row.title)}">${escapeHtml(row.title)}</span><code title="${attr(row.id)}">${escapeHtml(row.id.slice(0, 8))}</code></button></td>
         <td><span class="agent-service-status" data-state="${attr(row.status)}">${statusLabel(row.status)}</span></td><td>A2A</td>
-        <td class="agent-task-wide" title="${attr(row.caller)}">${escapeHtml(row.caller)}</td>
+        <td class="agent-task-wide" title="${attr(row.caller_username ? `${row.caller_username} · ${row.caller}` : row.caller)}">${escapeHtml(row.caller_username || row.caller?.slice(0, 8) || "—")}</td>
         <td class="agent-task-wide">${escapeHtml(formatDate(row.created_at))}</td>
         <td class="agent-task-wide">${duration(row)}</td>
         <td>${row.artifact_count ? `<span class="agent-task-file-count" role="img" aria-label="${row.artifact_count} 个文件" title="${row.artifact_count} 个文件"><i data-lucide="file-text" aria-hidden="true"></i>${row.artifact_count}</span>` : "—"}</td>
@@ -206,6 +203,48 @@
       <p class="agent-service-empty" role="status">${escapeHtml(message)}</p>`;
   }
 
+  function taskIdValue(id, label, url = "") {
+    if (!id) return "—";
+    const code = `<code title="${attr(id)}">${escapeHtml(id.slice(0, 8))}</code>`;
+    const value = url ? `<a class="agent-service-session-link" href="${attr(url)}" data-detail-control="${attr(`open:${label}:${id}`)}" aria-label="${attr(`查看 ${label} ${id.slice(0, 8)}`)}">${code}</a>` : code;
+    return `<span class="agent-service-id-value">${value}
+      <button type="button" class="inspector-copy-btn" data-task-copy="${attr(id)}" data-detail-control="${attr(`copy:${label}:${id}`)}" title="复制 ${attr(label)}" aria-label="复制 ${attr(label)}">${icon("copy")}</button></span>`;
+  }
+
+  function taskDetailFacts(row) {
+    const named = (name, id, label, url) => {
+      const title = name ? `<strong class="agent-service-fact-name" title="${attr(name)}">${escapeHtml(name)}</strong>` : "";
+      const separator = title && id && url ? '<span class="agent-service-fact-meta" aria-hidden="true">·</span>' : "";
+      return `${title}${separator}${taskIdValue(id, label, url)}`;
+    };
+    const sessionUrl = row.session_id ? `#/diagnostics/sessions/${encodeURIComponent(row.session_id)}?view=conversation` : "";
+    const turns = (row.turns || []).map((turn) =>
+      taskIdValue(turn.id, "Turn ID", turn.event_id && sessionUrl ? `${sessionUrl}&event_id=${encodeURIComponent(turn.event_id)}` : ""),
+    );
+    const appName = row.app_name || (row.app_id ? "名称未获取" : "未关联应用");
+    const spaceName = row.space_name || (row.space_id ? "名称未获取" : "未关联空间");
+    const scope = `<span class="inspector-scope-value">
+      <span class="inspector-scope-names"><span title="${attr(appName)}">${escapeHtml(appName)}</span><span>/</span><span title="${attr(spaceName)}">${escapeHtml(spaceName)}</span></span>
+      <span class="inspector-scope-codes"><code>${escapeHtml(row.app_id || "—")}</code><span>/</span><code>${escapeHtml(row.space_id || "—")}</code></span>
+    </span>`;
+    return `<section class="inspector-section agent-service-task-facts">
+      <dl class="agent-service-facts">
+        <div><dt>调用方</dt><dd>${named(row.caller_username, row.caller, "User ID")}</dd></div>
+        <div><dt>接入方式</dt><dd><span class="agent-service-access-method" data-service-access="a2a">${icon("network")}A2A</span></dd></div>
+        <div><dt>应用 / 空间</dt><dd>${scope}</dd></div>
+        <div><dt>提交时间</dt><dd>${escapeHtml(formatDate(row.created_at))}${Number.isFinite(row.duration_seconds) ? `<span class="agent-service-fact-meta">耗时 ${duration(row)}</span>` : ""}</dd></div>
+      </dl>
+    </section>
+    <section class="inspector-section agent-service-task-facts">
+      <h4 class="channel-extension-heading">会话与轮次</h4>
+      <dl class="agent-service-facts">
+        <div><dt>提问</dt><dd>${turns.join("") || "—"}</dd></div>
+        <div><dt>会话</dt><dd>${named(row.session_title, row.session_id, "会话 ID", sessionUrl)}</dd></div>
+        <div><dt>Context ID</dt><dd>${taskIdValue(row.context_id, "Context ID")}</dd></div>
+      </dl>
+    </section>`;
+  }
+
   async function loadDetail() {
     detailRequest?.abort();
     if (!selectedTask) return;
@@ -220,30 +259,27 @@
       if (request.signal.aborted) return;
       const snapshot = JSON.stringify(row);
       if (taskDetailSnapshot === snapshot) return;
-      const hadCopyFocus = target.contains(document.activeElement);
+      const focusedControl = target.contains(document.activeElement) ? document.activeElement.dataset.detailControl : "";
       const previousScroll = target.querySelector(".inspector-tab-panel")?.scrollTop || 0;
-      const facts = [
-        ["接入方式", "A2A"], ["调用方", row.caller], ["应用 / 空间", `${row.app_id} / ${row.space_id}`],
-        ["提交时间", formatDate(row.created_at)], ["耗时", duration(row)],
-        ["Context ID", row.context_id],
-      ];
       target.innerHTML = `<div class="inspector-tabs agent-service-detail-heading">
         <div class="agent-service-detail-title"><h3 title="${attr(row.title)}">${escapeHtml(row.title)}</h3>
           <div class="session-subtitle-row"><code class="session-badge" title="${attr(row.id)}">${escapeHtml(row.id.slice(0, 8))}</code>
-          <button type="button" class="session-copy-btn" aria-label="复制任务 ID" title="复制任务 ID">${icon("copy")}</button></div></div>
+          <button type="button" class="session-copy-btn" data-task-copy="${attr(row.id)}" data-detail-control="copy:task" aria-label="复制任务 ID" title="复制任务 ID">${icon("copy")}</button></div></div>
         <span class="status-badge inspector-tab-status agent-service-detail-status" data-state="${attr(row.status)}">${statusLabel(row.status)}</span></div>
         <div class="inspector-tab-panel">
-          <section class="inspector-section"><div class="inspector-facts">${facts.map(([name, value]) =>
-            `<div><span>${name}</span><strong>${escapeHtml(value || "—")}</strong></div>`).join("")}</div></section>
-          ${row.progress?.length ? `<section class="inspector-section"><header><strong>任务进度</strong></header><ol class="agent-service-progress">${row.progress.map((step) =>
+          ${taskDetailFacts(row)}
+          ${row.progress?.length ? `<section class="inspector-section"><h4 class="channel-extension-heading">任务进度</h4><ol class="agent-service-progress">${row.progress.map((step) =>
             `<li><span>${statusLabel(step.status)}</span><time>${escapeHtml(formatDate(step.timestamp))}</time></li>`).join("")}</ol></section>` : ""}
           ${row.message.length ? `<section class="inspector-section"><header><strong>${statusLabel(row.status)}</strong></header><p>${escapeHtml(row.message.join("\n"))}</p></section>` : ""}
           ${row.files.length ? `<section class="inspector-section"><header><strong>交付产物</strong></header><ul>${row.files.map((file) => `<li>${escapeHtml(file.name)}</li>`).join("")}</ul></section>` : ""}
         </div>`;
       taskDetailSnapshot = snapshot;
-      target.querySelector("button").addEventListener("click", () => void copy(row.id));
       target.querySelector(".inspector-tab-panel").scrollTop = previousScroll;
-      if (hadCopyFocus) target.querySelector("button").focus({ preventScroll: true });
+      if (focusedControl) {
+        const control = Array.from(target.querySelectorAll("[data-detail-control]"))
+          .find((item) => item.dataset.detailControl === focusedControl);
+        control?.focus({ preventScroll: true });
+      }
       refreshIcons();
     } catch (error) {
       if (!request.signal.aborted) renderDetailPlaceholder(error.message);
@@ -479,6 +515,10 @@
       }
       taskRowsMarkup = "";
       void loadDetail();
+    });
+    el("agentTaskDetail").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-task-copy]");
+      if (button) void copy(button.dataset.taskCopy);
     });
     for (const id of ["agentTaskState", "agentTaskApp"]) {
       el(id).addEventListener("change", () => { page = 1; void loadTasks(); });

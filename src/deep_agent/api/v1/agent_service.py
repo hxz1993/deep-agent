@@ -10,6 +10,7 @@ from a2a.server.routes.jsonrpc_dispatcher import JsonRpcDispatcher
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from google.protobuf.json_format import MessageToDict
+from sqlalchemy import and_, select
 from starlette.background import BackgroundTask
 
 from deep_agent.agent.input_capabilities import document_upload_mimes
@@ -22,10 +23,13 @@ from deep_agent.agent_service.tasks import Owner, TERMINAL, TaskStore
 from deep_agent.api.v1.admin import require_console_admin
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
+from deep_agent.db.models import ChatSession, ChatSessionEvent
 from deep_agent.db.reference_integrity import ReferenceConflict
 from deep_agent.documents.settings import load_document_parsing_config
 from deep_agent.files.storage import FileStoreError, FileStoreNotFoundError, FileStorePermissionError
+from deep_agent.security.diagnostic_users import DiagnosticUserAuthenticationError, resolve_diagnostic_users
 from deep_agent.services.integration_app_access import IntegrationAppAccessError, IntegrationAppDirectory
+from deep_agent.services.scope_names import resolve_scope_directory
 
 router = APIRouter(prefix="/agent-service")
 tag = "agent-service"
@@ -174,8 +178,17 @@ def summary(entry):
     }
 
 
+async def caller_profiles(request: Request, user: str, user_ids: set[str]):
+    try:
+        return await resolve_diagnostic_users(request, user, user_ids)
+    except DiagnosticUserAuthenticationError:
+        # Names are optional. The Console management authorization is checked separately.
+        return {}
+
+
 @router.get("/publications/{agent_code}/tasks", dependencies=admin)
-async def recent_tasks(ctx: AppContextDep, agent_code: AgentCode, page: int = Query(1, ge=1),
+async def recent_tasks(ctx: AppContextDep, request: Request, user: RequestUserDep,
+                       agent_code: AgentCode, page: int = Query(1, ge=1),
                        q: str = Query("", max_length=100), state: str = Query("", max_length=40),
                        app_id: ScopeId | None = None):
     row = await publication(ctx, agent_code)
@@ -189,26 +202,68 @@ async def recent_tasks(ctx: AppContextDep, agent_code: AgentCode, page: int = Qu
         and (not query or query in entry.title.casefold() or query in entry.task.id)
         and (not state or wire.TaskState.Name(entry.state) == state)
     ), key=lambda entry: entry.created, reverse=True)
+    items = [summary(entry) for entry in rows[(page - 1) * 20:page * 20]]
+    profiles = await caller_profiles(request, user, {item["caller"] for item in items})
+    for item in items:
+        item["caller_username"] = profiles.get(item["caller"], {}).get("username") or None
     return {
-        "items": [summary(entry) for entry in rows[(page - 1) * 20:page * 20]],
+        "items": items,
         "total": len(rows),
         "app_ids": sorted({entry.context.owner.app for entry in entries}),
     }
 
 
 @router.get("/publications/{agent_code}/tasks/{task_id}", dependencies=admin)
-async def recent_task(ctx: AppContextDep, agent_code: AgentCode, task_id: str):
+async def recent_task(ctx: AppContextDep, request: Request, user: RequestUserDep, agent_code: AgentCode, task_id: str):
     row = await publication(ctx, agent_code)
     tasks = task_store(ctx)
     tasks.prune()
     entry = tasks.entries.get(task_id)
     if entry is None or entry.context.owner.publication_id != row.id:
         raise HTTPException(404, "任务不存在")
-    return {
-        **summary(entry), "session_id": entry.context.session_id,
+    scope = entry.context
+    # Keep the task state and its run IDs from the same point in time.
+    run_ids = tuple(entry.run_ids)
+    result = {
+        **summary(entry),
         "message": [part.text for part in entry.task.status.message.parts if part.HasField("text")],
         "progress": [{"status": wire.TaskState.Name(state), "timestamp": stamp} for state, stamp in entry.progress],
         "files": [{"name": file.name, "mime": file.mime, "size": file.size} for file in entry.files.values()],
+    }
+    # A context allocates a session ID before execution. Only show a link
+    # once the session exists, and only show turns persisted for this task.
+    statement = select(
+        ChatSession.session_id, ChatSession.title, ChatSessionEvent.turn_id, ChatSessionEvent.event_id,
+    ).outerjoin(
+        ChatSessionEvent,
+        and_(
+            ChatSessionEvent.session_id == ChatSession.session_id,
+            ChatSessionEvent.event_type == "user/message",
+            ChatSessionEvent.run_id.in_(run_ids),
+        ),
+    ).where(
+        ChatSession.session_id == scope.session_id,
+        ChatSession.source_type == "a2a",
+        ChatSession.source_id == row.id,
+    ).order_by(ChatSessionEvent.sequence)
+    async with ctx.db_session_factory() as db:
+        links = (await db.execute(statement)).all()
+    turns = {}
+    for link in links:
+        if link.turn_id:
+            turns.setdefault(link.turn_id, {"id": link.turn_id, "event_id": link.event_id})
+    profiles, names = await asyncio.gather(
+        caller_profiles(request, user, {scope.owner.user}),
+        resolve_scope_directory(request, user),
+    )
+    return {
+        **result,
+        "session_id": links[0].session_id if links else None,
+        "session_title": links[0].title if links else None,
+        "turns": list(turns.values()),
+        "caller_username": profiles.get(scope.owner.user, {}).get("username") or None,
+        "app_name": names.apps.get(scope.owner.app),
+        "space_name": names.spaces.get(scope.owner.space),
     }
 
 

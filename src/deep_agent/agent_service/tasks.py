@@ -74,6 +74,7 @@ class Entry:
     title: str
     created: datetime
     changed: datetime
+    run_ids: list[str] = field(default_factory=list)
     files: dict[str, ArtifactFile] = field(default_factory=dict)
     progress: list[tuple[int, datetime]] = field(default_factory=list)
     subscribers: set[asyncio.Queue] = field(default_factory=set, repr=False)

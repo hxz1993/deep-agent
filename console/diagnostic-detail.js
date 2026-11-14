@@ -6,7 +6,7 @@ import { applyAssistantPresentationActions } from "./assistant-presentation.js?v
 import { createTrajectoryController } from "./trajectory.js?v=20261106-ptc-source";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { eventEffort, historyEffort } from "./reasoning-ui.js?v=0160";
-import { renderSessionInspector } from "./session-inspector.js?v=0160";
+import { renderSessionInspector } from "./session-inspector.js?v=0170a2-session-source";
 import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
@@ -93,7 +93,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     const userId = session.user_id;
     role("inspectorContent").innerHTML = renderSessionInspector({
       state: { sessionId: session.session_id, agentId: session.agent_id, conversationId: session.conversation_id, modelMessageCount: data.history.items?.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length },
-      activeSession: { appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
+      activeSession: { source_type: session.source_type, appId: session.app_id, spaceId: session.space_id, turnCount: session.turn_count, messageCount: session.message_count, attachmentCount: session.attachment_count },
       model, runModel, sessionReasoningEffort: historyEffort(items, assistant?.turn_id),
       modelProvider: session.provider_name ? { name: session.provider_name } : null,
       run, usage, contextStatus, agentName: session.agent_name || session.agent_id || "未记录",

@@ -31,6 +31,7 @@ from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.files.storage import LocalFileStore
 from deep_agent.security import ConsoleAdminAuthorizer
 from deep_agent.services.integration_app_access import IntegrationAppAccessError
+from deep_agent.services.scope_names import ScopeDirectory
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 
 ROOT = "/api/v1/agent-service"
@@ -183,6 +184,12 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                     ids.append(self.result(reply)["task"]["id"])
                 await asyncio.wait_for(four_running.wait(), 2)
                 self.assertCountEqual(executing, ids[:4])
+                detail_url = f"{ROOT}/publications/budget-report/tasks/{ids[4]}"
+                detail = await self.client.get(detail_url, headers=self.admin)
+                self.assertEqual(detail.status_code, 200, detail.text)
+                self.assertEqual(detail.json()["status"], "TASK_STATE_SUBMITTED")
+                self.assertIsNone(detail.json()["session_id"])
+                self.assertEqual(detail.json()["turns"], [])
                 cancelled = self.result(await self.rpc("CancelTask", {"id": ids[4]}))
                 self.assertEqual(cancelled["status"]["state"], "TASK_STATE_CANCELED")
             finally:
@@ -217,6 +224,15 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             task = self.result(await self.rpc("SendMessage", {"message": self.message("q", "预算分析")}))["task"]
         self.assertEqual(task["status"]["state"], "TASK_STATE_INPUT_REQUIRED", task)
         self.assertEqual(task["status"]["message"]["parts"][0]["text"], "请提供预算月份")
+        detail_url = f"{ROOT}/publications/budget-report/tasks/{task['id']}"
+        paused = await self.client.get(detail_url, headers=self.admin)
+        self.assertEqual(paused.status_code, 200, paused.text)
+        session_id = paused.json()["session_id"]
+        self.assertNotEqual(session_id, task["contextId"])
+        self.assertEqual(paused.json()["caller"], "owner")
+        self.assertEqual(len(paused.json()["turns"]), 1)
+        ordinary_user = {**self.admin, "user": "owner"}
+        self.assertEqual((await self.client.get(detail_url, headers=ordinary_user)).status_code, 403)
         bindings = {"taskId": task["id"], "contextId": task["contextId"]}
         wrong = self.message("wrong", "十月", **bindings, metadata={"replyTo": "stale"})
         self.assertIn("error", (await self.rpc("SendMessage", {"message": wrong})).json())
@@ -228,6 +244,36 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task2["id"], task["id"])
         self.assertEqual(task2["status"]["state"], "TASK_STATE_COMPLETED", task2)
         self.assertEqual(task2["artifacts"][0]["parts"][0]["data"], {"month": "十月"})
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+            lambda *_: ModelResponse(parts=[ToolCallPart(output_name, {"month": "十一月"})]),
+        )):
+            next_task = self.result(await self.rpc("SendMessage", {
+                "message": self.message("next", "十一月", contextId=task["contextId"]),
+            }))["task"]
+        self.assertNotEqual(next_task["id"], task["id"])
+        persisted_turns = await self.ctx.store.list_events(session_id, event_type="user/message")
+        self.assertEqual(len(persisted_turns), 3)
+        with (
+            patch("deep_agent.api.v1.agent_service.resolve_diagnostic_users", return_value={"owner": {"username": "budget-user"}}),
+            patch("deep_agent.api.v1.agent_service.resolve_scope_directory", return_value=ScopeDirectory(
+                apps={"budget001": "预算应用"}, spaces={"budget": "预算空间"},
+            )),
+        ):
+            finished = await self.client.get(detail_url, headers=self.admin)
+            task_list = await self.client.get(f"{ROOT}/publications/budget-report/tasks", headers=self.admin)
+        self.assertEqual(finished.status_code, 200, finished.text)
+        detail = finished.json()
+        self.assertEqual(detail["session_id"], session_id)
+        self.assertEqual(detail["turns"], [
+            {"id": event.turn_id, "event_id": event.event_id} for event in persisted_turns[:2]
+        ])
+        self.assertEqual((detail["caller_username"], detail["app_name"], detail["space_name"]),
+                         ("budget-user", "预算应用", "预算空间"))
+        self.assertEqual(task_list.json()["items"][0]["caller_username"], "budget-user")
+        diagnostic = await self.client.get(f"/api/v1/diagnostics/sessions/{session_id}", headers=self.admin)
+        self.assertEqual(diagnostic.status_code, 200, diagnostic.text)
+        self.assertEqual(diagnostic.json()["source_type"], "a2a")
+        self.assertEqual(detail["session_title"], diagnostic.json()["title"])
 
     async def test_inline_image_reaches_model_in_original_task(self):
         from deep_agent.agent_service.output import QUESTION_NAME

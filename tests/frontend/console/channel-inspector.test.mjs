@@ -44,6 +44,14 @@ test("关联渠道的Agent显示第四页签但不伪造普通会话来源", () 
   assert.match(html, /Current bot/);
 });
 
+test("概览按已保存的会话来源标记集成 A2A", () => {
+  const html = inspector({ tab: "session", extraState: {
+    sessions: [{ id: "session-1", agentId: "agent-1", source_type: "a2a" }],
+  } });
+  assert.match(html, /集成<span class="inspector-channel-badge">A2A<\/span>/);
+  assert.doesNotMatch(inspector({ tab: "session" }), /inspector-channel-badge">A2A/);
+});
+
 test("历史来源独立于当前Agent绑定，ID转义并可复制", () => {
   const html = inspector({ channel: origin, accounts: [account] });
   assert.match(html, /Original bot/);

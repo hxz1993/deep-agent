@@ -200,6 +200,8 @@ class RunnerExecution:
             if entry.cancellation_requested:
                 return Result(state=CANCELED)
             started = True
+            if deps.run_id:
+                entry.run_ids.append(deps.run_id)
             output = await runner.run(scope.session_id, text, deps, attachments=attachments, run_id=deps.run_id)
         except RunCancelled:
             return Result(state=CANCELED if entry.cancellation_requested else FAILED)

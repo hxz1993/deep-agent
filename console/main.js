@@ -32,19 +32,19 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=0170a2-a2a-app-routes");
+    const module = await import("./configuration.js?v=0170a2-agent-service-style");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=0166-connection-status");
+    const module = await import("./workspace.js?v=0170a2-session-source");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=20261112-busy-retry");
+    const module = await import("./diagnostics-center.js?v=0170a2-session-source");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

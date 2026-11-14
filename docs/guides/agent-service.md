@@ -1,6 +1,8 @@
 # A2A 服务端
 
-Console 的「集成」可以为现有 Agent 新建发布。每份发布有独立的编码、用途和应用范围。一张 Agent Card 对应一份发布。选中发布可复制完整 Card 地址，并按实际调用应用筛选该发布的近期任务。
+Console 的「集成」可以为现有 Agent 新建发布。每份发布有独立的 Agent 编码、用途和应用范围。每份发布提供通用和指定 App 两种 Agent Card 地址。选中发布可复制这两条地址，并按实际调用应用筛选该发布的近期任务。
+
+发布管理 API 使用 `agent_code` 表示对外编码，`agent_id` 指向实际执行的内部 Agent。Agent 编码创建后固定。
 
 ## 部署与本地启动
 
@@ -17,12 +19,16 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 ## 接入与取件
 
-复制 `/api/v1/agent-service/a2a/{code}/agent-card.json` 的完整地址，在 A2A 1.0 客户端里登记。Card 中的 `supportedInterfaces` 给出 JSON-RPC 地址。也可使用发布 RPC 地址和相对的 `/.well-known/agent-card.json` 发现卡片。
+从「集成」复制完整 Card URL，在 A2A 1.0 客户端登记。两张 Card 都描述同一个 Agent，`supportedInterfaces[].url` 各自指向对应的 JSON-RPC 基址。
 
-Card 和业务请求都需要一项有效的平台凭据。平台 Token 用 `Authorization: Bearer <Token>`，DeepFOS API Key 用 `X-Deepfos-Key`。从客户端连接配置提供凭据，服务端以平台验证出的主体检查应用权限。
+| 入口 | Card 路径 | 应用上下文 |
+|---|---|---|
+| 通用 | `/api/v1/agent-service/a2a/{agent_code}/agent-card.json` | 用 `app` Header 指定应用。服务端确定 Space，显式传入的 `space` 必须匹配。 |
+| 指定 App | `/api/v1/agent-service/a2a/{agent_code}/apps/{app_id}/agent-card.json` | 将占位符替换为实际 App ID。服务端采用路径中的 App，并忽略 `app`、`space` Header。 |
 
-- **固定应用**在发布中选择一个 App。客户端无需发送 `app` 和 `space`，服务端始终使用发布配置里的 App 和 Space。
-- **调用方指定**默认允许全部有权访问的应用，也可以改为指定应用并添加一项或多项。客户端每次通过 `app` Header 指定应用。服务端校验调用方权限及发布范围，并确定 Space。如果同时传入 `space`，也会校验与 App 的对应关系。
+两个 RPC 基址均支持相对发现路径 `/.well-known/agent-card.json`。Card、任务操作和取件都需要一个有效凭据。平台 Token 用 `Authorization: Bearer <Token>`，DeepFOS API Key 用 `X-Deepfos-Key`。服务端验证调用身份、App 权限和发布范围，缺少凭据返回 `401`，超出应用权限或范围返回 `403`。
+
+发布的「应用范围」可以选择全部有权访问的应用，或指定一项及多项应用。两种入口在同一发布、调用主体和 App 下共用 Task 与 Context。
 
 可传 `language`。
 
@@ -35,7 +41,7 @@ Card 和业务请求都需要一项有效的平台凭据。平台 Token 用 `Aut
 | `CancelTask` | 取消当前任务。 |
 | `SubscribeToTask` | 观察已有的活动任务。任务结束后用 `GetTask` 读取结果。 |
 
-文本和结构化数据在 Artifact 中返回。Agent 已发布的文件会返回 Artifact URL。下载时使用原任务的调用身份，应用 Header 遵循该发布的应用来源配置。DeepAgent 会重新校验权限。临时任务记录到期后，A2A 下载地址随记录失效。
+文本和结构化数据在 Artifact 中返回。Agent 已发布的文件会返回 Artifact URL，地址沿用本次请求选择应用的方式。下载时使用原任务的调用身份，通用 URL 需要 `app` Header，带应用的 URL 使用路径。DeepAgent 会重新校验权限。临时任务记录到期后，A2A 下载地址随记录失效。
 
 输入附件用 `message.parts[]` 的 `raw`（Base64）、`mediaType` 和 `filename`。Card 的 `defaultInputModes` 包含当前接收的附件类型。单次内联附件合计上限为 8 MiB，仍受平台配置的单文件大小和数量限制。补交附件时，带上待补材料的 `taskId`、`contextId`，可通过 `metadata.replyTo` 指定待回答的问题。任务完成后的普通追问只带 `contextId`，会创建同一会话下的新 Task。
 
@@ -47,10 +53,10 @@ Card 和业务请求都需要一项有效的平台凭据。平台 Token 用 `Aut
 
 ## 联调
 
-- **本地官方 Inspector** 使用支持 A2A 1.0 的 Inspector，执行 `a2a-inspector --no-open --port 8085`，在本机浏览器打开提示的地址。添加完整 Card URL，在 Connection 设置 Bearer Token 或 API Key 以及 App/Space，然后点 Fetch again。分别发送普通和流式消息，再查看协议事件。
-- **A²D Playground** 选择 A2A、填写发布的 RPC 基址，工具会从相对的 well-known 路径读取 Card。打开 Authorization & Headers，填写样例凭据和 App/Space。连接成功后在对话区使用 Stream response (SSE) 切换普通和流式发送。在线工具联调使用隔离样例和它可访问的 HTTPS 地址。
+- **本地官方 Inspector** 使用支持 A2A 1.0 的 Inspector，执行 `a2a-inspector --no-open --port 8085`，在本机浏览器打开提示的地址。添加完整 Card URL，在 Connection 设置 Bearer Token 或 API Key。通用地址另填 `app` Header，然后点 Fetch again。分别发送普通和流式消息，再查看协议事件。
+- **A²D Playground** 选择 A2A、填写发布的 RPC 基址，工具会从相对的 well-known 路径读取 Card。打开 Authorization & Headers，填写样例凭据。通用地址另填 `app` Header。连接成功后在对话区使用 Stream response (SSE) 切换普通和流式发送。在线工具联调使用隔离样例和它可访问的 HTTPS 地址。
 - **Langflow** 原生出站 A2A 节点把消息作为文本发送。本地验收流使用自定义节点，接收 Playground 的完整 Chat Message，将已上传文件编码成 A2A 内联附件，并在该 Playground 聊天中保留 Task 与 Context ID。收到待补材料问题后，在同一聊天补交。服务或适配器重启导致旧关联失效时，节点会在聊天内提示点击 New Chat 后重发，原聊天仍可查看。
-- **CodeBuddy Code** 使用 CLI 的 `/login` 登录。实测 2.183.0 的发现入口接受 Card 数组或 `{"cards":[…]}`。把对应目录 URL 配给 `CODEBUDDY_REMOTE_AGENTS_URL`，并设置 `CODEBUDDY_A2A_OUTBOUND_ENABLED=1` 后启动 `codebuddy`。本地验收的回环适配器提供测试目录，并为客户端缺失的请求 Header 补齐测试凭据与 App/Space。可直接配置所需 Header 的客户端可以直接调用 DeepAgent。CodeBuddy 使用 URL 附件的验收细节见[验收记录](../design/45-a2a-access/server-validation.md)。
+- **CodeBuddy Code** 使用 CLI 的 `/login` 登录。实测 2.183.0 的发现入口接受 Card 数组或 `{"cards":[…]}`。把对应目录 URL 配给 `CODEBUDDY_REMOTE_AGENTS_URL`，并设置 `CODEBUDDY_A2A_OUTBOUND_ENABLED=1` 后启动 `codebuddy`。本地验收的回环适配器提供测试目录，通过带 App 的地址转发，并补齐测试凭据。可直接配置所需 Header 的客户端可以直接调用 DeepAgent。CodeBuddy 使用 URL 附件的验收细节见[验收记录](../design/45-a2a-access/server-validation.md)。
 
 仓库中的协议、任务、文件和权限回归可直接运行。
 

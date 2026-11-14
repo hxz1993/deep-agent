@@ -4,7 +4,7 @@
 
 ## 发现、版本与操作
 
-- 启用后从 `GET /api/v1/agent-service/a2a/{publication}/agent-card.json` 取得 Card。发布编码保持 URL 稳定，关联 Agent 可以编辑，新任务读取生效配置。停用时关闭 Card 与新任务入口，已有任务保留原执行范围。对端从 `supportedInterfaces[]` 读取规范地址和版本。入口建议 `POST /api/v1/agent-service/a2a/{publication}`，支持网关子路径。服务根据部署配置生成 URL。路由尾斜杠行为要在无自动重定向客户端测试。
+- 启用后从 `GET /api/v1/agent-service/a2a/{agent_code}/agent-card.json` 取得 Card。Agent 编码保持 URL 稳定，关联 Agent 可以编辑，新任务读取生效配置。停用时关闭 Card 与新任务入口，已有任务保留原执行范围。对端从 `supportedInterfaces[]` 读取规范地址和版本。入口建议 `POST /api/v1/agent-service/a2a/{agent_code}`，支持网关子路径。服务根据部署配置生成 URL。路由尾斜杠行为要在无自动重定向客户端测试。
 - `A2A-Version: 1.0`；规范将缺失版本解释为 0.3，纯 1.0 入口返回版本不支持。不匹配返回协议版本错误，不因方法名相似静默降级。JSON-RPC 与 HTTP 的鉴权和错误层分开。公共 Card 只放安全可公开的能力元数据；私有发布的发现是否需认证按部署策略配置，并用目标客户端确认。注册目录、Extended Card 都不依赖公开暴露所有 Agent。
 - 只广告已实测的接口、媒体类型和能力；首期仅 `JSONRPC`、`streaming=true`、`pushNotifications=false`。不对外宣称全传输、全扩展或已认证。试验包接受旧方法名并不意味着 0.3 互通；如目标强制 0.3，另设显式版本／接口，复用服务并独立验收。
 
@@ -165,4 +165,4 @@ stateDiagram-v2
 }
 ```
 
-大附件输入可先走拟议的 `POST /api/v1/agent-service/a2a/{publication}/uploads`（授权 multipart），拿本服务认可的受控 URL 再作为 `Part.url` 提交。必须核验它是本服务签发且属于当前调用者/发布的引用，不能把任意 URL 当作抓取命令。小文件使用 `Part.raw`。阶段 1 的 A2A 交付与取件不能等阶段 2 SDK 才可用。
+大附件输入可先走拟议的 `POST /api/v1/agent-service/a2a/{agent_code}/uploads`（授权 multipart），拿本服务认可的受控 URL 再作为 `Part.url` 提交。必须核验它是本服务签发且属于当前调用者/发布的引用，不能把任意 URL 当作抓取命令。小文件使用 `Part.raw`。阶段 1 的 A2A 交付与取件不能等阶段 2 SDK 才可用。

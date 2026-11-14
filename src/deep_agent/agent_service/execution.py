@@ -109,7 +109,7 @@ async def _ensure_session(ctx, entry: Entry):
             raise RuntimeError("A2A session binding changed")
 
 
-def _file_artifacts(entry: Entry, events, artifact_base: str, result: Result):
+def _file_artifacts(entry: Entry, events, result: Result):
     by_file = {file.id for file in (*entry.files.values(), *result.files.values())}
     for event in events:
         payload = event.payload.get("message") or {}
@@ -136,8 +136,7 @@ def _file_artifacts(entry: Entry, events, artifact_base: str, result: Result):
                 artifact_id = uuid4().hex
                 result.files[artifact_id] = ArtifactFile(file_id, name, mime, size)
                 result.artifacts.append(wire.Artifact(artifact_id=artifact_id, name=name, parts=[
-                    wire.Part(url=f"{artifact_base}/tasks/{entry.task.id}/artifacts/{artifact_id}/download",
-                              filename=name, media_type=mime),
+                    wire.Part(filename=name, media_type=mime),
                 ]))
                 by_file.add(file_id)
 
@@ -146,7 +145,6 @@ def _file_artifacts(entry: Entry, events, artifact_base: str, result: Result):
 class RunnerExecution:
     ctx: object
     headers: dict[str, str]
-    artifact_base: str
     publication_code: str
     text: str
     uploads: list
@@ -232,6 +230,6 @@ class RunnerExecution:
         while events := await ctx.store.list_events(
             scope.session_id, run_id=deps.run_id, event_type="tool/results", after_sequence=sequence, limit=100,
         ):
-            _file_artifacts(entry, events, self.artifact_base, result)
+            _file_artifacts(entry, events, result)
             sequence = events[-1].sequence
         return result

@@ -317,35 +317,47 @@
           <div class="modal-body">
             <div class="dialog-field-grid agent-service-fields">
               <div class="field">
-                <div class="field-label-row"><label for="agentPublicationCode"><span>发布编码</span></label><span class="field-help" tabindex="0" aria-label="发布编码说明" aria-describedby="agentPublicationCodeHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span id="agentPublicationCodeHelp" class="field-help-tooltip" role="tooltip">用于生成接入地址，保存后固定。使用小写字母、数字或连字符。</span></span></div>
-                <input id="agentPublicationCode" name="code" required maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="例如 budget-report">
+                <div class="field-label-row"><label for="agentPublicationCode"><span>Agent 编码</span></label><span class="field-help" tabindex="0" aria-label="Agent 编码说明" aria-describedby="agentPublicationCodeHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span id="agentPublicationCodeHelp" class="field-help-tooltip" role="tooltip">用于生成接入地址，保存后固定。使用小写字母、数字或连字符。</span></span></div>
+                <input id="agentPublicationCode" name="agent_code" required maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="例如 budget-report">
               </div>
               <label class="field"><span class="field-label-row">发布名称</span><input name="name" required maxlength="80"></label>
               <label class="field"><span class="field-label-row">关联 Agent</span><select name="agent_id" required></select></label>
               <label class="field agent-service-description"><span class="field-label-row">用途说明</span><textarea name="description" rows="2" maxlength="240" placeholder="说明可委托的任务"></textarea></label>
             </div>
-            <section class="agent-service-app-config" aria-labelledby="agentPublicationAppSource">
-              <div class="channel-connection-heading"><h4 id="agentPublicationAppSource">应用来源</h4><div class="console-segmented" role="group" aria-labelledby="agentPublicationAppSource"><button type="button" data-service-app-source="fixed" aria-pressed="false">固定应用</button><button type="button" data-service-app-source="caller" aria-pressed="true">调用方指定</button></div></div>
-              <button type="button" class="da-select-trigger" id="pickAgentPublicationFixedApp" aria-haspopup="dialog" aria-controls="integrationAppPicker" hidden><span id="agentPublicationFixedAppValue">选择应用</span><span id="agentPublicationFixedAppSpace" hidden></span><i data-lucide="chevron-down" aria-hidden="true"></i></button>
-              <div id="agentPublicationAppControls" role="group" aria-label="允许的应用" hidden>
-                <div class="agent-service-app-choices">
-                  <span id="agentPublicationAllApps" class="agent-service-app-tag agent-service-all-apps" hidden>全部应用</span>
-                  <div id="agentPublicationAppTags"></div>
-                  <button type="button" class="btn text compact agent-service-add-app" id="addAgentPublicationApp" hidden><i data-lucide="plus" aria-hidden="true"></i>添加允许的应用</button>
+            <section class="agent-service-app-config" aria-labelledby="agentPublicationAppScope">
+              <div class="channel-connection-heading"><h4 id="agentPublicationAppScope">应用范围</h4>
+                <div class="console-segmented" id="agentPublicationAppScopeToggle" role="group" aria-labelledby="agentPublicationAppScope">
+                  <button type="button" data-service-app-scope="all" aria-pressed="true">全部应用</button>
+                  <button type="button" data-service-app-scope="selected" aria-pressed="false">指定应用</button>
                 </div>
-                <button type="button" class="btn text compact agent-service-app-scope-toggle" id="toggleAgentPublicationAppScope"><i data-lucide="arrow-left-right" aria-hidden="true"></i>切换</button>
+              </div>
+              <p class="agent-service-scope-hint" id="agentPublicationAllAppsHint">调用方可使用其有权访问的应用，每次请求仍须指定一个应用。</p>
+              <div class="agent-service-app-choices" id="agentPublicationAppControls" role="group" aria-label="允许的应用" hidden>
+                <div id="agentPublicationAppTags"></div>
+                <button type="button" class="btn text compact agent-service-add-app" id="addAgentPublicationApp"><i data-lucide="plus" aria-hidden="true"></i>添加允许的应用</button>
               </div>
             </section>
             <section class="agent-service-auth" aria-labelledby="agentPublicationAuthTitle">
               <h4 class="channel-extension-heading" id="agentPublicationAuthTitle">请求 Header</h4>
               <div class="agent-service-auth-summary">
-                <section aria-labelledby="agentPublicationAppHeaderTitle">
-                  <h5 id="agentPublicationAppHeaderTitle">应用</h5>
-                  <p id="agentPublicationAuthContext" aria-live="polite"></p>
-                </section>
-                <section aria-labelledby="agentPublicationCredentialTitle">
-                  <h5 id="agentPublicationCredentialTitle">鉴权凭据<span>二选一</span></h5>
-                  <dl><dt>平台 Token</dt><dd><code>Authorization: Bearer &lt;Token&gt;</code></dd><dt>DeepFOS API Key</dt><dd><code>X-Deepfos-Key: &lt;API Key&gt;</code></dd></dl>
+                <div class="agent-service-auth-rules">
+                  <section aria-labelledby="agentPublicationAppHeaderTitle">
+                    <h5 id="agentPublicationAppHeaderTitle">应用</h5>
+                    <p>通用地址用 <code>app</code> 传应用 ID，<code>space</code>（空间 ID）可省略。带应用的地址将应用 ID 填在 URL 的 <code>{app_id}</code> 处，无需传 <code>app</code> 和 <code>space</code>。</p>
+                  </section>
+                  <section aria-labelledby="agentPublicationCredentialTitle">
+                    <h5 id="agentPublicationCredentialTitle">鉴权凭据<span>二选一</span></h5>
+                    <dl><dt>平台 Token</dt><dd><code>Authorization: Bearer &lt;Token&gt;</code></dd><dt>DeepFOS API Key</dt><dd><code>X-Deepfos-Key: &lt;API Key&gt;</code></dd></dl>
+                  </section>
+                </div>
+                <section aria-labelledby="agentPublicationHeaderExampleTitle">
+                  <h5 id="agentPublicationHeaderExampleTitle">通用地址示例<span>平台 Token</span></h5>
+                  <pre class="agent-service-auth-example"><code>{
+  "app": "budget001",
+  "space": "budget",
+  "A2A-Version": "1.0",
+  "Authorization": "Bearer &lt;Token&gt;"
+}</code></pre>
                 </section>
               </div>
             </section>
@@ -386,9 +398,21 @@
           </section>
           <section class="channel-help-panel" id="agentServiceTestPanel" role="tabpanel" aria-labelledby="agentServiceTestTab" hidden>
             <ul class="agent-service-links">
-              <li><a class="btn-link" href="https://a2playground.a2d-ai.com/" target="_blank" rel="noopener noreferrer">在线 A2D Playground <i data-lucide="external-link" aria-hidden="true"></i></a><p>适合公网可达的 Agent Card。</p></li>
-              <li><a class="btn-link" href="https://github.com/a2aproject/a2a-inspector" target="_blank" rel="noopener noreferrer">官方 A2A Inspector <i data-lucide="external-link" aria-hidden="true"></i></a><p>在本机启动网页，连接本地或内网地址，查看请求和响应。</p></li>
-              <li><a class="btn-link" href="https://github.com/a2aproject/a2a-cli#usage" target="_blank" rel="noopener noreferrer">官方 A2A CLI <i data-lucide="external-link" aria-hidden="true"></i></a><p>在终端调用，适合调试或重复验证。</p></li>
+              <li><a class="agent-service-tool-card" href="https://a2playground.a2d-ai.com/" target="_blank" rel="noopener noreferrer">
+                <span class="agent-service-tool-icon"><i data-lucide="globe" aria-hidden="true"></i></span>
+                <span class="agent-service-tool-copy"><strong>在线 A2D Playground</strong><small>在浏览器联调公网可达的 Agent Card。</small></span>
+                <i data-lucide="external-link" class="agent-service-tool-external" aria-hidden="true"></i>
+              </a></li>
+              <li><a class="agent-service-tool-card" href="https://github.com/a2aproject/a2a-inspector" target="_blank" rel="noopener noreferrer">
+                <span class="agent-service-tool-icon"><i data-lucide="monitor" aria-hidden="true"></i></span>
+                <span class="agent-service-tool-copy"><strong>官方 A2A Inspector</strong><small>启动本地网页，连接本机或内网地址，查看请求与响应。</small></span>
+                <i data-lucide="external-link" class="agent-service-tool-external" aria-hidden="true"></i>
+              </a></li>
+              <li><a class="agent-service-tool-card" href="https://github.com/a2aproject/a2a-cli#usage" target="_blank" rel="noopener noreferrer">
+                <span class="agent-service-tool-icon"><i data-lucide="terminal" aria-hidden="true"></i></span>
+                <span class="agent-service-tool-copy"><strong>官方 A2A CLI</strong><small>在终端调用 A2A 接口，适合脚本调试和重复验证。</small></span>
+                <i data-lucide="external-link" class="agent-service-tool-external" aria-hidden="true"></i>
+              </a></li>
             </ul>
           </section>
         </div>

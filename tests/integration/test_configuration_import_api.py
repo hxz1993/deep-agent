@@ -152,7 +152,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
                 "INSERT INTO agent_publications (id, code, name, description, agent_id, scope) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 ("publication-id", "fixture", "Fixture", "", "agent-1",
-                 '{"apps":{"mode":"fixed","items":[{"app_id":"budget001","space_id":"budget"}]}}'),
+                 '{"apps":{"mode":"selected","items":[{"app_id":"budget001","space_id":"budget"}]}}'),
             )
         backup = await export_backup(
             f"sqlite+aiosqlite:///{source.as_posix()}",
@@ -174,7 +174,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(imported.status_code, 200, imported.text)
         row = await PublicationStore(get_context().db_session_factory).get("fixture")
         self.assertEqual((row.id, row.agent_id), ("publication-id", "agent-1"))
-        self.assertEqual(row.scope, {"apps": {"mode": "fixed", "items": [
+        self.assertEqual(row.scope, {"apps": {"mode": "selected", "items": [
             {"app_id": "budget001", "space_id": "budget"},
         ]}})
 

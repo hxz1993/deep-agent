@@ -31,9 +31,9 @@ Console 通过管理员查询接口读取当前 A2A 进程内的近期 Task。�
 ## 阶段 1 页面与管理接口（拟议）
 
 - 「场景」「渠道」「集成」依次位于顶部导航组，集成使用链条图标。发布行最左侧的开关负责启停，点击名称或行内空白可切换查看对象。停用时管理页仍可查看任务记录，接入区提示可用原地址重新启用。
-- 「发布 Agent」与逐行编辑共用居中弹框。第一行是发布编码和发布名称，第二行是关联 Agent 和用途说明。应用来源在标题同行右侧切换，新建默认调用方指定。固定应用单选，调用方指定逐条添加，已选项显示为可移除的标签，至少保留一个。鉴权说明仍为只读。新建保存后默认启用，逐行开关负责启停。行尾的编辑与删除使用图标，删除需二次确认。
-- 右侧横排四张接入卡，彩色图标在左、标题在右。A2A 展示所选发布的 Agent Card 地址、复制按钮与简要接入步骤，停用时显示状态。MCP、CLI、Python SDK 在原型里仅占位。功能对照见[四种接入方式](server-entrypoints.md)。
-- 发布编码首次保存后固定。其余字段可改，包括关联 Agent 和允许的应用。启用或保存启用状态时，服务端校验配置依赖、工具兼容和权限。编辑保留 Card URL 与历史。新任务采用新配置，已受理任务保留受理时的执行范围，查询、取消与取件按当前权限复查。更换关联 Agent 后，新任务使用新 Context。已有任务的续跑沿原执行范围复查当前授权，避免混用会话数据。
+- 「发布 Agent」与逐行编辑共用居中弹框。第一行是 Agent 编码和发布名称，第二行是关联 Agent 和用途说明。应用范围在标题同行右侧切换，新建默认全部应用并显示权限说明。指定应用时逐条添加，已选项显示为可移除的标签，至少保留一个。请求 Header 区并排显示鉴权说明和通用地址的 JSON 示例，窄窗改为上下排列。新建保存后默认启用，逐行开关负责启停。行尾的编辑与删除使用图标，删除需二次确认。
+- 右侧横排四张接入卡，彩色图标在左、标题在右。A2A 展示所选发布的通用与指定 App 的 Agent Card 地址，各有复制按钮与简要说明，停用时显示状态。MCP、CLI、Python SDK 在原型里仅占位。功能对照见[四种接入方式](server-entrypoints.md)。
+- Agent 编码首次保存后固定。其余字段可改，包括关联 Agent 和允许的应用。启用或保存启用状态时，服务端校验配置依赖、工具兼容和权限。编辑保留 Card URL 与历史。新任务采用新配置，已受理任务保留受理时的执行范围，查询、取消与取件按当前权限复查。更换关联 Agent 后，新任务使用新 Context。已有任务的续跑沿原执行范围复查当前授权，避免混用会话数据。
 - **联调入口**：阶段 1 显示 A2A Card，协议方法、官方 Inspector 和官方 A2A CLI 放在「协议」弹框。DeepAgent 自有 CLI、MCP、SDK 属于阶段 2，安装方式确定后再开放入口。
 - **近期任务**：显示任务、当前状态、接入方式、调用方（适当脱敏）、提交时间、耗时及交付。筛选发布、状态、日期和可见 ID；服务端游标分页。打开详情显示外部 Task/Context ID、公开状态变化、当前问题与等待时限、交付与过期状态。处于待补材料时由调用方通过协议继续；管理员的诊断页不能冒充调用方回答。只在有诊断权限时展示内部会话或 Run 跳转。
 - **状态与动作**：初次加载、无任务、无匹配、失权、加载错误与重试分别呈现；取消操作仅对授权角色开放，有确认与回读，展示「取消处理中」直到实际停止。任务已完成但文件过期时依然是已完成，取件按钮禁用并说明原因。可选的任务统计先不改现有用量口径。
@@ -42,18 +42,18 @@ Console 通过管理员查询接口读取当前 A2A 进程内的近期 Task。�
 | 管理接口草案 | 用途与要点 |
 | --- | --- |
 | `GET/POST /api/v1/agent-service/publications` | 列表与创建发布配置。创建支持 `enabled`，默认启用。 |
-| `GET/PATCH /api/v1/agent-service/publications/{code}` | 详情、保存和启停共用接口，使用配置修订防覆盖。 |
-| `POST /api/v1/agent-service/publications/{code}/preflight` | 返回 Agent、App 权限、工具兼容和文件契约检查；只读。 |
-| `GET /api/v1/agent-service/publications/{code}/tasks` | 当前管理作用域内筛选、游标和状态。 |
-| `GET /api/v1/agent-service/publications/{code}/tasks/{taskId}` | 详情和可见文件；管理权限与任务取件权限分别检查。 |
-| `POST /api/v1/agent-service/publications/{code}/tasks/{taskId}/cancel` | 经授权写入取消意图，调用同一个 Task 服务；不通过公开 API 冒充 owner。 |
+| `GET/PATCH /api/v1/agent-service/publications/{agent_code}` | 详情、保存和启停共用接口，使用配置修订防覆盖。 |
+| `POST /api/v1/agent-service/publications/{agent_code}/preflight` | 返回 Agent、App 权限、工具兼容和文件契约检查；只读。 |
+| `GET /api/v1/agent-service/publications/{agent_code}/tasks` | 当前管理作用域内筛选、游标和状态。 |
+| `GET /api/v1/agent-service/publications/{agent_code}/tasks/{taskId}` | 详情和可见文件；管理权限与任务取件权限分别检查。 |
+| `POST /api/v1/agent-service/publications/{agent_code}/tasks/{taskId}/cancel` | 经授权写入取消意图，调用同一个 Task 服务；不通过公开 API 冒充 owner。 |
 
 发布弹框的主要字段如下。
 
 | 区域 | 字段与用途 |
 | --- | --- |
-| 基本信息 | 发布名称和用途用于 Card 展示，发布编码生成 URL，关联 Agent 决定实际执行方。 |
-| 允许的应用 | 多选。调用方每次指定其中一个 App，并带平台 Token 或 API Key。服务端解析 Space 与调用身份，再核验该应用的权限。 |
+| 基本信息 | 发布名称和用途用于 Card 展示，Agent 编码生成 URL，关联 Agent 决定实际执行方。 |
+| 应用范围 | 全部应用或指定应用。指定应用可多选。每次调用指定一个 App 并带平台 Token 或 API Key，服务端解析 Space 与调用身份，再核验发布范围和访问权限。 |
 
 Agent Card 的 `defaultOutputModes` 由服务端按实际支持的媒体类型生成。每次调用的结果由本轮任务决定，例如只返回文本摘要，或附上已生成且获准交付的 XLSX。若业务要求固定 JSON 结构或必交文件，另行定义并校验该业务的交付契约。
 

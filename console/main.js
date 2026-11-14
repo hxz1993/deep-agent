@@ -32,7 +32,7 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=0170a1-agent-service");
+    const module = await import("./configuration.js?v=0170a2-a2a-app-routes");
     await module.initConfiguration();
     configurationModule = module;
     return module;

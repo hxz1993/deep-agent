@@ -6,13 +6,15 @@
 
 管理员为每个对外业务建立发布配置。每份发布有自己的编码、Agent Card URL、JSON-RPC URL 和关联 Agent。调用方手工选择、在程序配置中指定，或由它的上层 Agent 根据 Card 的能力描述选中目标。
 
-| **任务** | **调用方预先登记的发布编码** | **服务端根据地址绑定的 Agent** |
+| **任务** | **调用方预先登记的 Agent 编码** | **服务端根据地址绑定的 Agent** |
 | --- | --- | --- |
 | 比较 10 月预算与实际 | `budget-variance-report` | 预算分析助手 |
 | 核对两份台账 | `reconciliation-review` | 智能对账助手 |
 | 分析当前表格数据 | `spreadsheet-analysis` | 电子表格助手 |
 
-以对账为例，调用方从 `GET /api/v1/agent-service/a2a/reconciliation-review/agent-card.json` 读取 Card，随后向 Card 的 `supportedInterfaces[].url` 发 `SendMessage`。服务端由 URL 中的发布编码查生效配置，核对调用主体，确定本任务的 Agent、执行身份及 App/Space。任务的 ID 也绑定发布和调用主体。编辑关联后，旧任务继续使用受理时的执行范围。客户端若带旧 Context 提交新任务，服务端明确要求去掉旧 Context 后重新提交。
+通用入口通过 `app` Header 传 App。指定 App 的入口在同一 RPC 基址后加 `/apps/{app_id}`，Card 和取件地址沿用这一段。两种地址按同一权限规则读取和执行。
+
+以对账为例，调用方从 `GET /api/v1/agent-service/a2a/reconciliation-review/agent-card.json` 读取 Card，随后向 Card 的 `supportedInterfaces[].url` 发 `SendMessage`。服务端由 URL 中的 Agent 编码查生效配置，核对调用主体，确定本任务的 Agent、执行身份及 App/Space。任务的 ID 也绑定发布和调用主体。编辑关联后，旧任务继续使用受理时的执行范围。客户端若带旧 Context 提交新任务，服务端明确要求去掉旧 Context 后重新提交。
 
 A2A 标准的根发现路径是 `/.well-known/agent-card.json`。这里的发布子路径作为直接配置的完整 Card URL 提供，客户端若只接受域名根发现，可用独立域名或网关为它映射根路径。Card 的 `skills[].id` 用于描述能力，规范的 `SendMessageRequest` 没有统一的 `agentId` 或 `skillId` 选路字段。接口声明的可选 `tenant` 是路由值，身份和授权仍由服务端校验。[A2A 发现](https://a2a-protocol.org/latest/specification/#82-discovery-mechanisms) · [请求结构](https://a2a-protocol.org/latest/specification/#321-sendmessage)
 
@@ -42,11 +44,11 @@ A2A 1.0 规定单张 Agent Card 的格式，承认目录是发现方式之一。
 
 ## A2A 1.0 操作表
 
-首版发现采用 HTTP GET，11 个标准操作在 JSON-RPC 下共用同一个 POST 地址 `/api/v1/agent-service/a2a/{publication}`，由报文中的 `method` 区分。gRPC 使用表中相同方法名，HTTP+JSON 使用右列路径。两种绑定暂缓。0.3 仅在有明确客户端需求时单独适配，首版客户端显式发 `A2A-Version: 1.0`。规范将缺失版本解释为 0.3，纯 1.0 入口按不支持版本处理。[规范的绑定映射](https://a2a-protocol.org/latest/specification/#53-method-mapping-reference) · [版本处理](https://a2a-protocol.org/latest/specification/#362-server-responsibilities)
+首版发现采用 HTTP GET，11 个标准操作在 JSON-RPC 下共用 JSON-RPC POST，通用地址为 `/api/v1/agent-service/a2a/{agent_code}`，带 App 地址在其后追加 `/apps/{app_id}`。两种地址都由报文中的 `method` 区分操作。gRPC 使用表中相同方法名，HTTP+JSON 使用右列路径。两种绑定暂缓。0.3 仅在有明确客户端需求时单独适配，首版客户端显式发 `A2A-Version: 1.0`。规范将缺失版本解释为 0.3，纯 1.0 入口按不支持版本处理。[规范的绑定映射](https://a2a-protocol.org/latest/specification/#53-method-mapping-reference) · [版本处理](https://a2a-protocol.org/latest/specification/#362-server-responsibilities)
 
 | **发现或 JSON-RPC 方法** | **HTTP+JSON 对照** | **首版** | **与 DeepAgent 现有接口的关系** |
 | --- | --- | --- | --- |
-| Agent Card | `GET /api/v1/agent-service/a2a/{publication}/agent-card.json` | 支持发现 | 由发布配置生成，通过完整 Card URL 接入。 |
+| Agent Card | `GET /api/v1/agent-service/a2a/{agent_code}/agent-card.json` | 支持发现 | 由发布配置生成，通过完整 Card URL 接入。 |
 | `SendMessage` | `POST /message:send` | 支持 | 复用 `POST /api/v1/chat` 背后的运行组装、Runner 和会话事件。可等待或立即返回 Task ID。同 Task 补材料仍用本方法。 |
 | `SendStreamingMessage` | `POST /message:stream` | 支持 | 复用 `POST /api/v1/chat/stream` 背后的执行与事件，将其投影为 A2A 流。观察连接断开后，运行继续。 |
 | `GetTask` | `GET /tasks/{id}` | 支持 | 查内存 Task 的状态、公开结果和产物。类似 `/sessions/{session_id}/run-status`，但有独立外部 ID 和近期终态。 |
@@ -58,7 +60,7 @@ A2A 1.0 规定单张 Agent Card 的格式，承认目录是发现方式之一。
 | `ListTaskPushNotificationConfigs` | `GET /tasks/{id}/pushNotificationConfigs` | 暂缓 | 列出任务回调配置，现有会话无对应接口。 |
 | `DeleteTaskPushNotificationConfig` | `DELETE /tasks/{id}/pushNotificationConfigs/{configId}` | 暂缓 | 删除任务回调配置，现有会话无对应接口。 |
 | `GetExtendedAgentCard` | `GET /extendedAgentCard` | 暂缓 | 提供认证后的扩展 Card，现有会话无对应接口。 |
-| Artifact 取件 | DeepAgent 扩展 `GET /api/v1/agent-service/a2a/{publication}/tasks/{taskId}/artifacts/{artifactId}/download` | 拟支持 | 标准在 Task 或 SSE 中返回 Artifact。二进制文件走现有 FileStore，并由扩展路径校验归属。A2A 1.0 无 `DownloadArtifact` RPC。 |
+| Artifact 取件 | DeepAgent 扩展 `GET /api/v1/agent-service/a2a/{agent_code}/tasks/{taskId}/artifacts/{artifactId}/download` | 支持 | Task 或 SSE 按当前接入地址返回取件 URL。二进制文件走现有 FileStore，每次取件重新校验归属。A2A 1.0 无 `DownloadArtifact` RPC。 |
 
 以上是能力和执行层映射。A2A 入口在进程内调用共用服务，避免发 HTTP 请求回调自己。内部历史和诊断继续使用已有会话与事件查询，外部只收到该发布允许披露的内容。[Chat 源码](../../../src/deep_agent/api/v1/chat.py) · [Session 源码](../../../src/deep_agent/api/v1/sessions.py)
 

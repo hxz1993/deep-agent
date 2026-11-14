@@ -76,7 +76,7 @@ class ChannelMigrationTests(unittest.TestCase):
                 agent = db.execute("SELECT id FROM agents LIMIT 1").fetchone()[0]
                 db.execute("""INSERT INTO agent_publications (id,code,name,description,agent_id,scope)
                   VALUES ('publication','budget','预算','',?,?)""",
-                           (agent, '{"apps":{"mode":"fixed","items":[{"app_id":"budget001","space_id":"budget"}]}}'))
+                           (agent, '{"apps":{"mode":"selected","items":[{"app_id":"budget001","space_id":"budget"}]}}'))
             with self.assertRaisesRegex(RuntimeError, "would discard Agent publications"):
                 command.downgrade(config, "015")
             with sqlite3.connect(path) as db:

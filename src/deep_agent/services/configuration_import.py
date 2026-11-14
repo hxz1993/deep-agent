@@ -329,10 +329,12 @@ def _validate_publication_rows(rows: Sequence[Mapping[str, Any]]) -> None:
     from deep_agent.agent_service.publications import PublicationCreate
     from pydantic import ValidationError
 
-    fields = PublicationCreate.model_fields
+    fields = PublicationCreate.model_fields.keys() - {"agent_code"}
     try:
         for row in rows:
-            PublicationCreate.model_validate({key: row[key] for key in fields})
+            PublicationCreate.model_validate({
+                "agent_code": row["code"], **{key: row[key] for key in fields},
+            })
             if type(row.get("revision")) is not int or row["revision"] < 1:
                 raise ValueError("invalid revision")
     except (ValidationError, KeyError, ValueError) as exc:

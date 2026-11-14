@@ -23,7 +23,7 @@
 | 电子表格助手关联的 Agent | GET /api/v1/integrations/deeptable-assistant | 当前认证用户 |
 | 电子表格应用配置、专用 Skill | /api/v1/integrations/deeptable-assistant/app-configs | Console 管理员且具备目标 App 配置权限 |
 | Agent 发布、近期任务 | /api/v1/agent-service/publications | 环境发布管理员 |
-| A2A Agent Card、任务调用 | GET /api/v1/agent-service/a2a/{code}/agent-card.json，POST /api/v1/agent-service/a2a/{code} | 平台凭据、发布范围和目标 App 权限 |
+| A2A Agent Card、任务调用 | GET /api/v1/agent-service/a2a/{agent_code}/agent-card.json，POST /api/v1/agent-service/a2a/{agent_code} | 平台凭据、发布范围和目标 App 权限 |
 | 普通/流式聊天 | POST /api/v1/chat、/api/v1/chat/stream | 业务用户 |
 | 会话列表 | GET /api/v1/sessions | 本人范围 |
 | 历史/事件/状态 | GET /api/v1/sessions/{id}/history、/events、/run-status | 本人范围 |
@@ -40,7 +40,7 @@
 
 Console 的「场景」对应 `/api/v1/integrations`，电子表格助手应用配置前缀是 `/api/v1/integrations/deeptable-assistant/app-configs`。该前缀的 `GET` 只列出已保存且有权配置的 App，`GET /available` 列出全部有权配置的候选应用。选中后直接使用 `GET /{app_id}` 读取详情，`PUT /{app_id}` 保存 `config_id` 和 `prompt_append`。兼容的 `POST /validate` 不用于新版选择器。详情与写入各自校验目标 App；App 角色不扩大共用 Agent 或配置备份权限。`/{app_id}/skills` 下的列表、上传和下载均限定到对应应用。
 
-Console 的「集成」管理 Agent 发布。对接时登记完整 Agent Card URL，从卡片读取 JSON-RPC 地址。发送 `A2A-Version: 1.0`，并提供平台 Token 或 DeepFOS API Key。调用方指定应用时发送 `app` Header，固定应用由服务端按配置确定。补材料沿用原 Task ID，完成后追问使用原 Context ID。文件按 Task 返回的 Artifact URL 取件。
+Console 的「集成」管理 Agent 发布。对接时登记完整 Agent Card URL，从卡片读取 JSON-RPC 地址。发送 `A2A-Version: 1.0`，并提供平台 Token 或 DeepFOS API Key。通用地址发送 `app` Header。也可在 RPC 基址后追加 `/apps/{app_id}` 并读取对应的 `agent-card.json`。这种地址以路径为准，只需传凭据。两种入口共用应用范围与权限校验。补材料沿用原 Task ID，完成后追问使用原 Context ID。文件按 Task 返回的 Artifact URL 取件。
 
 ## 有源码时如何继续定位
 

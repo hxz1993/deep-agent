@@ -8,7 +8,7 @@
 
 | 方法 | 输入 | 返回／行为 |
 | --- | --- | --- |
-| `discover(publication)` | 发布编码或已明确允许的 Card URL | `AgentCard`，版本不支持或 Card 不匹配报显式错误。 |
+| `discover(publication)` | Agent 编码或已明确允许的 Card URL | `AgentCard`，版本不支持或 Card 不匹配报显式错误。 |
 | `upload(path, media_type=None)` | 本地文件路径、允许媒体类型 | 有效期内的 `InputFileRef`，绑定调用者和内容摘要；流式读本地文件。上传是 DeepAgent 扩展。 |
 | `submit(publication, *, message_id, text=None, data=None, files=(), context_id=None, reference_task_ids=(), output_modes=())` | 业务输入和去重 ID | 以 `returnImmediately=true` 返回 `Task`。发送前生成或要求调用者持久保存消息 ID。 |
 | `get(task_id, *, history_length=None)` / `list(context_id=None, state=None, page_size=20, cursor=None)` | 定位和过滤 | `Task` 或 `TaskPage`。同一 Client 绑定发布与主体；配置多个发布需独立实例。 |
@@ -58,7 +58,7 @@ SDK 对 429／明确瞬时网络故障做有界指数退避；提交响应丢失
 
 ## CLI
 
-建议同 wheel 提供 `deepagent-a2a` console script，避免和现有命令冲突；私有 Python 包源或离线 wheel，由部署方选择。支持配置 profile 保存地址、发布编码和**凭据来源名**；Token 从环境、受控配置或登录凭据读取，不要求通过命令行参数传密钥。提供 `--format json` 供自动化， stdout 仅一份结果；日志和进度走 stderr。`watch --format jsonl` 逐行输出快照及增量。Ctrl+C 停止本地观察，不隐式停止远端任务。
+建议同 wheel 提供 `deepagent-a2a` console script，避免和现有命令冲突；私有 Python 包源或离线 wheel，由部署方选择。支持配置 profile 保存地址、Agent 编码和**凭据来源名**；Token 从环境、受控配置或登录凭据读取，不要求通过命令行参数传密钥。提供 `--format json` 供自动化， stdout 仅一份结果；日志和进度走 stderr。`watch --format jsonl` 逐行输出快照及增量。Ctrl+C 停止本地观察，不隐式停止远端任务。
 
 ```bash
 # 拟议：包尚未发布
@@ -90,7 +90,7 @@ deepagent-a2a --profile finance cancel task-demo-0066
 
 ## MCP 服务端
 
-以环境级 Streamable HTTP 入口 `/api/v1/agent-service/mcp` 提供接入。客户端通过工具列出可用发布，并按发布编码发起调用。远端只获得自己被授权的发布；不允许工具参数自报 owner、企业、内部 session、任意 file_id 或凭据。MCP 身份映射到同一 Task principal；同部署直接调用 Task 服务，独立部署通过官方 A2A 客户端＋可信委托访问，不假冒调用者。工具使用普通 tools/call，初期不要求客户端实现 [MCP Tasks 扩展](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks)，也不假定有交互式表单。
+以环境级 Streamable HTTP 入口 `/api/v1/agent-service/mcp` 提供接入。客户端通过工具列出可用发布，并按 Agent 编码发起调用。远端只获得自己被授权的发布；不允许工具参数自报 owner、企业、内部 session、任意 file_id 或凭据。MCP 身份映射到同一 Task principal；同部署直接调用 Task 服务，独立部署通过官方 A2A 客户端＋可信委托访问，不假冒调用者。工具使用普通 tools/call，初期不要求客户端实现 [MCP Tasks 扩展](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks)，也不假定有交互式表单。
 
 | Tool | inputSchema 关键字段 | 行为 |
 | --- | --- | --- |

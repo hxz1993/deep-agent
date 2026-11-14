@@ -11,8 +11,6 @@ from deep_agent.services.integration_app_access import (
     IntegrationAppAccessError, PlatformAppAccessClient, app_space,
 )
 
-from .publications import AppScopeItem
-
 _CREDENTIALS = ("authorization", "token", "x-user-token", "x-deepfos-key")
 
 
@@ -26,9 +24,9 @@ def public_base_url(value: str) -> str:
     return value.rstrip("/")
 
 
-async def platform_caller(request: Request, *, fixed_app: AppScopeItem | None = None) -> dict[str, str]:
+async def platform_caller(request: Request, *, path_app: str | None = None) -> dict[str, str]:
     headers = {}
-    header_names = (*_CREDENTIALS, "language") if fixed_app else (*_CREDENTIALS, "language", "app", "space")
+    header_names = (*_CREDENTIALS, "language") if path_app is not None else (*_CREDENTIALS, "language", "app", "space")
     for name in header_names:
         values = request.headers.getlist(name)
         if len(values) > 1:
@@ -37,18 +35,16 @@ async def platform_caller(request: Request, *, fixed_app: AppScopeItem | None = 
             raise HTTPException(400, f"{name} Header 格式无效。")
         if values and values[0].strip():
             headers[name] = values[0].strip()
-    if fixed_app:
-        app, space = fixed_app.app_id, fixed_app.space_id
-    else:
-        app = headers.get("app")
-        if not app:
-            raise HTTPException(400, "此发布由调用方指定应用，请在 app Header 中传入 App ID。")
-        try:
-            space = app_space(app)
-        except IntegrationAppAccessError as exc:
-            raise HTTPException(400, "app Header 不是有效的 App ID。") from exc
-        if "space" in headers and headers["space"] != space:
-            raise HTTPException(400, "space Header 与 App 所属空间不一致，请更正或省略 space。")
+    app = path_app if path_app is not None else headers.get("app")
+    if not app:
+        raise HTTPException(400, "请在 app Header 中传入 App ID，或使用指定 App 的接入地址。")
+    try:
+        space = app_space(app)
+    except IntegrationAppAccessError as exc:
+        source = "接入地址中的 App ID" if path_app is not None else "app Header"
+        raise HTTPException(400, f"{source}无效。") from exc
+    if "space" in headers and headers["space"] != space:
+        raise HTTPException(400, "space Header 与 App 所属空间不一致，请更正或省略 space。")
     headers.update(app=app, space=space)
     credentials = [name for name in _CREDENTIALS if name in headers]
     if not credentials:

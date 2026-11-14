@@ -90,6 +90,7 @@ main{min-width:0;display:flex;flex-direction:column;padding:21px 24px 24px;gap:1
 .release-tooltip{position:absolute;z-index:2;top:calc(100% + 4px);left:-10px;width:max-content;max-width:220px;visibility:hidden;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);box-shadow:0 4px 12px #202b3b18;color:var(--text);font-size:11px}
 .release-help:hover .release-tooltip,.release-help:focus-within .release-tooltip{visibility:visible}
 .release-apps{min-height:92px;margin:0;padding:0;border:0;min-inline-size:0}
+.release-scope-hint{margin-top:10px;color:var(--muted)}
 .release-scope-header{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .release-scope-header h3{display:flex;align-items:center;gap:12px;flex:1;font-weight:500}
 .release-scope-header h3::after{content:"";flex:1;height:1px;background:var(--line)}
@@ -118,14 +119,16 @@ main{min-width:0;display:flex;flex-direction:column;padding:21px 24px 24px;gap:1
 .release-description textarea{resize:none}
 .release-auth-note h3{display:flex;align-items:center;gap:12px;font-weight:500}
 .release-auth-note h3::after{content:"";flex:1;height:1px;background:var(--line)}
-.release-auth-summary{display:grid;gap:12px;margin-top:10px;padding:12px;border-radius:8px;background:var(--subtle)}
+.release-auth-summary{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,auto);gap:12px;margin-top:10px;padding:12px;border-radius:8px;background:var(--subtle)}
+.release-auth-rules{display:grid;gap:12px}
+.release-auth-example{margin:0;padding:8px 10px;border-radius:6px;background:var(--surface);white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:530px){.release-auth-summary{grid-template-columns:minmax(0,1fr)}}
 .release-auth-summary h4{margin:0 0 4px;font-size:13px}
 .release-auth-summary h4 span{margin-left:8px;color:var(--muted);font-size:12px;font-weight:400}
 .release-auth-summary p{color:var(--muted)}
 .release-close{border:0;background:transparent;color:var(--muted)}
 .release-auth-headers{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin:0;color:var(--muted)}
 .release-auth-headers dd{margin:0;overflow-wrap:anywhere}
-.release-fixed{margin-top:8px}
 .release-field :is(input[readonly],select:disabled){background:var(--subtle);color:var(--muted);opacity:1}
 .release-field select{min-width:0}
 .release-error{color:var(--red)}
@@ -263,11 +266,15 @@ main{min-width:0;display:flex;flex-direction:column;padding:21px 24px 24px;gap:1
     </div><button class="btn guide-link" id="showGuide" type="button" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#book"/></svg>协议</button></div>
     <section id="access-a2a" class="panel access-detail a2a-card" role="tabpanel" aria-labelledby="tab-a2a">
       <h3 id="accessTarget"></h3>
-      <p id="accessSubtitle" class="access-subtitle" hidden></p>
       <div id="activeAccess" class="a2a-connection">
-        <div class="access-head"><span id="endpointLabel" class="hint">Agent Card URL</span>
+        <div class="access-head"><span id="endpointLabel" class="hint">通用 Agent Card</span>
           <button id="copyEndpoint" class="link copy-endpoint" type="button" aria-label="复制 Agent Card 地址">复制地址</button></div>
         <div class="endpoint-row"><code id="endpointURL" aria-labelledby="endpointLabel"></code></div>
+        <p class="hint">在 app Header 填应用 ID，并传凭据。</p>
+        <div class="access-head"><span id="appEndpointLabel" class="hint">带应用的 Agent Card</span>
+          <button id="copyAppEndpoint" class="link copy-endpoint" type="button" aria-label="复制带应用的 Agent Card 地址">复制地址</button></div>
+        <div class="endpoint-row"><code id="appEndpointURL" aria-labelledby="appEndpointLabel"></code></div>
+        <p class="hint">将 {app_id} 替换为应用 ID，无需 app Header。</p>
       </div>
       <p id="inactiveAccess" hidden>该发布已停用。</p>
     </section>
@@ -346,9 +353,9 @@ main{min-width:0;display:flex;flex-direction:column;padding:21px 24px 24px;gap:1
       <div class="release-basic">
           <div class="release-field">
             <div class="release-field-title">
-              <label for="releaseCode">发布编码</label>
+              <label for="releaseCode">Agent 编码</label>
               <span class="release-help">
-                <button type="button" aria-label="发布编码说明" aria-describedby="releaseCodeHint"><svg class="ico" aria-hidden="true"><use href="#help"/></svg></button>
+                <button type="button" aria-label="Agent 编码说明" aria-describedby="releaseCodeHint"><svg class="ico" aria-hidden="true"><use href="#help"/></svg></button>
                 <span id="releaseCodeHint" class="release-tooltip" role="tooltip">各接入方式共用的发布标识，保存后固定。</span>
               </span>
             </div>
@@ -360,14 +367,14 @@ main{min-width:0;display:flex;flex-direction:column;padding:21px 24px 24px;gap:1
       </div>
       <section class="release-apps" aria-labelledby="releaseSourceTitle">
         <div class="release-scope-header">
-          <h3 id="releaseSourceTitle">应用来源</h3>
+          <h3 id="releaseSourceTitle">应用范围</h3>
           <div class="release-scope-options" role="radiogroup" aria-labelledby="releaseSourceTitle">
-            <label><input type="radio" name="appSource" value="fixed"><span>固定应用</span></label>
-            <label><input type="radio" name="appSource" value="caller" checked><span>调用方指定</span></label>
+            <label><input type="radio" name="appScope" value="all" checked><span>全部应用</span></label>
+            <label><input type="radio" name="appScope" value="selected"><span>指定应用</span></label>
           </div>
         </div>
-        <label id="releaseFixedAppField" class="release-field release-fixed" hidden><select name="fixedApp" aria-label="固定应用"><option value="">选择应用</option></select></label>
-        <div id="releaseAppSelection" class="release-app-selection">
+        <p id="releaseAllAppsHint" class="release-scope-hint">调用方可使用其有权访问的应用，每次请求仍须指定一个应用。</p>
+        <div id="releaseAppSelection" class="release-app-selection" hidden>
           <ul class="release-app-list" id="releaseApps"></ul>
           <button id="addReleaseApp" class="btn release-app-trigger" type="button" aria-controls="releaseAppOptions" aria-expanded="false"><svg class="ico" aria-hidden="true"><use href="#plus"/></svg>添加允许的应用</button>
           <div id="releaseAppOptions" class="release-app-options" role="group" aria-label="可添加的应用" hidden></div>
@@ -376,11 +383,19 @@ main{min-width:0;display:flex;flex-direction:column;padding:21px 24px 24px;gap:1
       <section class="release-auth-note" aria-labelledby="releaseAuthTitle">
         <h3 id="releaseAuthTitle">请求 Header</h3>
         <div class="release-auth-summary">
-          <section><h4>应用</h4><p id="releaseAuthContext" aria-live="polite"></p></section>
+          <div class="release-auth-rules">
+          <section><h4>应用</h4><p>通用地址用 <code>app</code> 传应用 ID，<code>space</code>（空间 ID）可省略。带应用的地址将应用 ID 填在 URL 的 <code>{app_id}</code> 处，无需传 <code>app</code> 和 <code>space</code>。</p></section>
           <section><h4>鉴权凭据<span>二选一</span></h4><dl class="release-auth-headers">
             <dt>平台 Token</dt><dd><code>Authorization: Bearer &lt;Token&gt;</code></dd>
             <dt>DeepFOS API Key</dt><dd><code>X-Deepfos-Key: &lt;API Key&gt;</code></dd>
           </dl></section>
+          </div>
+          <section><h4>通用地址示例<span>平台 Token</span></h4><pre class="release-auth-example"><code>{
+  "app": "budget001",
+  "space": "budget",
+  "A2A-Version": "1.0",
+  "Authorization": "Bearer &lt;Token&gt;"
+}</code></pre></section>
         </div>
       </section>
       <p id="releaseError" class="release-error" role="alert" hidden></p>
@@ -420,14 +435,14 @@ const apps={
 const appScope=(mode,ids=[])=>({apps:{mode,items:ids.map(id=>({app_id:id,space_id:apps[id].space}))}});
 const publications={
   "budget-variance-report":{enabled:true,name:"预算执行差异报告",agent:"预算分析助手",scope:appScope("selected",["finops001","bizdata001"]),description:"生成 2026 年 10 月预算执行差异报告"},
-  "reconciliation-review":{enabled:true,name:"对账差异核对",agent:"智能对账助手",scope:appScope("fixed",["finops002"]),description:"核对两份测试台账并列出差异"},
+  "reconciliation-review":{enabled:true,name:"对账差异核对",agent:"智能对账助手",scope:appScope("selected",["finops002"]),description:"核对两份测试台账并列出差异"},
   "spreadsheet-analysis":{enabled:true,name:"电子表格数据分析",agent:"电子表格助手",scope:appScope("selected",["bizdata001","finops003"]),description:"分析测试表格中的费用变化"},
   "expense-summary":{enabled:false,name:"费用归集分析",agent:"费用分析助手",scope:appScope("selected",["finops003"]),description:"汇总费用归集结果。"}
 };
 let selectedCode="budget-variance-report";
 const currentCode=()=>selectedCode;
 const a2aURL=code=>accessBase+"/a2a/"+code+"/";
-const cardURL=code=>a2aURL(code)+"agent-card.json";
+const cardURL=(code, app=false)=>a2aURL(code)+(app?"apps/{app_id}/":"")+"agent-card.json";
 let toastTimer,detailFeedbackTimer;
 async function copyText(value, taskFeedback=false){
   let copied=false;
@@ -448,6 +463,7 @@ async function copyText(value, taskFeedback=false){
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>$("toast").hidden=true,2000);
 }
 $("copyEndpoint").addEventListener("click",()=>copyText(cardURL(currentCode())));
+$("copyAppEndpoint").addEventListener("click",()=>copyText(cardURL(currentCode(),true)));
 const accessTabs=[...$("accessTabs").querySelectorAll("[role=tab]")];
 function selectAccessTab(selected){
   for(const tab of accessTabs){
@@ -543,12 +559,10 @@ function renderPublication(){
     row.querySelector(".publication-select").setAttribute("aria-pressed",String(selected));
   }
   $("accessTarget").textContent=publication?.name??"尚无发布";
-  $("accessSubtitle").hidden=!publication?.enabled;
-  $("accessSubtitle").textContent=publication?.scope.apps.mode==="fixed"
-    ?"在 A2A 客户端填写下方地址及平台 Token 或 API Key。"
-    :"在 A2A 客户端填写下方地址及凭据，并通过 app Header 指定应用。";
-  $("endpointURL").textContent=publication?.enabled?cardURL(code):"";
-  $("endpointURL").title=$("endpointURL").textContent;
+  for(const [id, app] of [["endpointURL",false],["appEndpointURL",true]]){
+    $(id).textContent=publication?.enabled?cardURL(code,app):"";
+    $(id).title=$(id).textContent;
+  }
   $("activeAccess").hidden=!publication?.enabled;
   $("inactiveAccess").hidden=Boolean(publication?.enabled);
   $("inactiveAccess").textContent=publication?"该发布已停用。":"发布 Agent 后可查看接入地址。";
@@ -558,7 +572,7 @@ function renderPublicationList(){
   $("publicationRows").innerHTML=Object.entries(publications).map(([code,p])=>{
     const name=escapeHTML(p.name),agent=escapeHTML(p.agent);
     const names=p.scope.apps.items?.map(item=>apps[item.app_id].name).join("、");
-    const scope=escapeHTML(p.scope.apps.mode==="fixed"?"固定 · "+names:names);
+    const scope=escapeHTML(p.scope.apps.mode==="all"?"全部应用":names);
     return `<tr data-publication="${code}">
       <td><div class="publication-name">
         <button type="button" class="switch-control publication-toggle" role="switch" aria-checked="${p.enabled}" aria-label="启用发布 ${name}" title="${p.enabled?"停用":"启用"}"><span class="switch-track" aria-hidden="true"></span></button>
@@ -703,20 +717,14 @@ for(const agent of demoAgents) fields.namedItem("agent").add(new Option(agent,ag
 const releaseAppList=$("releaseApps");
 const releaseAppOptions=$("releaseAppOptions");
 const addReleaseApp=$("addReleaseApp");
-const appSource=fields.namedItem("appSource");
-const fixedApp=fields.namedItem("fixedApp");
-for(const [id,app] of Object.entries(apps)) fixedApp.add(new Option(`${app.name} · ${id} / ${app.spaceName}`,id));
+const releaseScope=fields.namedItem("appScope");
 function renderAppMode(){
-  const fixed=appSource.value==="fixed";
-  $("releaseFixedAppField").hidden=!fixed;
-  $("releaseAppSelection").hidden=fixed;
-  $("releaseAuthContext").innerHTML=fixed
-    ? "无需发送 <code>app</code> 和 <code>space</code>，由发布配置确定。"
-    : "发送 <code>app: &lt;App ID&gt;</code>，应用须在允许范围内。<code>space</code> 由服务端确定。";
+  $("releaseAppSelection").hidden=releaseScope.value!=="selected";
+  $("releaseAllAppsHint").hidden=releaseScope.value!=="all";
   setReleaseAppOptions(false);
 }
 releaseForm.addEventListener("change",event=>{
-  if(["appSource","fixedApp"].includes(event.target.name)) renderAppMode();
+  if(event.target.name==="appScope") renderAppMode();
 });
 function setReleaseAppOptions(open){
   releaseAppOptions.hidden=!open;
@@ -764,9 +772,7 @@ releaseForm.addEventListener("keydown",event=>{
 function readRelease(){
   const values=Object.fromEntries(releaseKeys.map(key=>[key,fields.namedItem(key).value.trim()]));
   values.enabled=editingCode ? publications[editingCode].enabled : true;
-  values.scope=appSource.value==="fixed"
-    ?appScope("fixed",fixedApp.value?[fixedApp.value]:[])
-    :appScope("selected",selectedAppIds);
+  values.scope=appScope(releaseScope.value,releaseScope.value==="selected"?selectedAppIds:[]);
   return values;
 }
 function showReleaseError(message){
@@ -784,10 +790,8 @@ function openRelease(code=null){
     fields.namedItem(key).value=values[key]??"";
   }
   const scope=values.scope?.apps;
-  const fixed=scope?.mode==="fixed";
-  appSource.value=fixed?"fixed":"caller";
-  fixedApp.value=fixed?scope.items[0].app_id:"";
-  selectedAppIds=fixed?[]:scope?.items?.map(item=>item.app_id)??[];
+  releaseScope.value=scope?.mode??"all";
+  selectedAppIds=scope?.items?.map(item=>item.app_id)??[];
   renderAppMode();
   renderReleaseApps();
   fields.namedItem("code").readOnly=Boolean(publication);
@@ -807,8 +811,7 @@ releaseForm.addEventListener("submit",event=>{
   const values=readRelease();
   let message="";
   if(!values.name) message="请输入发布名称。";
-  else if(code!==editingCode&&Object.hasOwn(publications,code)) message="发布编码已存在。";
-  else if(values.scope.apps.mode==="fixed"&&!values.scope.apps.items.length) message="请选择固定应用。";
+  else if(code!==editingCode&&Object.hasOwn(publications,code)) message="Agent 编码已存在。";
   else if(values.scope.apps.mode==="selected"&&!values.scope.apps.items.length) message="请至少选择一个应用。";
   if(message){
     showReleaseError(message);

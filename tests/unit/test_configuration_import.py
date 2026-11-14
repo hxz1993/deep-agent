@@ -326,6 +326,29 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await engine.dispose()
 
+    async def test_agent_publication_backup_keeps_database_code(self) -> None:
+        source = self.root / "source-agent-publication.db"
+        await config_backup_tests.ConfigBackupTests()._create_source(source, revision="016")
+        with sqlite3.connect(source) as db:
+            db.execute("UPDATE agents SET skills='[]'")
+            db.execute("DELETE FROM skill_packages")
+            db.execute(
+                "INSERT INTO agent_publications (id, code, name, description, agent_id, scope) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("pub-1", "budget-report", "预算报告", "", "agent-1", json.dumps({"apps": {"mode": "all"}})),
+            )
+
+        backup = await export_backup(self._url(source), environment="test", output_root=self.root / "backup")
+        target = await self._target_engine(revision="016")
+        try:
+            plan = await build_configuration_import_plan(backup.path, target_engine=target)
+            await apply_configuration_import(plan, target_engine=target, file_store=_MemoryFileStore(), request_headers={})
+            async with target.connect() as connection:
+                row = (await connection.execute(text("SELECT code, agent_id FROM agent_publications"))).one()
+            self.assertEqual(tuple(row), ("budget-report", "agent-1"))
+        finally:
+            await target.dispose()
+
     async def test_invalid_integration_rows_cannot_bypass_import_validation(self) -> None:
         backup_path, _, _ = await self._backup()
         engine = await self._target_engine(baseline=True)

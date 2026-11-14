@@ -46,11 +46,11 @@
       const name = escapeHtml(row.name);
       const target = agents.find((item) => item.id === row.agent_id)?.name || row.agent_id;
       const scope = row.scope.apps;
-      const names = scope.items.map((item) => apps.get(item.app_id)?.app_name || item.app_id).join("、");
-      const scopeText = { all: "全部应用", fixed: `固定 · ${names}`, selected: names }[scope.mode];
-      return `<tr data-publication="${attr(row.code)}" class="${selected === row.code ? "selected" : ""}">
+      const scopeText = scope.mode === "all" ? "全部应用" :
+        scope.items.map((item) => apps.get(item.app_id)?.app_name || item.app_id).join("、");
+      return `<tr data-publication="${attr(row.agent_code)}" class="${selected === row.agent_code ? "selected" : ""}">
         <td><div class="agent-service-pub-name"><button type="button" class="model-enabled-switch ${row.enabled ? "on" : "off"}" role="switch" aria-checked="${row.enabled}" aria-label="${attr(row.name)}启用状态" data-service-action="toggle"><span></span></button>
-        <button type="button" class="btn text agent-service-select" aria-pressed="${selected === row.code}"><span title="${attr(row.name)}">${name}</span><code title="${attr(row.code)}">${escapeHtml(row.code)}</code></button></div></td>
+        <button type="button" class="btn text agent-service-select" aria-pressed="${selected === row.agent_code}"><span title="${attr(row.name)}">${name}</span><code title="${attr(row.agent_code)}">${escapeHtml(row.agent_code)}</code></button></div></td>
         <td title="${attr(target)}">${escapeHtml(target)}</td><td title="${attr(scopeText)}">${escapeHtml(scopeText)}</td>
         <td>${publicationUpdate(row)}</td>
         <td><div class="row-actions agent-row-actions"><button type="button" class="row-action icon-only" data-service-action="edit" aria-label="编辑${attr(row.name)}" title="编辑">${icon("pencil")}</button>
@@ -68,19 +68,27 @@
       button.tabIndex = active ? 0 : -1;
       if (active) card.setAttribute("aria-labelledby", button.id);
     });
-    const row = rows.find((item) => item.code === selected);
+    const row = rows.find((item) => item.agent_code === selected);
     if (access !== "a2a") card.textContent = "接入方式待定。";
     else if (!row) card.textContent = "请选择一项发布";
     else if (!row.card_url) {
       card.innerHTML = `<h4>${escapeHtml(row.name)}</h4><p>${row.enabled ? "尚未配置接入地址。" : "该发布已停用。"}</p>`;
     } else {
-      const instruction = row.scope.apps.mode === "fixed"
-        ? "在 A2A 客户端填写下方地址及平台 Token 或 API Key。"
-        : "在 A2A 客户端填写下方地址及凭据，并通过 app Header 指定应用。";
-      card.innerHTML = `<h4>${escapeHtml(row.name)}</h4><p class="agent-service-access-subtitle">${instruction}</p>
-        <div class="agent-service-card-heading"><span id="agentServiceCardUrlLabel">Agent Card URL</span><button type="button" class="btn text compact" aria-label="复制 Agent Card 地址">复制地址</button></div>
-        <div class="agent-service-card-url"><code aria-labelledby="agentServiceCardUrlLabel" title="${attr(row.card_url)}">${escapeHtml(row.card_url)}</code></div>`;
-      card.querySelector("button").addEventListener("click", () => void copy(row.card_url));
+      const cards = [
+        { label: "通用 Agent Card", url: row.card_url, help: "在 app Header 填应用 ID，并传凭据。" },
+        { label: "带应用的 Agent Card", url: row.app_card_url_template, help: "将 {app_id} 替换为应用 ID，无需 app Header。" },
+      ];
+      card.innerHTML = `<h4>${escapeHtml(row.name)}</h4>
+        <div class="agent-service-card-options">${cards.map(({ label, url, help }, index) => `
+          <section aria-labelledby="agentServiceCardLabel${index}">
+            <div class="agent-service-card-heading"><span id="agentServiceCardLabel${index}">${label}</span>
+              <button type="button" class="btn text compact" aria-label="复制${label}地址" data-card-copy="${index}">复制地址</button></div>
+            <div class="agent-service-card-url"><code title="${attr(url)}">${escapeHtml(url)}</code></div>
+            <p class="agent-service-access-help">${help}</p>
+          </section>`).join("")}</div>`;
+      card.querySelectorAll("[data-card-copy]").forEach((button) => {
+        button.addEventListener("click", () => void copy(cards[Number(button.dataset.cardCopy)].url));
+      });
     }
     refreshIcons();
   }
@@ -107,8 +115,8 @@
       rows = publications;
       agents = agentList;
       el("newAgentPublication").disabled = false;
-      if (!rows.some((row) => row.code === selected)) {
-        selectPublication(rows[0]?.code || "");
+      if (!rows.some((row) => row.agent_code === selected)) {
+        selectPublication(rows[0]?.agent_code || "");
       }
       renderPublications();
       await loadTasks();
@@ -243,31 +251,12 @@
   }
 
   function renderScope() {
-    const fixed = draft.source === "fixed";
-    const all = draft.callerScope === "all";
-    const fixedApp = draft.fixedApp;
-    const app = fixedApp && (apps.get(fixedApp.app_id) || fixedApp);
-    document.querySelectorAll("[data-service-app-source]").forEach((button) =>
-      button.setAttribute("aria-pressed", String(button.dataset.serviceAppSource === draft.source)));
-    el("pickAgentPublicationFixedApp").hidden = !fixed;
-    const appValue = el("agentPublicationFixedAppValue");
-    appValue.classList.toggle("da-select-placeholder", !app);
-    appValue.textContent = app ? [...new Set([app.app_name, app.app_id])].filter(Boolean).join(" · ") : "选择应用";
-    const space = el("agentPublicationFixedAppSpace");
-    space.textContent = app?.space_name || app?.space_id || "";
-    space.hidden = !space.textContent;
-    const appHeader = {
-      fixed: "无需发送 <code>app</code> 和 <code>space</code>，由发布配置确定。",
-      all: "发送 <code>app: &lt;App ID&gt;</code>，调用方须有该应用的访问权限。<code>space</code> 由服务端确定。",
-      selected: "发送 <code>app: &lt;App ID&gt;</code>，应用须在允许范围内。<code>space</code> 由服务端确定。",
-    };
-    el("agentPublicationAuthContext").innerHTML = appHeader[fixed ? "fixed" : draft.callerScope];
-    el("agentPublicationAppControls").hidden = fixed;
-    el("agentPublicationAllApps").hidden = !all;
-    el("addAgentPublicationApp").hidden = all;
-    const scopeToggle = el("toggleAgentPublicationAppScope");
-    scopeToggle.title = all ? "切换为指定应用" : "切换为全部应用";
-    scopeToggle.setAttribute("aria-label", scopeToggle.title);
+    const all = draft.mode === "all";
+    el("agentPublicationAppScopeToggle").querySelectorAll("[data-service-app-scope]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.serviceAppScope === draft.mode));
+    });
+    el("agentPublicationAllAppsHint").hidden = !all;
+    el("agentPublicationAppControls").hidden = all;
     el("agentPublicationAppTags").innerHTML = (all ? [] : draft.items).map((item, index) => {
       const name = apps.get(item.app_id)?.app_name;
       const hasName = name && name !== item.app_id;
@@ -287,15 +276,10 @@
     const form = el("agentPublicationForm");
     form.reset();
     const scope = row?.scope.apps;
-    const fixed = scope?.mode === "fixed";
-    draft = {
-      row, source: fixed ? "fixed" : "caller",
-      callerScope: scope?.mode === "selected" ? "selected" : "all",
-      fixedApp: fixed ? scope.items[0] : null, items: fixed ? [] : [...(scope?.items || [])],
-    };
+    draft = { row, mode: scope?.mode || "all", items: [...(scope?.items || [])] };
     clearText("agentPublicationTitle", row ? "编辑发布" : "发布 Agent");
-    form.elements.code.value = row?.code || "";
-    form.elements.code.readOnly = Boolean(row);
+    form.elements.agent_code.value = row?.agent_code || "";
+    form.elements.agent_code.readOnly = Boolean(row);
     form.elements.name.value = row?.name || "";
     form.elements.description.value = row?.description || "";
     const picker = form.elements.agent_id;
@@ -305,8 +289,8 @@
     el("agentPublicationError").hidden = true;
     renderScope();
     el("agentPublicationDialog").showModal();
-    form.elements[row ? "name" : "code"].focus();
-    if (scope?.items.some((app) => !apps.has(app.app_id))) {
+    form.elements[row ? "name" : "agent_code"].focus();
+    if (draft.items.some((app) => !apps.has(app.app_id))) {
       const currentDraft = draft;
       void window.DeepAgentAppPicker.getApps(`${root}/applications`).then((directory) => {
         directory.forEach((app) => apps.set(app.app_id, app));
@@ -321,12 +305,11 @@
     const form = event.currentTarget;
     const submit = form.querySelector('[type="submit"]');
     const values = Object.fromEntries(new FormData(form));
-    const fixed = draft.source === "fixed";
-    const mode = fixed ? "fixed" : draft.callerScope;
-    const items = { fixed: draft.fixedApp ? [draft.fixedApp] : [], selected: draft.items, all: [] }[mode];
-    if (mode !== "all" && !items.length) {
+    const { mode } = draft;
+    const items = mode === "selected" ? draft.items : [];
+    if (mode === "selected" && !items.length) {
       const error = el("agentPublicationError");
-      error.textContent = fixed ? "请选择固定应用。" : "请至少选择一个应用。";
+      error.textContent = "请至少选择一个应用。";
       error.hidden = false;
       error.scrollIntoView({ block: "nearest" });
       return;
@@ -334,15 +317,15 @@
     const scope = { apps: { mode, items } };
     const row = draft.row;
     const body = { ...values, scope };
-    if (row) { delete body.code; body.revision = row.revision; }
+    if (row) { delete body.agent_code; body.revision = row.revision; }
     submit.disabled = true;
     el("agentPublicationError").hidden = true;
     try {
-      const saved = await apiFetch(`${root}/publications${row ? `/${row.code}` : ""}`, {
+      const saved = await apiFetch(`${root}/publications${row ? `/${row.agent_code}` : ""}`, {
         method: row ? "PATCH" : "POST", body: JSON.stringify(body),
       });
       el("agentPublicationDialog").close();
-      selectPublication(saved.code);
+      selectPublication(saved.agent_code);
       await refresh();
       showToast("发布配置已保存");
     } catch (error) {
@@ -355,7 +338,7 @@
 
   async function publicationAction(event) {
     const tr = event.target.closest("[data-publication]");
-    const row = rows.find((item) => item.code === tr?.dataset.publication);
+    const row = rows.find((item) => item.agent_code === tr?.dataset.publication);
     if (!row) return;
     const button = event.target.closest("[data-service-action]");
     const action = button?.dataset.serviceAction;
@@ -366,15 +349,15 @@
     if (button) {
       button.disabled = true;
       try {
-        if (action === "toggle") await apiFetch(`${root}/publications/${row.code}`, {
+        if (action === "toggle") await apiFetch(`${root}/publications/${row.agent_code}`, {
           method: "PATCH", body: JSON.stringify({ enabled: !row.enabled, revision: row.revision }),
         });
-        if (action === "delete") await apiFetch(`${root}/publications/${row.code}?revision=${row.revision}`, { method: "DELETE" });
+        if (action === "delete") await apiFetch(`${root}/publications/${row.agent_code}?revision=${row.revision}`, { method: "DELETE" });
         await refresh();
       } catch (error) { showToast(error.message, true); }
       finally { button.disabled = false; }
-    } else if (selected !== row.code) {
-      selectPublication(row.code);
+    } else if (selected !== row.agent_code) {
+      selectPublication(row.agent_code);
       renderPublications();
       await loadTasks();
     }
@@ -462,25 +445,10 @@
       access = tab.dataset.serviceAccess;
       renderAccess();
     });
-    panel.querySelectorAll("[data-service-app-source]").forEach((button) => button.addEventListener("click", () => {
-      draft.source = button.dataset.serviceAppSource;
+    panel.querySelectorAll("[data-service-app-scope]").forEach((button) => button.addEventListener("click", () => {
+      draft.mode = button.dataset.serviceAppScope;
       el("agentPublicationError").hidden = true;
       renderScope();
-    }));
-    el("toggleAgentPublicationAppScope").addEventListener("click", () => {
-      draft.callerScope = draft.callerScope === "all" ? "selected" : "all";
-      el("agentPublicationError").hidden = true;
-      renderScope();
-    });
-    el("pickAgentPublicationFixedApp").addEventListener("click", () => window.DeepAgentAppPicker.open({
-      owner: "agent-service", path: `${root}/applications`, title: "选择固定应用",
-      selectedAppId: draft.fixedApp?.app_id,
-      onSelect(app) {
-        apps.set(app.app_id, app);
-        draft.fixedApp = { app_id: app.app_id, space_id: app.space_id };
-        el("agentPublicationError").hidden = true;
-        renderScope();
-      },
     }));
     el("addAgentPublicationApp").addEventListener("click", () => window.DeepAgentAppPicker.open({
       owner: "agent-service", path: `${root}/applications`, title: "添加应用",

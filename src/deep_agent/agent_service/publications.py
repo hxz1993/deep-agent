@@ -12,7 +12,7 @@ from deep_agent.db.models import Agent, AgentPublication
 from deep_agent.db.reference_integrity import ReferenceConflict, is_unique_conflict, lock_optional, lock_reference
 from deep_agent.db.stores._session import SessionBoundMixin
 
-Code = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=64)]
+AgentCode = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=64)]
 ScopeId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
 Description = Annotated[str, StringConstraints(strip_whitespace=True, max_length=240)]
@@ -26,15 +26,13 @@ class AppScopeItem(BaseModel):
 
 class AppScope(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["all", "selected", "fixed"]
+    mode: Literal["all", "selected"]
     items: list[AppScopeItem] = Field(default_factory=list, max_length=200)
 
     @model_validator(mode="after")
     def check_items(self):
         if self.mode == "all" and self.items:
             raise ValueError("全部应用时不能同时指定应用")
-        if self.mode == "fixed" and len(self.items) != 1:
-            raise ValueError("固定应用时必须选择一个应用")
         if self.mode == "selected" and not self.items:
             raise ValueError("指定应用时至少添加一个应用")
         if len(set(self.items)) != len(self.items):
@@ -46,17 +44,13 @@ class PublicationScope(BaseModel):
     model_config = ConfigDict(extra="forbid")
     apps: AppScope
 
-    @property
-    def fixed_app(self) -> AppScopeItem | None:
-        return self.apps.items[0] if self.apps.mode == "fixed" else None
-
     def allows(self, app_id: str, space_id: str) -> bool:
         return self.apps.mode == "all" or AppScopeItem(app_id=app_id, space_id=space_id) in self.apps.items
 
 
 class PublicationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    code: Code
+    agent_code: AgentCode
     name: Name
     description: Description = ""
     agent_id: Annotated[str, StringConstraints(min_length=1, max_length=36)]
@@ -93,7 +87,10 @@ class PublicationStore(SessionBoundMixin):
         try:
             async with self._write() as db:
                 await lock_reference(db, Agent, Agent.id, body.agent_id, "Agent")
-                row = AgentPublication(id=str(uuid4()), **body.model_dump(mode="json"))
+                row = AgentPublication(
+                    id=str(uuid4()), code=body.agent_code,
+                    **body.model_dump(mode="json", exclude={"agent_code"}),
+                )
                 db.add(row)
                 await db.flush()
                 await db.refresh(row)
@@ -101,7 +98,7 @@ class PublicationStore(SessionBoundMixin):
         except IntegrityError as exc:
             if not is_unique_conflict(exc):
                 raise
-            raise ReferenceConflict("发布编码已存在") from exc
+            raise ReferenceConflict("Agent 编码已存在") from exc
 
     async def update(self, code: str, body: PublicationPatch) -> AgentPublication | None:
         async with self._write() as db:

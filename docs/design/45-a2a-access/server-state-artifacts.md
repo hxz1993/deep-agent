@@ -43,7 +43,7 @@
 | 内部生成 | Runner、Python、Skill 可写内部文件；仅经明确交付策略和可信文件桥接采集成品。模型文字、工具 stdout、原用户输入和中间文件都不能自行晋升为交付引用。 |
 | 发布 | 先上传 FileStore、验证元数据与实际可读，再创建稳定 Artifact ID。写入公开的文件名、类型、大小、SHA-256、过期信息及私有 FileStore 引用，与终态一并写入当前内存 Task。上传成功而任务终态写入失败时，沿已有文件事实排查独占孤立件；不得误删共享或输入文件。需要 XLSX 而文件失败时 Task 不标完成。 |
 | 返回 | 摘要优先用 `Artifact.parts[].data` 或 text；文件用 `parts[].url`、`filename`、`mediaType`。稳定受控下载路径可出现在授权快照，签名地址按需短效生成，不落库或放日志。首期不切分文件进 SSE，完整已发布 Artifact 一次送达（`append=false, lastChunk=true`），不拷贝字节到数据库。 |
-| 取件 | `GET /api/v1/agent-service/a2a/{publication}/tasks/{taskId}/artifacts/{artifactId}/download` 为 DeepAgent 扩展，重新核验身份、任务及访问权限，读取现有 FileStore 或生成短效受控链接；不把内部 `file_id` 当通行证。先验证普通 Python/无浏览器凭据能下载再承诺。 |
+| 取件 | `GET /api/v1/agent-service/a2a/{agent_code}/tasks/{taskId}/artifacts/{artifactId}/download` 为 DeepAgent 扩展，重新核验身份、任务及访问权限，读取现有 FileStore 或生成短效受控链接；不把内部 `file_id` 当通行证。先验证普通 Python/无浏览器凭据能下载再承诺。 |
 | 留存 | Task、Context、沙盒、文件分别设期限。Task 还在而文件已过期时，展示文件已过期。Task 清理不删除 FileStore 文件，旧 Task 的 A2A 取件入口失效；多个 Task / 用户不能借名称或路径访问其他文件。 |
 
 例：Task 交付两项，`summary` 结构化摘要和 `report-xlsx` 文件，二者 `artifactId` 在订阅、查询、SDK、CLI 和 MCP 中一致。平台的 [local-files 路由](../../../src/deep_agent/api/v1/local_files.py)在平台存储模式不可当作下载实现；复用 [FileStore 文件桥接](../../../src/deep_agent/sandbox/file_bridge.py)及可信平台身份。若报告以后需要多版本编辑、独立搜索、共享、重发布，再建产物实体，不把该模块混入首阶段。

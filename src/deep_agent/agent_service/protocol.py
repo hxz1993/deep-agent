@@ -8,7 +8,7 @@ from a2a.server.request_handlers.request_handler import RequestHandler
 
 from .execution import RunnerExecution, prepare_input
 from .publications import PublicationScope, PublicationStore
-from .tasks import Owner, TaskStore
+from .tasks import Entry, Owner, TaskStore
 
 
 def agent_card(row, address: str, *, attachment_mimes: frozenset[str]) -> wire.AgentCard:
@@ -55,16 +55,35 @@ class PublicationHandler(RequestHandler):
                 raise wire.TaskNotFoundError()
             return self.tasks.submit(
                 self.owner, publication.agent_id, params.message, enabled=publication.enabled,
-                execute=RunnerExecution(self.ctx, self.headers, self.address, self.code, text, uploads),
+                execute=RunnerExecution(self.ctx, self.headers, self.code, text, uploads),
                 input_size=len(text.encode()) + sum(len(upload.data) for upload in uploads),
             )
+
+    def _set_download_url(self, task_id: str, artifact: wire.Artifact) -> None:
+        artifact.parts[0].url = f"{self.address}/tasks/{task_id}/artifacts/{artifact.artifact_id}/download"
+
+    def _address_task(self, task: wire.Task, entry: Entry) -> wire.Task:
+        for artifact in task.artifacts:
+            if artifact.artifact_id in entry.files:
+                self._set_download_url(task.id, artifact)
+        return task
+
+    def _address_event(self, event, entry: Entry):
+        if isinstance(event, wire.Task):
+            return self._address_task(event, entry)
+        if isinstance(event, wire.TaskArtifactUpdateEvent) and event.artifact.artifact_id in entry.files:
+            addressed = wire.TaskArtifactUpdateEvent()
+            addressed.CopyFrom(event)
+            self._set_download_url(event.task_id, addressed.artifact)
+            return addressed
+        return event
 
     async def on_message_send(self, params, context):
         entry = await self._submit(params)
         if not params.configuration.return_immediately:
             await self.tasks.wait(entry)
         size = params.configuration.history_length if params.configuration.HasField("history_length") else None
-        return entry.snapshot(size)
+        return self._address_task(entry.snapshot(size), entry)
 
     async def on_message_send_stream(self, params, context) -> AsyncIterator:
         entry = await self._submit(params)
@@ -74,27 +93,34 @@ class PublicationHandler(RequestHandler):
                 if isinstance(event, wire.Task) and params.configuration.HasField("history_length"):
                     size = params.configuration.history_length
                     del event.history[:max(0, len(event.history) - size)]
-                yield event
+                yield self._address_event(event, entry)
         finally:
             await stream.aclose()
 
     async def on_get_task(self, params, context):
         size = params.history_length if params.HasField("history_length") else None
-        return self.tasks.get(self.owner, params.id).snapshot(size)
+        entry = self.tasks.get(self.owner, params.id)
+        return self._address_task(entry.snapshot(size), entry)
 
     async def on_list_tasks(self, params, context):
         if params.tenant:
-            raise wire.InvalidParamsError(message="应用范围由经过验证的 app 和 space Header 确定")
-        return self.tasks.page(self.owner, params)
+            raise wire.InvalidParamsError(message="应用范围由接入地址或经过校验的 app Header 确定")
+        page = self.tasks.page(self.owner, params)
+        for task in page.tasks:
+            self._address_task(task, self.tasks.entries[task.id])
+        return page
 
     async def on_cancel_task(self, params, context):
-        return await self.tasks.cancel(self.tasks.get(self.owner, params.id))
+        entry = self.tasks.get(self.owner, params.id)
+        task = await self.tasks.cancel(entry)
+        return self._address_task(task, entry)
 
     async def on_subscribe_to_task(self, params, context) -> AsyncIterator:
-        stream = self.tasks.observe(self.tasks.get(self.owner, params.id))
+        entry = self.tasks.get(self.owner, params.id)
+        stream = self.tasks.observe(entry)
         try:
             async for event in stream:
-                yield event
+                yield self._address_event(event, entry)
         finally:
             await stream.aclose()
 

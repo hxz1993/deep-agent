@@ -16,7 +16,7 @@ from deep_agent.agent.input_capabilities import document_upload_mimes
 from deep_agent.agent.media_pipeline import allowed_mimes
 from deep_agent.agent_service.execution import MAX_INPUT_BYTES, permitted_agent
 from deep_agent.agent_service.protocol import PublicationHandler, agent_card
-from deep_agent.agent_service.publications import Code, PublicationCreate, PublicationPatch, PublicationScope, PublicationStore, ScopeId
+from deep_agent.agent_service.publications import AgentCode, PublicationCreate, PublicationPatch, PublicationScope, PublicationStore, ScopeId
 from deep_agent.agent_service.security import platform_caller, public_base_url
 from deep_agent.agent_service.tasks import Owner, TERMINAL, TaskStore
 from deep_agent.api.v1.admin import require_console_admin
@@ -38,12 +38,13 @@ def task_store(ctx) -> TaskStore:
     return ctx.agent_tasks
 
 
-def address_for(code: str) -> str:
+def address_for(agent_code: str, app_id: str | None = None) -> str:
     try:
         base = public_base_url(os.environ.get("DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL", ""))
     except ValueError as exc:
         raise HTTPException(503, "请配置 Agent Service 对外地址") from exc
-    return f"{base}/api/v1/agent-service/a2a/{code}"
+    address = f"{base}/api/v1/agent-service/a2a/{agent_code}"
+    return f"{address}/apps/{app_id}" if app_id is not None else address
 
 
 async def require_publication_admin(user: RequestUserDep) -> str:
@@ -56,27 +57,30 @@ async def require_publication_admin(user: RequestUserDep) -> str:
 admin = (Depends(require_console_admin), Depends(require_publication_admin))
 
 
-async def publication(ctx, code: str):
-    row = await PublicationStore(ctx.db_session_factory).get(code)
+async def publication(ctx, agent_code: str):
+    row = await PublicationStore(ctx.db_session_factory).get(agent_code)
     if row is None:
         raise HTTPException(404, "发布不存在")
     return row
 
 
 def serialize_publication(row) -> dict:
-    card_url = None
+    card_url = app_card_url_template = None
     if row.enabled:
         try:
             card_url = address_for(row.code) + "/agent-card.json"
+            app_card_url_template = address_for(row.code, "{app_id}") + "/agent-card.json"
         except HTTPException as exc:
             if exc.status_code != 503:
                 raise
     return {
         **{key: getattr(row, key) for key in (
-            "id", "code", "name", "description", "agent_id", "scope", "enabled",
+            "id", "name", "description", "agent_id", "scope", "enabled",
             "revision", "created_at", "updated_at",
         )},
+        "agent_code": row.code,
         "card_url": card_url,
+        "app_card_url_template": app_card_url_template,
     }
 
 
@@ -106,14 +110,14 @@ async def list_apps(request: Request, user: RequestUserDep):
         raise HTTPException(exc.status, str(exc)) from exc
 
 
-@router.get("/publications/{code}", dependencies=admin)
-async def get_publication(ctx: AppContextDep, code: Code):
-    return serialize_publication(await publication(ctx, code))
+@router.get("/publications/{agent_code}", dependencies=admin)
+async def get_publication(ctx: AppContextDep, agent_code: AgentCode):
+    return serialize_publication(await publication(ctx, agent_code))
 
 
 @router.post("/publications", status_code=201, dependencies=admin)
 async def create_publication(ctx: AppContextDep, request: Request, user: RequestUserDep, body: PublicationCreate):
-    address_for(body.code)
+    address_for(body.agent_code)
     await permitted_agent(ctx, body.agent_id)
     await verify_scopes(request, user, [body.scope])
     try:
@@ -123,18 +127,18 @@ async def create_publication(ctx: AppContextDep, request: Request, user: Request
         raise HTTPException(409, str(exc)) from exc
 
 
-@router.patch("/publications/{code}", dependencies=admin)
-async def edit_publication(ctx: AppContextDep, request: Request, user: RequestUserDep, code: Code, body: PublicationPatch):
+@router.patch("/publications/{agent_code}", dependencies=admin)
+async def edit_publication(ctx: AppContextDep, request: Request, user: RequestUserDep, agent_code: AgentCode, body: PublicationPatch):
     if body.scope:
         await verify_scopes(request, user, [body.scope])
     if body.enabled is True:
-        address_for(code)
+        address_for(agent_code)
     async with task_store(ctx).admission:
-        current = await publication(ctx, code)
+        current = await publication(ctx, agent_code)
         if body.agent_id or body.enabled is True:
             await permitted_agent(ctx, body.agent_id or current.agent_id)
         try:
-            row = await PublicationStore(ctx.db_session_factory).update(code, body)
+            row = await PublicationStore(ctx.db_session_factory).update(agent_code, body)
         except ReferenceConflict as exc:
             raise HTTPException(409, str(exc)) from exc
     if row is None:
@@ -142,17 +146,17 @@ async def edit_publication(ctx: AppContextDep, request: Request, user: RequestUs
     return serialize_publication(row)
 
 
-@router.delete("/publications/{code}", status_code=204, dependencies=admin)
-async def delete_publication(ctx: AppContextDep, code: Code, revision: int = Query(ge=1)):
+@router.delete("/publications/{agent_code}", status_code=204, dependencies=admin)
+async def delete_publication(ctx: AppContextDep, agent_code: AgentCode, revision: int = Query(ge=1)):
     tasks = task_store(ctx)
     async with tasks.admission:
-        row = await publication(ctx, code)
+        row = await publication(ctx, agent_code)
         tasks.prune()
         if any(entry.context.owner.publication_id == row.id and entry.state not in TERMINAL
                for entry in tasks.entries.values()):
             raise HTTPException(409, "请等待或取消尚未结束的任务")
         try:
-            await PublicationStore(ctx.db_session_factory).delete(code, revision)
+            await PublicationStore(ctx.db_session_factory).delete(agent_code, revision)
         except ReferenceConflict as exc:
             raise HTTPException(409, str(exc)) from exc
     return Response(status_code=204)
@@ -170,11 +174,11 @@ def summary(entry):
     }
 
 
-@router.get("/publications/{code}/tasks", dependencies=admin)
-async def recent_tasks(ctx: AppContextDep, code: Code, page: int = Query(1, ge=1),
+@router.get("/publications/{agent_code}/tasks", dependencies=admin)
+async def recent_tasks(ctx: AppContextDep, agent_code: AgentCode, page: int = Query(1, ge=1),
                        q: str = Query("", max_length=100), state: str = Query("", max_length=40),
                        app_id: ScopeId | None = None):
-    row = await publication(ctx, code)
+    row = await publication(ctx, agent_code)
     tasks = task_store(ctx)
     tasks.prune()
     entries = [entry for entry in tasks.entries.values() if entry.context.owner.publication_id == row.id]
@@ -192,9 +196,9 @@ async def recent_tasks(ctx: AppContextDep, code: Code, page: int = Query(1, ge=1
     }
 
 
-@router.get("/publications/{code}/tasks/{task_id}", dependencies=admin)
-async def recent_task(ctx: AppContextDep, code: Code, task_id: str):
-    row = await publication(ctx, code)
+@router.get("/publications/{agent_code}/tasks/{task_id}", dependencies=admin)
+async def recent_task(ctx: AppContextDep, agent_code: AgentCode, task_id: str):
+    row = await publication(ctx, agent_code)
     tasks = task_store(ctx)
     tasks.prune()
     entry = tasks.entries.get(task_id)
@@ -208,29 +212,26 @@ async def recent_task(ctx: AppContextDep, code: Code, task_id: str):
     }
 
 
-async def authorized_publication(ctx, code: str, request: Request):
-    row = await publication(ctx, code)
+async def authorized_publication(ctx, agent_code: str, request: Request, app_id: str | None):
+    row = await publication(ctx, agent_code)
     scope = PublicationScope.model_validate(row.scope)
-    headers = await platform_caller(request, fixed_app=scope.fixed_app)
+    headers = await platform_caller(request, path_app=app_id)
     if not scope.allows(headers["app"], headers["space"]):
-        raise HTTPException(403, "app Header 指定的应用不在该发布的允许范围内，请检查发布配置和 App ID。")
+        raise HTTPException(403, "指定的应用不在该发布的允许范围内，请检查发布配置和 App ID。")
     return row, Owner(row.id, headers["user"], headers["app"], headers["space"]), headers
 
 
-@router.get("/a2a/{code}/.well-known/agent-card.json", include_in_schema=False)
-@router.get("/a2a/{code}/agent-card.json")
-async def get_card(ctx: AppContextDep, code: Code, request: Request):
-    row, _, _ = await authorized_publication(ctx, code, request)
+async def _get_card(ctx: AppContextDep, agent_code: AgentCode, request: Request, app_id: str | None = None):
+    row, _, _ = await authorized_publication(ctx, agent_code, request, app_id)
     if not row.enabled:
         raise HTTPException(404, "发布不存在")
     config = await load_document_parsing_config(ctx.stores.global_setting)
-    card = agent_card(row, address_for(row.code), attachment_mimes=allowed_mimes(document_upload_mimes(config)))
+    card = agent_card(row, address_for(row.code, app_id), attachment_mimes=allowed_mimes(document_upload_mimes(config)))
     return JSONResponse(MessageToDict(card), headers={"Cache-Control": "no-store"})
 
 
-@router.post("/a2a/{code}")
-async def rpc(ctx: AppContextDep, code: Code, request: Request):
-    row, owner, headers = await authorized_publication(ctx, code, request)
+async def _rpc(ctx: AppContextDep, agent_code: AgentCode, request: Request, app_id: str | None = None):
+    row, owner, headers = await authorized_publication(ctx, agent_code, request, app_id)
     body = bytearray()
     async for chunk in request.stream():
         if len(body) + len(chunk) > MAX_BODY_BYTES:
@@ -247,7 +248,7 @@ async def rpc(ctx: AppContextDep, code: Code, request: Request):
 
     handler = PublicationHandler(
         ctx, task_store(ctx), PublicationStore(ctx.db_session_factory),
-        row.code, owner, headers, address_for(row.code),
+        row.code, owner, headers, address_for(row.code, app_id),
     )
     dispatcher = JsonRpcDispatcher(handler, enable_v0_3_compat=False)
     response = await dispatcher.handle_requests(Request(request.scope, receive))
@@ -255,9 +256,8 @@ async def rpc(ctx: AppContextDep, code: Code, request: Request):
     return response
 
 
-@router.get("/a2a/{code}/tasks/{task_id}/artifacts/{artifact_id}/download")
-async def download_artifact(ctx: AppContextDep, code: Code, task_id: str, artifact_id: str, request: Request):
-    _, owner, headers = await authorized_publication(ctx, code, request)
+async def _download_artifact(ctx: AppContextDep, agent_code: AgentCode, task_id: str, artifact_id: str, request: Request, app_id: str | None = None):
+    _, owner, headers = await authorized_publication(ctx, agent_code, request, app_id)
     try:
         entry = task_store(ctx).get(owner, task_id)
     except wire.TaskNotFoundError as exc:
@@ -285,3 +285,42 @@ async def download_artifact(ctx: AppContextDep, code: Code, task_id: str, artifa
     return StreamingResponse(
         chunks(), media_type=artifact.mime, headers=response_headers, background=BackgroundTask(handle.close),
     )
+
+
+_A2A_PATH = "/a2a/{agent_code}"
+_A2A_APP_PATH = _A2A_PATH + "/apps/{app_id}"
+_ARTIFACT_PATH = "/tasks/{task_id}/artifacts/{artifact_id}/download"
+
+
+@router.get(f"{_A2A_PATH}/.well-known/agent-card.json", include_in_schema=False)
+@router.get(f"{_A2A_PATH}/agent-card.json")
+async def get_card(ctx: AppContextDep, agent_code: AgentCode, request: Request):
+    return await _get_card(ctx, agent_code, request)
+
+
+@router.get(f"{_A2A_APP_PATH}/.well-known/agent-card.json", include_in_schema=False)
+@router.get(f"{_A2A_APP_PATH}/agent-card.json")
+async def get_app_card(ctx: AppContextDep, agent_code: AgentCode, app_id: str, request: Request):
+    return await _get_card(ctx, agent_code, request, app_id)
+
+
+@router.post(_A2A_PATH)
+async def rpc(ctx: AppContextDep, agent_code: AgentCode, request: Request):
+    return await _rpc(ctx, agent_code, request)
+
+
+@router.post(_A2A_APP_PATH)
+async def app_rpc(ctx: AppContextDep, agent_code: AgentCode, app_id: str, request: Request):
+    return await _rpc(ctx, agent_code, request, app_id)
+
+
+@router.get(_A2A_PATH + _ARTIFACT_PATH)
+async def download_artifact(ctx: AppContextDep, agent_code: AgentCode, task_id: str, artifact_id: str, request: Request):
+    return await _download_artifact(ctx, agent_code, task_id, artifact_id, request)
+
+
+@router.get(_A2A_APP_PATH + _ARTIFACT_PATH)
+async def download_app_artifact(
+    ctx: AppContextDep, agent_code: AgentCode, app_id: str, task_id: str, artifact_id: str, request: Request,
+):
+    return await _download_artifact(ctx, agent_code, task_id, artifact_id, request, app_id)

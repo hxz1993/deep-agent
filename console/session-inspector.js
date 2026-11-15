@@ -221,8 +221,8 @@ export function renderSessionInspector({
       ${inspectorFactHtml("模型", `<span class="inspector-channel-name">${modelProvider ? `<span class="composer-provider-icon">${composerProviderIcon(modelProvider)}</span>` : ""}${escapeHtml(model ? modelWithEffort(model.name || model.model || "未记录", sessionReasoningEffort) : "未记录")}</span>`)}
       ${inspectorFactHtml("会话来源", channelOrigin
         ? `<span class="inspector-channel-name"><img class="session-source-logo" src="${channelOrigin.logo}" alt="" />${escapeHtml(channelOrigin.platform)}</span>`
-        : activeSession.source_type === "a2a"
-          ? '<span class="inspector-channel-name">集成<span class="inspector-channel-badge">A2A</span></span>'
+        : ["a2a", "mcp", "http"].includes(activeSession.source_type)
+          ? `<span class="inspector-channel-name">集成<span class="inspector-channel-badge">${activeSession.source_type.toUpperCase()}</span></span>`
           : '<span class="inspector-channel-name"><img class="session-source-logo" src="./favicon.svg?v=20260922-d-rounded" alt="" />DeepFOS</span>')}
       ${inspectorFactHtml("App / Space", sessionScope, { wide: true })}
       ${inspectorFactHtml("会话统计", sessionCounts)}

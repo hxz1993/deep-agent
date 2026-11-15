@@ -65,6 +65,7 @@ class Conversation:
     owner: Owner
     agent_id: str
     active_id: str | None = None
+    source: str = "a2a"
 
 
 @dataclass
@@ -74,6 +75,8 @@ class Entry:
     title: str
     created: datetime
     changed: datetime
+    source: str = "a2a"
+    client: str | None = None
     run_ids: list[str] = field(default_factory=list)
     files: dict[str, ArtifactFile] = field(default_factory=dict)
     progress: list[tuple[int, datetime]] = field(default_factory=list)
@@ -190,6 +193,7 @@ class TaskStore:
     def submit(
         self, owner: Owner, agent_id: str, message: wire.Message, *,
         enabled: bool, execute: Execute, input_size: int = 0,
+        source: str = "a2a", require_question: bool = False, client: str | None = None,
     ) -> Entry:
         self.prune()
         if self._closed:
@@ -219,7 +223,7 @@ class TaskStore:
                 raise wire.UnsupportedOperationError(message="此任务已达到补答次数上限")
             if entry.state == INPUT_REQUIRED:
                 reply_to = message.metadata.fields.get("replyTo")
-                if reply_to is not None and reply_to.string_value != entry.question_id:
+                if (reply_to is None and require_question) or (reply_to is not None and reply_to.string_value != entry.question_id):
                     raise wire.InvalidParamsError(message="补答对应的问题已失效")
         else:
             if not enabled:
@@ -233,10 +237,10 @@ class TaskStore:
                 if context.agent_id != agent_id or context.active_id:
                     raise wire.UnsupportedOperationError(message="当前 Context 有活动任务或执行范围已改变")
             else:
-                context = Conversation(uuid4().hex, uuid4().hex, owner, agent_id)
+                context = Conversation(uuid4().hex, uuid4().hex, owner, agent_id, source=source)
             task = wire.Task(id=uuid4().hex, context_id=context.id)
-            title = next((part.text.strip()[:100] for part in message.parts if part.text.strip()), "A2A 任务")
-            entry = Entry(context, task, title, datetime.now(UTC), datetime.now(UTC))
+            title = next((part.text.strip()[:100] for part in message.parts if part.text.strip()), "Agent 任务")
+            entry = Entry(context, task, title, datetime.now(UTC), datetime.now(UTC), source=source, client=client)
             self.contexts[context.id] = context
             self.entries[task.id] = entry
             context.active_id = task.id

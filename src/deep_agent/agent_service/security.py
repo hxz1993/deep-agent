@@ -24,7 +24,7 @@ def public_base_url(value: str) -> str:
     return value.rstrip("/")
 
 
-async def platform_caller(request: Request, *, path_app: str | None = None) -> dict[str, str]:
+async def platform_caller(request: Request, *, path_app: str | None = None, require_app: bool = True) -> dict[str, str]:
     headers = {}
     header_names = (*_CREDENTIALS, "language") if path_app is not None else (*_CREDENTIALS, "language", "app", "space")
     for name in header_names:
@@ -36,16 +36,20 @@ async def platform_caller(request: Request, *, path_app: str | None = None) -> d
         if values and values[0].strip():
             headers[name] = values[0].strip()
     app = path_app if path_app is not None else headers.get("app")
-    if not app:
+    if not app and (require_app or "x-deepfos-key" in headers):
         raise HTTPException(400, "请在 app Header 中传入 App ID，或使用指定 App 的接入地址。")
-    try:
-        space = app_space(app)
-    except IntegrationAppAccessError as exc:
-        source = "接入地址中的 App ID" if path_app is not None else "app Header"
-        raise HTTPException(400, f"{source}无效。") from exc
-    if "space" in headers and headers["space"] != space:
-        raise HTTPException(400, "space Header 与 App 所属空间不一致，请更正或省略 space。")
-    headers.update(app=app, space=space)
+    space = None
+    if app:
+        try:
+            space = app_space(app)
+        except IntegrationAppAccessError as exc:
+            source = "接入地址中的 App ID" if path_app is not None else "app Header"
+            raise HTTPException(400, f"{source}无效。") from exc
+        if "space" in headers and headers["space"] != space:
+            raise HTTPException(400, "space Header 与 App 所属空间不一致，请更正或省略 space。")
+        headers.update(app=app, space=space)
+    elif "space" in headers:
+        raise HTTPException(400, "请与 app 一起发送 space Header")
     credentials = [name for name in _CREDENTIALS if name in headers]
     if not credentials:
         raise HTTPException(401, "缺少调用凭据。请通过 Authorization: Bearer <Token> 或 X-Deepfos-Key 提供一种凭据。")
@@ -77,7 +81,8 @@ async def platform_caller(request: Request, *, path_app: str | None = None) -> d
                 raise HTTPException(401, "Platform did not verify the caller identity")
             user = ids.pop()
         headers["user"] = user
-        await PlatformAppAccessClient(headers).verify_app_access(app, space)
+        if app and space:
+            await PlatformAppAccessClient(headers).verify_app_access(app, space)
     except IntegrationAppAccessError as exc:
         if exc.status == 401:
             raise HTTPException(401, "平台无法验证调用凭据，请检查凭据是否有效。") from exc

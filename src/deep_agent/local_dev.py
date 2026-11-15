@@ -159,7 +159,10 @@ class LocalIdentityAdapter:
                 )(scope, receive, send)
                 return
 
-        if scope.get("path", "").startswith("/api/v1/agent-service/a2a/"):
+        path = scope.get("path", "")
+        public_service = "/api/v1/agent-service"
+        artifact_download = path.startswith(f"{public_service}/tasks/") and path.endswith("/download")
+        if path == f"{public_service}/mcp" or path.startswith(f"{public_service}/a2a/") or artifact_download:
             await self.app(scope, receive, send)
             return
 

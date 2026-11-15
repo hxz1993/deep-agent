@@ -135,8 +135,8 @@ async def _ensure_session_access(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     stored_agent_id, _ = resolved
     source, _ = await ctx.stores.chat_session.get_source(stored_agent_id, session_id)
-    if source == "a2a":
-        raise HTTPException(409, detail="请通过 A2A Task 继续此会话")
+    if source in {"a2a", "mcp", "http"}:
+        raise HTTPException(409, detail="请通过集成任务入口继续此会话")
     if agent_id is not None and stored_agent_id != agent_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     return stored_agent_id

@@ -88,6 +88,20 @@ class LocalIdentityAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["space"], "mdxath")
         self.assertEqual(headers["language"], "zh-cn")
 
+    async def test_external_agent_endpoints_keep_caller_credentials(self) -> None:
+        target = HeaderCaptureApp()
+        adapter = LocalIdentityAdapter(target, LocalIdentity(user="console", token="local-token"))
+
+        async def unused(*args, **kwargs):
+            return None
+
+        for path in ("a2a/example", "mcp", "tasks/sample/artifacts/file/download"):
+            with self.subTest(path=path):
+                scope = {"type": "http", "path": f"/api/v1/agent-service/{path}",
+                         "headers": [(b"authorization", b"Bearer caller-token")]}
+                await adapter(scope, unused, unused)
+                self.assertIs(target.scope, scope)
+
     async def test_lifespan_scope_is_not_modified(self) -> None:
         target = HeaderCaptureApp()
         adapter = LocalIdentityAdapter(target, LocalIdentity(user="user", token="token"))

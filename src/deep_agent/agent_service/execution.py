@@ -19,8 +19,6 @@ from deep_agent.agent.media_pipeline import MediaPipelineError, process_upload
 from deep_agent.agent.input_capabilities import document_upload_mimes
 from deep_agent.agent.tool_output_limits import artifacts_from_metadata
 from deep_agent.mcp_request_context import resolve_mcp_request_context_mode
-from deep_agent.api.v1.chat import _agent_deps
-from deep_agent.api.v1.deps import build_runner_for_agent
 from deep_agent.db.models import Agent, ChatSession, McpServer
 from deep_agent.db.reference_integrity import lock_reference
 from deep_agent.db.stores._session import SessionBoundMixin
@@ -100,11 +98,11 @@ async def _ensure_session(ctx, entry: Entry):
         if session is None:
             db.add(ChatSession(
                 session_id=scope.session_id, agent_id=scope.agent_id, user_id=scope.owner.user,
-                app_id=scope.owner.app, space_id=scope.owner.space, source_type="a2a",
+                app_id=scope.owner.app, space_id=scope.owner.space, source_type=scope.source,
                 source_id=scope.owner.publication_id, title=entry.title, next_sequence=1,
             ))
         elif (session.agent_id, session.user_id, session.app_id, session.space_id, session.source_type, session.source_id) != (
-            scope.agent_id, scope.owner.user, scope.owner.app, scope.owner.space, "a2a", scope.owner.publication_id,
+            scope.agent_id, scope.owner.user, scope.owner.app, scope.owner.space, scope.source, scope.owner.publication_id,
         ):
             raise RuntimeError("A2A session binding changed")
 
@@ -176,6 +174,9 @@ class RunnerExecution:
             app, space, row.settings.get("prompt_append", ""), app_skill_scope(app), tuple(row.settings["skills"]),
         )
         mcp_headers = filter_verified_mcp_headers(headers)
+        from deep_agent.api.v1.chat import _agent_deps
+        from deep_agent.api.v1.deps import build_runner_for_agent
+
         runner = await build_runner_for_agent(ctx, scope.agent_id, capabilities=capabilities,
                                                app_context=app_context, request_headers=mcp_headers, a2a=True)
         deps = _agent_deps(ctx, session_id=scope.session_id, user=scope.owner.user, agent_id=scope.agent_id,

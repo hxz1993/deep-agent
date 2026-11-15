@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from a2a import types as wire
 from a2a.server.request_handlers.request_handler import RequestHandler
 
-from .execution import RunnerExecution, prepare_input
-from .publications import PublicationScope, PublicationStore
+from .execution import RunnerExecution
+from .service import AgentService
 from .tasks import Entry, Owner, TaskStore
 
 
@@ -36,7 +36,6 @@ def agent_card(row, address: str, *, attachment_mimes: frozenset[str]) -> wire.A
 class PublicationHandler(RequestHandler):
     ctx: object
     tasks: TaskStore
-    store: PublicationStore
     code: str
     owner: Owner
     headers: dict[str, str]
@@ -47,17 +46,9 @@ class PublicationHandler(RequestHandler):
             raise wire.InvalidParamsError(message="message is required")
         if params.configuration.HasField("task_push_notification_config"):
             raise wire.PushNotificationNotSupportedError()
-        text, uploads = await prepare_input(self.ctx, params.message)
-        async with self.tasks.admission:
-            publication = await self.store.get(self.code)
-            if (publication is None or publication.id != self.owner.publication_id
-                    or not PublicationScope.model_validate(publication.scope).allows(self.owner.app, self.owner.space)):
-                raise wire.TaskNotFoundError()
-            return self.tasks.submit(
-                self.owner, publication.agent_id, params.message, enabled=publication.enabled,
-                execute=RunnerExecution(self.ctx, self.headers, self.code, text, uploads),
-                input_size=len(text.encode()) + sum(len(upload.data) for upload in uploads),
-            )
+        return await AgentService(self.ctx).submit(
+            self.code, self.owner, self.headers, params.message, executor=RunnerExecution,
+        )
 
     def _set_download_url(self, task_id: str, artifact: wire.Artifact) -> None:
         artifact.parts[0].url = f"{self.address}/tasks/{task_id}/artifacts/{artifact.artifact_id}/download"

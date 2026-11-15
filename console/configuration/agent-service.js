@@ -7,6 +7,7 @@
   };
   let rows = [], agents = [], apps = new Map(), tasks = [];
   let selected = "", selectedTask = "", access = "a2a", page = 1;
+  let clientConfig = {};
   let draft, detailRequest, taskRequest, timer, searchTimer;
   let taskRowsMarkup = "", taskDetailSnapshot = "", shownTask = "";
   const icon = (name) => `<i data-lucide="${name}"></i>`;
@@ -55,6 +56,47 @@
     renderAccess();
   }
 
+  const methods = {
+    a2a: { label: "A2A", icon: "network" },
+    mcp: { label: "MCP", icon: "plug" },
+    http: { label: "HTTP", icon: "globe" },
+  };
+
+  function renderMcpAccess(card) {
+    const endpoint = clientConfig.mcp_url;
+    if (!endpoint) {
+      card.textContent = "当前环境暂未提供 MCP 接入地址。";
+      return;
+    }
+    const headers = JSON.stringify({ app: "<App ID>", "X-Deepfos-Key": "<API Key>" }, null, 2);
+    const instructions = [
+      "请在当前 Agent 客户端中添加名为 DeepAgent 的 MCP 连接，选择 Streamable HTTP。",
+      `MCP 地址：${endpoint}`,
+      `请求 Header 示例：\n${headers}`,
+      "请向用户确认 App ID，让用户通过宿主的凭据设置提供 API Key。若使用平台 Token，请改用 Authorization: Bearer <Token>，两种凭据只选一种。请勿在对话中索取或回显真实凭据。",
+      "连接后调用 list_agents 验证。目录展示所有已启用的发布，发起任务时仍会检查应用权限和发布范围。",
+      "如果地址指向 localhost 或 127.0.0.1，请在同一台电脑上运行客户端。云端客户端需要可达的服务地址。",
+    ].join("\n\n");
+    const copyButton = (value, label) => `<button type="button" class="btn text compact" data-client-copy="${attr(value)}">${label}</button>`;
+    card.innerHTML = `<div class="agent-service-card-options">
+      <div class="agent-service-card-heading"><h4>MCP 接入</h4>${copyButton(instructions, "复制 Agent 接入指引")}</div>
+      <p class="agent-service-access-help">Streamable HTTP · 填写应用 ID 和一种凭据</p>
+      <div class="agent-service-card-option agent-service-card-options">
+        <section>
+          <div class="agent-service-card-heading"><h5>MCP 地址</h5>${copyButton(endpoint, "复制地址")}</div>
+          <pre class="agent-service-client-snippet">${escapeHtml(endpoint)}</pre>
+        </section>
+        <section>
+          <div class="agent-service-card-heading"><h5>请求 Header</h5>${copyButton(headers, "复制示例")}</div>
+          <pre class="agent-service-client-snippet">${escapeHtml(headers)}</pre>
+        </section>
+      </div>
+    </div>`;
+    card.querySelectorAll("[data-client-copy]").forEach((button) => {
+      button.addEventListener("click", () => void copy(button.dataset.clientCopy));
+    });
+  }
+
   function renderAccess() {
     const card = el("agentServiceAccess");
     el("agentServiceTabs").querySelectorAll("[data-service-access]").forEach((button) => {
@@ -66,7 +108,8 @@
     });
     const row = rows.find((item) => item.agent_code === selected);
     const publication = row ? `<h4 class="agent-service-current-publication">${icon("bot")}<span>当前发布</span><strong>${escapeHtml(row.name)}</strong></h4>` : "";
-    if (access !== "a2a") card.textContent = "接入方式待定。";
+    if (access === "mcp") renderMcpAccess(card);
+    else if (access !== "a2a") card.textContent = "接入方式待评审，本版本暂未开放。";
     else if (!row) card.textContent = "请选择一项发布";
     else if (!row.card_url) {
       card.innerHTML = `${publication}<p>${row.enabled ? "尚未配置接入地址。" : "该发布已停用。"}</p>`;
@@ -80,8 +123,8 @@
           <section class="agent-service-card-option" aria-labelledby="agentServiceCardLabel${index}">
             <div class="agent-service-card-heading"><h5 id="agentServiceCardLabel${index}">${label}</h5>
               <button type="button" class="btn text compact" aria-label="复制${label}地址" data-card-copy="${index}">复制地址</button></div>
-            <p class="agent-service-access-help">${help}</p>
             <div class="agent-service-card-url"><code title="${attr(url)}">${escapeHtml(url)}</code></div>
+            <p class="agent-service-access-help">${help}</p>
           </section>`).join("")}</div>`;
       card.querySelectorAll("[data-card-copy]").forEach((button) => {
         button.addEventListener("click", () => void copy(cards[Number(button.dataset.cardCopy)].url));
@@ -105,12 +148,14 @@
 
   async function refresh() {
     try {
-      const [publications, agentList] = await Promise.all([
+      const [publications, agentList, distribution] = await Promise.all([
         apiFetch(`${root}/publications`),
         apiFetch("/api/v1/agents").catch(() => []),
+        apiFetch(`${root}/client-config`).catch(() => ({})),
       ]);
       rows = publications;
       agents = agentList;
+      clientConfig = distribution;
       el("newAgentPublication").disabled = false;
       if (!rows.some((row) => row.agent_code === selected)) {
         selectPublication(rows[0]?.agent_code || "");
@@ -166,7 +211,7 @@
     const markup = tasks.length ? tasks.map((row) => `
       <tr data-agent-task="${attr(row.id)}" class="${row.id === selectedTask ? "selected" : ""}">
         <td><button type="button" class="btn text agent-service-select" aria-controls="agentTaskDetail" aria-pressed="${row.id === selectedTask}"><span title="${attr(row.title)}">${escapeHtml(row.title)}</span><code title="${attr(row.id)}">${escapeHtml(row.id.slice(0, 8))}</code></button></td>
-        <td><span class="agent-service-status" data-state="${attr(row.status)}">${statusLabel(row.status)}</span></td><td>A2A</td>
+        <td><span class="agent-service-status" data-state="${attr(row.status)}">${statusLabel(row.status)}</span></td><td>${methods[row.source]?.label || "A2A"}</td>
         <td class="agent-task-wide" title="${attr(row.caller_username ? `${row.caller_username} · ${row.caller}` : row.caller)}">${escapeHtml(row.caller_username || row.caller?.slice(0, 8) || "—")}</td>
         <td class="agent-task-wide">${escapeHtml(formatDate(row.created_at))}</td>
         <td class="agent-task-wide">${duration(row)}</td>
@@ -230,7 +275,7 @@
     return `<section class="inspector-section agent-service-task-facts">
       <dl class="agent-service-facts">
         <div><dt>调用方</dt><dd>${named(row.caller_username, row.caller, "User ID")}</dd></div>
-        <div><dt>接入方式</dt><dd><span class="agent-service-access-method" data-service-access="a2a">${icon("network")}A2A</span></dd></div>
+        <div><dt>接入方式</dt><dd><span class="agent-service-access-method" data-service-access="${attr(row.source || "a2a")}">${icon((methods[row.source] || methods.a2a).icon)}${(methods[row.source] || methods.a2a).label}</span></dd></div>
         <div><dt>应用 / 空间</dt><dd>${scope}</dd></div>
         <div><dt>提交时间</dt><dd>${escapeHtml(formatDate(row.created_at))}${Number.isFinite(row.duration_seconds) ? `<span class="agent-service-fact-meta">耗时 ${duration(row)}</span>` : ""}</dd></div>
       </dl>
@@ -399,29 +444,58 @@
     }
   }
 
-  function bindResize(split, layout, property) {
-    const minimum = Number(split.getAttribute("aria-valuemin"));
-    const maximum = Number(split.getAttribute("aria-valuemax"));
+  function bindResize(split, layout, property, topPane = null) {
+    const byHeight = Boolean(topPane);
     const initial = Number(split.getAttribute("aria-valuenow"));
+    const currentSize = () => byHeight
+      ? Math.round(topPane.getBoundingClientRect().height)
+      : Number(split.getAttribute("aria-valuenow"));
+    const bounds = () => {
+      if (!byHeight) return [Number(split.getAttribute("aria-valuemin")), Number(split.getAttribute("aria-valuemax"))];
+      const style = getComputedStyle(layout);
+      const minimum = parseFloat(style.getPropertyValue("--agent-service-top-min"));
+      const reserved = parseFloat(style.getPropertyValue("--agent-service-recent-min"));
+      return [minimum, Math.max(minimum, layout.clientHeight - split.offsetHeight - reserved)];
+    };
+    const syncHeight = () => {
+      if (!split.offsetHeight) return;
+      const [minimum, maximum] = bounds();
+      split.setAttribute("aria-valuemin", minimum);
+      split.setAttribute("aria-valuemax", maximum);
+      split.setAttribute("aria-valuenow", currentSize());
+    };
     const apply = (value) => {
-      const width = Math.round(Math.max(minimum, Math.min(maximum, value)));
-      layout.style.setProperty(property, `${width}%`);
-      split.setAttribute("aria-valuenow", width);
+      const [minimum, maximum] = bounds();
+      const size = Math.round(Math.max(minimum, Math.min(maximum, value)));
+      layout.style.setProperty(property, `${size}${byHeight ? "px" : "%"}`);
+      split.setAttribute("aria-valuenow", size);
     };
     split.addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      const smaller = byHeight ? "ArrowUp" : "ArrowLeft";
+      const larger = byHeight ? "ArrowDown" : "ArrowRight";
+      if (![smaller, larger, "Home", "End"].includes(event.key)) return;
       event.preventDefault();
-      const current = Number(split.getAttribute("aria-valuenow"));
-      apply({ Home: minimum, End: maximum, ArrowLeft: current - 2, ArrowRight: current + 2 }[event.key]);
+      const [minimum, maximum] = bounds();
+      const step = byHeight ? 16 : 2;
+      const current = currentSize();
+      apply({ Home: minimum, End: maximum, [smaller]: current - step, [larger]: current + step }[event.key]);
     });
-    split.addEventListener("dblclick", () => apply(initial));
+    split.addEventListener("dblclick", () => {
+      if (byHeight) {
+        layout.style.removeProperty(property);
+        syncHeight();
+      } else apply(initial);
+    });
     split.addEventListener("pointerdown", (event) => {
       if (!event.isPrimary || event.button !== 0) return;
       event.preventDefault();
-      const startWidth = Number(split.getAttribute("aria-valuenow"));
+      const startSize = currentSize();
+      const position = (pointer) => byHeight ? pointer.clientY : pointer.clientX;
+      const start = position(event);
+      const scale = byHeight ? 1 : 100 / layout.clientWidth;
       const move = (pointer) => {
         if (pointer.pointerId === event.pointerId) {
-          apply(startWidth + (pointer.clientX - event.clientX) * 100 / layout.clientWidth);
+          apply(startSize + (position(pointer) - start) * scale);
         }
       };
       split.setPointerCapture(event.pointerId);
@@ -434,6 +508,11 @@
         document.body.classList.remove("workspace-pane-resizing");
       }, { once: true });
     });
+    if (byHeight) {
+      const resizeObserver = new ResizeObserver(syncHeight);
+      resizeObserver.observe(layout);
+      resizeObserver.observe(topPane);
+    }
   }
 
   function bindTabs(tabList, activate) {
@@ -469,7 +548,7 @@
       });
     });
     el("agentServiceProtocolBtn").addEventListener("click", () => {
-      const methods = el("agentServiceMethodsTab");
+      const methods = el(access === "mcp" ? "agentServiceMcpHelpTab" : "agentServiceMethodsTab");
       methods.click();
       guide.showModal();
       el("agentServiceMethodsPanel").scrollTop = 0;
@@ -478,8 +557,10 @@
     });
     panel.querySelectorAll("[data-service-close]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
     bindTabs(el("agentServiceTabs"), (tab) => {
+      if (access === tab.dataset.serviceAccess) return;
       access = tab.dataset.serviceAccess;
       renderAccess();
+      el("agentServiceAccess").scrollTop = 0;
     });
     panel.querySelectorAll("[data-service-app-scope]").forEach((button) => button.addEventListener("click", () => {
       draft.mode = button.dataset.serviceAppScope;
@@ -529,7 +610,9 @@
     });
     el("prevAgentTasks").addEventListener("click", () => { page--; void loadTasks(); });
     el("nextAgentTasks").addEventListener("click", () => { page++; void loadTasks(); });
-    bindResize(el("agentServiceTopSplitter"), el("agentServiceTop"), "--agent-publications-width");
+    const topPane = el("agentServiceTop");
+    bindResize(el("agentServiceRowSplitter"), topPane.parentElement, "--agent-service-top-height", topPane);
+    bindResize(el("agentServiceTopSplitter"), topPane, "--agent-publications-width");
     bindResize(el("agentTaskSplitter"), el("agentTaskWorkbench"), "--task-list-width");
     clearInterval(timer);
     timer = setInterval(() => {

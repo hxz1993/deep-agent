@@ -3,43 +3,35 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import asdict
-from urllib.parse import quote
 
 from a2a import types as wire
 from a2a.server.routes.jsonrpc_dispatcher import JsonRpcDispatcher
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from google.protobuf.json_format import MessageToDict
 from sqlalchemy import and_, select
-from starlette.background import BackgroundTask
 
 from deep_agent.agent.input_capabilities import document_upload_mimes
 from deep_agent.agent.media_pipeline import allowed_mimes
-from deep_agent.agent_service.execution import MAX_INPUT_BYTES, permitted_agent
+from deep_agent.agent_service.download import artifact_download
+from deep_agent.agent_service.execution import permitted_agent
 from deep_agent.agent_service.protocol import PublicationHandler, agent_card
 from deep_agent.agent_service.publications import AgentCode, PublicationCreate, PublicationPatch, PublicationScope, PublicationStore, ScopeId
 from deep_agent.agent_service.security import platform_caller, public_base_url
-from deep_agent.agent_service.tasks import Owner, TERMINAL, TaskStore
+from deep_agent.agent_service.service import AgentService, bounded_body, task_store
+from deep_agent.agent_service.tasks import TERMINAL
 from deep_agent.api.v1.admin import require_console_admin
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.models import ChatSession, ChatSessionEvent
 from deep_agent.db.reference_integrity import ReferenceConflict
 from deep_agent.documents.settings import load_document_parsing_config
-from deep_agent.files.storage import FileStoreError, FileStoreNotFoundError, FileStorePermissionError
 from deep_agent.security.diagnostic_users import DiagnosticUserAuthenticationError, resolve_diagnostic_users
 from deep_agent.services.integration_app_access import IntegrationAppAccessError, IntegrationAppDirectory
 from deep_agent.services.scope_names import resolve_scope_directory
 
 router = APIRouter(prefix="/agent-service")
 tag = "agent-service"
-MAX_BODY_BYTES = MAX_INPUT_BYTES * 4 // 3 + 256 * 1024
-
-
-def task_store(ctx) -> TaskStore:
-    if ctx.agent_tasks is None:
-        ctx.agent_tasks = TaskStore()
-    return ctx.agent_tasks
 
 
 def address_for(agent_code: str, app_id: str | None = None) -> str:
@@ -62,10 +54,7 @@ admin = (Depends(require_console_admin), Depends(require_publication_admin))
 
 
 async def publication(ctx, agent_code: str):
-    row = await PublicationStore(ctx.db_session_factory).get(agent_code)
-    if row is None:
-        raise HTTPException(404, "发布不存在")
-    return row
+    return await AgentService(ctx).publication(agent_code)
 
 
 def serialize_publication(row) -> dict:
@@ -170,7 +159,7 @@ def summary(entry):
     return {
         "id": entry.task.id, "context_id": entry.context.id, "title": entry.title,
         "app_id": entry.context.owner.app, "space_id": entry.context.owner.space,
-        "caller": entry.context.owner.user,
+        "caller": entry.context.owner.user, "source": entry.source,
         "status": wire.TaskState.Name(entry.state),
         "created_at": entry.created, "updated_at": entry.changed,
         "artifact_count": len(entry.files),
@@ -226,6 +215,7 @@ async def recent_task(ctx: AppContextDep, request: Request, user: RequestUserDep
     run_ids = tuple(entry.run_ids)
     result = {
         **summary(entry),
+        "client": entry.client,
         "message": [part.text for part in entry.task.status.message.parts if part.HasField("text")],
         "progress": [{"status": wire.TaskState.Name(state), "timestamp": stamp} for state, stamp in entry.progress],
         "files": [{"name": file.name, "mime": file.mime, "size": file.size} for file in entry.files.values()],
@@ -243,7 +233,7 @@ async def recent_task(ctx: AppContextDep, request: Request, user: RequestUserDep
         ),
     ).where(
         ChatSession.session_id == scope.session_id,
-        ChatSession.source_type == "a2a",
+        ChatSession.source_type == scope.source,
         ChatSession.source_id == row.id,
     ).order_by(ChatSessionEvent.sequence)
     async with ctx.db_session_factory() as db:
@@ -269,11 +259,8 @@ async def recent_task(ctx: AppContextDep, request: Request, user: RequestUserDep
 
 async def authorized_publication(ctx, agent_code: str, request: Request, app_id: str | None):
     row = await publication(ctx, agent_code)
-    scope = PublicationScope.model_validate(row.scope)
     headers = await platform_caller(request, path_app=app_id)
-    if not scope.allows(headers["app"], headers["space"]):
-        raise HTTPException(403, "指定的应用不在该发布的允许范围内，请检查发布配置和 App ID。")
-    return row, Owner(row.id, headers["user"], headers["app"], headers["space"]), headers
+    return row, AgentService.owner(row, headers), headers
 
 
 async def _get_card(ctx: AppContextDep, agent_code: AgentCode, request: Request, app_id: str | None = None):
@@ -287,11 +274,7 @@ async def _get_card(ctx: AppContextDep, agent_code: AgentCode, request: Request,
 
 async def _rpc(ctx: AppContextDep, agent_code: AgentCode, request: Request, app_id: str | None = None):
     row, owner, headers = await authorized_publication(ctx, agent_code, request, app_id)
-    body = bytearray()
-    async for chunk in request.stream():
-        if len(body) + len(chunk) > MAX_BODY_BYTES:
-            raise HTTPException(413, "A2A request exceeds the size limit")
-        body.extend(chunk)
+    body = await bounded_body(request)
     body_pending = True
 
     async def receive():
@@ -302,7 +285,7 @@ async def _rpc(ctx: AppContextDep, agent_code: AgentCode, request: Request, app_
         return await request.receive()
 
     handler = PublicationHandler(
-        ctx, task_store(ctx), PublicationStore(ctx.db_session_factory),
+        ctx, task_store(ctx),
         row.code, owner, headers, address_for(row.code, app_id),
     )
     dispatcher = JsonRpcDispatcher(handler, enable_v0_3_compat=False)
@@ -317,29 +300,9 @@ async def _download_artifact(ctx: AppContextDep, agent_code: AgentCode, task_id:
         entry = task_store(ctx).get(owner, task_id)
     except wire.TaskNotFoundError as exc:
         raise HTTPException(404, "文件不存在或已过期") from exc
-    artifact = entry.files.get(artifact_id)
-    if artifact is None:
-        raise HTTPException(404, "文件不存在或已过期")
-    response_headers = {
-        "Content-Disposition": "attachment; filename*=UTF-8''" + quote(artifact.name, safe=""),
-        "Content-Length": str(artifact.size), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
-    }
-    try:
-        handle = await ctx.file_store.open_download(artifact.id, headers, expected_size=artifact.size)
-    except (FileStorePermissionError, FileStoreNotFoundError) as exc:
-        raise HTTPException(404, "文件不存在或已过期") from exc
-    except FileStoreError as exc:
-        raise HTTPException(502, "文件暂不可读取") from exc
-    async def chunks():
-        try:
-            while chunk := await asyncio.to_thread(handle.read, 64 * 1024):
-                yield chunk
-        finally:
-            handle.close()
-
-    return StreamingResponse(
-        chunks(), media_type=artifact.mime, headers=response_headers, background=BackgroundTask(handle.close),
-    )
+    service = AgentService(ctx)
+    artifact = service.artifact(entry, artifact_id)
+    return await artifact_download(service, artifact, headers)
 
 
 _A2A_PATH = "/a2a/{agent_code}"

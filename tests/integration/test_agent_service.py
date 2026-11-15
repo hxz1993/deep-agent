@@ -7,6 +7,7 @@ import io
 import json
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -20,11 +21,12 @@ from pydantic_ai.messages import BinaryContent, ModelResponse, TextPart, ToolCal
 from pydantic_ai.models.function import FunctionModel
 
 from deep_agent.agent_service.publications import PublicationCreate, PublicationStore
-from deep_agent.agent_service.tasks import ArtifactFile, Result
+from deep_agent.agent_service.tasks import RETENTION, ArtifactFile, Result
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.sandbox import SubprocessBackend
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate
+from deep_agent.security.console_admin import ConsoleAdminAuthenticationError
 from tests.helpers.sandbox import sandbox_test_python
 
 from deep_agent.core.context import AppContext, init_context, reset_context
@@ -56,6 +58,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.ctx.aclose)
         app = FastAPI()
         app.include_router(api_router)
+        self.app = app
         self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
         self.addAsyncCleanup(self.client.aclose)
         self.enterContext(patch.dict("os.environ", {
@@ -487,6 +490,8 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(card_url, headers=outside)).status_code, 403)
 
     async def test_download_xlsx_published_by_python_sandbox(self):
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
         from openpyxl import load_workbook
 
         backend = SubprocessBackend(python_executable=sandbox_test_python(), max_concurrency=1)
@@ -527,6 +532,20 @@ w.save(publish_path("预算.xlsx"))
         self.assertIn("%E9%A2%84%E7%AE%97.xlsx", response.headers["content-disposition"])
         book = load_workbook(io.BytesIO(response.content))
         self.assertEqual(book.active["C2"].value, 20)
+        artifact_id = next(item["artifactId"] for item in task["artifacts"] if artifact in item["parts"])
+        self.client.headers.update(HEADERS)
+        async with streamable_http_client(f"http://test{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+            async with ClientSession(rx, tx) as session:
+                await session.initialize()
+                tool = await session.call_tool("get_artifact", {"task_id": task["id"], "artifact_id": artifact_id})
+                self.assertFalse(tool.isError)
+                file = tool.structuredContent
+                resource = await session.read_resource(file["resource_uri"])
+                self.assertEqual(base64.b64decode(resource.contents[0].blob), response.content)
+        self.assertEqual((await self.client.get(file["download_path"], headers=HEADERS)).content, response.content)
+        self.assertEqual((await self.client.get(file["download_path"], headers={
+            **HEADERS, "authorization": "Bearer fixture-other",
+        })).status_code, 404)
         generic_task = self.result(await self.rpc("GetTask", {"id": task["id"]}))
         generic_url = next(part["url"] for item in generic_task["artifacts"] for part in item["parts"] if "url" in part)
         self.assertIn(f"{self.url}/tasks/", generic_url)
@@ -539,6 +558,7 @@ w.save(publish_path("预算.xlsx"))
         self.assertEqual(denied.status_code, 404)
         self.revoked = True
         self.assertEqual((await self.client.get(artifact["url"], headers=HEADERS)).status_code, 403)
+        self.assertEqual((await self.client.get(file["download_path"], headers=HEADERS)).status_code, 403)
 
     async def test_file_events_use_each_subscriber_address(self):
         done = asyncio.Event()
@@ -641,3 +661,112 @@ w.save(publish_path("预算.xlsx"))
         self.assertIn("task", frames[0]["result"])
         self.assertTrue(any("artifactUpdate" in frame["result"] for frame in frames))
         self.assertEqual(frames[-1]["result"]["statusUpdate"]["status"]["state"], "TASK_STATE_COMPLETED")
+
+    async def test_only_a2a_mcp_and_mcp_download_are_exposed(self):
+        config = await self.client.get(f"{ROOT}/client-config", headers=self.admin)
+        self.assertEqual(config.json(), {"mcp_url": f"http://127.0.0.1:8002{ROOT}/mcp"})
+        self.assertIn((await self.client.get(f"{ROOT}/client-config")).status_code, (401, 403))
+        with patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": "http://["}):
+            self.assertEqual((await self.client.get(f"{ROOT}/client-config", headers=self.admin)).json(),
+                             {"mcp_url": None})
+            self.assertEqual((await self.client.post(f"{ROOT}/mcp", headers={"Origin": "http://test"})).status_code, 403)
+        for method, path in (
+            ("GET", "/agents"), ("POST", "/agents/budget-report/tasks"),
+            ("GET", "/agents/budget-report/tasks"), ("GET", "/tasks/" + "a" * 32),
+            ("POST", "/tasks/" + "a" * 32 + "/messages"), ("POST", "/tasks/" + "a" * 32 + "/cancel"),
+            ("GET", "/client-packages/deepfos_agent_client-0.17.0a3-py3-none-any.whl"),
+        ):
+            response = await self.client.request(method, ROOT + path, headers=HEADERS)
+            self.assertEqual((response.status_code, response.json()), (404, {"detail": "Not Found"}), path)
+        artifact = f"{ROOT}/tasks/{'a' * 32}/artifacts/{'b' * 32}/download"
+        self.assertEqual((await self.client.get(artifact)).status_code, 400)
+
+    async def test_public_task_visibility_and_cross_transport_mcp(self):
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+        from deep_agent.api.v1.agent_service_public import draft_router
+
+        self.app.include_router(draft_router, prefix="/api/v1")
+
+        directory = f"{ROOT}/agents"
+        alternate = {"authorization": "Bearer fixture-other", "app": "budget003"}
+        without_app = {"authorization": HEADERS["authorization"]}
+        self.assertEqual((await self.client.get(directory)).status_code, 401)
+        response = await self.client.get(directory, headers=without_app)
+        self.assertEqual(response.json(), {"agents": [{
+            "agent_code": "budget-report", "name": "预算报告", "description": "",
+        }]})
+        self.assertEqual((await self.client.get(directory, headers=alternate)).json(), response.json())
+        self.assertEqual((await self.client.get(directory, headers={"X-Deepfos-Key": "fixture"})).status_code, 400)
+        async def key_user(key, app, space):
+            self.assertEqual((app, space), ("budget001", "budget"))
+            if key != "fixture-key":
+                raise ConsoleAdminAuthenticationError("Fixture key rejected")
+            return "owner"
+
+        with patch("deep_agent.agent_service.security.PlatformEnterpriseAdminChecker.resolve_api_key_user",
+                   side_effect=key_user):
+            key_headers = {"X-Deepfos-Key": "fixture-key", "app": "budget001"}
+            self.assertEqual((await self.client.get(directory, headers=key_headers)).json(), response.json())
+            denied = await self.client.get(directory, headers={**key_headers, "X-Deepfos-Key": "invalid"})
+            self.assertEqual(denied.status_code, 401)
+
+        request = {"message_id": "cross-transport", "text": "使用模拟数字回答差额。"}
+        target = f"{ROOT}/agents/budget-report/tasks"
+        self.assertEqual((await self.client.post(target, headers=alternate, json=request)).status_code, 403)
+        self.assertEqual((await self.client.post(target, headers=without_app, json=request)).status_code, 400)
+        oversized_number = {**request, "data": {"value": 10 ** 400}}
+        self.assertEqual((await self.client.post(target, headers=HEADERS, json=oversized_number)).status_code, 422)
+        mcp_url = f"{ROOT}/mcp"
+        denied_origin = await self.client.post(mcp_url, headers={**HEADERS, "origin": "https://example.net"})
+        self.assertEqual(denied_origin.status_code, 403)
+        self.client.headers.update(HEADERS)
+
+        async with streamable_http_client(f"http://test{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+            async with ClientSession(rx, tx) as session:
+                hello = await session.initialize()
+                self.assertIsNotNone(hello.capabilities.resources)
+                names = {tool.name for tool in (await session.list_tools()).tools}
+                self.assertEqual(names, {"list_agents", "submit_task", "get_task", "list_tasks",
+                                         "reply_task", "cancel_task", "get_artifact"})
+                listed = await session.call_tool("list_agents")
+                self.assertEqual(listed.structuredContent, response.json())
+                del self.client.headers["app"]
+                del self.client.headers["space"]
+                self.assertEqual((await session.call_tool("list_agents")).structuredContent, response.json())
+                missing = await session.call_tool("get_task", {"task_id": "unknown"})
+                self.assertTrue(missing.isError)
+                self.assertEqual(missing.structuredContent["status"], 400)
+                self.client.headers.update(HEADERS)
+                with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+                    lambda *_: ModelResponse(parts=[TextPart("20")]),
+                )):
+                    result = await session.call_tool("submit_task", {"agent_code": "budget-report", **request})
+                    self.assertFalse(result.isError, result)
+                    initial = result.structuredContent
+                    self.assertEqual(initial["source"], "mcp")
+                    task_id = initial["id"]
+                    await self.ctx.agent_tasks.wait(self.ctx.agent_tasks.entries[task_id])
+                self.assertEqual(self.result(await self.rpc("GetTask", {"id": task_id}))["id"], task_id)
+                self.assertEqual((await session.call_tool("list_tasks", {"agent_code": "budget-report"}))
+                                 .structuredContent["items"][0]["id"], task_id)
+                repeated = await self.client.post(target, json=request)
+                self.assertEqual(repeated.status_code, 202, repeated.text)
+                self.assertEqual(repeated.json()["id"], task_id)
+                self.assertEqual((await self.client.post(target, json={**request, "text": "different"})).status_code, 400)
+                task = (await self.client.get(f"{ROOT}/tasks/{task_id}")).json()
+                self.assertEqual(task["state"], "completed")
+                self.assertEqual(task["artifacts"][0]["parts"][0]["text"], "20")
+                page = await self.client.get(target, params={"state": "completed"})
+                self.assertEqual(page.json()["items"][0]["id"], task_id)
+                detail = await self.client.get(f"{ROOT}/publications/budget-report/tasks/{task_id}", headers=self.admin)
+                self.assertEqual(detail.json()["source"], "mcp")
+                self.assertEqual((await self.ctx.stores.chat_session.get_source(self.agent, detail.json()["session_id"]))[0], "mcp")
+                for headers in ({"authorization": "Bearer fixture-other"}, {"app": "budget002"}):
+                    self.assertEqual((await self.client.get(f"{ROOT}/tasks/{task_id}", headers=headers)).status_code, 404)
+                self.revoked = True
+                self.assertEqual((await self.client.get(f"{ROOT}/tasks/{task_id}")).status_code, 403)
+                self.revoked = False
+                self.ctx.agent_tasks.entries[task_id].changed -= RETENTION + timedelta(seconds=1)
+                self.assertEqual((await self.client.get(f"{ROOT}/tasks/{task_id}")).status_code, 404)
+                self.assertEqual((await session.call_tool("get_task", {"task_id": task_id})).structuredContent["status"], 404)

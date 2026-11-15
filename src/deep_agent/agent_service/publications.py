@@ -79,6 +79,15 @@ class PublicationStore(SessionBoundMixin):
         async with self._read() as db:
             return list((await db.scalars(select(AgentPublication).order_by(AgentPublication.created_at, AgentPublication.code))).all())
 
+    async def list_enabled(self) -> list[AgentPublication]:
+        async with self._read() as db:
+            query = select(AgentPublication).where(AgentPublication.enabled.is_(True)).order_by(AgentPublication.code)
+            return list((await db.scalars(query)).all())
+
+    async def get_by_id(self, publication_id: str) -> AgentPublication | None:
+        async with self._read() as db:
+            return await db.get(AgentPublication, publication_id)
+
     async def get(self, code: str) -> AgentPublication | None:
         async with self._read() as db:
             return await db.scalar(select(AgentPublication).where(AgentPublication.code == code))

@@ -278,20 +278,21 @@
             <div class="console-section-heading"><h3 class="console-section-title">Agent 发布</h3><button type="button" class="btn primary" id="newAgentPublication"><i data-lucide="plus"></i>发布 Agent</button></div>
             <div class="table-wrap console-list-a agent-service-scroll"><table class="data-table agent-service-table"><thead><tr><th scope="col">发布名称</th><th scope="col">关联 Agent</th><th scope="col">应用范围</th><th scope="col">最近更新</th><th scope="col">操作</th></tr></thead><tbody id="agentPublicationRows"></tbody></table></div>
           </section>
-          <div id="agentServiceTopSplitter" class="workspace-resizer agent-service-splitter" role="separator" aria-label="调整发布列表宽度" aria-controls="agentServicePublications" aria-orientation="vertical" aria-valuemin="55" aria-valuemax="72" aria-valuenow="68" tabindex="0"></div>
+          <div id="agentServiceTopSplitter" class="workspace-resizer agent-service-splitter" role="separator" aria-label="调整发布列表宽度" aria-controls="agentServicePublications" aria-orientation="vertical" aria-valuemin="55" aria-valuemax="72" aria-valuenow="62" tabindex="0"></div>
           <section class="console-section agent-service-access">
             <div class="agent-service-access-heading">
               <div id="agentServiceTabs" class="console-segmented agent-service-tabs" role="tablist" aria-label="接入方式">
                 <button id="agentServiceTabA2a" class="active" type="button" role="tab" data-service-access="a2a" aria-selected="true" aria-controls="agentServiceAccess"><i data-lucide="network" aria-hidden="true"></i>A2A</button>
                 <button id="agentServiceTabMcp" type="button" role="tab" data-service-access="mcp" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><i data-lucide="plug" aria-hidden="true"></i>MCP</button>
                 <button id="agentServiceTabCli" type="button" role="tab" data-service-access="cli" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>CLI</button>
-                <button id="agentServiceTabSdk" type="button" role="tab" data-service-access="sdk" aria-selected="false" aria-controls="agentServiceAccess" aria-label="Python SDK" title="Python SDK" tabindex="-1"><i data-lucide="code-xml" aria-hidden="true"></i>SDK</button>
+                <button id="agentServiceTabSdk" type="button" role="tab" data-service-access="sdk" aria-selected="false" aria-controls="agentServiceAccess" aria-label="Python SDK" tabindex="-1"><i data-lucide="code-xml" aria-hidden="true"></i>SDK</button>
               </div>
               <button type="button" class="btn channel-help-btn" id="agentServiceProtocolBtn" aria-haspopup="dialog"><i data-lucide="book-open" aria-hidden="true"></i><span>协议</span></button>
             </div>
             <div id="agentServiceAccess" class="agent-service-access-body" role="tabpanel" aria-labelledby="agentServiceTabA2a"></div>
           </section>
         </div>
+        <div id="agentServiceRowSplitter" class="workspace-resizer agent-service-row-resizer" role="separator" aria-label="调整 Agent 发布区域高度" aria-controls="agentServiceTop" aria-orientation="horizontal" title="上下拖动调整高度，双击恢复默认" tabindex="0"></div>
         <section class="console-section agent-service-recent">
           <div class="console-section-heading"><div class="field-label-row"><h3 class="console-section-title">近期任务</h3><span class="field-help" tabindex="0" aria-label="近期任务保留说明" aria-describedby="agentTaskRetentionHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="agentTaskRetentionHelp" role="tooltip">任务受理后出现在列表中。结束后最多保留 24 小时，实例最多保留 500 条已结束任务。服务重启后清空列表。</span></span></div><div class="agent-service-filters">
             <label class="console-search"><i data-lucide="search"></i><input type="search" id="agentTaskSearch" aria-label="搜索任务" placeholder="搜索任务名称或 ID"></label>
@@ -371,11 +372,12 @@
         <div class="modal-body">
           <nav class="cap-tabs channel-help-tabs" id="agentServiceGuideTabs" role="tablist" aria-label="接入帮助">
             <button type="button" class="cap-tab active" id="agentServiceMethodsTab" role="tab" aria-selected="true" aria-controls="agentServiceMethodsPanel"><i data-lucide="book-open" aria-hidden="true"></i>A2A 协议</button>
+            <button type="button" class="cap-tab" id="agentServiceMcpHelpTab" role="tab" aria-selected="false" aria-controls="agentServiceMcpHelpPanel" tabindex="-1"><i data-lucide="plug" aria-hidden="true"></i>MCP 接入</button>
             <button type="button" class="cap-tab" id="agentServiceTestTab" role="tab" aria-selected="false" aria-controls="agentServiceTestPanel" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>联调工具</button>
           </nav>
           <section class="channel-help-panel" id="agentServiceMethodsPanel" role="tabpanel" aria-labelledby="agentServiceMethodsTab">
             <div class="agent-service-guide-heading">
-              <p>每个发布有独立的 Agent Card。客户端读取卡片后，使用 A2A 1.0 JSON-RPC 调用。</p>
+              <p>客户端读取 Agent Card 后使用 A2A 1.0 JSON-RPC。通用地址通过 <code>app</code> Header 指定应用，带应用的地址从路径取 App。两者使用相同的凭据和授权规则。</p>
               <a class="btn-link" href="https://a2a-protocol.org/v1.0.1/specification/#53-method-mapping-reference" target="_blank" rel="noopener noreferrer">官方规范 <i data-lucide="external-link" aria-hidden="true"></i></a>
             </div>
             <div class="table-wrap console-list-a agent-service-methods" tabindex="0" role="region" aria-label="A2A 方法列表">
@@ -394,6 +396,17 @@
                 <tr><td><code>GetExtendedAgentCard</code></td><td><span role="img" aria-label="未支持">—</span></td><td>认证后读取扩展 Card。</td></tr>
                 <tr><td><code>Artifact 下载 · DeepAgent 扩展</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>使用 Task 返回的授权链接取件。A2A 标准没有单独的下载方法。</td></tr>
               </tbody></table>
+            </div>
+          </section>
+          <section class="channel-help-panel" id="agentServiceMcpHelpPanel" role="tabpanel" aria-labelledby="agentServiceMcpHelpTab" hidden>
+            <ol class="agent-service-mcp-steps">
+              <li>添加 Streamable HTTP 连接，使用 MCP 页提供的环境地址。同机客户端可以用回环地址，其他客户端需要可达的服务地址。</li>
+              <li>在连接的请求 Header 中填写 <code>app</code>，值为应用 ID。添加 <code>X-Deepfos-Key</code> 或 <code>Authorization: Bearer &lt;Token&gt;</code> 其中一种凭据。</li>
+              <li>调用 <code>list_agents</code> 验证连接。目录展示已启用的发布，执行任务时仍按 App 权限和发布范围校验。查询状态、补材料和取件使用原 Task ID。</li>
+            </ol>
+            <div class="agent-service-card-options">
+              <p>CodeBuddy 可通过 HTTP MCP 配置或 <code>--mcp-config</code> 接入。<a class="btn-link" href="https://www.codebuddy.ai/docs/cli/mcp" target="_blank" rel="noopener noreferrer">CodeBuddy 配置文档</a></p>
+              <p>WorkBuddy 在「连接器」中查看并配置 MCP。<a class="btn-link" href="https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide" target="_blank" rel="noopener noreferrer">WorkBuddy 配置文档</a></p>
             </div>
           </section>
           <section class="channel-help-panel" id="agentServiceTestPanel" role="tabpanel" aria-labelledby="agentServiceTestTab" hidden>

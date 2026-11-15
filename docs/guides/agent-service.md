@@ -1,4 +1,4 @@
-# A2A 服务端
+# Agent 集成服务
 
 Console 的「集成」可以为现有 Agent 新建发布。每份发布有独立的 Agent 编码、用途和应用范围。每份发布提供通用和指定 App 两种 Agent Card 地址。选中发布可复制这两条地址，并按实际调用应用筛选该发布的近期任务。
 
@@ -51,6 +51,16 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 首次请求不带这两个 ID，服务端创建 Context 和 Task。已有任务完成后，客户端带上 `contextId` 继续追问，服务端在同一会话创建新 Task。任务仍待补材料时，客户端带上原来的两个 ID 继续该 Task。同一 Context 同时只处理一个活动 Task。
 
+## MCP 接入
+
+在 Console「集成 → MCP」复制当前环境的 Streamable HTTP 地址和请求 Header 示例。将 `app` 填为应用 ID，搭配 `X-Deepfos-Key` 或 `Authorization: Bearer <Token>` 其中一种凭据。服务端解析所属空间。把「复制 Agent 接入指引」的内容发给本地 Agent，由它配置宿主连接，凭据通过宿主设置提供。回环地址仅供同机客户端使用。
+
+调用 `list_agents` 验证连接并取得 Agent 编码。目录包含所有启用的发布，`submit_task` 会单独检查应用权限与发布范围。`get_task` 查询结果，`list_tasks` 查看近期任务，`reply_task` 用原 Task ID 和问题 ID 补材料，`cancel_task` 取消任务。`get_artifact` 返回资源引用及鉴权下载路径。MCP 资源读取限 1 MiB，完整文件通过下载路径获取，仍需传凭据和 App。
+
+同一凭据主体和应用可以在 A2A 与 MCP 间继续同一个任务。任务 ID 保持不变。
+
+CLI、Python SDK 和通用 HTTP 调用是待评审草案，本版仅在 Console 保留入口占位。草案可能改写或移除，当前服务仅注册 A2A、MCP 及必要的鉴权取件接口。
+
 ## 联调
 
 - **本地官方 Inspector** 使用支持 A2A 1.0 的 Inspector，执行 `a2a-inspector --no-open --port 8085`，在本机浏览器打开提示的地址。添加完整 Card URL，在 Connection 设置 Bearer Token 或 API Key。通用地址另填 `app` Header，然后点 Fetch again。分别发送普通和流式消息，再查看协议事件。
@@ -68,6 +78,6 @@ PYTHONPATH=src .venv/bin/python -m unittest tests.integration.test_agent_service
 
 ## 依赖变更（运维）
 
-运行镜像新增 `a2a-sdk[http-server]==1.3.0`。本机解析并验证了 `culsans 0.11.0`、`google-api-core 2.44.0`、`googleapis-common-protos 1.76.0`、`protobuf 7.36.2` 和 `json-rpc 1.15.0` 等传递依赖。本机运行与回归使用 Python 3.12。现有 FastAPI、Pydantic AI、Harness 及沙箱依赖声明没有调整。请从实际基础镜像的清单核对差异，重新构建并验证镜像后与代码配套发版。
+相对一期已含官方 `a2a-sdk[http-server]==1.3.0` 的基线，二期服务端依赖变更为无。上线前确认基础镜像已包含一期 A2A SDK 及其传递依赖，以及当前运行依赖提供的 MCP SDK。二期本机验证使用 Python 3.12、MCP SDK 1.30.0、AnyIO 4.16.0。CLI 和 SDK 草案的依赖不进入本版服务端镜像。
 
-数据库由 `015` 升到 `016`，只新增发布配置表和索引。生产迁移前核对 DDL 权限、数据库方言、备份、锁和回退窗口。有发布记录时迁移会拒绝降级。
+一期由 `015` 升到 `016`，新增发布配置表和索引。二期沿用 `016`。若环境尚在 `015`，生产迁移前核对 DDL 权限、数据库方言、备份、锁和回退窗口。有发布记录时迁移会拒绝降级。

@@ -2,7 +2,7 @@
 from typing import Literal, get_args
 
 SessionSourceType = Literal[
-    "internal", "a2a", "channel:wecom", "channel:feishu", "channel:dingtalk", "channel:wecom_app",
+    "internal", "a2a", "mcp", "http", "channel:wecom", "channel:feishu", "channel:dingtalk", "channel:wecom_app",
 ]
 CHANNEL_SOURCE_TYPES = tuple(value for value in get_args(SessionSourceType) if value.startswith("channel:"))
 CHANNEL_TYPES = frozenset(value.split(":", 1)[1] for value in CHANNEL_SOURCE_TYPES)

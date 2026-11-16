@@ -6,12 +6,12 @@
 
 ## 页面与交付范围
 
-首期 Console 增加「集成」页，A2A 是首个对外调用协议。后续如需让 DeepAgent 主动委托外部 Agent，再另设客户端页。首期先让外部 Agent 和普通程序使用已发布的业务能力，例如提交预算差异报告任务、跟踪状态、领取 XLSX。
+首期 Console 增加「集成」页，A2A 是首个对外发布协议。首期允许外部 Agent 和普通程序提交任务、跟踪状态、领取产物。DeepAgent 主动委托外部 Agent 的后续入口定为「外部调用」。
 
 | 区域 | 操作 | 交付顺序 |
 | --- | --- | --- |
 | 服务端 · 被调用 | 选已有 Agent，填写 Agent 编码和用途，选择全部应用或指定应用。客户端通过路径或 Header 提供本次 App，调用需携带平台凭据。保存后可按需启停。 | 阶段 1 实施 A2A 1.0 和服务端 Console；阶段 2 再实现 MCP、CLI、Python SDK，三者复用同一任务服务。 |
-| 客户端 · 调用外部 Agent | 登记远端 Agent Card，核验协议、接口和认证方式，授权指定内部 Agent，测试连接，查看远端任务状态与产物。 | 后续单独成页。以第一个真实外部 Agent 为联调目标。 |
+| 客户端 · 调用外部 Agent | 登记远端 Agent Card，填写对方要求的请求 Header。指定本地 Agent 可用的连接，直连调试并查看近期调用。 | 设计和原型评审中。以第一个真实第三方或客户平台 Agent 为联调目标。 |
 
 原型右侧有四张接入卡。A2A Agent Card 随所选发布切换，MCP、CLI 和 Python SDK 按环境接入。首版用官方 A2A CLI 联调标准接口。DeepAgent 自有 CLI、MCP 和 Python SDK 属于阶段 2。发布范围、执行权限、任务归属和产物授权共用。
 
@@ -29,6 +29,12 @@
 [打开集成原型](<Prototype A2A服务端接入/index.html>)。上方左侧管理发布，右侧横排四张接入卡。下方近期任务默认左右分栏，右侧详情可拖拽调整宽度。发布弹框右侧切换应用范围，指定应用按标签显示。A2A 提供通用与指定 App 的两条 Card 地址和简要用法，其他三种入口先占位。
 
 [服务端 Console、任务与产物](server-console-design.md)说明发布配置和近期任务如何展示，以及 FileStore 和联调工具如何接入。
+
+## 外部调用原型
+
+[打开外部调用原型](<Prototype A2A客户端接入/index.html>)。首页同屏显示连接和可按连接筛选的近期调用。进入连接后，左侧配置，右侧直接调试。
+
+外部连接计划使用 `agent_connections`，八个字段拟随出站功能落地。连接保存后即可调试，在 Agent 编辑页选用，引用存入 `agents.capabilities`。当前服务端版本的 Revision `016` 只创建 `agent_publications`。身份、凭据、调用记录和联调见[外部调用实施方案](client-implementation-plan.md)。
 
 ## 早期布局备选
 

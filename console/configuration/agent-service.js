@@ -6,7 +6,7 @@
     CANCELED: "已取消", REJECTED: "已拒绝", INPUT_REQUIRED: "待补材料", AUTH_REQUIRED: "待鉴权",
   };
   let rows = [], agents = [], apps = new Map(), tasks = [];
-  let selected = "", selectedTask = "", access = "a2a", page = 1;
+  let selected = "", selectedTask = "", access = "a2a", a2aCardMode = "general", page = 1;
   let clientConfig = {};
   let draft, detailRequest, taskRequest, timer, searchTimer;
   let taskRowsMarkup = "", taskDetailSnapshot = "", shownTask = "";
@@ -27,6 +27,8 @@
   function copy(value) {
     return navigator.clipboard.writeText(value).then(() => showToast("已复制"), () => showToast("复制失败", true));
   }
+
+  const copyButton = (value, label, variant = "text compact") => `<button type="button" class="btn ${variant}" data-client-copy="${attr(value)}">${label}</button>`;
 
   function publicationUpdate(row) {
     const operator = row.updated_by_user?.username || row.updated_by || "—";
@@ -62,10 +64,23 @@
     http: { label: "HTTP", icon: "globe" },
   };
 
-  function renderMcpAccess(card) {
+  function accessToolbar(method, controls = "", publicationName = "") {
+    const { label, icon: glyph } = methods[method];
+    const publication = publicationName
+      ? `<span class="agent-service-publication-name" title="当前发布 ${attr(publicationName)}">${escapeHtml(publicationName)}</span>` : "";
+    return `<div class="agent-service-card-heading agent-service-card-toolbar">
+      <div class="agent-service-access-identity">
+        <h4 class="agent-service-access-title" data-service-access="${method}">${icon(glyph)}<span>${label} 接入</span></h4>
+        ${publication}
+      </div>
+      ${controls}
+    </div>`;
+  }
+
+  function renderMcpAccess(card, inGuide = false) {
     const endpoint = clientConfig.mcp_url;
     if (!endpoint) {
-      card.textContent = "当前环境暂未提供 MCP 接入地址。";
+      card.innerHTML = `${inGuide ? "" : accessToolbar("mcp")}<p>当前环境暂未提供 MCP 接入地址。</p>`;
       return;
     }
     const headers = JSON.stringify({ app: "<App ID>", "X-Deepfos-Key": "<API Key>" }, null, 2);
@@ -73,28 +88,70 @@
       "请在当前 Agent 客户端中添加名为 DeepAgent 的 MCP 连接，选择 Streamable HTTP。",
       `MCP 地址：${endpoint}`,
       `请求 Header 示例：\n${headers}`,
-      "请向用户确认 App ID，让用户通过宿主的凭据设置提供 API Key。若使用平台 Token，请改用 Authorization: Bearer <Token>，两种凭据只选一种。请勿在对话中索取或回显真实凭据。",
+      "配置前，先引导用户确认 App ID 并选择一种鉴权凭据。推荐使用有权访问该应用的 DeepFOS API Key，填入 X-Deepfos-Key。使用平台 Token 时，填入 token 或 Authorization: Bearer <Token>。请引导用户在客户端的安全凭据设置中提供，或自行填到本地配置的占位符里，避免在对话中粘贴或回显真实凭据。",
       "连接后调用 list_agents 验证。目录展示所有已启用的发布，发起任务时仍会检查应用权限和发布范围。",
       "如果地址指向 localhost 或 127.0.0.1，请在同一台电脑上运行客户端。云端客户端需要可达的服务地址。",
     ].join("\n\n");
-    const copyButton = (value, label) => `<button type="button" class="btn text compact" data-client-copy="${attr(value)}">${label}</button>`;
-    card.innerHTML = `<div class="agent-service-card-options">
-      <div class="agent-service-card-heading"><h4>MCP 接入</h4>${copyButton(instructions, "复制 Agent 接入指引")}</div>
-      <p class="agent-service-access-help">Streamable HTTP · 填写应用 ID 和一种凭据</p>
+    const guideButton = copyButton(instructions, "复制 Agent 接入指引", "compact");
+    const toolbar = inGuide
+      ? `<div class="agent-service-card-heading agent-service-card-toolbar"><h4>连接配置</h4>${guideButton}</div>`
+      : accessToolbar("mcp", guideButton);
+    card.innerHTML = `${toolbar}
       <div class="agent-service-card-option agent-service-card-options">
         <section>
           <div class="agent-service-card-heading"><h5>MCP 地址</h5>${copyButton(endpoint, "复制地址")}</div>
           <pre class="agent-service-client-snippet">${escapeHtml(endpoint)}</pre>
+          <p class="agent-service-access-help">Streamable HTTP · 填写应用 ID 和一种凭据</p>
         </section>
         <section>
           <div class="agent-service-card-heading"><h5>请求 Header</h5>${copyButton(headers, "复制示例")}</div>
           <pre class="agent-service-client-snippet">${escapeHtml(headers)}</pre>
         </section>
-      </div>
-    </div>`;
-    card.querySelectorAll("[data-client-copy]").forEach((button) => {
-      button.addEventListener("click", () => void copy(button.dataset.clientCopy));
-    });
+      </div>`;
+  }
+
+  function a2aHeaderExample({ appScoped = false, useToken = false } = {}) {
+    const context = appScoped ? {} : {
+      app: "budget001",
+      space: "budget",
+      language: "zh-cn",
+      "A2A-Version": "1.0",
+    };
+    const credential = useToken ? { token: "<Token>" } : { "X-Deepfos-Key": "<API Key>" };
+    return JSON.stringify({ ...context, ...credential }, null, 2);
+  }
+
+  function renderA2aAccess(card, row) {
+    if (!row) {
+      card.innerHTML = `${accessToolbar("a2a")}<p>请选择一项发布</p>`;
+      return;
+    }
+    if (!row.card_url) {
+      card.innerHTML = `${accessToolbar("a2a", "", row.name)}<p>${row.enabled ? "尚未配置接入地址。" : "该发布已停用。"}</p>`;
+      return;
+    }
+    const appScoped = a2aCardMode === "app" && Boolean(row.app_card_url_template);
+    const url = appScoped ? row.app_card_url_template : row.card_url;
+    const headers = a2aHeaderExample({ appScoped });
+    const help = appScoped
+      ? "将地址中的 <code>{app_id}</code> 替换为应用 ID。"
+      : "在 <code>app</code> 中填写应用 ID。读取 Agent Card 时可省略 <code>A2A-Version</code>。";
+    const cardModes = `<div class="console-segmented" role="group" aria-label="Agent Card 地址类型">
+          <button type="button" data-a2a-card-mode="general" aria-pressed="${!appScoped}">通用卡片</button>
+          <button type="button" data-a2a-card-mode="app" aria-pressed="${appScoped}"${row.app_card_url_template ? "" : " disabled"}>指定应用卡片</button>
+        </div>`;
+    card.innerHTML = `${accessToolbar("a2a", cardModes, row.name)}
+      <div class="agent-service-card-option agent-service-card-options">
+        <section>
+          <div class="agent-service-card-heading"><h5>Agent Card 地址</h5>${copyButton(url, "复制地址")}</div>
+          <div class="agent-service-card-url"><code title="${attr(url)}">${escapeHtml(url)}</code></div>
+          <p class="agent-service-access-help">${help}</p>
+        </section>
+        <section>
+          <div class="agent-service-card-heading"><h5>Header 示例</h5>${copyButton(headers, "复制示例")}</div>
+          <pre class="agent-service-client-snippet">${escapeHtml(headers)}</pre>
+        </section>
+      </div>`;
   }
 
   function renderAccess() {
@@ -106,30 +163,9 @@
       button.tabIndex = active ? 0 : -1;
       if (active) card.setAttribute("aria-labelledby", button.id);
     });
-    const row = rows.find((item) => item.agent_code === selected);
-    const publication = row ? `<h4 class="agent-service-current-publication">${icon("bot")}<span>当前发布</span><strong>${escapeHtml(row.name)}</strong></h4>` : "";
     if (access === "mcp") renderMcpAccess(card);
-    else if (access !== "a2a") card.textContent = "接入方式待评审，本版本暂未开放。";
-    else if (!row) card.textContent = "请选择一项发布";
-    else if (!row.card_url) {
-      card.innerHTML = `${publication}<p>${row.enabled ? "尚未配置接入地址。" : "该发布已停用。"}</p>`;
-    } else {
-      const cards = [
-        { label: "通用 Agent Card", url: row.card_url, help: "在请求 Header 的 <code>app</code> 中填写应用 ID，并传凭据。" },
-        { label: "带应用的 Agent Card", url: row.app_card_url_template, help: "将地址中的 <code>{app_id}</code> 替换为应用 ID，请求只需传凭据。" },
-      ];
-      card.innerHTML = `${publication}
-        <div class="agent-service-card-options">${cards.map(({ label, url, help }, index) => `
-          <section class="agent-service-card-option" aria-labelledby="agentServiceCardLabel${index}">
-            <div class="agent-service-card-heading"><h5 id="agentServiceCardLabel${index}">${label}</h5>
-              <button type="button" class="btn text compact" aria-label="复制${label}地址" data-card-copy="${index}">复制地址</button></div>
-            <div class="agent-service-card-url"><code title="${attr(url)}">${escapeHtml(url)}</code></div>
-            <p class="agent-service-access-help">${help}</p>
-          </section>`).join("")}</div>`;
-      card.querySelectorAll("[data-card-copy]").forEach((button) => {
-        button.addEventListener("click", () => void copy(cards[Number(button.dataset.cardCopy)].url));
-      });
-    }
+    else if (access === "a2a") renderA2aAccess(card, rows.find((item) => item.agent_code === selected));
+    else card.textContent = "接入方式待评审，本版本暂未开放。";
     refreshIcons();
   }
 
@@ -244,7 +280,7 @@
 
   function renderDetailPlaceholder(message) {
     taskDetailSnapshot = "";
-    el("agentTaskDetail").innerHTML = `<div class="inspector-tabs agent-service-detail-heading"><h3>任务详情</h3></div>
+    el("agentTaskDetail").innerHTML = `<div class="agent-service-detail-heading"><h3>任务详情</h3></div>
       <p class="agent-service-empty" role="status">${escapeHtml(message)}</p>`;
   }
 
@@ -253,19 +289,18 @@
     const code = `<code title="${attr(id)}">${escapeHtml(id.slice(0, 8))}</code>`;
     const value = url ? `<a class="agent-service-session-link" href="${attr(url)}" data-detail-control="${attr(`open:${label}:${id}`)}" aria-label="${attr(`查看 ${label} ${id.slice(0, 8)}`)}">${code}</a>` : code;
     return `<span class="agent-service-id-value">${value}
-      <button type="button" class="inspector-copy-btn" data-task-copy="${attr(id)}" data-detail-control="${attr(`copy:${label}:${id}`)}" title="复制 ${attr(label)}" aria-label="复制 ${attr(label)}">${icon("copy")}</button></span>`;
+      <button type="button" class="console-inline-id-copy" data-task-copy="${attr(id)}" data-copy-label="${attr(label)}" data-detail-control="${attr(`copy:${label}:${id}`)}" title="复制 ${attr(label)}" aria-label="复制 ${attr(label)}">${icon("copy")}</button></span>`;
   }
 
   function taskDetailFacts(row) {
-    const named = (name, id, label, url) => {
-      const title = name ? `<strong class="agent-service-fact-name" title="${attr(name)}">${escapeHtml(name)}</strong>` : "";
-      const separator = title && id && url ? '<span class="agent-service-fact-meta" aria-hidden="true">·</span>' : "";
-      return `${title}${separator}${taskIdValue(id, label, url)}`;
-    };
+    const callerName = row.caller_username ? `<strong class="agent-service-fact-name" title="${attr(row.caller_username)}">${escapeHtml(row.caller_username)}</strong>` : "";
+    const relatedIds = (label, ids) => ids.length
+      ? `<span class="agent-service-related-ids">${label} ${ids.join(" ")}</span>` : "";
     const sessionUrl = row.session_id ? `#/diagnostics/sessions/${encodeURIComponent(row.session_id)}?view=conversation` : "";
-    const turns = (row.turns || []).map((turn) =>
-      taskIdValue(turn.id, "Turn ID", turn.event_id && sessionUrl ? `${sessionUrl}&event_id=${encodeURIComponent(turn.event_id)}` : ""),
+    const turns = (row.turns || []).filter((turn) => turn.id).map((turn) =>
+      taskIdValue(turn.id, "提问 ID", turn.event_id && sessionUrl ? `${sessionUrl}&event_id=${encodeURIComponent(turn.event_id)}` : ""),
     );
+    const sessions = row.session_id ? [taskIdValue(row.session_id, "会话 ID", sessionUrl)] : [];
     const appName = row.app_name || (row.app_id ? "名称未获取" : "未关联应用");
     const spaceName = row.space_name || (row.space_id ? "名称未获取" : "未关联空间");
     const scope = `<span class="inspector-scope-value">
@@ -274,18 +309,18 @@
     </span>`;
     return `<section class="inspector-section agent-service-task-facts">
       <dl class="agent-service-facts">
-        <div><dt>调用方</dt><dd>${named(row.caller_username, row.caller, "User ID")}</dd></div>
+        <div><dt>调用方</dt><dd>${callerName}${taskIdValue(row.caller, "User ID")}</dd></div>
         <div><dt>接入方式</dt><dd><span class="agent-service-access-method" data-service-access="${attr(row.source || "a2a")}">${icon((methods[row.source] || methods.a2a).icon)}${(methods[row.source] || methods.a2a).label}</span></dd></div>
         <div><dt>应用 / 空间</dt><dd>${scope}</dd></div>
         <div><dt>提交时间</dt><dd>${escapeHtml(formatDate(row.created_at))}${Number.isFinite(row.duration_seconds) ? `<span class="agent-service-fact-meta">耗时 ${duration(row)}</span>` : ""}</dd></div>
       </dl>
     </section>
     <section class="inspector-section agent-service-task-facts">
-      <h4 class="channel-extension-heading">会话与轮次</h4>
+      <h4 class="channel-extension-heading">任务与会话</h4>
       <dl class="agent-service-facts">
-        <div><dt>提问</dt><dd>${turns.join("") || "—"}</dd></div>
-        <div><dt>会话</dt><dd>${named(row.session_title, row.session_id, "会话 ID", sessionUrl)}</dd></div>
-        <div><dt>Context ID</dt><dd>${taskIdValue(row.context_id, "Context ID")}</dd></div>
+        <div><dt>Task ID</dt><dd class="agent-service-id-pair">${taskIdValue(row.id, "Task ID")}${relatedIds("提问 ID", turns)}</dd></div>
+        <div><dt>Context ID</dt><dd class="agent-service-id-pair">${taskIdValue(row.context_id, "Context ID")}${relatedIds("会话 ID", sessions)}</dd></div>
+        <div><dt>会话名称</dt><dd>${escapeHtml(row.session_title || "—")}</dd></div>
       </dl>
     </section>`;
   }
@@ -306,10 +341,10 @@
       if (taskDetailSnapshot === snapshot) return;
       const focusedControl = target.contains(document.activeElement) ? document.activeElement.dataset.detailControl : "";
       const previousScroll = target.querySelector(".inspector-tab-panel")?.scrollTop || 0;
-      target.innerHTML = `<div class="inspector-tabs agent-service-detail-heading">
+      target.innerHTML = `<div class="agent-service-detail-heading">
         <div class="agent-service-detail-title"><h3 title="${attr(row.title)}">${escapeHtml(row.title)}</h3>
           <div class="session-subtitle-row"><code class="session-badge" title="${attr(row.id)}">${escapeHtml(row.id.slice(0, 8))}</code>
-          <button type="button" class="session-copy-btn" data-task-copy="${attr(row.id)}" data-detail-control="copy:task" aria-label="复制任务 ID" title="复制任务 ID">${icon("copy")}</button></div></div>
+          <button type="button" class="console-inline-id-copy" data-task-copy="${attr(row.id)}" data-copy-label="Task ID" data-detail-control="copy:task" aria-label="复制 Task ID" title="复制 Task ID">${icon("copy")}</button></div></div>
         <span class="status-badge inspector-tab-status agent-service-detail-status" data-state="${attr(row.status)}">${statusLabel(row.status)}</span></div>
         <div class="inspector-tab-panel">
           ${taskDetailFacts(row)}
@@ -353,6 +388,15 @@
     refreshIcons();
   }
 
+  function renderPublicationExample(useToken = false) {
+    const toggle = el("agentPublicationExampleToggle");
+    const mode = useToken ? "平台 Token" : "API Key";
+    toggle.dataset.mode = useToken ? "token" : "api-key";
+    toggle.setAttribute("aria-label", `当前示例为 ${mode}，切换为${useToken ? " API Key" : "平台 Token"}`);
+    clearText("agentPublicationExampleMode", mode);
+    clearText("agentPublicationExampleCode", a2aHeaderExample({ useToken }));
+  }
+
   function openEditor(row = null) {
     const form = el("agentPublicationForm");
     form.reset();
@@ -368,6 +412,7 @@
     agents.forEach((agent) => picker.add(new Option(agent.name, agent.id)));
     picker.value = row?.agent_id || "";
     el("agentPublicationError").hidden = true;
+    renderPublicationExample();
     renderScope();
     el("agentPublicationDialog").showModal();
     form.elements[row ? "name" : "agent_code"].focus();
@@ -536,6 +581,9 @@
     el("newAgentPublication").addEventListener("click", () => openEditor());
     el("agentPublicationRows").addEventListener("click", (event) => void publicationAction(event));
     el("agentPublicationForm").addEventListener("submit", save);
+    el("agentPublicationExampleToggle").addEventListener("click", (event) => {
+      renderPublicationExample(event.currentTarget.dataset.mode !== "token");
+    });
     const guide = el("agentServiceProtocol");
     const guideTabs = el("agentServiceGuideTabs");
     bindTabs(guideTabs, (selectedTab) => {
@@ -546,14 +594,16 @@
         tab.tabIndex = active ? 0 : -1;
         el(tab.getAttribute("aria-controls")).hidden = !active;
       });
+      guide.querySelector(".modal-body").scrollTop = 0;
     });
     el("agentServiceProtocolBtn").addEventListener("click", () => {
-      const methods = el(access === "mcp" ? "agentServiceMcpHelpTab" : "agentServiceMethodsTab");
-      methods.click();
+      const overview = el("agentServiceOverviewTab");
+      renderMcpAccess(el("agentServiceMcpGuideSetup"), true);
+      refreshIcons();
+      overview.click();
       guide.showModal();
-      el("agentServiceMethodsPanel").scrollTop = 0;
-      el("agentServiceTestPanel").scrollTop = 0;
-      methods.focus();
+      guide.querySelector(".modal-body").scrollTop = 0;
+      overview.focus();
     });
     panel.querySelectorAll("[data-service-close]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
     bindTabs(el("agentServiceTabs"), (tab) => {
@@ -561,6 +611,17 @@
       access = tab.dataset.serviceAccess;
       renderAccess();
       el("agentServiceAccess").scrollTop = 0;
+    });
+    panel.addEventListener("click", (event) => {
+      const copyTarget = event.target.closest("[data-client-copy]");
+      if (copyTarget) void copy(copyTarget.dataset.clientCopy);
+    });
+    el("agentServiceAccess").addEventListener("click", (event) => {
+      const toggle = event.target.closest("[data-a2a-card-mode]");
+      if (!toggle || toggle.getAttribute("aria-pressed") === "true") return;
+      a2aCardMode = toggle.dataset.a2aCardMode;
+      renderAccess();
+      el("agentServiceAccess").querySelector('[data-a2a-card-mode][aria-pressed="true"]')?.focus();
     });
     panel.querySelectorAll("[data-service-app-scope]").forEach((button) => button.addEventListener("click", () => {
       draft.mode = button.dataset.serviceAppScope;
@@ -597,9 +658,32 @@
       taskRowsMarkup = "";
       void loadDetail();
     });
-    el("agentTaskDetail").addEventListener("click", (event) => {
+    el("agentTaskDetail").addEventListener("click", async (event) => {
       const button = event.target.closest("[data-task-copy]");
-      if (button) void copy(button.dataset.taskCopy);
+      if (!button || button.disabled) return;
+      const label = button.dataset.copyLabel;
+      button.disabled = true;
+      try {
+        await navigator.clipboard.writeText(button.dataset.taskCopy);
+        button.classList.add("copied");
+        button.innerHTML = icon("check");
+        button.title = `${label} 已复制`;
+        button.setAttribute("aria-label", button.title);
+        refreshIcons();
+        showToast(button.title);
+        setTimeout(() => {
+          if (!button.isConnected) return;
+          button.classList.remove("copied");
+          button.innerHTML = icon("copy");
+          button.title = `复制 ${label}`;
+          button.setAttribute("aria-label", button.title);
+          button.disabled = false;
+          refreshIcons();
+        }, 1500);
+      } catch {
+        button.disabled = false;
+        showToast("复制失败，请手动选择", true);
+      }
     });
     for (const id of ["agentTaskState", "agentTaskApp"]) {
       el(id).addEventListener("change", () => { page = 1; void loadTasks(); });

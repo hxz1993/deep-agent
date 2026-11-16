@@ -26,11 +26,13 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 | 通用 | `/api/v1/agent-service/a2a/{agent_code}/agent-card.json` | 用 `app` Header 指定应用。服务端确定 Space，显式传入的 `space` 必须匹配。 |
 | 指定 App | `/api/v1/agent-service/a2a/{agent_code}/apps/{app_id}/agent-card.json` | 将占位符替换为实际 App ID。服务端采用路径中的 App，并忽略 `app`、`space` Header。 |
 
-两个 RPC 基址均支持相对发现路径 `/.well-known/agent-card.json`。Card、任务操作和取件都需要一个有效凭据。平台 Token 用 `Authorization: Bearer <Token>`，DeepFOS API Key 用 `X-Deepfos-Key`。服务端验证调用身份、App 权限和发布范围，缺少凭据返回 `401`，超出应用权限或范围返回 `403`。
+两个 RPC 基址均支持相对发现路径 `/.well-known/agent-card.json`。Card、任务操作和取件都需要一个有效凭据。平台 Token 可用 `token` 或 `Authorization: Bearer <Token>`，DeepFOS API Key 用 `X-Deepfos-Key`。只传一个鉴权 Header。服务端验证调用身份、App 权限和发布范围，缺少凭据返回 `401`，超出应用权限或范围返回 `403`。
+
+读取 Agent Card 时可省略协议版本。调用 JSON-RPC 任务接口时传 `A2A-Version: 1.0`。缺省按 A2A 0.3 处理，当前任务接口会返回版本不支持。
 
 发布的「应用范围」可以选择全部有权访问的应用，或指定一项及多项应用。两种入口在同一发布、调用主体和 App 下共用 Task 与 Context。
 
-可传 `language`。
+可传 `language`，默认 `zh-cn`。
 
 | 操作 | 行为 |
 |---|---|
@@ -53,11 +55,18 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 ## MCP 接入
 
-在 Console「集成 → MCP」复制当前环境的 Streamable HTTP 地址和请求 Header 示例。将 `app` 填为应用 ID，搭配 `X-Deepfos-Key` 或 `Authorization: Bearer <Token>` 其中一种凭据。服务端解析所属空间。把「复制 Agent 接入指引」的内容发给本地 Agent，由它配置宿主连接，凭据通过宿主设置提供。回环地址仅供同机客户端使用。
+在 Console「集成 → MCP」复制当前环境的 Streamable HTTP 地址和请求 Header 示例。将 `app` 填为应用 ID。平台 Token 可用 `token` 或 `Authorization: Bearer <Token>`，DeepFOS API Key 用 `X-Deepfos-Key`。只传一个鉴权 Header。服务端解析所属空间。把「复制 Agent 接入指引」的内容发给本地 Agent，由它配置宿主连接，凭据通过宿主设置提供。回环地址仅供同机客户端使用。
 
 调用 `list_agents` 验证连接并取得 Agent 编码。目录包含所有启用的发布，`submit_task` 会单独检查应用权限与发布范围。`get_task` 查询结果，`list_tasks` 查看近期任务，`reply_task` 用原 Task ID 和问题 ID 补材料，`cancel_task` 取消任务。`get_artifact` 返回资源引用及鉴权下载路径。MCP 资源读取限 1 MiB，完整文件通过下载路径获取，仍需传凭据和 App。
 
 同一凭据主体和应用可以在 A2A 与 MCP 间继续同一个任务。任务 ID 保持不变。
+
+支持浏览 MCP 资源的客户端可以用 `resources/list` 发现两份调用指南，再用 `resources/read` 读取示例：
+
+- `deepagent://guides/agent-tasks` 覆盖发现 Agent、提交、查看状态、补材料和在同一会话下追问。
+- `deepagent://guides/attachments-artifacts` 覆盖发送文件、读取任务结果和下载文件。
+
+任务产物通过 `get_artifact` 按任务授权取得资源地址。
 
 CLI、Python SDK 和通用 HTTP 调用是待评审草案，本版仅在 Console 保留入口占位。草案可能改写或移除，当前服务仅注册 A2A、MCP 及必要的鉴权取件接口。
 

@@ -230,7 +230,4 @@ html[data-theme="paper"] .diagnostic-usage-page { --usage-orange:#8474d4; }
 .usage-stat-label-with-hint:focus-within .usage-info-tooltip { display:block; }
 
 .usage-agent-id { display:inline-flex; align-items:center; gap:4px; }
-.usage-agent-copy { display:inline-grid; place-items:center; width:16px; height:18px; padding:0; border:0; border-radius:3px; background:transparent; color:var(--diag-muted); cursor:pointer; opacity:0; }
-.usage-agent-copy svg { width:12px; height:12px; }
-.usage-agent-id:hover .usage-agent-copy,.usage-agent-id:focus-within .usage-agent-copy { opacity:1; }
-.usage-agent-copy:hover { color:var(--diag-accent); background:var(--diag-accent-soft); }
+.usage-agent-id:not(:hover):not(:focus-within) .console-inline-id-copy:not(.copied) { opacity:0; }

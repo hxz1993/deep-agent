@@ -287,7 +287,7 @@
                 <button id="agentServiceTabCli" type="button" role="tab" data-service-access="cli" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>CLI</button>
                 <button id="agentServiceTabSdk" type="button" role="tab" data-service-access="sdk" aria-selected="false" aria-controls="agentServiceAccess" aria-label="Python SDK" tabindex="-1"><i data-lucide="code-xml" aria-hidden="true"></i>SDK</button>
               </div>
-              <button type="button" class="btn channel-help-btn" id="agentServiceProtocolBtn" aria-haspopup="dialog"><i data-lucide="book-open" aria-hidden="true"></i><span>协议</span></button>
+              <button type="button" class="btn channel-help-btn" id="agentServiceProtocolBtn" aria-haspopup="dialog" aria-controls="agentServiceProtocol"><i data-lucide="info" aria-hidden="true"></i><span>帮助</span></button>
             </div>
             <div id="agentServiceAccess" class="agent-service-access-body" role="tabpanel" aria-labelledby="agentServiceTabA2a"></div>
           </section>
@@ -325,7 +325,7 @@
               <label class="field"><span class="field-label-row">关联 Agent</span><select name="agent_id" required></select></label>
               <label class="field agent-service-description"><span class="field-label-row">用途说明</span><textarea name="description" rows="2" maxlength="240" placeholder="说明可委托的任务"></textarea></label>
             </div>
-            <section class="agent-service-app-config" aria-labelledby="agentPublicationAppScope">
+            <section aria-labelledby="agentPublicationAppScope">
               <div class="channel-connection-heading"><h4 id="agentPublicationAppScope">应用范围</h4>
                 <div class="console-segmented" id="agentPublicationAppScopeToggle" role="group" aria-labelledby="agentPublicationAppScope">
                   <button type="button" data-service-app-scope="all" aria-pressed="true">全部应用</button>
@@ -342,23 +342,25 @@
               <h4 class="channel-extension-heading" id="agentPublicationAuthTitle">请求 Header</h4>
               <div class="agent-service-auth-summary">
                 <div class="agent-service-auth-rules">
-                  <section aria-labelledby="agentPublicationAppHeaderTitle">
-                    <h5 id="agentPublicationAppHeaderTitle">应用</h5>
-                    <p>通用地址用 <code>app</code> 传应用 ID，<code>space</code>（空间 ID）可省略。带应用的地址将应用 ID 填在 URL 的 <code>{app_id}</code> 处，无需传 <code>app</code> 和 <code>space</code>。</p>
-                  </section>
-                  <section aria-labelledby="agentPublicationCredentialTitle">
-                    <h5 id="agentPublicationCredentialTitle">鉴权凭据<span>二选一</span></h5>
-                    <dl><dt>平台 Token</dt><dd><code>Authorization: Bearer &lt;Token&gt;</code></dd><dt>DeepFOS API Key</dt><dd><code>X-Deepfos-Key: &lt;API Key&gt;</code></dd></dl>
-                  </section>
+                  <table class="agent-service-header-table">
+                    <tbody>
+                      <tr><th scope="row"><code>app</code></th><td>必填，填应用 ID</td></tr>
+                      <tr><th scope="row"><code>space</code></th><td>选填，省略时由 <code>app</code> 推导</td></tr>
+                      <tr><th scope="row"><code>language</code></th><td>选填，默认 <code>zh-cn</code></td></tr>
+                      <tr><th scope="row"><code>A2A-Version</code></th><td>读 Agent Card 可省略。调用任务接口须填 <code>1.0</code>。</td></tr>
+                      <tr><th scope="row">鉴权</th><td>必填一种。API Key 用 <code>X-Deepfos-Key</code>。<br>平台 Token 用 <code>token</code> 或 <code>Authorization: Bearer &lt;Token&gt;</code>。</td></tr>
+                    </tbody>
+                  </table>
+                  <p>带应用的地址在 URL 中填写 <code>{app_id}</code>，可省略 <code>app</code> 和 <code>space</code>。</p>
                 </div>
-                <section aria-labelledby="agentPublicationHeaderExampleTitle">
-                  <h5 id="agentPublicationHeaderExampleTitle">通用地址示例<span>平台 Token</span></h5>
-                  <pre class="agent-service-auth-example"><code>{
-  "app": "budget001",
-  "space": "budget",
-  "A2A-Version": "1.0",
-  "Authorization": "Bearer &lt;Token&gt;"
-}</code></pre>
+                <section class="agent-service-example-pane" aria-labelledby="agentPublicationHeaderExampleTitle">
+                  <div class="agent-service-example-heading">
+                    <h5 id="agentPublicationHeaderExampleTitle">通用地址示例</h5>
+                    <button type="button" class="btn text compact" id="agentPublicationExampleToggle" aria-controls="agentPublicationExampleCode">
+                      <i data-lucide="arrow-left-right" aria-hidden="true"></i><span id="agentPublicationExampleMode">API Key</span>
+                    </button>
+                  </div>
+                  <pre class="agent-service-auth-example"><code id="agentPublicationExampleCode"></code></pre>
                 </section>
               </div>
             </section>
@@ -371,17 +373,48 @@
         <header class="modal-header"><h3 id="agentServiceProtocolTitle">接入帮助</h3><button type="button" class="icon-btn" data-service-close aria-label="关闭接入帮助"><i data-lucide="x" aria-hidden="true"></i></button></header>
         <div class="modal-body">
           <nav class="cap-tabs channel-help-tabs" id="agentServiceGuideTabs" role="tablist" aria-label="接入帮助">
-            <button type="button" class="cap-tab active" id="agentServiceMethodsTab" role="tab" aria-selected="true" aria-controls="agentServiceMethodsPanel"><i data-lucide="book-open" aria-hidden="true"></i>A2A 协议</button>
+            <button type="button" class="cap-tab active" id="agentServiceOverviewTab" role="tab" aria-selected="true" aria-controls="agentServiceOverviewPanel"><i data-lucide="list" aria-hidden="true"></i>总览</button>
+            <button type="button" class="cap-tab" id="agentServiceMethodsTab" role="tab" aria-selected="false" aria-controls="agentServiceMethodsPanel" tabindex="-1"><i data-lucide="book-open" aria-hidden="true"></i>A2A 协议</button>
             <button type="button" class="cap-tab" id="agentServiceMcpHelpTab" role="tab" aria-selected="false" aria-controls="agentServiceMcpHelpPanel" tabindex="-1"><i data-lucide="plug" aria-hidden="true"></i>MCP 接入</button>
-            <button type="button" class="cap-tab" id="agentServiceTestTab" role="tab" aria-selected="false" aria-controls="agentServiceTestPanel" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>联调工具</button>
           </nav>
-          <section class="channel-help-panel" id="agentServiceMethodsPanel" role="tabpanel" aria-labelledby="agentServiceMethodsTab">
+          <section class="channel-help-panel agent-service-guide-flow" id="agentServiceOverviewPanel" role="tabpanel" aria-labelledby="agentServiceOverviewTab">
+            <div class="table-wrap console-list-a agent-service-guide-table">
+              <table class="data-table">
+                <thead><tr><th scope="col">能力</th><th scope="col">A2A</th><th scope="col">MCP</th><th scope="col">CLI（计划中）</th></tr></thead>
+                <tbody>
+                  <tr><th scope="row">发现 Agent</th><td>读取已知地址的 Agent Card</td><td><code>list_agents</code></td><td>列出已发布 Agent</td></tr>
+                  <tr><th scope="row">发起任务</th><td><code>SendMessage</code></td><td><code>submit_task</code></td><td>提交任务</td></tr>
+                  <tr><th scope="row">补材料 / 追问</th><td>带原 Task ID 或 Context ID 继续发送</td><td><code>reply_task</code>，或带 Context ID 提交</td><td>继续任务或会话</td></tr>
+                  <tr><th scope="row">查询结果 / 取消</th><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td><code>get_task</code>、<code>list_tasks</code>、<code>cancel_task</code></td><td>查询、等待及取消</td></tr>
+                  <tr><th scope="row">获取进度</th><td><code>SendStreamingMessage</code>、<code>SubscribeToTask</code></td><td>轮询 <code>get_task</code></td><td>等待及查询状态</td></tr>
+                  <tr><th scope="row">发送附件</th><td>消息 Part 传 Base64 字节</td><td><code>attachments</code> 传 Base64 字节</td><td>读取本地文件后随任务发送</td></tr>
+                  <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>get_artifact</code>，读取资源或鉴权下载</td><td>读取结果并下载文件</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <section class="agent-service-guide-block">
+              <h4>请求 Header</h4>
+              <div class="table-wrap console-list-a agent-service-guide-table agent-service-auth-matrix">
+                <table class="data-table">
+                  <thead><tr><th scope="col">接入方式</th><th scope="col">应用</th><th scope="col">鉴权</th></tr></thead>
+                  <tbody>
+                    <tr><th scope="row">A2A 通用卡片</th><td><code>app</code> 必填，<code>space</code> 可省略。</td><td rowspan="3"><code>X-Deepfos-Key</code>、<code>token</code> 或 <code>Authorization: Bearer &lt;Token&gt;</code>，三选一。</td></tr>
+                    <tr><th scope="row">A2A 指定应用卡片</th><td>在 URL 中填写 <code>{app_id}</code>。</td></tr>
+                    <tr><th scope="row">MCP</th><td>在连接的 Header 中填 <code>app</code>，<code>space</code> 可省略。</td></tr>
+                    <tr><th scope="row">CLI（计划中）</th><td>从客户端配置指定应用。</td><td>计划读取已配置的 API Key 或平台 Token。</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>两种 A2A 地址读取 Card 时可省略版本，调用任务接口时传 <code>A2A-Version: 1.0</code>。<code>language</code> 默认 <code>zh-cn</code>。</p>
+            </section>
+          </section>
+          <section class="channel-help-panel agent-service-guide-flow" id="agentServiceMethodsPanel" role="tabpanel" aria-labelledby="agentServiceMethodsTab" hidden>
             <div class="agent-service-guide-heading">
               <p>客户端读取 Agent Card 后使用 A2A 1.0 JSON-RPC。通用地址通过 <code>app</code> Header 指定应用，带应用的地址从路径取 App。两者使用相同的凭据和授权规则。</p>
               <a class="btn-link" href="https://a2a-protocol.org/v1.0.1/specification/#53-method-mapping-reference" target="_blank" rel="noopener noreferrer">官方规范 <i data-lucide="external-link" aria-hidden="true"></i></a>
             </div>
-            <div class="table-wrap console-list-a agent-service-methods" tabindex="0" role="region" aria-label="A2A 方法列表">
-              <table class="data-table"><thead><tr><th scope="col">发现 / JSON-RPC 方法</th><th scope="col">要支持</th><th scope="col">备注</th></tr></thead><tbody>
+            <div class="table-wrap console-list-a agent-service-guide-table agent-service-methods">
+              <table class="data-table"><thead><tr><th scope="col">发现 / JSON-RPC 方法</th><th scope="col">支持</th><th scope="col">备注</th></tr></thead><tbody>
                 <tr><td><code>Agent Card · HTTP GET</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>每个发布有独立 Card URL，通过平台鉴权后读取。</td></tr>
                 <tr><td><code>SendMessage</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>可等待结果或立即获得 Task ID。补材料时带原 Task ID。</td></tr>
                 <tr><td><code>SendStreamingMessage</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>断开连接后任务继续执行。</td></tr>
@@ -397,36 +430,41 @@
                 <tr><td><code>Artifact 下载 · DeepAgent 扩展</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>使用 Task 返回的授权链接取件。A2A 标准没有单独的下载方法。</td></tr>
               </tbody></table>
             </div>
+            <section class="agent-service-guide-block">
+              <h4>联调工具</h4>
+              <ul class="agent-service-links">
+                <li><a class="btn-link" href="https://a2playground.a2d-ai.com/" target="_blank" rel="noopener noreferrer">在线 A2D Playground<i data-lucide="external-link" aria-hidden="true"></i></a><p>在浏览器联调公网可达的 Agent Card。</p></li>
+                <li><a class="btn-link" href="https://github.com/a2aproject/a2a-inspector" target="_blank" rel="noopener noreferrer">官方 A2A Inspector<i data-lucide="external-link" aria-hidden="true"></i></a><p>在本地网页连接本机或内网地址，查看请求与响应。</p></li>
+                <li><a class="btn-link" href="https://github.com/a2aproject/a2a-cli#usage" target="_blank" rel="noopener noreferrer">官方 A2A CLI<i data-lucide="external-link" aria-hidden="true"></i></a><p>在终端调用 A2A 接口，用于脚本调试和重复验证。</p></li>
+              </ul>
+            </section>
           </section>
-          <section class="channel-help-panel" id="agentServiceMcpHelpPanel" role="tabpanel" aria-labelledby="agentServiceMcpHelpTab" hidden>
-            <ol class="agent-service-mcp-steps">
-              <li>添加 Streamable HTTP 连接，使用 MCP 页提供的环境地址。同机客户端可以用回环地址，其他客户端需要可达的服务地址。</li>
-              <li>在连接的请求 Header 中填写 <code>app</code>，值为应用 ID。添加 <code>X-Deepfos-Key</code> 或 <code>Authorization: Bearer &lt;Token&gt;</code> 其中一种凭据。</li>
-              <li>调用 <code>list_agents</code> 验证连接。目录展示已启用的发布，执行任务时仍按 App 权限和发布范围校验。查询状态、补材料和取件使用原 Task ID。</li>
-            </ol>
-            <div class="agent-service-card-options">
-              <p>CodeBuddy 可通过 HTTP MCP 配置或 <code>--mcp-config</code> 接入。<a class="btn-link" href="https://www.codebuddy.ai/docs/cli/mcp" target="_blank" rel="noopener noreferrer">CodeBuddy 配置文档</a></p>
-              <p>WorkBuddy 在「连接器」中查看并配置 MCP。<a class="btn-link" href="https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide" target="_blank" rel="noopener noreferrer">WorkBuddy 配置文档</a></p>
+          <section class="channel-help-panel agent-service-guide-flow" id="agentServiceMcpHelpPanel" role="tabpanel" aria-labelledby="agentServiceMcpHelpTab" hidden>
+            <div class="agent-service-mcp-guide-setup" id="agentServiceMcpGuideSetup"></div>
+            <p>凭据选一种。使用平台 Token 时，可将示例的 <code>X-Deepfos-Key</code> 换成 <code>token</code> 或 <code>Authorization: Bearer &lt;Token&gt;</code>。其他机器上的客户端需填写可达地址。</p>
+            <div class="agent-service-mcp-guide-columns">
+              <section class="agent-service-guide-block">
+                <h4>工具</h4>
+                <dl class="agent-service-guide-list">
+                  <div><dt><code>list_agents</code></dt><dd>列出已启用的 Agent 发布</dd></div>
+                  <div><dt><code>submit_task</code></dt><dd>发送消息并发起任务，支持附件</dd></div>
+                  <div><dt><code>get_task</code></dt><dd>查询状态、结果和产物引用</dd></div>
+                  <div><dt><code>list_tasks</code></dt><dd>列出当前应用下的近期任务</dd></div>
+                  <div><dt><code>reply_task</code></dt><dd>向原任务补充材料</dd></div>
+                  <div><dt><code>cancel_task</code></dt><dd>取消任务</dd></div>
+                  <div><dt><code>get_artifact</code></dt><dd>取得授权的资源引用和下载路径</dd></div>
+                </dl>
+              </section>
+              <section class="agent-service-guide-block">
+                <h4>资源</h4>
+                <dl class="agent-service-guide-list agent-service-guide-resources">
+                  <div><dt>任务调用与补材料</dt><dd><code>deepagent://guides/agent-tasks</code></dd></div>
+                  <div><dt>附件与取件</dt><dd><code>deepagent://guides/attachments-artifacts</code></dd></div>
+                  <div><dt>任务产物</dt><dd>使用 <code>get_artifact</code> 返回的 URI 读取文件，单个资源上限 1 MiB。完整文件可通过鉴权地址下载。</dd></div>
+                </dl>
+              </section>
             </div>
-          </section>
-          <section class="channel-help-panel" id="agentServiceTestPanel" role="tabpanel" aria-labelledby="agentServiceTestTab" hidden>
-            <ul class="agent-service-links">
-              <li><a class="agent-service-tool-card" href="https://a2playground.a2d-ai.com/" target="_blank" rel="noopener noreferrer">
-                <span class="agent-service-tool-icon"><i data-lucide="globe" aria-hidden="true"></i></span>
-                <span class="agent-service-tool-copy"><strong>在线 A2D Playground</strong><small>在浏览器联调公网可达的 Agent Card。</small></span>
-                <i data-lucide="external-link" class="agent-service-tool-external" aria-hidden="true"></i>
-              </a></li>
-              <li><a class="agent-service-tool-card" href="https://github.com/a2aproject/a2a-inspector" target="_blank" rel="noopener noreferrer">
-                <span class="agent-service-tool-icon"><i data-lucide="monitor" aria-hidden="true"></i></span>
-                <span class="agent-service-tool-copy"><strong>官方 A2A Inspector</strong><small>启动本地网页，连接本机或内网地址，查看请求与响应。</small></span>
-                <i data-lucide="external-link" class="agent-service-tool-external" aria-hidden="true"></i>
-              </a></li>
-              <li><a class="agent-service-tool-card" href="https://github.com/a2aproject/a2a-cli#usage" target="_blank" rel="noopener noreferrer">
-                <span class="agent-service-tool-icon"><i data-lucide="terminal" aria-hidden="true"></i></span>
-                <span class="agent-service-tool-copy"><strong>官方 A2A CLI</strong><small>在终端调用 A2A 接口，适合脚本调试和重复验证。</small></span>
-                <i data-lucide="external-link" class="agent-service-tool-external" aria-hidden="true"></i>
-              </a></li>
-            </ul>
+            <p class="agent-service-guide-client-links"><a href="https://www.codebuddy.ai/docs/cli/mcp" target="_blank" rel="noopener noreferrer">CodeBuddy 配置文档</a><a href="https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide" target="_blank" rel="noopener noreferrer">WorkBuddy 配置文档</a></p>
           </section>
         </div>
         <footer class="modal-footer"><button type="button" class="btn" data-service-close>关闭</button></footer>

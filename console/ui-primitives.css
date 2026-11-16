@@ -242,6 +242,11 @@
 :is(.btn, .diagnostics-button):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .btn-sm, .btn.compact { height:var(--ui-control-compact); min-height:var(--ui-control-compact); }
 
+.console-inline-id-copy { display:inline-grid; place-items:center; flex:0 0 16px; width:16px; height:18px; padding:0; border:0; border-radius:3px; background:transparent; color:var(--text-dim); cursor:pointer; }
+.console-inline-id-copy svg { width:12px; height:12px; }
+.console-inline-id-copy:is(:hover,:focus-visible,.copied) { color:var(--accent); background:var(--accent-soft); }
+.console-inline-id-copy:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
 /* Configuration groups: one flow layout, no absolute-positioned actions. */
 .console-stack, .global-settings-stack { display: grid; gap: var(--ui-group-gap); }
 .console-section { min-width: 0; }

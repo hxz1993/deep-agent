@@ -96,6 +96,36 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             "jsonrpc": "2.0", "id": 1, "method": method, "params": params,
         })
 
+    async def test_documented_a2a_and_mcp_auth_headers(self):
+        app = {"app": "budget001"}
+        rpc_version = {"A2A-Version": "1.0"}
+        app_url = f"{self.url}/apps/budget001"
+        mcp_url = f"{ROOT}/mcp"
+        mcp_request = {"jsonrpc": "2.0", "id": 1, "method": "resources/list"}
+        rpc_call = {"content-type": "application/json", "accept": "application/json, text/event-stream"}
+        with patch("deep_agent.agent_service.security.PlatformEnterpriseAdminChecker.resolve_api_key_user",
+                   return_value="owner") as resolve_key:
+            for credential in (
+                {"token": "fixture-owner"},
+                {"Authorization": "Bearer fixture-owner"},
+                {"X-Deepfos-Key": "fixture-key"},
+            ):
+                with self.subTest(credential=next(iter(credential))):
+                    for url, context in ((self.url, app), (app_url, {})):
+                        card = await self.client.get(f"{url}/agent-card.json", headers={**credential, **context})
+                        self.assertEqual(card.status_code, 200)
+                        task_list = await self.rpc("ListTasks", {}, url=url, headers={**credential, **context, **rpc_version})
+                        self.result(task_list)
+                    resources = await self.client.post(mcp_url, json=mcp_request, headers={**rpc_call, **credential, **app})
+                    self.assertEqual(resources.status_code, 200)
+                    self.assertIn("resources", resources.json()["result"])
+            resolve_key.assert_awaited_with("fixture-key", "budget001", "budget")
+        wrong_version = await self.rpc("ListTasks", {}, headers={**app, "token": "fixture-owner"})
+        self.assertEqual(wrong_version.json()["error"]["code"], -32009)
+        conflicting = {**app, "token": "fixture-owner", "Authorization": "Bearer fixture-owner"}
+        self.assertEqual((await self.client.get(f"{self.url}/agent-card.json", headers=conflicting)).status_code, 401)
+        self.assertEqual((await self.client.post(mcp_url, headers={**rpc_call, **conflicting}, json=mcp_request)).status_code, 401)
+
     @staticmethod
     def message(id, content, **bindings):
         return {"messageId": id, "role": "ROLE_USER", "parts": [{"text": content}], **bindings}
@@ -720,6 +750,10 @@ w.save(publish_path("预算.xlsx"))
         mcp_url = f"{ROOT}/mcp"
         denied_origin = await self.client.post(mcp_url, headers={**HEADERS, "origin": "https://example.net"})
         self.assertEqual(denied_origin.status_code, 403)
+        unauthenticated = await self.client.post(mcp_url, json={
+            "jsonrpc": "2.0", "id": 1, "method": "resources/list",
+        })
+        self.assertEqual(unauthenticated.status_code, 401)
         self.client.headers.update(HEADERS)
 
         async with streamable_http_client(f"http://test{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
@@ -729,6 +763,17 @@ w.save(publish_path("预算.xlsx"))
                 names = {tool.name for tool in (await session.list_tools()).tools}
                 self.assertEqual(names, {"list_agents", "submit_task", "get_task", "list_tasks",
                                          "reply_task", "cancel_task", "get_artifact"})
+                guides = {str(resource.uri): resource.mimeType for resource in (await session.list_resources()).resources}
+                guide_examples = {
+                    "deepagent://guides/agent-tasks": ("submit_task", "reply_task", "context_id"),
+                    "deepagent://guides/attachments-artifacts": ("data_base64", "resources/read", "download_path"),
+                }
+                self.assertEqual(guides, dict.fromkeys(guide_examples, "text/markdown"))
+                for uri, examples in guide_examples.items():
+                    resource = (await session.read_resource(uri)).contents[0]
+                    self.assertEqual(resource.mimeType, "text/markdown")
+                    for example in examples:
+                        self.assertIn(example, resource.text)
                 listed = await session.call_tool("list_agents")
                 self.assertEqual(listed.structuredContent, response.json())
                 del self.client.headers["app"]

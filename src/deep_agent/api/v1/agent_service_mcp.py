@@ -20,6 +20,7 @@ from mcp.shared.exceptions import McpError
 from pydantic import ValidationError
 
 from deep_agent.agent_service.download import artifact_download
+from deep_agent.agent_service.mcp_guides import MCP_GUIDES
 from deep_agent.agent_service.public import (
     HistoryLength, PublicInput, PublicTasks, ReplyInput, SubmitInput, TaskId, TaskQuery, task_error,
 )
@@ -34,7 +35,8 @@ tag = "agent-service"
 server = Server(
     "deepagent-agents",
     instructions="Use list_agents to discover enabled agents. Keep the task ID for polling or reply, "
-                 "and reuse the same message_id when retrying a submission.",
+                 "and reuse the same message_id when retrying a submission. Use resources/list to "
+                 "discover call examples for tasks, supplemental input, attachments, and artifacts.",
 )
 current: ContextVar[PublicTasks] = ContextVar("agent_service_mcp")
 RESOURCE_LIMIT = 1024 * 1024
@@ -158,13 +160,18 @@ def tool_error(status_code: int, detail: str):
 
 @server.list_resources()
 async def list_resources():
-    # References are tied to authorized tasks and are issued by get_artifact.
-    return []
+    return [
+        types.Resource(uri=uri, name=name, description=description, mimeType="text/markdown")
+        for uri, (name, description, _) in MCP_GUIDES.items()
+    ]
 
 
 @server.read_resource()
 async def read_resource(uri):
-    match = re.fullmatch(r"deepagent://tasks/([a-f0-9]{32})/artifacts/([a-f0-9]{32})", str(uri))
+    uri = str(uri)
+    if guide := MCP_GUIDES.get(uri):
+        return [ReadResourceContents(guide[2], "text/markdown")]
+    match = re.fullmatch(r"deepagent://tasks/([a-f0-9]{32})/artifacts/([a-f0-9]{32})", uri)
     try:
         if not match:
             raise HTTPException(404, "未知产物引用")

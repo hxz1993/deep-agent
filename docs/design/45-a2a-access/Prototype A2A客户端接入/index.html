@@ -1,0 +1,1650 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepAgent · 外部调用原型</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface:#fff; --canvas:#f4f7f8; --line:#dbe3ea; --hairline:#e6ecf0;
+    --text:#20262e; --muted:#58636e; --accent:#5142e9; --accent-soft:#eceafd;
+    --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing:border-box }
+  [hidden] { display:none !important }
+  body { margin:0; background:var(--surface); color:var(--text); font:13px/1.5 var(--font) }
+  button, input, select { font:inherit; color:inherit }
+  button { cursor:pointer }
+  button:disabled { cursor:default; opacity:.58 }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px }
+  h1,h2,h3,h4,p,dl,dd,ol,ul { margin:0 }
+  h1 { font-size:16px; font-weight:650 }
+  h2 { font-size:14px; font-weight:620 }
+  h3,h4 { font-size:13px; font-weight:620 }
+  svg { width:15px; height:15px; flex:none; vertical-align:middle; stroke:currentColor; stroke-width:1.75; fill:none; stroke-linecap:round; stroke-linejoin:round }
+  code,pre { font:12px/1.5 var(--mono); overflow-wrap:anywhere }
+  aside.sidebar { position:fixed; inset:0 auto 0 0; width:200px; display:flex; flex-direction:column; gap:10px; background:#f3f6f7; border-right:1px solid var(--line); padding:10px }
+  .brand { display:flex; align-items:center; gap:10px; padding:5px 5px 8px; font-size:14px }
+  .brand img { width:29px; height:29px; object-fit:contain }
+  .brand small { display:block; color:var(--muted); font-size:10px; font-weight:400 }
+  .brand small::before { content:""; display:inline-block; width:5px; height:5px; border-radius:50%; margin-right:4px; background:#18863e; vertical-align:1px }
+  .nav { display:grid; gap:3px; list-style:none; padding:0 }
+  .nav li { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:8px; color:#46515d }
+  .nav .nav-heading { font-size:11px; color:var(--muted); padding:9px 10px 1px }
+  .nav [aria-current] { background:#e3e3f8; color:var(--accent) }
+  .nav li:has(button) { padding:0 }
+  .nav button { display:flex; align-items:center; gap:9px; width:100%; padding:8px 10px; border:0; background:none; color:inherit; border-radius:inherit }
+  .nav button:hover { background:var(--accent-soft) }
+  .sidebar-bottom { margin-top:auto }
+  .sidebar-bottom .profile { border-top:1px solid var(--line); border-radius:0; margin-top:8px }
+  main { margin-left:200px; padding:20px 22px 22px; min-width:0 }
+  .page-heading { display:flex; align-items:center; justify-content:space-between; gap:10px }
+  .prototype-nav { display:flex; align-items:center; gap:5px; flex-wrap:wrap; padding-bottom:9px; margin-bottom:14px; border-bottom:1px solid var(--line) }
+  .prototype-nav .btn { min-height:29px; background:var(--canvas); border-color:transparent }
+  .prototype-nav [aria-current] { border-color:#d9d3fb; background:var(--accent-soft); color:var(--accent); font-weight:600 }
+  .prototype-nav .prototype-label { margin-right:5px; color:var(--muted); font-size:12px }
+  .prototype-page .page-heading { margin-bottom:10px }
+  .agent-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr)); gap:12px; margin-top:14px }
+  .agent-card { padding:14px }
+  .agent-card h2 svg, .agent-card .inline svg { color:var(--accent) }
+  .agent-card .actions { justify-content:space-between; margin-top:13px; padding-top:10px; border-top:1px solid var(--hairline) }
+  .agent-editor { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1.15fr); margin-top:12px; min-height:540px }
+  .agent-fields { display:grid; align-content:start; gap:12px; padding:16px; border-right:1px solid var(--line) }
+  .agent-fields label { display:grid; gap:5px }
+  .agent-fields :is(input,select) { width:100%; min-width:0 }
+  .connection-editor { grid-template-columns:clamp(322px, 25%, 440px) minmax(0,1fr) clamp(220px, 18%, 294px); min-height:max(660px, calc(100dvh - 140px)) }
+  .connection-summary { position:relative; align-self:stretch; padding:10px 0 16px 16px }
+  .connection-summary::before { content:""; position:absolute; inset:16px auto 16px 0; width:1px; background:var(--line); pointer-events:none }
+  .connection-summary .inspector-head { padding:0 0 8px; min-height:37px }
+  .connection-summary .inspector-body { padding:0 }
+  .connection-summary .facts > div { grid-template-columns:60px minmax(0,1fr) }
+  .connection-editor .agent-fields { min-width:0; position:relative; border:0; padding-left:0; padding-right:18px }
+  .connection-editor .agent-fields::after { content:""; position:absolute; inset:16px 0 16px auto; width:1px; background:var(--line); pointer-events:none }
+  .editor-back { display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:0 3px; margin-right:8px; border:0; border-radius:6px; background:transparent; color:var(--muted) }
+  .editor-back:hover { color:var(--accent) }
+  .toolbar.connections-toolbar { margin:14px 0 11px }
+  .segment.view-controls button { width:29px; padding:0 }
+  .segment button[aria-pressed=true] { color:var(--accent); background:var(--surface) }
+  .external-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%,278px),1fr)); gap:14px; align-items:stretch }
+  .external-card { display:flex; flex-direction:column; min-width:0; padding:14px 15px 13px; border-radius:10px; box-shadow:0 2px 7px rgb(30 49 75 / .04); cursor:pointer }
+  .external-card:hover,.external-card:focus-within { border-color:#bdb4f6 }
+  .external-card header { display:grid; grid-template-columns:38px minmax(0,1fr) auto; align-items:center; gap:9px }
+  .external-card-icon { display:grid; width:38px; height:38px; place-items:center; border:1px solid var(--hairline); border-radius:9px; background:var(--surface) }
+  .external-card-icon .driver-logo { width:26px; height:26px }
+  .external-badge { display:inline-flex; align-items:center; gap:4px; color:#4538b8; background:#efedfc; border-radius:4px; font-size:11px; padding:1px 6px; white-space:nowrap }
+  .external-badge svg { width:12px; height:12px }
+  .external-card-open { border:0; background:none; text-align:left; padding:1px 0; font-weight:650; min-width:0 }
+  .external-card .agent-intro { margin-top:12px; padding-top:10px; border-top:1px solid var(--hairline); min-height:43px; overflow-wrap:anywhere }
+  .external-card footer { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:auto; padding-top:11px }
+  .external-card footer .btn { min-height:27px }
+  .btn.danger { color:#a52d36 }
+  .btn.danger:hover:not(:disabled) { background:#fdf0f1 }
+  .btn.danger.primary { background:#a52d36; border-color:#a52d36; color:#fff }
+  .btn.danger.primary:hover:not(:disabled) { background:#8d2330 }
+  .connection-table table { min-width:700px }
+  .connection-table td:last-child { text-align:right; white-space:nowrap }
+  .toolbar.record-filters { margin:22px 0 10px }
+  .record-filters .actions { margin-left:auto }
+  .record-workbench { height:clamp(440px, 55dvh, 720px); min-height:440px }
+  .record-workbench .list-column { min-height:0; overflow:hidden }
+  .record-workbench .table-scroll { flex:1; min-height:0 }
+  .record-workbench table { min-width:540px }
+  .record-workbench th { position:sticky; top:0 }
+  .record-workbench time { font-size:12px; white-space:nowrap }
+  .record-workbench .footer-count { display:flex; justify-content:space-between; gap:6px }
+  .record-workbench .inspector { min-height:0; overflow:auto }
+  .record-workbench .inspector .inspector-head { position:sticky; top:0; background:var(--surface); z-index:1 }
+  .record-workbench .inspector-head h3 { min-width:0 }
+  .record-workbench .inspector .facts > div { grid-template-columns:76px minmax(0,1fr) }
+  .record-resume .inline { margin-top:6px; overflow-wrap:anywhere }
+  .resource-panel.debug-side { display:flex; flex-direction:column; min-height:0; padding-top:10px }
+  .driver-section { display:grid; gap:8px; min-width:0 }
+  .driver-section h3 { font-size:13px }
+  .driver-picker { container-type:inline-size }
+  .driver-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px }
+  .btn.driver-option { display:flex; min-width:0; min-height:64px; align-items:center; justify-content:center; gap:7px; padding:7px 4px }
+  .driver-option .driver-logo { display:block; width:28px; height:28px }
+  .driver-option[data-driver="codex"] .driver-logo { transform:scale(1.12) }
+  .driver-option strong { font-size:13px; font-weight:600 }
+  .driver-launch { margin:0; color:var(--muted); font-size:12px; overflow-wrap:anywhere }
+  @container (max-width:370px) {
+    .btn.driver-option { flex-direction:column; gap:4px }
+  }
+  .driver-option[aria-pressed="true"] { border-color:var(--accent); background:var(--accent-soft); color:var(--accent) }
+  .driver-logo { width:16px; height:16px; object-fit:contain; flex:none }
+  .external-badge .driver-logo { width:13px; height:13px }
+  .driver-fields { display:grid; gap:10px; min-width:0 }
+  .config-heading { display:flex; align-items:center; justify-content:space-between; gap:8px }
+  .config-toggle { display:inline-flex; align-items:center; gap:5px; min-height:26px }
+  .config-toggle svg { width:14px; height:14px }
+  .config-dialog { width:min(420px,calc(100vw - 32px)); border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--text); padding:18px }
+  .config-dialog::backdrop { background:rgb(18 26 42 / .35) }
+  .config-dialog p { margin:10px 0 }
+  .config-dialog .actions { justify-content:flex-end; margin-top:14px }
+  .config-editor-body { position:relative }
+  .driver-fields[aria-hidden="true"] { visibility:hidden }
+  .driver-section .json-editor { position:absolute; inset:0; height:100%; min-height:0; font:12px/1.6 var(--mono); tab-size:2; white-space:pre; overflow:auto; resize:none }
+  .config-error { color:#b42332; margin:0; font-size:12px }
+  .header-rows { display:grid; gap:5px }
+  .header-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) 26px; gap:5px }
+  .header-row .field { min-width:0 }
+  .header-row .btn { padding:0; justify-content:center }
+  #add-config-header { justify-self:start }
+  .debug-workspace { display:flex; flex:1; flex-direction:column; align-self:center; width:min(100%,820px); min-height:0 }
+  .debug-thread { min-height:192px; max-height:max(370px, calc(100dvh - 385px)); flex:1; overflow:auto; margin:9px 0 10px }
+  #debug-notice { margin:0 }
+  .debug-side[data-unsaved] #debug-notice { flex:1; min-height:192px; display:flex; align-items:center; justify-content:center; gap:7px; padding:24px 12px }
+  #debug-notice svg { width:16px; height:16px; flex:none; color:#97630a }
+  .debug-side[data-unsaved] :is(.debug-thread,.debug-context) { display:none }
+  .debug-side[data-unsaved] .debug-compose { background:var(--canvas); box-shadow:none }
+  .debug-thread .session-turn { gap:6px }
+  .debug-thread .message { justify-self:end; max-width:92%; background:var(--accent-soft) }
+  .debug-thread .soft { justify-self:start; max-width:92% }
+  .debug-thread p, .debug-thread pre { white-space:pre-wrap; overflow-wrap:anywhere }
+  .debug-context { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:12px; margin-top:10px }
+  .debug-compose { display:grid; gap:4px; padding:7px 9px 8px; border:1px solid var(--line); border-radius:13px; background:var(--surface); box-shadow:0 1px 2px rgb(0 0 0 / .05) }
+  .debug-compose:focus-within,.debug-compose[data-drop] { border-color:var(--accent) }
+  .debug-compose textarea { width:100%; min-height:42px; padding:3px 2px; border:0; background:transparent; color:var(--text); font:inherit; resize:vertical }
+  .debug-compose textarea:focus-visible { outline:none }
+  .debug-compose .actions { justify-content:space-between; min-height:26px }
+  .debug-attach,.debug-send { display:grid; place-items:center; width:26px; height:26px; padding:0; border:0; border-radius:5px; background:transparent; color:var(--muted) }
+  .debug-attach:hover:not(:disabled) { background:var(--canvas); color:var(--text) }
+  .debug-send { border-radius:50%; background:var(--accent); color:#fff }
+  .debug-send:hover:not(:disabled) { background:#4235cf }
+  .debug-attach svg,.debug-send svg { width:15px; height:15px }
+  .debug-files { display:flex; flex-wrap:wrap; gap:5px }
+  .debug-files:not(:empty) { margin-bottom:4px }
+  .debug-file { display:inline-flex; align-items:center; gap:5px; min-width:0; max-width:100%; padding:2px 6px; border-radius:6px; background:var(--canvas); font-size:12px }
+  .debug-file svg { flex:none; width:13px; height:13px }
+  .debug-file button { border:0; padding:0 2px; background:transparent; color:var(--muted) }
+  details { margin-top:8px; font-size:12px }
+  summary { cursor:pointer; color:var(--accent); width:fit-content }
+  details pre { white-space:pre-wrap; margin-bottom:0 }
+  textarea.field { display:block; width:100%; padding:8px 10px; resize:vertical; color:inherit; font-family:inherit }
+  .resource-panel { min-width:0; padding:0 16px 16px }
+  .resource-panel .tabs { margin-top:10px; flex-wrap:wrap }
+  .resource-panel .tabs button { padding-inline:8px }
+  .counter { border-radius:10px; min-width:16px; padding:0 4px; background:#dedafb; color:#4438bd; font-size:11px }
+  .choice-list { display:grid; gap:8px; margin-top:10px }
+  .choice-card { display:flex; align-items:flex-start; gap:7px; border:1px solid var(--line); border-radius:8px; padding:9px 10px; min-width:0 }
+  .choice-card:has(input:checked) { border-color:#c7bef8; background:#f7f5ff }
+  .choice-card label { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; flex:1; min-width:0; cursor:pointer }
+  .choice-card input { accent-color:var(--accent); margin:3px 0 }
+  .choice-card small { display:block; margin-top:3px; overflow-wrap:anywhere }
+  .choice-card .link { flex:none }
+  .agent-pill { padding:2px 6px; border-radius:4px; background:var(--accent-soft); text-align:left }
+  .session-view { min-height:460px }
+  .session-thread { min-width:0; padding:12px 16px 16px; border-right:1px solid var(--line) }
+  .session-turn { display:grid; gap:10px; margin:10px 0 }
+  .session-turn .message,.session-turn .soft { padding:10px; border-radius:8px; overflow-wrap:anywhere }
+  .session-turn .message { background:var(--accent-soft) }
+  .session-turn .soft { margin:0 }
+  .test-form { display:grid; gap:8px; margin-top:11px }
+  .test-form label { display:grid; gap:4px }
+  .test-form select { max-width:100% }
+  .test-form .btn { justify-self:start }
+  .subtitle { margin-top:3px; color:#43505b; font-size:12px }
+  .segment { display:inline-flex; flex:none; height:32px; padding:3px; gap:2px; border:1px solid var(--line); border-radius:8px; background:#eff3f6 }
+  .segment button, .tabs button { display:inline-flex; align-items:center; justify-content:center; gap:5px; padding:0 9px; min-width:0; border:0; border-radius:5px; background:transparent; color:#424d58; font-size:12px; white-space:nowrap }
+  .segment button[aria-selected=true] { color:var(--accent); background:var(--surface) }
+  .segment button svg { width:14px; height:14px }
+  .tabs { display:flex; gap:4px; margin:17px 0 12px; padding-bottom:7px; border-bottom:1px solid var(--hairline) }
+  .tabs button { height:28px; padding:0 10px }
+  .tabs button[aria-selected=true] { color:var(--accent); background:var(--accent-soft) }
+  .toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:32px; margin:0 0 8px }
+  .actions,.inline { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0 }
+  .btn, .field, select { border:1px solid var(--line); border-radius:8px; background:var(--surface); min-height:32px; padding:0 10px; font-size:12px }
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap }
+  .btn:hover:not(:disabled) { background:var(--canvas) }
+  .btn.primary { background:var(--accent); color:white; border-color:var(--accent) }
+  .btn.primary:hover:not(:disabled) { background:#4235cf }
+  .link { color:var(--accent); background:transparent; border:0; padding:0; font:inherit; font-size:12px }
+  .link:hover { text-decoration:underline }
+  .search { position:relative; display:inline-flex; align-items:center; color:var(--muted) }
+  .search svg { position:absolute; left:9px; pointer-events:none; width:14px; height:14px }
+  .search input { padding-left:29px; width:188px }
+  .split { display:grid; grid-template-columns:minmax(0, 1.8fr) minmax(315px, 1fr); gap:14px }
+  .workbench { display:grid; grid-template-columns:minmax(0, 1.8fr) minmax(315px, 1fr); border:1px solid var(--line); border-radius:8px; min-height:555px; overflow:hidden }
+  .box { min-width:0; border:1px solid var(--line); border-radius:8px; background:var(--surface); overflow:hidden }
+  .table-scroll { overflow:auto; min-width:0 }
+  .list-column { display:flex; flex-direction:column; min-width:0; border-right:1px solid var(--line) }
+  table { width:100%; border-collapse:collapse; text-align:left; font-size:13px; table-layout:fixed; min-width:430px }
+  th { background:var(--canvas); color:#485463; font-size:12px; font-weight:500; padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap }
+  td { padding:8px 12px; border-bottom:1px solid var(--hairline) }
+  tr:last-child td { border-bottom:0 }
+  tr.active td { background:var(--accent-soft) }
+  tr.pickable { cursor:pointer }
+  tr.pickable:hover:not(.active) td { background:var(--canvas) }
+  .row-name { display:block; width:100%; text-align:left; border:0; background:transparent; padding:0; font-weight:600; font-size:13px; line-height:1.35 }
+  .truncate { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .subline { display:block; margin-top:2px; font-size:11px; color:var(--muted) }
+  .protocol { display:inline-flex; align-items:center; gap:5px; white-space:nowrap }
+  .protocol svg { color:var(--accent); width:14px; height:14px }
+  .status { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; font-size:12px; color:var(--muted) }
+  .status::before { content:""; width:6px; height:6px; border-radius:50%; background:#9aa5af; flex:none }
+  .status.good { color:#216737 }.status.good::before { background:#228849 }
+  .status.wait { color:#8c5e11 }.status.wait::before { background:#cf9229 }
+  .status.run { color:#4240b4 }.status.run::before { background:#6b61ee }
+  .status.fail { color:#a52d36 }.status.fail::before { background:#bd3c3c }
+  .footer-count { margin-top:auto; padding:9px 12px; border-top:1px solid var(--hairline); font-size:12px; color:var(--muted) }
+  .inspector { min-width:0 }
+  .inspector-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:7px; padding:10px 13px; min-height:45px; border-bottom:1px solid var(--hairline) }
+  .inspector-head h3 { overflow-wrap:anywhere }
+  .inspector-body { padding:11px 13px 16px }
+  .muted { color:var(--muted); font-size:12px }
+  .facts { display:grid; gap:8px; margin:10px 0 0 }
+  .facts > div { display:grid; grid-template-columns:76px minmax(0, 1fr); gap:8px }
+  .facts dt { color:var(--muted); font-size:12px }
+  .facts dd { min-width:0; overflow-wrap:anywhere; font-size:12px }
+  .divider { display:flex; align-items:center; gap:9px; margin-top:15px; font-size:12px; font-weight:600 }
+  .divider::after { content:""; height:1px; background:var(--line); flex:1 }
+  .soft { margin-top:8px; padding:9px 10px; border-radius:8px; background:#f4f5f6 }
+  .soft pre { margin:6px 0 0; white-space:pre-wrap; padding:7px 9px; border-radius:5px; background:white }
+  .tools-list { display:grid; gap:4px; margin-top:9px; padding-left:17px }
+  .timeline { display:grid; gap:8px; list-style:none; padding:2px 0 2px 10px; margin:10px 0 0 3px; border-left:1px solid var(--line) }
+  .timeline li { position:relative; display:flex; justify-content:space-between; gap:10px; font-size:12px }
+  .timeline li:last-child::before { content:""; position:absolute; left:-13px; top:7px; width:5px; height:5px; background:var(--accent); border-radius:50% }
+  .timeline time { color:var(--muted); white-space:nowrap }
+  .empty { padding:42px 12px; text-align:center; color:var(--muted) }
+  .panel-note { margin-top:9px; font-size:12px; color:var(--muted) }
+  .server { margin-top:12px }
+  .server .split .box { min-height:250px }
+  .server-tabs { margin-left:auto }
+  .server .workbench { min-height:330px }
+  .server-bottom { margin-top:17px }
+  .copy { color:var(--accent); border:0; border-radius:4px; background:transparent; padding:2px 3px }
+  .copy svg { width:13px; height:13px }
+  .toast { position:fixed; bottom:20px; right:20px; max-width:calc(100% - 40px); border:1px solid var(--line); border-radius:8px; padding:8px 12px; background:var(--surface); box-shadow:0 4px 18px rgb(23 28 37 / .12); z-index:2 }
+  @media(max-width:1170px) {
+    .workbench,.split { grid-template-columns:minmax(0,1.55fr) minmax(280px,1fr) }
+    th,td { padding-left:9px; padding-right:9px }
+  }
+  @media(max-width:1010px) {
+    aside.sidebar { width:56px; padding:9px 6px }
+    .brand { padding:5px 7px }.brand div,.nav li span,.nav .nav-heading { display:none }
+    .nav li { justify-content:center; padding:9px 5px }
+    .nav button { justify-content:center; padding:9px 5px }
+    main { margin-left:56px; padding:16px }
+  }
+  @media(max-width:1180px) {
+    .connection-editor { grid-template-columns:minmax(292px,.72fr) minmax(0,1.28fr) }
+    .connection-summary { grid-column:2; margin:0 16px; padding:10px 0 16px; border-top:1px solid var(--line) }
+    .connection-summary::before { display:none }
+  }
+  @media(max-width:760px) {
+    .workbench,.split { grid-template-columns:minmax(0,1fr); min-height:0 }
+    .list-column { border-right:0; border-bottom:1px solid var(--line); min-height:160px }
+    .server .split .box { min-height:0 }
+    .toolbar { flex-wrap:wrap }
+    .server-tabs { margin:0 }
+    .agent-editor { grid-template-columns:1fr; min-height:0 }
+    .agent-fields,.session-thread { border-right:0; border-bottom:1px solid var(--line) }
+    .agent-fields textarea { min-height:76px; height:76px }
+    .record-workbench { height:auto }
+    .record-workbench .list-column { min-height:210px }
+    .record-filters .actions { margin-left:0 }
+    .connection-editor .agent-fields::after { display:none }
+    .connection-editor .agent-fields,.connection-editor .debug-side { padding-inline:0 }
+    .connection-summary { grid-column:auto; margin:0 }
+  }
+  @media(max-width:470px) {
+    main { margin-left:0; padding:12px }
+    aside.sidebar { display:none }
+    .search input { width:162px }
+  }
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 11a7 7 0 0 1-7 7H5l-2 3v-8a8 8 0 0 1 8-9h3a7 7 0 0 1 7 7Z"/><path d="M8 11h8M8 14h5"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M2 12v4m20-4v4M9 12v3m6-3v3"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 8H7a4 4 0 0 0 0 8h3m4-8h3a4 4 0 0 1 0 8h-3m-6-4h8"/></symbol>
+  <symbol id="i-a2a" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4m-6 4v-4h12v4"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5m6-5v5M7 8h10v4a5 5 0 0 1-10 0Zm5 9v4"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 6 6 6-6 6m9 0h7"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m7 6-6 6 6 6m10-12 6 6-6 6m-3-15-4 18"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="m15 5 4 4M4 20l5-1L21 7l-4-4L5 15Z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18m-15 0 1 14h10l1-14M9 6V3h6v3m-5 4v6m4-6v6"/></symbol>
+  <symbol id="i-attach" viewBox="0 0 24 24"><path d="m21.4 11.6-8.8 8.8a5.1 5.1 0 0 1-7.2-7.2L15 3.6a3.4 3.4 0 0 1 4.8 4.8l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.6-8.6"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 2h8l5 5v15H6zM14 2v6h5M9 13h7m-7 4h7"/></symbol>
+  <symbol id="i-warning" viewBox="0 0 24 24"><path d="M10.3 4.6a2 2 0 0 1 3.4 0l7.8 13.5a2 2 0 0 1-1.7 3H4.2a2 2 0 0 1-1.7-3zM12 9v4m0 4h.01"/></symbol>
+  <symbol id="i-switch" viewBox="0 0 24 24"><path d="M4 8h15m-4-4 4 4-4 4m5 4H5m4-4-4 4 4 4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m12 5-7 7 7 7M5 12h14"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M3 7h18M3 17h18"/><circle cx="8" cy="7" r="2" fill="#f3f6f7"/><circle cx="16" cy="17" r="2" fill="#f3f6f7"/></symbol>
+</svg>
+
+<aside class="sidebar" aria-label="DeepAgent 控制台">
+  <div class="brand"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNzggMzQwIiB3aWR0aD0iMjc4IiBoZWlnaHQ9IjM0MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsbGVkYnk9InRpdGxlIj48dGl0bGUgaWQ9InRpdGxlIj5EZWVwQWdlbnQgRCByb3VuZGVkIOKAlCByZWZlcmVuY2UgdHJhY2VkPC90aXRsZT48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9InB1cnBsZSIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjEiPjxzdG9wIHN0b3AtY29sb3I9IiM2MzQ4RkYiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM1ODQwRjUiLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48ZyBpZD0ic2lsaG91ZXR0ZSIgZmlsbD0idXJsKCNwdXJwbGUpIj48cGF0aCBkPSJNMTMzLjY2LDE4LjExTDEzMy42NiwxOC4xMVExMzIuMDAsMTcuMDAgMTMwLjAyLDE2Ljc1TDExNy45OCwxNS4yNVExMTYuMDAsMTUuMDAgMTE0LjEzLDE1LjcyTDEwNC44NywxOS4yOFExMDMuMDAsMjAuMDAgMTAxLjUxLDIxLjMzTDk1LjQ5LDI2LjY3UTk0LjAwLDI4LjAwIDkzLjE3LDI5LjgyTDg5LjgzLDM3LjE4UTg5LjAwLDM5LjAwIDg5LjAwLDQxLjAwTDg5LjAwLDUyLjAwUTg5LjAwLDU0LjAwIDg5LjcwLDU1Ljg3TDkxLjMwLDYwLjEzUTkyLjAwLDYyLjAwIDkzLjM1LDYzLjQ4TDEwMC44Nyw3MS43NlExMDIuMDAsNzMuMDAgMTAzLjUwLDczLjc1TDEwNi41MCw3NS4yNVExMDguMDAsNzYuMDAgMTA3Ljk1LDc3LjY4TDEwNy4wNiwxMDcuMDBRMTA3LjAwLDEwOS4wMCAxMDUuMDAsMTA5LjAwTDMzLjAwLDEwOS4wMFEzMS4wMCwxMDkuMDAgMjkuMTMsMTA5LjcwTDI0Ljg3LDExMS4zMFEyMy4wMCwxMTIuMDAgMjEuNzMsMTEzLjU1TDE1LjI3LDEyMS40NVExNC4wMCwxMjMuMDAgMTMuOTksMTI1LjAwTDEzLjAxLDMxMC4wMFExMy4wMCwzMTIuMDAgMTMuOTYsMzEzLjc2TDE4LjE0LDMyMS40MlExOS4wMCwzMjMuMDAgMjAuNTAsMzI0LjAwTDIzLjY4LDMyNi4xMlEyNS4wMCwzMjcuMDAgMjYuNTAsMzI3LjUwTDI5LjUwLDMyOC41MFEzMS4wMCwzMjkuMDAgMzIuNTgsMzI4Ljk5TDE5OC4wMCwzMjguMDFRMjAwLjAwLDMyOC4wMCAyMDEuOTAsMzI3LjM3TDIxNi4xMCwzMjIuNjNRMjE4LjAwLDMyMi4wMCAyMTkuNjksMzIwLjkzTDIzOC4zMSwzMDkuMDdRMjQwLjAwLDMwOC4wMCAyNDEuMzYsMzA2LjUzTDI1MS42NCwyOTUuNDdRMjUzLjAwLDI5NC4wMCAyNTMuOTYsMjkyLjI1TDI2My4wNCwyNzUuNzVRMjY0LjAwLDI3NC4wMCAyNjQuNjMsMjcyLjEwTDI2Ni4zNywyNjYuOTBRMjY3LjAwLDI2NS4wMCAyNjcuMjgsMjYzLjAyTDI2OS43MiwyNDUuOThRMjcwLjAwLDI0NC4wMCAyNzAuMDAsMjQyLjAwTDI3MC4wMCwxOTguMDBRMjcwLjAwLDE5Ni4wMCAyNjkuNzIsMTk0LjAyTDI2Ny4yOCwxNzYuOThRMjY3LjAwLDE3NS4wMCAyNjYuMzEsMTczLjEyTDI2MC42OSwxNTcuODhRMjYwLjAwLDE1Ni4wMCAyNTguOTcsMTU0LjI5TDI1NS4wMywxNDcuNzFRMjU0LjAwLDE0Ni4wMCAyNTIuNzEsMTQ0LjQ3TDI0NC4yOSwxMzQuNTNRMjQzLjAwLDEzMy4wMCAyNDEuNDEsMTMxLjc5TDIyNy41OSwxMjEuMjFRMjI2LjAwLDEyMC4wMCAyMjQuMjEsMTE5LjExTDIxNS43OSwxMTQuODlRMjE0LjAwLDExNC4wMCAyMTIuMDUsMTEzLjU0TDE5NC45NSwxMDkuNDZRMTkzLjAwLDEwOS4wMCAxOTEuMDAsMTA4Ljk3TDEzNS4wMCwxMDguMDNRMTMzLjAwLDEwOC4wMCAxMzMuMDAsMTA2LjAwTDEzMy4wMCw3OC4wMFExMzMuMDAsNzYuMDAgMTM0Ljc0LDc1LjAxTDEzOC4yNiw3Mi45OVExNDAuMDAsNzIuMDAgMTQxLjMzLDcwLjUxTDE0Ni42Nyw2NC40OVExNDguMDAsNjMuMDAgMTQ4LjY4LDYxLjEyTDE1MS4zMiw1My44OFExNTIuMDAsNTIuMDAgMTUxLjg3LDUwLjAwTDE1MS4xMywzOS4wMFExNTEuMDAsMzcuMDAgMTQ5Ljk5LDM1LjI3TDE0NS4wMSwyNi43M1ExNDQuMDAsMjUuMDAgMTQyLjM0LDIzLjg5WiIvPjwvZz48ZyBpZD0iZmFjZSIgZmlsbD0iI0ZDRkNGRiI+PHBhdGggZD0iTTU4LjQxLDE3OS41OUw1OC40MSwxNzkuNTlRNTcuMDAsMTgxLjAwIDU2LjM3LDE4Mi45MEw1Mi42MywxOTQuMTBRNTIuMDAsMTk2LjAwIDUyLjAwLDE5OC4wMEw1Mi4wMCwyNDMuMDBRNTIuMDAsMjQ1LjAwIDUyLjQ5LDI0Ni45NEw1NC41MSwyNTUuMDZRNTUuMDAsMjU3LjAwIDU2LjE4LDI1OC42Mkw2MS44MiwyNjYuMzhRNjMuMDAsMjY4LjAwIDY0LjY2LDI2OS4xMUw3MC4zNCwyNzIuODlRNzIuMDAsMjc0LjAwIDczLjkyLDI3NC41N0w4MC4wOCwyNzYuNDNRODIuMDAsMjc3LjAwIDg0LjAwLDI3Ny4wMEwxODUuMDAsMjc3LjAwUTE4Ny4wMCwyNzcuMDAgMTg4LjkzLDI3Ni40N0wxOTYuNTksMjc0LjM4UTE5OC4wMCwyNzQuMDAgMTk5LjI1LDI3My4yNUwyMDEuNzUsMjcxLjc1UTIwMy4wMCwyNzEuMDAgMjAzLjk1LDI2OS44OUwyMTMuNzAsMjU4LjUyUTIxNS4wMCwyNTcuMDAgMjE1LjUzLDI1NS4wN0wyMTcuNDcsMjQ3LjkzUTIxOC4wMCwyNDYuMDAgMjE4LjAwLDI0NC4wMEwyMTguMDAsMTk3LjAwUTIxOC4wMCwxOTUuMDAgMjE3LjMzLDE5My4xMkwyMTMuNjcsMTgyLjg4UTIxMy4wMCwxODEuMDAgMjExLjY3LDE3OS41MUwyMDYuMzMsMTczLjQ5UTIwNS4wMCwxNzIuMDAgMjAzLjI2LDE3MS4wMUwxOTkuNzQsMTY4Ljk5UTE5OC4wMCwxNjguMDAgMTk2LjEwLDE2Ny4zN0wxOTAuOTAsMTY1LjYzUTE4OS4wMCwxNjUuMDAgMTg3LjAwLDE2NS4wMEw4My4wMCwxNjUuMDBRODEuMDAsMTY1LjAwIDc5LjEzLDE2NS43Mkw2OS44NywxNjkuMjhRNjguMDAsMTcwLjAwIDY2LjU5LDE3MS40MVoiLz48L2c+PGcgaWQ9ImV5ZXMiIGZpbGw9IiM2MDQ1RkEiPjxwYXRoIGQ9Ik0xNjkuMDAsMTg2LjAwTDE2OS4wMCwxODYuMDBRMTY3LjAwLDE4Ni4wMCAxNjUuNDAsMTg3LjIwTDE2MC4wOCwxOTEuMTlRMTU5LjAwLDE5Mi4wMCAxNTguNTAsMTkzLjI1TDE1Ny41MCwxOTUuNzVRMTU3LjAwLDE5Ny4wMCAxNTcuMDAsMTk4LjM1TDE1Ny4wMCwyNDIuNDJRMTU3LjAwLDI0NC4wMCAxNTcuNTAsMjQ1LjUwTDE1OC41NSwyNDguNjZRMTU5LjAwLDI1MC4wMCAxNjAuMDAsMjUxLjAwTDE2Mi4wNSwyNTMuMDVRMTYzLjAwLDI1NC4wMCAxNjQuMjUsMjU0LjUwTDE2Ni43NSwyNTUuNTBRMTY4LjAwLDI1Ni4wMCAxNjkuMzUsMjU2LjAwTDE3My4yNSwyNTYuMDBRMTc1LjAwLDI1Ni4wMCAxNzYuNDAsMjU0Ljk1TDE4MS45MiwyNTAuODFRMTgzLjAwLDI1MC4wMCAxODMuNTAsMjQ4Ljc1TDE4NC41MCwyNDYuMjVRMTg1LjAwLDI0NS4wMCAxODUuMDAsMjQzLjY1TDE4NS4wMCwxOTguMzVRMTg1LjAwLDE5Ny4wMCAxODQuNTAsMTk1Ljc1TDE4My41MCwxOTMuMjVRMTgzLjAwLDE5Mi4wMCAxODIuMDUsMTkxLjA1TDE3OS43OSwxODguNzlRMTc5LjAwLDE4OC4wMCAxNzguMDAsMTg3LjUwTDE3Ni4wMCwxODYuNTBRMTc1LjAwLDE4Ni4wMCAxNzMuODgsMTg2LjAwWiIvPjxwYXRoIGQ9Ik05Ny4wMCwxODYuMDBMOTcuMDAsMTg2LjAwUTk1LjAwLDE4Ni4wMCA5My40MCwxODcuMjBMODguMDgsMTkxLjE5UTg3LjAwLDE5Mi4wMCA4Ni41MCwxOTMuMjVMODUuNTAsMTk1Ljc1UTg1LjAwLDE5Ny4wMCA4NS4wMCwxOTguMzVMODUuMDAsMjQyLjQyUTg1LjAwLDI0NC4wMCA4NS41MCwyNDUuNTBMODYuNTUsMjQ4LjY2UTg3LjAwLDI1MC4wMCA4OC4wMCwyNTEuMDBMOTAuMjEsMjUzLjIxUTkxLjAwLDI1NC4wMCA5Mi4wMCwyNTQuNTBMOTQuMDAsMjU1LjUwUTk1LjAwLDI1Ni4wMCA5Ni4xMiwyNTYuMDBMMTAwLjY1LDI1Ni4wMFExMDIuMDAsMjU2LjAwIDEwMy4yNSwyNTUuNTBMMTA1Ljc1LDI1NC41MFExMDcuMDAsMjU0LjAwIDEwNy45NSwyNTMuMDVMMTEwLjA1LDI1MC45NVExMTEuMDAsMjUwLjAwIDExMS41MCwyNDguNzVMMTEyLjUwLDI0Ni4yNVExMTMuMDAsMjQ1LjAwIDExMy4wMCwyNDMuNjVMMTEzLjAwLDE5OC4zNVExMTMuMDAsMTk3LjAwIDExMi41MCwxOTUuNzVMMTExLjUwLDE5My4yNVExMTEuMDAsMTkyLjAwIDExMC4wNSwxOTEuMDVMMTA3Ljc5LDE4OC43OVExMDcuMDAsMTg4LjAwIDEwNi4wMCwxODcuNTBMMTA0LjAwLDE4Ni41MFExMDMuMDAsMTg2LjAwIDEwMS44OCwxODYuMDBaIi8+PC9nPjxnIGlkPSJoaWdobGlnaHRzIiBmaWxsPSIjQTg5N0ZGIj48L2c+PC9zdmc+" alt=""><div><b>DeepAgent</b><small>原型</small></div></div>
+  <ul class="nav" id="main-nav"></ul>
+  <ul class="nav sidebar-bottom" id="bottom-nav"></ul>
+</aside>
+
+<main>
+  <nav class="prototype-nav" aria-label="切换原型页面">
+    <span class="prototype-label">原型页面</span>
+    <button type="button" class="btn" data-page="integration">对外服务</button>
+    <button type="button" class="btn" data-page="connections" aria-current="page">外部调用</button>
+    <button type="button" class="btn" data-page="connection-editor">连接调试</button>
+    <button type="button" class="btn" data-page="agents">Agent 列表</button>
+    <button type="button" class="btn" data-page="editor">Agent 编辑</button>
+    <button type="button" class="btn" data-page="test">测试</button>
+  </nav>
+  <section id="page-integration" hidden>
+  <header>
+    <div class="page-heading">
+      <h1>对外服务</h1>
+    </div>
+    <p class="subtitle">将本地 Agent 提供给外部客户端调用。</p>
+  </header>
+
+  <section id="server" class="server">
+    <div class="split">
+      <section>
+        <div class="toolbar"><h2>Agent 发布</h2><button type="button" class="btn primary" disabled><svg aria-hidden="true"><use href="#i-plus"/></svg>发布 Agent</button></div>
+        <div class="box table-scroll">
+          <table aria-label="Agent 发布">
+            <colgroup><col style="width:29%"><col style="width:23%"><col style="width:20%"><col></colgroup>
+            <thead><tr><th>发布名称</th><th>关联 Agent</th><th>应用范围</th><th>最近更新</th></tr></thead>
+            <tbody id="server-rows"></tbody>
+          </table>
+        </div>
+      </section>
+      <section>
+        <div class="toolbar">
+          <div class="segment server-tabs" role="tablist" aria-label="服务端接入方式" id="server-tabs">
+            <button id="server-a2a" type="button" role="tab" aria-selected="true" aria-controls="server-access"><svg aria-hidden="true"><use href="#i-a2a"/></svg>A2A</button>
+            <button id="server-mcp" type="button" role="tab" aria-selected="false" aria-controls="server-access"><svg aria-hidden="true"><use href="#i-plug"/></svg>MCP</button>
+            <button id="server-cli" type="button" role="tab" aria-selected="false" aria-controls="server-access"><svg aria-hidden="true"><use href="#i-terminal"/></svg>CLI</button>
+            <button id="server-sdk" type="button" role="tab" aria-selected="false" aria-controls="server-access"><svg aria-hidden="true"><use href="#i-code"/></svg>SDK</button>
+          </div>
+        </div>
+        <div class="box inspector-body" id="server-access" role="tabpanel" aria-labelledby="server-a2a"></div>
+      </section>
+    </div>
+    <section class="server-bottom">
+      <div class="toolbar"><h2>近期任务</h2></div>
+      <div class="workbench">
+        <div class="list-column"><div class="table-scroll"><table aria-label="服务端近期任务">
+          <colgroup><col style="width:44%"><col style="width:16%"><col style="width:16%"><col></colgroup>
+          <thead><tr><th>任务</th><th>状态</th><th>接入方式</th><th>提交时间</th></tr></thead>
+          <tbody><tr><td><b>核对本月预算与实际差额</b><code class="subline">607765e2</code></td><td><span class="status good">已完成</span></td><td>A2A</td><td>11/15 09:20</td></tr></tbody>
+        </table></div><footer class="footer-count">共 1 条任务</footer></div>
+        <section class="inspector"><header class="inspector-head"><h3>核对本月预算与实际差额</h3><span class="status good">已完成</span></header><div class="inspector-body"><dl class="facts"><div><dt>接入方式</dt><dd>A2A</dd></div><div><dt>调用方</dt><dd>本地验收用户</dd></div><div><dt>提交时间</dt><dd>2026/11/15 09:20:12</dd></div></dl></div></section>
+      </div>
+    </section>
+  </section>
+  </section>
+
+  <section id="page-external" class="prototype-page">
+    <header class="page-heading">
+      <div><h1>外部调用</h1><p class="subtitle">接入外部 Agent，作为工具调用。</p></div>
+    </header>
+    <section id="external-connections" aria-labelledby="external-connections-title">
+      <div class="toolbar connections-toolbar">
+        <h2 id="external-connections-title">Agent 连接</h2>
+        <div class="actions">
+        <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input class="field" id="connection-search" type="search" aria-label="搜索外部连接" placeholder="搜索连接"></label>
+        <div class="segment view-controls" role="group" aria-label="连接展示方式">
+          <button type="button" id="show-cards" aria-pressed="true" aria-label="卡片视图" title="卡片视图"><svg aria-hidden="true"><use href="#i-grid"/></svg></button>
+          <button type="button" id="show-list" aria-pressed="false" aria-label="列表视图" title="列表视图"><svg aria-hidden="true"><use href="#i-list"/></svg></button>
+        </div>
+        <button type="button" class="btn primary" id="new-connection"><svg aria-hidden="true"><use href="#i-plus"/></svg>添加 Agent</button>
+        </div>
+      </div>
+      <div class="external-cards" id="connection-cards" aria-label="外部连接卡片"></div>
+      <div class="box table-scroll connection-table" id="connection-list" hidden>
+        <table aria-label="外部连接列表">
+          <colgroup><col style="width:22%"><col style="width:15%"><col><col style="width:14%"><col style="width:90px"></colgroup>
+          <thead><tr><th scope="col">连接名称</th><th scope="col">接入方式</th><th scope="col">用途</th><th scope="col">环境状态</th><th scope="col" style="text-align:right">操作</th></tr></thead>
+          <tbody id="connection-rows"></tbody>
+        </table>
+      </div>
+    </section>
+    <section id="external-records" aria-labelledby="recent-records-heading">
+      <div class="toolbar record-filters">
+        <h2 id="recent-records-heading" tabindex="-1">近期调用</h2>
+        <div class="actions">
+          <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input class="field" id="task-search" type="search" aria-label="搜索调用记录" placeholder="搜索任务名称或 ID"></label>
+          <select id="task-connection" aria-label="按外部连接筛选"></select>
+          <select id="task-source" aria-label="按发起方式筛选"><option value="">全部发起方式</option><option value="agent">本地 Agent</option><option value="debug">直连调试</option></select>
+          <select id="task-status" aria-label="按任务状态筛选"><option value="">全部状态</option><option>待补材料</option><option>进行中</option><option>已完成</option><option>失败</option></select>
+        </div>
+      </div>
+      <div class="workbench record-workbench">
+        <section class="list-column" aria-label="调用记录列表">
+          <div class="table-scroll"><table aria-label="近期调用">
+            <colgroup><col style="width:35%"><col><col style="width:88px"><col style="width:101px"><col style="width:108px"></colgroup>
+            <thead><tr><th scope="col">任务</th><th scope="col">外部连接</th><th scope="col">状态</th><th scope="col">发起方式</th><th scope="col">提交时间</th></tr></thead>
+            <tbody id="task-rows"></tbody>
+          </table></div>
+          <footer class="footer-count"><span id="task-count"></span><span class="muted">演示记录 · 内存保留最近 30 条</span></footer>
+        </section>
+        <section class="inspector" id="task-detail" aria-label="调用详情"></section>
+      </div>
+    </section>
+  </section>
+  <section class="prototype-page" id="page-agents" hidden>
+    <header class="page-heading">
+      <div><h1>Agent</h1><p class="subtitle">管理本地 Agent 的提示词、工具与外部连接。</p></div>
+      <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="agent-search" class="field" type="search" aria-label="搜索本地 Agent" placeholder="搜索 Agent"></label>
+    </header>
+    <div id="agent-cards" class="agent-cards"></div>
+  </section>
+
+  <section class="prototype-page" id="page-editor" hidden>
+    <header class="page-heading">
+      <div class="inline"><button type="button" class="btn" data-page="agents">返回</button><h1 id="agent-edit-heading"></h1></div>
+      <div class="actions"><button type="button" id="launch-test" class="btn">发起测试</button><button type="button" id="save-agent" class="btn primary">保存</button></div>
+    </header>
+    <div class="box agent-editor">
+      <section class="agent-fields" aria-label="基础信息与提示词">
+        <label>名称<input class="field" id="local-agent-name" readonly></label>
+        <label>默认模型<input class="field" id="local-agent-model" value="gpt-6.1-terra" readonly></label>
+        <label>System Prompt<textarea class="field" id="local-agent-prompt" rows="13" readonly></textarea></label>
+      </section>
+      <section class="resource-panel" aria-label="Agent 资源配置">
+        <div class="tabs" id="resource-tabs" role="tablist" aria-label="Agent 资源类型">
+          <button type="button" id="resource-builtin" role="tab" aria-selected="false" aria-controls="existing-resource">内置</button>
+          <button type="button" id="resource-ui" role="tab" aria-selected="false" aria-controls="existing-resource">UI</button>
+          <button type="button" id="resource-mcp" role="tab" aria-selected="false" aria-controls="existing-resource"><svg aria-hidden="true"><use href="#i-plug"/></svg>MCP</button>
+          <button type="button" id="resource-external" role="tab" aria-selected="true" aria-controls="external-resource"><svg aria-hidden="true"><use href="#i-terminal"/></svg>外部 Agent <span class="counter" id="bound-count"></span></button>
+          <button type="button" id="resource-skill" role="tab" aria-selected="false" aria-controls="existing-resource">Skill</button>
+          <button type="button" id="resource-output" role="tab" aria-selected="false" aria-controls="existing-resource">输出</button>
+        </div>
+        <section id="existing-resource" role="tabpanel" hidden></section>
+        <section id="external-resource" role="tabpanel" aria-labelledby="resource-external">
+          <div class="toolbar">
+            <p class="muted">勾选此 Agent 可以使用的外部连接。</p>
+            <button type="button" class="link" data-page="connections">管理连接</button>
+          </div>
+          <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input class="field" id="resource-search" type="search" aria-label="搜索可用连接" placeholder="搜索外部 Agent"></label>
+          <div class="choice-list" id="external-options"></div>
+        </section>
+      </section>
+    </div>
+  </section>
+
+  <section class="prototype-page" id="page-test" hidden>
+    <header class="page-heading">
+      <div><h1>测试</h1><p class="subtitle">模拟本地 Agent 在对话中调用外部工具。</p></div>
+      <select id="test-agent" aria-label="选择测试 Agent"></select>
+    </header>
+    <div class="workbench session-view">
+      <section class="session-thread">
+        <h2>对话</h2>
+        <div id="test-thread"></div>
+        <form class="test-form" id="test-form">
+          <label>模拟调用目标<select id="test-target" required></select></label>
+          <label>输入消息<textarea class="field" id="test-prompt" rows="2" required maxlength="500">请检查项目 README 的运行说明</textarea></label>
+          <button type="submit" class="btn primary" id="simulate-task">模拟发送</button>
+        </form>
+      </section>
+      <section class="inspector" aria-label="测试概览">
+        <header class="inspector-head"><h3>概览</h3></header>
+        <div class="inspector-body" id="test-overview"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="prototype-page" id="page-connection-editor" hidden>
+    <header class="page-heading">
+      <div class="inline"><button type="button" class="editor-back" data-page="connections"><svg aria-hidden="true"><use href="#i-back"/></svg>返回</button><h1 id="edit-title">添加连接</h1><span id="editor-driver-badge"></span></div>
+      <button type="submit" class="btn primary" form="edit-form">保存连接</button>
+    </header>
+    <div class="agent-editor connection-editor">
+      <form class="agent-fields" id="edit-form" aria-label="连接配置" novalidate>
+        <h2>连接配置</h2>
+        <label>连接名称<input class="field" name="name" required maxlength="60"></label>
+        <label>用途说明<input class="field" name="description" maxlength="120" placeholder="说明可委托的任务"></label>
+        <section class="driver-section driver-picker" aria-labelledby="driver-options-title">
+          <h3 id="driver-options-title">接入方式</h3>
+          <div id="driver-options" class="driver-options" role="group" aria-labelledby="driver-options-title" aria-describedby="driver-launch"></div>
+          <p class="driver-launch" id="driver-launch"></p>
+        </section>
+        <section class="driver-section" aria-labelledby="driver-config-title">
+          <div class="config-heading">
+            <h3 id="driver-config-title">接入配置</h3>
+            <button type="button" class="link config-toggle" id="config-toggle"><svg aria-hidden="true"><use href="#i-switch"/></svg><span id="config-toggle-label">切换为 JSON</span></button>
+          </div>
+          <div class="config-editor-body" id="config-editor-body">
+            <div id="driver-fields" class="driver-fields"></div>
+            <textarea class="field json-editor" id="driver-json" aria-label="接入配置 JSON" aria-describedby="config-error" spellcheck="false" autocomplete="off" hidden></textarea>
+          </div>
+          <p class="config-error" id="config-error" role="alert" hidden></p>
+        </section>
+      </form>
+      <section class="resource-panel debug-side" id="debug-panel" aria-labelledby="debug-heading">
+        <div class="toolbar"><h2 id="debug-heading">直连调试</h2><button type="button" class="btn" id="debug-new">新对话</button></div>
+        <div class="debug-workspace">
+          <p id="debug-notice" class="muted" role="status"></p>
+          <div class="debug-context" id="debug-context"></div>
+          <div class="debug-thread" id="debug-thread" aria-live="polite"></div>
+          <form class="debug-compose" id="debug-form" aria-describedby="debug-notice">
+            <div class="debug-files" id="debug-files" aria-label="待发送附件" hidden></div>
+            <input type="file" id="debug-file-input" aria-label="选择附件" multiple accept="image/*,.docx,.xlsx,.txt,.log,.csv,.json,.md,.html,.xml,.mp3,.wav,.mp4" hidden>
+            <textarea id="debug-prompt" aria-label="调试消息" rows="2" maxlength="500" placeholder="输入要发给外部 Agent 的消息"></textarea>
+            <div class="actions">
+              <button type="button" class="debug-attach" id="debug-attach" aria-label="添加附件" title="添加附件"><svg aria-hidden="true"><use href="#i-attach"/></svg></button>
+              <button type="submit" class="debug-send" id="debug-send" aria-label="发送消息" title="发送消息"><svg aria-hidden="true"><use href="#i-send"/></svg></button>
+            </div>
+          </form>
+        </div>
+      </section>
+      <aside class="inspector connection-summary" id="editor-card-summary" aria-label="调试概览"></aside>
+    </div>
+  </section>
+</main>
+
+<dialog class="config-dialog" id="config-form-dialog" aria-labelledby="config-dialog-title" aria-describedby="config-dialog-note">
+  <h2 id="config-dialog-title">切换为 UI</h2>
+  <p id="config-dialog-note">部分 JSON 配置可能无法转换到 UI。无法转换的内容会从草稿中移除，保存后生效。</p>
+  <form method="dialog" class="actions">
+    <button type="submit" class="btn" value="cancel" autofocus>取消</button>
+    <button type="submit" class="btn primary" value="confirm">确认切换</button>
+  </form>
+</dialog>
+<dialog class="config-dialog" id="delete-connection-dialog" aria-labelledby="delete-connection-title" aria-describedby="delete-connection-note">
+  <h2 id="delete-connection-title">删除外部 Agent</h2>
+  <p id="delete-connection-note"></p>
+  <form method="dialog" class="actions">
+    <button type="submit" class="btn" value="cancel" autofocus>取消</button>
+    <button type="submit" class="btn danger primary" value="confirm">删除</button>
+  </form>
+</dialog>
+<div class="toast" role="status" id="toast" hidden></div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[char]);
+  const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
+  const driverLogo = (id) => `<img class="driver-logo" src="icons/${drivers[id].logo}" alt="" width="16" height="16">`;
+  const driverBadge = ({driver}) => `<span class="external-badge">${driverLogo(driver)}${drivers[driver].name}</span>`;
+  const statusColors = { "正常":"good", "已完成":"good", "待补材料":"wait", "进行中":"run", "失败":"fail", "连接失败":"fail" };
+  const statusBadge = (label) => `<span class="status ${statusColors[label] ?? ""}">${escapeHtml(label)}</span>`;
+  const fact = (label, value) => `<div><dt>${label}</dt><dd>${value || "—"}</dd></div>`;
+  const fieldCode = (value) => value ? `<code>${escapeHtml(value)}</code>` : "";
+  const dateLabel = (time) => time ? time.slice(5, 16) : "—";
+  const copyButton = (value, label) => value ? `<button type="button" class="copy" data-copy="${escapeHtml(value)}" aria-label="复制${label}" title="复制${label}">${icon("copy")}</button>` : "";
+  const inlineId = (value, label) => value ? `<span class="inline"><code title="${escapeHtml(value)}">${escapeHtml(value.slice(0,8))}</code>${copyButton(value, label)}</span>` : "";
+
+  const navigation = [["测试","message","test"],["Agent","bot","agents"],["场景","a2a"],["渠道","link"],["对外服务","link","integration"],["设置"],["模型","bot"],["工具","terminal"],["MCP","plug"],["外部调用","terminal","connections"],["Skill","code"],["诊断"],["会话","message"],["用量","clock"],["日志","code"]];
+  const navItem = ([label, symbol, page]) => {
+    if (!symbol) return `<li class="nav-heading">${label}</li>`;
+    const content = `${icon(symbol)}<span>${label}</span>`;
+    return page ? `<li><button type="button" data-page="${page}" aria-label="${label}">${content}</button></li>`
+      : `<li title="${label}">${content}</li>`;
+  };
+  $("main-nav").innerHTML = navigation.map(navItem).join("");
+  $("bottom-nav").innerHTML = [["系统"],["全局配置","settings"],["开发调试","terminal"],["本地用户","user"]].map(navItem).join("");
+  $("bottom-nav").lastElementChild.classList.add("profile");
+
+  const publications = [
+    { name:"本地预算验证", code:"local-budget-verification", agent:"预算分析助手", scope:"指定应用" },
+    { name:"月度经营分析", code:"monthly-business-review", agent:"经营分析助手", scope:"全部应用" },
+  ];
+  // Brand assets: A2A website, ChatGPT app resources and the CodeBuddy website.
+  const drivers = {
+    a2a:{
+      name:"A2A", title:"A2A", logo:"a2a.svg", transport:"A2A · HTTP", session:"Context ID",
+      launchNote:"读取 Agent Card 获取远端接口，通过 A2A 发送消息并查询任务状态。",
+      fields:[{key:"cardUrl", label:"Agent Card 地址", placeholder:"https://example.com/.well-known/agent-card.json", required:true}],
+    },
+    codex:{
+      name:"Codex Exec", title:"Codex", logo:"codex.png", launch:"codex exec --json", command:"codex", transport:"单次命令 · JSONL", session:"Thread ID", resume:"resume",
+      launchNote:"以非交互模式执行任务，运行事件逐行返回，可跟踪进度和结果。",
+      fields:[
+        {key:"model", label:"模型（可选）", placeholder:"例如 gpt-5.2", help:"填写执行机支持的模型 ID。留空沿用默认模型。"},
+        {key:"sandbox", label:"工作区权限", choices:[["read-only","只读"],["workspace-write","可写工作区"]]},
+      ],
+    },
+    codebuddy:{
+      name:"CodeBuddy -p", title:"CodeBuddy", logo:"codebuddy.svg", launch:"codebuddy -p --output-format json", command:"codebuddy", transport:"单次命令 · JSON", session:"Session ID", resume:"--resume",
+      launchNote:"以非交互模式执行任务，结束时返回一份 JSON 结果。",
+      fields:[{key:"model", label:"模型（可选）", placeholder:"例如 hy4std", help:"填写执行机支持的模型 ID。留空沿用默认模型。"}],
+    },
+  };
+  const localExecution = "DeepAgent 所在机器";
+  const executionFields = [
+    {key:"execution", label:"执行位置", choices:[["local",localExecution],["ssh","SSH 执行机"]]},
+    {key:"sshHost", label:"SSH 主机别名", placeholder:"例如，build-runner"},
+    {key:"command", label:"可执行文件", required:true},
+    {key:"cwd", label:"工作目录", required:true},
+  ];
+  function executionLabel(config) {
+    return config.execution === "ssh" ? `SSH · ${config.sshHost}` : localExecution;
+  }
+  function connectionSnapshot(connection) {
+    const {name,driver,config} = connection;
+    return driver === "a2a" ? {connectionName:name} : {
+      connectionName:name, executor:executionLabel(config), cwd:config.cwd, executable:config.command,
+    };
+  }
+  const connections = [
+    {id:"codex-review", driver:"codex", name:"代码评审", description:"检查变更，给出带代码位置的评审意见。", config:{execution:"local", command:"codex", cwd:"/Users/me/projects/demo", sandbox:"read-only"}, status:"正常", checked:"2026/11/16 10:24:05"},
+    {id:"codebuddy-check", driver:"codebuddy", name:"交付检查", description:"读取项目文档，整理部署步骤和待核对事项。", config:{execution:"ssh", sshHost:"build-runner", command:"codebuddy", cwd:"/srv/projects/delivery"}, status:"正常", checked:"2026/11/16 10:25:10"},
+  ];
+  const agents = [
+    {id:"review-agent", name:"研发助手", prompt:"把代码审阅或仓库排查委派给已配置的外部 Agent，并汇总证据。", connectionIds:["codex-review"]},
+    {id:"delivery-agent", name:"交付助手", prompt:"检查文档中的部署步骤和验收条件，并标出需要确认的事项。", connectionIds:["codebuddy-check"]},
+  ];
+  const tasks = [
+    {id:"84c3d9f2b37044909ce1811acfc49954", connection:"codex-review", driver:"codex", agent:"研发助手", title:"审阅配置改动", ...connectionSnapshot(connections[0]), state:"已完成", submitted:"2026/11/16 10:32:08", session:"5b3b68c26a15495ba7b041d77dd72930", context:"a06c89fb-d661-4e41-bd42-26a8bb7bfafb", turn:"bb9149aced8648a8a14c14d5f04b8a66", response:"已检查当前提交的配置变更，发现一处说明需要更新。", events:[["发起调用","10:32:08"],["命令已启动","10:32:09"],["调用完成","10:32:14"]]},
+    {id:"612abcd35a0d44c8b4fb9b8fe19d5eaa", connection:"codebuddy-check", driver:"codebuddy", agent:"交付助手", title:"检查 README 的安装说明", ...connectionSnapshot(connections[1]), state:"已完成", submitted:"2026/11/16 10:29:12", session:"381c902213074ed595d64c89f12dcc95", context:"0009cc45-2c1f-4f46-baac-839e11b97483", turn:"6bb5116eecef4fc188be3ed8a1d315aa", response:"安装步骤齐全，建议补充运行所需的 Python 版本。", events:[["发起调用","10:29:12"],["客户端已响应","10:29:13"],["调用完成","10:29:15"]]},
+  ];
+  let selectedPublication = 0;
+  let accessTab = "a2a";
+  let selectedConnection = connections[0].id;
+  let selectedTask = tasks[0].id;
+  let editorAgent = agents[0];
+  let testAgent = agents[0];
+  const agentDrafts = new Map();
+  const debugContexts = new Map();
+  const debugAttachments = [];
+  const recordLimit = 30;
+  let editing = null;
+  let editingDriver = "a2a";
+  let configMode = "form";
+  const configDrafts = new Map();
+  let toastTimeout;
+  const form = $("edit-form");
+
+  function setTabs(group, onSelect, sharedPanel) {
+    const buttons = [...group.querySelectorAll('[role="tab"]')];
+    function select(button) {
+      for (const tab of buttons) {
+        const active = tab === button;
+        tab.setAttribute("aria-selected", active);
+        tab.tabIndex = active ? 0 : -1;
+      }
+      const panel = sharedPanel || $(button.getAttribute("aria-controls"));
+      if (!sharedPanel) {
+        for (const tab of buttons) {
+          const otherPanel = $(tab.getAttribute("aria-controls"));
+          otherPanel.hidden = otherPanel !== panel;
+        }
+      }
+      panel.setAttribute("aria-labelledby", button.id);
+      onSelect?.(button.id);
+    }
+    for (const tab of buttons) {
+      tab.tabIndex = tab.getAttribute("aria-selected") === "true" ? 0 : -1;
+      tab.addEventListener("click", () => select(tab));
+      tab.addEventListener("keydown", (event) => {
+        const index = buttons.indexOf(tab);
+        const options = { ArrowRight:(index + 1) % buttons.length, ArrowLeft:(index + buttons.length - 1) % buttons.length, Home:0, End:buttons.length - 1 };
+        if (!(event.key in options)) return;
+        event.preventDefault();
+        const next = buttons[options[event.key]];
+        select(next);
+        next.focus();
+      });
+    }
+  }
+
+  function notify(message) {
+    const toast = $("toast");
+    toast.textContent = message;
+    toast.hidden = false;
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => toast.hidden = true, 2800);
+  }
+
+  function renderServer() {
+    $("server-rows").innerHTML = publications.map((publication, index) => `
+      <tr class="pickable ${index === selectedPublication ? "active" : ""}" data-publication="${index}">
+        <td><button class="row-name truncate" aria-pressed="${index === selectedPublication}">${publication.name}</button><code class="subline truncate">${publication.code}</code></td>
+        <td>${publication.agent}</td><td>${publication.scope}</td><td>2026/11/15 09:15</td>
+      </tr>`).join("");
+    const publication = publications[selectedPublication];
+    const example = "https://deepagent.example.com/api/v1/agent-service";
+    const cards = [
+      ["通用 Agent Card", "在请求 Header 的 app 中填写应用 ID，并传凭据。", "/agent-card.json"],
+      ["带应用的 Agent Card", "将 {app_id} 替换为应用 ID，请求只需传凭据。", "/apps/{app_id}/agent-card.json"]
+    ];
+    const headings = { cli:"CLI", sdk:"Python SDK" };
+    let content;
+    if (accessTab === "a2a") {
+      content = `<p class="inline">${icon("bot")}<span class="muted">当前发布</span><b>${publication.name}</b></p>` + cards.map(([title, help, route]) => {
+        const url = example + "/a2a/" + publication.code + route;
+        return `<section class="soft"><div class="inline" style="justify-content:space-between"><h4>${title}</h4>${copyButton(url, "地址")}</div><pre>${url}</pre><p class="muted" style="margin-top:5px">${help}</p></section>`;
+      }).join("");
+    } else if (accessTab === "mcp") {
+      content = `<h3>MCP 配置</h3><section class="soft"><h4>MCP 地址</h4><pre>${example}/mcp</pre><h4 style="margin-top:8px">请求 Header</h4><pre>{
+  "app": "&lt;App ID&gt;",
+  "X-Deepfos-Key": "&lt;API Key&gt;"
+}</pre></section>`;
+    } else {
+      content = `<h3>${headings[accessTab]}</h3><p class="panel-note">安装说明待完善。</p>`;
+    }
+    $("server-access").innerHTML = content;
+  }
+
+  function renderConnections() {
+    const query = $("connection-search").value.trim().toLowerCase();
+    const rows = connections.filter((connection) =>
+      [connection.name, connection.description, drivers[connection.driver].name].some((value) => value?.toLowerCase().includes(query)));
+    const remove = (connection) => `<button type="button" class="btn danger" data-delete-connection="${connection.id}" aria-label="删除${escapeHtml(connection.name)}">${icon("trash")}删除</button>`;
+    const purpose = (connection) => escapeHtml(connection.description || "—");
+
+    $("connection-cards").innerHTML = rows.length ? rows.map((connection) => `
+      <article class="box external-card" data-open-connection="${connection.id}">
+        <header><span class="external-card-icon" aria-hidden="true">${driverLogo(connection.driver)}</span>
+          <button class="external-card-open truncate" type="button">${escapeHtml(connection.name)}</button>${driverBadge(connection)}
+        </header>
+        <p class="agent-intro">${purpose(connection)}</p>
+        <footer>${statusBadge(connection.status)}${remove(connection)}</footer>
+      </article>`).join("") : '<p class="empty">没有符合条件的连接</p>';
+
+    $("connection-rows").innerHTML = rows.length ? rows.map((connection) => `
+      <tr class="pickable" data-open-connection="${connection.id}">
+        <td><button type="button" class="row-name truncate">${escapeHtml(connection.name)}</button></td>
+        <td>${driverBadge(connection)}</td><td class="truncate" title="${purpose(connection)}">${purpose(connection)}</td>
+        <td>${statusBadge(connection.status)}</td><td>${remove(connection)}</td>
+      </tr>`).join("") : '<tr><td colspan="5" class="empty">没有符合条件的连接</td></tr>';
+
+    const filter = $("task-connection");
+    const filterValue = filter.value;
+    const choices = new Map(connections.map(({id,name}) => [id,name]));
+    for (const task of tasks) {
+      if (!choices.has(task.connection)) choices.set(task.connection, `${task.connectionName}（已删除）`);
+    }
+    filter.replaceChildren(new Option("全部连接", ""), ...Array.from(choices, ([id,name]) => new Option(name,id)));
+    filter.value = choices.has(filterValue) ? filterValue : "";
+  }
+
+  function confirmConnectionDeletion(connection) {
+    const dialog = $("delete-connection-dialog");
+    const linked = agents.filter((agent) => agent.connectionIds.includes(connection.id));
+    const linkedNote = linked.length ? `将解除与 ${linked.map(({name}) => name).join("、")} 的关联。` : "";
+    $("delete-connection-note").textContent = `删除「${connection.name}」？${linkedNote}已有调用记录会保留。`;
+    dialog.returnValue = "";
+    dialog.showModal();
+    dialog.addEventListener("close", () => {
+      if (dialog.returnValue !== "confirm") return;
+      connections.splice(connections.indexOf(connection), 1);
+      for (const agent of linked) agent.connectionIds = agent.connectionIds.filter((id) => id !== connection.id);
+      for (const draft of agentDrafts.values()) draft.delete(connection.id);
+      debugContexts.delete(connection.id);
+      if (selectedConnection === connection.id) selectedConnection = connections[0]?.id ?? null;
+      renderConnections();
+      renderTasks();
+      $("new-connection").focus();
+      notify("已删除外部 Agent");
+    }, {once:true});
+  }
+
+  function switchConnectionView(listView) {
+    $("show-cards").setAttribute("aria-pressed", !listView);
+    $("show-list").setAttribute("aria-pressed", listView);
+    $("connection-cards").hidden = listView;
+    $("connection-list").hidden = !listView;
+  }
+
+  const taskSource = (task) => task.source === "debug" ? "直连调试" : "本地 Agent";
+  function renderTasks() {
+    const connection = $("task-connection").value;
+    const source = $("task-source").value;
+    const state = $("task-status").value;
+    const query = $("task-search").value.trim().toLowerCase();
+    const rows = tasks.filter((task) =>
+      (!connection || task.connection === connection) &&
+      (!source || (task.source ?? "agent") === source) &&
+      (!state || task.state === state) &&
+      [task.title, task.id, task.context].some((value) => value?.toLowerCase().includes(query)));
+    const task = rows.find(({id}) => id === selectedTask) ?? rows[0];
+    selectedTask = task?.id ?? null;
+    $("task-rows").innerHTML = rows.length ? rows.map((item) => `
+      <tr class="pickable ${item === task ? "active" : ""}" data-task="${item.id}">
+        <td><button type="button" class="row-name truncate" aria-pressed="${item === task}" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</button>
+          <code class="subline">${item.id.slice(0,8)}</code></td>
+        <td class="truncate" title="${escapeHtml(taskConnectionName(item))}">${escapeHtml(taskConnectionName(item))}</td>
+        <td>${statusBadge(item.state)}</td><td>${taskSource(item)}</td><td><time>${dateLabel(item.submitted)}</time></td>
+      </tr>`).join("") : '<tr><td colspan="5" class="empty">暂无符合条件的调用记录</td></tr>';
+    $("task-count").textContent = `共 ${rows.length} 条记录`;
+    $("task-detail").innerHTML = task ? `
+      <header class="inspector-head"><h3>${escapeHtml(task.title)}</h3>${statusBadge(task.state)}</header>
+      <div class="inspector-body">
+        <dl class="facts">
+          ${fact("接入方式", driverBadge(task))}
+          ${fact("外部 Agent", escapeHtml(taskConnectionName(task)))}
+          ${fact("发起方式", taskSource(task))}
+          ${task.agent ? fact("本地 Agent", escapeHtml(task.agent)) : ""}
+          ${fact("提交时间", task.submitted)}
+          ${fact("调用 ID", inlineId(task.id, "调用 ID"))}
+          ${task.attachments?.length ? fact("附件", attachmentChips(task.attachments)) : ""}
+        </dl>
+        ${externalSessionDetails(task)}
+        ${task.session ? `<h4 class="divider">本地会话</h4>
+        <dl class="facts">
+          ${fact("会话 ID", inlineId(task.session, "会话 ID"))}
+          ${fact("提问 ID", inlineId(task.turn, "提问 ID"))}
+        </dl>` : ""}
+        <h4 class="divider">任务进度</h4>
+        <ol class="timeline">${task.events.map(([event,time]) => `<li><span>${escapeHtml(event)}</span><time>${time}</time></li>`).join("")}</ol>
+        ${task.response ? `<div class="soft"><h4>${task.state === "待补材料" ? "等待补充" : task.state === "失败" ? "失败原因" : "任务结果"}</h4><p class="muted">${escapeHtml(task.response)}</p></div>` : ""}
+        ${task.state === "待补材料" && task.source !== "debug" ? '<p class="panel-note">请在原 Agent 会话补答。</p>' : ""}
+        ${canOpenDebug(task) ? `<div class="actions" style="margin-top:10px"><button type="button" class="btn" data-open-debug="${task.id}">${task.driver === "a2a" ? "打开调试对话" : "打开调试记录"}</button></div>` : ""}
+      </div>` : '<header class="inspector-head"><h3>任务详情</h3></header><p class="empty">暂无任务可查看</p>';
+  }
+
+  const configFields = (id) => id === "a2a" ? drivers[id].fields : [...executionFields, ...drivers[id].fields];
+  const configText = (config) => JSON.stringify(config, null, 2);
+
+  function defaultConfig(id) {
+    return Object.fromEntries(configFields(id).map(({key,choices}) => [
+      key, key === "command" ? drivers[id].command : choices?.[0][0] ?? "",
+    ]));
+  }
+
+  function appendHeader(name = "", value = "") {
+    const row = document.createElement("div");
+    row.className = "header-row";
+    row.innerHTML = `<input class="field" data-header-name aria-label="请求头名称" placeholder="名称">
+      <input class="field" data-header-value aria-label="请求头值" placeholder="值" autocomplete="off">
+      <button type="button" class="btn" data-remove-header aria-label="移除请求头">×</button>`;
+    row.querySelector("[data-header-name]").value = name;
+    row.querySelector("[data-header-value]").value = value;
+    $("config-headers").append(row);
+    return row;
+  }
+
+  function headerDraft() {
+    return [...$("config-headers").children].map((row) => [
+      row.querySelector("[data-header-name]").value.trim(),
+      row.querySelector("[data-header-value]").value,
+    ]);
+  }
+
+  function formConfig() {
+    return Object.fromEntries(configFields(editingDriver).map(({key}) => [key, form.elements[key].value.trim()]));
+  }
+
+  function updateExecutionFields() {
+    const remote = form.elements.execution.value === "ssh";
+    form.elements.sshHost.closest("label").hidden = !remote;
+    form.elements.cwd.placeholder = remote ? "执行机上的绝对路径，例如 /srv/projects/demo" : "DeepAgent 所在机器上的绝对路径";
+  }
+
+  function renderConfigEditor() {
+    for (const button of $("driver-options").children) {
+      button.setAttribute("aria-pressed", button.dataset.driver === editingDriver);
+    }
+    const {launch,launchNote} = drivers[editingDriver];
+    $("driver-launch").innerHTML = launch ? `运行 <code>${launch}</code>，${launchNote}` : launchNote;
+    $("editor-driver-badge").innerHTML = driverBadge({driver:editingDriver});
+    const draft = configDrafts.get(editingDriver);
+    let config = draft?.config ?? defaultConfig(editingDriver);
+    const isJson = configMode === "json";
+    $("config-toggle-label").textContent = isJson ? "切换为 UI" : "切换为 JSON";
+    if (isJson) $("config-toggle").setAttribute("aria-haspopup", "dialog");
+    else $("config-toggle").removeAttribute("aria-haspopup");
+    const fields = $("driver-fields");
+    $("config-editor-body").style.minHeight = isJson && draft?.uiHeight ? `${draft.uiHeight}px` : "";
+    fields.inert = isJson;
+    fields.setAttribute("aria-hidden", String(isJson));
+    $("driver-json").hidden = !isJson;
+    showConfigError("");
+    if (isJson) {
+      $("driver-json").value = draft?.text ?? configText(config);
+      try {
+        config = formProjection(readConfig());
+      } catch {
+        // Keep a form-sized editor while an incomplete JSON draft is being edited.
+      }
+    }
+
+    $("driver-fields").innerHTML = configFields(editingDriver).map(({key,label,placeholder,choices,help}) => {
+      const value = config[key] ?? "";
+      const labelId = `config-${key}-label`;
+      const caption = `<span id="${labelId}">${label}</span>`;
+      if (!choices) {
+        const helpId = `config-${key}-help`;
+        return `<label>${caption}<input class="field" name="${key}" aria-labelledby="${labelId}" value="${escapeHtml(value)}" placeholder="${placeholder ?? ""}" autocomplete="off" ${help ? `aria-describedby="${helpId}"` : ""}>${help ? `<small class="muted" id="${helpId}">${help}</small>` : ""}</label>`;
+      }
+      const options = choices.map(([code,title]) => `<option value="${code}" ${value === code ? "selected" : ""}>${title}</option>`);
+      if (!choices.some(([code]) => code === value)) options.unshift('<option value="" selected disabled>请选择</option>');
+      return `<label>${caption}<select name="${key}" aria-labelledby="${labelId}">${options.join("")}</select></label>`;
+    }).join("");
+    if (editingDriver !== "a2a") {
+      form.elements.sshHost.setAttribute("aria-describedby", "ssh-host-help");
+      form.elements.sshHost.insertAdjacentHTML("afterend", '<small class="muted" id="ssh-host-help">使用管理员预先配置的 SSH 主机别名。</small>');
+      updateExecutionFields();
+    }
+    if (editingDriver === "a2a") {
+      $("driver-fields").insertAdjacentHTML("beforeend", `<div class="driver-section">
+        <h3>请求头（可选）</h3><div id="config-headers" class="header-rows"></div>
+        <button type="button" class="btn" id="add-config-header">${icon("plus")}添加请求头</button>
+      </div>`);
+      for (const [key,value] of Object.entries(config.headers ?? {})) appendHeader(key,value);
+    }
+  }
+
+  function showEditor(connection) {
+    editing = connection ?? null;
+    editingDriver = connection?.driver ?? "a2a";
+    configMode = connection?.configMode ?? "form";
+    configDrafts.clear();
+    if (connection) configDrafts.set(editingDriver, {mode:configMode, config:connection.config});
+    form.elements.name.value = connection?.name ?? "";
+    form.elements.name.setCustomValidity("");
+    form.elements.description.value = connection?.description ?? "";
+    renderConfigEditor();
+    $("edit-title").textContent = connection ? "编辑连接 · " + connection.name : "添加 Agent";
+    $("debug-prompt").value = "";
+    debugAttachments.length = 0;
+    openPage("connection-editor");
+    renderDebugger();
+    form.elements.name.focus();
+  }
+
+  setTabs($("server-tabs"), (id) => {
+    accessTab = id.slice("server-".length);
+    renderServer();
+  }, $("server-access"));
+
+  for (const id of ["task-connection", "task-source", "task-status"]) $(id).addEventListener("change", renderTasks);
+  $("task-search").addEventListener("input", renderTasks);
+  $("connection-search").addEventListener("input", renderConnections);
+  $("show-cards").addEventListener("click", () => switchConnectionView(false));
+  $("show-list").addEventListener("click", () => switchConnectionView(true));
+  $("driver-options").innerHTML = Object.entries(drivers).map(([id, driver]) =>
+    `<button type="button" class="btn driver-option" data-driver="${id}" aria-pressed="false" title="${driver.launch ?? '通过 Agent Card 连接远端 Agent'}">
+      ${driverLogo(id)}<strong>${driver.title}</strong>
+    </button>`).join("");
+  $("new-connection").addEventListener("click", () => showEditor());
+  $("driver-options").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-driver]");
+    if (!button || button.dataset.driver === editingDriver) return;
+    try {
+      const draft = configMode === "json"
+        ? {text:$("driver-json").value, uiHeight:$("config-editor-body").getBoundingClientRect().height}
+        : {config:readConfig()};
+      configDrafts.set(editingDriver, {mode:configMode, ...draft});
+    } catch (error) {
+      showConfigError(error.message);
+      return;
+    }
+    editingDriver = button.dataset.driver;
+    configMode = configDrafts.get(editingDriver)?.mode ?? configMode;
+    renderConfigEditor();
+    renderDebugger();
+  });
+
+  function showConfigError(message) {
+    $("config-error").textContent = message;
+    $("config-error").hidden = !message;
+    $("driver-json").setAttribute("aria-invalid", String(Boolean(message)));
+  }
+
+  const isConfigObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+  function readConfig() {
+    if (configMode === "json") {
+      let config;
+      try {
+        config = JSON.parse($("driver-json").value);
+      } catch {
+        throw new Error("请输入有效的 JSON。");
+      }
+      if (!isConfigObject(config)) throw new Error("配置须为 JSON 对象。");
+      return config;
+    }
+    const config = formConfig();
+    if (config.execution === "local") delete config.sshHost;
+    if (editingDriver === "a2a") {
+      const headers = headerDraft().filter(([key,value]) => key || value);
+      const names = headers.map(([name]) => name.toLowerCase());
+      if (names.includes("") || new Set(names).size !== names.length) throw new Error("请求头名称不能为空或重复。");
+      if (headers.length) config.headers = Object.fromEntries(headers);
+    }
+    return Object.fromEntries(Object.entries(config).filter(([,value]) => value !== ""));
+  }
+
+  function validateConfig(config) {
+    for (const {key,label,required} of configFields(editingDriver)) {
+      if (required && (typeof config[key] !== "string" || !config[key].trim())) throw new Error(`请填写${label}。`);
+      if (Object.hasOwn(config,key) && typeof config[key] !== "string") throw new Error(`${label}须为字符串。`);
+    }
+    if (editingDriver !== "a2a") {
+      if (!["local", "ssh"].includes(config.execution)) throw new Error("执行位置须为 local 或 ssh。");
+      if (config.execution === "ssh" && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(config.sshHost ?? "")) {
+        throw new Error("请填写有效的 SSH 主机别名，例如 build-runner。");
+      }
+      return;
+    }
+    try {
+      if (!["http:","https:"].includes(new URL(config.cardUrl).protocol)) throw new Error();
+    } catch {
+      throw new Error("Agent Card 地址须以 http:// 或 https:// 开头。");
+    }
+    const headers = config.headers;
+    if (headers === undefined) return;
+    if (!isConfigObject(headers)) throw new Error("headers 须为 JSON 对象。");
+    const names = Object.keys(headers).map((name) => name.trim().toLowerCase());
+    if (names.includes("") || new Set(names).size !== names.length || Object.values(headers).some((value) => typeof value !== "string")) {
+      throw new Error("请求头名称须唯一且非空，值须为字符串。");
+    }
+  }
+
+  const normalizedConfig = (config) => JSON.stringify(config, (_, value) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map((key) => [key,value[key]])) : value);
+
+  function formProjection(config) {
+    const fields = new Map(configFields(editingDriver).map((field) => [field.key, field]));
+    const entries = [];
+
+    for (const [key,value] of Object.entries(config)) {
+      if (key === "headers" && editingDriver === "a2a" && isConfigObject(value)) {
+        const headers = Object.entries(value).filter(([,header]) => typeof header === "string" && !/[\r\n]/.test(header));
+        if (headers.length) entries.push([key,Object.fromEntries(headers)]);
+        continue;
+      }
+      const field = fields.get(key);
+      const supported = field && (key !== "sshHost" || config.execution === "ssh")
+        && typeof value === "string" && !/[\r\n]/.test(value)
+        && (!field.choices || field.choices.some(([choice]) => choice === value));
+      if (supported) entries.push([key,value]);
+    }
+    return Object.fromEntries(entries);
+  }
+
+  function changeConfigMode(mode, draft) {
+    configMode = mode;
+    configDrafts.set(editingDriver, {mode, ...draft});
+    renderConfigEditor();
+    renderDebugAvailability();
+  }
+
+  function confirmFormSwitch(original) {
+    const config = formProjection(original);
+    const dialog = $("config-form-dialog");
+    dialog.returnValue = "";
+    dialog.showModal();
+    dialog.addEventListener("close", () => {
+      if (dialog.returnValue !== "confirm") return;
+      changeConfigMode("form", {config});
+      $("config-toggle").focus();
+    }, {once:true});
+  }
+
+  $("config-toggle").addEventListener("click", () => {
+    try {
+      const config = readConfig();
+      if (configMode === "json") {
+        confirmFormSwitch(config);
+      } else {
+        changeConfigMode("json", {
+          text:configText(config),
+          uiHeight:$("config-editor-body").getBoundingClientRect().height,
+        });
+        $("driver-json").focus();
+      }
+    } catch (error) {
+      showConfigError(error.message);
+      if (configMode === "json") $("driver-json").focus();
+    }
+  });
+  $("driver-fields").addEventListener("click", (event) => {
+    if (event.target.closest("#add-config-header")) appendHeader().querySelector("input").focus();
+    const remove = event.target.closest("[data-remove-header]");
+    if (remove) {
+      remove.closest(".header-row").remove();
+      showConfigError("");
+      renderDebugAvailability();
+    }
+  });
+  form.addEventListener("input", (event) => {
+    event.target.setCustomValidity?.("");
+    if (event.target.name === "execution") updateExecutionFields();
+    showConfigError("");
+    renderDebugAvailability();
+  });
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = form.elements.name.value.trim();
+    if (!name) {
+      form.elements.name.setCustomValidity("请填写连接名称。");
+      form.elements.name.reportValidity();
+      return;
+    }
+    let config;
+    try {
+      config = readConfig();
+      validateConfig(config);
+    } catch (error) {
+      showConfigError(error.message);
+      if (configMode === "json") $("driver-json").focus();
+      return;
+    }
+    const target = editing ?? {id:makeId()};
+    if (!editing) connections.push(target);
+    if (target.driver !== editingDriver || normalizedConfig(target.config) !== normalizedConfig(config)) {
+      Object.assign(target, {revision:(target.revision ?? 0) + 1, status:"未检查", checked:""});
+      debugContexts.delete(target.id);
+    }
+    Object.assign(target, {name, description:form.elements.description.value.trim(), driver:editingDriver, config, configMode});
+    if (configMode === "json") {
+      $("driver-json").value = configText(config);
+      $("driver-json").scrollLeft = 0;
+    }
+    editing = target;
+    selectedConnection = target.id;
+    $("connection-search").value = "";
+    $("edit-title").textContent = "编辑连接 · " + target.name;
+    renderConnections();
+    renderTasks();
+    renderDebugger();
+    notify("连接已保存在本次演示中");
+  });
+
+  const getSelectedConnection = () => connections.find(({id}) => id === selectedConnection);
+  const connectionById = (id) => connections.find((connection) => connection.id === id);
+  const taskConnectionName = (task) => connectionById(task.connection)?.name ?? task.connectionName;
+  const activeDraft = () => agentDrafts.get(editorAgent.id);
+  const eligibleConnection = (connection) => connection.status === "正常";
+  const makeId = () => crypto.randomUUID?.().replaceAll("-", "") ?? Date.now().toString(16) + Math.random().toString(16).slice(2);
+
+  function timestamp() {
+    const now = new Date();
+    const time = now.toLocaleTimeString("en-GB", {hour12:false});
+    return [now.toLocaleDateString("sv-SE").replaceAll("-", "/") + " " + time, time];
+  }
+
+  function trackTask(task) {
+    tasks.unshift(task);
+    tasks.splice(recordLimit);
+    renderTasks();
+    setTimeout(() => {
+      if (!tasks.includes(task)) return;
+      task.state = "已完成";
+      task.context ??= crypto.randomUUID?.() ?? makeId();
+      task.response = "模拟调用已完成。";
+      task.events.push(["调用完成", timestamp()[1]]);
+      renderTasks();
+      if (!$("page-connection-editor").hidden && editing?.id === task.connection && canOpenDebug(task)) {
+        renderDebugger();
+      }
+      if (!$("page-test").hidden && testAgent.id === task.testAgentId) renderTest();
+    }, 3500);
+  }
+
+  function sessionFact(task) {
+    const label = drivers[task.driver].session;
+    return task.context ? fact(label, inlineId(task.context, label)) : "";
+  }
+
+  function shellWord(value) {
+    return /^[a-zA-Z0-9_./-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\\''") + "'";
+  }
+
+  function externalSessionDetails(task) {
+    if (!task.executor && !task.context) return "";
+    const {resume, session} = drivers[task.driver];
+    const command = resume && task.context && task.executable
+      ? `${shellWord(task.executable)} ${resume} ${shellWord(task.context)}` : "";
+    return `<h4 class="divider">外部会话</h4>
+      <dl class="facts">
+        ${task.executor ? fact("执行位置", escapeHtml(task.executor)) : ""}
+        ${task.cwd ? fact("工作目录", fieldCode(task.cwd)) : ""}
+        ${sessionFact(task) || fact(session, task.state === "进行中" ? "等待返回" : "")}
+      </dl>
+      ${command ? `<details class="record-resume"><summary>续接方式</summary>
+        <p class="panel-note">在原执行机使用原 CLI 账号，进入上方工作目录后运行。</p>
+        <div class="inline">${fieldCode(command)}${copyButton(command,"续接命令")}</div>
+      </details>` : ""}`;
+  }
+
+  function canOpenDebug(task) {
+    const connection = connectionById(task.connection);
+    return task.source === "debug" && connection && task.connectionRevision === (connection.revision ?? 0);
+  }
+
+  function debugHistory() {
+    if (!editing || editing.driver !== editingDriver) return [];
+    const group = debugContexts.get(editing.id);
+    if (!group) return [];
+    return tasks.filter((task) => task.debugGroup === group && task.connection === editing.id && canOpenDebug(task)).reverse();
+  }
+
+  function connectionFormSaved() {
+    if (editing?.driver !== editingDriver) return false;
+    try {
+      return form.elements.name.value.trim() === editing.name
+        && form.elements.description.value.trim() === editing.description
+        && normalizedConfig(readConfig()) === normalizedConfig(editing.config);
+    } catch {
+      return false;
+    }
+  }
+
+  function debuggerReady() {
+    return Boolean(editing && connectionFormSaved());
+  }
+
+  function attachmentChips(files, removable = false) {
+    return `<div class="debug-files">${files.map((file,index) => `<span class="debug-file">
+      ${icon("file")}<span class="truncate" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+      ${removable ? `<button type="button" data-remove-debug-file="${index}" aria-label="移除附件 ${escapeHtml(file.name)}">×</button>` : ""}
+    </span>`).join("")}</div>`;
+  }
+
+  function updateDebugSend() {
+    $("debug-send").disabled = $("debug-prompt").disabled || !($("debug-prompt").value.trim() || debugAttachments.length);
+  }
+
+  function renderDebugFiles() {
+    $("debug-files").hidden = !debugAttachments.length;
+    $("debug-files").innerHTML = debugAttachments.length ? attachmentChips(debugAttachments, true) : "";
+    for (const button of $("debug-files").querySelectorAll("button")) button.disabled = $("debug-prompt").disabled;
+    updateDebugSend();
+  }
+
+  function renderDebugAvailability() {
+    const ready = debuggerReady();
+    $("debug-panel").toggleAttribute("data-unsaved", !ready);
+    $("debug-prompt").disabled = !ready;
+    $("debug-attach").disabled = !ready;
+    $("debug-new").disabled = !ready || !debugHistory().length;
+    $("debug-file-input").disabled = !ready;
+    const checkButton = $("check-connection");
+    if (checkButton) checkButton.disabled = !ready;
+    $("debug-notice").innerHTML = ready
+      ? "提交后可在近期调用中查看进度和结果。"
+      : `${icon("warning")}<span>保存连接后可调试</span>`;
+    renderDebugFiles();
+  }
+
+  function renderDebugger() {
+    const history = debugHistory();
+    const last = history.at(-1);
+    const driver = drivers[editingDriver];
+    const a2a = editingDriver === "a2a";
+    $("debug-new").textContent = a2a ? "新对话" : "清空调试";
+    $("debug-heading").textContent = a2a ? "对话调试" : "任务调试";
+    $("debug-send").setAttribute("aria-label", a2a ? "发送消息" : "提交任务");
+    $("debug-send").title = a2a ? "发送消息" : "提交任务";
+    $("debug-prompt").setAttribute("aria-label", a2a ? "调试消息" : "调试任务");
+    $("debug-prompt").placeholder = a2a ? "给远端 Agent 发送消息…" : "描述要执行的任务…";
+    const existing = editing?.driver === editingDriver;
+    const consumers = editing ? agents.filter((agent) => agent.connectionIds.includes(editing.id)) : [];
+    $("editor-card-summary").innerHTML = `
+      <header class="inspector-head"><h2>${a2a ? "远端连接" : "执行环境"}</h2>
+        <button type="button" class="btn" id="check-connection">${a2a ? "检查连通性" : "检查环境"}</button>
+      </header>
+      <div class="inspector-body">${existing
+        ? `<dl class="facts">
+          ${fact("接入方式", driver.transport)}
+          ${a2a ? fact("Agent Card", fieldCode(editing.config.cardUrl))
+            : fact("执行位置", escapeHtml(executionLabel(editing.config))) + fact("登录", "沿用执行机登录")}
+          ${fact("状态", statusBadge(editing.status))}
+          ${fact("最近检查", editing.checked)}
+          ${fact("已选用", consumers.map((agent) => `<button type="button" class="link agent-pill" data-edit-agent="${agent.id}">${agent.name}</button>`).join(" "))}
+        </dl>`
+        : '<p class="panel-note">保存连接后显示概要。</p>'}</div>`;
+    renderDebugAvailability();
+    $("debug-context").innerHTML = last ? `
+      <span class="muted">调用 ID</span>${inlineId(last.id,"调用 ID")}${statusBadge(last.state)}
+      ${last.context ? `<span class="muted">${driver.session}</span>${inlineId(last.context,driver.session)}` : ""}
+      <button type="button" class="link" data-show-task="${last.id}">查看调用记录</button>` : "";
+    const thread = $("debug-thread");
+    thread.innerHTML = history.length ? history.map(debugExchange).join("")
+      : "";
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  function debugExchange(task) {
+    const method = drivers[task.driver].launch ?? "SendMessage";
+    return `<div class="session-turn">
+      <div class="message"><b>你</b>
+        ${task.prompt ? `<p>${escapeHtml(task.prompt)}</p>` : ""}
+        ${task.attachments.length ? attachmentChips(task.attachments) : ""}
+      </div>
+      <div class="soft">
+        <div class="inline"><b>${escapeHtml(editing.name)}</b>${statusBadge(task.state)}</div>
+        ${task.response ? `<p>${escapeHtml(task.response)}</p>` : ""}
+        <details><summary>调用详情</summary>
+          <dl class="facts">
+            ${fact("调用方法", fieldCode(method))}
+            ${task.executor ? fact("执行位置", escapeHtml(task.executor)) : ""}
+            ${fact("调用 ID", inlineId(task.id, "调用 ID"))}
+          </dl>
+        </details>
+      </div>
+    </div>`;
+  }
+
+  $("debug-attach").addEventListener("click", () => $("debug-file-input").click());
+  $("debug-file-input").addEventListener("change", (event) => {
+    if (debuggerReady()) debugAttachments.push(...Array.from(event.target.files, ({name}) => ({name})));
+    event.target.value = "";
+    renderDebugFiles();
+  });
+  $("debug-files").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-remove-debug-file]");
+    if (!button || !debuggerReady()) return;
+    debugAttachments.splice(Number(button.dataset.removeDebugFile), 1);
+    renderDebugFiles();
+    $("debug-attach").focus();
+  });
+  $("debug-form").addEventListener("dragover", (event) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    if (debuggerReady()) $("debug-form").setAttribute("data-drop", "");
+  });
+  $("debug-form").addEventListener("dragleave", (event) => {
+    if (!$("debug-form").contains(event.relatedTarget)) $("debug-form").removeAttribute("data-drop");
+  });
+  $("debug-form").addEventListener("drop", (event) => {
+    if (!event.dataTransfer.types.includes("Files")) return;
+    event.preventDefault();
+    $("debug-form").removeAttribute("data-drop");
+    if (!debuggerReady()) return;
+    debugAttachments.push(...Array.from(event.dataTransfer.files, ({name}) => ({name})));
+    renderDebugFiles();
+  });
+  $("debug-prompt").addEventListener("input", updateDebugSend);
+  $("debug-prompt").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    if (!$("debug-send").disabled) $("debug-form").requestSubmit();
+  });
+  $("debug-new").addEventListener("click", () => {
+    if (!editing) return;
+    debugContexts.delete(editing.id);
+    $("debug-prompt").value = "";
+    debugAttachments.length = 0;
+    renderDebugger();
+    $("debug-prompt").focus();
+  });
+  $("debug-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const message = $("debug-prompt").value.trim();
+    if ((!message && !debugAttachments.length) || !debuggerReady()) return;
+    const a2a = editing.driver === "a2a";
+    const group = debugContexts.get(editing.id) ?? makeId();
+    const [submitted, time] = timestamp();
+    const task = {
+      id:makeId(), context:a2a ? group : null, debugGroup:group,
+      connection:editing.id, driver:editing.driver, connectionRevision:editing.revision ?? 0,
+      title:message || debugAttachments[0].name, prompt:message, attachments:[...debugAttachments],
+      source:"debug", submitted, state:"进行中",
+      ...connectionSnapshot(editing),
+      events:[["发起调用", time], [a2a ? "远端已受理" : "命令已启动", time]],
+    };
+    debugContexts.set(editing.id, group);
+    trackTask(task);
+    $("debug-prompt").value = "";
+    debugAttachments.length = 0;
+    renderDebugger();
+    $("debug-prompt").focus();
+  });
+
+  function renderAgentList() {
+    const query = $("agent-search").value.trim();
+    const matching = agents.filter((agent) => agent.name.includes(query));
+    $("agent-cards").innerHTML = matching.length ? matching.map((agent) => {
+      const names = agent.connectionIds.map((id) => escapeHtml(connectionById(id)?.name)).filter(Boolean);
+      return `<article class="box agent-card">
+        <h2 class="inline">${icon("bot")}${agent.name}</h2>
+        <p class="panel-note">${agent.prompt}</p>
+        <div class="actions">
+          <span title="${names.join("、")}" class="inline muted">${icon("terminal")}外部 Agent · ${names.length}</span>
+          <button type="button" class="btn" data-edit-agent="${agent.id}" aria-label="编辑${agent.name}">${icon("edit")}编辑</button>
+        </div>
+      </article>`;
+    }).join("") : '<p class="empty">没有符合条件的 Agent</p>';
+  }
+
+  function renderResourceChoices() {
+    const draft = activeDraft();
+    const search = $("resource-search").value.trim().toLowerCase();
+    $("bound-count").textContent = draft.size;
+    const rows = connections.filter((connection) => (connection.name + " " + drivers[connection.driver].name).toLowerCase().includes(search));
+    $("external-options").innerHTML = rows.length ? rows.map((connection) => {
+      const checked = draft.has(connection.id);
+      return `<div class="choice-card">
+        <label>
+          <input type="checkbox" data-bind-connection="${connection.id}" aria-label="${escapeHtml(connection.name)}" ${checked ? "checked" : ""}>
+          <span>
+            <span class="inline"><b>${escapeHtml(connection.name)}</b>${driverBadge(connection)}${statusBadge(connection.status)}</span>
+            <small class="muted">${escapeHtml(connection.description || "—")}</small>
+          </span>
+        </label>
+        <button type="button" class="link" data-show-connection="${connection.id}" aria-label="查看${escapeHtml(connection.name)}的连接">详情</button>
+      </div>`;
+    }).join("") : '<p class="empty">没有符合条件的连接</p>';
+  }
+
+  function renderAgentEditor() {
+    if (!activeDraft()) agentDrafts.set(editorAgent.id, new Set(editorAgent.connectionIds));
+    $("agent-edit-heading").textContent = editorAgent.name;
+    $("local-agent-name").value = editorAgent.name;
+    $("local-agent-prompt").value = editorAgent.prompt;
+    $("resource-external").click();
+    renderResourceChoices();
+  }
+
+  function renderTest() {
+    const saved = testAgent.connectionIds.map(connectionById).filter(Boolean);
+    const targets = saved.filter(eligibleConnection);
+    const previousTarget = $("test-target").value;
+    $("test-agent").value = testAgent.id;
+    $("test-target").replaceChildren(...(targets.length
+      ? targets.map(({id,name}) => new Option(name, id))
+      : [new Option("暂无可用的外部连接", "")]));
+    if (targets.some(({id}) => previousTarget === id)) $("test-target").value = previousTarget;
+    $("test-target").disabled = !targets.length;
+    $("simulate-task").disabled = !targets.length;
+    const runs = tasks.filter((task) => task.testAgentId === testAgent.id).reverse();
+    $("test-thread").innerHTML = runs.map((task) => sessionTurn(task)).join("");
+    $("test-overview").innerHTML = `<dl class="facts">
+      ${fact("本地 Agent", testAgent.name)}
+      ${fact("模型", "gpt-6.1-terra")}
+      ${fact("外部 Agent", saved.length
+        ? saved.map(({name,status}) => `<span class="inline">${escapeHtml(name)}${statusBadge(status)}</span>`).join("<br>")
+        : "未配置")}
+    </dl>
+    <div class="actions" style="margin-top:12px"><button type="button" class="link" data-edit-agent="${testAgent.id}">编辑 Agent</button></div>`;
+  }
+
+  function sessionTurn(task) {
+    return `<div class="session-turn">
+      <div class="message"><b>用户</b><p>${escapeHtml(task.title)}</p></div>
+      <div class="soft">
+        <div class="inline">${driverBadge(task)}<b>${escapeHtml(taskConnectionName(task))}</b>${statusBadge(task.state)}</div>
+        ${task.response ? `<p class="muted">${escapeHtml(task.response)}</p>` : ""}
+        <details><summary>展开工具调用</summary>
+          <dl class="facts">${fact("调用 ID", inlineId(task.id, "调用 ID"))}${sessionFact(task)}</dl>
+          <button type="button" class="link" data-show-task="${task.id}">查看调用记录</button>
+        </details>
+      </div>
+    </div>`;
+  }
+
+  function setNavigation(page, panel) {
+    const currentSidebar = panel === "editor" ? "agents"
+      : panel === "external" || panel === "connection-editor" ? "connections" : panel;
+    for (const button of document.querySelectorAll(".prototype-nav [data-page], .sidebar [data-page]")) {
+      const id = button.closest(".sidebar") ? currentSidebar : page;
+      if (button.dataset.page === id) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    }
+  }
+
+  function openPage(page) {
+    const panel = page === "connections" || page === "records" ? "external" : page;
+    for (const id of ["integration", "external", "connection-editor", "agents", "editor", "test"]) {
+      $("page-" + id).hidden = id !== panel;
+    }
+    setNavigation(panel === "external" ? "connections" : page, panel);
+    if (page === "records") {
+      renderTasks();
+      $("recent-records-heading").focus();
+    } else window.scrollTo(0, 0);
+    if (panel === "agents") renderAgentList();
+    if (panel === "editor") renderAgentEditor();
+    if (panel === "test") renderTest();
+  }
+
+  function openTask(id) {
+    const task = tasks.find((item) => item.id === id);
+    if (!task) return;
+    if (connectionById(task.connection)) selectedConnection = task.connection;
+    selectedTask = id;
+    $("task-connection").value = task.connection;
+    $("task-source").value = "";
+    $("task-status").value = "";
+    $("task-search").value = "";
+    openPage("records");
+  }
+
+  $("agent-search").addEventListener("input", renderAgentList);
+  $("resource-search").addEventListener("input", renderResourceChoices);
+  $("external-options").addEventListener("change", (event) => {
+    const option = event.target.closest("[data-bind-connection]");
+    if (!option) return;
+    if (option.checked) activeDraft().add(option.dataset.bindConnection);
+    else activeDraft().delete(option.dataset.bindConnection);
+    $("bound-count").textContent = activeDraft().size;
+  });
+  $("save-agent").addEventListener("click", () => {
+    editorAgent.connectionIds = Array.from(activeDraft());
+    renderConnections();
+    notify("已保存外部 Agent 配置");
+  });
+  $("launch-test").addEventListener("click", () => {
+    testAgent = editorAgent;
+    openPage("test");
+    if (editorAgent.connectionIds.length !== activeDraft().size || editorAgent.connectionIds.some((id) => !activeDraft().has(id))) {
+      notify("测试使用已保存的配置");
+    }
+  });
+  $("test-agent").replaceChildren(...agents.map(({id,name}) => new Option(name,id)));
+  $("test-agent").addEventListener("change", (event) => {
+    testAgent = agents.find(({id}) => id === event.target.value);
+    renderTest();
+  });
+  $("test-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const connection = connectionById($("test-target").value);
+    const title = $("test-prompt").value.trim();
+    if (!title || !connection || !eligibleConnection(connection) || !testAgent.connectionIds.includes(connection.id)) return;
+    const [submitted, time] = timestamp();
+    const a2a = connection.driver === "a2a";
+    const task = {
+      id:makeId(), connection:connection.id, driver:connection.driver, agent:testAgent.name, testAgentId:testAgent.id, title,
+      state:"进行中", submitted, session:makeId(), context:a2a ? makeId() : null, turn:makeId(),
+      ...connectionSnapshot(connection),
+      events:[["发起调用", time], [a2a ? "远端已受理" : "命令已启动", time]],
+    };
+    selectedTask = task.id;
+    trackTask(task);
+    renderTest();
+    notify("已生成模拟任务");
+  });
+
+  const resourceFixtures = {
+    "resource-builtin":["内置工具", "Python 执行"],
+    "resource-ui":["UI 工具", "默认交互组件"],
+    "resource-mcp":["MCP 服务", "DeepFOS MCP"],
+    "resource-skill":["Skill", "预算分析"],
+    "resource-output":["结构化输出", "未启用"],
+  };
+  setTabs($("resource-tabs"), (id) => {
+    if (id === "resource-external") return;
+    const [heading, value] = resourceFixtures[id];
+    $("existing-resource").innerHTML = `<h2>${heading}</h2><p class="soft muted">${value} · 现有配置示例</p>`;
+  });
+  document.addEventListener("click", async (event) => {
+    const target = event.target;
+    const removeConnection = target.closest("[data-delete-connection]");
+    if (removeConnection) {
+      confirmConnectionDeletion(connectionById(removeConnection.dataset.deleteConnection));
+      return;
+    }
+    const pageButton = target.closest("[data-page]");
+    if (pageButton?.dataset.page === "connection-editor") showEditor(getSelectedConnection());
+    else if (pageButton) openPage(pageButton.dataset.page);
+    const editAgent = target.closest("[data-edit-agent]");
+    if (editAgent) {
+      editorAgent = agents.find(({id}) => id === editAgent.dataset.editAgent);
+      $("resource-search").value = "";
+      openPage("editor");
+    }
+    const showConnection = target.closest("[data-show-connection]");
+    if (showConnection) {
+      selectedConnection = showConnection.dataset.showConnection;
+      showEditor(getSelectedConnection());
+    }
+    const showTask = target.closest("[data-show-task]");
+    if (showTask) openTask(showTask.dataset.showTask);
+    const showDebug = target.closest("[data-open-debug]");
+    if (showDebug) {
+      const task = tasks.find(({id}) => id === showDebug.dataset.openDebug);
+      if (task && canOpenDebug(task)) {
+        selectedConnection = task.connection;
+        debugContexts.set(task.connection, task.debugGroup);
+        showEditor(getSelectedConnection());
+      }
+    }
+    const copy = target.closest("[data-copy]");
+    const publication = target.closest("[data-publication]");
+    const connection = target.closest("[data-open-connection]");
+    const taskRow = target.closest("[data-task]");
+    if (copy) {
+      try {
+        await navigator.clipboard.writeText(copy.dataset.copy);
+        notify("已复制");
+      } catch {
+        notify("当前浏览器未开放剪贴板权限");
+      }
+    }
+    if (publication) {
+      selectedPublication = Number(publication.dataset.publication);
+      renderServer();
+      if (target.matches("button")) $("server-rows").querySelector(".active button").focus();
+    }
+    if (connection) {
+      selectedConnection = connection.dataset.openConnection;
+      showEditor(getSelectedConnection());
+    }
+    if (taskRow) {
+      selectedTask = taskRow.dataset.task;
+      renderTasks();
+      if (target.matches("button")) $("task-rows").querySelector(".active button").focus();
+    }
+    if (target.closest("#check-connection")) {
+      if (!connectionFormSaved()) {
+        notify("请先保存连接，再检查环境");
+        return;
+      }
+      const connection = editing;
+      [connection.checked] = timestamp();
+      connection.status = "正常";
+      renderConnections();
+      renderDebugger();
+      $("check-connection").focus();
+      notify("环境检查（模拟） · " + connection.status);
+    }
+  });
+
+  renderServer();
+  renderConnections();
+  renderTasks();
+  openPage("connections");
+</script>
+</body>
+</html>

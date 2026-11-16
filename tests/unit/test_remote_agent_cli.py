@@ -6,15 +6,18 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from deep_agent.remote_agents.cli import CliAdapter
-from deep_agent.remote_agents.contracts import CodeBuddyConfig, CodexConfig, InputFile, RemoteAgentError, RemoteState
+from deep_agent.remote_agents.contracts import (
+    CodeBuddyConfig, CodexConfig, InputFile, RemoteAgentError, RemoteState, RemoteTaskExpired,
+)
 
 
 _CLI_FIXTURE = r"""
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -45,6 +48,17 @@ output = Path(values["Output directory"])
 inputs = [Path(path) for path in values["New attachments"]]
 if message == "slow":
     time.sleep(120)
+if message == "expired":
+    if protocol == "codex":
+        print(f"Error: thread/resume failed: no rollout found for thread id {native}", file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps({"type": "error", "error": f"No conversation found with session ID: {native}"}))
+    sys.exit(0)
+if message == "group-child":
+    subprocess.Popen([sys.executable, "-c", "import signal, sys, time; from pathlib import Path; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); Path(sys.argv[1]).touch(); time.sleep(12)",
+        str(output / "child-ready")])
+    sys.exit(0)
 if message == "invalid":
     data = {"state": [], "text": "invalid status", "files": []}
 elif message == "start":
@@ -57,8 +71,9 @@ elif message == "second":
     assert inputs[0].read_bytes() == b"follow-up"
     (output / "out.csv").write_bytes(b"diff\n20\n")
     (output / "outside").symlink_to(inputs[0])
+    os.link(inputs[0], output / "hardlink")
     (output / "unlisted.txt").write_text("ignore")
-    data = {"state": "completed", "text": "Difference is 20.", "files": ["out.csv", "outside", "../escape"]}
+    data = {"state": "completed", "text": "Difference is 20.", "files": ["out.csv", "outside", "hardlink", "../escape"]}
 else:
     data = {"state": "completed", "text": "October", "files": []}
 if protocol == "codex":
@@ -148,7 +163,79 @@ class RemoteCliAdapterTests(unittest.IsolatedAsyncioTestCase):
                 await adapter.cancel(self.checkpoints[-1])
                 await asyncio.wait_for(call, 5)
 
+    async def test_cancel_before_cli_starts_or_after_it_asks_for_input(self):
+        adapter = self.adapter("codebuddy")
+        prepared = asyncio.Event()
+        start_helper = asyncio.Event()
+
+        async def checkpoint(state):
+            await self.checkpoint(state)
+            prepared.set()
+            await start_helper.wait()
+
+        call = asyncio.create_task(
+            adapter.run(RemoteState(), "invalid", [], "start", checkpoint, message_id="never-run")
+        )
+        try:
+            await asyncio.wait_for(prepared.wait(), 5)
+            canceled = await adapter.cancel(self.checkpoints[-1])
+            self.assertEqual(canceled.state.status, "canceled")
+        finally:
+            start_helper.set()
+            finished = await asyncio.wait_for(call, 5)
+        self.assertEqual(finished.state, canceled.state)
+
+        with patch.dict(os.environ, {"DEEP_AGENT_TEST_SECRET": "fixture"}):
+            waiting = await adapter.run(
+                RemoteState(), "start", [InputFile("source.csv", "text/csv", b"original")],
+                "start", self.checkpoint, message_id="asks-first",
+            )
+        self.assertEqual(waiting.state.status, "input_required")
+        canceled = await adapter.cancel(waiting.state)
+        self.assertEqual(canceled.state.status, "canceled")
+        self.assertEqual((await adapter.refresh(canceled.state, self.checkpoint)).state, canceled.state)
+
     async def test_malformed_structured_response_is_checked(self):
         adapter = self.adapter("codebuddy")
         with self.assertRaisesRegex(RemoteAgentError, "格式无效"):
             await adapter.run(RemoteState(), "invalid", [], "start", self.checkpoint, message_id="invalid")
+
+    async def test_resumed_turn_recheck_and_cancel_wait_for_the_cli_group(self):
+        adapter = self.adapter("codex")
+        completed = await adapter.run(RemoteState(), "done", [], "start", self.checkpoint, message_id="first")
+        recovered = CliAdapter(adapter.config, adapter.workspace_root)
+        call = asyncio.create_task(
+            adapter.run(completed.state, "group-child", [], "resume", self.checkpoint, message_id="next")
+        )
+        try:
+            async with asyncio.timeout(5):
+                while not list(adapter.workspace_root.glob("*/work/outputs/*/child-ready")):
+                    await asyncio.sleep(0.05)
+            state = self.checkpoints[-1]
+            replay = await recovered.run(state, "group-child", [], "resume", self.checkpoint, message_id="next")
+            self.assertEqual(replay.state.status, "working")
+            self.assertEqual(replay.state.cursor, state.cursor)
+            canceled = await recovered.cancel(replay.state)
+            self.assertEqual(canceled.state.status, "canceled")
+            self.assertEqual((await asyncio.wait_for(call, 3)).state.status, "canceled")
+        finally:
+            if not call.done():
+                await asyncio.wait_for(call, 15)
+
+    async def test_malformed_artifact_preserves_other_files(self):
+        adapter = self.adapter("codebuddy")
+        with patch.object(adapter, "_helper", new=AsyncMock(return_value={"good.txt": "YWJj", "bad.txt": "!"})):
+            files, warnings = await adapter._artifacts("0" * 32, "1" * 32, ["good.txt", "\ud800", "bad.txt"])
+        self.assertEqual([(file.name, file.data) for file in files], [("good.txt", b"abc")])
+        self.assertTrue(warnings)
+
+    async def test_expired_native_session_has_a_distinct_error_without_retaining_cli_errors(self):
+        for protocol in ("codex", "codebuddy"):
+            with self.subTest(protocol=protocol):
+                adapter = self.adapter(protocol)
+                result = await adapter.run(RemoteState(), "done", [], "start", self.checkpoint, message_id="done")
+                with self.assertRaisesRegex(RemoteTaskExpired, "原任务不可继续"):
+                    await adapter.run(result.state, "expired", [], "resume", self.checkpoint, message_id="expired")
+                snapshot = await adapter._helper("snapshot", *adapter._ids(self.checkpoints[-1]), {})
+                self.assertTrue(snapshot["exit"]["session_expired"])
+                self.assertNotIn("found", snapshot["events"])

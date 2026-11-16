@@ -309,6 +309,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail["session_title"], diagnostic.json()["title"])
 
     async def test_outbound_clients_use_same_task_for_two_replies_and_retrieve_artifacts(self):
+        from httpx import ReadError
         from deep_agent.agent_service.output import QUESTION_NAME
         from deep_agent.remote_agents import network
         from deep_agent.remote_agents.contracts import A2AConfig, InputFile, McpConfig, RemoteAgentError, RemoteState
@@ -328,11 +329,19 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         http_client = network._http_client
         requests = []
+        interrupted_replies = []
 
         class RecordingTransport(ASGITransport):
             async def handle_async_request(self, request):
-                requests.append((request.method, request.url.path, await request.aread()))
-                return await super().handle_async_request(request)
+                body = await request.aread()
+                requests.append((request.method, request.url.path, body))
+                response = await super().handle_async_request(request)
+                if (request.url.path == f"{ROOT}/mcp" and b'"name":"reply_task"' in body
+                        and b'"message_id":"mcp-second"' in body and not interrupted_replies):
+                    interrupted_replies.append(body)
+                    await response.aclose()
+                    raise ReadError("Interrupted delivery of the MCP reply response", request=request)
+                return response
 
         def client_factory(headers, *, exact_url=None):
             client = http_client(headers, exact_url=exact_url)
@@ -388,6 +397,11 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                     second = await adapter.run(
                         first.state, "用十一月", [], "answer", checkpoint, message_id=f"{protocol}-second",
                     )
+                    if second.state.status in {"submitted", "working"}:
+                        async with asyncio.timeout(5):
+                            while second.state.status in {"submitted", "working"}:
+                                await asyncio.sleep(0.05)
+                                second = await adapter.refresh(second.state, checkpoint)
                     self.assertEqual((second.state.status, second.text), ("input_required", "哪个地区？"))
                     self.assertEqual(second.state.task_id, first.state.task_id)
                     self.assertNotEqual(second.state.question_id, first.state.question_id)
@@ -425,6 +439,8 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("extra.txt", str(events[2].payload))
 
         mcp_rpc_payloads = [body for method, path, body in requests if method == "POST" and path == f"{ROOT}/mcp"]
+        self.assertEqual(len(interrupted_replies), 1)
+        self.assertEqual(sum(b'"message_id":"mcp-second"' in body for body in mcp_rpc_payloads), 1)
         self.assertTrue(any(b'"resources/read"' in body for body in mcp_rpc_payloads))
         self.assertTrue(any(method == "GET" and path.startswith(f"{ROOT}/tasks/") and path.endswith("/download")
                             for method, path, _body in requests))
@@ -1042,6 +1058,57 @@ class IndependentA2ASdkTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(methods, ["SendStreamingMessage"])
                         checkpoint.assert_not_awaited()
 
+    async def test_interrupted_answer_queries_existing_task_and_preserves_original_question(self):
+        from httpx import MockTransport, ReadError, Response
+        from deep_agent.remote_agents import network
+        from deep_agent.remote_agents.contracts import A2AConfig, RemoteAgentError, RemoteState
+
+        base = "http://external.example"
+        advertised = {"url": f"{base}/rpc", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+        previous = RemoteState(task_id="task", context_id="context", status="input_required", question_id="first")
+        for recovered_question in ("first", "second"):
+            with self.subTest(recovered_question=recovered_question):
+                methods = []
+
+                async def respond(request):
+                    if request.method == "GET":
+                        return Response(200, json={
+                            "name": "independent", "supportedInterfaces": [advertised],
+                            "capabilities": {"streaming": True},
+                        })
+                    rpc = json.loads(await request.aread())
+                    methods.append(rpc["method"])
+                    if rpc["method"] == "SendStreamingMessage":
+                        raise ReadError("The reply response was interrupted", request=request)
+                    self.assertEqual(rpc["params"]["id"], "task")
+                    return Response(200, json={"jsonrpc": "2.0", "id": rpc["id"], "result": {
+                        "id": "task", "contextId": "context",
+                        "status": {"state": "TASK_STATE_INPUT_REQUIRED", "message": {
+                            "messageId": recovered_question, "role": "ROLE_AGENT",
+                            "parts": [{"text": f"question {recovered_question}"}],
+                        }},
+                    }})
+
+                config = A2AConfig(card_url=f"{base}/card", approved_interface=advertised)
+                adapter = network.A2AAdapter(config)
+                checkpoint = AsyncMock()
+                with patch.object(network, "_http_client", side_effect=lambda headers: AsyncClient(
+                    headers=headers, transport=MockTransport(respond),
+                )):
+                    result = await adapter.run(previous, "answer", [], "answer", checkpoint, message_id="answer")
+                    self.assertEqual(result.state.question_id, recovered_question)
+                    self.assertEqual(result.text, f"question {recovered_question}")
+                    self.assertEqual(result.warnings, (network.UNCONFIRMED_ANSWER,) if recovered_question == "first" else ())
+                    self.assertEqual(methods, ["SendStreamingMessage", "GetTask"])
+                    self.assertEqual(checkpoint.await_args.args[0], result.state)
+
+                    methods.clear()
+                    with self.assertRaises(RemoteAgentError) as error:
+                        await adapter.run(previous.model_copy(update={"status": "completed"}), "follow-up", [],
+                                          "resume", checkpoint, message_id="next")
+                    self.assertEqual(error.exception.status, "unknown")
+                    self.assertEqual(methods, ["SendStreamingMessage"])
+
     async def test_artifact_download_keeps_credentials_on_approved_origin(self):
         from httpx import MockTransport, Response
         from deep_agent.remote_agents.network import A2AAdapter
@@ -1064,3 +1131,109 @@ class IndependentA2ASdkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(file.name, file.data) for file in files], [("safe.txt", b"safe")])
         self.assertEqual(len(warnings), 1)
         self.assertIn("unsafe.txt", warnings[0])
+
+    async def test_stream_joins_chunks_and_does_not_publish_partial_file(self):
+        from httpx import MockTransport, Response
+        from deep_agent.remote_agents import network
+        from deep_agent.remote_agents.contracts import A2AConfig, RemoteState
+
+        base = "http://external.example"
+        advertised = {"url": f"{base}/rpc", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+        working = {"id": "task", "contextId": "context", "status": {"state": "TASK_STATE_WORKING"}}
+        ids = {"taskId": "task", "contextId": "context"}
+        first_file_part = {"filename": "result.csv", "mediaType": "text/csv", "text": "row,value\n"}
+
+        async def respond(request):
+            if request.method == "GET":
+                return Response(200, json={
+                    "name": "independent", "supportedInterfaces": [advertised],
+                    "capabilities": {"streaming": True},
+                })
+            rpc = json.loads(await request.aread())
+            if rpc["method"] == "GetTask":
+                return Response(200, json={"jsonrpc": "2.0", "id": rpc["id"], "result": {
+                    **working, "artifacts": [{"artifactId": "file", "parts": [first_file_part]}],
+                }})
+            events = [
+                {"task": working},
+                {"artifactUpdate": {**ids, "artifact": {"artifactId": "file", "parts": [first_file_part]}}},
+                {"artifactUpdate": {**ids, "append": True, "lastChunk": True, "artifact": {
+                    "artifactId": "file", "parts": [{**first_file_part, "text": "East,20\n"}],
+                }}},
+                {"statusUpdate": {**ids, "status": {"state": "TASK_STATE_COMPLETED"}}},
+            ]
+            stream = "".join(f"data: {json.dumps({'jsonrpc': '2.0', 'id': rpc['id'], 'result': event})}\n\n"
+                             for event in events)
+            return Response(200, text=stream, headers={"Content-Type": "text/event-stream"})
+
+        adapter = network.A2AAdapter(A2AConfig(card_url=f"{base}/card", approved_interface=advertised))
+        checkpoint = AsyncMock()
+        with patch.object(network, "_http_client", side_effect=lambda headers: AsyncClient(
+            headers=headers, transport=MockTransport(respond),
+        )):
+            active = await adapter.refresh(RemoteState(task_id="task", context_id="context"), checkpoint)
+            self.assertEqual(active.state.status, "working")
+            self.assertEqual(active.files, ())
+            finished = await adapter.run(RemoteState(), "start", [], "start", checkpoint, message_id="start")
+        self.assertEqual(finished.state.status, "completed")
+        self.assertEqual([(file.name, file.data) for file in finished.files], [
+            ("result.csv", b"row,value\nEast,20\n"),
+        ])
+
+
+class OutboundMcpTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_interrupted_tool_call_reconnects_for_read_only_recovery(self):
+        from contextlib import asynccontextmanager
+        from deep_agent.remote_agents.network import McpAdapter, UNCONFIRMED_ANSWER
+        from deep_agent.remote_agents.contracts import McpConfig, RemoteAgentError, RemoteState
+
+        adapter = McpAdapter(McpConfig(mcp_server_name="fixture", publication_code="budget"),
+                             "https://example.test/api/v1/agent-service/mcp", {})
+        initial = RemoteState(task_id="task", context_id="context", status="input_required", question_id="first")
+        for scenario in ("unchanged", "advanced", "query-interrupted", "resume-unknown"):
+            with self.subTest(scenario=scenario):
+                connections = []
+                call_log = []
+
+                async def call_tool(tool, arguments, *, raise_on_error):
+                    call_log.append((tool, dict(arguments)))
+                    if scenario == "query-interrupted" and tool == "reply_task":
+                        payload = {"id": "task", "context_id": "context", "state": "working"}
+                    elif tool == "get_task" and scenario == "query-interrupted" and len(connections) == 1:
+                        raise ConnectionError("interrupted query")
+                    elif tool == "get_task":
+                        question = "first" if scenario == "unchanged" else "second"
+                        payload = {"id": "task", "context_id": "context", "state": "input_required",
+                                   "question_id": question, "message": f"question {question}"}
+                    else:
+                        raise ConnectionError("interrupted send")
+                    return SimpleNamespace(is_error=False, structured_content=payload)
+
+                @asynccontextmanager
+                async def client():
+                    connections.append(object())
+                    yield SimpleNamespace(call_tool=call_tool)
+
+                checkpoint = AsyncMock()
+                with patch.object(adapter, "_client", client):
+                    if scenario == "resume-unknown":
+                        with self.assertRaises(RemoteAgentError) as error:
+                            await adapter.run(initial.model_copy(update={"status": "completed"}), "continue", [],
+                                              "resume", checkpoint, message_id="next")
+                        self.assertEqual(error.exception.status, "unknown")
+                        self.assertEqual(call_log, [("submit_task", {
+                            "agent_code": "budget", "context_id": "context", "message_id": "next", "text": "continue",
+                        })])
+                        checkpoint.assert_not_awaited()
+                        continue
+                    result = await adapter.run(initial, "answer", [], "answer", checkpoint, message_id="reply")
+                    self.assertEqual(call_log[0], ("reply_task", {
+                        "task_id": "task", "reply_to": "first", "message_id": "reply", "text": "answer",
+                    }))
+                    self.assertTrue(all(name == "get_task" and arguments["task_id"] == "task"
+                                        for name, arguments in call_log[1:]))
+                    self.assertEqual(len(connections), 2)
+                    self.assertEqual(len(call_log), 3 if scenario == "query-interrupted" else 2)
+                    self.assertEqual(result.state.question_id, "first" if scenario == "unchanged" else "second")
+                    self.assertEqual(result.warnings, (UNCONFIRMED_ANSWER,) if scenario == "unchanged" else ())
+                    self.assertEqual(checkpoint.await_args.args[0], result.state)

@@ -7,7 +7,8 @@ import hashlib
 import json
 import re
 from collections.abc import AsyncIterator, Sequence
-from contextlib import aclosing, asynccontextmanager
+from contextlib import AsyncExitStack, aclosing, asynccontextmanager
+from dataclasses import replace
 from pathlib import PurePosixPath
 from urllib.parse import urljoin
 
@@ -32,7 +33,10 @@ MAX_CARD_BYTES = 1024 * 1024
 MAX_ARTIFACTS = 128
 MAX_TEXT = 64 * 1024
 OBSERVATION_SECONDS = 60
+RECOVERY_SECONDS = 10
+ARTIFACT_SECONDS = 45
 ACTIVE = frozenset({"submitted", "working"})
+UNCONFIRMED_ANSWER = "暂时无法确认补答是否送达，远端仍显示原问题。"
 
 
 def _validate_url(url: str) -> httpx.URL:
@@ -67,8 +71,10 @@ def _http_client(headers: dict[str, str], *, exact_url: str | None = None) -> ht
 
 
 async def _read_bytes(http: httpx.AsyncClient, url: str, maximum: int) -> tuple[bytes, str]:
-    async with http.stream("GET", url) as response:
+    async with http.stream("GET", url, headers={"accept-encoding": "identity"}) as response:
         response.raise_for_status()
+        if response.headers.get("content-encoding", "identity").lower() != "identity":
+            raise RemoteAgentError("远端返回了未协商的压缩响应")
         limit = response.headers.get("content-length", "")
         if limit.isdecimal() and int(limit) > maximum:
             raise RemoteAgentError("远端响应超过大小限制")
@@ -141,6 +147,13 @@ async def _accept_state(state: RemoteState, updated: RemoteState, checkpoint: Ch
     if state != updated:
         await checkpoint(updated)
     return updated
+
+
+def _recovered_result(result: RemoteResult, unanswered: str | None) -> RemoteResult:
+    if (unanswered and result.state.status == "input_required"
+            and result.state.question_id == unanswered):
+        return replace(result, warnings=(*result.warnings, UNCONFIRMED_ANSWER))
+    return result
 
 
 class A2AAdapter:
@@ -231,6 +244,7 @@ class A2AAdapter:
         )
         if mode == "answer" and state.question_id and not state.cursor.get("a2a_synthetic_question"):
             outbound.metadata.fields["replyTo"].string_value = state.question_id
+        unanswered = state.question_id if mode == "answer" else None
         request = wire.SendMessageRequest(message=outbound)
         request.configuration.history_length = 0
         state = state.model_copy(update={
@@ -239,13 +253,15 @@ class A2AAdapter:
         })
         async with self._client() as (client, http, endpoint):
             task = wire.Task()
+            immediate = None
             observed = False
             try:
                 async with asyncio.timeout(OBSERVATION_SECONDS):
                     async with aclosing(client.send_message(request)) as stream:
                         async for response in stream:
                             if response.HasField("message"):
-                                return await self._direct_message(response.message, state, checkpoint, http, endpoint)
+                                immediate = response.message
+                                break
                             self._merge_event(task, response)
                             if not task.id:
                                 continue
@@ -256,31 +272,39 @@ class A2AAdapter:
                             observed = True
                             if state.status not in ACTIVE:
                                 break
-                    if not observed:
-                        raise RemoteAgentError("发送结果未知，未收到远端任务标识", status="unknown")
-                    while state.status in ACTIVE:
+                    if immediate is None and not observed:
+                        raise A2AClientError("Missing task response")
+                    while immediate is None and state.status in ACTIVE:
                         task = await client.get_task(wire.GetTaskRequest(id=task.id, history_length=0))
                         state = await _accept_state(state, self._state(state, task), checkpoint)
                         if state.status in ACTIVE:
                             await asyncio.sleep(0.5)
-            except (A2AClientError, TimeoutError, httpx.HTTPError) as exc:
-                if not observed:
+            except (A2AClientError, TimeoutError, httpx.HTTPError, ParseError, ValueError) as exc:
+                if not state.task_id:
                     raise RemoteAgentError("发送结果未知，未收到远端响应", status="unknown") from None
-                if isinstance(exc, TimeoutError):
+                if observed and isinstance(exc, TimeoutError):
                     return RemoteResult(state, "远端任务仍在执行，可按原任务回查。")
                 try:
-                    task = await client.get_task(wire.GetTaskRequest(id=task.id, history_length=0))
-                    state = await _accept_state(state, self._state(state, task), checkpoint)
+                    async with asyncio.timeout(RECOVERY_SECONDS):
+                        task = await client.get_task(wire.GetTaskRequest(id=state.task_id, history_length=0))
                 except wire.TaskNotFoundError:
                     raise RemoteTaskExpired("远端任务不存在或已过期") from None
-                except (A2AClientError, httpx.HTTPError):
-                    return RemoteResult(state, "远端暂时无法查询，可稍后按原任务回查。")
+                except (wire.UnsupportedOperationError, A2AClientError, TimeoutError,
+                        httpx.HTTPError, ParseError, ValueError):
+                    if observed:
+                        return RemoteResult(state, "远端暂时无法查询，可稍后按原任务回查。")
+                    raise RemoteAgentError("补答结果未知，可按原任务回查。", status="unknown") from None
+                state = await _accept_state(state, self._state(state, task), checkpoint)
+                result = await self._result(task, state, http, endpoint)
+                return _recovered_result(result, unanswered if not observed else None)
             except wire.TaskNotFoundError:
                 raise RemoteTaskExpired("远端任务不存在或已过期") from None
             except wire.ContentTypeNotSupportedError:
                 raise RemoteAgentError("远端 A2A 接口不支持本次消息或附件类型") from None
             except (wire.InvalidParamsError, wire.UnsupportedOperationError):
                 raise RemoteAgentError("远端拒绝本次消息，请检查任务状态和接口能力") from None
+            if immediate is not None:
+                return await self._direct_message(immediate, state, checkpoint, http, endpoint)
             return await self._result(task, state, http, endpoint)
 
     @staticmethod
@@ -326,14 +350,18 @@ class A2AAdapter:
             else:
                 for part in update.artifact.parts:
                     previous = current.parts[-1] if current.parts else None
-                    if previous is not None and previous.HasField("raw") and part.HasField("raw") and (
-                        previous.filename, previous.media_type
-                    ) == (part.filename, part.media_type):
-                        if len(previous.raw) + len(part.raw) > MAX_OUTPUT_BYTES:
+                    kind = part.WhichOneof("content")
+                    if (previous is not None and kind in {"text", "raw"}
+                            and previous.WhichOneof("content") == kind
+                            and (previous.filename, previous.media_type, previous.metadata) ==
+                            (part.filename, part.media_type, part.metadata)):
+                        left, right = getattr(previous, kind), getattr(part, kind)
+                        limit = MAX_OUTPUT_BYTES if kind == "raw" or part.filename else MAX_TEXT
+                        if len(left) + len(right) > limit and limit == MAX_OUTPUT_BYTES:
                             raise RemoteAgentError("远端流的文件产物超过大小限制")
-                        previous.raw += part.raw
-                    else:
-                        current.parts.append(part)
+                        setattr(previous, kind, (left + right)[:limit])
+                        continue
+                    current.parts.append(part)
 
     async def _direct_message(self, message: wire.Message, state: RemoteState, checkpoint: Checkpoint,
                               http: httpx.AsyncClient, endpoint: str) -> RemoteResult:
@@ -351,9 +379,10 @@ class A2AAdapter:
 
     async def _result(self, task: wire.Task, state: RemoteState, http: httpx.AsyncClient, endpoint: str) -> RemoteResult:
         text = _content_text(task.status.message.parts)
-        if state.status == "completed":
-            text = "\n".join(value for value in (text, *(_content_text(item.parts) for item in task.artifacts))
-                             if value)[:MAX_TEXT]
+        if state.status != "completed":
+            return RemoteResult(state, text)
+        text = "\n".join(value for value in (text, *(_content_text(item.parts) for item in task.artifacts))
+                         if value)[:MAX_TEXT]
         files, warnings = await self._files(task.artifacts, task.id, http, endpoint)
         return RemoteResult(state, text, files, warnings)
 
@@ -362,6 +391,7 @@ class A2AAdapter:
         files: list[OutputFile] = []
         warnings: list[str] = []
         remaining = MAX_OUTPUT_BYTES
+        deadline = asyncio.get_running_loop().time() + ARTIFACT_SECONDS
         for artifact in list(artifacts)[:MAX_ARTIFACTS]:
             for index, part in enumerate(artifact.parts):
                 is_file = part.HasField("raw") or part.HasField("url") or bool(part.filename)
@@ -372,7 +402,10 @@ class A2AAdapter:
                     if part.HasField("raw"):
                         data, mime = part.raw, part.media_type
                     elif part.HasField("url"):
-                        data, mime = await _download(http, endpoint, part.url, remaining)
+                        async with asyncio.timeout_at(deadline):
+                            if asyncio.get_running_loop().time() >= deadline:
+                                raise TimeoutError
+                            data, mime = await _download(http, endpoint, part.url, remaining)
                     elif part.HasField("text") or part.HasField("data"):
                         text = part.text if part.HasField("text") else _text_value(MessageToDict(part.data))
                         data, mime = text.encode(), "text/plain" if part.HasField("text") else "application/json"
@@ -380,7 +413,7 @@ class A2AAdapter:
                         raise RemoteAgentError("远端产物缺少内容")
                     if len(data) > remaining:
                         raise RemoteAgentError("文件产物超过大小限制")
-                except (httpx.HTTPError, RemoteAgentError):
+                except (httpx.HTTPError, RemoteAgentError, TimeoutError):
                     warnings.append(f"未能获取产物 {name}，可以回查原任务重试。")
                     continue
                 remaining -= len(data)
@@ -396,7 +429,7 @@ class A2AAdapter:
                 task = await client.get_task(wire.GetTaskRequest(id=state.task_id, history_length=0))
             except wire.TaskNotFoundError:
                 raise RemoteTaskExpired("远端任务不存在或已过期") from None
-            except (wire.UnsupportedOperationError, A2AClientError, httpx.HTTPError):
+            except (wire.UnsupportedOperationError, A2AClientError, httpx.HTTPError, ParseError, ValueError):
                 raise RemoteAgentError("暂时无法查询远端任务", status="unknown") from None
             state = await _accept_state(state, self._state(state, task), checkpoint)
             return await self._result(task, state, http, endpoint)
@@ -409,12 +442,19 @@ class A2AAdapter:
                 task = await client.cancel_task(wire.CancelTaskRequest(id=state.task_id))
             except wire.TaskNotFoundError:
                 raise RemoteTaskExpired("远端任务不存在或已过期") from None
-            except (wire.TaskNotCancelableError, wire.UnsupportedOperationError, A2AClientError, httpx.HTTPError):
+            except (wire.TaskNotCancelableError, wire.UnsupportedOperationError, A2AClientError,
+                    httpx.HTTPError, ParseError, ValueError):
                 raise RemoteAgentError("远端尚未确认取消", status="unknown") from None
             result = self._state(state, task)
-            if result.task_id != state.task_id or result.status != "canceled":
+            if (result.task_id != state.task_id or result.status != "canceled"
+                    or (state.context_id and result.context_id != state.context_id)):
                 raise RemoteAgentError("远端尚未确认取消", status="unknown")
             return RemoteResult(result)
+
+
+class _McpTransportError(RemoteAgentError):
+    def __init__(self) -> None:
+        super().__init__("DeepAgent MCP 连接失败，暂时无法确认远端结果", status="unknown")
 
 
 class McpAdapter:
@@ -427,17 +467,32 @@ class McpAdapter:
     async def _client(self):
         async with _http_client(self.headers, exact_url=self.url) as http:
             client = build_resource_client(self.config.mcp_server_name, "url", {"url": self.url}, http_client=http)
+            stack = AsyncExitStack()
             try:
-                async with client:
-                    yield client.client
-            except RemoteAgentError:
-                raise
+                await stack.enter_async_context(client)
             except Exception:
-                raise RemoteAgentError("DeepAgent MCP 连接失败，暂时无法确认远端结果", status="unknown") from None
+                raise _McpTransportError() from None
+            command_failed = False
+            try:
+                yield client.client
+            except BaseException:
+                command_failed = True
+                raise
+            finally:
+                try:
+                    # FastMCP can surface a transport read failure again while
+                    # joining its background session. Keep any earlier error.
+                    await stack.aclose()
+                except Exception:
+                    if not command_failed:
+                        raise _McpTransportError() from None
 
     @staticmethod
     async def _call(client, tool: str, arguments: dict) -> dict:
-        response = await client.call_tool(tool, arguments, raise_on_error=False)
+        try:
+            response = await client.call_tool(tool, arguments, raise_on_error=False)
+        except Exception:
+            raise _McpTransportError() from None
         payload = response.structured_content
         if response.is_error:
             status = payload.get("status") if isinstance(payload, dict) else None
@@ -445,16 +500,19 @@ class McpAdapter:
                 if tool in {"get_task", "reply_task", "cancel_task"}:
                     raise RemoteTaskExpired("远端任务不存在或已过期")
                 raise RemoteAgentError("远端发布、任务或产物不存在，也可能已过期")
-            if status in {401, 403}:
+            if status in (401, 403):
                 raise RemoteAgentError("远端拒绝访问，请检查应用范围和鉴权")
             raise RemoteAgentError("DeepAgent MCP 拒绝本次调用，请检查连接和任务状态")
         if not isinstance(payload, dict):
-            raise RemoteAgentError("DeepAgent MCP 未返回结构化结果", status="unknown")
+            raise _McpTransportError()
         return payload
 
     async def publications(self) -> list[dict[str, str]]:
         async with self._client() as client:
-            tools = await client.list_tools()
+            try:
+                tools = await client.list_tools()
+            except Exception:
+                raise _McpTransportError() from None
             names = {tool.name for tool in tools}
             required = {"list_agents", "submit_task", "reply_task", "get_task", "cancel_task", "get_artifact"}
             if not required.issubset(names):
@@ -479,14 +537,21 @@ class McpAdapter:
 
     @staticmethod
     def _state(state: RemoteState, task: dict) -> RemoteState:
+        raw_status = task.get("state")
+        if not isinstance(raw_status, str):
+            raise _McpTransportError()
         status = {
             "submitted": "submitted", "working": "working", "input_required": "input_required",
             "completed": "completed", "canceled": "canceled", "failed": "failed", "rejected": "failed",
             "auth_required": "failed",
-        }.get(task.get("state"), "unknown")
-        return RemoteState.model_validate({
-            **state.model_dump(), "task_id": task.get("id"), "context_id": task.get("context_id") or state.context_id,
-            "status": status, "question_id": task.get("question_id") if status == "input_required" else None,
+        }.get(raw_status, "unknown")
+        task_id, context_id = task.get("id"), task.get("context_id")
+        question_id = task.get("question_id") if status == "input_required" else None
+        if (not isinstance(task_id, str) or not task_id or not isinstance(context_id, str) or not context_id
+                or (status == "input_required" and (not isinstance(question_id, str) or not question_id))):
+            raise _McpTransportError()
+        return state.model_copy(update={
+            "task_id": task_id, "context_id": context_id, "status": status, "question_id": question_id,
         })
 
     async def run(self, state: RemoteState, message: str, attachments: Sequence[InputFile],
@@ -500,6 +565,7 @@ class McpAdapter:
                 {"name": item.name, "media_type": item.mime, "data_base64": base64.b64encode(item.data).decode("ascii")}
                 for item in attachments
             ]
+        unanswered = state.question_id if mode == "answer" else None
         if mode == "answer":
             if not state.task_id or not state.question_id:
                 raise RemoteAgentError("没有可以补答的远端任务")
@@ -515,33 +581,55 @@ class McpAdapter:
             state = state.model_copy(update={
                 "task_id": None, "question_id": None, "context_id": None if mode == "start" else state.context_id,
             })
-        task = None
+        state = state.model_copy(update={"question_id": None, "status": "submitted"})
+        observed = False
         try:
-            async with asyncio.timeout(OBSERVATION_SECONDS):
-                async with self._client() as client:
+            async with self._client() as client:
+                async with asyncio.timeout(OBSERVATION_SECONDS):
                     task = await self._call(client, tool, arguments)
                     state = await _accept_state(state, self._state(state, task), checkpoint)
+                    observed = True
                     while state.status in ACTIVE:
                         await asyncio.sleep(0.5)
                         task = await self._call(client, "get_task", {"task_id": state.task_id, "history_length": 0})
                         state = await _accept_state(state, self._state(state, task), checkpoint)
-                    return await self._result(client, task, state)
-        except TimeoutError:
-            if task is None:
+                return await self._result(client, task, state)
+        except (_McpTransportError, TimeoutError) as exc:
+            if not state.task_id:
                 raise RemoteAgentError("发送结果未知，未收到 DeepAgent MCP 响应", status="unknown") from None
-            return RemoteResult(state, "远端任务仍可按原任务回查。")
+            if observed and isinstance(exc, TimeoutError):
+                return RemoteResult(state, "远端任务仍可按原任务回查。")
+            try:
+                async with self._client() as client:
+                    async with asyncio.timeout(RECOVERY_SECONDS):
+                        task = await self._call(client, "get_task", {"task_id": state.task_id, "history_length": 0})
+                    state = await _accept_state(state, self._state(state, task), checkpoint)
+                    result = await self._result(client, task, state)
+            except RemoteTaskExpired:
+                raise
+            except (_McpTransportError, TimeoutError):
+                if observed:
+                    return RemoteResult(state, "远端暂时无法查询，可稍后按原任务回查。")
+                raise RemoteAgentError("补答结果未知，可按原任务回查。", status="unknown") from None
+            return _recovered_result(result, unanswered if not observed else None)
 
     async def _result(self, client, task: dict, state: RemoteState) -> RemoteResult:
         text = [str(task.get("message") or "")]
+        if state.status != "completed":
+            return RemoteResult(state, text[0][:MAX_TEXT])
         warnings: list[str] = []
         files: list[OutputFile] = []
         remaining = MAX_OUTPUT_BYTES
+        deadline = asyncio.get_running_loop().time() + ARTIFACT_SECONDS
+        artifacts = task.get("artifacts", [])
+        if not isinstance(artifacts, list):
+            return RemoteResult(state, text[0][:MAX_TEXT], warnings=("远端没有返回有效的产物列表，可回查原任务重试。",))
         async with _http_client(self.headers) as http:
-            for artifact in (task.get("artifacts") or [])[:MAX_ARTIFACTS]:
+            for artifact in artifacts[:MAX_ARTIFACTS]:
                 if not isinstance(artifact, dict):
                     continue
                 if "parts" in artifact:
-                    if state.status == "completed":
+                    if isinstance(artifact["parts"], list):
                         for part in artifact["parts"]:
                             if isinstance(part, dict) and ("text" in part or "data" in part):
                                 text.append(_text_value(part.get("text", part.get("data"))))
@@ -549,16 +637,21 @@ class McpAdapter:
                 artifact_id = artifact.get("artifact_id")
                 name = _name(str(artifact.get("name") or "artifact"))
                 try:
-                    reference = await self._call(client, "get_artifact", {
-                        "task_id": state.task_id, "artifact_id": artifact_id,
-                    })
-                    size = reference.get("size")
-                    if type(size) is not int or not 0 <= size <= remaining:
-                        raise RemoteAgentError("产物缺少有效大小或超过限制")
-                    data, mime = await self._file_bytes(client, http, state.task_id, artifact_id, reference, size)
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise TimeoutError
+                    async with asyncio.timeout_at(deadline):
+                        reference = await self._call(client, "get_artifact", {
+                            "task_id": state.task_id, "artifact_id": artifact_id,
+                        })
+                        if not isinstance(artifact_id, str) or reference.get("artifact_id") != artifact_id:
+                            raise RemoteAgentError("远端返回了与请求不一致的产物")
+                        size = reference.get("size")
+                        if type(size) is not int or not 0 <= size <= remaining:
+                            raise RemoteAgentError("产物缺少有效大小或超过限制")
+                        data, mime = await self._file_bytes(client, http, state.task_id, artifact_id, reference, size)
                     if len(data) != size:
                         raise RemoteAgentError("远端产物大小校验失败")
-                except Exception:
+                except (RemoteAgentError, httpx.HTTPError, TimeoutError):
                     warnings.append(f"未能获取产物 {name}，可以回查原任务重试。")
                     continue
                 remaining -= size
@@ -574,7 +667,8 @@ class McpAdapter:
         if size <= MCP_INLINE_LIMIT and uri == f"deepagent://tasks/{task_id}/artifacts/{artifact_id}":
             try:
                 items = await client.read_resource(uri)
-                if len(items) == 1 and isinstance(items[0], mcp_types.BlobResourceContents):
+                if (len(items) == 1 and isinstance(items[0], mcp_types.BlobResourceContents)
+                        and str(items[0].uri) == uri):
                     data = base64.b64decode(items[0].blob, validate=True)
                     if len(data) == size:
                         return data, str(items[0].mimeType or reference.get("media_type") or "")
@@ -604,6 +698,7 @@ class McpAdapter:
         async with self._client() as client:
             task = await self._call(client, "cancel_task", {"task_id": state.task_id})
             result = self._state(state, task)
-            if result.task_id != state.task_id or result.status != "canceled":
+            if (result.task_id != state.task_id or result.status != "canceled"
+                    or (state.context_id and result.context_id != state.context_id)):
                 raise RemoteAgentError("远端尚未确认取消", status="unknown")
             return RemoteResult(result)

@@ -17,7 +17,7 @@ from uuid import uuid4
 from .cli_workspace import MAX_FILES, MAX_INPUT, MAX_LINE, MAX_OUTPUT, SAFE_ID, TURN_SECONDS, file_name
 from .contracts import (
     Checkpoint, CodeBuddyConfig, CodexConfig, InputFile, Operation, OutputFile, RemoteAgentError,
-    RemoteResult, RemoteState,
+    RemoteResult, RemoteState, RemoteTaskExpired,
 )
 
 _HELPER = Path(__file__).with_name("cli_workspace.py").resolve()
@@ -126,6 +126,7 @@ class CliAdapter:
             return await asyncio.create_subprocess_exec(
                 *self._args(operation, workspace, turn), stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=MAX_LINE,
+                start_new_session=operation == "run",
             )
         except OSError as exc:
             raise RemoteAgentError("无法启动远程 Agent 执行器") from exc
@@ -197,14 +198,14 @@ class CliAdapter:
         if len(attachments) > MAX_FILES or sum(len(file.data) for file in attachments) > MAX_INPUT:
             raise RemoteAgentError("附件超出 CLI 文件数量或总大小上限")
         ids = self._ids(state)
+        turn = hashlib.sha256(message_id.encode()).hexdigest()[:32]
+        if ids and ids[1] == turn:
+            return await self.refresh(state, checkpoint)
         if mode != "start" and (ids is None or not _NATIVE_ID.fullmatch(state.session_id or "")):
             raise RemoteAgentError("原 CLI 会话不可继续")
         if mode != "start" and state.status in {"submitted", "working", "unknown"}:
             raise RemoteAgentError("请先确认上一条 CLI 指令的执行状态", status="unknown")
         workspace = ids[0] if ids else uuid4().hex
-        turn = hashlib.sha256(message_id.encode()).hexdigest()[:32]
-        if ids == (workspace, turn):
-            return await self.refresh(state, checkpoint)
         paths = await self._helper("prepare", workspace, turn, {
             "cwd": self.config.cwd, "schema": _RESULT_SCHEMA,
             "files": [{"name": file.name, "data": base64.b64encode(file.data).decode("ascii")}
@@ -221,7 +222,8 @@ class CliAdapter:
             "question_id": None, "status": "working",
         })
         await checkpoint(current)
-        request = {"cwd": paths["cwd"], "argv": self._command(current.session_id, paths), "prompt": prompt}
+        request = {"cwd": paths["cwd"], "argv": self._command(current.session_id, paths),
+                   "prompt": prompt, "session_id": current.session_id}
         process = await self._open("run", workspace, turn)
         try:
             # Consume the native event stream while the worker checkpoints it to disk.
@@ -237,10 +239,12 @@ class CliAdapter:
                 await process.wait()
         except (BrokenPipeError, ConnectionResetError, TimeoutError, ValueError):
             # The remote worker retains its lease and exit status after the connection goes away.
-            return await self.refresh(current, checkpoint)
+            pass
         return await self.refresh(current, checkpoint)
 
     async def refresh(self, state: RemoteState, checkpoint: Checkpoint) -> RemoteResult:
+        if state.status == "canceled":
+            return RemoteResult(state)
         ids = self._ids(state)
         if ids is None:
             return RemoteResult(state.model_copy(update={"status": "unknown"}), "尚未取得 CLI 执行标识")
@@ -263,10 +267,12 @@ class CliAdapter:
             return RemoteResult(current, "未能确认该 CLI 指令的结果")
         exit_status = snapshot["exit"]
         if exit_status.get("canceled"):
-            return RemoteResult(state.model_copy(update={"status": "canceled", "session_id": session}))
+            return RemoteResult(state.model_copy(update={"status": "canceled", "session_id": session, "question_id": None}))
         if exit_status.get("timeout"):
             raise RemoteAgentError("CLI 执行超时")
         output = _codex_result(events) if self.config.protocol == "codex" else _codebuddy_result(events)
+        if exit_status.get("session_expired") and (exit_status.get("returncode") != 0 or output is None):
+            raise RemoteTaskExpired("CLI 执行端找不到原会话，原任务不可继续")
         if exit_status.get("returncode") != 0 or session is None:
             raise RemoteAgentError("CLI 运行失败或未返回原生会话标识")
         status, answer, names = _decode_outcome(output)
@@ -284,18 +290,27 @@ class CliAdapter:
         if not names:
             return (), ()
         names = list(dict.fromkeys(names))
+        eligible = [name for name in names if file_name(name)]
         try:
-            outputs = await self._helper("collect", workspace, turn, {"names": [name for name in names if file_name(name)]})
+            outputs = await self._helper("collect", workspace, turn, {"names": eligible})
         except RemoteAgentError:
             return (), ("CLI 产物暂不可读取，可以回查重试",)
-        data = tuple(OutputFile(
-            f"{turn}:{name}", name, mimetypes.guess_type(name)[0] or "application/octet-stream",
-            base64.b64decode(outputs[name], validate=True),
-        ) for name in names if name in outputs)
-        warnings = ("部分 CLI 产物未找到、超限或不是输出目录中的普通文件",) if len(data) != len(names) else ()
-        return data, warnings
+        data = []
+        for name in eligible:
+            encoded = outputs.get(name)
+            if not isinstance(encoded, str):
+                continue
+            try:
+                payload = base64.b64decode(encoded, validate=True)
+            except ValueError:
+                continue
+            data.append(OutputFile(f"{turn}:{name}", name, mimetypes.guess_type(name)[0] or "application/octet-stream", payload))
+        warnings = ("部分 CLI 产物无法读取，可以回查重试",) if len(data) != len(names) else ()
+        return tuple(data), warnings
 
     async def cancel(self, state: RemoteState) -> RemoteResult:
+        if state.status == "canceled":
+            return RemoteResult(state)
         ids = self._ids(state)
         if ids is None:
             return RemoteResult(state.model_copy(update={"status": "unknown"}), "未能确认该 CLI 指令是否停止")
@@ -303,11 +318,13 @@ class CliAdapter:
         if state.status == "input_required":
             return RemoteResult(state.model_copy(update={"status": "canceled", "question_id": None}))
         snapshot = await self._helper("cancel", workspace, turn, {})
-        for _ in range(8):
-            if snapshot.get("status") != "working":
-                break
-            await asyncio.sleep(0.4)
-            snapshot = await self._helper("snapshot", workspace, turn, {})
+        try:
+            async with asyncio.timeout(5):
+                while snapshot.get("status") == "working":
+                    await asyncio.sleep(0.2)
+                    snapshot = await self._helper("snapshot", workspace, turn, {})
+        except TimeoutError:
+            pass
         if snapshot.get("exit", {}).get("canceled"):
             return RemoteResult(state.model_copy(update={"status": "canceled", "question_id": None}))
         if snapshot.get("status") == "settled":

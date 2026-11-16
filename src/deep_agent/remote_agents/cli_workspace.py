@@ -26,8 +26,8 @@ SAFE_ID = re.compile(r"[a-f0-9]{32}")
 
 def file_name(value: str) -> bool:
     return (
-        bool(value) and value not in {".", ".."} and len(value.encode()) <= 180
-        and not any(char in value for char in "/\\") and value.isprintable()
+        bool(value) and value not in {".", ".."} and value.isprintable()
+        and len(value.encode()) <= 180 and not any(char in value for char in "/\\")
     )
 
 
@@ -114,7 +114,7 @@ def _write_events_line(line: bytes, event_file, count: int) -> int:
     fact = _event_facts(event) if isinstance(event, dict) else {}
     if not fact:
         return count + len(line)
-    event_file.write(json.dumps(fact, ensure_ascii=False).encode("utf-8") + b"\n")
+    event_file.write(json.dumps(fact, ensure_ascii=False).encode("utf-8", errors="backslashreplace") + b"\n")
     event_file.flush()
     ids = {name: fact[name] for name in ("thread_id", "session_id")
            if isinstance(fact.get(name), str) and len(fact[name]) <= 128}
@@ -127,21 +127,29 @@ def _write_events_line(line: bytes, event_file, count: int) -> int:
     return count + len(line)
 
 
-async def _terminate(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is not None:
-        return
+def _signal_group(group_id: int, sig: int) -> bool:
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(group_id, sig)
     except ProcessLookupError:
-        return
+        return False
+    except PermissionError:
+        # macOS reports EPERM while the group contains only zombies awaiting reap.
+        if sys.platform != "darwin":
+            raise
+        return False
+    return True
+
+
+async def _terminate(process: asyncio.subprocess.Process) -> None:
+    _signal_group(process.pid, signal.SIGTERM)
     try:
-        await asyncio.wait_for(process.wait(), 3)
+        async with asyncio.timeout(3):
+            # A CLI child can still own the output pipe after the group leader exits.
+            while _signal_group(process.pid, 0):
+                await asyncio.sleep(0.1)
     except TimeoutError:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        await process.wait()
+        _signal_group(process.pid, signal.SIGKILL)
+    await process.wait()
 
 
 async def _execute(turn: Path, request: dict) -> dict:
@@ -150,16 +158,33 @@ async def _execute(turn: Path, request: dict) -> dict:
         return {"returncode": None, "canceled": True}
     process = await asyncio.create_subprocess_exec(
         *request["argv"], cwd=request["cwd"], stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         env=_execution_env(), limit=MAX_LINE, start_new_session=True,
     )
+    count = 0
+    expired = False
+    session = request.get("session_id")
+    missing_codex = f"no rollout found for thread id {session}".encode() if session else None
+    missing_codebuddy = f"No conversation found with session ID: {session}".encode() if session else None
 
     async def stream() -> None:
-        nonlocal count
+        nonlocal count, expired
         with (turn / "events.jsonl").open("xb") as events:
             while line := await process.stdout.readline():
+                if missing_codebuddy and missing_codebuddy in line:
+                    expired = True
                 count = _write_events_line(line, events, count)
         await process.wait()
+
+    async def drain_errors() -> None:
+        nonlocal expired
+        tail = b""
+        while chunk := await process.stderr.read(65536):
+            if missing_codex:
+                window = tail + chunk
+                if missing_codex in window:
+                    expired = True
+                tail = window[-len(missing_codex):]
 
     async def feed() -> None:
         try:
@@ -170,26 +195,24 @@ async def _execute(turn: Path, request: dict) -> dict:
         finally:
             process.stdin.close()
 
-    count = 0
-    reader = asyncio.create_task(stream())
-    writer = asyncio.create_task(feed())
+    tasks = [asyncio.create_task(operation()) for operation in (stream, drain_errors, feed)]
     try:
         async with asyncio.timeout(TURN_SECONDS):
-            while not reader.done() or not writer.done():
+            pending = set(tasks)
+            while pending:
                 if marker.exists():
                     return {"returncode": None, "canceled": True}
-                pending = {item for item in (reader, writer) if not item.done()}
-                await asyncio.wait(pending, timeout=0.2, return_when=asyncio.FIRST_COMPLETED)
-            await reader
-            await writer
-        return {"returncode": process.returncode}
+                done, pending = await asyncio.wait(pending, timeout=0.2, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
+        return {"returncode": process.returncode, "session_expired": expired}
     except TimeoutError:
         return {"returncode": None, "timeout": True}
     finally:
-        reader.cancel()
-        writer.cancel()
+        for task in tasks:
+            task.cancel()
         await _terminate(process)
-        await asyncio.gather(reader, writer, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def _run(workspace: Path, turn: Path, request: dict) -> None:
@@ -217,7 +240,10 @@ def _snapshot(workspace: Path, turn: Path) -> dict:
             active = False
         except BlockingIOError:
             active = True
-    response = {"status": "working" if active else "unknown"}
+    started = (turn / "started").is_file()
+    if not started and (turn / "cancel").exists():
+        return {"status": "settled", "exit": {"returncode": None, "canceled": True}}
+    response = {"status": "working" if active and started else "unknown"}
     if exit_path.is_file():
         response = {"status": "settled", "exit": json.loads(exit_path.read_bytes())}
     if events_path.is_file():

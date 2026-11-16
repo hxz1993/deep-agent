@@ -187,6 +187,10 @@ def _validate_chat_body(body: ChatRequest | StreamChatRequest, *, max_count: int
     has_context_refs = bool(body.context_refs)
     deferred = getattr(body, "deferred_tool_results", None)
     has_deferred = bool(deferred)
+    if body.remote_question_id and not body.remote_task_id:
+        raise HTTPException(422, "remote_question_id requires remote_task_id.")
+    if body.remote_task_id and (not body.session_id or not (has_message or has_attachments) or has_deferred):
+        raise HTTPException(422, "Remote task replies require an existing session and a message or attachments.")
     if not has_message and not has_attachments and not has_context_refs and not has_deferred:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -216,6 +220,23 @@ def _deferred_results(body: StreamChatRequest):
         return build_deferred_tool_results(body.deferred_tool_results)
     except DeferredResultConflict as exc:
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+async def _prepare_remote_reply(ctx, deps, body) -> None:
+    if body.remote_task_id is None:
+        return
+    from deep_agent.remote_agents.contracts import CONNECTION_PREFIX, RemoteAgentError
+    from deep_agent.remote_agents.runtime import RequestScope
+
+    deps.remote_task_id = body.remote_task_id
+    deps.remote_question_id = body.remote_question_id
+    allowed = None if body.capabilities is None else frozenset(
+        code.removeprefix(CONNECTION_PREFIX) for code in body.capabilities if code.startswith(CONNECTION_PREFIX)
+    )
+    try:
+        await ctx.get_remote_agents().validate_reply(RequestScope.from_deps(deps, allowed))
+    except RemoteAgentError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 async def _current_channel_context(ctx, body, account):
@@ -320,7 +341,7 @@ async def chat(
         local_username=_local_execution_username(request, user),
         app_context=app_context,
     )
-    deps.remote_task_id = body.remote_task_id
+    await _prepare_remote_reply(ctx, deps, body)
     try:
         active_run = ctx.active_runs.register(
             agent_id=agent_id, session_id=session_id, user_id=user,
@@ -447,7 +468,7 @@ async def chat_stream(
         local_username=_local_execution_username(request, user),
         app_context=app_context,
     )
-    deps.remote_task_id = body.remote_task_id
+    await _prepare_remote_reply(ctx, deps, body)
     session_data = {
         "session_id": session_id,
         "agent_id": agent_id,

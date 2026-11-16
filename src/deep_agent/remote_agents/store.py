@@ -22,7 +22,12 @@ async def lock_agent_connections(db, codes: list[str], *, old_codes=()) -> None:
 
 async def mcp_connections(db, name: str) -> list[RemoteAgentConnection]:
     rows = (await db.scalars(select(RemoteAgentConnection).order_by(RemoteAgentConnection.id))).all()
-    return [row for row in rows if row.config.get("mcp_server_name") == name]
+    connections = []
+    for connection_id in [row.id for row in rows if row.config.get("mcp_server_name") == name]:
+        row = await lock_optional(db, RemoteAgentConnection, RemoteAgentConnection.id, connection_id)
+        if row is not None and row.config.get("mcp_server_name") == name:
+            connections.append(row)
+    return connections
 
 
 class ConnectionStore(SessionBoundMixin):

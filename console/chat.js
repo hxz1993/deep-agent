@@ -2486,7 +2486,7 @@ async function loadCapabilities() {
 
 /* --------------------------- 发送 / 流式 --------------------------- */
 function setRemoteTaskReply(task) {
-  state.remoteTaskReply = task ? { id: task.id, name: task.name, sessionId: state.sessionId } : null;
+  state.remoteTaskReply = task ? { id: task.id, name: task.name, questionId: task.question_id, sessionId: state.sessionId } : null;
   if (!el.remoteTaskReply) return;
   el.remoteTaskReply.hidden = !task;
   el.remoteTaskReply.querySelector("#composerRemoteReplyLabel").textContent = task
@@ -2545,6 +2545,7 @@ async function onSend() {
   };
   if (state.remoteTaskReply?.sessionId === state.sessionId) {
     payload.remote_task_id = state.remoteTaskReply.id;
+    if (state.remoteTaskReply.questionId) payload.remote_question_id = state.remoteTaskReply.questionId;
     setRemoteTaskReply(null);
   }
   const modelId = chatPayloadModelId();

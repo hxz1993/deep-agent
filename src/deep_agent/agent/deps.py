@@ -79,6 +79,7 @@ class AgentDeps:
     remote_attachments: tuple[AttachmentRef, ...] = ()
     remote_user_message: str | None = None
     remote_task_id: str | None = None
+    remote_question_id: str | None = None
     # All FileStore-backed artifacts authorized by the raw current-session history.
     # Overflow artifacts are also kept in ``tool_output_artifacts`` because only
     # those handles may be consumed by Harness ``read_tool_result``.

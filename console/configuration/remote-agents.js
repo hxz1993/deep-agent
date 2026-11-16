@@ -31,6 +31,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   let homeRequest;
   let openRequest = 0;
   let pollTimer;
+  let debugPollTimer;
   let binding = false;
 
   const path = (id) => `${endpoint}/${encodeURIComponent(id)}`;
@@ -77,8 +78,11 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   }
 
   function recentIsVisible() {
-    const panel = el("panel-remote-agents");
-    return panel?.classList.contains("active") && !editor && !document.hidden
+    return !editor && panelIsVisible();
+  }
+
+  function panelIsVisible() {
+    return el("panel-remote-agents")?.classList.contains("active") && !document.hidden
       && (!document.body.dataset.consolePage || document.body.dataset.consolePage === "configuration");
   }
 
@@ -95,6 +99,10 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     select.value = names.has(previous) ? previous : "";
   }
 
+  function recentConnectionName(row, connection = connections.find(item => item.id === row.connection_id)) {
+    return connection?.name || row.connection_name || row.name;
+  }
+
   function renderRecent(message = "") {
     renderRecentFilter();
     const keyword = el("remoteCallSearch").value.trim().toLocaleLowerCase();
@@ -108,14 +116,20 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     const selected = shown.find(row => row.id === selectedRecent) || shown[0];
     selectedRecent = selected?.id;
     const markup = shown.length ? shown.map(row => {
-      const name = row.connection_name || connections.find(item => item.id === row.connection_id)?.name || row.name;
+      const name = recentConnectionName(row);
       const title = row.title || row.task || row.label || "远程 Agent 调用";
-      return `<tr class="${row.id === selectedRecent ? "selected" : ""}">
-        <td><button type="button" class="btn text remote-agent-call-name" data-remote-call="${attr(row.id)}" aria-pressed="${row.id === selectedRecent}"><span>${escapeHtml(title)}</span><code>${escapeHtml(String(row.id).slice(0, 8))}</code></button></td>
-        <td><div class="remote-agent-call-name"><span>${escapeHtml(name || "—")}</span>${driverBadge(row.protocol)}</div></td>
+      return `<tr data-remote-call-row="${attr(row.id)}" class="${row.id === selectedRecent ? "selected" : ""}">
+        <td><button type="button" class="btn text remote-agent-call-name" data-remote-call="${attr(row.id)}" aria-pressed="${row.id === selectedRecent}"><span title="${attr(title)}">${escapeHtml(title)}</span><code title="${attr(row.id)}">${escapeHtml(String(row.id).slice(0, 8))}</code></button></td>
+        <td><div class="remote-agent-call-name"><span title="${attr(name || "—")}">${escapeHtml(name || "—")}</span>${driverBadge(row.protocol)}</div></td>
         <td>${status(row.status)}</td><td><time datetime="${attr(row.created_at)}">${escapeHtml(formatDate(row.created_at))}</time></td></tr>`;
-    }).join("") : `<tr><td colspan="4" class="remote-agent-empty">${escapeHtml(message || "暂无调用记录")}</td></tr>`;
-    replaceMarkup(el("remoteCallRows"), markup);
+    }).join("") : `<tr><td colspan="4" class="remote-agent-empty">${escapeHtml(message || (keyword || connectionId || protocol || filterStatus ? "暂无符合条件的调用记录" : "暂无调用记录"))}</td></tr>`;
+    const body = el("remoteCallRows");
+    const focused = body.contains(document.activeElement) && document.activeElement.dataset.remoteCall;
+    replaceMarkup(body, markup);
+    if (focused && !body.contains(document.activeElement)) {
+      const button = Array.from(body.querySelectorAll("[data-remote-call]")).find(node => node.dataset.remoteCall === focused);
+      button?.focus({ preventScroll: true });
+    }
     el("remoteCallCount").textContent = `共 ${shown.length} 条`;
     renderRecentDetail(selected);
     icons();
@@ -150,28 +164,32 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       return;
     }
     const title = row.title || row.task || row.label || "调用详情";
+    const connection = connections.find(item => item.id === row.connection_id);
+    const localAgent = connection?.agents?.find(agent => agent.id === row.agent_id);
     const question = row.question || (row.status === "input_required" ? row.text : "");
     const result = row.result || (row.status === "input_required" ? "" : row.text);
     const sessionUrl = row.session_id && window.DeepAgentConsoleAPI?.consoleUrl(
       `#/diagnostics/sessions/${encodeURIComponent(row.session_id)}`,
     );
     const events = (Array.isArray(row.timeline) ? row.timeline : []).map(item => `<li>${status(item.status, item.label)}<time>${escapeHtml(formatDate(item.at || item.created_at))}</time></li>`).join("");
+    const remoteSession = [
+      fact("任务 ID", row.remote_task_id),
+      fact(row.protocol === "codex" ? "Thread ID" : row.protocol === "codebuddy" ? "Session ID" : "Context ID", row.remote_context_id || row.remote_session_id || row.thread_id),
+      fact("提问 ID", row.question_id),
+    ].join("");
     replaceMarkup(el("remoteCallDetail"), `
       <div class="remote-agent-toolbar remote-agent-detail-heading"><h3>${escapeHtml(title)}</h3>${status(row.status)}</div>
       <dl class="remote-agent-facts">
         <div><dt>接入方式</dt><dd>${driverBadge(row.protocol)}</dd></div>
-        ${fact("远程 Agent", row.name)}
+        ${fact("远程 Agent", recentConnectionName(row, connection))}
+        ${fact("本地 Agent", localAgent?.name || row.agent_id)}
         ${fact("提交时间", formatDate(row.created_at))}
         ${fact("调用 ID", row.id)}
       </dl>
-      <section class="remote-agent-detail-section"><h4>外部会话</h4><dl class="remote-agent-facts">
-        ${fact("任务 ID", row.remote_task_id)}
-        ${fact("远端会话", row.remote_context_id || row.remote_session_id || row.thread_id)}
-        ${fact("提问 ID", row.question_id)}
-      </dl></section>
+      ${remoteSession ? `<section class="remote-agent-detail-section"><h4>外部会话</h4><dl class="remote-agent-facts">${remoteSession}</dl></section>` : ""}
       ${sessionUrl ? `<section class="remote-agent-detail-section"><h4>本地会话</h4><dl class="remote-agent-facts"><div><dt>会话 ID</dt><dd><a href="${attr(sessionUrl)}">${escapeHtml(row.session_id)}</a></dd></div>${fact("提问 ID", row.turn_id)}</dl></section>` : ""}
       ${events ? `<section class="remote-agent-detail-section"><h4>任务进度</h4><ol>${events}</ol></section>` : ""}
-      ${question ? `<section class="remote-agent-detail-section"><h4>待补材料</h4><p>${escapeHtml(question)}</p></section>` : ""}
+      ${question ? `<section class="remote-agent-detail-section"><h4>待补材料</h4><p>${escapeHtml(question)}</p>${sessionUrl ? '<p class="muted">请在原 Agent 会话补答。</p>' : ""}</section>` : ""}
       ${result ? `<section class="remote-agent-detail-section remote-agent-result"><h4>任务结果</h4><p>${escapeHtml(result)}</p></section>` : ""}
       ${(row.warnings || []).map(warning => `<p class="muted">${escapeHtml(warning)}</p>`).join("")}
       ${renderFiles(row.files)}`);
@@ -236,6 +254,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   function openEditor(row = {}, initial = {}) {
     homeRequest?.abort();
     clearTimeout(pollTimer);
+    clearTimeout(debugPollTimer);
     const config = { ...baseConfig(protocolOf(row) || initial.protocol || "a2a"), ...(row.config || initial.config) };
     editor = {
       row, config, formModes: { cwd: config.cwd ? "custom" : "default", model: config.model ? "custom" : "default" },
@@ -273,6 +292,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       title: "放弃未保存的修改？", message: "当前远程 Agent 的修改尚未保存。",
       icon: "file-warning", confirmLabel: "放弃修改",
     }))) return false;
+    clearTimeout(debugPollTimer);
     editor = null;
     el("remoteAgentEditor").hidden = true;
     el("remoteAgentDirectory").hidden = false;
@@ -281,23 +301,23 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     el("remoteConfigJson").value = "";
     el("remoteDriverFields").replaceChildren();
     el("remoteDebugPrompt").value = "";
-    el("remoteDebugThread").replaceChildren();
+    replaceMarkup(el("remoteDebugThread"), "");
     el("remoteDebugFiles").replaceChildren();
     return true;
   }
 
-  function field(label, key, { value, hint, type = "text", required = false, readonly = false } = {}) {
+  function field(label, key, { value, hint, placeholder, type = "text", required = false, readonly = false } = {}) {
     const identifier = `remote-field-${key}`;
     return `<label class="field"><span class="field-label-row">${label}${hint ? tooltip(identifier, hint) : ""}</span>
-      <input type="${type}" id="${identifier}" ${readonly ? "readonly" : `data-config-field="${key}"`} value="${attr(value ?? editor.config[key])}" autocomplete="off" ${required ? "required" : ""}></label>`;
+      <input type="${type}" id="${identifier}" ${readonly ? "readonly" : `data-config-field="${key}"`} value="${attr(value ?? editor.config[key])}" ${placeholder ? `placeholder="${attr(placeholder)}"` : ""} autocomplete="off" ${required ? "required" : ""}></label>`;
   }
 
   function tooltip(id, content) {
     return `<span class="field-help" tabindex="0" aria-label="查看字段说明" aria-describedby="${id}-tip">${icon("circle-help")}<span class="field-help-tooltip" id="${id}-tip" role="tooltip">${escapeHtml(content)}</span></span>`;
   }
 
-  function segmented(label, key, current, content = "") {
-    return `<div class="remote-agent-option"><div class="remote-agent-option-label"><span>${label}</span>
+  function segmented(label, key, current, content = "", hint = "") {
+    return `<div class="remote-agent-option"><div class="remote-agent-option-label"><span class="field-label-row">${label}${hint ? tooltip(`remote-option-${key}`, hint) : ""}</span>
       <div class="console-segmented" role="group" aria-label="${label}">${Object.entries(fieldOptions[key]).map(([value, label]) => `<button type="button" class="${value === current ? "active" : ""}" data-config-option="${key}" data-config-value="${value}" aria-pressed="${value === current}">${label}</button>`).join("")}</div>
       </div>${content ? `<div class="remote-agent-option-field">${content}</div>` : ""}</div>`;
   }
@@ -313,7 +333,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
         + field("目标发布", "publication_code", { readonly: true });
     }
     if (config.protocol === "a2a") {
-      return `${field("Agent Card 地址", "card_url", { type: "url", required: true })}
+      return `${field("Agent Card 地址", "card_url", { type: "url", required: true, placeholder: "https://example.com/.well-known/agent-card.json" })}
         <div class="remote-agent-header-fields"><div class="remote-agent-toolbar"><strong>请求 Header</strong>
           <button type="button" class="btn text compact" id="addRemoteHeader">${icon("plus")}添加</button></div>
           ${editor.headers.map(([key, value], index) => `
@@ -324,30 +344,37 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
             </div>`).join("")}</div>`;
     }
     const codex = config.protocol === "codex";
+    const modelExample = codex ? "gpt-5.4" : "gpt-5";
     return `
       ${segmented("执行位置", "execution", config.execution, config.execution === "ssh"
-        ? optionField("ssh_host", "SSH 主机别名", "例如 development-server", true)
+        ? optionField("ssh_host", "SSH 主机别名", "SSH 主机名，如 build-runner", true)
         : '<span class="muted">在本机执行。</span>')}
       ${segmented("工作目录", "cwd", editor.formModes.cwd, editor.formModes.cwd === "custom"
         ? optionField("cwd", "工作目录", "输入执行环境中的绝对路径", true)
         : '<span class="muted">为任务使用独立工作目录。</span>')}
       ${segmented("模型", "model", editor.formModes.model, editor.formModes.model === "custom"
-        ? optionField("model", "模型", "输入 CLI 支持的模型", true)
-        : '<span class="muted">使用 CLI 的默认模型。</span>')}
+        ? optionField("model", "模型", `例如 ${modelExample}`, true)
+        : `<span class="muted">沿用 ${drivers[config.protocol].label} 的默认模型。</span>`, `指定时填写执行账号可用的模型名，例如 ${modelExample}。`)}
       ${codex ? segmented("工作区权限", "sandbox", config.sandbox) : ""}
       <details class="remote-agent-advanced" ${editor.advanced ? "open" : ""}>
         <summary>高级</summary>
-        ${field("启动命令", "command", { hint: `留空使用 ${config.protocol}。也可填写执行环境中的可执行文件绝对路径。` })}
-        ${codex ? field("配置档（Profile）", "profile") + field("推理强度", "reasoning_effort", { hint: "常见档位为 minimal、low、medium、high、xhigh。可用值取决于模型。" }) : ""}
+        ${field("启动命令", "command", { placeholder: `默认 ${config.protocol}，支持绝对路径`, hint: "只填命令名或执行环境中的可执行文件绝对路径。" })}
+        ${codex ? field("配置档（Profile）", "profile", { placeholder: "沿用默认配置，如 review", hint: "填写执行账号在 Codex 中已定义的配置档名称。配置档可为不同工作场景预设模型等选项；留空使用 CLI 默认配置。" })
+          + field("推理强度", "reasoning_effort", { placeholder: "沿用默认档位，如 medium", hint: "常见档位为 minimal、low、medium、high、xhigh。可用值取决于模型。" }) : ""}
       </details>`;
   }
 
   function renderConfig() {
     const cfg = editor.config;
     const mcp = cfg.protocol === "mcp";
+    const cli = cfg.protocol === "codex" || cfg.protocol === "codebuddy";
+    el("remoteEditorDriver").innerHTML = driverBadge(cfg.protocol);
     el("remoteDriverOptions").innerHTML = Object.entries(drivers).filter(([key]) => mcp ? key === "mcp" : key !== "mcp").map(([key, driver]) =>
       `<button type="button" class="btn remote-agent-driver-option ${key === cfg.protocol ? "active" : ""}" data-remote-driver="${key}" aria-pressed="${key === cfg.protocol}" ${mcp ? "disabled" : ""}>${icon(driver.icon)}<span>${driver.label}</span></button>`).join("");
     el("remoteDriverNote").textContent = drivers[cfg.protocol].help;
+    el("remoteDebugHeading").textContent = cli ? "任务调试" : "对话调试";
+    el("resetRemoteDebug").textContent = cli ? "清空调试" : "新对话";
+    el("remoteDebugPrompt").placeholder = cli ? "描述要执行的任务…" : "给远程 Agent 发送消息…";
     const fields = el("remoteDriverFields");
     fields.hidden = editor.json;
     fields.innerHTML = editor.json ? "" : driverFields();
@@ -423,12 +450,19 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
 
   function renderSummary() {
     const row = editor.row;
-    const config = row.config || editor.config;
+    const savedProtocol = row.config?.protocol === editor.config.protocol;
+    const cli = ["codex", "codebuddy"].includes(editor.config.protocol);
+    const heading = `<h3>${cli ? "执行环境" : "连接概览"}</h3>`;
+    const summary = el("remoteConnectionSummary");
+    if (!savedProtocol) {
+      summary.innerHTML = `${heading}<p class="muted">保存后显示概要。</p>`;
+      return;
+    }
+    const config = row.config;
     const inspection = row.inspection;
     const proposed = inspection?.proposed_interface
       || (inspection?.status === "approval_required" ? inspection.interface : null);
-    el("remoteConnectionSummary").innerHTML = `
-      <h3>${config.protocol === "a2a" ? "连接概览" : ["codex", "codebuddy"].includes(config.protocol) ? "执行环境" : "连接概览"}</h3>
+    summary.innerHTML = `${heading}
       <dl class="remote-agent-facts">${fact("接入方式", drivers[config.protocol].label)}
         <div><dt>状态</dt><dd>${inspectionState(inspection)}</dd></div>
         ${fact("远端 Agent", inspection?.agent_name || inspection?.name)}
@@ -449,11 +483,11 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     const active = editor.debug.invocation && activeStates.has(editor.debug.invocation.status);
     el("checkRemoteConnection").disabled = !ready;
     el("checkRemoteConnection").textContent = editor.checking ? "正在检查…" : ["a2a", "mcp"].includes(editor.config.protocol) ? "检查连接" : "检查环境";
-    el("saveRemoteConnection").disabled = editor.busy;
+    el("saveRemoteConnection").disabled = editor.busy || editor.debugBusy;
     el("remoteConnectionForm").inert = editor.busy;
     el("remoteDebugPrompt").disabled = !ready || editor.debugBusy || active;
     el("attachRemoteDebug").disabled = el("remoteDebugPrompt").disabled;
-    el("sendRemoteDebug").disabled = el("remoteDebugPrompt").disabled || !el("remoteDebugPrompt").value.trim();
+    el("sendRemoteDebug").disabled = el("remoteDebugPrompt").disabled || (!el("remoteDebugPrompt").value.trim() && !editor.debug.files.length);
     el("resetRemoteDebug").disabled = !ready || editor.debugBusy;
     el("cancelRemoteDebug").hidden = !editor.debug.invocation || !["submitted", "working", "input_required"].includes(editor.debug.invocation.status);
     el("cancelRemoteDebug").disabled = !ready || editor.debugBusy;
@@ -470,12 +504,16 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   function renderDebug() {
     const thread = el("remoteDebugThread");
     const state = editor.debug;
-    thread.innerHTML = state.messages.map(item => `<article class="remote-agent-message ${item.role}">
+    const markup = state.messages.map(item => `<article class="remote-agent-message ${item.role}">
       <header><strong>${item.role === "user" ? "你" : escapeHtml(editor.row.name || "远程 Agent")}</strong>${item.status ? status(item.status) : ""}</header>
       ${item.text ? `<p>${escapeHtml(item.text)}</p>` : ""}
+      ${item.attachments?.length ? `<ul class="remote-agent-message-attachments" aria-label="已发送附件">${item.attachments.map(name => `<li>${icon("paperclip")}${escapeHtml(name)}</li>`).join("")}</ul>` : ""}
       ${(item.warnings || []).map(warning => `<p class="muted">${escapeHtml(warning)}</p>`).join("")}
       ${renderFiles(item.files)}</article>`).join("");
-    thread.scrollTop = thread.scrollHeight;
+    if (thread.remoteAgentMarkup !== markup) {
+      replaceMarkup(thread, markup);
+      thread.scrollTop = thread.scrollHeight;
+    }
     const files = el("remoteDebugFiles");
     files.hidden = !state.files.length;
     files.innerHTML = state.files.map((file, i) => `<span>${icon("paperclip")}${escapeHtml(file.name)}
@@ -500,7 +538,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   async function save(event) {
     event.preventDefault();
     const target = editor;
-    if (!target || target.busy) return;
+    if (!target || target.busy || target.debugBusy) return;
     const statusNode = el("remoteConfigStatus");
     let config;
     try {
@@ -578,57 +616,74 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     }
   }
 
+  function scheduleDebugPoll(delay = 1500) {
+    clearTimeout(debugPollTimer);
+    if (panelIsVisible() && activeStates.has(editor?.debug.invocation?.status)) {
+      debugPollTimer = setTimeout(() => void debugAction("refresh"), delay);
+    }
+  }
+
   async function debugAction(action, manual = false) {
     const target = editor;
-    if (!target?.row.id || target.debugBusy || target.dirty || target.busy) return;
+    if (!target?.row.id) return;
     const state = target.debug;
-    if (action === "refresh" && !manual && !activeStates.has(state.invocation?.status)) return;
+    const auto = action === "refresh" && !manual;
+    if (auto) {
+      if (!panelIsVisible() || !activeStates.has(state.invocation?.status)) return;
+      if (target.debugBusy || target.busy) { scheduleDebugPoll(); return; }
+    } else if (target.debugBusy || target.dirty || target.busy) return;
     const input = el("remoteDebugPrompt");
     const message = action === "send" ? input.value.trim() : "";
     const files = action === "send" ? [...state.files] : [];
-    if (action === "send" && !message) return;
-    if (action === "clear" && !state.invocation) {
+    if (action === "send" && !message && !files.length) return;
+    const clearLocal = () => {
       target.debug = { files: [], messages: [], invocation: null };
       input.value = "";
+    };
+    if (action === "clear" && !state.invocation) {
+      clearLocal();
       renderDebug();
       return;
     }
+    const questionId = action === "send" && state.invocation?.status === "input_required" ? state.invocation.question_id : null;
+    let pollDelay = 1500;
     target.debugBusy = true;
     state.error = false;
     renderEditorState();
     try {
       const row = await post(`${path(target.row.id)}/debug`, {
         action, message, attachments: files.map(({ id, name, mime }) => ({ id, name, mime })), invocation_id: state.invocation?.id,
+        ...(questionId ? { question_id: questionId } : {}),
       });
       if (target !== editor) return;
       if (action === "clear") {
-        target.debug = { files: [], messages: [], invocation: null };
-        input.value = "";
+        clearLocal();
         return;
       }
       state.invocation = row;
       if (action === "send") {
-        state.messages.push({ role: "user", text: message || files.map(file => file.name).join("、") });
+        state.messages.push({ role: "user", text: message, attachments: files.map(file => file.name) });
         input.value = "";
         state.files = [];
       }
       const latest = { role: "agent", status: row.status, text: row.question || row.text || row.result, files: row.files, warnings: row.warnings };
       if (action !== "send" && state.messages.at(-1)?.role === "agent") state.messages[state.messages.length - 1] = latest;
       else state.messages.push(latest);
-      if (activeStates.has(row.status)) {
-        setTimeout(() => { if (editor === target && target.debug === state) void debugAction("refresh"); }, 1500);
-      }
     } catch (error) {
       if (target !== editor) return;
+      if (action === "clear" && error.status === 404) { clearLocal(); return; }
+      if (action === "refresh" && error.status === 404) {
+        state.invocation = null;
+        if (state.messages.at(-1)?.role === "agent") state.messages.at(-1).status = "unknown";
+      }
       state.error = true;
       el("remoteDebugNotice").textContent = error.message;
-      if (action === "refresh" && !manual && el("panel-remote-agents").classList.contains("active")) {
-        setTimeout(() => { if (editor === target && target.debug === state) void debugAction("refresh"); }, 4000);
-      }
+      if (auto) pollDelay = 4000;
     } finally {
       if (target === editor) {
         target.debugBusy = false;
         renderDebug();
+        scheduleDebugPoll(pollDelay);
       }
     }
   }
@@ -721,6 +776,8 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     panel.addEventListener("click", async (event) => {
       const button = event.target.closest("button");
       if (!button) {
+        const call = event.target.closest("[data-remote-call-row]");
+        if (call) { selectedRecent = call.dataset.remoteCallRow; renderRecent(); return; }
         const card = event.target.closest("[data-remote-card]");
         if (card) await loadEditor(card.dataset.remoteCard);
         return;
@@ -759,6 +816,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
         dirty();
         renderConfig();
         renderSummary();
+        el("remoteDriverOptions").querySelector(`[data-remote-driver="${data.remoteDriver}"]`)?.focus();
       } else if (data.configOption) {
         if (data.configOption === "cwd" || data.configOption === "model") editor.formModes[data.configOption] = data.configValue;
         else editor.config[data.configOption] = data.configValue;
@@ -795,7 +853,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       event.target.value = "";
       if (files.length) void uploadFiles(files);
     });
-    document.addEventListener("visibilitychange", schedulePoll);
+    document.addEventListener("visibilitychange", () => { schedulePoll(); scheduleDebugPoll(); });
   }
 
   async function catalog() {

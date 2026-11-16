@@ -13,6 +13,8 @@ class ChatRequest(BaseModel):
     reasoning_effort: str | None = Field(default=None, min_length=1, max_length=64)
     remote_task_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$",
         description="Select a waiting remote Agent task in this conversation for this reply.")
+    remote_question_id: str | None = Field(default=None, min_length=1, max_length=512,
+        description="Only answer the selected remote task if this question is still pending.")
     agent_id: str | None = Field(
         default=None,
         description=(

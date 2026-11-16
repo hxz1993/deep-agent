@@ -38,6 +38,7 @@ class HarnessSession(InMemoryTransport):
         self.advanced = asyncio.Condition()
         self.touched = datetime.now(UTC)
         self.closing = False
+        self.active_runs = 0
 
     async def open(self):
         await self.manager.__aenter__()
@@ -82,6 +83,8 @@ class HarnessSession(InMemoryTransport):
             elif entry.state.status == "input_required":
                 if request.run_id == entry.run_id or not request.user_message:
                     raise RemoteAgentError("请让用户先回复远程 Agent 的补充问题")
+                if request.remote_task_id and request.remote_task_id != entry.id:
+                    raise RemoteAgentError("用户选择了其他远程任务")
                 mode, prompt = "answer", request.user_message
             else:
                 mode, prompt = "resume", event.prompt
@@ -93,9 +96,8 @@ class HarnessSession(InMemoryTransport):
                             await asyncio.sleep(1)
                             await self.runtime.refresh(entry, request)
                 except TimeoutError:
-                    entry.state = entry.state.model_copy(update={"status": "unknown"})
-                    entry.text = "远端任务尚未结束，可按原任务查询进度。"
-                    await self.runtime._save(entry)
+                    await self.runtime._save(entry, state=entry.state.model_copy(update={"status": "unknown"}),
+                                             text="远端任务尚未结束，可按原任务查询进度。")
                 if entry.state.status != "input_required":
                     break
                 question_id = entry.state.question_id
@@ -109,7 +111,9 @@ class HarnessSession(InMemoryTransport):
                         answer = await self.receive(f"task:{entry.id}:worker")
                         candidate = self.request
                         if (isinstance(answer, TaskAnsweredEvent) and answer.question_id == question_id
-                                and candidate.run_id != entry.run_id and candidate.user_message):
+                                and candidate.run_id != entry.run_id and candidate.user_message
+                                and candidate.remote_task_id in (None, entry.id)
+                                and candidate.remote_question_id in (None, question_id)):
                             request, prompt = candidate, candidate.user_message
                             break
                 mode = "answer"
@@ -155,8 +159,11 @@ class SessionTransport(InMemoryTransport):
 
 
 class RemoteLifecycle(AbstractCapability[AgentDeps]):
-    def __init__(self, runtime):
+    def __init__(self, runtime, connections):
         self.runtime = runtime
+        self.connection_ids = frozenset(row.id for row in connections)
+        targets = {_target(row.id) for row in connections}
+        self.target_aliases = {row.name: _target(row.id) for row in connections if row.name not in targets}
         self.task_for_call: dict[str, str] = {}
         self.toolset = FunctionToolset[AgentDeps]()
         self.toolset.add_function(self.remote_task_result)
@@ -165,7 +172,10 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
         return self.toolset
 
     def get_instructions(self):
+        labels = json.dumps(list(self.target_aliases), ensure_ascii=False)
         return (
+            f"When setting agent_name in delegate_task, use the exact configured display name from {labels} "
+            "or an exact identifier in the SubAgents list. "
             "Remote agents can ask the user for additional information. Relay each question to the user and "
             "finish the current reply. Prefer foreground delegation when the user is waiting for a reply. "
             "Use remote_task_result if the decision or question text is not yet in the tool receipt. "
@@ -181,12 +191,7 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
         deps = ctx.deps
         if not deps.user or deps.file_store is None:
             return await handler()
-        request = RequestScope(
-            deps.user, deps.file_store, deps.execution_request_headers or deps.request_headers,
-            agent_id=deps.agent_id, session_id=deps.session_id, app_id=deps.app_id, space_id=deps.space_id,
-            turn_id=deps.turn_id, run_id=deps.run_id, attachments=deps.remote_attachments,
-            user_message=deps.remote_user_message, remote_task_id=deps.remote_task_id,
-        )
+        request = RequestScope.from_deps(deps, self.connection_ids)
         key = (deps.session_id, deps.user, deps.agent_id, deps.app_id, deps.space_id)
         session = self.runtime.harness_sessions.get(key)
         if session is None:
@@ -194,23 +199,29 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
             session = HarnessSession(self.runtime, request)
             self.runtime.harness_sessions[key] = session
             await session.open()
-        session.request = request
-        session.touched = datetime.now(UTC)
-        await self._restore(ctx.conversation_id, session, request)
-        token = SessionTransport.current.set(session)
+        session.active_runs += 1
         try:
-            with session.owner.bind():
-                await self._answer_user_reply(ctx, session, request)
-                return await handler()
+            session.request = request
+            session.owner.aliases.clear()
+            session.owner.aliases.update(self.target_aliases)
+            await self._restore(ctx.conversation_id, session, request)
+            token = SessionTransport.current.set(session)
+            try:
+                with session.owner.bind():
+                    await self._answer_user_reply(ctx, session, request)
+                    return await handler()
+            finally:
+                SessionTransport.current.reset(token)
         finally:
-            SessionTransport.current.reset(token)
+            session.active_runs -= 1
+            session.touched = datetime.now(UTC)
 
     async def _prune_sessions(self):
         sessions = self.runtime.harness_sessions
-        for key, session in list(sessions.items()):
+        for key, session in sorted(sessions.items(), key=lambda item: item[1].touched):
             if len(sessions) < 128:
                 return
-            if not session.workers:
+            if not session.workers and not session.active_runs and sessions.get(key) is session:
                 del sessions[key]
                 await session.close()
         if len(sessions) >= 128:
@@ -222,9 +233,11 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
             app_id=request.app_id, space_id=request.space_id,
         )
         for entry in entries:
-            if entry.id in session.workers or entry.id in session.owner.records:
+            if entry.id in session.workers or entry.connection_id not in self.connection_ids:
                 continue
             session.entries[entry.id] = entry
+            if entry.id in session.owner.records:
+                continue
             await session.owner.restore(DelegationTask(
                 id=entry.id, agent_name=_target(entry.connection_id), conversation_id=conversation_id,
                 prompt="", status="finished", outcome="ok", delivered=True,
@@ -237,7 +250,8 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
             return
         waiting = [(entry, session.owner.pending_question(entry.id)) for entry in session.entries.values()
                    if entry.state.status == "input_required" and entry.run_id != request.run_id
-                   and (request.remote_task_id is None or request.remote_task_id == entry.id)]
+                   and entry.connection_id in self.connection_ids
+                   and request.remote_task_id in (None, entry.id)]
         if len(waiting) != 1:
             if request.remote_task_id:
                 ctx.enqueue("所选远程任务在当前会话中没有待回答的问题，本轮未向该任务发送补答。")
@@ -245,7 +259,11 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
         entry, question = waiting[0]
         try:
             await self.runtime.authorize(entry, request)
-        except RemoteAgentError:
+            if request.remote_question_id not in (None, entry.state.question_id):
+                raise RemoteAgentError("远程补问已更新，请刷新后重新选择问题")
+        except RemoteAgentError as error:
+            if request.remote_task_id:
+                ctx.enqueue(str(error))
             return
         if question is None and entry.id not in session.workers:
             await self._answer_recovered(ctx, entry, request)
@@ -274,7 +292,7 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
         ctx.enqueue("<remote_task_update>" + json.dumps({
             "task_id": entry.id, "status": entry.state.status,
             "question": entry.text if entry.state.status == "input_required" else None,
-            "has_files": bool(entry.files),
+            "has_files": bool(entry.files), "warnings": entry.warnings,
         }, ensure_ascii=False) + "</remote_task_update>")
 
     @on_event(TaskAnsweredEvent)
@@ -285,6 +303,10 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
             event.veto("Wait for the user to answer this question in the next turn.")
         elif ctx.deps.remote_task_id is not None and ctx.deps.remote_task_id != event.task_id:
             event.veto("The user chose a different task for this reply.")
+        elif entry is not None and entry.connection_id not in self.connection_ids:
+            event.veto("This remote connection is disabled for the current turn.")
+        elif ctx.deps.remote_question_id not in (None, event.question_id):
+            event.veto("The chosen remote question is no longer pending.")
 
     @on_event(TaskSteeredEvent)
     async def unsupported_steering(self, ctx, event):
@@ -333,7 +355,7 @@ def portable_result(entry) -> ToolReturn:
 
 def remote_capabilities(runtime, connections):
     return [
-        RemoteLifecycle(runtime),
+        RemoteLifecycle(runtime, connections),
         SubAgents(task_control=TaskControl(
             remote_agents=[RemoteSubAgent(name=_target(row.id),
                 description=f"{row.name} ({row.config['protocol']}). {row.description or ''}") for row in connections],

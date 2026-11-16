@@ -169,6 +169,7 @@ class DebugRequest(BaseModel):
     file_ids: list[str] = Field(default_factory=list, max_length=20)
     attachments: list[AttachmentRef] = Field(default_factory=list, max_length=20)
     invocation_id: str | None = Field(default=None, max_length=64)
+    question_id: str | None = Field(default=None, min_length=1, max_length=512)
     action: Literal["send", "refresh", "cancel", "clear"] = "send"
 
 
@@ -177,28 +178,36 @@ async def debug_connection(ctx: AppContextDep, connection_id: str, body: DebugRe
     runtime = ctx.get_remote_agents()
     connection = await required(runtime, connection_id)
     files = body.attachments or [AttachmentRef(id=key) for key in body.file_ids]
-    current = replace(scope(request, user, ctx), attachments=files)
+    current = replace(scope(request, user, ctx), attachments=files, remote_question_id=body.question_id)
     entry = runtime.debug_entries.get(body.invocation_id) if body.invocation_id else None
     if body.invocation_id and (entry is None or entry.connection_id != connection_id):
         raise HTTPException(404, "调试任务不存在")
     try:
         if entry:
             await runtime.authorize(entry, current)
+            if entry.id in runtime.debug_actions:
+                if body.action == "refresh":
+                    return entry.summary()
+                raise HTTPException(409, "调试任务正在更新，请稍后再试")
         if body.action == "clear":
-            if entry and entry.id not in runtime.operations:
+            if entry:
+                if entry.id in runtime.operations or entry.state.status in {"submitted", "working"}:
+                    raise HTTPException(409, "调试任务正在执行，请先取消任务")
                 runtime.debug_entries.pop(entry.id, None)
             return {"status": "cleared"}
         if body.action != "send":
             if entry is None:
                 raise HTTPException(404, "调试任务不存在")
-            if body.action == "refresh" and entry.id in runtime.operations:
-                return entry.summary()
+            if body.action == "refresh":
+                state = entry.state
+                if entry.id in runtime.operations or not (state.task_id or state.session_id or state.cursor):
+                    return entry.summary()
             operation = runtime.refresh if body.action == "refresh" else runtime.cancel
-            result = await operation(entry, current)
-            active = runtime.operations.get(entry.id)
-            if result.state.status == "canceled" and active:
-                active.cancel()
-            return result.summary()
+            runtime.debug_actions.add(entry.id)
+            try:
+                return (await operation(entry, current)).summary()
+            finally:
+                runtime.debug_actions.discard(entry.id)
         message = body.message.strip() or ("请使用本轮补充的附件。" if files else "")
         if not message:
             raise HTTPException(422, "请输入调试消息")
@@ -209,10 +218,14 @@ async def debug_connection(ctx: AppContextDep, connection_id: str, body: DebugRe
             if entry.id in runtime.operations:
                 raise HTTPException(409, "调试任务正在执行")
             mode = "answer" if entry.state.status == "input_required" else "resume"
+            if body.question_id and (mode != "answer" or body.question_id != entry.state.question_id):
+                raise HTTPException(409, "远程补问已更新，请刷新后重新选择问题")
         else:
+            if body.question_id:
+                raise HTTPException(409, "调试任务不存在")
             entry = runtime.create(connection, current)
             runtime.debug_entries[entry.id] = entry
-        task = asyncio.create_task(runtime.execute(entry, current, message, mode))
+        task = asyncio.create_task(runtime.execute_debug(entry, current, message, mode))
         runtime.operations[entry.id] = task
         task.add_done_callback(lambda finished: (runtime.operations.pop(entry.id, None),
                                                  finished.exception() if not finished.cancelled() else None))

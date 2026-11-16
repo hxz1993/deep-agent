@@ -31,13 +31,23 @@ export const ASSISTANT_PRESENTATION_ACTIONS = Object.freeze({
 });
 
 export const PLANNING_TOOL_NAMES = new Set(["write_plan"]);
+const REMOTE_AGENT_TOOL_NAMES = new Set(["delegate_task", "list_tasks", "answer_task", "cancel_task", "message_task", "remote_task_result"]);
+
+export function isRemoteAgentToolEvent(event = {}) {
+  return Boolean(event.metadata?.remote_agent)
+    || (REMOTE_AGENT_TOOL_NAMES.has(event.tool) && !["ui", "manual", "mcp"].includes(event.source));
+}
 
 export function isPlanningToolEvent(event = {}) {
   return PLANNING_TOOL_NAMES.has(event.tool) && !["ui", "manual", "mcp"].includes(event.source);
 }
 
 export function toolResultPresentation(result = {}) {
-  const values = [result.outcome, result.status];
+  const remote = result.metadata?.remote_agent?.status;
+  if (remote === "input_required") return { status: "pending", label: "待补答", className: "tool-status-pending" };
+  if (remote === "submitted" || remote === "working") return { status: "running", label: "远端执行中", className: "tool-status-pending" };
+  if (remote === "unknown") return { status: "failed", label: "结果未知", className: "tool-status-error" };
+  const values = [result.outcome, result.status, remote];
   if (values.some((value) => ['interrupted', 'cancelled', 'canceled'].includes(value))) {
     return { status: 'interrupted', label: '已中断', className: 'tool-status-interrupted' };
   }

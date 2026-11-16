@@ -83,10 +83,18 @@ class ChannelMigrationTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("016",))
                 self.assertEqual(db.execute("SELECT code FROM agent_publications").fetchone(), ("budget",))
                 db.execute("DELETE FROM agent_publications")
+                db.execute("INSERT INTO remote_agent_connections (id,name,config) VALUES ('one','Review','{}')")
+                with self.assertRaises(sqlite3.IntegrityError):
+                    db.execute("INSERT INTO remote_agent_connections (id,name,config) VALUES ('two','Review','{}')")
+            with self.assertRaisesRegex(RuntimeError, "would discard remote Agent connections"):
+                command.downgrade(config, "015")
+            with sqlite3.connect(path) as db:
+                db.execute("DELETE FROM remote_agent_connections")
             command.downgrade(config, "015")
             with sqlite3.connect(path) as db:
                 self.assertEqual(db.execute("SELECT version_num FROM alembic_version").fetchone(), ("015",))
                 self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='agent_publications'").fetchone())
+                self.assertIsNone(db.execute("SELECT 1 FROM sqlite_master WHERE name='remote_agent_connections'").fetchone())
 
     def test_007_keeps_event_data_and_refuses_usage_loss_on_downgrade(self):
         with tempfile.TemporaryDirectory(prefix="TMP_to_delete_usage_migration_") as directory:

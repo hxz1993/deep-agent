@@ -159,6 +159,7 @@ const state = {
   reasoningOverrides: new Map(),
   sessionModelIds: {},
   sessionId: null,
+  remoteTaskReply: null,
   conversationId: null,
   sessions: [], // [{id, agentId, agentName, title}] — 仅来自 GET /api/v1/sessions
   sessionAppFilter: "all",
@@ -236,6 +237,7 @@ const el = {
   contextBudgetBadge: $("contextBudgetBadge"),
   fileInput: $("fileInput"),
   attachmentPreview: $("attachmentPreview"),
+  remoteTaskReply: $("composerRemoteReply"),
   composerMeta: $("composerMeta"),
   composerModelTrigger: $("composerModelTrigger"),
   composerModelMenu: $("composerModelMenu"),
@@ -504,6 +506,10 @@ function generateSessionId() {
 }
 
 function init() {
+  document.getElementById("clearComposerRemoteReply")?.addEventListener("click", () => {
+    setRemoteTaskReply(null);
+    el.input.focus();
+  });
   updateAdminLink();
 
   const agentFromUrl = new URLSearchParams(location.search).get("agent_id");
@@ -976,6 +982,7 @@ function detachChatView() {
   state.streamSessionConfirmed = false;
   state.streamRecoveryNote = null;
   state.awaitingHitl = false;
+  if (state.remoteTaskReply) setRemoteTaskReply(null);
   state.assistantPresenter?.dispose?.();
   setStreaming(false);
 }
@@ -2478,6 +2485,23 @@ async function loadCapabilities() {
 }
 
 /* --------------------------- 发送 / 流式 --------------------------- */
+function setRemoteTaskReply(task) {
+  state.remoteTaskReply = task ? { id: task.id, name: task.name, sessionId: state.sessionId } : null;
+  if (!el.remoteTaskReply) return;
+  el.remoteTaskReply.hidden = !task;
+  el.remoteTaskReply.querySelector("#composerRemoteReplyLabel").textContent = task
+    ? `回复远程 Agent：${task.name || task.id}` : "";
+}
+
+function selectRemoteTaskReply(task) {
+  if (!state.sessionId || state.streaming || state.historyLoading || currentSessionHasProducer()) {
+    showConsoleToast("请等当前会话结束生成后再回复任务", true);
+    return;
+  }
+  setRemoteTaskReply(task);
+  el.input.focus();
+}
+
 async function onSend() {
   const text = el.input.value.trim();
   const attachments = state.pendingAttachments.slice();
@@ -2519,6 +2543,10 @@ async function onSend() {
     message: text || null,
     session_id: state.sessionId,
   };
+  if (state.remoteTaskReply?.sessionId === state.sessionId) {
+    payload.remote_task_id = state.remoteTaskReply.id;
+    setRemoteTaskReply(null);
+  }
   const modelId = chatPayloadModelId();
   if (modelId) payload.model_id = modelId;
   const effort = reasoningOverride(selectedLlmModel());
@@ -3592,6 +3620,7 @@ function getConversationPresenter() {
     isUiToolCall, maybeAttachHitlWidget, renderHitlWidget, resumeDeferred,
     onContextReference: (ref, point) => window.DeepAgentConsoleWorkspace?.toggleContextReferenceInspector(ref, point),
     isContextReferenceSelected: (ref, point) => window.DeepAgentConsoleWorkspace?.isContextReferenceSelected(ref, point),
+    onRemoteTaskReply: selectRemoteTaskReply,
   });
 }
 

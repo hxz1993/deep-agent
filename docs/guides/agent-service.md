@@ -70,6 +70,14 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 CLI、Python SDK 和通用 HTTP 调用是待评审草案，本版仅在 Console 保留入口占位。草案可能改写或移除，当前服务仅注册 A2A、MCP 及必要的鉴权取件接口。
 
+## 将远程 Agent 作为工具
+
+管理员在 Console「远程 Agent」保存、检查和直连调试 A2A、Codex 或 CodeBuddy。对于另一套 DeepAgent，先在「MCP」登记对方的 Streamable HTTP 地址和所需 Header，再从该 MCP 的详情选择「绑定为远程 Agent」及目标发布。目录使用 `list_agents` 返回的发布编码。对端的 App 和凭据随连接配置。
+
+在本地 Agent 的资源配置开启指定远程连接。会话中的派单、补答、续接和取消走 Harness。每轮附件按权限由客户端发送，生成文件落到调用方 FileStore，可在原会话下载。待补答时在原会话回复，多个待答任务时通过工具卡指定任务。已保存结果和产物引用在调用方重启后仍从会话读取。已知远端任务 ID 可用于查询和恢复，远端过期或连接撤权时需要重新发起。
+
+Console「近期调用」按进程保留最近 24 小时、最多 30 条本地 Agent 调用。直连调试对话单独保留在内存，两者在重启后清空。Codex 默认只读，生成文件的任务需要可写工作区；CodeBuddy 采用执行账号的权限策略。需要自定义 CLI 安装位置时，在「高级」填写可执行文件路径或命令名。
+
 ## 联调
 
 - **本地官方 Inspector** 使用支持 A2A 1.0 的 Inspector，执行 `a2a-inspector --no-open --port 8085`，在本机浏览器打开提示的地址。添加完整 Card URL，在 Connection 设置 Bearer Token 或 API Key。通用地址另填 `app` Header，然后点 Fetch again。分别发送普通和流式消息，再查看协议事件。
@@ -90,3 +98,5 @@ PYTHONPATH=src .venv/bin/python -m unittest tests.integration.test_agent_service
 相对一期已含官方 `a2a-sdk[http-server]==1.3.0` 的基线，二期服务端依赖变更为无。上线前确认基础镜像已包含一期 A2A SDK 及其传递依赖，以及当前运行依赖提供的 MCP SDK。二期本机验证使用 Python 3.12、MCP SDK 1.30.0、AnyIO 4.16.0。CLI 和 SDK 草案的依赖不进入本版服务端镜像。
 
 一期由 `015` 升到 `016`，新增发布配置表和索引。二期沿用 `016`。若环境尚在 `015`，生产迁移前核对 DDL 权限、数据库方言、备份、锁和回退窗口。有发布记录时迁移会拒绝降级。
+
+远程 Agent 客户端与服务端在同一内部 `016` 交付。该迁移同时创建 `agent_publications` 和 `remote_agent_connections`。客户端依赖升级及运行镜像要求见 [CHANGELOG](../../CHANGELOG.md) 的「依赖变更（运维）」。旧内部 `016` 验证库升级前需核对物理结构。

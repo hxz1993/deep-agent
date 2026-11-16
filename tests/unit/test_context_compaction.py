@@ -24,6 +24,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.usage import RunUsage, UsageLimits
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.context.compaction import (
     DeepAgentContextCompaction,
     SummaryUnavailable,
@@ -70,7 +71,7 @@ class DshCompactionRulesTests(unittest.TestCase):
             UserPromptPart(SUMMARY_PREFIX + "old" + PROTECTED_CONTEXT_MARKER + "[]")])]
         self.assertEqual(extract_anchor_protected_context(messages), {})
         self.assertFalse(latest_user_has_unreferenced_media([ModelResponse(parts=[TextPart("done")])]))
-        projected = extract_protected_context([ModelRequest(parts=[UserPromptPart([{"kind": "text-content", "content": "文字"}])])])
+        projected = extract_protected_context([ModelRequest(parts=[StoredUserPromptPart([{"kind": "text-content", "content": "文字"}])])])
         self.assertEqual(projected["latest_user_content"], [["文字"]])
         preview = json.loads(safe_tool_args_preview({"items": [b"secret", 1, {"token": "secret"}]}))
         self.assertEqual(preview["items"], ["[binary omitted]", 1, {"token": "[redacted]"}])
@@ -132,13 +133,13 @@ class DshCompactionRulesTests(unittest.TestCase):
                 comp._plan_summary(messages, SimpleNamespace(model_request_parameters=None), budget_limit=80000,
                                    output_limit=256, previous_summary=None, state=state)
         self.assertEqual(_stable_facts({"nested": [{"name": ["甲", "乙"], "total": 2}]}), {"name": ["甲", "乙"], "total": 2})
-        self.assertEqual(_deterministic_attachment_evidence_text([ModelRequest(parts=[UserPromptPart([{"kind": "attachment-ref"}])])]), "")
+        self.assertEqual(_deterministic_attachment_evidence_text([ModelRequest(parts=[StoredUserPromptPart([{"kind": "attachment-ref"}])])]), "")
         self.assertIsNone(build_context_compaction(context_window_tokens=None, max_output_tokens=None))
 
     def test_authentic_raw_user_can_start_with_the_synthetic_summary_prefix(self) -> None:
         from deep_agent.agent.context.handoff import SUMMARY_PREFIX
         content = SUMMARY_PREFIX + "这是用户提供的原始材料，单位万元；禁止写入。"
-        raw = [ModelRequest(parts=[UserPromptPart(content)]), ModelResponse(parts=[TextPart("确认")])]
+        raw = [ModelRequest(parts=[StoredUserPromptPart(content)]), ModelResponse(parts=[TextPart("确认")])]
         self.assertEqual(extract_protected_context(raw), {})
         protected = extract_protected_context(raw, cutoff=2, raw_history=raw)
         self.assertEqual(protected["latest_user_content"], [content])
@@ -374,7 +375,7 @@ class DshCompactionRulesTests(unittest.TestCase):
     def test_context_payload_is_evidence_not_summary_input(self) -> None:
         raw = ModelRequest(
             parts=[
-                UserPromptPart(
+                StoredUserPromptPart(
                     content=[
                         {
                             "kind": "context-ref",
@@ -402,7 +403,7 @@ class DshCompactionRulesTests(unittest.TestCase):
     def test_attachment_reference_is_deterministic_evidence(self) -> None:
         raw = ModelRequest(
             parts=[
-                UserPromptPart(
+                StoredUserPromptPart(
                     content=[
                         "请读取附件",
                         {
@@ -437,7 +438,7 @@ class DshCompactionRulesTests(unittest.TestCase):
         self.assertIn("继续分析", formatted)
 
     def test_protected_context_is_exact_sourced_and_uses_safe_reference_projection(self) -> None:
-        user = ModelRequest(parts=[UserPromptPart(content=[
+        user = ModelRequest(parts=[StoredUserPromptPart(content=[
             "  仅分析2026年，单位万元；不要写入。  ",
             {"kind": "context-ref", "key": "region", "type": "spreadsheet.selection", "schema_version": "1",
              "payload": {"period": "2026", "cube": "budget"}, "metadata": {"token": "must-not-copy"}},

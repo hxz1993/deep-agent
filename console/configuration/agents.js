@@ -5,16 +5,18 @@ function chatUrlForAgent(id) {
 const CATEGORY_LABELS = {
   builtin: "内置",
   mcp: "MCP",
+  agent_connection: "远程 Agent",
   ui: "UI 工具",
 };
 
 const GROUP_LABELS = {
   builtin: "内置工具",
   mcp: "MCP",
+  agent_connection: "远程 Agent",
   ui: "UI 工具",
 };
 
-const GROUP_ORDER = ["builtin", "mcp", "ui"];
+const GROUP_ORDER = ["builtin", "mcp", "ui", "agent_connection"];
 let promptEstimateTimer = null;
 let promptEstimateRequestId = 0;
 let agentListView = "cards";
@@ -30,15 +32,16 @@ const agentDeletesInFlight = new Set();
 function loadAgentEditorCatalogs() {
   if (!agentEditorCatalogs) {
     // An editor must never interpret a failed directory request as an empty selection.
-    // Publish all three catalogs together, after every response has succeeded.
+    // Publish the catalogs together, after every response has succeeded.
     agentEditorCatalogs = Promise.all([
       apiFetch("/api/v1/llm-models?selectable_only=false"),
       apiFetch("/api/v1/tools"),
       apiFetch("/api/v1/skills"),
-    ]).then(([models, capabilities, skills]) => {
-      if (![models, capabilities, skills].every(Array.isArray)) throw new Error("Agent 编辑目录响应格式错误");
+      window.remoteAgentAdmin?.catalog() || [],
+    ]).then(([models, capabilities, skills, remoteAgents]) => {
+      if (![models, capabilities, skills, remoteAgents].every(Array.isArray)) throw new Error("Agent 编辑目录响应格式错误");
       state.llmModels = models;
-      state.capabilities = capabilities;
+      state.capabilities = [...capabilities, ...remoteAgents];
       state.skills = skills;
     })
       .finally(() => { agentEditorCatalogs = null; });
@@ -134,6 +137,7 @@ function renderAgentCapabilityCounts(agent) {
     ["builtin", "内置工具", "hammer", "个工具包"],
     ["ui", "UI 工具", "monitor-check", "个工具包"],
     ["mcp", "MCP", "plug", "个服务"],
+    ["agent_connection", "远程 Agent", "bot", "个远程 Agent"],
     ["skills", "Skill", "book-open-check", "个 Skill"],
   ];
   return `<div class="agent-capability-counts">${groups.map(([kind, label, icon, unit]) => {
@@ -404,6 +408,20 @@ const agentsAdmin = {
   renderCapCard(cap, selectedSet) {
     const checked = isCapabilitySelected(cap, selectedSet);
     const displayName = cap.label || capDisplayName(cap.code, cap.category);
+    if (cap.category === "agent_connection") {
+      const description = cap.description || "";
+      const safeName = escapeHtml(displayName).replaceAll('"', "&quot;");
+      return `<article class="cap-card kind-agent_connection">
+        <div class="cap-card-header">
+          <label class="cap-switch"><input type="checkbox" role="switch" name="cap" value="${escapeHtml(cap.code)}"
+            aria-label="${safeName}" ${checked ? "checked" : ""}><span class="cap-switch-ui"></span></label>
+          <div class="cap-card-info">
+            <div class="cap-card-title"><strong>${escapeHtml(displayName)}</strong>${window.remoteAgentAdmin?.driverBadge(cap.protocol) || ""}${window.remoteAgentAdmin?.inspectionState(cap.inspection) || ""}</div>
+            ${description ? `<p class="cap-card-desc">${escapeHtml(description)}</p>` : ""}
+          </div>
+        </div>
+      </article>`;
+    }
     const kindLabel = cap.category === "ui" ? "UI" : capKindLabel(cap);
     const toolCount = Number(cap.tool_count ?? cap.tools?.length ?? 0);
     const toolIcon = cap.category === "ui" ? "monitor-check" : cap.category === "mcp" ? "wrench" : "hammer";
@@ -432,7 +450,13 @@ const agentsAdmin = {
     const container = document.getElementById("agentCapGroups");
     if (!container) return;
 
-    const caps = state.capabilities || [];
+    const caps = [...(state.capabilities || [])];
+    const known = new Set(caps.map(cap => cap.code));
+    for (const code of selected) {
+      if (code.startsWith("agent_connection:") && !known.has(code)) caps.push({
+        code, category: "agent_connection", label: code, description: "该远程 Agent 当前不可用，可关闭开关解除关联。",
+      });
+    }
     const selectedSet = buildCapabilitySelectionSet(selected);
     const { byGroup } = groupCapabilities(caps);
 
@@ -502,12 +526,9 @@ const agentsAdmin = {
 
     document.querySelectorAll("[data-kind-badge]").forEach((badge) => {
       const group = badge.dataset.kindBadge;
-      const groupCapabilities = (state.capabilities || []).filter(
-        (capability) => capabilityGroup(capability) === group,
-      );
-      const groupSelected = groupCapabilities.filter((capability) =>
-        selectedSet.has(capability.code),
-      ).length;
+      const groupSelected = group === "agent_connection"
+        ? [...selectedSet].filter(code => code.startsWith("agent_connection:")).length
+        : (state.capabilities || []).filter(capability => capabilityGroup(capability) === group && selectedSet.has(capability.code)).length;
       badge.textContent = String(groupSelected);
     });
   },

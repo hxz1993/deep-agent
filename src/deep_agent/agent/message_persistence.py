@@ -14,13 +14,13 @@ from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering, Too
 from pydantic_ai.exceptions import ToolFailedError
 from pydantic_ai.messages import (
     FunctionToolCallEvent, FunctionToolResultEvent, ModelMessage, ModelRequest,
-    ModelResponse, ToolCallPart, ToolReturn, ToolReturnPart, RetryPromptPart,
+    ModelResponse, ToolCallPart, ToolReturn, ToolReturnPart,
 )
 from pydantic_core import to_json
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_names import public_tool_messages
-from deep_agent.agent.history import is_user_only_request, same_tool_return
+from deep_agent.agent.history import is_retry_feedback, is_user_only_request, same_tool_return
 from deep_agent.agent.observability import log_event
 from deep_agent.agent.planning import (
     attach_plan_snapshot, current_plan_snapshot, is_planning_tool, plan_snapshot_from_part,
@@ -69,9 +69,8 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         )
 
     def get_ordering(self) -> CapabilityOrdering:
-        # The public SDK orders after_* hooks in reverse. Outermost means our
-        # after_tool_execute observes the existing limits/redaction's final
-        # result, never the raw oversized result before those policies run.
+        # Capture after the entire tool lifecycle, including other wrap hooks
+        # that add timing or transform the finished result.
         # ToolSearch is itself outermost and adds feedback to its tool return.
         # Resolve the tie explicitly so its final result is saved once, in both
         # ordinary and streaming runs, before immutable event comparison.
@@ -177,7 +176,9 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 response_index = match
         return self._with_ordinals(merged)
 
-    def _accept(self, ctx: RunContext[AgentDeps], call: ToolCallPart, *, allow_nested: bool = False) -> bool:
+    def _accept(
+        self, ctx: RunContext[AgentDeps], call: ToolCallPart, *, allow_nested: bool = False,
+    ) -> tuple[int, str] | None:
         # Providers can reuse IDs in later loops: acceptance is response-scoped.
         for message in reversed(ctx.messages):
             if isinstance(message, ModelResponse) and any(
@@ -185,8 +186,9 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 and part.tool_name == call.tool_name for part in message.parts
             ):
                 self._record(message)
-                self._accepted.add((id(message), call.tool_call_id))
-                return True
+                key = (id(message), call.tool_call_id)
+                self._accepted.add(key)
+                return key
         # PTC dispatch uses normal SDK tool hooks for its authorized inner calls,
         # but those calls are not new model messages. Their durable outer tool is
         # already recorded; nested audit remains on its existing result metadata.
@@ -194,7 +196,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         # parent from provider-controlled tool_call_id strings.
         parent = self._executing_parent.get()
         if allow_nested and parent is not None and parent in self._accepted:
-            return False
+            return None
         raise MessagePersistenceError("Accepted tool call has no official model response")
 
     def _with_ordinals(self, messages: list[ModelMessage]) -> list[ModelMessage]:
@@ -232,11 +234,11 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 # Validation corrections were never accepted tool executions.
                 # Do not persist their raw validators' arguments or exceptions.
                 indices = [i for i, part in enumerate(copy.parts)
-                           if (copy.metadata or {}).get("deepagent_output_budget") or not isinstance(part, RetryPromptPart)
-                           or part.tool_call_id in accepted_in_round]
+                           if (copy.metadata or {}).get("deepagent_output_budget") or not is_retry_feedback(part)
+                           or getattr(part, "tool_call_id", None) in accepted_in_round]
                 copy.parts = [copy.parts[i] for i in indices]
                 for part in copy.parts:
-                    if isinstance(part, RetryPromptPart) and not (copy.metadata or {}).get("deepagent_output_budget"):
+                    if is_retry_feedback(part) and not (copy.metadata or {}).get("deepagent_output_budget"):
                         part.content = safe_execution_error({"message": part.content})["message"]
             copy.metadata = {**(copy.metadata or {}),
                              "deepagent_message_ordinal": ordinal,
@@ -250,10 +252,10 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             # Supplemental media has no call ID; save it in the official SDK
             # request once ordering is fixed, not in a parallel-result draft.
             parts = deepcopy([part for part in self._results.values()
-                              if not isinstance(part, RetryPromptPart)
-                              or part.tool_call_id in accepted_in_round])
+                              if not is_retry_feedback(part)
+                              or getattr(part, "tool_call_id", None) in accepted_in_round])
             for part in parts:
-                if isinstance(part, RetryPromptPart):
+                if is_retry_feedback(part):
                     part.content = safe_execution_error({"message": part.content})["message"]
             request = ModelRequest(parts=parts,
                                    metadata={"deepagent_message_ordinal": ordinal})
@@ -359,11 +361,14 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             self._next_request = None
             await self._save(ctx, hook="_prepare_model_node")
 
-    async def after_model_request(self, ctx, *, request_context, response):
+    async def wrap_model_request(self, ctx, *, request_context, handler):
+        response = await handler(request_context)
+        if response.run_id is None:
+            response.run_id = ctx.deps.run_id
         if ctx.deps.output_state is not None:
             await ctx.deps.output_state.check_response(ctx, response, progress=self)
         self._record(response)
-        await self._save(ctx, hook="after_model_request")
+        await self._save(ctx, hook="wrap_model_request")
         return response
 
     async def after_node_run(self, ctx, *, node, result):
@@ -389,15 +394,16 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         return args
 
     async def wrap_tool_execute(self, ctx, *, call, tool_def, args, handler):
-        parent = previous_parent = self._executing_parent.get()
-        for message in reversed(self._ledger):
-            key = (id(message), call.tool_call_id)
-            if key in self._accepted:
-                parent = key
-                break
+        previous_parent = self._executing_parent.get()
+        # The latest SDK enters wrap before before_tool_execute. Establish
+        # ancestry here so inner calls remain tied to the durable outer call.
+        parent = previous_parent or self._accept(ctx, call, allow_nested=True)
         token = self._executing_parent.set(parent)
         try:
-            return await handler(args)
+            result = await handler(args)
+            if self.capture_execute_results and previous_parent is None:
+                result = await self._capture_tool_result(ctx, call, tool_def, result)
+            return result
         except ToolFailedError as exc:
             if self.capture_execute_results and previous_parent is None:
                 self._results[call.tool_call_id] = deepcopy(exc.tool_failed)
@@ -419,9 +425,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             ctx.deps.plan_snapshots[part.tool_call_id] = snapshot
         return True
 
-    async def after_tool_execute(self, ctx, *, call, tool_def, args, result):
-        if not self.capture_execute_results or self._executing_parent.get() is not None:
-            return result
+    async def _capture_tool_result(self, ctx, call, tool_def, result):
         # Normal run() has no consumer-facing tool-result events. Preserve the
         # settled result here while sibling tools may still be running. This is
         # a completed tool fact, deduplicated against its later official request;
@@ -440,7 +444,7 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                 wrapped.metadata = deepcopy(part.metadata)
                 result = wrapped
         self._results[call.tool_call_id] = part
-        await self._save(ctx, hook="after_tool_execute")
+        await self._save(ctx, hook="wrap_tool_execute")
         return result
 
 

@@ -93,10 +93,12 @@
       "如果地址指向 localhost 或 127.0.0.1，请在同一台电脑上运行客户端。云端客户端需要可达的服务地址。",
     ].join("\n\n");
     const guideButton = copyButton(instructions, "复制 Agent 接入指引", "compact");
-    const toolbar = inGuide
-      ? `<div class="agent-service-card-heading agent-service-card-toolbar"><h4>连接配置</h4>${guideButton}</div>`
-      : accessToolbar("mcp", guideButton);
-    card.innerHTML = `${toolbar}
+    if (inGuide) {
+      card.innerHTML = `<div class="agent-service-guide-heading"><h4>Agent 接入指引</h4>${guideButton}</div>
+        <pre class="agent-service-guide-preview">${escapeHtml(instructions)}</pre>`;
+      return;
+    }
+    card.innerHTML = `${accessToolbar("mcp", guideButton)}
       <div class="agent-service-card-option agent-service-card-options">
         <section>
           <div class="agent-service-card-heading"><h5>MCP 地址</h5>${copyButton(endpoint, "复制地址")}</div>
@@ -191,7 +193,11 @@
       ]);
       rows = publications;
       agents = agentList;
+      const mcpAddressChanged = clientConfig.mcp_url !== distribution.mcp_url;
       clientConfig = distribution;
+      if (mcpAddressChanged && el("agentServiceProtocol").open) {
+        renderMcpAccess(el("agentServiceMcpGuideSetup"), true);
+      }
       el("newAgentPublication").disabled = false;
       if (!rows.some((row) => row.agent_code === selected)) {
         selectPublication(rows[0]?.agent_code || "");
@@ -592,17 +598,17 @@
         tab.classList.toggle("active", active);
         tab.setAttribute("aria-selected", String(active));
         tab.tabIndex = active ? 0 : -1;
-        el(tab.getAttribute("aria-controls")).hidden = !active;
+        const tabPanel = el(tab.getAttribute("aria-controls"));
+        tabPanel.hidden = !active;
+        if (active) tabPanel.scrollTop = 0;
       });
-      guide.querySelector(".modal-body").scrollTop = 0;
     });
     el("agentServiceProtocolBtn").addEventListener("click", () => {
       const overview = el("agentServiceOverviewTab");
       renderMcpAccess(el("agentServiceMcpGuideSetup"), true);
       refreshIcons();
-      overview.click();
       guide.showModal();
-      guide.querySelector(".modal-body").scrollTop = 0;
+      overview.click();
       overview.focus();
     });
     panel.querySelectorAll("[data-service-close]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));

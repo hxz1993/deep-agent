@@ -6,6 +6,7 @@ import unittest
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolReturnPart, UserPromptPart
 from sqlalchemy import event, update
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.db.event_codec import encode_messages
 from deep_agent.db.models import ChatSession, ChatSessionEvent
 from deep_agent.db.session_list import SessionListFilters
@@ -28,7 +29,7 @@ class SessionListPagingTests(unittest.IsolatedAsyncioTestCase):
     async def test_filter_before_page_preserves_scope_sort_and_message_counts(self):
         attachment = {"kind": "attachment-ref", "id": "synthetic-file", "name": "input.txt", "mime": "text/plain"}
         await self.store.append_message_parts("filled-a", messages=[
-            ModelRequest(parts=[UserPromptPart(["first prompt", attachment])]),
+            ModelRequest(parts=[StoredUserPromptPart(["first prompt", attachment])]),
             ModelResponse(parts=[TextPart("first part"), TextPart("second part")]),
         ], agent_id=self.agent.id, user_id="owner", run_id="first", turn_id="same-turn")
         await self.store.append("filled-a", [ModelRequest(parts=[UserPromptPart("later prompt")])],

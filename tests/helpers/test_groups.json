@@ -68,6 +68,7 @@
   "files": [
     "tests/integration/test_integration_app_scopes.py",
     "tests/integration/test_agent_service.py",
+    "tests/integration/test_remote_agent_harness.py",
     "tests/integration/test_trajectory_export.py",
     "tests/integration/test_agent_package_cross_version_http.py",
     "tests/integration/test_agent_packages_api.py",
@@ -151,6 +152,7 @@
     "tests/unit/test_public_file_download.py",
     "tests/unit/test_reader_runtime.py",
     "tests/unit/test_reading_budget.py",
+    "tests/unit/test_remote_agent_cli.py",
     "tests/unit/test_runtime_dependencies.py",
     "tests/unit/test_sandbox_framing.py",
     "tests/unit/test_sandbox_input_capacity.py",

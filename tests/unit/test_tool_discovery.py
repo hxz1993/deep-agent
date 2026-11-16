@@ -9,9 +9,9 @@ from pydantic_ai.capabilities import IncludeToolReturnSchemas, ToolSearch
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     TextPart,
     ToolCallPart,
+    ToolReturnPart,
     ToolSearchCallPart,
     ToolSearchReturnPart,
 )
@@ -21,6 +21,7 @@ from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import RunUsage
 
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.tool_discovery import (
@@ -927,7 +928,7 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(
             any(
-                isinstance(part, RetryPromptPart)
+                is_tool_retry(part)
                 for message in result.all_messages()
                 if isinstance(message, ModelRequest)
                 for part in message.parts
@@ -1121,9 +1122,10 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
             for message in result.all_messages()
             if isinstance(message, ModelRequest)
             for part in message.parts
-            if isinstance(part, RetryPromptPart)
+            if isinstance(part, ToolReturnPart) and part.outcome == "retried"
         ]
         self.assertEqual(len(retries), 1)
+        self.assertEqual(retries[0].retry.cause, "unavailable_tool")
         self.assertIn("search for it first", str(retries[0].content))
 
     async def test_removed_discovery_evidence_requires_search_again(self) -> None:
@@ -1230,7 +1232,9 @@ class ToolDiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "search required")
         self.assertTrue(
             any(
-                isinstance(part, RetryPromptPart)
+                isinstance(part, ToolReturnPart)
+                and part.outcome == "retried"
+                and part.retry is not None and part.retry.cause == "unavailable_tool"
                 and "search for it first" in str(part.content)
                 for message in result.new_messages()
                 if isinstance(message, ModelRequest)

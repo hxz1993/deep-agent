@@ -19,7 +19,7 @@ from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.db.ids import new_agent_id
 from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, skill_scope_condition
 from deep_agent.db.models import (
-    Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolDefinition, UiToolPackage,
+    Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, RemoteAgentConnection, SkillPackage, UiToolDefinition, UiToolPackage,
 )
 from deep_agent.db.reference_integrity import is_unique_conflict
 from deep_agent.db.stores.agent.base import save_output_config, trusted_updater
@@ -45,7 +45,7 @@ def ui_payload(package, tools):
 
 async def snapshot(db):
     result = {}
-    for cls in (Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, SkillPackage, UiToolPackage, UiToolDefinition):
+    for cls in (Agent, AgentOutputConfig, LlmModel, LlmProvider, McpServer, RemoteAgentConnection, SkillPackage, UiToolPackage, UiToolDefinition):
         statement = select(cls).options(lazyload('*')).execution_options(populate_existing=True)
         if cls is SkillPackage:
             statement = statement.where(skill_scope_condition(SkillPackage.scope_ref, GENERAL_SKILL_SCOPE))
@@ -98,6 +98,7 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     builtin_ui = {t.package_code for t in builtin_ui_records()}
     builtin_names = {t.name for t in builtin_ui_records()}
     available = set(ctx.registry.codes()) | builtin_ui
+    remote_agents = {f"agent_connection:{row.id}": row.name for row in data.get(RemoteAgentConnection, ())}
     resources, blocked = [], []
     def add(kind, code, label, status, **extra):
         refs = []
@@ -152,7 +153,9 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
             retained_tools=sorted(set(local_tools) - incoming_names))
     packed_ui = {p.code for p in package.ui}
     for code in package.agent.capabilities:
-        if not code.startswith('mcp:') and code not in packed_ui:
+        if code.startswith('agent_connection:'):
+            add('builtin_tool', code, remote_agents.get(code, code), 'reuse' if code in remote_agents else 'missing')
+        elif not code.startswith('mcp:') and code not in packed_ui:
             add('builtin_tool', code, code, 'reuse' if code in available else 'missing')
     reference = package.agent.model_reference
     matches = [m for m in models if reference and m['name'] == reference.name]

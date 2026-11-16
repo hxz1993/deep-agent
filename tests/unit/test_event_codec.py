@@ -6,7 +6,6 @@ from pydantic_ai.messages import (
     ImageUrl,
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     SystemPromptPart,
     TextPart,
     ThinkingPart,
@@ -94,8 +93,8 @@ class EventCodecTests(unittest.TestCase):
                         content={"names": ["上海", "江苏"], "total": 2},
                         tool_call_id="call-1",
                     ),
-                    RetryPromptPart(
-                        content="retry",
+                    ToolReturnPart(
+                        content="retry", outcome="retried",
                         tool_name="query_members",
                         tool_call_id="call-1",
                     ),

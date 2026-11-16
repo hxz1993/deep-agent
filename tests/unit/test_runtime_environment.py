@@ -6,11 +6,12 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfoNotFoundError
 
 from pydantic_ai import ModelRetry, RunContext
-from pydantic_ai.messages import ModelResponse, RetryPromptPart, TextPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.factory import _toolsets_for_spec, build_agent
 from deep_agent.agent.spec import AgentSpec
@@ -83,9 +84,10 @@ class RuntimeEnvironmentTests(unittest.IsolatedAsyncioTestCase):
         def model(messages, info):
             del info
             parts = [part for message in messages for part in message.parts]
-            if any(isinstance(part, ToolReturnPart) and part.tool_name == "get_current_time" for part in parts):
+            if any(isinstance(part, ToolReturnPart) and part.tool_name == "get_current_time"
+                   and part.outcome == "success" for part in parts):
                 return ModelResponse(parts=[TextPart("完成")])
-            corrected = any(isinstance(part, RetryPromptPart) for part in parts)
+            corrected = any(is_tool_retry(part) for part in parts)
             zone = "UTC" if corrected else "Not/A_Zone"
             calls.append(zone)
             return ModelResponse(parts=[ToolCallPart("get_current_time", {"timezone": zone})])

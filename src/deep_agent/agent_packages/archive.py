@@ -240,7 +240,7 @@ def parse_package(raw: bytes) -> Package:
         raise PackageError('UI 工具包或工具名称重复')
     if any(p.code not in agent.capabilities for p in ui):
         raise PackageError('安装包包含未关联的 UI 工具包')
-    if any(not c.startswith(('builtin:', 'ui:', 'mcp:')) for c in agent.capabilities):
+    if any(not c.startswith(('builtin:', 'ui:', 'mcp:', 'agent_connection:')) for c in agent.capabilities):
         raise PackageError('无法识别的能力引用')
     skills = {}
     for name, payload in files.items():

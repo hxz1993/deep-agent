@@ -367,6 +367,22 @@ class UiToolDefinition(Base):
     package: Mapped[UiToolPackage] = relationship("UiToolPackage", primaryjoin="foreign(UiToolDefinition.package_code) == UiToolPackage.code", lazy="joined")
 
 
+class RemoteAgentConnection(Base):
+    __tablename__ = "remote_agent_connections"
+    __table_args__ = (UniqueConstraint("name", name="uq_remote_agent_connections_name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    config: Mapped[dict] = mapped_column(JSONType, nullable=False)
+    inspection: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False,
+    )
+
+
 class ChatSessionEvent(Base):
     __tablename__ = "chat_session_events"
     __table_args__ = (

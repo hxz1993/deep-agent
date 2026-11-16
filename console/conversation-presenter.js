@@ -5,7 +5,7 @@ import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=2
 import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20261103-view-image1";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { findViewImageResult, renderViewImageResult } from "./view-image.js?v=20261103-view-image3";
-import { isPlanningToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=20261103-view-image1";
+import { isPlanningToolEvent, isRemoteAgentToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=remote-agents-1";
 
 // No controller imports or initialization: each host owns its DOM and capabilities.
 export function createConversationPresenter({
@@ -13,7 +13,7 @@ export function createConversationPresenter({
   scrollToBottom = () => {}, showConsoleToast = () => {},
   mergeUiToolCall = (call) => call, isUiToolCall = () => false,
   maybeAttachHitlWidget = () => {}, renderHitlWidget = () => {}, resumeDeferred = () => {},
-  onContextReference = () => {}, isContextReferenceSelected = () => false,
+  onContextReference = () => {}, isContextReferenceSelected = () => false, onRemoteTaskReply = null,
 } = {}) {
   if (!messages) throw new TypeError("Conversation presentation requires its own message host");
   const lucideIcon = (name, className = "") => `<i data-lucide="${name}" class="${className}" aria-hidden="true"></i>`;
@@ -257,7 +257,8 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
 
   function syncPendingToolPresentation() {
     for (const block of toolBlocks.values()) {
-      const pending = block.classList.contains("hitl-pending") && !block.dataset.done;
+      const pending = (block.classList.contains("hitl-pending") && !block.dataset.done)
+        || Boolean(block.querySelector("[data-remote-task-reply]"));
       const position = pendingToolPositions.get(block);
       if (pending && !position) {
         const marker = document.createComment("pending tool position");
@@ -547,8 +548,9 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const isToolSearch =
         merged.source === "tool_search" || ["search_tools", "tool_search"].includes(merged.tool);
       const isSkillLoad = merged.tool === "load_capability";
+      const isRemoteAgent = isRemoteAgentToolEvent(merged);
       const defaultTitle = merged.display_name || merged.tool || "tool";
-      block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}${isSkillLoad ? " skill-load-block" : ""}`;
+      block.className = `tool-block${isToolSearch ? " tool-search-block" : ""}${isSkillLoad ? " skill-load-block" : ""}${isRemoteAgent ? " remote-agent-tool-block" : ""}`;
       block.dataset.toolCallId = key;
       block.dataset.toolName = merged.tool || "";
       block.dataset.defaultTitle = defaultTitle;
@@ -557,7 +559,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const renderedArgs = hasArgs ? merged.args : {};
       block.innerHTML = `
         <button type="button" class="tool-head" aria-expanded="false">
-          <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : "wrench")}</span>
+          <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : isRemoteAgent ? "bot" : "wrench")}</span>
           <span class="tool-name">${escapeHtml(defaultTitle)}</span>
           <span class="tool-status">${readOnly ? '<span class="tool-status-pending">尚无已保存结果</span>' : '<span class="spinner" role="status" aria-label="运行中"></span>'}</span>
           <span class="chevron">${lucideIcon("chevron-right")}</span>
@@ -592,8 +594,15 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       if (!block) return;
       block.dataset.done = "1";
       block.classList.remove("hitl-pending");
+      if (isRemoteAgentToolEvent(data) && !block.classList.contains("remote-agent-tool-block")) {
+        block.classList.add("remote-agent-tool-block");
+        block.querySelector(".tool-icon").innerHTML = lucideIcon("bot");
+      }
       const title = block.querySelector(".tool-name");
-      if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
+      if (title && block.dataset.defaultTitle) {
+        const remoteName = data.metadata?.remote_agent?.name;
+        title.textContent = remoteName ? `${remoteName} · ${block.dataset.defaultTitle}` : block.dataset.defaultTitle;
+      }
       const resultStatus = toolResultPresentation(data);
       block.querySelector(".tool-status").innerHTML = `<span class="${resultStatus.className}">${resultStatus.label}</span>`;
       refreshLucideIcons(row);
@@ -615,7 +624,26 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         artifactsHost.dataset.toolArtifacts = "1";
         block.insertBefore(artifactsHost, body);
       }
-      artifactsHost.innerHTML = `${renderToolResultArtifacts(data.artifacts)}${media || ""}${renderLocalFileDownload(data.result, data.artifacts, imageOptions)}`;
+      artifactsHost.innerHTML = `${renderToolResultArtifacts(data.artifacts, { allowPlatformDownload: Boolean(data.metadata?.remote_agent) })}${media || ""}${renderLocalFileDownload(data.result, data.artifacts, imageOptions)}`;
+      const remote = data.metadata?.remote_agent;
+      if (!readOnly && onRemoteTaskReply && typeof remote?.id === "string") {
+        for (const previous of messages.querySelectorAll("[data-remote-task-reply]")) {
+          if (previous.dataset.remoteTaskReply === remote.id) previous.dispatchEvent(new window.Event("remote-task-updated"));
+        }
+        if (remote.status === "input_required") {
+          const reply = document.createElement("button");
+          reply.type = "button";
+          reply.className = "btn text compact remote-task-reply";
+          reply.dataset.remoteTaskReply = remote.id;
+          reply.textContent = "回复此任务";
+          reply.addEventListener("click", () => onRemoteTaskReply(remote));
+          reply.addEventListener("remote-task-updated", () => {
+            reply.remove();
+            updateProcessDisclosure();
+          }, { once: true });
+          artifactsHost.appendChild(reply);
+        }
+      }
       res.innerHTML = media ? "" : '<div class="label" style="margin-top:8px">结果 result</div><div data-tool-result-content=""></div>';
       body.appendChild(res);
       const details = toolDetailStates.get(block);
@@ -753,7 +781,7 @@ function renderLocalFileDownload(result, artifacts = [], imageOptions = {}) {
   return `<a class="local-file-download" href="${escapeHtml(href)}" download>${lucideIcon("download")}<span>${escapeHtml(file.fileName)}</span></a>`;
 }
 
-function renderToolResultArtifacts(artifacts) {
+function renderToolResultArtifacts(artifacts, { allowPlatformDownload = false } = {}) {
   if (!Array.isArray(artifacts) || artifacts.length === 0) return "";
   const overflow = artifacts.filter((item) => item?.kind !== "sandbox_output");
   const generated = artifacts.filter((item) => item?.kind === "sandbox_output");
@@ -766,19 +794,19 @@ function renderToolResultArtifacts(artifacts) {
     ? `<div class="tool-result-artifact">${lucideIcon("archive")}<span>完整结果已外置${escapeHtml(size)}，当前展示预览；Agent 可按需读取。</span></div>`
     : "";
   const generatedHtml = generated.length
-    ? `<div class="generated-file-list"><div class="generated-file-heading">${lucideIcon("files")}<span>生成文件</span></div>${generated.map(renderGeneratedFileArtifact).join("")}</div>`
+    ? `<div class="generated-file-list"><div class="generated-file-heading">${lucideIcon("files")}<span>生成文件</span></div>${generated.map(artifact => renderGeneratedFileArtifact(artifact, { allowPlatformDownload })).join("")}</div>`
     : "";
   return `${overflowHtml}${generatedHtml}`;
 }
 
-function renderGeneratedFileArtifact(artifact) {
+function renderGeneratedFileArtifact(artifact, { allowPlatformDownload = false } = {}) {
   const fileId = String(artifact?.file_id || artifact?.artifact_id || "");
   const fileName = String(artifact?.file_name || fileId || "未命名文件");
   const details = [artifact?.mime, formatArtifactBytes(artifact?.byte_size)].filter(Boolean).join(" · ");
   const downloadUrl = fileId.startsWith("local_")
     ? attachmentUrl({ id: fileId, name: fileName, mime: artifact?.mime })
       || window.serviceUrl(`api/v1/local-files/${encodeURIComponent(fileId)}/download`)
-    : null;
+    : allowPlatformDownload && fileId ? attachmentUrl({ id: fileId, name: fileName, mime: artifact?.mime }) : null;
   const download = downloadUrl
     ? `<a href="${escapeHtml(downloadUrl)}" download title="下载文件">${lucideIcon("download")}</a>`
     : "";

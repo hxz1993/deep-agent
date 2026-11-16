@@ -10,6 +10,7 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryFeedbackPart,
     RetryPromptPart,
     TextPart,
     ThinkingPart,
@@ -24,6 +25,16 @@ from deep_agent.agent.context_references import (
 )
 from deep_agent.agent.tool_names import WIRE_NAMES
 from deep_agent.time import ensure_utc
+
+
+def is_tool_retry(part: object) -> bool:
+    return isinstance(part, RetryPromptPart) or (
+        isinstance(part, ToolReturnPart) and part.outcome == "retried"
+    )
+
+
+def is_retry_feedback(part: object) -> bool:
+    return isinstance(part, RetryFeedbackPart) or is_tool_retry(part)
 
 
 def same_tool_return(left: ToolReturnPart, right: ToolReturnPart) -> bool:
@@ -146,7 +157,7 @@ def _rejected_tool_calls(messages: list[ModelMessage]) -> _RejectedToolCalls:
         if not isinstance(message, ModelRequest):
             continue
         for part_index, part in enumerate(message.parts):
-            if isinstance(part, RetryPromptPart):
+            if is_tool_retry(part):
                 position = pop_call(part.tool_call_id, part.tool_name)
                 if position is not None:
                     rejected.setdefault(position[0], set()).add(position[1])
@@ -208,7 +219,7 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
             kept_parts = [
                 part
                 for part_index, part in enumerate(message.parts)
-                if not isinstance(part, RetryPromptPart) or part_index in terminal_retries
+                if not is_retry_feedback(part) or part_index in terminal_retries
             ]
             if not kept_parts:
                 continue
@@ -218,7 +229,7 @@ def filter_ephemeral_agent_messages(messages: list[ModelMessage]) -> list[ModelM
                     metadata["deepagent_part_indices"] = [
                         metadata["deepagent_part_indices"][i]
                         for i, part in enumerate(message.parts)
-                        if not isinstance(part, RetryPromptPart) or i in terminal_retries
+                        if not is_retry_feedback(part) or i in terminal_retries
                     ]
                 message = replace(message, parts=kept_parts, metadata=metadata)
         filtered.append(message)
@@ -414,7 +425,7 @@ def repair_unprocessed_tool_calls(
             kept_indices = []
             current_retry_resolved: set[tuple[str, str | None]] = set()
             for index, part in enumerate(message.parts):
-                if isinstance(part, RetryPromptPart) and part.tool_call_id:
+                if is_tool_retry(part) and part.tool_call_id:
                     pending.pop(part.tool_call_id, None)
                     current_retry_resolved.add((part.tool_call_id, part.tool_name))
                 elif isinstance(part, BaseToolReturnPart) and part.tool_call_id:

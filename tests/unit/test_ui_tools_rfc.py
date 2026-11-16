@@ -10,11 +10,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import ValidationError
 from pydantic_ai import Agent, DeferredToolRequests, ModelRetry
 from pydantic_ai.exceptions import UnexpectedModelBehavior
-from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart, ToolCallPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy import event
 
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.agent.spec import AgentSpec
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.registry import (
@@ -758,7 +759,7 @@ class ExternalToolsetTests(unittest.IsolatedAsyncioTestCase):
             retries = [
                 part
                 for message in messages if isinstance(message, ModelRequest)
-                for part in message.parts if isinstance(part, RetryPromptPart)
+                for part in message.parts if is_tool_retry(part)
             ]
             self.assertEqual(len(retries), calls - 1)
             args = {} if calls <= 3 else {"message": "继续？"}

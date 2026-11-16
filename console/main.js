@@ -32,7 +32,7 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=0170a4-agent-service-help");
+    const module = await import("./configuration.js?v=remote-agents-1");
     await module.initConfiguration();
     configurationModule = module;
     return module;
@@ -162,6 +162,8 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   }
   if (next !== "configuration" && window.integrationsAdmin?.deactivate() === false) return false;
   if (next !== "configuration" && window.wecomApplicationsAdmin?.deactivate() === false) return false;
+  if (next !== "configuration" && current === "configuration" && window.remoteAgentAdmin
+      && !(await window.remoteAgentAdmin.requestCloseEditor())) return false;
   if (generation !== navigationGeneration) return false;
   document.querySelectorAll("[data-page-panel]").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.pagePanel === next);

@@ -308,6 +308,127 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostic.json()["source_type"], "a2a")
         self.assertEqual(detail["session_title"], diagnostic.json()["title"])
 
+    async def test_outbound_clients_use_same_task_for_two_replies_and_retrieve_artifacts(self):
+        from deep_agent.agent_service.output import QUESTION_NAME
+        from deep_agent.remote_agents import network
+        from deep_agent.remote_agents.contracts import A2AConfig, InputFile, McpConfig, RemoteAgentError, RemoteState
+
+        backend = SubprocessBackend(python_executable=sandbox_test_python(), max_concurrency=1)
+        self.ctx.sandbox_backend = backend
+        self.ctx.registry = build_registry(sandbox_backend=backend)
+        await self.ctx.stores.agent.update_unique(self.agent, AgentUpdate(capabilities=["builtin:sandbox"]))
+        csv = b"month,region,budget,actual\nNovember,East,100,120\n"
+        extra = b"confirmed\n"
+        result_csv = b"region,difference\nEast,20\n"
+        evidence = b"e" * (1024 * 1024 + 1)
+        script = (
+            "from deepagent_files import publish_path\n"
+            f"open(publish_path('result.csv'), 'wb').write({result_csv!r})\n"
+            f"open(publish_path('evidence.txt'), 'wb').write(b'e' * {len(evidence)})"
+        )
+        http_client = network._http_client
+        requests = []
+
+        class RecordingTransport(ASGITransport):
+            async def handle_async_request(self, request):
+                requests.append((request.method, request.url.path, await request.aread()))
+                return await super().handle_async_request(request)
+
+        def client_factory(headers, *, exact_url=None):
+            client = http_client(headers, exact_url=exact_url)
+            client._transport = RecordingTransport(app=self.app)
+            return client
+
+        def respond(messages, info):
+            if QUESTION_NAME not in {tool.name for tool in info.output_tools}:
+                return ModelResponse(parts=[TextPart("预算核对")])
+            latest = next(part.content for message in reversed(messages) for part in reversed(message.parts)
+                          if isinstance(part, UserPromptPart))
+            text = latest if isinstance(latest, str) else "\n".join(part for part in latest if isinstance(part, str))
+            if "开始核对" in text:
+                return ModelResponse(parts=[ToolCallPart(QUESTION_NAME, {"question": "哪个月份？"})])
+            if "用十一月" in text:
+                return ModelResponse(parts=[ToolCallPart(QUESTION_NAME, {"question": "哪个地区？"})])
+            if "继续解释" in text:
+                return ModelResponse(parts=[TextPart("仍然使用十一月和华东地区")])
+            if getattr(messages[-1].parts[-1], "tool_name", None) == "execute_python":
+                return ModelResponse(parts=[TextPart("预算差额 20")])
+            self.assertIn("用华东", text)
+            return ModelResponse(parts=[ToolCallPart("execute_python", {"code": script})])
+
+        with (
+            patch.object(network, "_http_client", side_effect=client_factory),
+            patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)),
+        ):
+            a2a_config = A2AConfig(card_url=f"http://127.0.0.1:8002{self.url}/agent-card.json", headers=HEADERS)
+            inspection = await network.A2AAdapter(a2a_config).inspect()
+            self.assertTrue(inspection["streaming"])
+            a2a = network.A2AAdapter(a2a_config.model_copy(update={
+                "approved_interface": inspection["approved_interface"],
+            }))
+            mcp = network.McpAdapter(
+                McpConfig(mcp_server_name="fixture", publication_code="budget-report"),
+                f"http://127.0.0.1:8002{ROOT}/mcp", HEADERS,
+            )
+            self.assertEqual((await mcp.inspect())["publication_code"], "budget-report")
+            for protocol, adapter in (("a2a", a2a), ("mcp", mcp)):
+                with self.subTest(protocol=protocol):
+                    checkpoints = []
+
+                    async def checkpoint(state):
+                        checkpoints.append(state)
+
+                    first = await adapter.run(
+                        RemoteState(), "开始核对", [InputFile("budget.csv", "text/csv", csv)],
+                        "start", checkpoint, message_id=f"{protocol}-first",
+                    )
+                    self.assertEqual((first.state.status, first.text), ("input_required", "哪个月份？"))
+                    self.assertTrue(first.state.task_id)
+                    self.assertTrue(first.state.question_id)
+                    second = await adapter.run(
+                        first.state, "用十一月", [], "answer", checkpoint, message_id=f"{protocol}-second",
+                    )
+                    self.assertEqual((second.state.status, second.text), ("input_required", "哪个地区？"))
+                    self.assertEqual(second.state.task_id, first.state.task_id)
+                    self.assertNotEqual(second.state.question_id, first.state.question_id)
+                    resumed = await adapter.refresh(second.state, checkpoint)
+                    self.assertEqual(resumed.state, second.state)
+                    with self.assertRaises(RemoteAgentError):
+                        await adapter.run(
+                            second.state.model_copy(update={"question_id": first.state.question_id}),
+                            "旧问题", [], "answer", checkpoint, message_id=f"{protocol}-stale",
+                        )
+                    completed = await adapter.run(
+                        resumed.state, "用华东", [InputFile("extra.txt", "text/plain", extra)],
+                        "answer", checkpoint, message_id=f"{protocol}-third",
+                    )
+                    self.assertEqual((completed.state.status, completed.text), ("completed", "预算差额 20"))
+                    self.assertEqual(completed.state.task_id, first.state.task_id)
+                    self.assertEqual(completed.state.context_id, first.state.context_id)
+                    self.assertEqual(completed.warnings, ())
+                    self.assertEqual({file.name: file.data for file in completed.files},
+                                     {"result.csv": result_csv, "evidence.txt": evidence})
+                    retrieved = await adapter.refresh(completed.state, checkpoint)
+                    self.assertEqual(retrieved.files, completed.files)
+                    continued = await adapter.run(
+                        completed.state, "继续解释", [], "resume", checkpoint, message_id=f"{protocol}-continued",
+                    )
+                    self.assertEqual(continued.text, "仍然使用十一月和华东地区")
+                    self.assertEqual(continued.state.context_id, first.state.context_id)
+                    self.assertNotEqual(continued.state.task_id, first.state.task_id)
+                    self.assertEqual(checkpoints[0].task_id, first.state.task_id)
+                    self.assertIn(checkpoints[0].status, {"submitted", "working"})
+                    entry = self.ctx.agent_tasks.entries[first.state.task_id]
+                    events = await self.ctx.store.list_events(entry.context.session_id, event_type="user/message")
+                    self.assertEqual(len(events), 4)
+                    self.assertIn("budget.csv", str(events[0].payload))
+                    self.assertIn("extra.txt", str(events[2].payload))
+
+        mcp_rpc_payloads = [body for method, path, body in requests if method == "POST" and path == f"{ROOT}/mcp"]
+        self.assertTrue(any(b'"resources/read"' in body for body in mcp_rpc_payloads))
+        self.assertTrue(any(method == "GET" and path.startswith(f"{ROOT}/tasks/") and path.endswith("/download")
+                            for method, path, _body in requests))
+
     async def test_inline_image_reaches_model_in_original_task(self):
         from deep_agent.agent_service.output import QUESTION_NAME
 
@@ -815,3 +936,131 @@ w.save(publish_path("预算.xlsx"))
                 self.ctx.agent_tasks.entries[task_id].changed -= RETENTION + timedelta(seconds=1)
                 self.assertEqual((await self.client.get(f"{ROOT}/tasks/{task_id}")).status_code, 404)
                 self.assertEqual((await session.call_tool("get_task", {"task_id": task_id})).structuredContent["status"], 404)
+
+
+class IndependentA2ASdkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_official_server_contract_supports_streaming_and_polling_with_tenant(self):
+        from deep_agent.remote_agents import network
+        from deep_agent.remote_agents.contracts import A2AConfig, InputFile, RemoteState
+        from tests.integration.fixtures.remote_a2a_server import create_app
+
+        base = "http://external.example"
+        http_client = network._http_client
+        attachment = InputFile(
+            "budget.csv", "text/csv",
+            b"month,region,budget,actual,nonce\nNovember,East,100,120,from-outbound-fixture\n",
+        )
+        extra = InputFile("review.txt", "text/plain", b"confirmed")
+
+        for streaming in (True, False):
+            with self.subTest(streaming=streaming):
+                app = create_app(base, streaming=streaming)
+
+                def client_factory(headers, *, exact_url=None):
+                    client = http_client(headers, exact_url=exact_url)
+                    client._transport = ASGITransport(app=app)
+                    return client
+
+                checkpoint = AsyncMock()
+                config = A2AConfig(card_url=f"{base}/.well-known/agent-card.json")
+                with patch.object(network, "_http_client", side_effect=client_factory):
+                    inspected = await network.A2AAdapter(config).inspect()
+                    self.assertEqual(inspected["streaming"], streaming)
+                    self.assertEqual(inspected["approved_interface"]["tenant"], "budget-fixture")
+                    adapter = network.A2AAdapter(config.model_copy(update={
+                        "approved_interface": inspected["approved_interface"],
+                    }))
+                    first = await adapter.run(RemoteState(), "start", [attachment], "start", checkpoint, message_id="start")
+                    self.assertEqual((first.state.status, first.text), ("input_required", "请确认月份。"))
+                    second = await adapter.run(first.state, "November", [], "answer", checkpoint, message_id="month")
+                    self.assertEqual(second.state.task_id, first.state.task_id)
+                    self.assertNotEqual(second.state.question_id, first.state.question_id)
+                    third = await adapter.run(second.state, "East", [extra], "answer", checkpoint, message_id="region")
+                    self.assertEqual((third.state.status, third.text), ("completed", "预算差额 20。"))
+                    self.assertEqual(third.state.task_id, first.state.task_id)
+                    self.assertEqual(third.files[0].data,
+                                     b"month,region,difference,nonce\nNovember,East,20,from-outbound-fixture\n")
+                    self.assertEqual((await adapter.refresh(third.state, checkpoint)).files, third.files)
+                    follow_up = await adapter.run(third.state, "repeat", [], "resume", checkpoint, message_id="next")
+                    self.assertEqual(follow_up.state.context_id, first.state.context_id)
+                    self.assertNotEqual(follow_up.state.task_id, first.state.task_id)
+                    self.assertEqual(follow_up.text, "沿用 November / East，差额 20。")
+                    paused = await adapter.run(
+                        RemoteState(), "another", [attachment], "start", checkpoint, message_id="cancel-start",
+                    )
+                    self.assertEqual((await adapter.cancel(paused.state)).state.status, "canceled")
+
+    async def test_interrupted_send_recovers_known_task_without_repeating_mutation(self):
+        from httpx import MockTransport, ReadError, Response
+        from deep_agent.remote_agents import network
+        from deep_agent.remote_agents.contracts import A2AConfig, RemoteAgentError, RemoteState
+
+        base = "http://external.example"
+        advertised = {"url": f"{base}/rpc", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+        methods = []
+        task = {"id": "task", "contextId": "context", "status": {"state": "TASK_STATE_WORKING"}}
+
+        for task_known in (True, False):
+            with self.subTest(task_known=task_known):
+                methods.clear()
+
+                async def respond(request):
+                    if request.method == "GET":
+                        return Response(200, json={
+                            "name": "independent", "supportedInterfaces": [advertised],
+                            "capabilities": {"streaming": True},
+                        })
+                    rpc = json.loads(await request.aread())
+                    methods.append(rpc["method"])
+                    if rpc["method"] == "SendStreamingMessage":
+                        if not task_known:
+                            raise ReadError("Lost the first response", request=request)
+                        first = {"jsonrpc": "2.0", "id": rpc["id"], "result": {"task": task}}
+                        return Response(200, text=f"data: {json.dumps(first)}\n\n",
+                                        headers={"Content-Type": "text/event-stream"})
+                    completed = {
+                        **task, "status": {"state": "TASK_STATE_COMPLETED"},
+                        "artifacts": [{"artifactId": "result", "parts": [{"text": "finished"}]}],
+                    }
+                    return Response(200, json={"jsonrpc": "2.0", "id": rpc["id"], "result": completed})
+
+                config = A2AConfig(card_url=f"{base}/card", approved_interface=advertised)
+                checkpoint = AsyncMock()
+                adapter = network.A2AAdapter(config)
+                with patch.object(network, "_http_client", side_effect=lambda headers: AsyncClient(
+                    headers=headers, transport=MockTransport(respond),
+                )):
+                    if task_known:
+                        finished = await adapter.run(RemoteState(), "start", [], "start", checkpoint, message_id="unique")
+                        self.assertEqual((finished.state.status, finished.text), ("completed", "finished"))
+                        self.assertEqual(methods, ["SendStreamingMessage", "GetTask"])
+                        self.assertEqual(checkpoint.await_args_list[0].args[0].task_id, "task")
+                    else:
+                        with self.assertRaises(RemoteAgentError) as failed:
+                            await adapter.run(RemoteState(), "start", [], "start", checkpoint, message_id="unique")
+                        self.assertEqual(failed.exception.status, "unknown")
+                        self.assertEqual(methods, ["SendStreamingMessage"])
+                        checkpoint.assert_not_awaited()
+
+    async def test_artifact_download_keeps_credentials_on_approved_origin(self):
+        from httpx import MockTransport, Response
+        from deep_agent.remote_agents.network import A2AAdapter
+
+        base = "https://a2a.example/rpc"
+        targets = []
+
+        async def respond(request):
+            targets.append(str(request.url))
+            self.assertEqual(request.headers["authorization"], "Bearer fixture")
+            return Response(200, content=b"safe", headers={"content-type": "text/plain"})
+
+        artifact = wire.Artifact(artifact_id="files", parts=[
+            wire.Part(url="https://other.example/file", filename="unsafe.txt"),
+            wire.Part(url="/download", filename="safe.txt"),
+        ])
+        async with AsyncClient(transport=MockTransport(respond), headers={"authorization": "Bearer fixture"}) as http:
+            files, warnings = await A2AAdapter._files([artifact], "task", http, base)
+        self.assertEqual(targets, ["https://a2a.example/download"])
+        self.assertEqual([(file.name, file.data) for file in files], [("safe.txt", b"safe")])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("unsafe.txt", warnings[0])

@@ -14,10 +14,10 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic_ai.messages import RetryPromptPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from sqlalchemy import select
 
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.core.context import AppContext, init_context, reset_context
@@ -268,7 +268,7 @@ class ChannelMessagePersistenceIntegrationTests(unittest.IsolatedAsyncioTestCase
                 yield {1: DeltaToolCall(name="builtin__confirm", json_args='{"message":"Synthetic confirmation"}',
                                         tool_call_id="unavailable-confirm")}
             else:
-                self.assertTrue(any(isinstance(part, RetryPromptPart) for part in messages[-1].parts))
+                self.assertTrue(any(is_tool_retry(part) for part in messages[-1].parts))
                 yield "请直接在聊天里确认。"
 
         async def deliver(_frame, _stream_id, _text, finish):

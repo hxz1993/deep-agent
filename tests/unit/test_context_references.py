@@ -33,7 +33,7 @@ from deep_agent.agent.context_references import (
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.history import first_user_prompt
 from deep_agent.agent.runner import AgentRunner
-from deep_agent.db.serialization import deserialize_message, serialize_message
+from deep_agent.db.serialization import StoredUserPromptPart, deserialize_message, serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.chat import ChatRequest
 from deep_agent.schemas.context_reference import ContextReference
@@ -140,7 +140,7 @@ class ContextReferenceProjectionTests(unittest.IsolatedAsyncioTestCase):
         )
         history = [
             ModelRequest(
-                parts=[UserPromptPart(content=content)],
+                parts=[StoredUserPromptPart(content=content)],
                 instructions="keep-instructions",
                 run_id="run-with-attachment",
                 metadata={"trace": "keep"},
@@ -171,7 +171,7 @@ class ContextReferenceProjectionTests(unittest.IsolatedAsyncioTestCase):
         raw = [
             ModelRequest(
                 parts=[
-                    UserPromptPart(
+                    StoredUserPromptPart(
                         content=[context_reference_dict(_ref()), "继续分析"]
                     )
                 ]
@@ -194,7 +194,7 @@ class ContextReferenceProjectionTests(unittest.IsolatedAsyncioTestCase):
         raw = [
             ModelRequest(
                 parts=[
-                    UserPromptPart(
+                    StoredUserPromptPart(
                         content=[context_reference_dict(_ref()), "继续分析"]
                     )
                 ],
@@ -218,7 +218,7 @@ class ContextReferencePersistenceTests(unittest.TestCase):
             AttachmentRef(id="f1", name="note.txt", mime="text/plain")
         )
         original = ModelRequest(
-            parts=[UserPromptPart(content=[ref_payload, "解释", attachment])]
+            parts=[StoredUserPromptPart(content=[ref_payload, "解释", attachment])]
         )
         restored = deserialize_message(serialize_message(original))
         part = restored.parts[0]
@@ -227,7 +227,7 @@ class ContextReferencePersistenceTests(unittest.TestCase):
 
     def test_history_returns_structured_reference(self) -> None:
         request = ModelRequest(
-            parts=[UserPromptPart(content=[context_reference_dict(_ref()), "解释"])]
+            parts=[StoredUserPromptPart(content=[context_reference_dict(_ref()), "解释"])]
         )
         history = project_model_messages([request])
         self.assertEqual(history[0].text, "解释")
@@ -238,10 +238,10 @@ class ContextReferencePersistenceTests(unittest.TestCase):
 
     def test_context_only_title_uses_label_or_fallback(self) -> None:
         labelled = ModelRequest(
-            parts=[UserPromptPart(content=[context_reference_dict(_ref())])]
+            parts=[StoredUserPromptPart(content=[context_reference_dict(_ref())])]
         )
         unlabelled = ModelRequest(
-            parts=[UserPromptPart(content=[context_reference_dict(_ref(label=None))])]
+            parts=[StoredUserPromptPart(content=[context_reference_dict(_ref(label=None))])]
         )
         self.assertEqual(first_user_prompt([labelled]), "[上下文] 销售预算!B2:C4")
         self.assertEqual(first_user_prompt([unlabelled]), "上下文会话")

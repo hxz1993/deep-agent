@@ -109,7 +109,7 @@ from loguru import logger
 
 from deep_agent.db.conversation import SessionStore, _common_message_suffix
 from deep_agent.time import utc_rfc3339
-from deep_agent.db.serialization import serialize_message
+from deep_agent.db.serialization import StoredUserPromptPart, serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.options import OPTION
@@ -972,8 +972,9 @@ class AgentRunner:
         user_event_id: str | None = None
         if has_user_turn(message, attachments, context_refs):
             content = refs_from_attachments(message, attachments, context_refs)
+            part = UserPromptPart(content) if isinstance(content, str) else StoredUserPromptPart(content)
             user_request = ModelRequest(
-                parts=[UserPromptPart(content=content)],
+                parts=[part],
                 metadata={'reasoning_effort': self._reasoning_effort} if self._reasoning_effort else None,
             )
             rows = await self.store.append(
@@ -1014,6 +1015,8 @@ class AgentRunner:
             attachments=attachments,
             messages=raw_history,
         )
+        deps.remote_attachments = tuple(attachments or ())
+        deps.remote_user_message = message or ("请使用本轮补充的附件。" if attachments else None)
         deps.has_context_references = history_has_context_references(history)
         return _PreparedHistory(
             projected=history,

@@ -19,6 +19,7 @@ from typing import Mapping
 
 from loguru import logger
 from pydantic_ai.capabilities import AbstractCapability, Capability, CombinedCapability
+from pydantic_ai.workspaces import LocalWorkspaceBackend
 from pydantic_ai_harness.skills import Skills
 
 from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, app_skill_storage_key, skill_package_code
@@ -727,7 +728,10 @@ def _assemble_skills(
     for item in general_items:
         if item.library_root not in directories:
             directories.append(item.library_root)
-    capability = Skills(directories, include=[item.code for item in general_items]) if directories else None
+    capability = Skills(
+        directories, include=[item.code for item in general_items],
+        workspace=LocalWorkspaceBackend(directories[0]),
+    ) if directories else None
     if scoped_capabilities:
         children = ([capability] if capability is not None else []) + scoped_capabilities
         capability = CombinedCapability(children)

@@ -24,6 +24,6 @@
 
 ## DeepAgent 作为客户端（后续）
 
-Console 计划使用独立的「外部调用」入口。Agent Card 和请求 Header 拟保存在 `agent_connections` 表中。关联在本地 Agent 编辑页配置，连接 ID 保存在 `agents.capabilities`。调用记录关联已有会话与远端 Task/Context。第三方产物随 Workspace 验收。详细配置、授权、生命周期和验收见[外部调用实施方案](client-implementation-plan.md)。
+Console 计划使用独立的「远程 Agent」入口。A2A、Codex 和 CodeBuddy 的接入配置拟保存在 `remote_agent_connections` 表中。关联在本地 Agent 编辑页配置，连接引用保存在 `agents.capabilities`。调用记录关联已有会话与远端 Task/Context。第三方产物随 Workspace 验收。详细配置、授权、生命周期和验收见[远程 Agent 实施方案](client-implementation-plan.md)。
 
 背景资料：[Dot 交接详稿](https://chatgpt.com/space/page_dd86da26ca8c8191b5c07d19ef7ff85f)、[A2A 1.0 规范](https://a2a-protocol.org/latest/specification/)、[官方 Python SDK](https://github.com/a2aproject/a2a-python)。

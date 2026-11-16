@@ -71,7 +71,13 @@ class AgentPackageCrossVersionHttpTests(unittest.IsolatedAsyncioTestCase):
     async def start(self, source, name):
         data = self.root / name
         port = free_port()
-        process = subprocess.Popen([sys.executable, "-P", str(SERVER), "--root", str(data), "--port", str(port)],
+        # The archived service needs its own dependency line when the current
+        # SDK changes behavior. Keep the existing same-runtime default for
+        # comparisons where both revisions share the same dependency line.
+        python = sys.executable if source == REPO else (
+            os.environ.get("DEEP_AGENT_TEST_LEGACY_PYTHON") or sys.executable
+        )
+        process = subprocess.Popen([python, "-P", str(SERVER), "--root", str(data), "--port", str(port)],
             cwd=source, env={**os.environ, "PYTHONPATH": f'{source / "src"}{os.pathsep}{source}'},
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         self.processes.append(process)

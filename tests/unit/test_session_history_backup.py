@@ -13,7 +13,7 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from deep_agent.db.serialization import serialize_message
+from deep_agent.db.serialization import StoredUserPromptPart, serialize_message
 from maintenance.session_history_backup import (
     default_output_root,
     export_session_history_backup,
@@ -163,7 +163,7 @@ class SessionHistoryBackupTests(unittest.IsolatedAsyncioTestCase):
         payload = serialize_message(
             ModelRequest(
                 parts=[
-                    UserPromptPart(
+                    StoredUserPromptPart(
                         content=[
                             "hello",
                             {

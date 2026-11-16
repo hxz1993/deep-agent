@@ -8,6 +8,7 @@ from deep_agent.agent.tool_names import WIRE_NAMES, is_output_call
 from deep_agent.agent.observability import token_usage_available
 from deep_agent.agent.planning import is_planning_tool
 from deep_agent.agent.tool_output_limits import artifacts_from_metadata
+from deep_agent.remote_agents.contracts import tool_metadata as remote_agent_metadata
 from deep_agent.web.images import safe_web_image_value, web_image_tool_value, view_image_tool_value
 from deep_agent.conversation.models import (
     AssistantConversationItem,
@@ -452,6 +453,9 @@ def _apply_result(
         if isinstance(sources, list):
             web_metadata["sources"] = sources
         item.metadata = web_metadata or None
+    remote = remote_agent_metadata(item.tool_name, metadata)
+    if remote is not None and unscoped:
+        item.metadata = {**(item.metadata or {}), "remote_agent": remote}
 
 
 def _artifacts(part: Mapping[str, Any]) -> list[ConversationArtifact]:
@@ -479,7 +483,7 @@ def _result_status(part: Mapping[str, Any], outcome: str | None) -> str:
         return "rejected"
     if normalized in {"failed", "failure", "error"}:
         return "failed"
-    if kind == "retry-prompt" or normalized == "retry":
+    if kind == "retry-prompt" or normalized in {"retry", "retried"}:
         return "removed"
     return "completed"
 

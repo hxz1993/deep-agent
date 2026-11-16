@@ -31,10 +31,10 @@ from pydantic_ai_harness._monty_exec import is_sandbox_panic
 from pydantic_ai_harness.code_mode._toolset import (
     _TOOL_RETURN_CONTENT_TA,
     _describe_started_calls,
-    _global_mode_is_sequential,
     _is_duration_exhausted,
     _jsonable_for_sandbox,
     _resolve_resource_limits,
+    global_mode_is_sequential,
 )
 from deep_agent.ptc.limits import PTC_EXECUTION_SECONDS
 from deep_agent.ptc.diagnostics import current_collector
@@ -128,7 +128,7 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
     )
     loop = asyncio.get_running_loop()
     parent_context = contextvars.copy_context()
-    serial = asyncio.Lock() if _global_mode_is_sequential(manager.get_parallel_execution_mode) else None
+    serial = asyncio.Lock() if global_mode_is_sequential(manager.get_parallel_execution_mode) else None
     completed: list[asyncio.Event] = []
     host_cancellation: asyncio.CancelledError | None = None
     collector = current_collector.get()
@@ -224,11 +224,7 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
                 AsyncMonty(max_processes=1, request_timeout=PTC_EXECUTION_SECONDS),
             )
         if runtime.session is None:
-            limits = _resolve_resource_limits(toolset.resource_limits, in_temporal_workflow=False)
-            # Harness 0.32 names this max_duration_secs; Monty 1.5 separates
-            # per-feed execution time from time between individual host calls.
-            if "max_duration_secs" in limits:
-                limits["max_feed_duration_secs"] = limits.pop("max_duration_secs")
+            limits = _resolve_resource_limits(toolset.resource_limits)
             runtime.session = await runtime.session_stack.enter_async_context(runtime.pool.checkout(
                 limits=limits,
                 type_check=fresh and bool(tool.callable_defs),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 from pydantic import TypeAdapter
@@ -14,8 +14,23 @@ _message_adapter: TypeAdapter[ModelMessage] = TypeAdapter(ModelMessage)
 _request_part_adapter: TypeAdapter[ModelRequestPart] = TypeAdapter(ModelRequestPart)
 
 
-def _is_deep_agent_reference(item: Any) -> bool:
-    return is_attachment_ref(item) or is_context_reference(item)
+def _is_stored_user_content(item: Any) -> bool:
+    return (
+        is_attachment_ref(item)
+        or is_context_reference(item)
+        or (isinstance(item, dict) and item.get("kind") == "text-content")
+    )
+
+
+@dataclass(repr=False)
+class StoredUserPromptPart(UserPromptPart):
+    """A persisted prompt with DeepAgent references, projected before model use."""
+
+    def __post_init__(self) -> None:
+        content = self.content
+        if isinstance(content, (list, tuple)):
+            content = [item for item in content if not _is_stored_user_content(item)]
+        UserPromptPart(content)
 
 
 def _payload_has_deep_agent_ref(payload: dict[str, Any]) -> bool:
@@ -27,7 +42,7 @@ def _payload_has_deep_agent_ref(payload: dict[str, Any]) -> bool:
         content = part.get("content")
         if not isinstance(content, list):
             continue
-        if any(_is_deep_agent_reference(item) for item in content):
+        if _part_has_stored_content(content):
             return True
     return False
 
@@ -37,14 +52,14 @@ def _deserialize_request_with_deep_agent_refs(payload: dict[str, Any]) -> ModelR
     for part_payload in payload.get("parts") or []:
         if (
             part_payload.get("part_kind") == "user-prompt"
-            and _part_content_has_deep_agent_ref(part_payload.get("content"))
+            and _part_has_stored_content(part_payload.get("content"))
         ):
             parsed = _request_part_adapter.validate_python(
                 {**part_payload, "content": ""}
             )
             if not isinstance(parsed, UserPromptPart):
                 raise ValueError("Expected a user prompt part")
-            parts.append(replace(parsed, content=part_payload["content"]))
+            parts.append(StoredUserPromptPart(part_payload["content"], timestamp=parsed.timestamp))
             continue
         parts.append(_request_part_adapter.validate_python(part_payload))
     shell = _message_adapter.validate_python({**payload, "parts": []})
@@ -53,15 +68,15 @@ def _deserialize_request_with_deep_agent_refs(payload: dict[str, Any]) -> ModelR
     return replace(shell, parts=parts)
 
 
-def _part_content_has_deep_agent_ref(content: Any) -> bool:
+def _part_has_stored_content(content: Any) -> bool:
     if not isinstance(content, list):
         return False
-    return any(_is_deep_agent_reference(item) for item in content)
+    return any(_is_stored_user_content(item) for item in content)
 
 
 def _request_has_deep_agent_ref(message: ModelRequest) -> bool:
     for part in message.parts:
-        if isinstance(part, UserPromptPart) and _part_content_has_deep_agent_ref(
+        if isinstance(part, UserPromptPart) and _part_has_stored_content(
             part.content
         ):
             return True
@@ -80,7 +95,7 @@ def _serialize_user_prompt_part_with_refs(part: UserPromptPart) -> dict[str, Any
 def _serialize_request_with_deep_agent_refs(message: ModelRequest) -> dict[str, Any]:
     parts: list[dict[str, Any]] = []
     for part in message.parts:
-        if isinstance(part, UserPromptPart) and _part_content_has_deep_agent_ref(
+        if isinstance(part, UserPromptPart) and _part_has_stored_content(
             part.content
         ):
             parts.append(_serialize_user_prompt_part_with_refs(part))

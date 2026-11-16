@@ -10,9 +10,11 @@ import {
   assistantActionsFromSse,
   formatProcessElapsed,
   isPlanningToolEvent,
+  isRemoteAgentToolEvent,
   normalizePlanSnapshot,
   planPanelState,
   processDisclosureLabel,
+  toolResultPresentation,
 } from "../../../console/assistant-presentation.js";
 
 function recordingPresenter() {
@@ -373,10 +375,17 @@ test("共享动作入口恢复 Deferred 时仍补齐 UI 工具元数据", () => 
 });
 
 test("大工具结果显示外置提示并保留预览", () => {
-  assert.match(chatSource, /renderToolResultArtifacts\(data\.artifacts\)/);
+  assert.match(chatSource, /renderToolResultArtifacts\(data\.artifacts(?:,|\))/);
   assert.match(chatSource, /完整结果已外置/);
   assert.match(chatSource, /Agent 可按需读取/);
   assert.match(workspaceCss, /\.tool-result-artifact/);
+});
+
+test("远程任务等待时提供补答语义，普通 MCP 的同名工具保持原样", () => {
+  assert.equal(isRemoteAgentToolEvent({ tool: "delegate_task" }), true);
+  assert.equal(isRemoteAgentToolEvent({ tool: "delegate_task", source: "mcp" }), false);
+  assert.equal(toolResultPresentation({ metadata: { remote_agent: { status: "input_required" } } }).label, "待补答");
+  assert.equal(toolResultPresentation({ metadata: { remote_agent: { status: "unknown" } } }).label, "结果未知");
 });
 
 test("无参数工具显示空对象且参数和结果 JSON 不重复绘制边框", () => {

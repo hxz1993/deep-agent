@@ -872,6 +872,10 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
                 target_met=telemetry.candidate_valid,
             )
 
+        # Request-context changes apply to this request only in Pydantic AI 2.68.
+        # Keep subsequent steps on the committed projection, as Harness does.
+        if compacted is not messages:
+            ctx.messages[:] = compacted
         request_context.messages = compacted
         after = _request_estimate(state.estimator, compacted, request_context)
         # Provider usage describes the request that was actually sent after

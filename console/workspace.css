@@ -628,6 +628,7 @@ html, body {
 .trajectory-kind.thinking { background: #f3edff; color: #7c3aed; }
 .trajectory-kind.tool,
 .trajectory-kind.code { background: #fff3e7; color: #c65d08; }
+.trajectory-kind.remote-agent { background: var(--accent-soft); color: var(--accent); }
 .trajectory-kind.planning { background: #e7f7f4; color: #078573; }
 .trajectory-kind.deferred { background: #fff5df; color: #b45309; }
 .trajectory-kind.error { background: var(--danger-soft); color: var(--danger-text); }
@@ -1612,6 +1613,16 @@ html, body {
 }
 .thinking-head .thinking-icon,
 .tool-head .tool-icon { display: inline-grid; place-items: center; color: var(--text-faint); }
+.remote-agent-tool-block .tool-head .tool-icon { color: var(--accent); }
+.composer-remote-reply {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: var(--ui-font-helper);
+}
+.composer-remote-reply[hidden] { display: none; }
 .thinking-head .thinking-icon svg,
 .tool-head .tool-icon svg { width: 14px; height: 14px; display: block; }
 .thinking-head .thinking-title { font-weight: 600; color: var(--text-faint); }

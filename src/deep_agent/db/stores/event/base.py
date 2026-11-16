@@ -339,7 +339,7 @@ class SessionEventStore(SessionBoundMixin):
 
     async def _append_lifecycle(
         self, db: AsyncSession, session: ChatSession, *,
-        event_type: Literal["compaction"], status: LifecycleStatus,
+        event_type: Literal["compaction", "remote_agent/invocation"], status: str,
         turn_id: str | None, run_id: str | None, payload: dict[str, Any],
         now: datetime | None = None,
     ) -> ChatSessionEvent:

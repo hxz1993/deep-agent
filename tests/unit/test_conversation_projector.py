@@ -16,13 +16,12 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
-    UserPromptPart,
 )
 from pydantic_ai.usage import RequestUsage
 
 from deep_agent.agent.planning import PLAN_METADATA_KEY
 from deep_agent.conversation.projector import project_session_events
-from deep_agent.db.serialization import serialize_message
+from deep_agent.db.serialization import StoredUserPromptPart, serialize_message
 
 
 NOW = datetime(2026, 8, 27, tzinfo=timezone.utc)
@@ -114,7 +113,7 @@ class ConversationProjectorTests(unittest.TestCase):
             event(
                 1,
                 "user/message",
-                message=ModelRequest(parts=[UserPromptPart(content=[
+                message=ModelRequest(parts=[StoredUserPromptPart(content=[
                     {"kind": "text-content", "content": "分析预算"},
                     {"kind": "attachment-ref", "id": "file-1", "name": "预算.xlsx", "mime": "application/vnd.ms-excel"},
                     {"kind": "context-ref", "key": "range", "type": "deeptable.range", "label": "预算!B2:C4", "metadata": {"token": "secret"}},

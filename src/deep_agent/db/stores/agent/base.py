@@ -14,6 +14,7 @@ from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.models.reasoning import DEFAULT_EFFORT, bound_agent_effort
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate, AgentOutputConfig as OutputConfig
 from deep_agent.skills.catalog import active_skill_codes
+from deep_agent.remote_agents.store import lock_agent_connections
 
 
 class InvalidAgentOutputConfig(ValueError):
@@ -109,6 +110,7 @@ class AgentStoreBase(SessionBoundMixin):
                     model = await lock_reference(db, LlmModel, LlmModel.id, data.model_id, "LLM model")
                 await self._lock_ui_packages(db, data.capabilities)
                 await self._lock_mcp_servers(db, data.capabilities)
+                await lock_agent_connections(db, data.capabilities)
                 if await self._get_by_name(db, data.name) is not None:
                     raise ValueError(f"Agent already exists: {data.name}")
                 row = Agent(
@@ -148,6 +150,8 @@ class AgentStoreBase(SessionBoundMixin):
                 await self._lock_ui_packages(db, old_caps + (data.capabilities or []))
                 await self._lock_mcp_servers(db, data.capabilities if data.capabilities is not None else old_caps,
                                              old_capabilities=old_caps)
+                await lock_agent_connections(db, data.capabilities if data.capabilities is not None else old_caps,
+                                             old_codes=old_caps)
                 row = await lock_optional(db, Agent, Agent.id, agent_id)
                 if row is None:
                     return None

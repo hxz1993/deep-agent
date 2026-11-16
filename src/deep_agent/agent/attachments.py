@@ -192,14 +192,14 @@ async def resolve_history_for_llm(
                 new_parts.append(part)
                 continue
             new_parts.append(
-                replace(
-                    part,
+                UserPromptPart(
                     content=await _resolve_user_prompt_part(
                         part.content,
                         request_headers,
                         full=full_turn,
                         file_store=file_store,
                     ),
+                    timestamp=part.timestamp,
                 )
             )
         resolved.append(replace(message, parts=new_parts))

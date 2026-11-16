@@ -9,7 +9,7 @@ import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { findViewImageResult, renderViewImageResult } from "./view-image.js?v=20261103-view-image3";
 import { attachmentPreviewAttributes, attachmentDownloadUrl } from "./attachment-preview.js?v=20261103-view-image1";
-import { toolResultPresentation } from "./assistant-presentation.js?v=20261103-view-image1";
+import { isRemoteAgentToolEvent, toolResultPresentation } from "./assistant-presentation.js?v=remote-agents-1";
 import { renderPtcExecution } from "./ptc-execution.js?v=20260924-5";
 import { mountTrajectoryExport } from "./trajectory-export.js?v=20261106-trajectory-export";
 
@@ -619,7 +619,7 @@ export function buildTrajectory(history = {}) {
           outcome: part.outcome || null,
           plan: tool.kind === "planning" ? metadata.deepagent_plan || null : null,
           artifacts: toolResultArtifacts(metadata),
-          metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls, ptc_diagnostics: metadata.ptc_diagnostics, ...(toolName === "view_image" ? { view_image: metadata.view_image } : {}) },
+          metadata: { code_mode: metadata.code_mode, nested_calls: metadata.nested_calls, ptc_diagnostics: metadata.ptc_diagnostics, remote_agent: metadata.remote_agent, ...(toolName === "view_image" ? { view_image: metadata.view_image } : {}) },
         }));
         tool.native = { ...(tool.native || {}), result_event_id: event.event_id, result_part_offset: offset };
         tool.timestamp_end = null;
@@ -764,10 +764,12 @@ function isPythonCodeEvent(event) {
 }
 
 function eventKindClass(event) {
+  if (event?.kind === "tool" && isRemoteAgentToolEvent({ tool: event.label, metadata: event.result?.metadata, source: event.source })) return "remote-agent";
   return isRunCodeEvent(event) ? "code" : event?.kind;
 }
 
 function eventKindBadge(event) {
+  if (eventKindClass(event) === "remote-agent") return "远程 Agent";
   return isRunCodeEvent(event) ? "PTC" : kindBadge(event?.kind);
 }
 
@@ -1686,7 +1688,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       const payload = frame.payload;
       row.result = redactTrajectoryValue(jsonClone({ result: payload.result, outcome: payload.outcome || null,
         artifacts: payload.artifacts || null, plan: payload.plan || null,
-        metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics, ...(row.label === "view_image" ? { view_image: payload.metadata?.view_image } : {}) } }));
+        metadata: { code_mode: payload.metadata?.code_mode, nested_calls: payload.metadata?.nested_calls, ptc_diagnostics: payload.metadata?.ptc_diagnostics, remote_agent: payload.metadata?.remote_agent, ...(row.label === "view_image" ? { view_image: payload.metadata?.view_image } : {}) } }));
       row.summary = liveSummary("tool_result", payload);
       row.status = toolResultPresentation(payload).status;
       if (row.duration_source !== "execution") row.timestamp_end = frame.timestamp;

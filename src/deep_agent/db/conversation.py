@@ -1145,6 +1145,9 @@ def _common_message_suffix(raw: list[ModelMessage], projected: list[ModelMessage
                     {key: value for key, value in part.items() if key != "timestamp"}
                     if part.get("part_kind") == "tool-return" else part
                     for part in payload.get("parts", [])
+                    # A generated instruction baseline is added after the
+                    # prompt's event is committed, as with the request envelope.
+                    if part.get("part_kind") != "instruction-baseline"
                 ]
             if original.get("instructions") is None:
                 original.pop("instructions", None)

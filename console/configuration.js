@@ -11,7 +11,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "0170a4-agent-service-help";
+const CONFIGURATION_ASSET_VERSION = "remote-agents-1";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -21,6 +21,7 @@ const CONFIGURATION_TABS = new Set([
   "channels",
   "integrations",
   "agent-service",
+  "remote-agents",
   "global-settings",
 ]);
 let activeConfigurationTab = "agents";
@@ -135,7 +136,10 @@ async function loadAdminScripts() {
   };
   window.addEventListener?.("error", onScriptError);
   try {
-    const loaded = Promise.all(scripts.map(loadClassicScript)).then(async () => {
+    const loaded = Promise.all([
+      ...scripts.map(loadClassicScript),
+      import("./configuration/remote-agents.js?v=remote-agents-1"),
+    ]).then(async () => {
       if (hasExecutionError) return;
       // These scripts arrived after the browser's original DOMContentLoaded.
       // Replay once for their existing bindings; initialization makes no API calls.
@@ -185,6 +189,7 @@ export function refreshCurrentConfiguration() {
   if (active === "skills") return window.skillsAdmin?.refresh();
   if (active === "mcp") return window.mcpAdmin?.refresh();
   if (active === "agent-service") return window.agentServiceAdmin?.refresh();
+  if (active === "remote-agents") return window.remoteAgentAdmin?.refresh();
   if (active === "integrations") return window.integrationsAdmin?.refresh();
   if (active === "channels") return window.channelsAdmin?.refresh();
   return null;

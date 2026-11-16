@@ -64,7 +64,7 @@ class TurnRequestBudget(AbstractCapability[AgentDeps]):
 
     def get_ordering(self) -> CapabilityOrdering:
         # Run after discovery AND compaction, whose summary may spend a request.
-        # after_model_request runs in reverse, before message persistence.
+        # after_model_request runs within the model lifecycle, before persistence.
         return CapabilityOrdering(position="innermost")
 
     async def before_model_request(self, ctx, request_context):
@@ -131,7 +131,8 @@ class TurnRequestBudget(AbstractCapability[AgentDeps]):
     async def after_model_request(self, ctx, *, request_context, response: ModelResponse):
         response.metadata = {
             **(response.metadata or {}),
-            BUDGET_METADATA: {"run_requests": ctx.usage.requests},
+            # The SDK increments the request count when it commits this response.
+            BUDGET_METADATA: {"run_requests": ctx.usage.requests + 1},
         }
         if self.final_request and any(isinstance(part, ToolCallPart)
                 and (ctx.deps.output_state is None or part.tool_name != ctx.deps.output_state.tool_name.wire)

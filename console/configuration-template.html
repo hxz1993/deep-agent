@@ -270,6 +270,95 @@
       </div>
     </section>
 
+    <section class="panel" id="panel-remote-agents">
+      <div id="remoteAgentDirectory">
+        <header class="panel-toolbar remote-agent-page-heading"><div><h2>远程 Agent</h2><p>接入外部 Agent，作为工具调用。</p></div></header>
+        <section class="console-section" aria-labelledby="remoteConnectionTitle">
+          <div class="console-section-heading remote-agent-toolbar">
+            <h3 class="console-section-title" id="remoteConnectionTitle">已接入的 Agent</h3>
+            <div class="remote-agent-actions">
+              <label class="agent-search"><i data-lucide="search" aria-hidden="true"></i><input id="remoteConnectionSearch" type="search" aria-label="搜索远程 Agent" placeholder="搜索远程 Agent"></label>
+              <div class="agent-view-switch" role="group" aria-label="连接视图">
+                <button id="remoteConnectionCards" class="active" type="button" data-remote-view="cards" aria-pressed="true" aria-label="卡片" title="卡片"><i data-lucide="layout-grid" aria-hidden="true"></i></button>
+                <button id="remoteConnectionList" type="button" data-remote-view="list" aria-pressed="false" aria-label="列表" title="列表"><i data-lucide="list" aria-hidden="true"></i></button>
+              </div>
+              <button class="btn primary" id="addRemoteConnection" type="button"><i data-lucide="plus" aria-hidden="true"></i>添加远程 Agent</button>
+            </div>
+          </div>
+          <div class="remote-agent-cards" id="remoteConnectionCardsHost"></div>
+          <div class="table-wrap console-list-a remote-agent-connection-list" id="remoteConnectionListHost" hidden>
+            <table class="data-table"><thead><tr><th scope="col">远程 Agent</th><th scope="col">用途说明</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody id="remoteConnectionRows"></tbody></table>
+          </div>
+          <p class="remote-agent-notice" id="remoteConnectionNotice" role="status"></p>
+        </section>
+        <section class="console-section remote-agent-recent" aria-labelledby="remoteCallsTitle">
+          <div class="console-section-heading remote-agent-toolbar">
+            <h3 class="console-section-title" id="remoteCallsTitle">近期调用</h3>
+            <div class="remote-agent-actions remote-agent-filters">
+              <label class="agent-search"><i data-lucide="search" aria-hidden="true"></i><input id="remoteCallSearch" type="search" aria-label="搜索任务名称或 ID" placeholder="搜索任务名称或 ID"></label>
+              <select id="remoteCallConnection" aria-label="筛选远程 Agent"><option value="">全部远程 Agent</option></select>
+              <select id="remoteCallProtocol" aria-label="筛选接入方式"><option value="">全部接入方式</option><option value="a2a">A2A</option><option value="codex">Codex</option><option value="codebuddy">CodeBuddy</option><option value="mcp">MCP</option></select>
+              <select id="remoteCallStatus" aria-label="筛选状态"><option value="">全部状态</option><option value="working">进行中</option><option value="input_required">待补答</option><option value="completed">已完成</option><option value="failed">失败</option><option value="canceled">已取消</option><option value="unknown">结果未知</option></select>
+            </div>
+          </div>
+          <div class="remote-agent-recent-grid">
+            <div class="remote-agent-recent-list">
+              <div class="table-wrap remote-agent-calls-table"><table class="data-table"><thead><tr><th scope="col">任务</th><th scope="col">远程 Agent</th><th scope="col">状态</th><th scope="col">提交时间</th></tr></thead><tbody id="remoteCallRows"></tbody></table></div>
+              <footer class="remote-agent-footer"><span id="remoteCallCount"></span><span>近 24 小时，最多 30 条</span></footer>
+            </div>
+            <aside class="inspector-content remote-agent-call-detail" id="remoteCallDetail" aria-label="调用详情"></aside>
+          </div>
+        </section>
+      </div>
+      <div id="remoteAgentEditor" hidden>
+        <header class="panel-toolbar remote-agent-editor-heading">
+          <button class="btn text" id="closeRemoteEditor" type="button"><i data-lucide="arrow-left" aria-hidden="true"></i><span>返回</span></button>
+          <h2 id="remoteEditorTitle">添加远程 Agent</h2>
+          <div class="remote-agent-actions">
+            <button class="btn" id="checkRemoteConnection" type="button">检查环境</button>
+            <button class="btn primary" id="saveRemoteConnection" type="submit" form="remoteConnectionForm">保存配置</button>
+          </div>
+        </header>
+        <div class="remote-agent-editor-grid">
+          <form class="remote-agent-config" id="remoteConnectionForm" aria-label="远程 Agent 配置">
+            <label class="field"><span>名称</span><input name="name" required maxlength="80" autocomplete="off"></label>
+            <label class="field"><span>用途说明</span><input name="description" maxlength="500" placeholder="说明可委托的任务"></label>
+            <section class="remote-agent-field-section" aria-labelledby="remoteDriverHeading">
+              <h3 id="remoteDriverHeading">接入方式</h3>
+              <div id="remoteDriverOptions" class="remote-agent-driver-options" role="group" aria-labelledby="remoteDriverHeading"></div>
+              <p class="muted remote-agent-driver-note" id="remoteDriverNote"></p>
+            </section>
+            <section class="remote-agent-field-section" aria-labelledby="remoteConfigHeading">
+              <div class="remote-agent-toolbar">
+                <h3 id="remoteConfigHeading">接入配置</h3>
+                <button class="btn text compact" type="button" id="toggleRemoteConfigMode"><i data-lucide="arrow-right-left" aria-hidden="true"></i><span>切换为 JSON</span></button>
+              </div>
+              <div id="remoteDriverFields"></div>
+              <label class="field" id="remoteConfigJsonField" hidden><textarea id="remoteConfigJson" rows="12" aria-label="接入配置 JSON" spellcheck="false" autocomplete="off"></textarea></label>
+            </section>
+            <p class="remote-agent-error" id="remoteConfigStatus" role="alert"></p>
+          </form>
+          <section class="remote-agent-debug" aria-labelledby="remoteDebugHeading">
+            <div class="remote-agent-toolbar">
+              <h3 id="remoteDebugHeading">直连调试</h3>
+              <div class="remote-agent-actions"><button class="btn" type="button" id="refreshRemoteDebug" hidden>重新获取</button><button class="btn" type="button" id="cancelRemoteDebug" hidden>取消任务</button><button class="btn" id="resetRemoteDebug" type="button">新对话</button></div>
+            </div>
+            <p class="muted remote-agent-debug-notice" id="remoteDebugNotice" role="status"></p>
+            <div class="remote-agent-debug-thread" id="remoteDebugThread" role="log" aria-label="调试消息"></div>
+            <form class="remote-agent-compose" id="remoteDebugForm">
+              <div class="remote-agent-debug-files" id="remoteDebugFiles" aria-label="待发送附件" hidden></div>
+              <input type="file" id="remoteDebugFileInput" multiple hidden>
+              <textarea id="remoteDebugPrompt" aria-label="调试消息" rows="2" placeholder="输入调试消息"></textarea>
+              <div class="remote-agent-actions">
+                <button class="btn icon-only" id="attachRemoteDebug" type="button" aria-label="添加附件" title="添加附件"><i data-lucide="paperclip" aria-hidden="true"></i></button>
+                <button class="btn primary icon-only" id="sendRemoteDebug" type="submit" aria-label="发送消息" title="发送消息"><i data-lucide="send" aria-hidden="true"></i></button>
+              </div>
+            </form>
+          </section>
+          <aside class="inspector-content remote-agent-summary" id="remoteConnectionSummary" aria-label="远程 Agent 概览"></aside>
+        </div>
+      </div>
+    </section>
     <section class="panel" id="panel-agent-service">
       <div class="panel-toolbar"><div><h2>集成</h2><p class="panel-subtitle">发布选定的 Agent，供授权的外部 Agent 和业务程序调用。</p></div></div>
       <div class="agent-service-layout">
@@ -393,19 +482,27 @@
               </table>
             </div>
             <section class="agent-service-guide-block">
-              <h4>请求 Header</h4>
+              <h4 id="agentServiceHeaderMatrixTitle">请求 Header</h4>
               <div class="table-wrap console-list-a agent-service-guide-table agent-service-auth-matrix">
-                <table class="data-table">
-                  <thead><tr><th scope="col">接入方式</th><th scope="col">应用</th><th scope="col">鉴权</th></tr></thead>
+                <table class="data-table" aria-labelledby="agentServiceHeaderMatrixTitle">
+                  <thead><tr><th scope="col">Header 键</th><th scope="col">A2A 通用卡片</th><th scope="col">A2A 指定应用卡片</th><th scope="col">MCP</th><th scope="col">CLI（计划中）</th></tr></thead>
                   <tbody>
-                    <tr><th scope="row">A2A 通用卡片</th><td><code>app</code> 必填，<code>space</code> 可省略。</td><td rowspan="3"><code>X-Deepfos-Key</code>、<code>token</code> 或 <code>Authorization: Bearer &lt;Token&gt;</code>，三选一。</td></tr>
-                    <tr><th scope="row">A2A 指定应用卡片</th><td>在 URL 中填写 <code>{app_id}</code>。</td></tr>
-                    <tr><th scope="row">MCP</th><td>在连接的 Header 中填 <code>app</code>，<code>space</code> 可省略。</td></tr>
-                    <tr><th scope="row">CLI（计划中）</th><td>从客户端配置指定应用。</td><td>计划读取已配置的 API Key 或平台 Token。</td></tr>
+                    <tr><th scope="row"><code>app</code></th><td>必填，无默认值</td><td>从 URL 的 <code>{app_id}</code> 读取</td><td>必填，无默认值</td><td>从客户端配置读取</td></tr>
+                    <tr><th scope="row"><code>space</code></th><td>选填，默认取应用所属空间</td><td>从应用推导</td><td>选填，默认取应用所属空间</td><td>待定</td></tr>
+                    <tr><th scope="row"><code>language</code></th><td>选填，默认 <code>zh-cn</code></td><td>选填，默认 <code>zh-cn</code></td><td>选填，默认 <code>zh-cn</code></td><td>待定</td></tr>
+                    <tr><th scope="row"><code>A2A-Version</code></th><td colspan="2">读卡可省略，调用任务接口传 <code>1.0</code></td><td>无需传</td><td>待定</td></tr>
+                    <tr>
+                      <th scope="row">鉴权</th>
+                      <td colspan="3">
+                        <div><code>X-Deepfos-Key</code> 填 DeepFOS API Key</div>
+                        <div><code>token</code> 填平台 Token</div>
+                        <div><code>Authorization</code> 填 <code>Bearer &lt;Token&gt;</code></div>
+                      </td>
+                      <td>计划从客户端配置读取 API Key 或平台 Token</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
-              <p>两种 A2A 地址读取 Card 时可省略版本，调用任务接口时传 <code>A2A-Version: 1.0</code>。<code>language</code> 默认 <code>zh-cn</code>。</p>
             </section>
           </section>
           <section class="channel-help-panel agent-service-guide-flow" id="agentServiceMethodsPanel" role="tabpanel" aria-labelledby="agentServiceMethodsTab" hidden>
@@ -440,29 +537,32 @@
             </section>
           </section>
           <section class="channel-help-panel agent-service-guide-flow" id="agentServiceMcpHelpPanel" role="tabpanel" aria-labelledby="agentServiceMcpHelpTab" hidden>
-            <div class="agent-service-mcp-guide-setup" id="agentServiceMcpGuideSetup"></div>
-            <p>凭据选一种。使用平台 Token 时，可将示例的 <code>X-Deepfos-Key</code> 换成 <code>token</code> 或 <code>Authorization: Bearer &lt;Token&gt;</code>。其他机器上的客户端需填写可达地址。</p>
+            <section class="agent-service-guide-block" id="agentServiceMcpGuideSetup"></section>
             <div class="agent-service-mcp-guide-columns">
-              <section class="agent-service-guide-block">
-                <h4>工具</h4>
-                <dl class="agent-service-guide-list">
-                  <div><dt><code>list_agents</code></dt><dd>列出已启用的 Agent 发布</dd></div>
-                  <div><dt><code>submit_task</code></dt><dd>发送消息并发起任务，支持附件</dd></div>
-                  <div><dt><code>get_task</code></dt><dd>查询状态、结果和产物引用</dd></div>
-                  <div><dt><code>list_tasks</code></dt><dd>列出当前应用下的近期任务</dd></div>
-                  <div><dt><code>reply_task</code></dt><dd>向原任务补充材料</dd></div>
-                  <div><dt><code>cancel_task</code></dt><dd>取消任务</dd></div>
-                  <div><dt><code>get_artifact</code></dt><dd>取得授权的资源引用和下载路径</dd></div>
-                </dl>
-              </section>
-              <section class="agent-service-guide-block">
-                <h4>资源</h4>
-                <dl class="agent-service-guide-list agent-service-guide-resources">
-                  <div><dt>任务调用与补材料</dt><dd><code>deepagent://guides/agent-tasks</code></dd></div>
-                  <div><dt>附件与取件</dt><dd><code>deepagent://guides/attachments-artifacts</code></dd></div>
-                  <div><dt>任务产物</dt><dd>使用 <code>get_artifact</code> 返回的 URI 读取文件，单个资源上限 1 MiB。完整文件可通过鉴权地址下载。</dd></div>
-                </dl>
-              </section>
+              <div class="table-wrap console-list-a agent-service-guide-table agent-service-mcp-reference">
+                <table class="data-table" aria-label="MCP 工具">
+                  <thead><tr><th scope="col">工具</th><th scope="col">用途</th></tr></thead>
+                  <tbody>
+                    <tr><th scope="row"><code>list_agents</code></th><td>列出已启用的 Agent 发布</td></tr>
+                    <tr><th scope="row"><code>submit_task</code></th><td>发起任务，支持附件</td></tr>
+                    <tr><th scope="row"><code>get_task</code></th><td>查询状态、结果和产物引用</td></tr>
+                    <tr><th scope="row"><code>list_tasks</code></th><td>列出当前应用下的近期任务</td></tr>
+                    <tr><th scope="row"><code>reply_task</code></th><td>向原任务补充材料</td></tr>
+                    <tr><th scope="row"><code>cancel_task</code></th><td>取消任务</td></tr>
+                    <tr><th scope="row"><code>get_artifact</code></th><td>取得授权的资源引用和下载路径</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="table-wrap console-list-a agent-service-guide-table agent-service-mcp-reference">
+                <table class="data-table" aria-label="MCP 资源">
+                  <thead><tr><th scope="col">资源</th><th scope="col">URI / 读取方式</th></tr></thead>
+                  <tbody>
+                    <tr><th scope="row">任务调用与补材料</th><td><code>deepagent://guides/agent-tasks</code></td></tr>
+                    <tr><th scope="row">附件与取件</th><td><code>deepagent://guides/attachments-artifacts</code></td></tr>
+                    <tr><th scope="row">任务产物</th><td>用 <code>get_artifact</code> 返回的 URI 读取，单个资源上限 1 MiB。完整文件可通过鉴权地址下载。</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
             <p class="agent-service-guide-client-links"><a href="https://www.codebuddy.ai/docs/cli/mcp" target="_blank" rel="noopener noreferrer">CodeBuddy 配置文档</a><a href="https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide" target="_blank" rel="noopener noreferrer">WorkBuddy 配置文档</a></p>
           </section>
@@ -831,6 +931,7 @@
               <button type="button" class="cap-tab active" role="tab" data-kind="builtin" aria-selected="true"><i data-lucide="hammer" aria-hidden="true"></i>内置 <span class="cap-tab-badge" data-kind-badge="builtin">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="ui" aria-selected="false"><i data-lucide="monitor-check" aria-hidden="true"></i>UI <span class="cap-tab-badge" data-kind-badge="ui">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="mcp" aria-selected="false"><i data-lucide="plug" aria-hidden="true"></i>MCP <span class="cap-tab-badge" data-kind-badge="mcp">0</span></button>
+              <button type="button" class="cap-tab" role="tab" data-kind="agent_connection" aria-selected="false"><i data-lucide="bot" aria-hidden="true"></i>远程 Agent <span class="cap-tab-badge" data-kind-badge="agent_connection">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="skills" aria-selected="false"><i data-lucide="book-open-check" aria-hidden="true"></i>Skill <span class="cap-tab-badge" id="agentSkillCounter">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="output" aria-selected="false"><i data-lucide="braces" aria-hidden="true"></i>输出</button>
             </nav>
@@ -1386,6 +1487,7 @@
           <span class="modal-entity-id" id="mcpEditorMeta">MCP 配置 · URL</span>
         </div>
         <div class="agent-editor-header-actions">
+          <button type="button" class="btn" id="bindMcpRemoteAgent" hidden><i data-lucide="bot" aria-hidden="true"></i>绑定为远程 Agent</button>
           <button type="submit" class="btn primary">保存</button>
         </div>
       </div>

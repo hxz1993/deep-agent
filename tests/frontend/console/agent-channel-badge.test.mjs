@@ -25,18 +25,18 @@ function harness(fetcher) {
 
 test("卡片与列表按已配置的包和服务去重计数，零配置整体标记为空", async () => {
   const configured = { ...agent,
-    capabilities: ["builtin:ptc", "builtin:sandbox", "builtin:ptc", "ui:forms", "mcp:finance", "mcp:finance"],
+    capabilities: ["builtin:ptc", "builtin:sandbox", "builtin:ptc", "ui:forms", "mcp:finance", "mcp:finance", "agent_connection:remote-a", "agent_connection:remote-a"],
     skills: ["analysis", "analysis"],
   };
   const { admin, elements } = harness(path => path.endsWith("/agents") ? [configured, { ...agent, id: "empty" }] : []);
   await admin.refresh();
   for (const id of ["agentsCardGrid", "agentsTableBody"]) {
     const [populated, empty] = elements[id].innerHTML.split('data-open-agent="empty"');
-    for (const description of ["内置工具：2 个工具包", "UI 工具：1 个工具包", "MCP：1 个服务", "Skill：1 个 Skill"]) {
+    for (const description of ["内置工具：2 个工具包", "UI 工具：1 个工具包", "MCP：1 个服务", "远程 Agent：1 个远程 Agent", "Skill：1 个 Skill"]) {
       assert.ok(populated.includes(`aria-label="${description}"`));
     }
     assert.doesNotMatch(populated, /agent-capability-count is-empty/);
-    assert.equal((empty.match(/agent-capability-count is-empty/g) || []).length, 4);
+    assert.equal((empty.match(/agent-capability-count is-empty/g) || []).length, 5);
     assert.match(empty, /data-lucide="hammer"/);
     assert.match(empty, /data-lucide="monitor-check"/);
   }

@@ -320,6 +320,7 @@ async def chat(
         local_username=_local_execution_username(request, user),
         app_context=app_context,
     )
+    deps.remote_task_id = body.remote_task_id
     try:
         active_run = ctx.active_runs.register(
             agent_id=agent_id, session_id=session_id, user_id=user,
@@ -446,6 +447,7 @@ async def chat_stream(
         local_username=_local_execution_username(request, user),
         app_context=app_context,
     )
+    deps.remote_task_id = body.remote_task_id
     session_data = {
         "session_id": session_id,
         "agent_id": agent_id,

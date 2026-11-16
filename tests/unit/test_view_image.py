@@ -16,6 +16,7 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.files.image_view.runtime import build_view_image_runtime
 from deep_agent.files.image_view.toolset import _read_skill_bytes
@@ -200,7 +201,7 @@ class ViewImageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_data_url_context_bytes_are_not_zero(self):
         from deep_agent.files.image_view.runtime import ImageViewState
-        ctx = context(messages=[ModelRequest(parts=[UserPromptPart(content=[
+        ctx = context(messages=[ModelRequest(parts=[StoredUserPromptPart(content=[
             ImageUrl(url="data:image/png;base64,YWJjZA=="),
         ])])])
         self.assertEqual(ImageViewState().context_totals(ctx), (1, 4))

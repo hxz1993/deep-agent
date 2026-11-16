@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.workspaces import LocalWorkspaceBackend
 from pydantic_ai_harness.skills import Skills
 
 from deep_agent.agent.deps import AgentDeps
@@ -79,7 +80,7 @@ class SkillSelectionInstructionTests(unittest.IsolatedAsyncioTestCase):
             with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
                 agent = build_agent(
                     AgentSpec(name="test", model="test", instructions="BASE", capabilities=[]),
-                    ToolPackageRegistry(), skill_capability=Skills(str(library)),
+                    ToolPackageRegistry(), skill_capability=Skills(library, workspace=LocalWorkspaceBackend(library)),
                     skill_resource_toolset=build_skill_resource_toolset({item.code: item}),
                     file_toolset=build_file_toolset({item.code: item}),
                 )
@@ -107,7 +108,7 @@ class SkillSelectionInstructionTests(unittest.IsolatedAsyncioTestCase):
                     agent = build_agent(
                         AgentSpec(name="test", model="test", instructions="BASE", capabilities=[]),
                         ToolPackageRegistry(),
-                        skill_capability=Skills(root) if enabled else None,
+                        skill_capability=Skills(root, workspace=LocalWorkspaceBackend(root)) if enabled else None,
                     )
                 await agent.run("hello", deps=AgentDeps(session_id="test"))
                 self.assertEqual(seen[0].count(SKILL_SELECTION_INSTRUCTIONS), int(enabled))
@@ -133,7 +134,7 @@ class SkillSelectionInstructionTests(unittest.IsolatedAsyncioTestCase):
             with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
                 agent = build_agent(
                     AgentSpec(name="test", model="test", instructions="BASE", capabilities=[]),
-                    ToolPackageRegistry(), skill_capability=Skills(root),
+                    ToolPackageRegistry(), skill_capability=Skills(root, workspace=LocalWorkspaceBackend(root)),
                 )
             first = await agent.run("sample task", deps=AgentDeps(session_id="test"))
             await agent.run("continue", message_history=first.all_messages(), deps=AgentDeps(session_id="test"))

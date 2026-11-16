@@ -78,6 +78,30 @@ def logical_reference_violations(connection, tables: Iterable[str] | None = None
             violations.append({"table": "channel_accounts", "column": "settings.wecom.application_id", "parent_table": "wecom_applications", "parent_column": "id", "count": invalid})
         if invalid_app:
             violations.append({"table": "channel_accounts", "column": "settings.wecom_app.application_id", "parent_table": "wecom_applications", "parent_column": "id", "count": invalid_app})
+    if "remote_agent_connections" in existing and (selected is None or "remote_agent_connections" in selected):
+        from deep_agent.remote_agents.contracts import CONFIG_ADAPTER, McpConfig
+        names = set(connection.execute(sa.text("SELECT name FROM mcp_servers")).scalars())
+        invalid = 0
+        for raw in connection.execute(sa.text("SELECT config FROM remote_agent_connections")).scalars():
+            try:
+                config = CONFIG_ADAPTER.validate_json(raw) if isinstance(raw, str) else CONFIG_ADAPTER.validate_python(raw)
+                invalid += int(isinstance(config, McpConfig) and config.mcp_server_name not in names)
+            except ValueError:
+                invalid += 1
+        if invalid:
+            violations.append({"table": "remote_agent_connections", "column": "config.mcp_server_name",
+                               "parent_table": "mcp_servers", "parent_column": "name", "count": invalid})
+    if {"agents", "remote_agent_connections"} <= existing and (selected is None or "agents" in selected):
+        from deep_agent.remote_agents.contracts import CONNECTION_PREFIX
+        ids = set(connection.execute(sa.text("SELECT id FROM remote_agent_connections")).scalars())
+        invalid = 0
+        for raw in connection.execute(sa.text("SELECT capabilities FROM agents")).scalars():
+            codes = json.loads(raw) if isinstance(raw, str) else raw
+            invalid += sum(1 for code in (codes or ()) if isinstance(code, str) and code.startswith(CONNECTION_PREFIX)
+                           and code.removeprefix(CONNECTION_PREFIX) not in ids)
+        if invalid:
+            violations.append({"table": "agents", "column": "capabilities.agent_connection",
+                               "parent_table": "remote_agent_connections", "parent_column": "id", "count": invalid})
     return violations
 
 

@@ -107,7 +107,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
         async with engine.begin() as connection:
             await connection.run_sync(lambda conn: Base.metadata.create_all(
                 conn, tables=[table for table in Base.metadata.sorted_tables
-                              if revision == "016" or table.name != "agent_publications"],
+                              if revision == "016" or table.name not in {"agent_publications", "remote_agent_connections"}],
             ))
             await connection.execute(
                 text(
@@ -309,6 +309,29 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sessions, 0)
             self.assertEqual(integrations[0]["code"], "deeptable-assistant")
             self.assertEqual(integrations[0]["settings"], {"enabled": True, "options": [1, None, "中文"]})
+        finally:
+            await engine.dispose()
+
+    async def test_016_restores_remote_connection_and_its_agent_binding(self) -> None:
+        backup_path, _, _ = await self._backup(revision="016")
+        connection_id = "70000000-0000-0000-0000-000000000001"
+        config = {"version": 1, "protocol": "mcp", "mcp_server_name": "remote", "publication_code": "budget"}
+        capabilities = [f"agent_connection:{connection_id}"]
+        with sqlite3.connect(backup_path) as connection:
+            connection.execute("INSERT INTO remote_agent_connections (id,name,config) VALUES (?,?,?)",
+                               (connection_id, "Budget", json.dumps(config)))
+            connection.execute("UPDATE agents SET capabilities=?", (json.dumps(capabilities),))
+        engine = await self._target_engine(revision="016")
+        try:
+            plan = await build_configuration_import_plan(backup_path, target_engine=engine)
+            await apply_configuration_import(plan, target_engine=engine, file_store=_MemoryFileStore(), request_headers={})
+            async with engine.connect() as connection:
+                self.assertEqual(json.loads(await connection.scalar(text("SELECT config FROM remote_agent_connections"))), config)
+                self.assertEqual(await connection.scalar(select(Agent.capabilities)), capabilities)
+            with sqlite3.connect(backup_path) as connection:
+                connection.execute("DELETE FROM remote_agent_connections")
+            with self.assertRaisesRegex(ConfigurationImportError, "capabilities.agent_connection"):
+                await build_configuration_import_plan(backup_path, target_engine=engine)
         finally:
             await engine.dispose()
 

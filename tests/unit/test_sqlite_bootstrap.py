@@ -20,6 +20,7 @@ from deep_agent.db.stores.bundle import create_data_stores
 
 EXPECTED_TABLES = {
     "agent_publications",
+    "remote_agent_connections",
     "agent_output_configs",
     "agents",
     "chat_session_events",

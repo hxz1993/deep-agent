@@ -20,7 +20,7 @@ test("附件上传不再要求可配置的附件工具包", () => {
   assert.match(agentSource, /return toolPackage\.category/);
   assert.match(
     agentSource,
-    /GROUP_ORDER\s*=\s*\["builtin",\s*"mcp",\s*"ui"\]/,
+    /GROUP_ORDER\s*=\s*\["builtin",\s*"mcp",\s*"ui",\s*"agent_connection"\]/,
   );
   assert.doesNotMatch(agentSource, /GROUP_ORDER[^;]*"skill"/);
   assert.match(chatSource, /function uploadCapabilityText\(\)/);

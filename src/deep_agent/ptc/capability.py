@@ -5,6 +5,9 @@ from collections.abc import Sequence
 from pydantic_ai import AbstractToolset, RunContext
 from pydantic_ai.messages import SystemPromptPart
 from pydantic_ai_harness import CodeMode
+from pydantic_ai_harness.code_mode._capability import (
+    _DISCOVERY_ANNOUNCEMENT_ORIGIN, _visible_announced_tools,
+)
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.ptc.toolset import HybridCodeModeToolset
@@ -72,16 +75,18 @@ class HybridCodeMode(CodeMode[AgentDeps]):
         for ref in refs:
             collector.generated_files[ref["file_id"]] = ref
 
-    def _announce_newly_discovered(self, ctx: RunContext[AgentDeps], names: Sequence[str]) -> None:
-        # Harness 0.26's local/native search hooks both route through this method.
-        # Preserve its run-scoped de-duplication, changing only the announcement:
-        # unlike code-only mode, discovery is not an instruction to enter Monty.
-        fresh = [name for name in names if name not in self._announced_tools]
+    async def _announce_newly_callable(self, ctx: RunContext[AgentDeps], names: Sequence[str]) -> None:
+        # Hybrid leaves newly discovered schemas available in both routes.
+        announced = _visible_announced_tools(ctx.messages) | self._in_flight_announcements
+        fresh = [name for name in names if name not in announced]
         if not fresh:
             return
-        self._announced_tools.update(fresh)
+        self._in_flight_announcements.update(fresh)
         listing = ", ".join(f"`{name}`" for name in fresh)
-        ctx.enqueue(SystemPromptPart(content=f"New tool schemas are available: {listing}."))
+        ctx.enqueue(SystemPromptPart(
+            content=f"New tool schemas are available: {listing}.",
+            metadata={"origin": _DISCOVERY_ANNOUNCEMENT_ORIGIN, "tools": fresh},
+        ))
 
     def get_wrapper_toolset(
         self,

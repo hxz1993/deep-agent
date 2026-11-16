@@ -343,6 +343,8 @@ function initTabs() {
     const activate = async () => {
       if (window.agentsAdmin?.isEditorOpen?.() && !(await window.agentsAdmin.requestCloseEditor())) return;
       if (window.mcpAdmin?.isEditorOpen?.() && !(await window.mcpAdmin.requestCloseEditor())) return;
+      if (tab.dataset.tab !== "remote-agents" && window.remoteAgentAdmin
+          && !(await window.remoteAgentAdmin.requestCloseEditor())) return;
       if (tab.dataset.tab !== "integrations" && window.integrationsAdmin?.deactivate() === false) return;
       if (tab.dataset.tab !== "channels" && window.wecomApplicationsAdmin?.deactivate() === false) return;
       tabs.forEach((t) => t.classList.remove("active"));
@@ -367,6 +369,7 @@ function initTabs() {
       }
       if (name === "mcp" && window.mcpAdmin) return window.mcpAdmin.refresh();
       if (name === "agent-service") return window.agentServiceAdmin?.refresh();
+      if (name === "remote-agents") return window.remoteAgentAdmin?.refresh();
       if (name === "integrations") return window.integrationsAdmin?.refresh();
       if (name === "channels" && window.channelsAdmin) return window.channelsAdmin.refresh();
     };

@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolReturnPart, UserPromptPart
 from sqlalchemy import update
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.active_runs import ActiveRunRegistry
 from deep_agent.api.v1.admin import resolve_console_admin_access
 from deep_agent.api.v1.sessions import router
@@ -64,7 +65,7 @@ class TrajectoryExportTests(unittest.IsolatedAsyncioTestCase):
 
     async def history(self, attachments=(), artifacts=(), *, user="owner", run="r1", terminal="completed"):
         content = [{"kind": "attachment-ref", "id": file.id, "name": file.file_name, "mime": file.mime} for file in attachments]
-        messages = [ModelRequest(parts=[UserPromptPart(["question", *content])], run_id=run)]
+        messages = [ModelRequest(parts=[StoredUserPromptPart(["question", *content])], run_id=run)]
         if artifacts:
             messages.append(ModelRequest(parts=[ToolReturnPart("run_code", {"result": "done"}, "ptc-call",
                 metadata={"generated_files": list(artifacts)})], run_id=run))

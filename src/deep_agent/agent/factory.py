@@ -293,6 +293,7 @@ def build_agent(
     image_view_toolset: Any | None = None,
     document_lifecycle: AbstractCapability[AgentDeps] | None = None,
     image_view_lifecycle: AbstractCapability[AgentDeps] | None = None,
+    remote_agent_capabilities: list[AbstractCapability[AgentDeps]] | None = None,
 ) -> Agent[AgentDeps, str]:
     """Construct a Pydantic AI agent from a spec + the tool package registry.
 
@@ -325,6 +326,8 @@ def build_agent(
         image_view_toolset=image_view_toolset,
     )
     capabilities: list[AbstractCapability[AgentDeps]] = [RuntimeDiagnostics()]
+    if remote_agent_capabilities:
+        capabilities.extend(remote_agent_capabilities)
     if "builtin:sandbox" in spec.capabilities:
         capabilities.append(ExecutionContextLifecycle())
     if document_lifecycle is not None and "builtin:document" in spec.capabilities:
@@ -360,7 +363,7 @@ def build_agent(
                 dynamic_catalog=True,
                 max_tool_calls=PTC_MAX_TOOL_CALLS,
                 resource_limits={
-                    "max_duration_secs": PTC_EXECUTION_SECONDS,
+                    "max_duration_seconds": PTC_EXECUTION_SECONDS,
                     "max_memory": PTC_MAX_MEMORY_BYTES,
                 },
             )

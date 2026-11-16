@@ -18,7 +18,6 @@ from pydantic_ai.exceptions import ModelRetry, RunCancelled
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -28,6 +27,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RunUsage
 from pydantic_ai.toolsets import FunctionToolset
 
+from deep_agent.agent.history import is_tool_retry
 from deep_agent.agent.deps import AgentDeps
 from tests.helpers.conversation import project_model_messages
 from deep_agent.capabilities.mcp.toolset_builder import (
@@ -485,7 +485,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                 for message in messages
                 if isinstance(message, ModelRequest)
                 for part in message.parts
-                if isinstance(part, RetryPromptPart)
+                if is_tool_retry(part)
             ]
             return ModelResponse(
                 parts=[
@@ -523,7 +523,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             for message in result.all_messages()
             if isinstance(message, ModelRequest)
             for part in message.parts
-            if isinstance(part, RetryPromptPart)
+            if is_tool_retry(part)
         ]
         failed = [
             part

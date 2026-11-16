@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DeepAgent · 外部调用原型</title>
+<title>DeepAgent · 远程 Agent 原型</title>
 <style>
   :root {
     color-scheme: light;
@@ -48,8 +48,12 @@
   .prototype-page .page-heading { margin-bottom:10px }
   .agent-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(250px,100%),1fr)); gap:12px; margin-top:14px }
   .agent-card { padding:14px }
-  .agent-card h2 svg, .agent-card .inline svg { color:var(--accent) }
+  .agent-card h2 svg { color:var(--accent) }
   .agent-card .actions { justify-content:space-between; margin-top:13px; padding-top:10px; border-top:1px solid var(--hairline) }
+  .agent-capability-counts { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums }
+  .agent-capability-count { display:inline-flex; align-items:center; gap:5px }
+  .agent-capability-count svg { flex:none; width:14px; height:14px; color:var(--accent) }
+  .agent-capability-count.is-empty, .agent-capability-count.is-empty svg { color:var(--muted) }
   .agent-editor { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1.15fr); margin-top:12px; min-height:540px }
   .agent-fields { display:grid; align-content:start; gap:12px; padding:16px; border-right:1px solid var(--line) }
   .agent-fields label { display:grid; gap:5px }
@@ -61,6 +65,7 @@
   .connection-summary .inspector-body { padding:0 }
   .connection-summary .facts > div { grid-template-columns:60px minmax(0,1fr) }
   .connection-editor .agent-fields { min-width:0; position:relative; border:0; padding-left:0; padding-right:18px }
+  .connection-editor .agent-fields > .driver-section { margin-top:6px }
   .connection-editor .agent-fields::after { content:""; position:absolute; inset:16px 0 16px auto; width:1px; background:var(--line); pointer-events:none }
   .editor-back { display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:0 3px; margin-right:8px; border:0; border-radius:6px; background:transparent; color:var(--muted) }
   .editor-back:hover { color:var(--accent) }
@@ -79,6 +84,7 @@
   .external-card .agent-intro { margin-top:12px; padding-top:10px; border-top:1px solid var(--hairline); min-height:43px; overflow-wrap:anywhere }
   .external-card footer { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:auto; padding-top:11px }
   .external-card footer .btn { min-height:27px }
+  .btn.connection-delete { width:27px; min-height:27px; padding:0 }
   .btn.danger { color:#a52d36 }
   .btn.danger:hover:not(:disabled) { background:#fdf0f1 }
   .btn.danger.primary { background:#a52d36; border-color:#a52d36; color:#fff }
@@ -93,6 +99,8 @@
   .record-workbench table { min-width:540px }
   .record-workbench th { position:sticky; top:0 }
   .record-workbench time { font-size:12px; white-space:nowrap }
+  .record-agent { display:grid; justify-items:start; gap:2px }
+  .record-agent .truncate { max-width:100% }
   .record-workbench .footer-count { display:flex; justify-content:space-between; gap:6px }
   .record-workbench .inspector { min-height:0; overflow:auto }
   .record-workbench .inspector .inspector-head { position:sticky; top:0; background:var(--surface); z-index:1 }
@@ -101,7 +109,7 @@
   .record-resume .inline { margin-top:6px; overflow-wrap:anywhere }
   .resource-panel.debug-side { display:flex; flex-direction:column; min-height:0; padding-top:10px }
   .driver-section { display:grid; gap:8px; min-width:0 }
-  .driver-section h3 { font-size:13px }
+  .driver-section h3, .config-advanced summary { font-size:13px; font-weight:620 }
   .driver-picker { container-type:inline-size }
   .driver-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px }
   .btn.driver-option { display:flex; min-width:0; min-height:64px; align-items:center; justify-content:center; gap:7px; padding:7px 4px }
@@ -116,6 +124,30 @@
   .driver-logo { width:16px; height:16px; object-fit:contain; flex:none }
   .external-badge .driver-logo { width:13px; height:13px }
   .driver-fields { display:grid; gap:10px; min-width:0 }
+  .config-field { display:grid; min-width:0; gap:5px }
+  .config-field-title { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:5px 8px }
+  .config-field-title > span { display:inline-flex; align-items:center; gap:5px }
+  .config-caption { display:inline-flex; align-items:center; gap:5px }
+  .config-field-detail { display:grid; grid-template-columns:minmax(0,1fr); align-items:center; min-height:32px }
+  .config-field-detail > * { grid-area:1 / 1; min-width:0 }
+  .config-field-detail > [aria-hidden="true"] { visibility:hidden }
+  .segment.config-segment { display:inline-grid; grid-template-columns:repeat(2,minmax(0,1fr)); width:118px; height:28px }
+  .agent-fields .config-choice { position:relative; display:block }
+  .config-choice input { position:absolute; width:1px; height:1px; opacity:0 }
+  .config-choice span { display:flex; height:100%; align-items:center; justify-content:center; padding:0 8px; border-radius:5px; color:var(--muted); white-space:nowrap; cursor:pointer }
+  .config-choice input:checked + span { background:var(--surface); color:var(--accent) }
+  .config-choice input:focus-visible + span { outline:2px solid var(--accent); outline-offset:1px }
+  .config-advanced { margin:6px 0 0; min-width:0 }
+  .config-advanced summary { display:inline-flex; min-height:28px; align-items:center; gap:5px; color:var(--text); list-style:none; cursor:pointer }
+  .config-advanced summary::-webkit-details-marker { display:none }
+  .config-advanced summary:hover { color:var(--accent) }
+  .config-advanced summary svg { width:13px; height:13px }
+  .config-advanced[open] summary svg { transform:rotate(90deg) }
+  .config-advanced-fields { display:grid; gap:10px; padding-top:4px }
+  .config-help { position:relative; display:inline-flex }
+  .config-help button { width:16px; height:16px; border:1px solid var(--line); border-radius:50%; background:var(--surface); color:var(--muted); padding:0; font-size:11px; line-height:1 }
+  .config-tip { position:absolute; z-index:2; top:calc(100% + 5px); left:0; width:min(245px, 60vw); visibility:hidden; padding:7px 9px; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--muted); box-shadow:0 3px 12px rgb(18 26 42 / .12) }
+  .config-help:is(:hover,:focus-within) .config-tip { visibility:visible }
   .config-heading { display:flex; align-items:center; justify-content:space-between; gap:8px }
   .config-toggle { display:inline-flex; align-items:center; gap:5px; min-height:26px }
   .config-toggle svg { width:14px; height:14px }
@@ -168,12 +200,17 @@
   .resource-panel .tabs button { padding-inline:8px }
   .counter { border-radius:10px; min-width:16px; padding:0 4px; background:#dedafb; color:#4438bd; font-size:11px }
   .choice-list { display:grid; gap:8px; margin-top:10px }
-  .choice-card { display:flex; align-items:flex-start; gap:7px; border:1px solid var(--line); border-radius:8px; padding:9px 10px; min-width:0 }
-  .choice-card:has(input:checked) { border-color:#c7bef8; background:#f7f5ff }
-  .choice-card label { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; flex:1; min-width:0; cursor:pointer }
-  .choice-card input { accent-color:var(--accent); margin:3px 0 }
-  .choice-card small { display:block; margin-top:3px; overflow-wrap:anywhere }
-  .choice-card .link { flex:none }
+  .choice-card { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:10px; border-radius:8px; padding:10px 12px; min-width:0 }
+  .choice-card:hover, .choice-card:focus-within { background:var(--canvas) }
+  .choice-card:has(input:checked) { background:var(--accent-soft) }
+  .choice-card .cap-switch { position:relative; display:inline-flex; cursor:pointer }
+  .cap-switch input { position:absolute; inset:0; margin:0; opacity:0; cursor:pointer }
+  .cap-switch-ui { position:relative; width:30px; height:18px; border-radius:999px; background:#8b96a1; pointer-events:none }
+  .cap-switch-ui::after { content:""; position:absolute; top:3px; left:3px; width:12px; height:12px; border-radius:50%; background:var(--surface); box-shadow:0 1px 2px rgb(0 0 0 / .18) }
+  .cap-switch input:checked + .cap-switch-ui { background:var(--accent) }
+  .cap-switch input:checked + .cap-switch-ui::after { transform:translateX(12px) }
+  .cap-switch input:focus-visible + .cap-switch-ui { outline:2px solid var(--accent); outline-offset:2px }
+  .choice-card p { margin-top:4px; overflow-wrap:anywhere }
   .agent-pill { padding:2px 6px; border-radius:4px; background:var(--accent-soft); text-align:left }
   .session-view { min-height:460px }
   .session-thread { min-width:0; padding:12px 16px 16px; border-right:1px solid var(--line) }
@@ -303,6 +340,9 @@
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 8H7a4 4 0 0 0 0 8h3m4-8h3a4 4 0 0 1 0 8h-3m-6-4h8"/></symbol>
   <symbol id="i-a2a" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4m-6 4v-4h12v4"/></symbol>
   <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5m6-5v5M7 8h10v4a5 5 0 0 1-10 0Zm5 9v4"/></symbol>
+  <symbol id="i-hammer" viewBox="0 0 24 24"><path d="m15 12-8.4 8.4a1 1 0 0 1-2.8-2.8L12 9m5.5 5.5L21 11l-2.5-2.5-1 1-2-2 1-1L14 4a3 3 0 0 0-4 0l-2 2 4 3 5.5 5.5Z"/></symbol>
+  <symbol id="i-monitor-check" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M12 17v4m-4 0h8M9 10l2 2 4-4"/></symbol>
+  <symbol id="i-book-open-check" viewBox="0 0 24 24"><path d="M12 7v14m0-14a4 4 0 0 0-4-4H3v16h5a4 4 0 0 1 4 2m0-14a4 4 0 0 1 4-4h5v5m-9 13a4 4 0 0 1 4-2h5v-3m-5-4 2 2 4-4"/></symbol>
   <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 6 6 6-6 6m9 0h7"/></symbol>
   <symbol id="i-code" viewBox="0 0 24 24"><path d="m7 6-6 6 6 6m10-12 6 6-6 6m-3-15-4 18"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -319,6 +359,7 @@
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="m12 5-7 7 7 7M5 12h14"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
   <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M3 7h18M3 17h18"/><circle cx="8" cy="7" r="2" fill="#f3f6f7"/><circle cx="16" cy="17" r="2" fill="#f3f6f7"/></symbol>
 </svg>
@@ -333,8 +374,8 @@
   <nav class="prototype-nav" aria-label="切换原型页面">
     <span class="prototype-label">原型页面</span>
     <button type="button" class="btn" data-page="integration">对外服务</button>
-    <button type="button" class="btn" data-page="connections" aria-current="page">外部调用</button>
-    <button type="button" class="btn" data-page="connection-editor">连接调试</button>
+    <button type="button" class="btn" data-page="connections" aria-current="page">远程 Agent</button>
+    <button type="button" class="btn" data-page="connection-editor">工具调试</button>
     <button type="button" class="btn" data-page="agents">Agent 列表</button>
     <button type="button" class="btn" data-page="editor">Agent 编辑</button>
     <button type="button" class="btn" data-page="test">测试</button>
@@ -387,25 +428,25 @@
 
   <section id="page-external" class="prototype-page">
     <header class="page-heading">
-      <div><h1>外部调用</h1><p class="subtitle">接入外部 Agent，作为工具调用。</p></div>
+      <div><h1>远程 Agent</h1><p class="subtitle">接入外部 Agent，作为工具调用。</p></div>
     </header>
     <section id="external-connections" aria-labelledby="external-connections-title">
       <div class="toolbar connections-toolbar">
-        <h2 id="external-connections-title">Agent 连接</h2>
+        <h2 id="external-connections-title">已接入的 Agent</h2>
         <div class="actions">
-        <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input class="field" id="connection-search" type="search" aria-label="搜索外部连接" placeholder="搜索连接"></label>
-        <div class="segment view-controls" role="group" aria-label="连接展示方式">
+        <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input class="field" id="connection-search" type="search" aria-label="搜索外部 Agent" placeholder="搜索外部 Agent"></label>
+        <div class="segment view-controls" role="group" aria-label="外部 Agent 展示方式">
           <button type="button" id="show-cards" aria-pressed="true" aria-label="卡片视图" title="卡片视图"><svg aria-hidden="true"><use href="#i-grid"/></svg></button>
           <button type="button" id="show-list" aria-pressed="false" aria-label="列表视图" title="列表视图"><svg aria-hidden="true"><use href="#i-list"/></svg></button>
         </div>
-        <button type="button" class="btn primary" id="new-connection"><svg aria-hidden="true"><use href="#i-plus"/></svg>添加 Agent</button>
+        <button type="button" class="btn primary" id="new-connection"><svg aria-hidden="true"><use href="#i-plus"/></svg>添加外部 Agent</button>
         </div>
       </div>
-      <div class="external-cards" id="connection-cards" aria-label="外部连接卡片"></div>
+      <div class="external-cards" id="connection-cards" aria-label="外部 Agent 卡片"></div>
       <div class="box table-scroll connection-table" id="connection-list" hidden>
-        <table aria-label="外部连接列表">
+        <table aria-label="外部 Agent 列表">
           <colgroup><col style="width:22%"><col style="width:15%"><col><col style="width:14%"><col style="width:90px"></colgroup>
-          <thead><tr><th scope="col">连接名称</th><th scope="col">接入方式</th><th scope="col">用途</th><th scope="col">环境状态</th><th scope="col" style="text-align:right">操作</th></tr></thead>
+          <thead><tr><th scope="col">名称</th><th scope="col">接入方式</th><th scope="col">用途</th><th scope="col">环境状态</th><th scope="col" style="text-align:right">操作</th></tr></thead>
           <tbody id="connection-rows"></tbody>
         </table>
       </div>
@@ -415,19 +456,19 @@
         <h2 id="recent-records-heading" tabindex="-1">近期调用</h2>
         <div class="actions">
           <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input class="field" id="task-search" type="search" aria-label="搜索调用记录" placeholder="搜索任务名称或 ID"></label>
-          <select id="task-connection" aria-label="按外部连接筛选"></select>
-          <select id="task-source" aria-label="按发起方式筛选"><option value="">全部发起方式</option><option value="agent">本地 Agent</option><option value="debug">直连调试</option></select>
+          <select id="task-connection" aria-label="按远程 Agent 筛选"></select>
+          <select id="task-driver" aria-label="按接入方式筛选"><option value="">全部接入方式</option></select>
           <select id="task-status" aria-label="按任务状态筛选"><option value="">全部状态</option><option>待补材料</option><option>进行中</option><option>已完成</option><option>失败</option></select>
         </div>
       </div>
       <div class="workbench record-workbench">
         <section class="list-column" aria-label="调用记录列表">
           <div class="table-scroll"><table aria-label="近期调用">
-            <colgroup><col style="width:35%"><col><col style="width:88px"><col style="width:101px"><col style="width:108px"></colgroup>
-            <thead><tr><th scope="col">任务</th><th scope="col">外部连接</th><th scope="col">状态</th><th scope="col">发起方式</th><th scope="col">提交时间</th></tr></thead>
+            <colgroup><col style="width:42%"><col><col style="width:80px"><col style="width:108px"></colgroup>
+            <thead><tr><th scope="col">任务</th><th scope="col">远程 Agent</th><th scope="col">状态</th><th scope="col">提交时间</th></tr></thead>
             <tbody id="task-rows"></tbody>
           </table></div>
-          <footer class="footer-count"><span id="task-count"></span><span class="muted">演示记录 · 内存保留最近 30 条</span></footer>
+          <footer class="footer-count"><span id="task-count"></span><span class="muted">演示记录 · 近 24 小时，最多 30 条</span></footer>
         </section>
         <section class="inspector" id="task-detail" aria-label="调用详情"></section>
       </div>
@@ -435,7 +476,7 @@
   </section>
   <section class="prototype-page" id="page-agents" hidden>
     <header class="page-heading">
-      <div><h1>Agent</h1><p class="subtitle">管理本地 Agent 的提示词、工具与外部连接。</p></div>
+      <div><h1>Agent</h1><p class="subtitle">管理 Agent 的提示词和可用工具。</p></div>
       <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="agent-search" class="field" type="search" aria-label="搜索本地 Agent" placeholder="搜索 Agent"></label>
     </header>
     <div id="agent-cards" class="agent-cards"></div>
@@ -457,17 +498,14 @@
           <button type="button" id="resource-builtin" role="tab" aria-selected="false" aria-controls="existing-resource">内置</button>
           <button type="button" id="resource-ui" role="tab" aria-selected="false" aria-controls="existing-resource">UI</button>
           <button type="button" id="resource-mcp" role="tab" aria-selected="false" aria-controls="existing-resource"><svg aria-hidden="true"><use href="#i-plug"/></svg>MCP</button>
-          <button type="button" id="resource-external" role="tab" aria-selected="true" aria-controls="external-resource"><svg aria-hidden="true"><use href="#i-terminal"/></svg>外部 Agent <span class="counter" id="bound-count"></span></button>
+          <button type="button" id="resource-external" role="tab" aria-selected="true" aria-controls="external-resource"><svg aria-hidden="true"><use href="#i-terminal"/></svg>Agent 工具 <span class="counter" id="bound-count"></span></button>
           <button type="button" id="resource-skill" role="tab" aria-selected="false" aria-controls="existing-resource">Skill</button>
           <button type="button" id="resource-output" role="tab" aria-selected="false" aria-controls="existing-resource">输出</button>
         </div>
         <section id="existing-resource" role="tabpanel" hidden></section>
         <section id="external-resource" role="tabpanel" aria-labelledby="resource-external">
-          <div class="toolbar">
-            <p class="muted">勾选此 Agent 可以使用的外部连接。</p>
-            <button type="button" class="link" data-page="connections">管理连接</button>
-          </div>
-          <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input class="field" id="resource-search" type="search" aria-label="搜索可用连接" placeholder="搜索外部 Agent"></label>
+          <div class="toolbar"><p class="muted">选择此 Agent 可以调用的外部 Agent。</p></div>
+          <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input class="field" id="resource-search" type="search" aria-label="搜索可用的外部 Agent" placeholder="搜索外部 Agent"></label>
           <div class="choice-list" id="external-options"></div>
         </section>
       </section>
@@ -476,7 +514,7 @@
 
   <section class="prototype-page" id="page-test" hidden>
     <header class="page-heading">
-      <div><h1>测试</h1><p class="subtitle">模拟本地 Agent 在对话中调用外部工具。</p></div>
+      <div><h1>测试</h1><p class="subtitle">原型演示。使用已保存的配置查看 Agent 工具调用及结果。</p></div>
       <select id="test-agent" aria-label="选择测试 Agent"></select>
     </header>
     <div class="workbench session-view">
@@ -498,13 +536,15 @@
 
   <section class="prototype-page" id="page-connection-editor" hidden>
     <header class="page-heading">
-      <div class="inline"><button type="button" class="editor-back" data-page="connections"><svg aria-hidden="true"><use href="#i-back"/></svg>返回</button><h1 id="edit-title">添加连接</h1><span id="editor-driver-badge"></span></div>
-      <button type="submit" class="btn primary" form="edit-form">保存连接</button>
+      <div class="inline"><button type="button" class="editor-back" data-page="connections"><svg aria-hidden="true"><use href="#i-back"/></svg>返回</button><h1 id="edit-title">添加外部 Agent</h1><span id="editor-driver-badge"></span></div>
+      <div class="actions">
+        <button type="button" class="btn" id="check-connection" disabled>检查环境</button>
+        <button type="submit" class="btn primary" form="edit-form">保存配置</button>
+      </div>
     </header>
     <div class="agent-editor connection-editor">
-      <form class="agent-fields" id="edit-form" aria-label="连接配置" novalidate>
-        <h2>连接配置</h2>
-        <label>连接名称<input class="field" name="name" required maxlength="60"></label>
+      <form class="agent-fields" id="edit-form" aria-label="外部 Agent 配置" novalidate>
+        <label>名称<input class="field" name="name" required maxlength="60"></label>
         <label>用途说明<input class="field" name="description" maxlength="120" placeholder="说明可委托的任务"></label>
         <section class="driver-section driver-picker" aria-labelledby="driver-options-title">
           <h3 id="driver-options-title">接入方式</h3>
@@ -578,7 +618,7 @@
   const copyButton = (value, label) => value ? `<button type="button" class="copy" data-copy="${escapeHtml(value)}" aria-label="复制${label}" title="复制${label}">${icon("copy")}</button>` : "";
   const inlineId = (value, label) => value ? `<span class="inline"><code title="${escapeHtml(value)}">${escapeHtml(value.slice(0,8))}</code>${copyButton(value, label)}</span>` : "";
 
-  const navigation = [["测试","message","test"],["Agent","bot","agents"],["场景","a2a"],["渠道","link"],["对外服务","link","integration"],["设置"],["模型","bot"],["工具","terminal"],["MCP","plug"],["外部调用","terminal","connections"],["Skill","code"],["诊断"],["会话","message"],["用量","clock"],["日志","code"]];
+  const navigation = [["测试","message","test"],["Agent","bot","agents"],["场景","a2a"],["渠道","link"],["对外服务","link","integration"],["设置"],["模型","bot"],["工具","terminal"],["MCP","plug"],["远程 Agent","bot","connections"],["Skill","code"],["诊断"],["会话","message"],["用量","clock"],["日志","code"]];
   const navItem = ([label, symbol, page]) => {
     if (!symbol) return `<li class="nav-heading">${label}</li>`;
     const content = `${icon(symbol)}<span>${label}</span>`;
@@ -604,22 +644,26 @@
       name:"Codex Exec", title:"Codex", logo:"codex.png", launch:"codex exec --json", command:"codex", transport:"单次命令 · JSONL", session:"Thread ID", resume:"resume",
       launchNote:"以非交互模式执行任务，运行事件逐行返回，可跟踪进度和结果。",
       fields:[
-        {key:"model", label:"模型（可选）", placeholder:"例如 gpt-5.2", help:"填写执行机支持的模型 ID。留空沿用默认模型。"},
-        {key:"sandbox", label:"工作区权限", choices:[["read-only","只读"],["workspace-write","可写工作区"]]},
+        {key:"model", label:"模型", placeholder:"例如 gpt-5.4", override:true, defaultHint:"沿用 Codex 的默认模型。", tip:"指定时填写执行账号可用的 Codex 模型 ID，例如 gpt-5.4。"},
+        {key:"sandbox", label:"工作区权限", choices:[["read-only","只读"],["workspace-write","可写"]]},
+        {key:"profile", label:"配置档（Profile）", placeholder:"留空沿用执行账号配置，例如 review", advanced:true, tip:"执行账号预先配置的 Codex 配置档名称。例如 review 对应 review.config.toml，可预设模型和推理强度。"},
+        {key:"reasoningEffort", label:"推理强度", placeholder:"留空沿用默认档位，例如 medium", advanced:true, tip:"常见档位有 low（低）、medium（中）、high（高）、xhigh（很高）、max（最高）。可用档位取决于模型。"},
       ],
     },
     codebuddy:{
       name:"CodeBuddy -p", title:"CodeBuddy", logo:"codebuddy.svg", launch:"codebuddy -p --output-format json", command:"codebuddy", transport:"单次命令 · JSON", session:"Session ID", resume:"--resume",
       launchNote:"以非交互模式执行任务，结束时返回一份 JSON 结果。",
-      fields:[{key:"model", label:"模型（可选）", placeholder:"例如 hy4std", help:"填写执行机支持的模型 ID。留空沿用默认模型。"}],
+      fields:[{key:"model", label:"模型", placeholder:"例如 gpt-5", override:true, defaultHint:"沿用 CodeBuddy 的默认模型。", tip:"指定时填写执行账号可用的 CodeBuddy 模型名，例如 gpt-5。"}],
     },
   };
-  const localExecution = "DeepAgent 所在机器";
+  $("task-driver").append(...Object.entries(drivers).map(([id,driver]) => new Option(driver.title,id)));
+  const localExecution = "本机";
+  const sshHostField = {key:"sshHost", label:"SSH 主机名", placeholder:"SSH 主机名，如 build-runner"};
   const executionFields = [
-    {key:"execution", label:"执行位置", choices:[["local",localExecution],["ssh","SSH 执行机"]]},
-    {key:"sshHost", label:"SSH 主机别名", placeholder:"例如，build-runner"},
-    {key:"command", label:"可执行文件", required:true},
-    {key:"cwd", label:"工作目录", required:true},
+    {key:"execution", label:"执行位置", choices:[["local",localExecution],["ssh","SSH"]], defaultValue:"ssh", defaultHint:"在本机运行 CLI。"},
+    sshHostField,
+    {key:"cwd", label:"工作目录", placeholder:"例如 /srv/projects/demo", override:true, defaultHint:"使用为此连接分配的工作目录。"},
+    {key:"command", label:"启动命令", advanced:true},
   ];
   function executionLabel(config) {
     return config.execution === "ssh" ? `SSH · ${config.sshHost}` : localExecution;
@@ -627,31 +671,34 @@
   function connectionSnapshot(connection) {
     const {name,driver,config} = connection;
     return driver === "a2a" ? {connectionName:name} : {
-      connectionName:name, executor:executionLabel(config), cwd:config.cwd, executable:config.command,
+      connectionName:name, executor:executionLabel(config), cwd:config.cwd || `~/.deepagent/workspaces/${connection.id}`,
+      executable:config.command || drivers[driver].command, profile:driver === "codex" ? config.profile : undefined,
     };
   }
   const connections = [
-    {id:"codex-review", driver:"codex", name:"代码评审", description:"检查变更，给出带代码位置的评审意见。", config:{execution:"local", command:"codex", cwd:"/Users/me/projects/demo", sandbox:"read-only"}, status:"正常", checked:"2026/11/16 10:24:05"},
-    {id:"codebuddy-check", driver:"codebuddy", name:"交付检查", description:"读取项目文档，整理部署步骤和待核对事项。", config:{execution:"ssh", sshHost:"build-runner", command:"codebuddy", cwd:"/srv/projects/delivery"}, status:"正常", checked:"2026/11/16 10:25:10"},
+    {id:"codex-review", driver:"codex", name:"代码评审", description:"检查变更，给出带代码位置的评审意见。", config:{execution:"local", cwd:"/Users/me/projects/demo", sandbox:"read-only"}, status:"正常", checked:"2026/11/16 10:24:05"},
+    {id:"codebuddy-check", driver:"codebuddy", name:"交付检查", description:"读取项目文档，整理部署步骤和待核对事项。", config:{execution:"ssh", sshHost:"build-runner", cwd:"/srv/projects/delivery"}, status:"正常", checked:"2026/11/16 10:25:10"},
   ];
   const agents = [
     {id:"review-agent", name:"研发助手", prompt:"把代码审阅或仓库排查委派给已配置的外部 Agent，并汇总证据。", connectionIds:["codex-review"]},
     {id:"delivery-agent", name:"交付助手", prompt:"检查文档中的部署步骤和验收条件，并标出需要确认的事项。", connectionIds:["codebuddy-check"]},
   ];
-  const tasks = [
+  const initialTasks = [
     {id:"84c3d9f2b37044909ce1811acfc49954", connection:"codex-review", driver:"codex", agent:"研发助手", title:"审阅配置改动", ...connectionSnapshot(connections[0]), state:"已完成", submitted:"2026/11/16 10:32:08", session:"5b3b68c26a15495ba7b041d77dd72930", context:"a06c89fb-d661-4e41-bd42-26a8bb7bfafb", turn:"bb9149aced8648a8a14c14d5f04b8a66", response:"已检查当前提交的配置变更，发现一处说明需要更新。", events:[["发起调用","10:32:08"],["命令已启动","10:32:09"],["调用完成","10:32:14"]]},
     {id:"612abcd35a0d44c8b4fb9b8fe19d5eaa", connection:"codebuddy-check", driver:"codebuddy", agent:"交付助手", title:"检查 README 的安装说明", ...connectionSnapshot(connections[1]), state:"已完成", submitted:"2026/11/16 10:29:12", session:"381c902213074ed595d64c89f12dcc95", context:"0009cc45-2c1f-4f46-baac-839e11b97483", turn:"6bb5116eecef4fc188be3ed8a1d315aa", response:"安装步骤齐全，建议补充运行所需的 Python 版本。", events:[["发起调用","10:29:12"],["客户端已响应","10:29:13"],["调用完成","10:29:15"]]},
   ];
   let selectedPublication = 0;
   let accessTab = "a2a";
   let selectedConnection = connections[0].id;
-  let selectedTask = tasks[0].id;
+  let selectedTask = initialTasks[0].id;
   let editorAgent = agents[0];
   let testAgent = agents[0];
   const agentDrafts = new Map();
   const debugContexts = new Map();
   const debugAttachments = [];
-  const recordLimit = 30;
+  const invocationTtl = 24 * 60 * 60 * 1000;
+  const recentInvocations = createInvocationStore(initialTasks, 30, invocationTtl);
+  const debugInvocations = createInvocationStore([], 30, invocationTtl);
   let editing = null;
   let editingDriver = "a2a";
   let configMode = "form";
@@ -734,7 +781,10 @@
     const query = $("connection-search").value.trim().toLowerCase();
     const rows = connections.filter((connection) =>
       [connection.name, connection.description, drivers[connection.driver].name].some((value) => value?.toLowerCase().includes(query)));
-    const remove = (connection) => `<button type="button" class="btn danger" data-delete-connection="${connection.id}" aria-label="删除${escapeHtml(connection.name)}">${icon("trash")}删除</button>`;
+    const remove = (connection) => {
+      const label = `删除${escapeHtml(connection.name)}`;
+      return `<button type="button" class="btn danger connection-delete" data-delete-connection="${connection.id}" aria-label="${label}" title="${label}">${icon("trash")}</button>`;
+    };
     const purpose = (connection) => escapeHtml(connection.description || "—");
 
     $("connection-cards").innerHTML = rows.length ? rows.map((connection) => `
@@ -744,22 +794,22 @@
         </header>
         <p class="agent-intro">${purpose(connection)}</p>
         <footer>${statusBadge(connection.status)}${remove(connection)}</footer>
-      </article>`).join("") : '<p class="empty">没有符合条件的连接</p>';
+      </article>`).join("") : '<p class="empty">没有符合条件的外部 Agent</p>';
 
     $("connection-rows").innerHTML = rows.length ? rows.map((connection) => `
       <tr class="pickable" data-open-connection="${connection.id}">
         <td><button type="button" class="row-name truncate">${escapeHtml(connection.name)}</button></td>
         <td>${driverBadge(connection)}</td><td class="truncate" title="${purpose(connection)}">${purpose(connection)}</td>
         <td>${statusBadge(connection.status)}</td><td>${remove(connection)}</td>
-      </tr>`).join("") : '<tr><td colspan="5" class="empty">没有符合条件的连接</td></tr>';
+      </tr>`).join("") : '<tr><td colspan="5" class="empty">没有符合条件的外部 Agent</td></tr>';
 
     const filter = $("task-connection");
     const filterValue = filter.value;
     const choices = new Map(connections.map(({id,name}) => [id,name]));
-    for (const task of tasks) {
+    for (const task of recentInvocations.list()) {
       if (!choices.has(task.connection)) choices.set(task.connection, `${task.connectionName}（已删除）`);
     }
-    filter.replaceChildren(new Option("全部连接", ""), ...Array.from(choices, ([id,name]) => new Option(name,id)));
+    filter.replaceChildren(new Option("全部远程 Agent", ""), ...Array.from(choices, ([id,name]) => new Option(name,id)));
     filter.value = choices.has(filterValue) ? filterValue : "";
   }
 
@@ -791,15 +841,14 @@
     $("connection-list").hidden = !listView;
   }
 
-  const taskSource = (task) => task.source === "debug" ? "直连调试" : "本地 Agent";
   function renderTasks() {
     const connection = $("task-connection").value;
-    const source = $("task-source").value;
+    const driver = $("task-driver").value;
     const state = $("task-status").value;
     const query = $("task-search").value.trim().toLowerCase();
-    const rows = tasks.filter((task) =>
+    const rows = recentInvocations.list().filter((task) =>
       (!connection || task.connection === connection) &&
-      (!source || (task.source ?? "agent") === source) &&
+      (!driver || task.driver === driver) &&
       (!state || task.state === state) &&
       [task.title, task.id, task.context].some((value) => value?.toLowerCase().includes(query)));
     const task = rows.find(({id}) => id === selectedTask) ?? rows[0];
@@ -808,17 +857,19 @@
       <tr class="pickable ${item === task ? "active" : ""}" data-task="${item.id}">
         <td><button type="button" class="row-name truncate" aria-pressed="${item === task}" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</button>
           <code class="subline">${item.id.slice(0,8)}</code></td>
-        <td class="truncate" title="${escapeHtml(taskConnectionName(item))}">${escapeHtml(taskConnectionName(item))}</td>
-        <td>${statusBadge(item.state)}</td><td>${taskSource(item)}</td><td><time>${dateLabel(item.submitted)}</time></td>
-      </tr>`).join("") : '<tr><td colspan="5" class="empty">暂无符合条件的调用记录</td></tr>';
+        <td><div class="record-agent">
+          <span class="truncate" title="${escapeHtml(taskConnectionName(item))}">${escapeHtml(taskConnectionName(item))}</span>
+          ${driverBadge(item)}
+        </div></td>
+        <td>${statusBadge(item.state)}</td><td><time>${dateLabel(item.submitted)}</time></td>
+      </tr>`).join("") : '<tr><td colspan="4" class="empty">暂无符合条件的调用记录</td></tr>';
     $("task-count").textContent = `共 ${rows.length} 条记录`;
     $("task-detail").innerHTML = task ? `
       <header class="inspector-head"><h3>${escapeHtml(task.title)}</h3>${statusBadge(task.state)}</header>
       <div class="inspector-body">
         <dl class="facts">
           ${fact("接入方式", driverBadge(task))}
-          ${fact("外部 Agent", escapeHtml(taskConnectionName(task)))}
-          ${fact("发起方式", taskSource(task))}
+          ${fact("远程 Agent", escapeHtml(taskConnectionName(task)))}
           ${task.agent ? fact("本地 Agent", escapeHtml(task.agent)) : ""}
           ${fact("提交时间", task.submitted)}
           ${fact("调用 ID", inlineId(task.id, "调用 ID"))}
@@ -833,8 +884,7 @@
         <h4 class="divider">任务进度</h4>
         <ol class="timeline">${task.events.map(([event,time]) => `<li><span>${escapeHtml(event)}</span><time>${time}</time></li>`).join("")}</ol>
         ${task.response ? `<div class="soft"><h4>${task.state === "待补材料" ? "等待补充" : task.state === "失败" ? "失败原因" : "任务结果"}</h4><p class="muted">${escapeHtml(task.response)}</p></div>` : ""}
-        ${task.state === "待补材料" && task.source !== "debug" ? '<p class="panel-note">请在原 Agent 会话补答。</p>' : ""}
-        ${canOpenDebug(task) ? `<div class="actions" style="margin-top:10px"><button type="button" class="btn" data-open-debug="${task.id}">${task.driver === "a2a" ? "打开调试对话" : "打开调试记录"}</button></div>` : ""}
+        ${task.state === "待补材料" ? '<p class="panel-note">请在原 Agent 会话补答。</p>' : ""}
       </div>` : '<header class="inspector-head"><h3>任务详情</h3></header><p class="empty">暂无任务可查看</p>';
   }
 
@@ -842,8 +892,8 @@
   const configText = (config) => JSON.stringify(config, null, 2);
 
   function defaultConfig(id) {
-    return Object.fromEntries(configFields(id).map(({key,choices}) => [
-      key, key === "command" ? drivers[id].command : choices?.[0][0] ?? "",
+    return Object.fromEntries(configFields(id).filter(({choices}) => choices).map(({key,choices,defaultValue}) => [
+      key, defaultValue ?? choices[0][0],
     ]));
   }
 
@@ -867,13 +917,69 @@
   }
 
   function formConfig() {
-    return Object.fromEntries(configFields(editingDriver).map(({key}) => [key, form.elements[key].value.trim()]));
+    const config = {};
+    for (const {key,override} of configFields(editingDriver)) {
+      if (key === "sshHost" && form.elements.execution.value !== "ssh") continue;
+      if (override && form.elements[`${key}Mode`].value !== "specified") continue;
+      const value = form.elements[key].value.trim();
+      if (value || override) config[key] = value;
+    }
+    return config;
   }
 
-  function updateExecutionFields() {
+  function updateCliFields() {
     const remote = form.elements.execution.value === "ssh";
-    form.elements.sshHost.closest("label").hidden = !remote;
-    form.elements.cwd.placeholder = remote ? "执行机上的绝对路径，例如 /srv/projects/demo" : "DeepAgent 所在机器上的绝对路径";
+    form.elements.cwd.placeholder = remote ? "例如 /srv/projects/demo" : "例如 /Users/me/projects/demo";
+    for (const detail of $("driver-fields").querySelectorAll(".config-field-detail")) {
+      const [input, hint] = detail.children;
+      const showInput = input.name === "sshHost" ? remote : form.elements[`${input.name}Mode`].value === "specified";
+      input.setAttribute("aria-hidden", String(!showInput));
+      hint.setAttribute("aria-hidden", String(showInput));
+    }
+  }
+
+  function configSegment(name, labelId, choices, value) {
+    return `<div class="segment config-segment" role="radiogroup" aria-labelledby="${labelId}">
+      ${choices.map(([code,title]) => `<label class="config-choice">
+        <input type="radio" name="${name}" value="${code}" ${value === code ? "checked" : ""}><span>${title}</span>
+      </label>`).join("")}
+    </div>`;
+  }
+
+  function configInput({key,label,placeholder}, config) {
+    return `<input class="field" name="${key}" aria-label="${label}" value="${escapeHtml(config[key] ?? "")}" placeholder="${placeholder ?? ""}" autocomplete="off">`;
+  }
+
+  function configField(field, config) {
+    const {key,label,choices,override,defaultHint,tip} = field;
+    const value = config[key] ?? "";
+    const labelId = `config-${key}-label`;
+    const helpId = `config-${key}-help`;
+    const caption = `<span id="${labelId}">${label}</span>`;
+    const help = tip ? `<span class="config-help">
+      <button type="button" aria-label="${label}配置说明" aria-describedby="${helpId}">?</button>
+      <small class="config-tip" id="${helpId}" role="tooltip">${tip}</small>
+    </span>` : "";
+    if (!choices && !override) {
+      const input = key === "command"
+        ? configInput({...field, placeholder:`默认 ${drivers[editingDriver].command}，支持绝对路径`}, config)
+        : configInput(field, config);
+      return tip ? `<div class="config-field"><span class="config-caption">${caption}${help}</span>${input}</div>` : `<label>${caption}${input}</label>`;
+    }
+    const control = override
+      ? configSegment(`${key}Mode`, labelId, [["default","默认"],["specified","指定"]], Object.hasOwn(config,key) ? "specified" : "default")
+      : configSegment(key, labelId, choices, value);
+    const detailField = key === "execution" ? sshHostField : override ? field : null;
+    return `<div class="config-field">
+      <div class="config-field-title">
+        <span>${caption}${help}</span>
+        ${control}
+      </div>
+      ${detailField ? `<div class="config-field-detail">
+        ${configInput(detailField, config)}
+        <small class="muted">${defaultHint}</small>
+      </div>` : ""}
+    </div>`;
   }
 
   function renderConfigEditor() {
@@ -904,29 +1010,23 @@
       }
     }
 
-    $("driver-fields").innerHTML = configFields(editingDriver).map(({key,label,placeholder,choices,help}) => {
-      const value = config[key] ?? "";
-      const labelId = `config-${key}-label`;
-      const caption = `<span id="${labelId}">${label}</span>`;
-      if (!choices) {
-        const helpId = `config-${key}-help`;
-        return `<label>${caption}<input class="field" name="${key}" aria-labelledby="${labelId}" value="${escapeHtml(value)}" placeholder="${placeholder ?? ""}" autocomplete="off" ${help ? `aria-describedby="${helpId}"` : ""}>${help ? `<small class="muted" id="${helpId}">${help}</small>` : ""}</label>`;
-      }
-      const options = choices.map(([code,title]) => `<option value="${code}" ${value === code ? "selected" : ""}>${title}</option>`);
-      if (!choices.some(([code]) => code === value)) options.unshift('<option value="" selected disabled>请选择</option>');
-      return `<label>${caption}<select name="${key}" aria-labelledby="${labelId}">${options.join("")}</select></label>`;
-    }).join("");
-    if (editingDriver !== "a2a") {
-      form.elements.sshHost.setAttribute("aria-describedby", "ssh-host-help");
-      form.elements.sshHost.insertAdjacentHTML("afterend", '<small class="muted" id="ssh-host-help">使用管理员预先配置的 SSH 主机别名。</small>');
-      updateExecutionFields();
-    }
+    const settings = configFields(editingDriver);
+    fields.innerHTML = settings
+      .filter(({key,advanced}) => key !== "sshHost" && !advanced)
+      .map((field) => configField(field, config)).join("");
+    if (editingDriver !== "a2a") updateCliFields();
     if (editingDriver === "a2a") {
       $("driver-fields").insertAdjacentHTML("beforeend", `<div class="driver-section">
         <h3>请求头（可选）</h3><div id="config-headers" class="header-rows"></div>
         <button type="button" class="btn" id="add-config-header">${icon("plus")}添加请求头</button>
       </div>`);
       for (const [key,value] of Object.entries(config.headers ?? {})) appendHeader(key,value);
+    } else {
+      fields.insertAdjacentHTML("beforeend", `<details class="config-advanced">
+        <summary>高级${icon("chevron-right")}</summary>
+        <div class="config-advanced-fields">${settings.filter(({advanced}) => advanced)
+          .map((field) => configField(field, config)).join("")}</div>
+      </details>`);
     }
   }
 
@@ -940,7 +1040,7 @@
     form.elements.name.setCustomValidity("");
     form.elements.description.value = connection?.description ?? "";
     renderConfigEditor();
-    $("edit-title").textContent = connection ? "编辑连接 · " + connection.name : "添加 Agent";
+    $("edit-title").textContent = connection ? "编辑外部 Agent · " + connection.name : "添加外部 Agent";
     $("debug-prompt").value = "";
     debugAttachments.length = 0;
     openPage("connection-editor");
@@ -953,7 +1053,7 @@
     renderServer();
   }, $("server-access"));
 
-  for (const id of ["task-connection", "task-source", "task-status"]) $(id).addEventListener("change", renderTasks);
+  for (const id of ["task-connection", "task-driver", "task-status"]) $(id).addEventListener("change", renderTasks);
   $("task-search").addEventListener("input", renderTasks);
   $("connection-search").addEventListener("input", renderConnections);
   $("show-cards").addEventListener("click", () => switchConnectionView(false));
@@ -1001,25 +1101,33 @@
       return config;
     }
     const config = formConfig();
-    if (config.execution === "local") delete config.sshHost;
     if (editingDriver === "a2a") {
       const headers = headerDraft().filter(([key,value]) => key || value);
       const names = headers.map(([name]) => name.toLowerCase());
       if (names.includes("") || new Set(names).size !== names.length) throw new Error("请求头名称不能为空或重复。");
       if (headers.length) config.headers = Object.fromEntries(headers);
     }
-    return Object.fromEntries(Object.entries(config).filter(([,value]) => value !== ""));
+    return config;
   }
 
   function validateConfig(config) {
-    for (const {key,label,required} of configFields(editingDriver)) {
-      if (required && (typeof config[key] !== "string" || !config[key].trim())) throw new Error(`请填写${label}。`);
+    for (const {key,label,required,override} of configFields(editingDriver)) {
       if (Object.hasOwn(config,key) && typeof config[key] !== "string") throw new Error(`${label}须为字符串。`);
+      if ((required || (override && Object.hasOwn(config,key))) && !config[key]?.trim()) throw new Error(`请填写${label}。`);
     }
     if (editingDriver !== "a2a") {
       if (!["local", "ssh"].includes(config.execution)) throw new Error("执行位置须为 local 或 ssh。");
       if (config.execution === "ssh" && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(config.sshHost ?? "")) {
         throw new Error("请填写有效的 SSH 主机别名，例如 build-runner。");
+      }
+      if (editingDriver === "codex" && !drivers.codex.fields.find(({key}) => key === "sandbox").choices.some(([value]) => value === config.sandbox)) {
+        throw new Error("工作区权限须为只读或可写。");
+      }
+      if (config.command && !/^(?:[\w][\w.-]*|\/(?:[\w. -]+\/)*[\w. -]+)$/.test(config.command)) {
+        throw new Error("启动命令须为命令名或可执行文件的绝对路径。");
+      }
+      if (editingDriver === "codex" && config.reasoningEffort && !/^[a-z]+$/.test(config.reasoningEffort)) {
+        throw new Error("推理强度须为模型支持的档位，例如 medium。");
       }
       return;
     }
@@ -1107,7 +1215,7 @@
   });
   form.addEventListener("input", (event) => {
     event.target.setCustomValidity?.("");
-    if (event.target.name === "execution") updateExecutionFields();
+    if (editingDriver !== "a2a" && event.target.type === "radio") updateCliFields();
     showConfigError("");
     renderDebugAvailability();
   });
@@ -1116,7 +1224,7 @@
     event.preventDefault();
     const name = form.elements.name.value.trim();
     if (!name) {
-      form.elements.name.setCustomValidity("请填写连接名称。");
+      form.elements.name.setCustomValidity("请填写名称。");
       form.elements.name.reportValidity();
       return;
     }
@@ -1143,11 +1251,11 @@
     editing = target;
     selectedConnection = target.id;
     $("connection-search").value = "";
-    $("edit-title").textContent = "编辑连接 · " + target.name;
+    $("edit-title").textContent = "编辑外部 Agent · " + target.name;
     renderConnections();
     renderTasks();
     renderDebugger();
-    notify("连接已保存在本次演示中");
+    notify("配置已保存在本次演示中");
   });
 
   const getSelectedConnection = () => connections.find(({id}) => id === selectedConnection);
@@ -1163,21 +1271,45 @@
     return [now.toLocaleDateString("sv-SE").replaceAll("-", "/") + " " + time, time];
   }
 
+  function createInvocationStore(initial, limit, ttlMs) {
+    const newEntry = (task) => ({task:{...task}, expiresAt:Date.now() + ttlMs});
+    const entries = initial.slice(0, limit).map(newEntry);
+    function list() {
+      const now = Date.now();
+      while (entries.length && entries.at(-1).expiresAt <= now) entries.pop();
+      return entries.map(({task}) => task);
+    }
+    return {
+      add(task) {
+        entries.unshift(newEntry(task));
+        entries.splice(limit);
+      },
+      update(task) {
+        const entry = entries.find(({task:record}) => record.id === task.id);
+        if (entry && entry.expiresAt > Date.now()) entry.task = {...task};
+      },
+      list,
+      get(id) { return list().find((task) => task.id === id); },
+    };
+  }
+
   function trackTask(task) {
-    tasks.unshift(task);
-    tasks.splice(recordLimit);
-    renderTasks();
+    const debugging = Boolean(task.debugGroup);
+    const store = debugging ? debugInvocations : recentInvocations;
+    store.add(task);
+    if (!debugging) renderTasks();
     setTimeout(() => {
-      if (!tasks.includes(task)) return;
       task.state = "已完成";
       task.context ??= crypto.randomUUID?.() ?? makeId();
       task.response = "模拟调用已完成。";
-      task.events.push(["调用完成", timestamp()[1]]);
-      renderTasks();
-      if (!$("page-connection-editor").hidden && editing?.id === task.connection && canOpenDebug(task)) {
-        renderDebugger();
+      task.events = [...task.events, ["调用完成", timestamp()[1]]];
+      store.update(task);
+      if (debugging) {
+        if (!$("page-connection-editor").hidden && editing?.id === task.connection) renderDebugger();
+      } else {
+        renderTasks();
+        if (!$("page-test").hidden && testAgent.id === task.testAgentId) renderTest();
       }
-      if (!$("page-test").hidden && testAgent.id === task.testAgentId) renderTest();
     }, 3500);
   }
 
@@ -1193,8 +1325,9 @@
   function externalSessionDetails(task) {
     if (!task.executor && !task.context) return "";
     const {resume, session} = drivers[task.driver];
+    const profile = task.profile ? ` --profile ${shellWord(task.profile)}` : "";
     const command = resume && task.context && task.executable
-      ? `${shellWord(task.executable)} ${resume} ${shellWord(task.context)}` : "";
+      ? `${shellWord(task.executable)}${profile} ${resume} ${shellWord(task.context)}` : "";
     return `<h4 class="divider">外部会话</h4>
       <dl class="facts">
         ${task.executor ? fact("执行位置", escapeHtml(task.executor)) : ""}
@@ -1207,16 +1340,12 @@
       </details>` : ""}`;
   }
 
-  function canOpenDebug(task) {
-    const connection = connectionById(task.connection);
-    return task.source === "debug" && connection && task.connectionRevision === (connection.revision ?? 0);
-  }
-
   function debugHistory() {
     if (!editing || editing.driver !== editingDriver) return [];
     const group = debugContexts.get(editing.id);
     if (!group) return [];
-    return tasks.filter((task) => task.debugGroup === group && task.connection === editing.id && canOpenDebug(task)).reverse();
+    return debugInvocations.list().filter((task) => task.debugGroup === group && task.connection === editing.id
+      && task.connectionRevision === (editing.revision ?? 0)).reverse();
   }
 
   function connectionFormSaved() {
@@ -1259,11 +1388,8 @@
     $("debug-attach").disabled = !ready;
     $("debug-new").disabled = !ready || !debugHistory().length;
     $("debug-file-input").disabled = !ready;
-    const checkButton = $("check-connection");
-    if (checkButton) checkButton.disabled = !ready;
-    $("debug-notice").innerHTML = ready
-      ? "提交后可在近期调用中查看进度和结果。"
-      : `${icon("warning")}<span>保存连接后可调试</span>`;
+    $("check-connection").disabled = !ready;
+    $("debug-notice").innerHTML = ready ? "" : `${icon("warning")}<span>保存后可调试</span>`;
     renderDebugFiles();
   }
 
@@ -1272,6 +1398,7 @@
     const last = history.at(-1);
     const driver = drivers[editingDriver];
     const a2a = editingDriver === "a2a";
+    $("check-connection").textContent = a2a ? "检查连通性" : "检查环境";
     $("debug-new").textContent = a2a ? "新对话" : "清空调试";
     $("debug-heading").textContent = a2a ? "对话调试" : "任务调试";
     $("debug-send").setAttribute("aria-label", a2a ? "发送消息" : "提交任务");
@@ -1281,9 +1408,7 @@
     const existing = editing?.driver === editingDriver;
     const consumers = editing ? agents.filter((agent) => agent.connectionIds.includes(editing.id)) : [];
     $("editor-card-summary").innerHTML = `
-      <header class="inspector-head"><h2>${a2a ? "远端连接" : "执行环境"}</h2>
-        <button type="button" class="btn" id="check-connection">${a2a ? "检查连通性" : "检查环境"}</button>
-      </header>
+      <header class="inspector-head"><h2>${a2a ? "远端连接" : "执行环境"}</h2></header>
       <div class="inspector-body">${existing
         ? `<dl class="facts">
           ${fact("接入方式", driver.transport)}
@@ -1293,12 +1418,11 @@
           ${fact("最近检查", editing.checked)}
           ${fact("已选用", consumers.map((agent) => `<button type="button" class="link agent-pill" data-edit-agent="${agent.id}">${agent.name}</button>`).join(" "))}
         </dl>`
-        : '<p class="panel-note">保存连接后显示概要。</p>'}</div>`;
+        : '<p class="panel-note">保存后显示概要。</p>'}</div>`;
     renderDebugAvailability();
     $("debug-context").innerHTML = last ? `
       <span class="muted">调用 ID</span>${inlineId(last.id,"调用 ID")}${statusBadge(last.state)}
-      ${last.context ? `<span class="muted">${driver.session}</span>${inlineId(last.context,driver.session)}` : ""}
-      <button type="button" class="link" data-show-task="${last.id}">查看调用记录</button>` : "";
+      ${last.context ? `<span class="muted">${driver.session}</span>${inlineId(last.context,driver.session)}` : ""}` : "";
     const thread = $("debug-thread");
     thread.innerHTML = history.length ? history.map(debugExchange).join("")
       : "";
@@ -1380,7 +1504,7 @@
       id:makeId(), context:a2a ? group : null, debugGroup:group,
       connection:editing.id, driver:editing.driver, connectionRevision:editing.revision ?? 0,
       title:message || debugAttachments[0].name, prompt:message, attachments:[...debugAttachments],
-      source:"debug", submitted, state:"进行中",
+      submitted, state:"进行中",
       ...connectionSnapshot(editing),
       events:[["发起调用", time], [a2a ? "远端已受理" : "命令已启动", time]],
     };
@@ -1396,12 +1520,20 @@
     const query = $("agent-search").value.trim();
     const matching = agents.filter((agent) => agent.name.includes(query));
     $("agent-cards").innerHTML = matching.length ? matching.map((agent) => {
-      const names = agent.connectionIds.map((id) => escapeHtml(connectionById(id)?.name)).filter(Boolean);
+      const counts = [
+        ["hammer","内置工具",1],
+        ["monitor-check","UI 工具",1],
+        ["plug","MCP",1],
+        ["bot","Agent 工具",agent.connectionIds.filter(connectionById).length],
+        ["book-open-check","Skill",1],
+      ];
       return `<article class="box agent-card">
         <h2 class="inline">${icon("bot")}${agent.name}</h2>
         <p class="panel-note">${agent.prompt}</p>
         <div class="actions">
-          <span title="${names.join("、")}" class="inline muted">${icon("terminal")}外部 Agent · ${names.length}</span>
+          <div class="agent-capability-counts" aria-label="Agent 资源数量">
+            ${counts.map(([symbol,label,count]) => `<span class="agent-capability-count${count ? "" : " is-empty"}" role="img" title="${label}：${count}" aria-label="${label}：${count}">${icon(symbol)}<span>${count}</span></span>`).join("")}
+          </div>
           <button type="button" class="btn" data-edit-agent="${agent.id}" aria-label="编辑${agent.name}">${icon("edit")}编辑</button>
         </div>
       </article>`;
@@ -1416,16 +1548,17 @@
     $("external-options").innerHTML = rows.length ? rows.map((connection) => {
       const checked = draft.has(connection.id);
       return `<div class="choice-card">
-        <label>
-          <input type="checkbox" data-bind-connection="${connection.id}" aria-label="${escapeHtml(connection.name)}" ${checked ? "checked" : ""}>
-          <span>
-            <span class="inline"><b>${escapeHtml(connection.name)}</b>${driverBadge(connection)}${statusBadge(connection.status)}</span>
-            <small class="muted">${escapeHtml(connection.description || "—")}</small>
-          </span>
+        <label class="cap-switch">
+          <input type="checkbox" role="switch" data-bind-connection="${connection.id}" aria-label="${escapeHtml(connection.name)}" ${checked ? "checked" : ""}>
+          <span class="cap-switch-ui" aria-hidden="true"></span>
         </label>
-        <button type="button" class="link" data-show-connection="${connection.id}" aria-label="查看${escapeHtml(connection.name)}的连接">详情</button>
+        <div>
+          <div class="inline"><b>${escapeHtml(connection.name)}</b>${driverBadge(connection)}${statusBadge(connection.status)}</div>
+          ${connection.description ? `<p class="muted">${escapeHtml(connection.description)}</p>` : ""}
+        </div>
+        <button type="button" class="link" data-show-connection="${connection.id}" aria-label="查看${escapeHtml(connection.name)}的配置">详情</button>
       </div>`;
-    }).join("") : '<p class="empty">没有符合条件的连接</p>';
+    }).join("") : '<p class="empty">没有符合条件的外部 Agent</p>';
   }
 
   function renderAgentEditor() {
@@ -1444,11 +1577,11 @@
     $("test-agent").value = testAgent.id;
     $("test-target").replaceChildren(...(targets.length
       ? targets.map(({id,name}) => new Option(name, id))
-      : [new Option("暂无可用的外部连接", "")]));
+      : [new Option("暂无可用的 Agent 工具", "")]));
     if (targets.some(({id}) => previousTarget === id)) $("test-target").value = previousTarget;
     $("test-target").disabled = !targets.length;
     $("simulate-task").disabled = !targets.length;
-    const runs = tasks.filter((task) => task.testAgentId === testAgent.id).reverse();
+    const runs = recentInvocations.list().filter((task) => task.testAgentId === testAgent.id).reverse();
     $("test-thread").innerHTML = runs.map((task) => sessionTurn(task)).join("");
     $("test-overview").innerHTML = `<dl class="facts">
       ${fact("本地 Agent", testAgent.name)}
@@ -1500,12 +1633,12 @@
   }
 
   function openTask(id) {
-    const task = tasks.find((item) => item.id === id);
+    const task = recentInvocations.get(id);
     if (!task) return;
     if (connectionById(task.connection)) selectedConnection = task.connection;
     selectedTask = id;
     $("task-connection").value = task.connection;
-    $("task-source").value = "";
+    $("task-driver").value = "";
     $("task-status").value = "";
     $("task-search").value = "";
     openPage("records");
@@ -1523,7 +1656,7 @@
   $("save-agent").addEventListener("click", () => {
     editorAgent.connectionIds = Array.from(activeDraft());
     renderConnections();
-    notify("已保存外部 Agent 配置");
+    notify("已保存 Agent 工具配置");
   });
   $("launch-test").addEventListener("click", () => {
     testAgent = editorAgent;
@@ -1591,15 +1724,6 @@
     }
     const showTask = target.closest("[data-show-task]");
     if (showTask) openTask(showTask.dataset.showTask);
-    const showDebug = target.closest("[data-open-debug]");
-    if (showDebug) {
-      const task = tasks.find(({id}) => id === showDebug.dataset.openDebug);
-      if (task && canOpenDebug(task)) {
-        selectedConnection = task.connection;
-        debugContexts.set(task.connection, task.debugGroup);
-        showEditor(getSelectedConnection());
-      }
-    }
     const copy = target.closest("[data-copy]");
     const publication = target.closest("[data-publication]");
     const connection = target.closest("[data-open-connection]");
@@ -1628,7 +1752,7 @@
     }
     if (target.closest("#check-connection")) {
       if (!connectionFormSaved()) {
-        notify("请先保存连接，再检查环境");
+        notify("请先保存配置，再检查环境");
         return;
       }
       const connection = editing;

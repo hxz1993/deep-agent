@@ -17,7 +17,7 @@ BACKUP_SCOPE_SCHEMA_VERSION = "1.1"
 # Explicit logical dependency order. Keep this stable across 002/003: backup
 # manifests are versioned assets and must not change with ORM FK declarations.
 CONFIGURATION_TABLE_ORDER = (
-    "global_settings", "llm_providers", "mcp_servers", "model_catalog",
+    "global_settings", "llm_providers", "mcp_servers", "remote_agent_connections", "model_catalog",
     "integration_scoped_settings", "skill_packages", "ui_tool_packages", "llm_models", "ui_tool_definitions",
     "agents", "agent_output_configs", "agent_publications", "wecom_applications", "channel_accounts", "integration_settings",
 )

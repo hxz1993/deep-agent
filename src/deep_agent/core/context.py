@@ -76,6 +76,7 @@ class AppContext:
     sandbox_profile: ResolvedSandboxProfile | None = None
     session_live: SessionLiveHub = field(default_factory=SessionLiveHub)
     agent_tasks: object | None = None
+    remote_agents: object | None = None
     wecom_profiles: object | None = None
     wecom_import_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -85,6 +86,13 @@ class AppContext:
             from deep_agent.services.wecom_profiles import WecomProfileService
             self.wecom_profiles = WecomProfileService(self.stores.wecom, self.stores.channel)
         return self.wecom_profiles
+
+    def get_remote_agents(self):
+        if self.remote_agents is None:
+            from deep_agent.remote_agents.runtime import RemoteAgentRuntime
+            workspace = Path(OPTION.agent.sqlite_path).parent / "remote-agent-workspaces"
+            self.remote_agents = RemoteAgentRuntime(self, workspace_root=workspace)
+        return self.remote_agents
 
     @property
     def store(self) -> SessionStore:
@@ -257,6 +265,8 @@ class AppContext:
         )
 
     async def aclose(self) -> None:
+        if self.remote_agents is not None:
+            await self.remote_agents.close()
         if self.agent_tasks is not None:
             await self.agent_tasks.close()
         if self.wecom_profiles is not None:

@@ -287,6 +287,8 @@ const mcpAdmin = {
     const transport = document.getElementById("mcpTransport")?.value || "url";
     const meta = document.getElementById("mcpEditorMeta");
     if (meta) meta.textContent = `MCP 配置 · ${mcpTransportLabel(transport)}`;
+    const bind = document.getElementById("bindMcpRemoteAgent");
+    if (bind) bind.hidden = transport !== "url" || !state.editingMcp;
   },
 
   isEditorOpen() {
@@ -920,6 +922,9 @@ document.addEventListener("DOMContentLoaded", () => {
     mcpAdmin.catalogController = null;
   });
   document.getElementById("newMcpBtn")?.addEventListener("click", () => mcpAdmin.openCreate());
+  document.getElementById("bindMcpRemoteAgent")?.addEventListener("click", () => {
+    if (state.editingMcp) void window.remoteAgentAdmin?.bindMcp(state.editingMcp);
+  });
   document.getElementById("mcpForm")?.addEventListener("submit", (e) => mcpAdmin.save(e));
   document.getElementById("mcpForm")?.addEventListener("input", () => { mcpAdmin.editorDirty = true; });
   document.getElementById("mcpForm")?.addEventListener("change", () => { mcpAdmin.editorDirty = true; });

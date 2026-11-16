@@ -24,6 +24,7 @@ from deep_agent.db.stores.ui_tool_package import (
     create_ui_tool_package_store,
 )
 from deep_agent.services.llm_configuration import LlmConfigurationService
+from deep_agent.remote_agents.store import ConnectionStore
 
 __all__ = ["DataStores", "create_data_stores"]
 
@@ -48,6 +49,7 @@ class DataStores:
     integration_settings: IntegrationSettingsStore | None = None
     wecom: WecomStore | None = None
     integration_app: IntegrationAppStore | None = None
+    remote_agent: ConnectionStore | None = None
 
 
 def create_data_stores(
@@ -78,4 +80,5 @@ def create_data_stores(
         global_setting=GlobalSettingStore(session_factory),
         integration_settings=IntegrationSettingsStore(session_factory),
         integration_app=IntegrationAppStore(session_factory),
+        remote_agent=ConnectionStore(session_factory),
     )

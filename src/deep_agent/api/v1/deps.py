@@ -233,6 +233,16 @@ async def _build_runner_from_spec(
         validate_provider_config(spec.provider_config)
     selected = set(spec.capabilities)
     available = set(ctx.registry.codes()) | {"ui:builtin"}
+    from deep_agent.remote_agents.contracts import CONNECTION_PREFIX
+
+    remote_agent_capabilities = None
+    if any(code.startswith(CONNECTION_PREFIX) for code in selected) and ctx.stores.remote_agent is not None:
+        from deep_agent.remote_agents.harness import remote_capabilities
+
+        connections = await ctx.stores.remote_agent.selected(spec.capabilities)
+        available.update(CONNECTION_PREFIX + row.id for row in connections)
+        if connections:
+            remote_agent_capabilities = remote_capabilities(ctx.get_remote_agents(), connections)
     mcp_selected = any(code.startswith("mcp:") for code in selected)
     mcp_rows = await load_mcp_rows(ctx.stores) if mcp_selected else []
     mcp_packages = await load_mcp_tool_packages(ctx.stores, rows=mcp_rows) if mcp_selected else []
@@ -413,6 +423,7 @@ async def _build_runner_from_spec(
         web_toolset=(web_runtime.toolset if web_runtime is not None else None),
         document_toolset=(document_runtime.toolset if document_runtime else None),
         document_lifecycle=(document_runtime.lifecycle if document_runtime else None),
+        remote_agent_capabilities=remote_agent_capabilities,
     )
     if spec.context_window_tokens is not None and agent.model is not None:
         agent.model = ContextWindowModel(agent.model, spec.context_window_tokens)

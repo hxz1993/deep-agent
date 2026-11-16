@@ -3,6 +3,13 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.17.0
+
+- Console 新增「远程 Agent」，支持 A2A、DeepAgent MCP、Codex 和 CodeBuddy。主 Agent 统一通过 Harness 委派，可发送附件、补答、接续远端会话，并把生成文件交付到当前会话。内部迁移 016 同时创建发布表和远程连接表。
+- 升级 Pydantic AI 和 Harness，为远程 Agent 的官方子任务接口建立运行基线。兼容旧会话的附件和上下文引用、新版工具重试事件及程序编排接口，工具结果在最终执行钩子完成后再保存。数据库版本为 016。
+- **依赖变更（运维）** API／Gateway 运行依赖升级 `pydantic-ai-slim` 2.46.0 → 2.68.0、`pydantic-ai-harness` 0.32.0 → 0.68.0、`openai` 3.8.0 → 3.51.0（显式启用 `aiohttp` extra）、`pydantic-monty` 1.5.0 → 1.6.0。HTTP 客户端最低版本调整为 `httpx2>=2.12` 和 `aiohttp>=3.14.4`。Anthropic 限定 `>=1.15,<2`，兼容现有供应商的 `x-api-key`。本地验证环境解析出 `pydantic-graph` 2.68.0、Anthropic 1.17.0、Google Gen AI 2.34.0 和 You.com 3.1.2。发布需由运维重建匹配的基础镜像，核验 Linux 镜像的完整依赖、API／Gateway 启动及模型调用。独立 Python 沙箱的依赖清单无变更。
+- 跨版本 Agent 包回归可设置 `DEEP_AGENT_TEST_LEGACY_PYTHON`，让归档版本用升级前的 Python 环境启动，当前版本用升级后的环境启动。
+
 ## v0.17.0a5
 
 - 合并 Test 0.16.10 的诊断 Skill 下架兼容、只读查询 Skill 和输入栏优化。

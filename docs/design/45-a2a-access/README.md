@@ -6,7 +6,7 @@
 
 ## 页面与交付范围
 
-首期 Console 增加「集成」页，A2A 是首个对外发布协议。首期允许外部 Agent 和普通程序提交任务、跟踪状态、领取产物。DeepAgent 主动委托外部 Agent 的后续入口定为「外部调用」。
+首期 Console 增加「集成」页，A2A 是首个对外发布协议。首期允许外部 Agent 和普通程序提交任务、跟踪状态、领取产物。DeepAgent 将在「远程 Agent」接入外部 Agent，作为工具调用。
 
 | 区域 | 操作 | 交付顺序 |
 | --- | --- | --- |
@@ -30,11 +30,11 @@
 
 [服务端 Console、任务与产物](server-console-design.md)说明发布配置和近期任务如何展示，以及 FileStore 和联调工具如何接入。
 
-## 外部调用原型
+## 远程 Agent 原型
 
-[打开外部调用原型](<Prototype A2A客户端接入/index.html>)。首页同屏显示连接和可按连接筛选的近期调用。进入连接后，左侧配置，右侧直接调试。
+[打开远程 Agent 原型](<Prototype A2A客户端接入/index.html>)。首页同屏显示连接和本地 Agent 的近期调用，支持按外部 Agent 和接入方式筛选。打开配置后，可在调试区直接验证连接。
 
-外部连接计划使用 `agent_connections`，八个字段拟随出站功能落地。连接保存后即可调试，在 Agent 编辑页选用，引用存入 `agents.capabilities`。当前服务端版本的 Revision `016` 只创建 `agent_publications`。身份、凭据、调用记录和联调见[外部调用实施方案](client-implementation-plan.md)。
+远程连接计划使用 `remote_agent_connections`，八个字段拟随出站功能落地。连接保存后即可调试，在 Agent 编辑页选用，引用存入 `agents.capabilities`。当前服务端版本的 Revision `016` 只创建 `agent_publications`。身份、凭据、调用记录和联调见[远程 Agent 实施方案](client-implementation-plan.md)。
 
 ## 早期布局备选
 

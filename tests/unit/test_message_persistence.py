@@ -6,6 +6,7 @@ import unittest
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, FunctionToolset, ModelRequestNode, RunContext
 from pydantic_ai.capabilities import AbstractCapability
@@ -83,7 +84,7 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_identical_stream_finalization_skips_write(self):
         cap = self.capability()
         response = ModelResponse(parts=[TextPart("final")], usage=RequestUsage(), run_id="run")
-        await cap.after_model_request(self.ctx, request_context=None, response=response)
+        await cap.wrap_model_request(self.ctx, request_context=None, handler=AsyncMock(return_value=response))
         await cap.after_node_run(self.ctx, node=object(), result=object())
         await cap._flush(self.ctx, hook="stream_end")
         self.assertEqual(len(self.store.writes), 1)
@@ -115,7 +116,7 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cap.messages, [])
         response = ModelResponse(parts=[TextPart("lookup"), native_call, native_result,
                                         ToolCallPart("ui", {"unsafe": 1}, "invalid"), TextPart("answer")])
-        await cap.after_model_request(self.ctx, request_context=None, response=response)
+        await cap.wrap_model_request(self.ctx, request_context=None, handler=AsyncMock(return_value=response))
         self.assertEqual([part.part_kind for part in cap.messages[-1].parts],
                          ["text", "builtin-tool-call", "builtin-tool-return", "text"])
 
@@ -124,14 +125,14 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         request = ModelRequest(parts=[UserPromptPart("new")], run_id="run")
         await cap._prepare_model_node(self.ctx, ModelRequestNode(request=request))
         response = ModelResponse(parts=[TextPart("first")], run_id="run")
-        await cap.after_model_request(self.ctx, request_context=None, response=response)
+        await cap.wrap_model_request(self.ctx, request_context=None, handler=AsyncMock(return_value=response))
         next_request = ModelRequest(parts=[ToolReturnPart("read", "value", "call")], run_id="run")
         await cap.after_node_run(self.ctx, node=object(), result=ModelRequestNode(request=next_request))
         # A replacement much shorter than the old history length, as compaction does.
         self.ctx.messages[:] = [ModelRequest(parts=[UserPromptPart("summary")]), next_request]
         await cap._prepare_model_node(self.ctx, ModelRequestNode(request=next_request))
         final = ModelResponse(parts=[TextPart("final")], run_id="run")
-        await cap.after_model_request(self.ctx, request_context=None, response=final)
+        await cap.wrap_model_request(self.ctx, request_context=None, handler=AsyncMock(return_value=final))
         self.assertEqual([p.content for p in parts(cap.messages, TextPart)], ["first", "final"])
         canonical = cap.canonical_messages([deepcopy(next_request), deepcopy(final)])
         self.assertEqual(len(canonical), 3)
@@ -142,11 +143,11 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         cap = self.capability()
         first = ModelResponse(parts=[ToolCallPart("ui", {"valid": 1}, "same")])
         self.ctx.messages.append(first)
-        await cap.after_model_request(self.ctx, request_context=None, response=first)
+        await cap.wrap_model_request(self.ctx, request_context=None, handler=AsyncMock(return_value=first))
         await cap.before_tool_execute(self.ctx, call=first.parts[0], tool_def=None, args={})
         second = ModelResponse(parts=[ToolCallPart("ui", {"invalid": 1}, "same")])
         self.ctx.messages.append(second)
-        await cap.after_model_request(self.ctx, request_context=None, response=second)
+        await cap.wrap_model_request(self.ctx, request_context=None, handler=AsyncMock(return_value=second))
         self.assertEqual(len(parts(cap.messages, ToolCallPart)), 1)
         self.assertEqual(parts(cap.messages, ToolCallPart)[0].args, {"valid": 1})
 
@@ -442,10 +443,11 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         class CompactSecondRequest(AbstractCapability):
             async def before_model_request(self, ctx, request_context):
                 if parts(request_context.messages, ToolReturnPart):
-                    return replace(request_context, messages=[
+                    ctx.messages[:] = [
                         ModelRequest(parts=[UserPromptPart("Summary of previous conversation")]),
                         request_context.messages[-1],
-                    ])
+                    ]
+                    return replace(request_context, messages=list(ctx.messages))
                 return request_context
 
         calls = 0

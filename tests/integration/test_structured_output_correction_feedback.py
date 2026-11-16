@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelResponse, RetryPromptPart, ThinkingPart, ToolCallPart
+from pydantic_ai.messages import ModelResponse, ThinkingPart, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
 from pydantic_ai.usage import UsageLimits
 
@@ -76,8 +76,12 @@ class StructuredOutputCorrectionFeedbackTests(unittest.IsolatedAsyncioTestCase):
 
         def respond(messages, info):
             requests.append(info)
-            prompts = [p.content for m in messages for p in m.parts
-                       if isinstance(p, RetryPromptPart) and isinstance(p.content, str)]
+            prompts = [
+                p.content.split("<pyai:retry_feedback>", 1)[1].split("</pyai:retry_feedback>", 1)[0].strip()
+                for m in messages for p in m.parts
+                if isinstance(p, UserPromptPart) and isinstance(p.content, str)
+                and "<pyai:retry_feedback>" in p.content
+            ]
             retries.append(prompts[-1] if prompts else None)
             parts = (copy.deepcopy(bad_parts) if len(requests) == 1 or persistent else
                      [ToolCallPart("output__" + _OUTPUT_NAME, copy.deepcopy(valid), "good-result")])

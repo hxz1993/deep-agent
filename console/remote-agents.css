@@ -1,0 +1,198 @@
+#panel-remote-agents [hidden],
+#bindMcpRemoteAgent[hidden] { display: none !important; }
+
+.remote-agent-page-heading p { margin: 4px 0 0; color: var(--text-dim); }
+.remote-agent-toolbar, .remote-agent-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-inline-gap, 8px);
+  min-width: 0;
+}
+.remote-agent-toolbar { justify-content: space-between; flex-wrap: wrap; }
+.remote-agent-actions { flex-wrap: wrap; justify-content: flex-end; }
+.remote-agent-toolbar h3, .remote-agent-editor-grid h3, .remote-agent-detail-section h4 { margin: 0; font-size: 13px; }
+.remote-agent-toolbar .agent-search { min-width: 170px; max-width: 235px; }
+.remote-agent-filters > .da-select { width: 120px; flex: 0 0 120px; }
+.remote-agent-filters > .da-select:has(#remoteCallConnection) { width: 138px; flex-basis: 138px; }
+.remote-agent-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 278px), 1fr));
+  gap: 12px;
+}
+.remote-agent-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--ui-radius);
+  background: var(--console-surface);
+  cursor: pointer;
+}
+.remote-agent-card:hover, .remote-agent-card:focus-within { border-color: var(--accent); }
+.remote-agent-card > header { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.remote-agent-card-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--ui-control-radius, 8px);
+  color: var(--accent);
+}
+.remote-agent-card-icon svg { width: 18px; height: 18px; }
+.remote-agent-card > p { flex: 1; margin: 12px 0 8px; padding-top: 9px; border-top: 1px solid var(--border); color: var(--text-dim); overflow-wrap: anywhere; }
+.remote-agent-card > footer { display: flex; align-items: center; justify-content: space-between; }
+.remote-agent-open.btn, .remote-agent-call-name.btn { display: block; justify-self: start; min-width: 0; max-width: 100%; height: auto; padding: 0; text-align: left; font-weight: 600; }
+.remote-agent-open.btn, .remote-agent-call-name.btn > span { color: var(--text); }
+.remote-agent-open.btn:hover, .remote-agent-call-name.btn:hover > span { color: var(--accent); }
+.remote-agent-open, .remote-agent-call-name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-agent-state, .remote-agent-driver { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.remote-agent-driver {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.remote-agent-driver svg { width: 12px; height: 12px; }
+.remote-agent-state { color: var(--text-dim); font-size: 12px; }
+.remote-agent-state::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ""; flex: 0 0 5px; }
+.remote-agent-state[data-state="completed"] { color: var(--conn-ok); }
+.remote-agent-state[data-state="working"] { color: var(--accent); }
+.remote-agent-state[data-state="input_required"], .remote-agent-state[data-state="unknown"] { color: var(--duration-slow); }
+.remote-agent-state[data-state="failed"] { color: var(--danger-text); }
+.remote-agent-notice, .remote-agent-empty { margin: 0; padding: 12px; color: var(--text-dim); }
+.remote-agent-notice:empty { display: none; }
+.remote-agent-recent { margin-top: var(--ui-module-gap, 24px); }
+.remote-agent-recent-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(250px, 1fr);
+  min-height: clamp(350px, 52dvh, 720px);
+  border: 1px solid var(--border);
+  border-radius: var(--ui-radius);
+  background: var(--console-surface);
+  overflow: hidden;
+}
+.remote-agent-recent-list { display: flex; flex-direction: column; min-width: 0; }
+.remote-agent-calls-table { flex: 1; min-height: 0; overflow: auto; border: 0; border-radius: 0; }
+.remote-agent-connection-list td:first-child, .remote-agent-calls-table td { vertical-align: middle; }
+.remote-agent-connection-list td:first-child > .remote-agent-driver { margin-top: 3px; }
+.remote-agent-calls-table table, .remote-agent-connection-list table { table-layout: fixed; }
+.remote-agent-calls-table th:first-child { width: 36%; }
+.remote-agent-calls-table th:nth-child(2) { width: 25%; }
+.remote-agent-calls-table th:last-child { width: 22%; }
+.remote-agent-connection-list th:first-child { width: 28%; }
+.remote-agent-connection-list th:nth-child(3) { width: 16%; }
+.remote-agent-connection-list th:last-child { width: 64px; }
+.remote-agent-calls-table tr.selected > td { background: var(--accent-soft); }
+.remote-agent-call-name { display: grid; justify-items: start; gap: 1px; min-width: 0; }
+.remote-agent-call-name > * { display: block; max-width: 100%; }
+.remote-agent-call-name > .remote-agent-driver { display: inline-flex; }
+.remote-agent-call-name > code { color: var(--text-dim); font-size: 11px; }
+.remote-agent-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.remote-agent-call-detail { min-width: 0; padding: 12px; border-left: 1px solid var(--border); }
+.remote-agent-detail-heading { padding: 0 0 10px; border-bottom: 1px solid var(--border); }
+.remote-agent-detail-section { margin-top: 14px; }
+.remote-agent-detail-section:not(.remote-agent-result) > h4 { display: flex; align-items: center; gap: 8px; }
+.remote-agent-detail-section:not(.remote-agent-result) > h4::after { flex: 1; height: 1px; background: var(--border); content: ""; }
+.remote-agent-detail-section > p, .remote-agent-message > p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.remote-agent-detail-section > ol { margin: 5px 0; padding: 0 0 0 6px; border-left: 1px solid var(--border); list-style: none; }
+.remote-agent-detail-section > ol li { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+.remote-agent-detail-section > ol time { color: var(--text-dim); font-size: 12px; }
+.remote-agent-result { padding: 9px; border-radius: var(--ui-radius); background: var(--console-readonly-surface); }
+.remote-agent-result > p { margin: 5px 0 0; }
+.remote-agent-facts { display: grid; gap: 7px; margin: 12px 0; }
+.remote-agent-facts > div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; }
+.remote-agent-facts dt { color: var(--text-dim); }
+.remote-agent-facts dd { margin: 0; overflow-wrap: anywhere; }
+.remote-agent-facts a { color: var(--accent); }
+
+.remote-agent-editor-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.remote-agent-editor-heading h2 { min-width: 0; flex: 1; margin: 0; overflow-wrap: anywhere; }
+.remote-agent-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(282px, .88fr) minmax(265px, 1.45fr) minmax(164px, .6fr);
+  min-height: max(500px, calc(100dvh - 130px));
+}
+.remote-agent-config, .remote-agent-debug, .remote-agent-summary { min-width: 0; padding: 12px 14px; }
+.remote-agent-config { padding-left: 0; }
+.remote-agent-debug, .remote-agent-summary { border-left: 1px solid var(--border); }
+.remote-agent-config > .field, #remoteDriverFields > .field { margin-bottom: 12px; }
+.remote-agent-field-section { margin: 18px 0; }
+.remote-agent-field-section h3 { margin: 0 0 7px; }
+.remote-agent-field-section .remote-agent-toolbar h3 { margin: 0; }
+.remote-agent-driver-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.remote-agent-driver-option.btn {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  height: auto;
+  min-height: 61px;
+  padding: 6px 2px;
+}
+.remote-agent-driver-option.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.remote-agent-driver-option > svg { width: 19px; height: 19px; }
+.remote-agent-driver-note { min-height: 32px; margin: 7px 0 0; }
+#remoteDriverFields { display: grid; gap: 9px; margin-top: 9px; min-width: 0; }
+#remoteConfigJsonField textarea { margin-top: 9px; font-family: var(--mono); }
+.remote-agent-option-label { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.remote-agent-option-label > .console-segmented { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.remote-agent-option-label > .console-segmented button { min-width: 49px; }
+.remote-agent-option-field { display: flex; align-items: center; min-height: 36px; padding-top: 4px; }
+.remote-agent-option-field > input { width: 100%; min-width: 0; }
+.remote-agent-header-row { display: grid; grid-template-columns: minmax(68px, .9fr) minmax(68px, 1fr) auto; align-items: center; gap: 5px; margin-top: 5px; }
+.remote-agent-header-row input { width: 100%; min-width: 0; }
+.remote-agent-advanced summary { cursor: pointer; }
+.remote-agent-advanced > .field { margin-top: 9px; }
+.remote-agent-proposed { display: grid; gap: 6px; justify-items: start; }
+.remote-agent-proposed code { overflow-wrap: anywhere; }
+.remote-agent-error:not(:empty) { color: var(--danger-text); }
+
+.remote-agent-debug { display: flex; flex-direction: column; min-height: 0; }
+.remote-agent-debug-notice { margin: 7px 0 0; }
+.remote-agent-debug-notice:empty { display: none; }
+.remote-agent-debug-thread { flex: 1; min-height: 260px; max-height: calc(100dvh - 300px); overflow: auto; margin: 6px 0; }
+.remote-agent-message { padding: 8px 10px; margin: 5px 0; background: var(--console-readonly-surface); border-radius: var(--ui-card-radius, 8px); }
+.remote-agent-message.user { background: var(--accent-soft); }
+.remote-agent-message > header { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.remote-agent-message > p { margin: 5px 0 0; }
+.remote-agent-compose {
+  display: grid;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--ui-card-radius, 8px);
+  background: var(--console-surface);
+}
+.remote-agent-compose textarea { display: block; width: 100%; padding: 4px; border: 0; background: transparent; }
+.remote-agent-compose > .remote-agent-actions { justify-content: space-between; }
+.remote-agent-debug-files { display: flex; flex-wrap: wrap; gap: 4px; }
+.remote-agent-debug-files > span { display: inline-flex; align-items: center; gap: 4px; overflow-wrap: anywhere; min-width: 0; font-size: 12px; }
+.remote-agent-debug-files > span > svg { width: 13px; height: 13px; flex-shrink: 0; }
+.remote-agent-output-files { display: grid; gap: 5px; margin-top: 8px; }
+.remote-agent-output-file { display: flex; justify-content: space-between; align-items: center; gap: 6px; min-width: 0; }
+.remote-agent-output-file > span { display: flex; align-items: center; gap: 5px; overflow-wrap: anywhere; min-width: 0; }
+.remote-agent-output-file > span svg { width: 14px; height: 14px; flex: 0 0 auto; }
+
+@media (max-width: 1120px) {
+  .remote-agent-editor-grid { grid-template-columns: minmax(245px, .9fr) minmax(220px, 1.3fr); }
+  .remote-agent-summary { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); }
+}
+@media (max-width: 760px) {
+  .remote-agent-editor-grid, .remote-agent-recent-grid { grid-template-columns: minmax(0, 1fr); }
+  .remote-agent-filters { justify-content: flex-start; }
+  .remote-agent-call-detail, .remote-agent-debug { border-left: 0; border-top: 1px solid var(--border); }
+  .remote-agent-config, .remote-agent-debug, .remote-agent-summary { padding-inline: 0; }
+  .remote-agent-calls-table time { white-space: normal; overflow-wrap: anywhere; }
+}

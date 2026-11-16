@@ -179,42 +179,46 @@ dialog.console-detail-dialog.modal.agent-service-dialog[open] { display:flex; fl
 .agent-service-example-heading .btn:hover { text-decoration:underline; }
 .agent-service-example-heading .btn > svg { width:var(--ui-icon); height:var(--ui-icon); }
 .agent-service-auth-example { flex:1; margin:0; padding:8px 10px; border-radius:var(--ui-radius-inner); background:var(--console-surface); font-family:var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; }
-dialog.console-detail-dialog.modal.agent-service-guide { width:min(980px,calc(100vw - 32px)); height:fit-content; max-height:calc(100dvh - 32px); }
-.agent-service-guide > .modal-body { flex:0 1 auto; overflow-y:auto; }
-.agent-service-guide .channel-help-panel { flex:none; overflow:visible; }
-.agent-service-guide-flow:not([hidden]) { display:grid; gap:12px; }
+dialog.console-detail-dialog.modal.agent-service-guide { width:min(980px,calc(100vw - 32px)); height:min(790px,calc(100dvh - 32px)); }
+.agent-service-guide-flow:not([hidden]) { display:grid; grid-auto-rows:max-content; align-content:start; gap:12px; }
 .agent-service-guide-heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 12px; }
 .agent-service-guide-block { display:grid; align-content:start; gap:6px; min-width:0; }
 .agent-service-guide-block h4 { margin:0; font-size:var(--ui-font-body); font-weight:600; }
 .agent-service-guide .btn-link { display:inline-flex; align-items:center; gap:4px; padding:0; }
 .agent-service-guide .btn-link svg { width:var(--ui-icon); height:var(--ui-icon); flex:none; }
 .agent-service-guide p { margin:0; color:var(--text-dim); font-size:var(--ui-font-helper); }
+#configurationHost .agent-service-guide-table { overflow:clip; }
 #configurationHost .agent-service-guide-table .data-table { min-width:0; table-layout:fixed; }
-#configurationHost .agent-service-guide-table .data-table :is(th,td) {
-  padding:5px 10px; height:auto; white-space:normal; overflow-wrap:anywhere;
+#configurationHost .agent-service-guide .agent-service-guide-table .data-table :is(th,td) {
+  padding:5px 10px; height:auto; font-size:var(--ui-font-helper); white-space:normal; overflow-wrap:anywhere;
 }
+#configurationHost .agent-service-guide-table .data-table code { font-size:inherit; }
 .agent-service-guide-table tbody th { color:var(--text-dim); font-weight:500; text-align:left; }
 .agent-service-guide-table th:first-child { width:18%; }
-.agent-service-auth-matrix th:first-child { width:22%; }
-.agent-service-auth-matrix th:nth-child(2) { width:37%; }
 .agent-service-methods th:first-child { width:38%; }
 #configurationHost .agent-service-methods :is(th,td):nth-child(2) { width:82px; text-align:center; }
 .agent-service-supported { color:var(--success); font-weight:700; }
 .agent-service-links { display:grid; gap:6px; list-style:none; margin:0; padding:0; }
 .agent-service-links li { display:grid; grid-template-columns:minmax(160px,24%) minmax(0,1fr); align-items:baseline; gap:8px; }
 .agent-service-guide .agent-service-links .btn-link { justify-self:start; }
-.agent-service-mcp-guide-setup > .agent-service-card-options,
-.agent-service-mcp-guide-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
-.agent-service-mcp-guide-setup .agent-service-access-help { margin-top:6px; }
-.agent-service-guide-list { display:grid; gap:5px; margin:0; font-size:var(--ui-font-helper); }
-.agent-service-guide-list > div { display:grid; grid-template-columns:minmax(6rem,27%) minmax(0,1fr); gap:6px; }
-.agent-service-guide-list dd { margin:0; color:var(--text-dim); overflow-wrap:anywhere; }
-.agent-service-guide-resources > div { grid-template-columns:minmax(6rem,30%) minmax(0,1fr); }
+.agent-service-guide-preview {
+  margin:0; padding:10px 12px; border-radius:var(--ui-radius-inner);
+  background:var(--console-readonly-surface); color:var(--text);
+  font-family:inherit; font-size:var(--ui-font-helper); line-height:1.45;
+  white-space:pre-wrap; overflow-wrap:anywhere;
+}
+.agent-service-mcp-guide-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:16px; }
+.agent-service-mcp-reference th:first-child { width:33%; }
 .agent-service-guide-client-links { display:flex; flex-wrap:wrap; gap:6px 16px; }
+@media (max-height:850px) {
+  .agent-service-guide-flow:not([hidden]) { gap:8px; }
+  .agent-service-guide-preview { padding-block:8px; line-height:1.35; }
+  #configurationHost .agent-service-guide .agent-service-guide-table .data-table :is(th,td) { padding-block:3px; }
+}
 @media (max-width:640px) {
-  .agent-service-mcp-guide-setup > .agent-service-card-options,.agent-service-mcp-guide-columns { grid-template-columns:minmax(0,1fr); }
+  .agent-service-mcp-guide-columns { grid-template-columns:minmax(0,1fr); }
   .agent-service-links li { grid-template-columns:minmax(0,1fr); gap:2px; }
-  #configurationHost .agent-service-guide-table .data-table :is(th,td) { padding-inline:6px; }
+  #configurationHost .agent-service-guide .agent-service-guide-table .data-table :is(th,td) { padding-inline:6px; }
   #configurationHost .agent-service-methods :is(th,td):nth-child(2) { width:44px; }
 }
 @container (max-width:879px) {

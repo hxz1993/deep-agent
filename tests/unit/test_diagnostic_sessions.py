@@ -12,6 +12,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, Thinking
 from pydantic_ai.usage import RequestUsage
 from sqlalchemy import event as sql_event, select, update
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.active_runs import ActiveRunRegistry
 from deep_agent.api.v1.admin import resolve_console_admin_access
 from deep_agent.api.v1.diagnostic_sessions import router
@@ -39,7 +40,7 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
     async def question(self, sid, content="question", *, user="user-one", agent=None, run=None, at=None, terminal=None):
         self.sequence += 1
         run = run or f"run-{self.sequence}"
-        rows = await self.store.append(sid, [ModelRequest(parts=[UserPromptPart(content)], run_id=run)],
+        rows = await self.store.append(sid, [ModelRequest(parts=[StoredUserPromptPart(content)], run_id=run)],
             agent_id=agent or self.agent_id, user_id=user, run_id=run, turn_id=f"turn-{self.sequence}")
         if terminal:
             await self.store.append_message_parts(sid, messages=[ModelResponse(parts=[TextPart("answer")], run_id=run)],

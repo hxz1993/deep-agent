@@ -117,12 +117,12 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(announcements), 1)
         self.assertEqual(announcements[0], "<system>New tool schemas are available: `demo_lookup`.</system>")
 
-    def test_discovery_announcement_preserves_seen_tool_deduplication(self) -> None:
+    async def test_discovery_announcement_preserves_seen_tool_deduplication(self) -> None:
         capability = HybridCodeMode(tools=[], dynamic_catalog=True)
-        ctx = mock.Mock()
-        capability._announce_newly_discovered(ctx, ["demo_one"])
-        capability._announce_newly_discovered(ctx, ["demo_one"])
-        capability._announce_newly_discovered(ctx, ["demo_one", "demo_two"])
+        ctx = mock.Mock(messages=[])
+        await capability._announce_newly_callable(ctx, ["demo_one"])
+        await capability._announce_newly_callable(ctx, ["demo_one"])
+        await capability._announce_newly_callable(ctx, ["demo_one", "demo_two"])
         self.assertEqual(ctx.enqueue.call_count, 2)
         self.assertIn("demo_one", ctx.enqueue.call_args_list[0].args[0].content)
         self.assertIn("demo_two", ctx.enqueue.call_args_list[1].args[0].content)
@@ -1065,7 +1065,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
         )
         await agent.run("inspect", deps=AgentDeps(session_id="session"))
-        self.assertEqual(seen, {"run_code"})
+        self.assertEqual(seen, {"run_code", "search_tools"})
 
     async def test_deferred_tool_becomes_native_and_code_callable_after_reveal(self) -> None:
         revealed = False
@@ -1089,12 +1089,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
             tools = await original_get_tools(ctx)
             output = {}
             for name, tool in tools.items():
-                if name == "reveal_tools":
-                    output[name] = replace(
-                        tool,
-                        tool_def=replace(tool.tool_def, tool_kind="capability-load"),
-                    )
-                elif name == "hidden_lookup":
+                if name == "hidden_lookup":
                     output[name] = replace(
                         tool,
                         tool_def=replace(tool.tool_def, defer_loading=not revealed),
@@ -1136,8 +1131,9 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         )
         await agent.run("reveal", deps=AgentDeps(session_id="session"))
 
-        self.assertEqual(seen_steps[0], {"reveal_tools", "run_code"})
-        self.assertEqual(seen_steps[1], {"reveal_tools", "hidden_lookup", "run_code"})
+        self.assertTrue({"reveal_tools", "run_code"} <= seen_steps[0])
+        self.assertNotIn("hidden_lookup", seen_steps[0])
+        self.assertTrue({"reveal_tools", "hidden_lookup", "run_code"} <= seen_steps[1])
         self.assertEqual(called, ["revealed"])
 
 

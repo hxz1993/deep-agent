@@ -23,6 +23,7 @@ from pydantic_ai.usage import UsageLimits
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, event, insert, select, update
 
+from deep_agent.db.serialization import StoredUserPromptPart
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
@@ -287,7 +288,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
         await restore_plan_snapshot(deps, {"items": [{"id": "read", "content": "读取合成附件", "status": "completed"}]})
         expected_plan = await current_plan_snapshot(deps)
         messages = [
-            ModelRequest(parts=[UserPromptPart([
+            ModelRequest(parts=[StoredUserPromptPart([
                 {"kind": "text-content", "content": "分析合成预算"},
                 {"kind": "attachment-ref", "id": "synthetic-file", "name": "合成预算.xlsx", "mime": "application/vnd.ms-excel"},
                 {"kind": "context-ref", "key": "range", "type": "deeptable.range", "label": "预算!B2:C4", "metadata": {"token": "SYNTHETIC_PRIVATE_CONTEXT"}},

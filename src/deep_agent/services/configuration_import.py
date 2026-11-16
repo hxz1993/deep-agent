@@ -54,6 +54,7 @@ _SKILL_BEFORE_015 = Table("skill_packages", MetaData(), *(
     for column in Base.metadata.tables["skill_packages"].columns if column.name != "scope_ref"
 ))
 _BEFORE_015 = {"011", "012", "013", "014"}
+_ADDED_IN_016 = {"agent_publications", "remote_agent_connections"}
 # This does not perform cross-revision import or alter an Alembic revision.
 _AGENT_011 = Table("agents", MetaData(), *(
     Column(column.name, column.type, nullable=column.nullable, primary_key=column.primary_key)
@@ -69,7 +70,7 @@ _OUTPUT_CONFIG_012 = Table("agent_output_configs", MetaData(), *(
 
 def _configuration_tables(revision: str) -> tuple[str, ...]:
     return tuple(name for name in configuration_table_names()
-                 if (revision == "016" or name != "agent_publications")
+                 if (revision == "016" or name not in _ADDED_IN_016)
                  and (revision != "011" or name != "agent_output_configs")
                  and (revision not in _BEFORE_015 or name != "integration_scoped_settings"))
 
@@ -242,7 +243,7 @@ def _validate_schema_sync(sync_connection: Any, *, backup: bool) -> None:
     revision = str(sync_connection.scalar(text("SELECT version_num FROM alembic_version")) or "")
     tables = set(Base.metadata.tables)
     if revision != "016":
-        tables.discard("agent_publications")
+        tables.difference_update(_ADDED_IN_016)
     if revision == "011":
         tables.discard("agent_output_configs")
     if revision in _BEFORE_015:

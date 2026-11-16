@@ -175,7 +175,7 @@ class ProjectLayoutTest(unittest.TestCase):
             "migrations/env.py", "deploy/gunicorn.conf.py", "deploy/docker-compose.yml",
             "src/deepagent_files.py",
             "tests/helpers/models.py",
-            "src/deep_agent/builtin_skills/deepagent-diagnostics/SKILL.md",
+            "src/deep_agent/builtin_skills/deepfos-readonly-analysis/SKILL.md",
         ):
             with self.subTest(resource=name):
                 path = REPO_ROOT / name

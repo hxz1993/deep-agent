@@ -27,7 +27,7 @@ from deep_agent.models.provider_registry import model_unavailable_reason
 from deep_agent.models.reasoning import available_efforts, bound_agent_effort, effective_agent_effort, reasoning_protocol
 from deep_agent.schemas.agent import AgentResponse
 from deep_agent.schemas.ui_tools import UiToolCreate
-from deep_agent.skills.catalog import get_builtin_skill, list_builtin_skills
+from deep_agent.skills.catalog import RETIRED_DIAGNOSTICS_SKILL_CODE, active_skill_codes, get_builtin_skill, list_builtin_skills
 from deep_agent.skills.runtime import RUNTIME_READY, skill_platform_file_headers
 from deepfos_platform.client.platform import FILE_TYPE_SKILL_PACKAGE
 
@@ -112,14 +112,20 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
         if code in package.skills:
             _, incoming = package.skills[code]
             existing = uploaded.get(code)
-            if code in builtin_skills:
+            if code == RETIRED_DIAGNOSTICS_SKILL_CODE:
+                add('skill', code, incoming['label'], 'blocked')
+                blocked.append(f'Skill {code} 的内置编码已退役，不能用于上传包')
+            elif code in builtin_skills:
                 add('skill', code, incoming['label'], 'blocked')
                 blocked.append(f'Skill {code} 是内置资源，不能覆盖')
             else:
                 same = existing and existing.content_hash == incoming['content_hash']
                 add('skill', code, incoming['label'], 'reuse' if same else 'update' if existing else 'new')
         else:
-            add('builtin_skill', code, code, 'reuse' if code in builtin_skills else 'missing')
+            if code == RETIRED_DIAGNOSTICS_SKILL_CODE:
+                add('builtin_skill', code, '智能体诊断', 'missing', reason='retired_builtin_skill')
+            else:
+                add('builtin_skill', code, code, 'reuse' if code in builtin_skills else 'missing')
     for incoming in package.ui:
         existing = packages.get(incoming.code)
         tools = [t for t in data[UiToolDefinition] if t.package_code == incoming.code]
@@ -162,7 +168,7 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     removed = []
     if target:
         removed.extend({'kind': 'capability', 'code': c, 'label': c, 'status': 'unlinked'} for c in canonical_tool_package_codes(target.capabilities) if c not in resulting_caps)
-        removed.extend({'kind': 'skill', 'code': c, 'label': c, 'status': 'unlinked'} for c in target.skills or [] if c not in resulting_skills)
+        removed.extend({'kind': 'skill', 'code': c, 'label': c, 'status': 'unlinked'} for c in active_skill_codes(target.skills) if c not in resulting_skills)
     return {'digest': digest({'package': package.digest, 'target': snapshot_hash(data),
                              'builtin': sorted(available | builtin_skills), 'mode': mode, 'target_agent_id': target_agent_id}),
             'manifest': package.manifest.model_dump(), 'agent': package.agent.model_dump(),
@@ -214,7 +220,7 @@ async def export_package(ctx, agent_id, headers):
         if effort and reference is not None:
             reference.update(model=model.model, protocol=reasoning_protocol(model, provider))
         agent = PackageAgent(name=row.name, prompt=row.prompt,
-                             capabilities=row.capabilities, skills=row.skills,
+                             capabilities=row.capabilities, skills=active_skill_codes(row.skills),
                              model_reference=reference, reasoning_effort=effort,
                              structured_output_enabled=bool(row.structured_output_enabled),
                              allow_text_output=bool(output_config.allow_text_output) if row.structured_output_enabled and output_config is not None else False,

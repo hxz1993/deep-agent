@@ -1,19 +1,25 @@
 ---
 name: deepfos-readonly-analysis
-description: Plan and verify read-only DeepFOS analysis with explicit member confirmation, safe tool discovery, precise slices, and evidence-backed results.
+description: 查询和核验 DeepFOS 平台内部数据与元素。遇到维度成员、财务模型、Cube、电子表格等 DeepFOS 对象的查询或变更请求，先加载本 Skill。访问 DeepFOS 内部数据时，无论使用哪个 MCP 或通过 PTC 调用，只执行无业务副作用的只读操作。用户确认不能把查询任务变成写入任务。
 ---
 
-# DeepFOS read-only analysis
+# DeepFOS元素查询
 
-Use this Skill for read-only DeepFOS questions that require platform, dimension, financial model, cube, or spreadsheet context.
+本 Skill 的范围由**数据和操作目标**决定。只要访问 DeepFOS 平台内部数据、元素定义、配置或状态，原生 DeepFOS MCP、其他 MCP 转接和 PTC（`run_code`）间接调用都遵守同一只读边界。优先使用 Agent 已关联、指向目标应用和空间的 DeepFOS MCP。根据工具所属服务、目标范围和实际用途确认来源。
 
-1. Restate the target metric, organization, period, scenario, version, and comparison basis.
-2. Use Context References as snapshots, not as permission or as an authoritative write scope.
-3. Discover only the tools needed for the current question.
-4. Resolve ambiguous members before querying facts; do not silently pick the first match.
-5. Keep Actual, Budget, Forecast, scenario, version, and currency slices explicit.
-6. Verify empty and zero results against member selection before interpreting them.
-7. Cite the queried slice and distinguish returned facts from inference.
-8. Do not create, save, refresh, upload, publish, synchronize, import, delete, or modify data.
+## 先判断请求会不会写入
 
-This Skill grants no tools. The Agent must separately be authorized for the required MCP ToolPackage.
+- 在查找或调用工具前，将请求拆成只读查询和可能改变状态的操作。仅执行语义明确、授权范围内且无业务副作用的查询。新增、更新或删除维度成员，保存或刷新业务对象，填数、导入、上传、发布和同步均属于写入。无法确认工具或参数是否只读时停止调用，说明缺口。
+- 纯写入请求直接说明当前只读范围和未执行的操作。混合请求可以完成其中独立的查询，并明确说明哪一步未执行。查询发现对象缺失或数据有误时，报告事实及建议，禁止顺手补建或纠正。用户确认、催促或要求试运行均不能扩大此范围。
+- 禁止为写入搜索、加载、调用或试探工具，也禁止借助其他 MCP、PTC、Python、其他 Skill 或 UI 工具绕过只读边界。工具可调用、用户有权限、上下文引用中带有对象 ID，都不能单独授权本任务写入。按最小必要范围取数和展示，禁止通过外部服务同步或转发 DeepFOS 内部数据。
+- Agent 如果另有明确配置的专用写入工作流，且当前请求明确指向该流程、操作也属于它的授权范围，可以按该流程独立处理。例如电子表格填报流程的已授权单元格写入。分析结果直接回写、通用维度成员维护以及分析后的补救动作均不得借此默认放行。
+
+**示例**　「在销售区域新增华南二部，我已确认」应答复当前只读、未新增。「先列出现有区域，再新增华南二部」只列出工具实际返回的区域，并说明未新增。
+
+## 执行只读查询
+
+1. 明确业务对象、目标指标和对比口径，确认组织、期间、场景、版本、科目、币种及其他必要维度。上下文引用（Context Reference）可提供当前页面或选区的快照。
+2. 按业务操作和对象查找所需的只读工具，优先使用目标 DeepFOS MCP 的对象描述、元数据、成员查询和事实查询。使用其他已授权的 MCP 读取同一平台时，先确认数据来源、应用与空间以及调用的只读性质。缺少所需工具或授权时，说明具体缺口。
+3. 只有对象标识或切片口径不明确时才查元数据。查询事实前先消除成员歧义，有准确 ID 就保留 ID，禁止默认选首项。将实际、预算、预测及其版本明确分开，按足够回答问题的最小切片查询。
+4. 核对行数、空值、零值、期间、单位和聚合层级。遇到空结果或零值时先确认成员选取与数据口径，禁止将缺失当作零。
+5. 回答时给出实际查询的切片、工具返回的事实、分析推断及未解决的歧义。必要时说明未执行的写入步骤。按任务需要选择文字或表格。

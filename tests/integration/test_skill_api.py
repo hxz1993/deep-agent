@@ -289,7 +289,7 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(listed.status_code, 200)
             self.assertEqual(
                 {item["code"] for item in listed.json()},
-                {"deepagent-diagnostics", "deepfos-readonly-analysis", "file-reading-verification", "example-skill"},
+                {"deepfos-readonly-analysis", "file-reading-verification", "example-skill"},
             )
             self.assertTrue(
                 all("script_execution_status" not in item for item in listed.json())
@@ -340,11 +340,11 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
                     "name": "skill-agent",
                     "model_id": model_id,
                     "prompt": "Use selected skills only when relevant.",
-                    "skills": ["example-skill", "deepagent-diagnostics"],
+                    "skills": ["example-skill", "deepagent-diagnostics", "deepfos-readonly-analysis"],
                 },
             )
             self.assertEqual(agent.status_code, 201, agent.text)
-            self.assertEqual(agent.json()["skills"], ["example-skill", "deepagent-diagnostics"])
+            self.assertEqual(agent.json()["skills"], ["example-skill", "deepfos-readonly-analysis"])
 
             conflict = await client.delete("/api/v1/skills/example-skill")
             self.assertEqual(conflict.status_code, 409)
@@ -442,10 +442,15 @@ class SkillApiTests(unittest.IsolatedAsyncioTestCase):
             headers=self.client_headers,
         ) as client:
             forbidden = await client.patch(
-                "/api/v1/skills/deepagent-diagnostics",
+                "/api/v1/skills/deepfos-readonly-analysis",
                 json={"label": "不能修改"},
             )
             self.assertEqual(forbidden.status_code, 403)
+            retired = await client.post(
+                "/api/v1/skills",
+                files={"file": ("retired.zip", skill_zip(name="deepagent-diagnostics"), "application/zip")},
+            )
+            self.assertEqual(retired.status_code, 409)
 
             installed = await client.post(
                 "/api/v1/skills",

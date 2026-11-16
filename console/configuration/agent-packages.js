@@ -231,6 +231,7 @@
     },
     resourceName(item) { return item.label || item.name || item.code || kindLabels[item.kind] || '资源'; },
     actionLabel(item, finished = false) {
+      if (item.reason === 'retired_builtin_skill') return '已退役';
       if (item.status === 'reuse' && ['mcp', 'builtin_tool', 'builtin_skill'].includes(item.kind)) return finished ? '已关联' : '自动关联';
       if (item.status === 'update' && item.kind === 'ui') return finished ? '已更新' : '更新';
       if (finished && ['new', 'update', 'unlinked', 'removed'].includes(item.status)) return { new: '已新建', update: '已覆盖', unlinked: '已取消关联', removed: '已取消关联' }[item.status];
@@ -242,7 +243,8 @@
         for (const item of items) {
           const notes = [];
           if (kind === 'agent') notes.push(this.operationMode === 'overwrite' ? '替换提示词与关联，保留会话及外部引用' : '安装提示词与关联配置');
-          if (item.status === 'missing') notes.push(item.kind === 'mcp'
+          if (item.reason === 'retired_builtin_skill') notes.push(finished ? '安装时已自动跳过。' : '安装时将自动跳过。');
+          else if (item.status === 'missing') notes.push(item.kind === 'mcp'
             ? '未找到同名 MCP；请在 MCP 中配置服务，再到 Agent 中关联，否则相关工具不可用。'
             : ['builtin_tool', 'builtin_skill'].includes(item.kind)
               ? '当前环境缺少该内置能力；请检查部署版本，补齐后在 Agent 中关联。'

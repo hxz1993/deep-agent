@@ -596,13 +596,7 @@ function init() {
     setComposerPlanExpanded(!el.composerPlan.classList.contains("open"));
   });
 
-  el.input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      onSend();
-    }
-  });
-  el.input.addEventListener("input", autoGrow);
+  bindComposerInput(el.input);
   el.attachBtn?.addEventListener("click", () => {
     // Keep the native picker in the user gesture; refresh limits before selection
     // validation without delaying the click until transient activation expires.
@@ -873,6 +867,21 @@ function bindSessionListFeedback() {
   list.addEventListener("touchend", () => { touchY = null; }, { passive: true });
   list.addEventListener("touchcancel", () => { touchY = null; }, { passive: true });
   new ResizeObserver(updateSessionListFooter).observe(list);
+}
+
+function bindComposerInput(input) {
+  let composing = false;
+  input.addEventListener("compositionstart", () => { composing = true; });
+  input.addEventListener("compositionend", () => { composing = false; });
+  input.addEventListener("keydown", (event) => {
+    // Safari can end composition before keydown and still report IME key code 229.
+    if (composing || event.isComposing || event.keyCode === 229 || event.key === "Process") return;
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      onSend();
+    }
+  });
+  input.addEventListener("input", autoGrow);
 }
 
 function autoGrow() {

@@ -116,12 +116,14 @@ Agent 创建/更新接口增加独立字段：
 
 ```json
 {
-  "skills": ["deepagent-diagnostics"]
+  "skills": ["deepfos-readonly-analysis"]
 }
 ```
 
 新建 Agent 默认 `[]`；更新不传时保持原值，显式 `null` 返回 422。Skill自身没有启停状态；是否
 参与运行只由Agent的`skills`关联决定。仍被 Agent 引用的上传 Skill不能删除。
+原内置 `deepagent-diagnostics` 已下架。旧 Agent 中的该引用在运行、配置回读和导出时忽略，
+旧 ZIP 仍可预检和安装，控制台会提示该项已退役并自动跳过。诊断方法见[诊断会话指南](diagnostic-sessions.md#排查清单)。
 
 ## 模型运行
 

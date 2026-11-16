@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationInfo, f
 from deep_agent.capabilities.codes import canonical_tool_package_codes
 from deep_agent.schemas.llm_model import LlmModelSummary
 from deep_agent.models.reasoning import saved_effort
+from deep_agent.skills.catalog import active_skill_codes
 from deep_agent.time import UtcDatetime
 
 if TYPE_CHECKING:
@@ -114,7 +115,7 @@ class AgentCreate(_RejectRemovedAgentFields):
         return (
             canonical_tool_package_codes(normalized)
             if info.field_name == "capabilities"
-            else normalized
+            else active_skill_codes(normalized)
         )
 
 
@@ -172,7 +173,7 @@ class AgentUpdate(_RejectRemovedAgentFields):
         return (
             canonical_tool_package_codes(normalized)
             if info.field_name == "capabilities"
-            else normalized
+            else active_skill_codes(normalized)
         )
 
 
@@ -218,7 +219,7 @@ class AgentResponse(BaseModel):
             model=LlmModelSummary.from_row(llm_model) if llm_model is not None else None,
             prompt=row.prompt,
             capabilities=canonical_tool_package_codes(row.capabilities),
-            skills=row.skills or [],
+            skills=active_skill_codes(row.skills),
             structured_output_enabled=bool(row.structured_output_enabled),
             allow_text_output=bool(row.allow_text_output),
             updated_by=row.updated_by,

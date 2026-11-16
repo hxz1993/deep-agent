@@ -144,6 +144,26 @@ class AgentPackageCrossVersionHttpTests(unittest.IsolatedAsyncioTestCase):
     def record(self, scenario, raw, **extra):
         self.evidence.append({"id": scenario, "zip_sha256": hashlib.sha256(raw).hexdigest(), **extra})
 
+    async def test_retired_diagnostics_from_old_service_installs_on_new_service(self):
+        retired, readonly = "deepagent-diagnostics", "deepfos-readonly-analysis"
+        source = await self.create(self.old, "historical diagnostics", skills=[retired, readonly])
+        old_zip = await self.export(self.old, source["id"])
+        self.assertEqual(archive.parse_package(old_zip).agent.skills, [retired, readonly])
+
+        created, preview = await self.install(self.new, old_zip, "legacy create")
+        self.assertEqual(created["skills"], [readonly])
+        self.assertEqual(preview["blocked"], [])
+        retired_row = next(row for row in preview["resources"] if row["code"] == retired)
+        self.assertEqual(retired_row["reason"], "retired_builtin_skill")
+
+        updated, _ = await self.install(self.new, old_zip, "legacy create", target=created["id"])
+        self.assertEqual(updated["id"], created["id"])
+        self.assertEqual(updated["skills"], [readonly])
+        new_zip = await self.export(self.new, updated["id"])
+        self.assertEqual(archive.parse_package(new_zip).agent.skills, [readonly])
+        reinstalled, _ = await self.install(self.old, new_zip, "new ZIP on old service")
+        self.assertEqual(reinstalled["skills"], [readonly])
+
     async def test_reasoning_packages_install_on_real_v01514_and_back(self):
         baseline = self.root / "old-v0.15.14"
         baseline.mkdir()

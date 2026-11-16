@@ -383,7 +383,7 @@ const skillsAdmin = {
       const label = { ready: "已就绪", syncing: "同步中", missing: "未加载", error: "加载失败" }[status];
       const count = (icon, value, title) => `<span title="${title}"><i data-lucide="${icon}"></i>${Number(value || 0)}</span>`;
       return `<tr data-skill-row="${escapeHtml(skill.code)}" tabindex="0" aria-label="查看 ${escapeHtml(skill.label)}">
-        <td><div class="skill-table-name"><button class="skill-name-button" type="button" data-open-skill="${escapeHtml(skill.code)}">${escapeHtml(skill.label)}</button>${skill.source === "builtin" ? '<span class="skill-source-label">内置</span>' : ""}</div><code class="skill-table-code">${escapeHtml(skill.code)}</code></td>
+        <td><div class="skill-table-name">${skill.source === "builtin" ? '<span class="skill-source-label">内置</span>' : ""}<button class="skill-name-button" type="button" data-open-skill="${escapeHtml(skill.code)}">${escapeHtml(skill.label)}</button></div><code class="skill-table-code">${escapeHtml(skill.code)}</code></td>
         <td class="skill-version-column">${escapeHtml(skill.version || "未声明")}</td>${this.appPath ? "" : `<td>${this.renderReferences(skill)}</td>`}
         <td><span class="skill-status-tag runtime-${status}" title="${escapeHtml(runtime.label + '：' + runtime.detail)}">${label}</span></td>
         <td><div class="skill-resource-count">${count("book-open-text", skill.reference_count, "References")}${count("paperclip", skill.asset_count, "Assets")}${count("terminal-square", skill.script_count, "脚本")}</div></td>

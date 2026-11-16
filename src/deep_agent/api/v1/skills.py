@@ -38,7 +38,7 @@ from deep_agent.schemas.skill import (
     SkillSummary,
     SkillUpdate,
 )
-from deep_agent.skills.catalog import SkillDescriptor, get_builtin_skill, list_builtin_skills
+from deep_agent.skills.catalog import RETIRED_DIAGNOSTICS_SKILL_CODE, SkillDescriptor, get_builtin_skill, list_builtin_skills
 from deep_agent.skills.package import MAX_ZIP_BYTES, ParsedSkillPackage, SkillPackageError, parse_skill_zip
 from deep_agent.skills.resource_reader import (
     SkillResourceReadError,
@@ -377,6 +377,11 @@ async def install_skill(
     parsed: ParsedSkillPackage | None = None
     try:
         parsed = parse_skill_zip(raw)
+        if scope is None and parsed.code == RETIRED_DIAGNOSTICS_SKILL_CODE:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Skill code is retired: {parsed.code}",
+            )
         if scope is None and (
             get_builtin_skill(parsed.code) is not None or await ctx.stores.skill_package.get_by_code(parsed.code)
         ):

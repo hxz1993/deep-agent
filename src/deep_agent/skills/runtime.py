@@ -25,7 +25,7 @@ from deep_agent.integrations.app_scope import GENERAL_SKILL_SCOPE, app_skill_sto
 
 from deep_agent.db.models import SkillPackage
 from deep_agent.db.stores.bundle import DataStores
-from deep_agent.skills.catalog import BUILTIN_SKILLS_ROOT, SkillDescriptor, get_builtin_skill, list_builtin_skills
+from deep_agent.skills.catalog import BUILTIN_SKILLS_ROOT, SkillDescriptor, active_skill_codes, get_builtin_skill, list_builtin_skills
 from deep_agent.skills.package import ParsedSkillPackage, SkillPackageError, parse_skill_zip
 from deep_agent.files.storage import FileStore, PlatformFileStore
 from deep_agent.time import ensure_utc
@@ -567,7 +567,7 @@ def _resolved_builtin(item: SkillDescriptor) -> ResolvedSkill:
 async def validate_skill_codes(stores: DataStores, codes: list[str]) -> list[str]:
     invalid: list[str] = []
     seen: set[str] = set()
-    for code in codes:
+    for code in active_skill_codes(codes):
         if code in seen:
             invalid.append(code)
             continue
@@ -598,7 +598,7 @@ async def resolve_skills_for_run(
         missing = set(app_skill_codes) - {skill_package_code(row) for row in rows}
         for name in sorted(missing):
             scoped[app_skill_storage_key(app_id, name)] = (f"app:{app_id}:{name}", "")
-    codes = [*codes, *scoped]
+    codes = [*active_skill_codes(codes), *scoped]
     if not codes:
         return ResolvedSkills(configured=(), items=(), unavailable=(), capability=None)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +9,12 @@ from deep_agent.skills.package import ParsedSkillPackage, inspect_skill_director
 
 
 BUILTIN_SKILLS_ROOT = Path(__file__).resolve().parents[1] / "builtin_skills"
+RETIRED_DIAGNOSTICS_SKILL_CODE = "deepagent-diagnostics"
+
+
+def active_skill_codes(codes: Iterable[str] | None) -> list[str]:
+    """Drop the retired builtin association without rewriting stored records."""
+    return [code for code in codes or () if code != RETIRED_DIAGNOSTICS_SKILL_CODE]
 
 
 @dataclass(frozen=True)

@@ -161,12 +161,9 @@ MIME和后缀派生读取模式，v0.3.20已安装的XLSX无需重装。同一Ru
 Builtin Skill 位于 `src/deep_agent/builtin_skills/`，随代码发布、不写数据库、在 `/skills` 与上传包合并
 展示且只读：
 
-- `deepagent-diagnostics`：排查会话、模型、工具、压缩和取消；不读取服务器日志、不执行 Shell。
-- `deepfos-readonly-analysis`：指导 DeepFOS 只读问数、成员确认和结果核验；仍需 Agent 独立关联
-  对应 MCP ToolPackage。
-
-两个包都包含 SKILL.md、References 与 JSON Asset，用于回归名称目录、正文加载、资源分页、MCP
-授权隔离、Cancel 和压缩。
+- `deepfos-readonly-analysis`：只读边界、工具选择、成员确认和结果核验集中在 `SKILL.md`。所需 MCP
+  ToolPackage 由 Agent 单独关联，写权限由工具配置和平台授权决定。
+- `file-reading-verification`：指导读取和核验附件，表格核验的详细规则保留在参考资料中。
 
 ## 7. API 与 Console
 

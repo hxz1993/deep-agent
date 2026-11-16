@@ -13,6 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from deep_agent.agent_packages import archive
 from deep_agent.api.v1 import api_router
 from deep_agent.core.context import AppContext, init_context, reset_context
+from deep_agent.db.models import Agent
 from deep_agent.files.storage import LocalFileStore
 from deep_agent.security import ConsoleAdminAuthorizer
 from deep_agent.skills.runtime import SkillRuntimeLibrary
@@ -104,6 +105,57 @@ class AgentPackagesApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again.status_code, 201, again.text)
         self.assertNotEqual(again.json()['agent']['id'], body['id'])
         self.assertEqual(len(await self.stores.agent.list_all()), 2)
+
+    async def test_retired_diagnostics_reference_is_compatible_with_export_and_install(self):
+        retired, readonly = 'deepagent-diagnostics', 'deepfos-readonly-analysis'
+        created = await self.client.post('/api/v1/agents', headers=self.headers,
+            json={'name': '历史配置', 'prompt': '测试', 'skills': [readonly]})
+        self.assertEqual(created.status_code, 201, created.text)
+        agent_id = created.json()['id']
+        agent_path = f'/api/v1/agents/{agent_id}'
+        async with self.stores.agent._write() as db:
+            row = await db.get(Agent, agent_id)
+            row.skills = [retired, readonly]
+
+        config = await self.client.get(agent_path, headers=self.headers)
+        self.assertEqual(config.json()['skills'], [readonly])
+        refs = await self.client.get('/api/v1/skills/references/agents', headers=self.headers)
+        self.assertEqual(refs.json()[0]['skills'], [readonly])
+        exported = await self.client.get(f'{agent_path}/export', headers=self.headers)
+        self.assertEqual(exported.status_code, 200, exported.text[:100])
+        self.assertEqual(archive.parse_package(exported.content).agent.skills, [readonly])
+        self.assertEqual((await self.stores.agent.get_by_id(agent_id)).skills, [retired, readonly])
+
+        old_zip = archive.build_zip(package_files(agent_changes={'skills': [retired, readonly]}))
+        for mode in ('create', 'overwrite'):
+            form = {'mode': mode}
+            if mode == 'overwrite':
+                form['target_agent_id'] = agent_id
+            preview = await self.preview(data=form, files=self.upload(old_zip))
+            self.assertEqual(preview['blocked'], [])
+            self.assertEqual({row['code']: row['status'] for row in preview['resources']},
+                             {retired: 'missing', readonly: 'reuse'})
+            self.assertEqual(next(row for row in preview['resources'] if row['code'] == retired)['reason'],
+                             'retired_builtin_skill')
+            self.assertFalse(any(row['code'] == retired for row in preview['removed_associations']))
+            options = {**form, 'digest': preview['digest'], 'model_id': None,
+                       'name': '旧包新装' if mode == 'create' else '历史配置'}
+            installed = await self.client.post('/api/v1/agent-packages/install', headers=self.headers,
+                data={'options': json.dumps(options)}, files=self.upload(old_zip))
+            self.assertEqual(installed.status_code, 201, installed.text)
+            self.assertEqual(installed.json()['agent']['skills'], [readonly])
+            self.assertEqual(installed.json()['missing'][0]['reason'], 'retired_builtin_skill')
+
+        updated = await self.client.patch(agent_path, headers=self.headers,
+            json={'skills': [readonly, retired]})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual((await self.stores.agent.get_by_id(agent_id)).skills, [readonly])
+
+        async with self.stores.agent._write() as db:
+            row = await db.get(Agent, agent_id)
+            row.skills = ['unknown-missing-skill']
+        unknown_export = await self.client.get(f'{agent_path}/export', headers=self.headers)
+        self.assertEqual(unknown_export.status_code, 422)
 
     async def test_builtin_directory_listing_preview_and_install_use_same_pipeline(self):
         empty = await self.client.get('/api/v1/agent-packages', headers=self.headers)

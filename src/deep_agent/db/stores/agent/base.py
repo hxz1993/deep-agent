@@ -13,6 +13,7 @@ from deep_agent.db.reference_integrity import ReferenceConflict, lock_reference,
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.models.reasoning import DEFAULT_EFFORT, bound_agent_effort
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate, AgentOutputConfig as OutputConfig
+from deep_agent.skills.catalog import active_skill_codes
 
 
 class InvalidAgentOutputConfig(ValueError):
@@ -80,7 +81,7 @@ class AgentStoreBase(SessionBoundMixin):
                 {
                     "id": row.id,
                     "name": row.name,
-                    "skills": list(dict.fromkeys(
+                    "skills": active_skill_codes(dict.fromkeys(
                         code for code in (row.skills if isinstance(row.skills, list) else [])
                         if isinstance(code, str) and code.strip()
                     )),

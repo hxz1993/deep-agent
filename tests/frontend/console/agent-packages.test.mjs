@@ -54,6 +54,14 @@ test('共享覆盖需一次确认，缺失仅提示，blocked阻断下一步',as
  await h.admin.next();assert.equal(installed,false);assert.match(h.node('agentPackageStatus').textContent,/确认共享/);h.admin.sharedAcknowledged=true;
  await h.admin.next();assert.equal(installed,true);installed=false;data.blocked=['无法写入'];h.admin.render();assert.equal(h.node('agentPackageNextBtn').disabled,true);await h.admin.next();assert.equal(installed,false);
 });
+test('已退役的内置 Skill 在预检和结果中提示跳过', () => {
+  const { admin } = harness();
+  const retired = { kind: 'builtin_skill', label: '智能体诊断', status: 'missing', reason: 'retired_builtin_skill' };
+  const preview = admin.renderResources([retired]);
+  assert.match(preview, /智能体诊断.*已退役.*安装时将自动跳过/);
+  assert.doesNotMatch(preview, /补齐/);
+  assert.match(admin.renderResources([retired], true), /安装时已自动跳过/);
+});
 test('关闭和来源切换中止预检并忽略迟到结果',async()=>{
  const d=deferred(),h=harness(()=>d.promise);upload(h);const pending=h.admin.preflight();
  const signal=h.requests[0].signal;h.admin.close();assert.equal(signal.aborted,true);d.resolve(response(fixture()));await pending;

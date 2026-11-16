@@ -42,7 +42,7 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_harness_progressively_loads_skill_body(self) -> None:
         resolved = await resolve_skills_for_run(
             self.stores,
-            ["deepagent-diagnostics"],
+            ["deepagent-diagnostics", "deepfos-readonly-analysis"],
             runtime=self.runtime,
         )
         seen_instructions: list[str] = []
@@ -59,12 +59,12 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     parts=[
                         ToolCallPart(
                             "load_capability",
-                            {"id": "deepagent-diagnostics"},
+                            {"id": "deepfos-readonly-analysis"},
                             "load-skill-1",
                         )
                     ]
                 )
-            return ModelResponse(parts=[TextPart(content="diagnosed")])
+            return ModelResponse(parts=[TextPart(content="queried")])
 
         agent = Agent(
             FunctionModel(respond),
@@ -85,12 +85,13 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.agent.title_generator.generate_title",
             new=AsyncMock(return_value=None),
         ):
-            result = await runner.run("session", "Diagnose the session", deps)
+            result = await runner.run("session", "只读查询成本中心成员", deps)
 
-        self.assertEqual(result["output"], "diagnosed")
-        self.assertIn("deepagent-diagnostics", seen_instructions[0])
-        self.assertNotIn("Identify the exact Agent", seen_instructions[0])
-        self.assertIn("Identify the exact Agent", seen_messages[1])
+        self.assertEqual(result["output"], "queried")
+        self.assertIn("deepfos-readonly-analysis", seen_instructions[0])
+        self.assertNotIn("deepagent-diagnostics", seen_instructions[0])
+        self.assertNotIn("先判断请求会不会写入", seen_instructions[0])
+        self.assertIn("先判断请求会不会写入", seen_messages[1])
         call_parts = [
             part
             for message in await self.stores.coordinator.get_history(
@@ -108,12 +109,13 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
         boundaries = _safe_boundaries(history)
         self.assertEqual(boundaries[-1], len(history))
         self.assertLess(len(boundaries), len(history) + 1)
-        self.assertEqual(result["context"]["skills"]["loaded"], ["deepagent-diagnostics"])
+        self.assertEqual(result["context"]["skills"]["loaded"], ["deepfos-readonly-analysis"])
+        self.assertEqual(result["context"]["skills"]["unavailable"], [])
 
     async def test_skill_resources_are_authorized_and_paginated(self) -> None:
         resolved = await resolve_skills_for_run(
             self.stores,
-            ["deepagent-diagnostics"],
+            ["file-reading-verification"],
             runtime=self.runtime,
         )
         resource_toolset = build_skill_resource_toolset(resolved.resources)
@@ -129,7 +131,7 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     parts=[
                         ToolCallPart(
                             "list_skill_resources",
-                            {"skill_code": "deepagent-diagnostics"},
+                            {"skill_code": "file-reading-verification"},
                             "list-1",
                         )
                     ]
@@ -142,8 +144,8 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
                             {
                                 "resource": {
                                     "type": "skill",
-                                    "skill_code": "deepagent-diagnostics",
-                                    "path": "references/diagnostic-checklist.md",
+                                    "skill_code": "file-reading-verification",
+                                    "path": "references/spreadsheet-verification.md",
                                 },
                                 "offset": 1,
                                 "limit": 32,
@@ -176,9 +178,9 @@ class SkillRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             await validate_skill_codes(
                 self.stores,
-                ["deepagent-diagnostics", "deepagent-diagnostics"],
+                ["deepfos-readonly-analysis", "deepfos-readonly-analysis"],
             ),
-            ["deepagent-diagnostics"],
+            ["deepfos-readonly-analysis"],
         )
 
     async def test_file_verification_skill_is_explicit_and_grants_no_scripts(self) -> None:

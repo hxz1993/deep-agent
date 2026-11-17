@@ -80,6 +80,8 @@ from deep_agent.agent.request_budget import TurnRequestBudget, restored_request_
 from deep_agent.agent.observability import (
     cache_usage_available,
     log_event,
+    log_run_phase,
+    observe_run_phase,
     run_metrics,
     usage_dict,
 )
@@ -575,12 +577,14 @@ class AgentRunner:
         leaves the legacy path and all pre-accept failures unchanged, and does
         not suppress transport/task cancellation.
         """
-        try:
-            yield
-        except Exception as exc:
-            if deps.output_state is None or deps.output_state.accepted is None:
-                raise
-            self._log_post_accept_failure(deps, stage, exc)
+        with observe_run_phase(f"completion_{stage}", session_id=deps.session_id,
+                               run_id=deps.run_id, agent_id=deps.agent_id, agent_name=deps.agent_name):
+            try:
+                yield
+            except Exception as exc:
+                if deps.output_state is None or deps.output_state.accepted is None:
+                    raise
+                self._log_post_accept_failure(deps, stage, exc)
 
     @staticmethod
     def _log_post_accept_failure(deps: AgentDeps, stage: str, exc: Exception):
@@ -2257,12 +2261,15 @@ class AgentRunner:
         persister: EventPersister,
         active_run: ActiveRun | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        runner_entered_at = time.perf_counter()
         deps.agent_name = self.agent_name
         self._start_run_identity(
             session_id,
             deps,
             run_id=active_run.run_id if active_run is not None else None,
         )
+        timing_ids = {"session_id": session_id, "run_id": deps.run_id,
+                      "agent_id": deps.agent_id, "agent_name": deps.agent_name}
         await validate_deferred_results(self.store, session_id, deferred_tool_results)
         await self._ensure_turn_identity(
             session_id, deps, message=message, attachments=attachments,
@@ -2272,6 +2279,7 @@ class AgentRunner:
         self._prepare_skill_runtime(deps)
         started_at = time.perf_counter()
         run_event = await self._start_run_event(session_id, deps, mode="stream")
+        log_run_phase("runner_initialization", runner_entered_at, **timing_ids)
         log_event(
             "agent_run_started",
             conversation_id=deps.conversation_id,
@@ -2292,23 +2300,27 @@ class AgentRunner:
         title_task: asyncio.Task[None] | None = None
         stream_snapshot = _StreamRunSnapshot()
         self._set_tool_discovery_inputs(deps, message, context_refs)
+        session_lock_started_at = time.perf_counter()
         async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id), execution_context_scope(deps):
+            log_run_phase("wait_session_lock", session_lock_started_at, **timing_ids)
             # Recheck after waiting: another request may have consumed the UI result.
             # This rejection must stay outside the execution-error persistence block.
             await validate_deferred_results(self.store, session_id, deferred_tool_results)
             try:
-                prepared = await self._prepare_history(
-                    session_id,
-                    message,
-                    deps,
-                    session_title=session_title,
-                    attachments=attachments,
-                    context_refs=context_refs,
-                    branch_from=branch_from,
-                    deferred_tool_results=deferred_tool_results,
-                    session_event_queue=session_events,
-                )
-                await self._prepare_request_budget(session_id, deps)
+                with observe_run_phase("prepare_history", **timing_ids):
+                    prepared = await self._prepare_history(
+                        session_id,
+                        message,
+                        deps,
+                        session_title=session_title,
+                        attachments=attachments,
+                        context_refs=context_refs,
+                        branch_from=branch_from,
+                        deferred_tool_results=deferred_tool_results,
+                        session_event_queue=session_events,
+                    )
+                with observe_run_phase("prepare_request_budget", **timing_ids):
+                    await self._prepare_request_budget(session_id, deps)
                 if deps.output_state is not None:
                     deps.output_state.queue = session_events
             except BaseException as exc:
@@ -2347,15 +2359,16 @@ class AgentRunner:
             )
             self._bind_tool_output_store(deps, prepared.raw)
             try:
-                llm_history, user_prompt = await self._llm_inputs(
-                    prepared.projected,
-                    message,
-                    attachments,
-                    context_refs,
-                    deps,
-                    pre_persisted_user=prepared.pre_persisted_user,
-                    deferred_tool_results=deferred_tool_results,
-                )
+                with observe_run_phase("prepare_model_input", **timing_ids):
+                    llm_history, user_prompt = await self._llm_inputs(
+                        prepared.projected,
+                        message,
+                        attachments,
+                        context_refs,
+                        deps,
+                        pre_persisted_user=prepared.pre_persisted_user,
+                        deferred_tool_results=deferred_tool_results,
+                    )
             except Exception as exc:  # attachment/media validation before model start
                 self._log_run_terminal(run_event, status="failed", started_at=started_at, error=exc, phase="input")
                 logger.warning(
@@ -2412,6 +2425,7 @@ class AgentRunner:
                     )
                 model_history = llm_history
                 model_usage = RunUsage()
+                seen_sdk_phases: set[str] = set()
                 provider_retry_safe = True
                 progress = (
                     StreamMessagePersistenceCapability(
@@ -2457,9 +2471,20 @@ class AgentRunner:
                                     continue
                                 if isinstance(event, AgentRunResultEvent):
                                     result = event.result
+                                    log_run_phase("sdk_result_ready", runner_entered_at, **timing_ids,
+                                                  request_index=model_usage.requests)
                                     continue
                                 await self._capture_planning_result(event, deps)
                                 mapped = events.map_event(event)
+                                if mapped is not None:
+                                    kind = mapped.get("type")
+                                    if kind not in seen_sdk_phases and (
+                                        kind == "tool_call"
+                                        or (kind in {"text", "thinking"} and mapped.get("delta", "").strip())
+                                    ):
+                                        seen_sdk_phases.add(kind)
+                                        log_run_phase(f"sdk_first_{kind}", runner_entered_at, **timing_ids,
+                                                      request_index=model_usage.requests)
                                 if (deps.output_state is not None and mapped is not None
                                         and mapped.get("type") == "text"):
                                     # Mixed-mode prose is released via the status
@@ -2913,12 +2938,13 @@ class AgentRunner:
             if result is not None and isinstance(result.output, DeferredToolRequests)
             else "completed"
         )
-        updated_run_event = await self._finish_run_event(
-            run_event,
-            status=terminal_status,
-            started_at=started_at,
-            usage=result.usage if result is not None else None,
-        )
+        with observe_run_phase("finish_run_event", **timing_ids):
+            updated_run_event = await self._finish_run_event(
+                run_event,
+                status=terminal_status,
+                started_at=started_at,
+                usage=result.usage if result is not None else None,
+            )
         if updated_run_event is not None:
             yield {
                 "type": "session_event_updated",

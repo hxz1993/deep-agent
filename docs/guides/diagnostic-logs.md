@@ -188,8 +188,18 @@ SDK 流式请求延迟到消费者任务执行，因此通过透明 `WrapperMode
 收到传输字节不等于模型已生成有效内容或 Token；例如只有 SSE 心跳也会增长。SDK 在传输层之外的
 JSON/SSE 解析失败可能仅表现为 `closed`，需结合模型请求失败事件。HTTP 200 头后零字节等待则能与
 持续有字节但没有模型事件的情况分开；旧版本日志不能补出这些事实。
+
 回归：`test_model_api_stream_diagnostics.py` 使用真实 HTTPX/OpenAI SDK 验证无预读、周期快照、
 输出/请求体等价、取消、读取/解析/关闭异常及坏日志出口，不用线上模型请求代替契约测试。
+
+### 首字与工具轮次之间的等待
+
+用 `run_id` 关联同一次执行，结合 `request_index`、调用 ID 和时间戳还原模型与工具的起止及中间等待。
+
+- `agent_run_phase` 的 `stream_*`、`prepare_*` 阶段用于拆分 HTTP 请求进入路由后的请求体校验及依赖准备、会话与应用解析、Runner 构建、历史和输入准备。`model_node_entered`、`tool_node_entered` 是节点时间点，`tool_validate` 记录工具参数处理的耗时。
+- `sdk_first_thinking`／`sdk_first_text`／`sdk_first_tool_call` 是 Runner 看到首个非空思考／正文或首个工具调用的时间点，`sse_first_*` 是 HTTP 层准备发出相应事件的时间点。两组累计值分别从 Runner 和 HTTP 路由入口起算，对照时使用日志时间戳。供应商 `model_api_stream_first_byte` 只代表传输层首包，浏览器收到和渲染首字还需客户端取证。
+- `message_persistence_timing` 按触发 Hook 记录等待写锁、组装消息、存储事务和发布事件的耗时。SSE 工具调用与结果写入用 `phase=tool_call/tool_result` 和 `tool_call_id` 关联。`skipped` 表示本次合并跳过写入。与模型、工具执行的并行区间按时间线核对，避免重复加总。
+- `sdk_result_ready`、`completion_*`、`finish_run_event`、`sse_first_final` 和 `agent_stream_closed` 用于拆分生成结束后的历史保存、会话收尾、最终帧准备和连接关闭。
 
 统一入口是 `deep_agent.diagnostics.emit`；Agent 代码可沿用 `agent.observability.log_event`。
 先在 `diagnostics/schema.py` 注册稳定事件名与兜底中文摘要，通过 `diagnostics/messages.py` 从已校验字段生成可读正文，再提交白名单中的标识、数值、阶段和错误分类；未知字段直接丢弃。

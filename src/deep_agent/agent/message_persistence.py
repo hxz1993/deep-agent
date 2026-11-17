@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterable
 from contextvars import ContextVar
 from copy import deepcopy
@@ -277,11 +278,20 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             return None
         return digest.digest()
 
-    async def _flush(self, ctx: RunContext[AgentDeps], *, hook: str = "unknown") -> None:
+    async def _flush(
+        self, ctx: RunContext[AgentDeps], *, hook: str = "unknown",
+        tool_call_id: str | None = None, phase: str | None = None,
+    ) -> None:
+        started_at = time.perf_counter()
         async with self._write_lock:
             if self.persistence_error is not None:
                 raise self.persistence_error
             deps = ctx.deps
+            locked_at = time.perf_counter()
+            assembled_at = None
+            transaction_ended_at = None
+            committed_at = None
+            outcome = "interrupted"
             messages = []
             write_stage = "assemble"
             try:
@@ -298,18 +308,25 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                     if self._committed_projection is None:
                         self._committed_projection = self._projection(self.messages)
                     if projection is not None and projection == self._committed_projection:
+                        outcome = "skipped"
                         return
                 write_stage = "append"
-                async with asyncio.timeout(10):
-                    rows = await self.store.append_message_parts(
-                        deps.session_id, agent_id=deps.agent_id, user_id=deps.user,
-                        app_id=deps.app_id, space_id=deps.space_id,
-                        turn_id=deps.turn_id, run_id=deps.run_id,
-                        messages=public_tool_messages(messages, deps.tool_names),
-                        first_message_ordinal=1 if self.skip_user_prompt else 0,
-                        usage_model_id=self.model_name,
-                        usage_provider_id=self.provider_id,
-                    )
+                try:
+                    async with asyncio.timeout(10):
+                        messages_to_write = public_tool_messages(messages, deps.tool_names)
+                        assembled_at = time.perf_counter()
+                        rows = await self.store.append_message_parts(
+                            deps.session_id, agent_id=deps.agent_id, user_id=deps.user,
+                            app_id=deps.app_id, space_id=deps.space_id,
+                            turn_id=deps.turn_id, run_id=deps.run_id,
+                            messages=messages_to_write,
+                            first_message_ordinal=1 if self.skip_user_prompt else 0,
+                            usage_model_id=self.model_name,
+                            usage_provider_id=self.provider_id,
+                        )
+                finally:
+                    transaction_ended_at = time.perf_counter()
+                committed_at = transaction_ended_at
                 self.messages = messages
                 self._committed_scope = scope
                 self._committed_projection = projection
@@ -320,7 +337,9 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                             "type": "session_event_appended", "persisted": True,
                             "event": row.public_dict(),
                         })
+                outcome = "completed"
             except Exception as exc:
+                outcome = "failed"
                 log_event("message_persistence_failed", session_id=deps.session_id,
                           run_id=deps.run_id, agent_id=deps.agent_id,
                           phase="incremental", error_type=type(exc).__name__,
@@ -330,6 +349,20 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                           **persistence_failure_fields(exc, store=self.store, messages=messages, hook=hook))
                 self.persistence_error = MessagePersistenceError("Unable to persist completed message")
                 raise self.persistence_error from exc
+            finally:
+                ended_at = time.perf_counter()
+                log_event(
+                    "message_persistence_timing", session_id=deps.session_id, run_id=deps.run_id,
+                    agent_id=deps.agent_id, agent_name=getattr(deps, "agent_name", None),
+                    request_index=getattr(ctx, "run_step", None), write_hook=hook, status=outcome,
+                    tool_call_id=tool_call_id, phase=phase,
+                    duration_ms=round((ended_at - started_at) * 1000),
+                    lock_wait_ms=round((locked_at - started_at) * 1000),
+                    assemble_ms=round(((assembled_at or ended_at) - locked_at) * 1000),
+                    transaction_ms=(round((transaction_ended_at - assembled_at) * 1000)
+                                    if transaction_ended_at is not None and assembled_at is not None else None),
+                    publish_ms=round((ended_at - committed_at) * 1000) if committed_at is not None else None,
+                )
 
     async def _save(self, ctx: RunContext[AgentDeps], *, hook: str = "unknown") -> None:
         await self._flush(ctx, hook=hook)
@@ -456,11 +489,13 @@ class StreamMessagePersistenceCapability(MessagePersistenceCapability):
             async for event in stream:
                 if isinstance(event, FunctionToolCallEvent) and event.args_valid:
                     self._accept(ctx, event.part)
-                    await self._save(ctx, hook="wrap_run_event_stream")
+                    await self._flush(ctx, hook="wrap_run_event_stream", phase="tool_call",
+                                      tool_call_id=event.part.tool_call_id)
                 elif isinstance(event, FunctionToolResultEvent):
                     await self._capture_plan_result(ctx, event.part)
                     self._results[event.part.tool_call_id] = deepcopy(event.part)
-                    await self._save(ctx, hook="wrap_run_event_stream")
+                    await self._flush(ctx, hook="wrap_run_event_stream", phase="tool_result",
+                                      tool_call_id=event.part.tool_call_id)
                 yield event
             await self._flush(ctx, hook="stream_end")
         finally:

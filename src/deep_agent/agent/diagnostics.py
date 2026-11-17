@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Any
 
-from pydantic_ai import RunContext, ToolReturn, ToolDenied
+from pydantic_ai import CallToolsNode, ModelRequestNode, RunContext, ToolReturn, ToolDenied
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import ApprovalRequired, CallDeferred, ModelRetry, ToolRetryError
 
@@ -143,6 +143,20 @@ class RuntimeDiagnostics(AbstractCapability[AgentDeps]):
             self._emit("model_request_completed", **fields, **extra,
                        duration_ms=duration_ms)
             return response
+
+    async def before_node_run(self, ctx, *, node):
+        if isinstance(node, (ModelRequestNode, CallToolsNode)):
+            phase = "model_node_entered" if isinstance(node, ModelRequestNode) else "tool_node_entered"
+            self._emit("agent_run_phase", **self._fields(ctx), phase=phase)
+        return node
+
+    async def wrap_tool_validate(self, ctx, *, call, tool_def, args, handler):
+        started_at = self._clock()
+        try:
+            return await handler(args)
+        finally:
+            self._emit("agent_run_phase", **self._fields(ctx), phase="tool_validate",
+                       tool=call.tool_name, tool_call_id=call.tool_call_id, duration_ms=self._duration(started_at))
 
     async def wrap_tool_execute(self, ctx, *, call, tool_def, args, handler):
         fields = self._fields(ctx)

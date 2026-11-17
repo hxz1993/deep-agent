@@ -42,6 +42,8 @@ EVENTS = {
     "agent_cancel_observed": "执行取消来源已记录",
     "agent_cancel_api_received": "收到停止请求",
     "agent_stream_closed": "会话发送连接已结束",
+    "agent_run_phase": "Agent 执行阶段耗时",
+    "message_persistence_timing": "会话消息持久化耗时",
     "agent_run_pending": "执行等待人工操作", "message_persistence_failed": "会话内容保存失败",
     "output_post_accept_failed": "输出已保存，辅助收尾失败",
     "manual_compaction_started": "上下文压缩开始", "manual_compaction_completed": "上下文压缩结束",
@@ -150,10 +152,11 @@ PERSISTENCE_NUMBER_FIELDS = frozenset({
     "stored_part_count", "incoming_part_count", "database_error_code",
     "message_identity_merges", "response_id_mismatches",
 })
+PERSISTENCE_TIMING_FIELDS = frozenset({"lock_wait_ms", "assemble_ms", "transaction_ms", "publish_ms"})
 
 
 def _persistence_fields(fields: dict, result: dict) -> None:
-    """Failure-only vocabulary; no arbitrary SQL, exception or payload text."""
+    """Allowlisted persistence facts without SQL, exception or payload text."""
     choices = {
         "persistence_reason": {"immutable_part_conflict", "database_integrity", "database_operational",
                                "database_data", "database_driver", "timeout", "invalid_value", "unexpected"},
@@ -161,7 +164,7 @@ def _persistence_fields(fields: dict, result: dict) -> None:
         "write_stage": {"assemble", "append", "publish"},
         "write_hook": {"unknown", "_prepare_model_node", "after_model_request", "after_node_run",
                        "before_tool_execute", "wrap_tool_execute", "after_tool_execute",
-                       "wrap_run_event_stream", "terminal", "status_finalization", "event_worker"},
+                       "wrap_run_event_stream", "stream_end", "terminal", "status_finalization", "event_worker"},
         "conflict_field": {"part_kind", "content", "args", "tool_name", "tool_call_id", "tool_kind",
                            "metadata", "provider_details", "id", "signature", "provider_name", "outcome",
                            "tools_added", "tools_removed", "other", "parts_count", "metadata.deepagent_timing",
@@ -301,6 +304,8 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
         if type(value) is str and TOKEN.fullmatch(value) and "://" not in value:
             result[name] = value
     event_numbers = ADAPTATION_NUMBER_FIELDS if adapting else LAYOUT_NUMBER_FIELDS if layout else BUNDLE_NUMBER_FIELDS if bundle else set()
+    if event == "message_persistence_timing":
+        event_numbers = PERSISTENCE_TIMING_FIELDS
     for name in NUMBER_FIELDS | event_numbers:
         value = fields.get(name)
         if type(value) in (int, float) and 0 <= value <= 10**15 and math.isfinite(value):
@@ -310,7 +315,7 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     if type(name) is str and re.fullmatch(r"[\w .:/()\-|\\]{1,100}", name) and "://" not in name:
         result["agent_name"] = name
     _model_api_fields(fields, result)
-    if event == "message_persistence_failed":
+    if event in {"message_persistence_failed", "message_persistence_timing"}:
         _persistence_fields(fields, result)
     origin = _safe_model_origin(fields.get("target_origin"))
     if origin is not None:

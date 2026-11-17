@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelMessage
 from pydantic_ai.usage import UsageLimits
 
-from deep_agent.agent.context.budget import OutputTokenSample
+from deep_agent.agent.context.budget import OutputTokenSample, recent_output_token_samples
 from deep_agent.agent.context.estimator import TokenEstimator
 
 
@@ -78,6 +79,7 @@ class ContextRunState:
     usage_limits: UsageLimits | None = None
     event_queue: asyncio.Queue[dict[str, Any]] | None = None
     refresh_raw_history: Callable[[list[ModelMessage] | None], Awaitable[list[ModelMessage]]] | None = None
+    checkpoint_history: Callable[[RunContext[Any]], Awaitable[None]] | None = field(default=None, repr=False)
     output_samples: list[OutputTokenSample] = field(default_factory=list)
     telemetry: CompactionTelemetry = field(default_factory=CompactionTelemetry)
     last_budget: Any | None = None
@@ -103,6 +105,14 @@ class ContextRunState:
     finish_compaction_event: Callable[[str, str | None], Awaitable[Any]] | None = field(
         default=None, repr=False
     )
+
+    def __post_init__(self) -> None:
+        # A compaction refresh can reload responses already sampled in this Run.
+        # Seed once from the admitted history and keep subsequent samples in memory.
+        self.output_samples = [
+            *recent_output_token_samples(self.raw_history, estimator=self.estimator),
+            *self.output_samples,
+        ][-8:]
 
     async def begin_compaction(self, trigger: str) -> None:
         # These describe one attempt; counters and usage calibration remain run-wide.

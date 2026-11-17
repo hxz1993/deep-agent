@@ -104,8 +104,10 @@ test("连续输入仅发最后一次请求且检索分页保留query", async () 
   await new Promise((resolve) => setTimeout(resolve, 280));
   assert.equal(urls.length, 1);
   assert.equal(new URLSearchParams(urls[0].split("?")[1]).get("query"), "销售");
+  assert.equal(new URLSearchParams(urls[0].split("?")[1]).get("include_active_runs"), "true");
   await context.loadMoreSessions();
   assert.equal(new URLSearchParams(urls[1].split("?")[1]).get("query"), "销售");
+  assert.equal(new URLSearchParams(urls[1].split("?")[1]).get("include_active_runs"), "true");
   assert.match(urls[1], /offset=1/);
 });
 

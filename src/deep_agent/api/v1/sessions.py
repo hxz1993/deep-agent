@@ -29,7 +29,7 @@ from deep_agent.conversation.display_names import decorate_history_display_names
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
 from deep_agent.schemas.chat import (
-    ChannelSessionOrigin, SessionInfo, SessionListResponse, SessionFilterOptionsResponse,
+    ChannelSessionOrigin, SessionInfo, SessionListItem, SessionListResponse, SessionFilterOptionsResponse,
     SessionAgentFilterOption, SessionAppFilterOption,
 )
 from deep_agent.time import UtcDatetime
@@ -88,8 +88,8 @@ async def _resolve_agent_name(ctx: AppContextDep, agent_id: str | None) -> str |
     return row.name if row else None
 
 
-def _summary_to_session_info(row: SessionSummaryRow) -> SessionInfo:
-    return SessionInfo(
+def _summary_to_session_info(row: SessionSummaryRow) -> SessionListItem:
+    return SessionListItem(
         session_id=row.session_id,
         source_type=row.source_type, source_id=row.source_id,
         app_id=row.app_id, space_id=row.space_id,
@@ -185,6 +185,9 @@ async def list_sessions(
         default="updated_at",
         description="Sort field; results are always descending.",
     ),
+    include_active_runs: bool = Query(
+        default=False, description="Include same-instance active run IDs in the session list.",
+    ),
 ) -> SessionListResponse:
     if app_id is not None and app_scope != "all":
         raise HTTPException(status_code=422, detail="app_id is only supported with app_scope=all")
@@ -208,11 +211,18 @@ async def list_sessions(
     origins = await ChannelProfileService(ctx).enrich_origins(origins)
     items = [_summary_to_session_info(row) for row in rows]
     names = await resolve_scope_directory(request, user_id)
+    active_runs = {}
+    if include_active_runs:
+        active_runs = {
+            (run.agent_id, run.session_id): run.run_id
+            for run in ctx.active_runs.snapshot() if run.user_id == user_id
+        }
     for item in items:
         origin = origins.get(item.session_id)
         item.channel = ChannelSessionOrigin.model_validate(origin) if origin else None
         item.app_name = names.apps.get(item.app_id) if item.app_id else None
         item.space_name = names.spaces.get(item.space_id) if item.space_id else None
+        item.active_run_id = active_runs.get((item.agent_id, item.session_id))
     return SessionListResponse(
         items=items,
         total=total,

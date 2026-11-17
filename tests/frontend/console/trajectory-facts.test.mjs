@@ -633,6 +633,33 @@ test("reused tool call IDs in different loops retain distinct arguments, results
   });
 });
 
+test("end-of-run persistence replaces live tools with reused IDs and identical arguments", () => {
+  withController(controller => {
+    controller.ingest({ event: "session", data: { run_id: "run-1" } });
+    const saved = [];
+    for (let loop = 0; loop < 2; loop += 1) {
+      const payload = { tool: "lookup", tool_call_id: "reused", args: { key: "same" } };
+      controller.ingest({ event: "text", data: { delta: "同一条进度" } });
+      controller.ingest({ event: "tool_call", data: payload });
+      controller.ingest({ event: "tool_result", data: { ...payload, result: `结果${loop}` } });
+      saved.push(
+        fact(`text-${loop}`, loop * 3 + 1, loop * 2 + 1, 0, { part_kind: "text", content: "同一条进度" }),
+        fact(`call-${loop}`, loop * 3 + 2, loop * 2 + 1, 1, {
+          part_kind: "tool-call", tool_name: "lookup", tool_call_id: "reused", args: payload.args,
+        }),
+        fact(`result-${loop}`, loop * 3 + 3, loop * 2 + 2, 0, {
+          part_kind: "tool-return", tool_name: "lookup", tool_call_id: "reused", content: `结果${loop}`,
+        }, "tool/results"),
+      );
+    }
+    for (const event of saved) appendFact(controller, event);
+    controller.ingest({ event: "final", data: {} });
+    const tools = controller.events().filter(row => row.kind === "tool");
+    assert.deepEqual(tools.map(row => row.result.result), ["结果0", "结果1"]);
+    assert.deepEqual(tools.map(row => row.native.result_event_id), ["result-0", "result-1"]);
+  });
+});
+
 test("上下文引用保留在用户输入中，不再派生独立轨迹，入库后只保留事实行", () => {
   withController((controller, elements) => {
     const refs = [{ type: "deeptable.range", key: "range-1", label: "选中区域" }];

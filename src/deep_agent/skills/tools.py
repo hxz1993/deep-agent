@@ -5,6 +5,7 @@ from typing import Any
 from pydantic_ai import FunctionToolset, ModelRetry
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.files.toolset import skill_file_read_format
 from deep_agent.skills.runtime import ResolvedSkill
 
@@ -35,7 +36,7 @@ def build_skill_resource_toolset(
             )
         return item
 
-    @toolset.tool_plain
+    @toolset.tool_plain(metadata={READ_ONLY_TOOL: True})
     async def list_skill_resources(skill_code: str) -> dict[str, Any]:
         """List References, Assets and scripts in one associated Skill without reading their content."""
         item = _item(skill_code)

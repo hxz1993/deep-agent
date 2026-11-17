@@ -7,9 +7,11 @@ from typing import Any, Literal, Sequence
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, UserPromptPart
 from sqlalchemy import Select, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm.attributes import flag_modified
 
 from deep_agent.db.event_codec import (
     MESSAGE_EVENT_TYPES,
+    MessageEventDraft,
     decode_message_events,
     encode_messages,
     encode_message_parts,
@@ -208,19 +210,56 @@ class SessionEventStore(SessionBoundMixin):
         *, turn_id: str, run_id: str, first_message_ordinal: int = 1,
         terminal_status: str | None = None,
         usage_model_id: str | None = None, usage_provider_id: str | None = None,
-    ) -> list[ChatSessionEvent]:
-        session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
+        committed: tuple[ChatSessionEvent, ...] | None = None,
+    ) -> tuple[list[ChatSessionEvent], tuple[ChatSessionEvent, ...]]:
+        # The coordinator already locked or inserted this session in the same
+        # transaction. Its lock protects the sequence and event writes below.
         drafts = encode_message_parts(messages, session_id=session.session_id,
             run_id=run_id, first_message_ordinal=first_message_ordinal)
-        existing_rows = list((await db.execute(select(ChatSessionEvent).where(
-            ChatSessionEvent.session_id == session.session_id,
-            ChatSessionEvent.run_id == run_id,
-            ChatSessionEvent.event_type.in_(MESSAGE_EVENT_TYPES),
-        ))).scalars())
-        existing = {row.event_id: row for row in existing_rows}
         now = datetime.now(timezone.utc)
+        arguments = dict(
+            turn_id=turn_id, run_id=run_id, now=now,
+            first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
+            usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
+        )
+        existing_rows = committed
+        writes = None
+        if existing_rows is not None and terminal_status is None:
+            writes = self._prepare_message_part_writes(
+                session, existing_rows, drafts, messages, edit_existing=False, **arguments,
+            )
+        if writes is None:
+            existing_rows = tuple((await db.execute(select(ChatSessionEvent).where(
+                ChatSessionEvent.session_id == session.session_id,
+                ChatSessionEvent.run_id == run_id,
+                ChatSessionEvent.event_type.in_(MESSAGE_EVENT_TYPES),
+            ))).scalars())
+            writes = self._prepare_message_part_writes(
+                session, existing_rows, drafts, messages, edit_existing=True, **arguments,
+            )
+        assert writes is not None and existing_rows is not None
+        inserts, changed = writes
+        db.add_all(inserts)
+        if inserts:
+            session.next_sequence = int(session.next_sequence) + len(inserts)
+        if changed:
+            session.updated_at = now
+        await db.flush()
+        return changed, (*existing_rows, *inserts)
+
+    @staticmethod
+    def _prepare_message_part_writes(
+        session: ChatSession, stored: Sequence[ChatSessionEvent],
+        drafts: Sequence[MessageEventDraft], messages: Sequence[ModelMessage],
+        *, turn_id: str, run_id: str, now: datetime, first_message_ordinal: int,
+        terminal_status: str | None, usage_model_id: str | None, usage_provider_id: str | None,
+        edit_existing: bool,
+    ) -> tuple[list[ChatSessionEvent], list[ChatSessionEvent]] | None:
+        """Reuse confirmed rows for appends. Reload before merging a stored row."""
+        existing_rows = list(stored)
+        existing = {row.event_id: row for row in stored}
+        inserts: list[ChatSessionEvent] = []
         changed: dict[str, ChatSessionEvent] = {}
-        business_changed = False
         carriers: dict[int, str] = {}
         for row in sorted(existing_rows, key=lambda item: item.sequence):
             if row.event_type != "assistant/message":
@@ -243,6 +282,8 @@ class SessionEventStore(SessionBoundMixin):
                 stored_parts = immutable_parts(row.payload)
                 incoming_parts = immutable_parts(draft.payload)
                 if stored_parts != incoming_parts:
+                    if not edit_existing:
+                        return None
                     raise ImmutableMessagePartConflict(
                         event_id=draft.event_id,
                         message_ordinal=source.get("message_ordinal"),
@@ -252,13 +293,14 @@ class SessionEventStore(SessionBoundMixin):
                 old_source = row.payload.get("source")
                 source = draft.payload.get("source")
                 if isinstance(old_source, dict) and isinstance(source, dict) and old_source != source:
+                    if not edit_existing:
+                        return None
                     # A parallel result commits on completion, before the SDK
                     # creates the request in model call order. Finalize only
                     # its grouping position; the original fact stays intact.
                     row.payload = {**row.payload, "source": dict(source)}
                     row.updated_at = now
                     changed[row.event_id] = row
-                    business_changed = True
                 if terminal_status is not None and draft.event_type == "assistant/message":
                     current_message = dict(row.payload["message"])
                     # Only SDK completion metadata may be finalized, not text,
@@ -271,21 +313,18 @@ class SessionEventStore(SessionBoundMixin):
                         row.payload = {**row.payload, "message": finalized}
                         row.updated_at = now
                         changed[row.event_id] = row
-                        business_changed = True
                 continue
             row = ChatSessionEvent(
                 event_id=draft.event_id, session_id=session.session_id,
-                sequence=int(session.next_sequence), schema_version=draft.schema_version,
+                sequence=int(session.next_sequence) + len(inserts), schema_version=draft.schema_version,
                 event_type=draft.event_type, status=None, turn_id=turn_id, run_id=run_id,
                 search_text=draft.search_text, payload=draft.payload,
                 created_at=now, updated_at=now,
             )
-            db.add(row)
+            inserts.append(row)
             existing[row.event_id] = row
             existing_rows.append(row)
-            session.next_sequence = int(session.next_sequence) + 1
             changed[row.event_id] = row
-            business_changed = True
         for offset, message in enumerate(messages):
             if not isinstance(message, ModelResponse):
                 continue
@@ -298,6 +337,10 @@ class SessionEventStore(SessionBoundMixin):
             metered_row = next((item for item in existing_rows
                 if any(call.get("request_id") == request_id
                        for call in (item.usage or {}).get("calls", []))), None)
+            if not edit_existing and stored and metered_row is None:
+                # Usage can be attached to an older event without advancing the
+                # session sequence. Look for that carrier before metering anew.
+                return None
             carrier_id = carriers.get(ordinal)
             row = metered_row or (existing.get(carrier_id) if carrier_id else None)
             if row is None:
@@ -308,15 +351,13 @@ class SessionEventStore(SessionBoundMixin):
                 model_id=usage_model_id, provider_id=usage_provider_id, purpose="chat")
             updated_usage = merge_calls(row.usage, [call])
             if updated_usage != row.usage or row.usage_model_id != usage_model_id:
-                if row in existing_rows and row.event_id not in changed:
-                    await db.execute(update(ChatSessionEvent)
-                        .where(ChatSessionEvent.event_id == row.event_id)
-                        .values(usage=updated_usage, usage_model_id=usage_model_id,
-                                updated_at=row.updated_at))
-                    await db.refresh(row)
-                else:
-                    row.usage = updated_usage
-                    row.usage_model_id = usage_model_id
+                if not edit_existing and row not in inserts:
+                    return None
+                if row.event_id not in changed:
+                    # Keep event chronology when only backfilling usage.
+                    flag_modified(row, "updated_at")
+                row.usage = updated_usage
+                row.usage_model_id = usage_model_id
                 changed[row.event_id] = row
         if terminal_status is not None:
             assistant_rows = [row for row in existing_rows if row.event_type == "assistant/message"]
@@ -331,11 +372,7 @@ class SessionEventStore(SessionBoundMixin):
                         row.status = terminal_status
                         row.updated_at = now
                         changed[row.event_id] = row
-                        business_changed = True
-        if business_changed:
-            session.updated_at = now
-        await db.flush()
-        return sorted(changed.values(), key=lambda row: row.sequence)
+        return inserts, sorted(changed.values(), key=lambda row: row.sequence)
 
     async def _append_lifecycle(
         self, db: AsyncSession, session: ChatSession, *,

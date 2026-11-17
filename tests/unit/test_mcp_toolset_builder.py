@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import PropertyMock, patch
 
 import certifi
 import httpx
@@ -29,6 +30,8 @@ from pydantic_ai.usage import RunUsage
 from pydantic_ai.toolsets import FunctionToolset
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
+from deepfos_platform.conf.option import OptionNotSetError
 from tests.helpers.conversation import project_model_messages
 from deep_agent.capabilities.mcp.toolset_builder import (
     build_mcp_toolset,
@@ -255,6 +258,40 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
             except Exception as raised:
                 return raised, inner.call_tool.await_count
         self.fail("Expected the MCP tool call to fail")
+
+    async def test_only_trusted_platform_read_annotations_enable_buffering(self) -> None:
+        ctx = RunContext(deps=AgentDeps(session_id="session-a"), model=TestModel(), usage=RunUsage())
+        gateway = "https://platform.example/deepfos-server"
+        platform_url = f"{gateway}/deepfos-mcp/mcp"
+        scenarios = [
+            (platform_url, True, None, True),
+            (platform_url, False, None, False),
+            (platform_url, True, "optional", False),
+            ("https://third-party.example/mcp", True, None, False),
+        ]
+        platform = SimpleNamespace(server=SimpleNamespace(base=gateway))
+        with patch("deep_agent.services.mcp_bound_app.PLATFORM_OPTION", platform):
+            for url, read_only, task_support, expected in scenarios:
+                with self.subTest(url=url, read_only=read_only, task_support=task_support):
+                    inspection = self._inspection()
+                    item = inspection["tools"]["snapshot"]["definitions"][0]
+                    item["annotations"]["readOnlyHint"] = read_only
+                    item["task_support"] = task_support
+                    toolset = build_mcp_toolset("biz", "url", {"url": url}, inspection=inspection)
+                    tools = await toolset.get_tools(ctx)
+                    metadata = tools["mcp__biz__query"].tool_def.metadata
+                    self.assertEqual(bool(metadata.get(READ_ONLY_TOOL)), expected)
+
+    async def test_external_https_mcp_does_not_require_a_platform_gateway(self):
+        inspection = self._inspection()
+        inspection["tools"]["snapshot"]["definitions"][0]["annotations"]["readOnlyHint"] = True
+        ctx = RunContext(deps=AgentDeps(session_id="session-a"), model=TestModel(), usage=RunUsage())
+        with patch("deep_agent.services.mcp_bound_app.PLATFORM_OPTION") as platform:
+            type(platform.server).base = PropertyMock(side_effect=OptionNotSetError("unconfigured"))
+            toolset = build_mcp_toolset("external", "url", {"url": "https://external.example/mcp"},
+                                       inspection=inspection)
+            tools = await toolset.get_tools(ctx)
+        self.assertNotIn(READ_ONLY_TOOL, tools["mcp__external__query"].tool_def.metadata)
 
     async def test_uses_snapshot_without_connecting(self) -> None:
         ctx = RunContext(

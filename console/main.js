@@ -38,7 +38,7 @@ const loadPage = createPageLoader({
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=0166-connection-status");
+    const module = await import("./workspace.js?v=20261118-session-list-opt-in");
     await module.initWorkspace();
     workspaceModule = module;
     return module;

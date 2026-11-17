@@ -13,19 +13,28 @@ from deep_agent.services.integration_app_access import (
     PlatformAppAccessClient,
     app_space,
 )
+from deepfos_platform.conf.option import OptionNotSetError
 from deepfos_platform.lib.utils import concat_url
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 _LOGIN_HEADERS = ("authorization", "cookie", "token", "x-user-token")
 
 
-def bound_mcp_target(config: Mapping) -> tuple[str, str]:
-    url = config.get("url")
-    expected = concat_url(str(PLATFORM_OPTION.server.base), "deepfos-mcp/mcp")
-    if not isinstance(url, str) or url != expected or not url.startswith("https://"):
-        raise IntegrationAppAccessError(422, "绑定应用仅支持当前环境的 DeepFOS HTTPS MCP 网关地址。")
+def is_platform_mcp_url(url: object) -> bool:
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return False
+    try:
+        expected = concat_url(str(PLATFORM_OPTION.server.base), "deepfos-mcp/mcp")
+    except OptionNotSetError:
+        return False
+    if url != expected:
+        return False
     parsed = urlsplit(url)
-    if not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+    return bool(parsed.hostname) and not (parsed.username or parsed.password or parsed.query or parsed.fragment)
+
+
+def bound_mcp_target(config: Mapping) -> tuple[str, str]:
+    if not is_platform_mcp_url(config.get("url")):
         raise IntegrationAppAccessError(422, "绑定应用仅支持当前环境的 DeepFOS HTTPS MCP 网关地址。")
     scope = config["request_context"]
     app, space = scope.get("target_app_id"), scope.get("target_space_id")

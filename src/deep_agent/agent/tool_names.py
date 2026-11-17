@@ -14,6 +14,7 @@ from pydantic_ai.toolsets import WrapperToolset
 
 MCP_IDENTITY = "deepagent_mcp_identity"
 WIRE_NAMES = "deepagent_wire_names"
+READ_ONLY_TOOL = "deepagent_read_only_tool"
 _READABLE_SCOPE = re.compile(r"[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)*")
 _READABLE_NAME = re.compile(r"[A-Za-z0-9]+(?:(?:__?|-)[A-Za-z0-9]+)*")
 _NAMED_PARTS = (ToolCallPart, ToolReturnPart, RetryPromptPart)

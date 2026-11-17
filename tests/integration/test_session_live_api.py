@@ -15,13 +15,14 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from pydantic_ai import Agent
+from pydantic_ai import Agent, Tool
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.usage import UsageLimits
 
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.runner import AgentRunner
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.api.v1 import api_router
 from deep_agent.api.v1.sessions import observe_session_run
 from deep_agent.capabilities import build_registry
@@ -393,16 +394,23 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
         ready, release = asyncio.Event(), asyncio.Event()
         calls = 0
 
+        async def read_value() -> str:
+            return "LIVE_TOOL_RESULT"
+
         async def stream(messages, info):
             nonlocal calls
             calls += 1
+            if calls == 1:
+                yield {0: DeltaToolCall(name="read_value", json_args="{}", tool_call_id="read-once")}
+                return
             yield "LIVE_PREFIX"
             yield "_MIDDLE"
             ready.set()
             await release.wait()
             yield "_FINAL"
 
-        runner = AgentRunner(Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps), self.ctx.store,
+        tool = Tool(read_value, metadata={READ_ONLY_TOOL: True})
+        runner = AgentRunner(Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps, tools=[tool]), self.ctx.store,
                              UsageLimits(request_limit=3), active_runs=self.ctx.active_runs)
         with patch("deep_agent.api.v1.chat.build_runner_for_agent", new=AsyncMock(return_value=runner)) as build, \
              patch.object(AgentRunner, "_generate_model_title", new_callable=AsyncMock):
@@ -424,16 +432,20 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             prefixes = []
             for observer in observers:
                 parts = []
+                results = []
                 while "LIVE_PREFIX" not in "".join(parts):
                     kind, envelope = await observer.frame()
                     self.assertEqual(kind, "observation")
                     if envelope["event"] == "text":
                         parts.append(envelope["data"].get("delta", envelope["data"].get("content", "")))
+                    elif envelope["event"] == "tool_result":
+                        results.append(envelope["data"]["tool_call_id"])
                 prefixes.append("".join(parts))
+                self.assertEqual(results, ["read-once"])
             self.assertEqual(prefixes[0], prefixes[1])
             history = await self.http.get(f"/api/v1/sessions/{self.session}/history", params={"agent_id": self.agent_id})
             self.assertEqual(history.status_code, 200, history.text)
-            self.assertFalse(any(item["kind"] == "assistant_message" for item in history.json()["items"]))
+            self.assertFalse(any(item["kind"] in {"assistant_message", "tool"} for item in history.json()["items"]))
             await observers[0].close()
             self.assertEqual(self.ctx.active_runs.active_count(), 1)
             self.assertFalse(producer.task.done())
@@ -444,12 +456,52 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(finals[0]["output"], "LIVE_PREFIX_MIDDLE_FINAL")
             await asyncio.wait_for(producer.task, 5)
             await asyncio.wait_for(observers[1].task, 5)
-            self.assertEqual(calls, 1)
+            self.assertEqual(calls, 2)
             build.assert_awaited_once()
             self.assertEqual(self.ctx.active_runs.active_count(), 0)
             self.assertEqual(self.ctx.session_live._runs, {})
             self.assertEqual(self.ctx.session_live._subscribers, {})
             history = (await self.http.get(f"/api/v1/sessions/{self.session}/history", params={"agent_id": self.agent_id})).json()
             self.assertEqual([item["text"] for item in history["items"] if item["kind"] == "assistant_message"], ["LIVE_PREFIX_MIDDLE_FINAL"])
+            self.assertEqual(
+                [item["output"] for item in history["items"] if item["kind"] == "tool"], ["LIVE_TOOL_RESULT"],
+            )
             rows = (await self.http.get(f"/api/v1/sessions/{self.session}/events", params={"agent_id": self.agent_id})).json()["items"]
             self.assertFalse(any(row["event_type"].startswith(("run/", "observation")) for row in rows))
+
+    async def test_producer_disconnect_keeps_buffered_read_result_in_history(self):
+        ready = asyncio.Event()
+
+        async def read_value() -> str:
+            return "SAVED_ON_DISCONNECT"
+
+        async def stream(messages, info):
+            if not ready.is_set() and not any(
+                getattr(part, "tool_call_id", None) == "read-once"
+                for message in messages for part in message.parts
+            ):
+                yield {0: DeltaToolCall(name="read_value", json_args="{}", tool_call_id="read-once")}
+                return
+            ready.set()
+            await asyncio.Event().wait()
+
+        agent = Agent(
+            FunctionModel(stream_function=stream), deps_type=AgentDeps,
+            tools=[Tool(read_value, metadata={READ_ONLY_TOOL: True})],
+        )
+        runner = AgentRunner(agent, self.ctx.store, UsageLimits(request_limit=3), active_runs=self.ctx.active_runs)
+        with patch("deep_agent.api.v1.chat.build_runner_for_agent", new=AsyncMock(return_value=runner)), \
+             patch.object(AgentRunner, "_generate_model_title", new_callable=AsyncMock):
+            producer = self._request("/api/v1/chat/stream", method="POST", body={
+                "agent_id": self.agent_id, "session_id": self.session, "message": "synthetic interrupted run",
+            })
+            self.assertEqual((await producer.started())["status"], 200)
+            await asyncio.wait_for(ready.wait(), 5)
+            history_url = f"/api/v1/sessions/{self.session}/history"
+            params = {"agent_id": self.agent_id}
+            during = (await self.http.get(history_url, params=params)).json()["items"]
+            self.assertFalse(any(item["kind"] == "tool" for item in during))
+            await producer.close()
+        after = (await self.http.get(history_url, params=params)).json()["items"]
+        self.assertEqual([item["output"] for item in after if item["kind"] == "tool"], ["SAVED_ON_DISCONNECT"])
+        self.assertEqual(self.ctx.active_runs.active_count(), 0)

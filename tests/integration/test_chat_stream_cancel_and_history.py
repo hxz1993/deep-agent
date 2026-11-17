@@ -182,6 +182,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         for phase in ("stream_admission", "stream_route_prepare", "stream_run_lookup", "stream_app_context",
                       "stream_runner_build", "sse_session", "runner_initialization", "wait_session_lock",
                       "prepare_history", "prepare_request_budget", "prepare_model_input", "tool_validate",
+                      "model_context_budget", "model_context_protected_estimate",
                       "sdk_first_thinking", "sse_first_thinking", "sdk_first_tool_call", "sse_first_tool_call",
                       "sdk_first_text", "sse_first_text", "sdk_result_ready", "completion_optional_flush",
                       "finish_run_event", "sse_first_final", "stream_cleanup_flush"):
@@ -193,6 +194,11 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event_names.count("model_request_completed"), 3)
         self.assertEqual(event_names.count("agent_tool_started"), 2)
         self.assertEqual(event_names.count("agent_tool_completed"), 2)
+        self.assertNotIn("model_context_history_read", phases)
+        for phase in ("model_context_budget", "model_context_protected_estimate"):
+            measured = [row["request_index"] for name, row in records if name == "agent_run_phase"
+                        and row["phase"] == phase]
+            self.assertCountEqual(measured, [1, 2, 3])
         self.assertIn("agent_stream_closed", event_names)
         writes = [fields for name, fields in records if name == "message_persistence_timing"]
         self.assertTrue(writes)

@@ -481,7 +481,7 @@ textarea {
 #workspaceLegacyHost .session-item.active:hover .session-actions {
   background: var(--bg);
 }
-#workspaceLegacyHost .session-item.active:not(:hover) .session-actions { opacity: 0; }
+#workspaceLegacyHost .session-item.active:not(:hover):not(.is-generating) .session-actions { opacity: 0; }
 #workspaceLegacyHost .session-item.is-generating .session-actions { opacity: 1; }
 #workspaceLegacyHost .session-item.is-generating:not(:hover) .session-actions .rename-btn { visibility: hidden; }
 #workspaceLegacyHost .session-toolbar .icon-action { border: 0; border-radius: 8px; background: transparent; box-shadow: none; }

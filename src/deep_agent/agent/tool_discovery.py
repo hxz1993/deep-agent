@@ -23,6 +23,7 @@ from deep_agent.agent.context.estimator import (
     canonical_json,
 )
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.observability import log_run_phase
 from deep_agent.agent.tool_names import MCP_IDENTITY
 from deep_agent.search import (
     FieldRole,
@@ -98,6 +99,13 @@ _SEARCH_CONFIG = SearchConfig(token_aliases=_ACTION_ALIASES)
 ToolSearchDocument = SearchDocument
 
 
+@dataclass(frozen=True)
+class _McpPreselection:
+    query: tuple[str, str]
+    documents: tuple[ToolSearchDocument, ...]
+    selected: tuple[str, ...]
+
+
 @dataclass
 class ToolDiscoveryTelemetry:
     candidate_count: int = 0
@@ -121,6 +129,7 @@ class ToolDiscoveryTelemetry:
     search_feedback: dict[str, str] = field(default_factory=dict, repr=False)
     server_names: tuple[str, ...] = field(default_factory=tuple, repr=False)
     bound_targets: dict[str, dict[str, str]] = field(default_factory=dict, repr=False)
+    preselection: _McpPreselection | None = field(default=None, repr=False)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -520,33 +529,22 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
                    if (tool.metadata or {}).get("deep_agent_mcp_target")]
         telemetry.bound_targets = {target["name"]: target for target in targets}
         try:
-            primary_query, supplemental_query = search_inputs_for_run(ctx)
-            all_documents = build_search_documents(
-                definitions,
-                server_names=self.server_names,
-            )
-            documents = all_documents
             if len(definitions) <= MCP_DIRECT_DISCLOSURE_LIMIT:
-                selected = [tool.name for tool in definitions]
+                selected = tuple(tool.name for tool in definitions)
             else:
-                selected = rank_tool_documents(
-                    primary_query,
-                    documents,
-                    limit=MCP_PRESELECT_LIMIT,
-                )
-                if (
-                    not selected
-                    and not primary_query.strip()
-                    and supplemental_query.strip()
-                ):
-                    supplemental_selected = rank_tool_documents(
-                        supplemental_query,
-                        documents,
-                        limit=MCP_PRESELECT_LIMIT,
-                    )
-                    selected = list(
-                        dict.fromkeys([*selected, *supplemental_selected])
-                    )[:MCP_PRESELECT_LIMIT]
+                query = search_inputs_for_run(ctx)
+                documents = tuple(build_search_documents(definitions, server_names=self.server_names))
+                cached = telemetry.preselection
+                if cached is None or cached.query != query or cached.documents != documents:
+                    primary, supplemental = query
+                    ranked = rank_tool_documents(primary, documents, limit=MCP_PRESELECT_LIMIT)
+                    if not ranked and not primary.strip() and supplemental.strip():
+                        ranked = rank_tool_documents(supplemental, documents, limit=MCP_PRESELECT_LIMIT)
+                    cached = _McpPreselection(query, documents, tuple(ranked))
+                    telemetry.preselection = cached
+                # Discovery and the current authorized definitions are still
+                # applied below on every step. Only lexical ranking is reused.
+                selected = cached.selected
             selected_set = set(selected)
             legacy_names: dict[str, list[str]] = defaultdict(list)
             for tool in definitions:
@@ -629,7 +627,13 @@ class McpDiscoveryToolset(WrapperToolset[AgentDeps]):
             )
             return [replace(tool, defer_loading=False) for tool in fallback_definitions]
         finally:
-            telemetry.retrieval_ms += (time.perf_counter() - started) * 1_000
+            ended = time.perf_counter()
+            telemetry.retrieval_ms += (ended - started) * 1_000
+            log_run_phase(
+                "model_tool_catalog", started, ended_at=ended,
+                session_id=ctx.deps.session_id, run_id=ctx.deps.run_id or ctx.run_id,
+                agent_id=ctx.deps.agent_id, request_index=ctx.run_step,
+            )
 
     async def get_instructions(self, ctx: RunContext[AgentDeps]) -> list[str] | None:
         original = await self.wrapped.get_instructions(ctx)

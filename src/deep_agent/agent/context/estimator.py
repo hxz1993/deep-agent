@@ -4,7 +4,6 @@ import json
 import hashlib
 import math
 import re
-import unicodedata
 from io import BytesIO
 from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from typing import Any, Callable
@@ -118,8 +117,7 @@ _DEEPSEEK_MAX_WIDTH_HEIGHT_RATIO = 8
 _DEEPSEEK_MIN_PIXELS = 384 * 384
 
 _OPENAI_OFFICIAL_HOSTS = {"api.openai.com"}
-_ASCII_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
-_WHITESPACE_RE = re.compile(r"\s+")
+_TOKEN_GROUP_RE = re.compile(r"([A-Za-z0-9_]+)|\s+")
 
 
 def _jsonable(value: Any) -> Any:
@@ -148,17 +146,6 @@ def canonical_json(value: Any) -> str:
     )
 
 
-def _is_cjk(char: str) -> bool:
-    code = ord(char)
-    return (
-        0x3400 <= code <= 0x4DBF
-        or 0x4E00 <= code <= 0x9FFF
-        or 0xF900 <= code <= 0xFAFF
-        or 0x3040 <= code <= 0x30FF
-        or 0xAC00 <= code <= 0xD7AF
-    )
-
-
 def conservative_text_tokens(text: str) -> int:
     """Conservative text estimate for unknown/private models.
 
@@ -166,29 +153,14 @@ def conservative_text_tokens(text: str) -> int:
     ASCII prose is grouped at four characters per token, while punctuation is
     deliberately counted more conservatively for code/JSON-heavy content.
     """
-    if not text:
-        return 0
-    total = 0
-    index = 0
-    while index < len(text):
-        char = text[index]
-        word = _ASCII_WORD_RE.match(text, index)
-        if word is not None:
-            total += math.ceil(len(word.group(0)) / 4)
-            index = word.end()
-            continue
-        whitespace = _WHITESPACE_RE.match(text, index)
-        if whitespace is not None:
-            total += math.ceil(len(whitespace.group(0)) / 8)
-            index = whitespace.end()
-            continue
-        if _is_cjk(char) or ord(char) > 0xFFFF or unicodedata.combining(char):
-            total += 1
-        else:
-            # Punctuation and symbols dominate token counts in code and JSON.
-            total += 1
-        index += 1
-    return max(1, total)
+    # Unmatched code points already cost one token each. Only collapse runs
+    # of ASCII word characters and Unicode whitespace.
+    total = len(text)
+    for match in _TOKEN_GROUP_RE.finditer(text):
+        length = match.end() - match.start()
+        group_size = 4 if match.lastindex else 8
+        total -= length - (length + group_size - 1) // group_size
+    return total
 
 
 def _ceil_div(value: int, divisor: int) -> int:

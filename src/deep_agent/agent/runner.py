@@ -1123,6 +1123,8 @@ class AgentRunner:
     def _run_capabilities(deps: AgentDeps, progress):
         if deps.output_state is not None:
             deps.output_state.progress = progress
+        if deps.context_state is not None and progress is not None:
+            deps.context_state.checkpoint_history = progress.checkpoint_history
         return [capability for capability in (progress, deps.request_budget, deps.output_state) if capability is not None]
 
     def _bind_compaction_lifecycle(
@@ -1928,7 +1930,8 @@ class AgentRunner:
             progress = (
                 MessagePersistenceCapability(self.store, history_length=len(llm_history),
                                       skip_user_prompt=prepared.pre_persisted_user,
-                                      model_name=self._model_id, provider_id=self._provider_id)
+                                      model_name=self._model_id, provider_id=self._provider_id,
+                                      defer_read_only=deps.output_state is None)
                 if callable(getattr(self.store, "append_message_parts", None)) else None
             )
             try:
@@ -1953,9 +1956,10 @@ class AgentRunner:
                     # Non-streaming callers also preserve completed message facts.
                     with anyio.CancelScope(shield=True):
                         cancelled = isinstance(exc, (RunCancelled, asyncio.CancelledError))
+                        completed = progress.completed_messages()
                         recovered = (
-                            mark_cancelled_response_interrupted(progress.messages)
-                            if cancelled else _with_failed_response_diagnostic(progress.messages, _safe_run_failure(exc))
+                            mark_cancelled_response_interrupted(completed)
+                            if cancelled else _with_failed_response_diagnostic(completed, _safe_run_failure(exc))
                         )
                         try:
                             await self._persist_run_messages(
@@ -1975,7 +1979,7 @@ class AgentRunner:
                     usage=getattr(exc, "usage", None),
                     error=type(exc).__name__, exception=exc,
                     before_first_response=progress is None or not any(
-                        isinstance(item, ModelResponse) for item in progress.messages
+                        isinstance(item, ModelResponse) for item in completed
                     ),
                 )
                 await self._cancel_title_task(title_task)
@@ -2433,6 +2437,7 @@ class AgentRunner:
                         skip_user_prompt=prepared.pre_persisted_user, model_name=self._model_id,
                         provider_id=self._provider_id,
                         event_queue=session_events,
+                        defer_read_only=deps.output_state is None,
                     )
                     if callable(getattr(self.store, "append_message_parts", None)) else None
                 )
@@ -2632,7 +2637,7 @@ class AgentRunner:
                 official_failed = stream_snapshot.new_messages
                 if progress is not None:
                     official_failed = (progress.canonical_messages(official_failed)
-                                       if official_failed else progress.messages)
+                                       if official_failed else progress.completed_messages())
                 failed_messages = _with_failed_response_diagnostic(
                     official_failed, failure_diagnostic,
                 )
@@ -2725,7 +2730,7 @@ class AgentRunner:
                     official_cancelled = cancelled_run.new_messages()
                     if progress is not None:
                         official_cancelled = (progress.canonical_messages(official_cancelled)
-                                              if official_cancelled else progress.messages)
+                                              if official_cancelled else progress.completed_messages())
                     cancelled_messages = mark_cancelled_response_interrupted(official_cancelled)
                     # Transport cancellation re-raises before the normal cancelled
                     # SSE path below. Close its durable lifecycle here as well,

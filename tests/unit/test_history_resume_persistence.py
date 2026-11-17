@@ -48,7 +48,7 @@ class HistoryResumePersistenceTests(unittest.IsolatedAsyncioTestCase):
                                  store, UsageLimits(request_limit=3))
             # Simulate another reopen/send, including an unavailable diagnostic sink.
             for broken in (False, True):
-                with patch("deep_agent.agent.observability.log_event",
+                with patch("deep_agent.diagnostics.emit",
                            side_effect=OSError("unavailable") if broken else None) as log:
                     events = [e async for e in runner.run_stream(
                         session, "new question", AgentDeps(session_id=session, agent_id=agent_id,

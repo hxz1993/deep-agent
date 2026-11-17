@@ -78,6 +78,41 @@ class SessionListApiTests(SessionListFixture, unittest.TestCase):
         self.assertEqual(payload["items"][0]["agent_id"], self.agent_a)
         self.assertEqual(payload["items"][0]["user_prompt"], "only a")
 
+    def test_list_reports_only_active_runs_owned_by_the_caller(self) -> None:
+        ctx = get_context()
+
+        async def seed() -> None:
+            for session_id in ("active", "idle"):
+                await ctx.store.append(
+                    session_id, [ModelRequest(parts=[UserPromptPart(content="query")])],
+                    agent_id=self.agent_a, user_id=self.user_id,
+                    run_id=f"seed-{session_id}",
+                )
+
+        asyncio.run(seed())
+        active = ctx.active_runs.register(
+            agent_id=self.agent_a, session_id="active", user_id=self.user_id, run_id="this-run",
+        )
+        ctx.active_runs.register(
+            agent_id=self.agent_a, session_id="idle", user_id="someone-else", run_id="other-run",
+        )
+        url = f"/api/v1/sessions?agent_id={self.agent_a}"
+        default = self.client.get(url)
+        self.assertEqual(default.status_code, 200, default.text)
+        self.assertTrue(all("active_run_id" not in row for row in default.json()["items"]))
+        response = self.client.get(f"{url}&include_active_runs=true")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            {item["session_id"]: item.get("active_run_id") for item in response.json()["items"]},
+            {"active": "this-run", "idle": None},
+        )
+        self.assertTrue(all("active_run_id" not in row for row in response.json()["items"]
+                            if row["session_id"] == "idle"))
+        ctx.active_runs.unregister(active)
+        idle = self.client.get(f"{url}&include_active_runs=true")
+        self.assertEqual(idle.status_code, 200, idle.text)
+        self.assertTrue(all("active_run_id" not in row for row in idle.json()["items"]))
+
     def test_list_sessions_has_messages_filter(self) -> None:
         store = get_context().store
         import asyncio

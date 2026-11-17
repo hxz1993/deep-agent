@@ -9,6 +9,8 @@ import json
 import sys
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol, runtime_checkable
 
@@ -38,6 +40,14 @@ from deep_agent.db.serialization import serialize_message
 _MESSAGE_TERMINAL_STATUSES = {"completed", "pending", "cancelled", "failed", "interrupted"}
 
 __all__ = ["SessionStore", "SqlConversationCoordinator", "SqlConversationStore"]
+
+
+@dataclass
+class MessagePartWriteState:
+    """Confirmed event rows belonging to one active Run."""
+
+    head: tuple[str, str, str, int, str | None] | None = None
+    events: tuple[ChatSessionEvent, ...] = ()
 
 
 async def _settle_db_task(task: asyncio.Task[Any]) -> Any:
@@ -252,7 +262,7 @@ class SqlConversationCoordinator:
                 ))).scalars())
                 part_mode = any(isinstance(row.payload.get("source"), dict) for row in persisted)
             if part_mode and run_id:
-                rows = await self._events._append_message_parts(
+                rows, _ = await self._events._append_message_parts(
                     db, session, messages, turn_id=resolved_turn_id, run_id=run_id,
                     first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
                     usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
@@ -272,29 +282,53 @@ class SqlConversationCoordinator:
         first_message_ordinal: int = 1, app_id: str | None = None,
         space_id: str | None = None, terminal_status: str | None = None,
         usage_model_id: str | None = None, usage_provider_id: str | None = None,
+        write_state: MessagePartWriteState | None = None,
     ) -> list[SessionEventSnapshot]:
         if not run_id or not turn_id:
             raise ValueError("Message parts require run_id and turn_id")
         if terminal_status is not None and terminal_status not in _MESSAGE_TERMINAL_STATUSES:
             raise ValueError("Invalid message terminal status")
         scope, user = self._required_identity(agent_id, user_id)
+        if self._session_factory.kw.get("expire_on_commit", True):
+            # Only reuse rows whose loaded values survive the transaction.
+            write_state = None
 
         async def append() -> list[SessionEventSnapshot]:
             async with self._write() as db:
-                owner = await self._chat_sessions._get_owner(db, scope, session_id, for_update=True)
-                if owner.exists and owner.user_id != user:
-                    raise PermissionError("Session belongs to another user")
+                # _ensure locks the Agent and Session and validates the session owner.
                 session = await self._chat_sessions._ensure(
                     db, session_id, agent_id=scope, user_id=user,
                     app_id=app_id, space_id=space_id,
-                    title=first_user_prompt(messages) if not owner.exists else None,
+                    initial_title=first_user_prompt(messages),
+                    read_event_head=write_state is not None, touch=False,
                 )
-                rows = await self._events._append_message_parts(
+                next_sequence = int(session.next_sequence)
+                event_head_id = session.event_head_id if write_state is not None else None
+                head = (session_id, turn_id, run_id, next_sequence, event_head_id)
+                committed = None
+                if write_state is not None:
+                    if write_state.head == head and (next_sequence == 1 or event_head_id is not None):
+                        committed = write_state.events
+                    # A failed or uncertain commit may make this state stale.
+                    write_state.head = None
+                    write_state.events = ()
+                rows, stored = await self._events._append_message_parts(
                     db, session, messages, turn_id=turn_id, run_id=run_id,
                     first_message_ordinal=first_message_ordinal, terminal_status=terminal_status,
                     usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
+                    committed=committed,
                 )
-                return [SessionEventSnapshot.from_row(row) for row in rows]
+                snapshots = [SessionEventSnapshot.from_row(row) for row in rows]
+                if write_state is not None:
+                    # Keep published payloads independent of the writer's state.
+                    snapshots = deepcopy(snapshots)
+                    if session.next_sequence != next_sequence:
+                        event_head_id = rows[-1].event_id
+                    head = (session_id, turn_id, run_id, int(session.next_sequence), event_head_id)
+            if write_state is not None:
+                write_state.head = head
+                write_state.events = stored
+            return snapshots
 
         if self._session_factory.kw["bind"].dialect.name != "sqlite":
             return await append()

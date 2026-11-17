@@ -20,9 +20,12 @@ from pydantic_core import SchemaValidator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.observability import log_event
 from deep_agent.agent.tool_errors import native_error_details
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.capabilities.mcp.errors import classify_terminal_mcp_request_failure
 from deep_agent.mcp_request_context import resolve_mcp_headers, resolve_mcp_request_context_mode
-from deep_agent.services.mcp_bound_app import bound_mcp_headers, restricted_mcp_http_client, verify_bound_tool_args
+from deep_agent.services.mcp_bound_app import (
+    bound_mcp_headers, is_platform_mcp_url, restricted_mcp_http_client, verify_bound_tool_args,
+)
 from deep_agent.schemas.mcp import McpToolSnapshot
 
 
@@ -139,6 +142,7 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
         del ctx
         tools: dict[str, ToolsetTool[AgentDeps]] = {}
         target = self._target_metadata() if self.is_bound else None
+        platform_server = is_platform_mcp_url(self.config.get("url"))
         for item in self.snapshot.definitions:
             description = item.description
             if target:
@@ -147,6 +151,10 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                     f"空间 {target['space']}（{target['space_id']}）。"
                 )
                 description = f"{description or ''}\n{caption}".strip()
+            task = item.task_support in {"optional", "required"}
+            # A third-party server's annotation cannot move its call past the
+            # durable boundary. The configured platform gateway owns its schema.
+            reads_only = platform_server and not task and (item.annotations or {}).get("readOnlyHint") is True
             tool_def = ToolDefinition(
                 name=item.name,
                 description=description,
@@ -156,7 +164,8 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                     **({"deep_agent_mcp_target": target} if target else {}),
                     "title": item.title,
                     "annotations": item.annotations,
-                    "task": item.task_support in {"optional", "required"},
+                    "task": task,
+                    **({READ_ONLY_TOOL: True} if reads_only else {}),
                 },
             )
             tools[item.name] = ToolsetTool(

@@ -7,17 +7,20 @@ import unittest
 import time
 from unittest.mock import patch
 
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.messages import InstructionPart, ModelRequest, ModelResponse, TextPart, ThinkingPart, ToolCallPart, UserPromptPart
+from pydantic_ai import Agent, RunContext, Tool
+from pydantic_ai.messages import InstructionPart, ModelRequest, ModelResponse, TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.usage import RequestUsage, RunUsage, UsageLimits
+from sqlalchemy import event
 
-from deep_agent.agent.context.compaction import DeepAgentContextCompaction
+from deep_agent.agent.context.compaction import DeepAgentContextCompaction, summary_contents
 from deep_agent.agent.context.estimator import TokenEstimator, USAGE_ANCHOR_METADATA
 from deep_agent.agent.context.runtime import ContextRunState
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.runner import AgentRunner
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.diagnostics.sessions import detail_event_metadata
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 from tests.unit.test_context_compaction import valid_summary
@@ -103,6 +106,140 @@ class ContextUsagePersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["usage"]["input_tokens"], 32000)
         self.assertEqual(metadata["usage"]["output_tokens"], 170)
         self.assertEqual(sum(run["recorded_model_responses"] for run in metadata["runs"]), 3)
+
+    async def test_compaction_checkpoints_buffered_reads_then_continues_without_sql(self):
+        for streaming in (False, True):
+            with self.subTest(streaming=streaming):
+                await self._run_compaction_with_buffered_reads(streaming)
+
+    async def _run_compaction_with_buffered_reads(self, streaming):
+        session = f"compaction-buffered-read-{streaming}"
+        owner = "usage-owner"
+        old_input = "历史资料" * 1000
+        new_input = "继续核对本期变化"
+        large_result = "本轮新证据" * 2320
+        recent_result = "压缩后查到的结果"
+        await self.store.append(
+            session, [
+                ModelRequest(parts=[UserPromptPart(old_input)]),
+                ModelResponse(parts=[TextPart("历史结论" * 1000)]),
+            ], agent_id=self.agent_id, user_id=owner, run_id="prior-history",
+        )
+        request_count = 0
+        summary_calls = 0
+        tool_calls = 0
+        recording = False
+        statements = []
+
+        def record_sql(_conn, _cursor, statement, *_):
+            if recording:
+                statements.append(statement.partition(" ")[0])
+
+        async def lookup() -> str:
+            nonlocal tool_calls
+            tool_calls += 1
+            if tool_calls == 1:
+                history = await self.store.get_raw_history(session, agent_id=self.agent_id)
+                self.assertFalse(any(isinstance(part, ToolCallPart) for item in history for part in item.parts))
+                return large_result
+            return recent_result
+
+        async def respond(messages, info):
+            nonlocal request_count, summary_calls, recording
+            if not any(tool.name == "lookup" for tool in info.function_tools):
+                summary_calls += 1
+                history = await self.store.get_raw_history(session, agent_id=self.agent_id)
+                self.assertEqual(
+                    [part.content for item in history for part in item.parts if isinstance(part, ToolReturnPart)],
+                    [large_result],
+                )
+                return ModelResponse(parts=[TextPart(valid_summary())],
+                                     usage=RequestUsage(input_tokens=3500, output_tokens=150))
+            request_count += 1
+            if request_count == 1:
+                return ModelResponse(parts=[ToolCallPart("lookup", {}, "read-for-summary")],
+                                     usage=RequestUsage(input_tokens=50, output_tokens=25))
+            self.assertEqual(len(summary_contents(messages)), 1)
+            prompts = [part.content for message in messages for part in message.parts
+                       if isinstance(part, UserPromptPart)]
+            self.assertTrue(any(isinstance(prompt, str) and new_input in prompt for prompt in prompts),
+                            "Compaction must retain the current user's request in its anchor or tail")
+            self.assertNotIn(old_input, prompts)
+            if request_count == 2:
+                recording = True
+                return ModelResponse(parts=[ToolCallPart("lookup", {}, "read-after-summary")],
+                                     usage=RequestUsage(input_tokens=6000, output_tokens=20))
+            recording = False
+            self.assertEqual(
+                [part.content for message in messages for part in message.parts
+                 if isinstance(part, ToolReturnPart) and part.tool_call_id == "read-after-summary"],
+                [recent_result],
+            )
+            return ModelResponse(parts=[TextPart("继续完成")],
+                                 usage=RequestUsage(input_tokens=6000, output_tokens=20))
+
+        async def stream(messages, info):
+            response = await respond(messages, info)
+            for part in response.parts:
+                if isinstance(part, ToolCallPart):
+                    yield {0: DeltaToolCall(name=part.tool_name, json_args="{}", tool_call_id=part.tool_call_id)}
+                else:
+                    yield part.content
+
+        estimator = TokenEstimator.for_model("usage-fixture", provider_type="test")
+        capability = DeepAgentContextCompaction(
+            context_window_tokens=16000, max_output_tokens=1000, estimator=estimator,
+        )
+        agent = Agent(FunctionModel(respond, stream_function=stream), deps_type=AgentDeps, capabilities=[capability],
+                      tools=[Tool(lookup, metadata={READ_ONLY_TOOL: True})])
+        runner = AgentRunner(agent, self.store, UsageLimits(request_limit=10),
+                             context_window_tokens=16000, max_output_tokens=1000,
+                             context_compaction=capability, estimator=estimator)
+        def deps():
+            return AgentDeps(session_id=session, user=owner, agent_id=self.agent_id)
+
+        engine = self.engine.sync_engine
+        event.listen(engine, "before_cursor_execute", record_sql)
+        first_deps = deps()
+        try:
+            with patch.object(AgentRunner, "_generate_model_title", return_value=None):
+                if streaming:
+                    persister = EventPersister(self.store)
+                    await persister.start()
+                    try:
+                        frames = [frame async for frame in runner.run_stream(
+                            session, new_input, first_deps, persister=persister,
+                        )]
+                    finally:
+                        await persister.aclose()
+                    self.assertEqual(frames[-1]["type"], "final", frames[-1])
+                else:
+                    completed = await runner.run(session, new_input, first_deps)
+                    self.assertEqual(completed["status"], "completed")
+                self.assertEqual((request_count, summary_calls, tool_calls), (3, 1, 2))
+                self.assertEqual(statements, [], "Ordinary tool round after a checkpoint must not access SQL")
+                # One historical response and three real responses in this run.
+                # The checkpoint rereads the first response, but it remains one sample.
+                self.assertEqual(first_deps.context_state.last_budget.output_prediction_sample_count, 4)
+                # A new turn admits the persisted projection and keeps the raw
+                # Events. It must not rebuild the full history on every step.
+                followed_up = await runner.run(session, "参考上次核对结果", deps())
+                self.assertEqual(followed_up["status"], "completed")
+                self.assertEqual((request_count, summary_calls, tool_calls), (4, 1, 2))
+        finally:
+            event.remove(engine, "before_cursor_execute", record_sql)
+        rows = await self.store.list_all_events(session)
+        compactions = [row for row in rows if row.event_type == "compaction"]
+        self.assertEqual([row.status for row in compactions], ["completed"])
+        returns = [row for row in rows if row.event_type == "tool/results"]
+        self.assertEqual(len(returns), 2)
+        self.assertLess(returns[0].sequence, compactions[0].sequence)
+        self.assertLess(compactions[0].sequence, returns[1].sequence)
+        raw = await self.store.get_raw_history(session, agent_id=self.agent_id)
+        self.assertEqual(
+            [part.content for message in raw for part in message.parts if isinstance(part, ToolReturnPart)],
+            [large_result, recent_result],
+        )
 
     async def test_pressure_and_manual_use_same_projection_and_real_summary_path(self):
         raw = [ModelRequest(parts=[UserPromptPart("历史资料" * 2900)]),

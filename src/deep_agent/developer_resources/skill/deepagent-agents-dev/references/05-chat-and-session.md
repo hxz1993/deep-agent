@@ -57,6 +57,8 @@ POST /api/v1/sessions/{id}/cancel
 
 以上按目标OpenAPI和当前用户权限使用；跨用户改用管理员诊断接口。run-status的idle不证明业务已成功，最终结果还要看History/接受事实。History供普通业务渲染，Events供精确轨迹；不要让客户端各自从原始Pydantic消息猜恢复规则。
 
+运行中以聊天 SSE 接收正文和工具结果。History 和 Events 反映已提交的状态，普通只读轮次的结果可能在检查点或收尾时才成批出现。当前实例有运行时，读取 `run-status` 后可用 `GET /api/v1/sessions/{id}/live?agent_id=…&run_id=…` 观察指定 Run。观察连接关闭时，发起执行的连接继续负责原运行。
+
 刷新、切换或重新打开只读恢复，不能因此重新填表、批准或保存。停止使用cancel接口并等真实终态，Abort连接不等于业务已撤销。页面卸载也不保证任务一定继续运行。
 
 ## 人工确认续跑

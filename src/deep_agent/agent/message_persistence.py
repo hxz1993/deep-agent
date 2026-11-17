@@ -10,7 +10,7 @@ from dataclasses import replace
 from hashlib import sha256
 from typing import Any
 
-from pydantic_ai import AgentStreamEvent, ModelRequestNode, RunContext, ToolDenied
+from pydantic_ai import AgentStreamEvent, ModelRequestNode, RunContext, ToolDefinition, ToolDenied
 from pydantic_ai.capabilities import AbstractCapability, CapabilityOrdering, ToolSearch
 from pydantic_ai.exceptions import ToolFailedError
 from pydantic_ai.messages import (
@@ -20,12 +20,13 @@ from pydantic_ai.messages import (
 from pydantic_core import to_json
 
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.tool_names import public_tool_messages
+from deep_agent.agent.tool_names import READ_ONLY_TOOL, public_tool_messages
 from deep_agent.agent.history import is_user_only_request, same_tool_return
 from deep_agent.agent.observability import log_event
 from deep_agent.agent.planning import (
     attach_plan_snapshot, current_plan_snapshot, is_planning_tool, plan_snapshot_from_part,
 )
+from deep_agent.db.conversation import MessagePartWriteState, SqlConversationCoordinator
 from deep_agent.db.run_ownership import live_run
 from deep_agent.db.execution_error import safe_execution_error
 from deep_agent.db.serialization import serialize_message
@@ -37,6 +38,13 @@ class MessagePersistenceError(RuntimeError):
     """Further tools must not execute after a completed-message write failure."""
 
 
+def _is_read_only_tool(tool_def: ToolDefinition | None) -> bool:
+    return tool_def is not None and tool_def.kind == "function" and (
+        tool_def.tool_kind in {"tool-search", "capability-load"}
+        or (tool_def.metadata or {}).get(READ_ONLY_TOOL) is True
+    )
+
+
 class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
     """Per-run instance, including provider retries; never share across Runs."""
 
@@ -46,7 +54,8 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
     def __init__(self, store: Any, *, history_length: int,
                  skip_user_prompt: bool, model_name: str | None = None,
                  provider_id: str | None = None,
-                 event_queue: asyncio.Queue | None = None) -> None:
+                 event_queue: asyncio.Queue | None = None,
+                 defer_read_only: bool = False) -> None:
         self.store = store
         self.event_queue = event_queue
         # Keep the original input length for callers; ledger ordering survives compaction.
@@ -61,7 +70,13 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         self._accepted: set[tuple[int, str]] = set()
         self._results: dict[str, Any] = {}
         self._write_lock = asyncio.Lock()
+        self._buffer_read_only = defer_read_only and skip_user_prompt
+        self._defer_writes = self._buffer_read_only
+        self._write_options = {}
+        if isinstance(store, SqlConversationCoordinator):
+            self._write_options["write_state"] = MessagePartWriteState()
         self._committed_scope: tuple | None = None
+        self._committed_public_messages: list[ModelMessage] = []
         self._committed_projection: bytes | None = None
         self._message_identity_merges = 0
         self._response_id_mismatches = 0
@@ -198,27 +213,39 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             return False
         raise MessagePersistenceError("Accepted tool call has no official model response")
 
+    def _copy_for_event_store(self, message: ModelMessage) -> ModelMessage:
+        copy = deepcopy(message)
+        if (
+            self._buffer_read_only and isinstance(copy, ModelRequest) and copy.parts
+            and all(isinstance(part, ToolReturnPart) for part in copy.parts)
+        ):
+            # A buffered result uses the same envelope as an immediately saved
+            # result. The live SDK request retains its instructions and identity.
+            return replace(copy, timestamp=None, instructions=None, run_id=None, conversation_id=None)
+        return copy
+
     def _with_ordinals(self, messages: list[ModelMessage]) -> list[ModelMessage]:
         result = []
         ordinal = 1 if self.skip_user_prompt else 0
         for message in messages:
             if self.skip_user_prompt and is_user_only_request(message):
                 continue
-            copy = deepcopy(message)
+            copy = self._copy_for_event_store(message)
             copy.metadata = {**(copy.metadata or {}), "deepagent_message_ordinal": ordinal,
                              "deepagent_part_indices": list(range(len(copy.parts)))}
             ordinal += 1
             result.append(copy)
         return result
 
-    def _completed_messages(self) -> list[ModelMessage]:
+    def completed_messages(self) -> list[ModelMessage]:
+        """Return accepted facts available at a checkpoint, even before they are committed."""
         messages = []
         ordinal = 1 if self.skip_user_prompt else 0
         accepted_in_round: set[str] = set()
         for message in self._ledger:
             if self.skip_user_prompt and is_user_only_request(message):
                 continue
-            copy = deepcopy(message)
+            copy = self._copy_for_event_store(message)
             indices = list(range(len(copy.parts)))
             if isinstance(message, ModelResponse):
                 output_fact = bool((message.metadata or {}).get("deepagent_output"))
@@ -295,25 +322,29 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
             messages = []
             write_stage = "assemble"
             try:
-                messages = self._completed_messages()
+                messages = self.completed_messages()
+                if hook == "_prepare_model_node" and self.skip_user_prompt and not messages:
+                    # The runner already committed the user input before entering the SDK.
+                    outcome = "skipped"
+                    return
                 scope = (deps.session_id, deps.agent_id, deps.user, deps.app_id,
                          deps.space_id, deps.turn_id, deps.run_id)
+                messages_to_write = public_tool_messages(messages, deps.tool_names)
                 projection = None
                 if (
                     hook in self._duplicate_flush_hooks
                     and scope == self._committed_scope
-                    and len(messages) == len(self.messages)
+                    and len(messages_to_write) == len(self._committed_public_messages)
                 ):
-                    projection = self._projection(messages)
+                    projection = self._projection(messages_to_write)
                     if self._committed_projection is None:
-                        self._committed_projection = self._projection(self.messages)
+                        self._committed_projection = self._projection(self._committed_public_messages)
                     if projection is not None and projection == self._committed_projection:
                         outcome = "skipped"
                         return
                 write_stage = "append"
                 try:
                     async with asyncio.timeout(10):
-                        messages_to_write = public_tool_messages(messages, deps.tool_names)
                         assembled_at = time.perf_counter()
                         rows = await self.store.append_message_parts(
                             deps.session_id, agent_id=deps.agent_id, user_id=deps.user,
@@ -323,12 +354,14 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                             first_message_ordinal=1 if self.skip_user_prompt else 0,
                             usage_model_id=self.model_name,
                             usage_provider_id=self.provider_id,
+                            **self._write_options,
                         )
                 finally:
                     transaction_ended_at = time.perf_counter()
                 committed_at = transaction_ended_at
                 self.messages = messages
                 self._committed_scope = scope
+                self._committed_public_messages = messages_to_write
                 self._committed_projection = projection
                 write_stage = "publish"
                 if self.event_queue is not None:
@@ -364,8 +397,19 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
                     publish_ms=round((ended_at - committed_at) * 1000) if committed_at is not None else None,
                 )
 
-    async def _save(self, ctx: RunContext[AgentDeps], *, hook: str = "unknown") -> None:
-        await self._flush(ctx, hook=hook)
+    async def _save(
+        self, ctx: RunContext[AgentDeps], *, hook: str = "unknown",
+        tool_call_id: str | None = None, phase: str | None = None,
+    ) -> None:
+        if self.persistence_error is not None:
+            raise self.persistence_error
+        if not self._defer_writes:
+            await self._flush(ctx, hook=hook, tool_call_id=tool_call_id, phase=phase)
+
+    async def checkpoint_history(self, ctx: RunContext[AgentDeps]) -> None:
+        """Make the source prefix visible to compaction's existing SQL validation."""
+        if self._defer_writes:
+            await self._flush(ctx, hook="context_compaction")
 
     async def wrap_node_run(self, ctx, *, node, handler):
         await self._prepare_model_node(ctx, node)
@@ -395,6 +439,12 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
     async def after_model_request(self, ctx, *, request_context, response):
         if ctx.deps.output_state is not None:
             await ctx.deps.output_state.check_response(ctx, response, progress=self)
+        if self._defer_writes:
+            definitions = {tool.name: tool for tool in request_context.model_request_parameters.function_tools}
+            if any(isinstance(part, ToolCallPart) and not _is_read_only_tool(definitions.get(part.tool_name))
+                   for part in response.parts):
+                # Keep the original timing of call facts for a batch that may write.
+                self._defer_writes = False
         self._record(response)
         await self._save(ctx, hook="after_model_request")
         return response
@@ -414,11 +464,12 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
         return result
 
     async def before_tool_execute(self, ctx, *, call, tool_def, args):
-        if self._accept(ctx, call, allow_nested=True):
-            await self._save(ctx, hook="before_tool_execute")
-        else:
-            # Propagate an earlier persistence failure even if a nested tool caught it.
-            await self._flush(ctx, hook="before_tool_execute")
+        self._accept(ctx, call, allow_nested=True)
+        if not _is_read_only_tool(tool_def):
+            # Unknown or side-effecting calls require the existing durable
+            # dispatch guard and immediate capture of their settled outcomes.
+            self._defer_writes = False
+        await self._save(ctx, hook="before_tool_execute")
         return args
 
     async def wrap_tool_execute(self, ctx, *, call, tool_def, args, handler):
@@ -480,7 +531,11 @@ class MessagePersistenceCapability(AbstractCapability[AgentDeps]):
 class StreamMessagePersistenceCapability(MessagePersistenceCapability):
     # Stream events already carry the fully normalized official result parts.
     capture_execute_results = False
-    _duplicate_flush_hooks = frozenset({"after_node_run", "stream_end"})
+    # The pre-tool hook keeps its authoritative scope check before dispatch.
+    _duplicate_flush_hooks = frozenset({
+        "_prepare_model_node", "after_model_request", "after_node_run",
+        "wrap_run_event_stream", "stream_end",
+    })
 
     async def wrap_run_event_stream(
         self, ctx: RunContext[AgentDeps], *, stream: AsyncIterable[AgentStreamEvent],
@@ -489,15 +544,17 @@ class StreamMessagePersistenceCapability(MessagePersistenceCapability):
             async for event in stream:
                 if isinstance(event, FunctionToolCallEvent) and event.args_valid:
                     self._accept(ctx, event.part)
-                    await self._flush(ctx, hook="wrap_run_event_stream", phase="tool_call",
-                                      tool_call_id=event.part.tool_call_id)
+                    await self._save(
+                        ctx, hook="wrap_run_event_stream", phase="tool_call", tool_call_id=event.part.tool_call_id,
+                    )
                 elif isinstance(event, FunctionToolResultEvent):
                     await self._capture_plan_result(ctx, event.part)
                     self._results[event.part.tool_call_id] = deepcopy(event.part)
-                    await self._flush(ctx, hook="wrap_run_event_stream", phase="tool_result",
-                                      tool_call_id=event.part.tool_call_id)
+                    await self._save(
+                        ctx, hook="wrap_run_event_stream", phase="tool_result", tool_call_id=event.part.tool_call_id,
+                    )
                 yield event
-            await self._flush(ctx, hook="stream_end")
+            await self._save(ctx, hook="stream_end")
         finally:
             close = getattr(stream, "aclose", None)
             if callable(close):

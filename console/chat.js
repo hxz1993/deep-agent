@@ -427,6 +427,7 @@ function currentSessionSnapshot() {
     spaceId: persisted?.spaceId ?? null,
     appName: persisted?.appName ?? null,
     spaceName: persisted?.spaceName ?? null,
+    activeRunId: persisted?.activeRunId ?? null,
   });
 }
 
@@ -451,6 +452,7 @@ function mergeSessionsFromBackend(rows, { append = false, agentId = state.agentI
       spaceId: row.space_id ?? null,
       appName: row.app_name ?? null,
       spaceName: row.space_name ?? null,
+      activeRunId: row.active_run_id ?? null,
     });
   });
 
@@ -778,7 +780,9 @@ async function loadMoreSessions() {
   renderSessions();
   const request = (async () => {
   try {
-    const params = new URLSearchParams({ agent_id: page.agentId, limit: "50", offset: String(page.offset) });
+    const params = new URLSearchParams({
+      agent_id: page.agentId, limit: "50", offset: String(page.offset), include_active_runs: "true",
+    });
     for (const [key, value] of Object.entries(sessionAppQuery(page.appFilter))) params.set(key, value);
     if (page.query) params.set("query", page.query);
     const r = await daFetch(serviceUrl(`api/v1/sessions?${params}`), { signal: page.controller.signal });
@@ -1161,8 +1165,20 @@ function updateSessionRunIndicators() {
 
 function runningSessionKeys() {
   const running = new Set(Array.from(state.backgroundStreams?.values() || [], sessionLookupKey));
+  for (const session of state.sessions || []) {
+    if (session.activeRunId) running.add(sessionLookupKey(session));
+  }
   if (state.observingRun && state.sessionId) running.add(sessionLookupKey({ id: state.sessionId, agentId: state.agentId }));
   return running;
+}
+
+function clearListedSessionRun(session, runId) {
+  if (!runId) return;
+  const listed = state.sessions?.find(item => sessionLookupKey(item) === sessionLookupKey(session));
+  if (listed?.activeRunId === runId) {
+    listed.activeRunId = null;
+    updateSessionRunIndicators();
+  }
 }
 
 const MAX_CONSOLE_CHAT_STREAMS = 5;
@@ -1299,6 +1315,7 @@ function stopHistoryObservation() {
 }
 
 async function observeSessionHistory(session, controller, current) {
+  const listedRunId = session.activeRunId;
   let status;
   try {
     status = await boundedStreamRequest(async (signal) => {
@@ -1314,6 +1331,7 @@ async function observeSessionHistory(session, controller, current) {
   }
   if (!current()) return;
   if (status.status === "idle" || !status.run_id) {
+    if (listedRunId) clearListedSessionRun(session, listedRunId);
     return observePersistedSessionHistory(session, controller, current, {
       snapshotOnly: true, readOnly: status.status !== "idle",
     });
@@ -1401,6 +1419,7 @@ async function observeSessionHistory(session, controller, current) {
     onEnd: async (_data, signal) => {
       await readHistory(signal);
       if (!current() || signal.aborted) return;
+      if (state.sessions?.length) clearListedSessionRun(session, runId);
       setObservedStatus(false);
       void refreshTrajectory(controller.signal).catch(() => {});
       void loadContextStatus(session, { signal: controller.signal, isCurrent: current });
@@ -1413,7 +1432,10 @@ async function observeSessionHistory(session, controller, current) {
       if (!current() || fallback) return;
       discardPreview();
       fallback = await observePersistedSessionHistory(session, controller, current, {
-        runId, baselineSequence, register: false, onIdle: () => observer.stop(),
+        runId, baselineSequence, register: false, onIdle: () => {
+          if (state.sessions?.length) clearListedSessionRun(session, runId);
+          observer.stop();
+        },
       });
     },
   });
@@ -2624,6 +2646,7 @@ async function runChatStream(payload, assistant) {
       if (type === "session") {
         sourceSession.id = evt.data.session_id || sourceSession.id;
         sourceSession.agentId = evt.data.agent_id || sourceSession.agentId;
+        sourceSession.runId = evt.data.run_id || null;
       }
       if (current()) {
         handleEvent(evt, assistant);
@@ -2659,6 +2682,7 @@ async function runChatStream(payload, assistant) {
   } finally {
     streamController.signal.removeEventListener("abort", abortStop);
     state.backgroundStreams.delete(streamController);
+    if (sourceSession.runId) clearListedSessionRun(sourceSession, sourceSession.runId);
     updateSessionRunIndicators();
     if (!current()) {
       streamController.abort();

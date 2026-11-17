@@ -6,11 +6,14 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from deep_agent.db.models import Agent, McpServer, RemoteAgentConnection
+from deep_agent.db.models import Agent, RemoteAgentConnection
 from deep_agent.db.reference_integrity import ReferenceConflict, is_unique_conflict, lock_optional
 from deep_agent.db.stores._session import SessionBoundMixin
 
-from .contracts import A2AConfig, CONNECTION_PREFIX, ConnectionWrite, McpConfig
+from .contracts import A2AConfig, CONNECTION_PREFIX, ConnectionWrite
+
+
+UPDATED_BY_KEY = "_config_updated_by"
 
 
 async def lock_agent_connections(db, codes: list[str], *, old_codes=()) -> None:
@@ -18,16 +21,6 @@ async def lock_agent_connections(db, codes: list[str], *, old_codes=()) -> None:
         row = await lock_optional(db, RemoteAgentConnection, RemoteAgentConnection.id, code.removeprefix(CONNECTION_PREFIX))
         if row is None and code in codes:
             raise ReferenceConflict("远程 Agent 连接不存在，请刷新后重试")
-
-
-async def mcp_connections(db, name: str) -> list[RemoteAgentConnection]:
-    rows = (await db.scalars(select(RemoteAgentConnection).order_by(RemoteAgentConnection.id))).all()
-    connections = []
-    for connection_id in [row.id for row in rows if row.config.get("mcp_server_name") == name]:
-        row = await lock_optional(db, RemoteAgentConnection, RemoteAgentConnection.id, connection_id)
-        if row is not None and row.config.get("mcp_server_name") == name:
-            connections.append(row)
-    return connections
 
 
 class ConnectionStore(SessionBoundMixin):
@@ -57,13 +50,10 @@ class ConnectionStore(SessionBoundMixin):
                     result.setdefault(code.removeprefix(CONNECTION_PREFIX), []).append({"id": agent_id, "name": name})
         return result
 
-    async def save(self, body: ConnectionWrite, connection_id: str | None = None) -> RemoteAgentConnection | None:
+    async def save(self, body: ConnectionWrite, connection_id: str | None = None, *,
+                   updated_by: str | None = None) -> RemoteAgentConnection | None:
         try:
             async with self._write() as db:
-                if isinstance(body.config, McpConfig):
-                    mcp = await lock_optional(db, McpServer, McpServer.name, body.config.mcp_server_name)
-                    if mcp is None or mcp.transport != "url":
-                        raise ReferenceConflict("请选择已配置的 Streamable HTTP MCP")
                 row = None
                 if connection_id is not None:
                     row = await lock_optional(db, RemoteAgentConnection, RemoteAgentConnection.id, connection_id)
@@ -93,6 +83,13 @@ class ConnectionStore(SessionBoundMixin):
                     row.description = body.description
                     row.revision += 1
                     row.updated_at = datetime.now(UTC)
+                # Record the editor alongside the inspection snapshot so 016 stays compatible.
+                inspection = dict(row.inspection or {})
+                if updated_by is None:
+                    inspection.pop(UPDATED_BY_KEY, None)
+                else:
+                    inspection[UPDATED_BY_KEY] = updated_by
+                row.inspection = inspection or None
                 await db.flush()
                 await db.refresh(row)
                 return row
@@ -112,7 +109,10 @@ class ConnectionStore(SessionBoundMixin):
             if interface and row.config.get("approved_interface") != interface:
                 row.config = {**row.config, "approved_interface": interface}
                 row.revision += 1
-            row.inspection = {**value, "revision": row.revision, "checked_at": datetime.now(UTC).isoformat()}
+            inspection = {**value, "revision": row.revision, "checked_at": datetime.now(UTC).isoformat()}
+            if UPDATED_BY_KEY in (row.inspection or {}):
+                inspection[UPDATED_BY_KEY] = row.inspection[UPDATED_BY_KEY]
+            row.inspection = inspection
             await db.flush()
             await db.refresh(row)
             return row

@@ -9,12 +9,13 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, field_validator, model_validator
 
 CONNECTION_PREFIX = "agent_connection:"
+REMOTE_AGENT_PROTOCOLS = frozenset({"a2a", "codex", "codebuddy"})
 Operation = Literal["start", "answer", "resume"]
 Status = Literal["submitted", "working", "input_required", "completed", "failed", "canceled", "unknown"]
 
 
 def tool_metadata(tool_name: str, metadata: object) -> dict | None:
-    if tool_name not in {"delegate_task", "remote_task_result"} or not isinstance(metadata, Mapping):
+    if tool_name not in {"delegate_task", "answer_task", "remote_task_result"} or not isinstance(metadata, Mapping):
         return None
     value = metadata.get("remote_agent")
     if not isinstance(value, Mapping) or not isinstance(value.get("id"), str):
@@ -95,13 +96,7 @@ class CodeBuddyConfig(CliConfig):
     protocol: Literal["codebuddy"] = "codebuddy"
 
 
-class McpConfig(ConnectionConfig):
-    protocol: Literal["mcp"] = "mcp"
-    mcp_server_name: str = Field(min_length=1, max_length=191)
-    publication_code: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-
-
-RemoteConfig = Annotated[A2AConfig | CodexConfig | CodeBuddyConfig | McpConfig, Field(discriminator="protocol")]
+RemoteConfig = Annotated[A2AConfig | CodexConfig | CodeBuddyConfig, Field(discriminator="protocol")]
 CONFIG_ADAPTER = TypeAdapter(RemoteConfig)
 
 

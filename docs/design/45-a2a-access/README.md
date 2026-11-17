@@ -6,35 +6,35 @@
 
 ## 页面与交付范围
 
-首期 Console 增加「集成」页，A2A 是首个对外发布协议。首期允许外部 Agent 和普通程序提交任务、跟踪状态、领取产物。DeepAgent 将在「远程 Agent」接入外部 Agent，作为工具调用。
+Console 的「发布 Agent」提供 A2A 和 MCP 接入，外部调用方可以提交任务、跟踪状态、领取产物。「远程 Agent」提供 A2A、Codex 和 CodeBuddy 连接，供本地 Agent 委派任务。
 
-| 区域 | 操作 | 交付顺序 |
+| 区域 | 操作 | 入口 |
 | --- | --- | --- |
-| 服务端 · 被调用 | 选已有 Agent，填写 Agent 编码和用途，选择全部应用或指定应用。客户端通过路径或 Header 提供本次 App，调用需携带平台凭据。保存后可按需启停。 | 阶段 1 实施 A2A 1.0 和服务端 Console；阶段 2 再实现 MCP、CLI、Python SDK，三者复用同一任务服务。 |
-| 客户端 · 调用外部 Agent | 登记远端 Agent Card，填写对方要求的请求 Header。指定本地 Agent 可用的连接，直连调试并查看近期调用。 | 设计和原型评审中。以第一个真实第三方或客户平台 Agent 为联调目标。 |
+| 服务端 · 被调用 | 选已有 Agent，填写 Agent 编码和用途，选择全部应用或指定应用。客户端通过路径或 Header 提供本次 App，调用需携带平台凭据。保存后可按需启停。 | 发布 Agent |
+| 客户端 · 调用外部 Agent | 配置 Agent Card 或 CLI 的执行环境。指定本地 Agent 可用的连接，直连调试并查看近期调用。 | 远程 Agent |
 
-原型右侧有四张接入卡。A2A Agent Card 随所选发布切换，MCP、CLI 和 Python SDK 按环境接入。首版用官方 A2A CLI 联调标准接口。DeepAgent 自有 CLI、MCP 和 Python SDK 属于阶段 2。发布范围、执行权限、任务归属和产物授权共用。
+A2A Agent Card 随所选发布切换。MCP 按环境接入。A2A 和 MCP 共用发布范围、执行权限、任务归属和产物授权。DeepAgent 自有 CLI 和 Python SDK 的设计留待后续评审。
 
 | 入口 | 页面展示 | 调用方拿到什么 |
 | --- | --- | --- |
 | A2A API | Agent Card、协议版本、鉴权声明、提交与查任务示例 | 标准消息、Task、状态流和 Artifact。 |
 | MCP | 连接配置与授权范围、已发布工具、提交／查询／取消示例 | Task ID、任务状态、公开结果及授权文件引用。 |
 | DeepAgent CLI（阶段 2） | 安装与凭据配置、提交／查询／等待／取消／下载命令 | 可供 shell 和业务脚本处理的结果及退出状态。建议命令复用 Python SDK。 |
-| Python SDK | 安装与最小代码、提交／查询／等待／取消／下载示例 | 结构化任务与结果、异步状态及可下载产物。 |
+| Python SDK（设计） | 安装与最小代码、提交／查询／等待／取消／下载示例 | 结构化任务与结果、异步状态及可下载产物。 |
 
 **业务验收**用同一份脱敏预算数据，从 Python 和一个真实 MCP 客户端分别提交。客户端可在断开后通过 Task ID 查询，最终可下载并打开 XLSX。这是阶段 2 的业务验收；阶段 1 先用官方 A2A 客户端验证补材料续跑、文件和重启清空近期任务，并回归现有 Console 和聊天入口。
 
-## 首期服务端 HTML 原型
+## 发布 Agent
 
-[打开集成原型](<Prototype A2A服务端接入/index.html>)。上方左侧管理发布，右侧横排四张接入卡。下方近期任务默认左右分栏，右侧详情可拖拽调整宽度。发布弹框右侧切换应用范围，指定应用按标签显示。A2A 提供通用与指定 App 的两条 Card 地址和简要用法，其他三种入口先占位。
+上方左侧管理发布，右侧查看接入方式。下方近期任务默认左右分栏，右侧详情可拖拽调整宽度。发布弹框可切换应用范围，指定应用按标签显示。A2A 提供通用与指定 App 的两条 Card 地址，MCP 提供环境级地址。
 
 [服务端 Console、任务与产物](server-console-design.md)说明发布配置和近期任务如何展示，以及 FileStore 和联调工具如何接入。
 
-## 远程 Agent 原型
+## 远程 Agent
 
-[打开远程 Agent 原型](<Prototype A2A客户端接入/index.html>)。首页同屏显示连接和本地 Agent 的近期调用，支持按外部 Agent 和接入方式筛选。打开配置后，可在调试区直接验证连接。
+首页同屏显示连接和本地 Agent 的近期调用，支持按远程 Agent 和任务状态筛选。打开配置后，可在调试区直接验证连接。
 
-远程连接计划使用 `remote_agent_connections`，八个字段拟随出站功能落地。连接保存后即可调试，在 Agent 编辑页选用，引用存入 `agents.capabilities`。当前服务端版本的 Revision `016` 只创建 `agent_publications`。身份、凭据、调用记录和联调见[远程 Agent 实施方案](client-implementation-plan.md)。
+Revision `016` 创建 `agent_publications` 和 `remote_agent_connections`。连接保存后即可调试，在 Agent 编辑页选用，引用存入 `agents.capabilities`。身份、凭据、调用记录和联调见[远程 Agent 实施方案](client-implementation-plan.md)。
 
 ## 早期布局备选
 
@@ -44,7 +44,7 @@
 | [B · 左右双栏](assets/b-two-columns.png) | 左侧发布及四个入口，右侧外部连接列表与表单。 | 两种角色都需要频繁配置时，便于并排操作。 |
 | [C · 任务工作台](assets/c-task-workbench.png) | 主区放发布详情、四个入口与任务列表，右侧放外部连接。 | 运营需要持续查看任务、失败状态和产物时。 |
 
-以下 PNG 保留作为早期布局对照，首期以服务端 HTML 为准。三个 PNG 均为 ImageGen 静态设计稿，图中的 URL、命令、认证值、输出格式、版本和已发布状态仅作视觉示意。对接以锁定的协议和正式配置为准。
+三个 PNG 为未采用的早期布局对照。图中的 URL、命令、认证值、输出格式、版本和已发布状态仅作视觉示意。
 
 ## 实施与待确认
 

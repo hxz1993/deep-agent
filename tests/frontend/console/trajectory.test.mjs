@@ -13,6 +13,41 @@ import {
   trajectoryStats,
 } from "../../../console/trajectory.js";
 
+test("远程后台完成结果合并到原工具轨迹，补查取件只更新同一行", () => {
+  const call = {
+    event_id: "call-event", event_type: "assistant/message", sequence: 1, run_id: "run",
+    payload: { message: { parts: [{
+      part_kind: "tool-call", tool_name: "delegate_task", tool_call_id: "call", args: { task: "Review" },
+    }] } },
+  };
+  const receipt = {
+    event_id: "receipt", event_type: "tool/results", sequence: 2, run_id: "run",
+    payload: { message: { parts: [{
+      part_kind: "tool-return", tool_name: "delegate_task", tool_call_id: "call", content: "Background receipt",
+    }] } },
+  };
+  const invocation = {
+    event_id: "completed", event_type: "remote_agent/invocation", sequence: 3, status: "completed",
+    payload: { id: "task", run_id: "run", tool_call_id: "call", message_id: "step",
+      name: "Remote", protocol: "a2a", text: "Review done", warnings: [], file_message_ids: { result: "step" },
+      files: { result: { file_id: "local_result", file_name: "result.csv" } } },
+  };
+  const refreshed = {
+    ...invocation, event_id: "refreshed", sequence: 4,
+    payload: { ...invocation.payload, files: { ...invocation.payload.files,
+      after_retry: { file_id: "local_retry", file_name: "retry.csv" },
+      previous: { file_id: "local_previous", file_name: "old.csv" } },
+      file_message_ids: { result: "step", after_retry: "step", previous: "older-step" } },
+  };
+  const tools = buildTrajectory({ items: [call, receipt, invocation, refreshed] })
+    .filter(row => row.kind === "tool");
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0].status, "completed");
+  assert.equal(tools[0].result.result.result, "Review done");
+  assert.deepEqual(tools[0].result.artifacts.map(file => file.file_id), ["local_result", "local_retry"]);
+  assert.equal(tools[0].native.result_event_id, "refreshed");
+});
+
 test("PTC 精确源码按 UTF-8 范围定位同一行的单次调用，并回读原始片段", () => {
   const code = '# 中文😀\na = query(1); b = query(2)\n';
   const original = { kind: "tool", label: "run_code", tool_call_id: "outer-1", run_id: "run-1", payload: { args: { code } } };

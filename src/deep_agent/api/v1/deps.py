@@ -233,7 +233,7 @@ async def _build_runner_from_spec(
         validate_provider_config(spec.provider_config)
     selected = set(spec.capabilities)
     available = set(ctx.registry.codes()) | {"ui:builtin"}
-    from deep_agent.remote_agents.contracts import CONNECTION_PREFIX
+    from deep_agent.remote_agents.contracts import CONNECTION_PREFIX, REMOTE_AGENT_PROTOCOLS
 
     remote_agent_capabilities = None
     if any(code.startswith(CONNECTION_PREFIX) for code in selected) and ctx.stores.remote_agent is not None:
@@ -241,6 +241,8 @@ async def _build_runner_from_spec(
 
         connections = await ctx.stores.remote_agent.selected(spec.capabilities)
         available.update(CONNECTION_PREFIX + row.id for row in connections)
+        # Retired transports should not disable an Agent's other tools.
+        connections = [row for row in connections if row.config.get("protocol") in REMOTE_AGENT_PROTOCOLS]
         if connections:
             remote_agent_capabilities = remote_capabilities(ctx.get_remote_agents(), connections)
     mcp_selected = any(code.startswith("mcp:") for code in selected)

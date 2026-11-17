@@ -9,7 +9,6 @@ import tempfile
 import unittest
 from datetime import timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from a2a import types as wire
@@ -309,10 +308,12 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail["session_title"], diagnostic.json()["title"])
 
     async def test_outbound_clients_use_same_task_for_two_replies_and_retrieve_artifacts(self):
-        from httpx import ReadError
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
         from deep_agent.agent_service.output import QUESTION_NAME
         from deep_agent.remote_agents import network
-        from deep_agent.remote_agents.contracts import A2AConfig, InputFile, McpConfig, RemoteAgentError, RemoteState
+        from deep_agent.remote_agents.contracts import A2AConfig, InputFile, RemoteAgentError, RemoteState
 
         backend = SubprocessBackend(python_executable=sandbox_test_python(), max_concurrency=1)
         self.ctx.sandbox_backend = backend
@@ -328,24 +329,9 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             f"open(publish_path('evidence.txt'), 'wb').write(b'e' * {len(evidence)})"
         )
         http_client = network._http_client
-        requests = []
-        interrupted_replies = []
-
-        class RecordingTransport(ASGITransport):
-            async def handle_async_request(self, request):
-                body = await request.aread()
-                requests.append((request.method, request.url.path, body))
-                response = await super().handle_async_request(request)
-                if (request.url.path == f"{ROOT}/mcp" and b'"name":"reply_task"' in body
-                        and b'"message_id":"mcp-second"' in body and not interrupted_replies):
-                    interrupted_replies.append(body)
-                    await response.aclose()
-                    raise ReadError("Interrupted delivery of the MCP reply response", request=request)
-                return response
-
-        def client_factory(headers, *, exact_url=None):
-            client = http_client(headers, exact_url=exact_url)
-            client._transport = RecordingTransport(app=self.app)
+        def client_factory(headers):
+            client = http_client(headers)
+            client._transport = ASGITransport(app=self.app)
             return client
 
         def respond(messages, info):
@@ -372,78 +358,144 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             a2a_config = A2AConfig(card_url=f"http://127.0.0.1:8002{self.url}/agent-card.json", headers=HEADERS)
             inspection = await network.A2AAdapter(a2a_config).inspect()
             self.assertTrue(inspection["streaming"])
-            a2a = network.A2AAdapter(a2a_config.model_copy(update={
+            adapter = network.A2AAdapter(a2a_config.model_copy(update={
                 "approved_interface": inspection["approved_interface"],
             }))
-            mcp = network.McpAdapter(
-                McpConfig(mcp_server_name="fixture", publication_code="budget-report"),
-                f"http://127.0.0.1:8002{ROOT}/mcp", HEADERS,
+            checkpoints = []
+
+            async def checkpoint(state):
+                checkpoints.append(state)
+
+            first = await adapter.run(
+                RemoteState(), "开始核对", [InputFile("budget.csv", "text/csv", csv)],
+                "start", checkpoint, message_id="a2a-first",
             )
-            self.assertEqual((await mcp.inspect())["publication_code"], "budget-report")
-            for protocol, adapter in (("a2a", a2a), ("mcp", mcp)):
-                with self.subTest(protocol=protocol):
-                    checkpoints = []
+            self.assertEqual((first.state.status, first.text), ("input_required", "哪个月份？"))
+            self.assertTrue(first.state.task_id)
+            self.assertTrue(first.state.question_id)
+            second = await adapter.run(
+                first.state, "用十一月", [], "answer", checkpoint, message_id="a2a-second",
+            )
+            if second.state.status in {"submitted", "working"}:
+                async with asyncio.timeout(5):
+                    while second.state.status in {"submitted", "working"}:
+                        await asyncio.sleep(0.05)
+                        second = await adapter.refresh(second.state, checkpoint)
+            self.assertEqual((second.state.status, second.text), ("input_required", "哪个地区？"))
+            self.assertEqual(second.state.task_id, first.state.task_id)
+            self.assertNotEqual(second.state.question_id, first.state.question_id)
+            resumed = await adapter.refresh(second.state, checkpoint)
+            self.assertEqual(resumed.state, second.state)
+            with self.assertRaises(RemoteAgentError):
+                await adapter.run(
+                    second.state.model_copy(update={"question_id": first.state.question_id}),
+                    "旧问题", [], "answer", checkpoint, message_id="a2a-stale",
+                )
+            completed = await adapter.run(
+                resumed.state, "用华东", [InputFile("extra.txt", "text/plain", extra)],
+                "answer", checkpoint, message_id="a2a-third",
+            )
+            self.assertEqual((completed.state.status, completed.text), ("completed", "预算差额 20"))
+            self.assertEqual(completed.state.task_id, first.state.task_id)
+            self.assertEqual(completed.state.context_id, first.state.context_id)
+            self.assertEqual(completed.warnings, ())
+            self.assertEqual({file.name: file.data for file in completed.files},
+                             {"result.csv": result_csv, "evidence.txt": evidence})
+            retrieved = await adapter.refresh(completed.state, checkpoint)
+            self.assertEqual(retrieved.files, completed.files)
+            continued = await adapter.run(
+                completed.state, "继续解释", [], "resume", checkpoint, message_id="a2a-continued",
+            )
+            self.assertEqual(continued.text, "仍然使用十一月和华东地区")
+            self.assertEqual(continued.state.context_id, first.state.context_id)
+            self.assertNotEqual(continued.state.task_id, first.state.task_id)
+            self.assertEqual(checkpoints[0].task_id, first.state.task_id)
+            self.assertIn(checkpoints[0].status, {"submitted", "working"})
+            entry = self.ctx.agent_tasks.entries[first.state.task_id]
+            events = await self.ctx.store.list_events(entry.context.session_id, event_type="user/message")
+            self.assertEqual(len(events), 4)
+            self.assertIn("budget.csv", str(events[0].payload))
+            self.assertIn("extra.txt", str(events[2].payload))
 
-                    async def checkpoint(state):
-                        checkpoints.append(state)
+            self.client.headers.update(HEADERS)
+            async with streamable_http_client(f"http://test{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+                async with ClientSession(rx, tx) as session:
+                    await session.initialize()
 
-                    first = await adapter.run(
-                        RemoteState(), "开始核对", [InputFile("budget.csv", "text/csv", csv)],
-                        "start", checkpoint, message_id=f"{protocol}-first",
-                    )
-                    self.assertEqual((first.state.status, first.text), ("input_required", "哪个月份？"))
-                    self.assertTrue(first.state.task_id)
-                    self.assertTrue(first.state.question_id)
-                    second = await adapter.run(
-                        first.state, "用十一月", [], "answer", checkpoint, message_id=f"{protocol}-second",
-                    )
-                    if second.state.status in {"submitted", "working"}:
-                        async with asyncio.timeout(5):
-                            while second.state.status in {"submitted", "working"}:
-                                await asyncio.sleep(0.05)
-                                second = await adapter.refresh(second.state, checkpoint)
-                    self.assertEqual((second.state.status, second.text), ("input_required", "哪个地区？"))
-                    self.assertEqual(second.state.task_id, first.state.task_id)
-                    self.assertNotEqual(second.state.question_id, first.state.question_id)
-                    resumed = await adapter.refresh(second.state, checkpoint)
-                    self.assertEqual(resumed.state, second.state)
-                    with self.assertRaises(RemoteAgentError):
-                        await adapter.run(
-                            second.state.model_copy(update={"question_id": first.state.question_id}),
-                            "旧问题", [], "answer", checkpoint, message_id=f"{protocol}-stale",
-                        )
-                    completed = await adapter.run(
-                        resumed.state, "用华东", [InputFile("extra.txt", "text/plain", extra)],
-                        "answer", checkpoint, message_id=f"{protocol}-third",
-                    )
-                    self.assertEqual((completed.state.status, completed.text), ("completed", "预算差额 20"))
-                    self.assertEqual(completed.state.task_id, first.state.task_id)
-                    self.assertEqual(completed.state.context_id, first.state.context_id)
-                    self.assertEqual(completed.warnings, ())
-                    self.assertEqual({file.name: file.data for file in completed.files},
-                                     {"result.csv": result_csv, "evidence.txt": evidence})
-                    retrieved = await adapter.refresh(completed.state, checkpoint)
-                    self.assertEqual(retrieved.files, completed.files)
-                    continued = await adapter.run(
-                        completed.state, "继续解释", [], "resume", checkpoint, message_id=f"{protocol}-continued",
-                    )
-                    self.assertEqual(continued.text, "仍然使用十一月和华东地区")
-                    self.assertEqual(continued.state.context_id, first.state.context_id)
-                    self.assertNotEqual(continued.state.task_id, first.state.task_id)
-                    self.assertEqual(checkpoints[0].task_id, first.state.task_id)
-                    self.assertIn(checkpoints[0].status, {"submitted", "working"})
-                    entry = self.ctx.agent_tasks.entries[first.state.task_id]
+                    async def call(tool, args=None):
+                        response = await session.call_tool(tool, args or {})
+                        self.assertFalse(response.isError, response)
+                        return response.structuredContent
+
+                    async def advance(tool, args):
+                        submitted = await call(tool, args)
+                        task_id = submitted["id"]
+                        await self.ctx.agent_tasks.wait(self.ctx.agent_tasks.entries[task_id])
+                        return await call("get_task", {"task_id": task_id})
+
+                    publication = (await call("list_agents"))["agents"][0]["agent_code"]
+                    first = await advance("submit_task", {
+                        "agent_code": publication, "message_id": "mcp-first", "text": "开始核对",
+                        "attachments": [{"name": "budget.csv", "media_type": "text/csv",
+                                         "data_base64": base64.b64encode(csv).decode()}],
+                    })
+                    self.assertEqual((first["state"], first["message"]), ("input_required", "哪个月份？"))
+                    self.assertEqual(first["source"], "mcp")
+
+                    second = await advance("reply_task", {
+                        "task_id": first["id"], "reply_to": first["question_id"],
+                        "message_id": "mcp-second", "text": "用十一月",
+                    })
+                    self.assertEqual((second["state"], second["message"]), ("input_required", "哪个地区？"))
+                    self.assertEqual(second["id"], first["id"])
+                    self.assertNotEqual(second["question_id"], first["question_id"])
+
+                    completed = await advance("reply_task", {
+                        "task_id": second["id"], "reply_to": second["question_id"],
+                        "message_id": "mcp-third", "text": "用华东",
+                        "attachments": [{"name": "extra.txt", "media_type": "text/plain",
+                                         "data_base64": base64.b64encode(extra).decode()}],
+                    })
+                    self.assertEqual(completed["state"], "completed")
+                    self.assertEqual(completed["id"], first["id"])
+                    self.assertEqual(completed["context_id"], first["context_id"])
+                    self.assertTrue(any(part.get("text") == "预算差额 20"
+                                        for artifact in completed["artifacts"] for part in artifact.get("parts", ())))
+
+                    artifacts = {item["name"]: item["artifact_id"] for item in completed["artifacts"]
+                                 if item.get("artifact_id")}
+                    for file_name, data in (("result.csv", result_csv), ("evidence.txt", evidence)):
+                        receipt = await session.call_tool("get_artifact", {
+                            "task_id": completed["id"], "artifact_id": artifacts[file_name],
+                        })
+                        self.assertFalse(receipt.isError, receipt)
+                        artifact, blocks = receipt.structuredContent, receipt.content
+                        self.assertEqual(json.loads(blocks[0].text)["download_path"], artifact["download_path"])
+                        self.assertEqual(str(blocks[1].uri), artifact["resource_uri"])
+                        if len(data) <= 1024 * 1024:
+                            resource = await session.read_resource(artifact["resource_uri"])
+                            self.assertEqual(base64.b64decode(resource.contents[0].blob), data)
+                        downloaded = await self.client.get(artifact["download_path"])
+                        self.assertEqual(downloaded.status_code, 200)
+                        self.assertEqual(downloaded.content, data)
+
+                    continued = await advance("submit_task", {
+                        "agent_code": publication, "context_id": completed["context_id"],
+                        "message_id": "mcp-continued", "text": "继续解释",
+                    })
+                    self.assertEqual(continued["context_id"], completed["context_id"])
+                    self.assertNotEqual(continued["id"], completed["id"])
+                    self.assertTrue(any(part.get("text") == "仍然使用十一月和华东地区"
+                                        for artifact in continued["artifacts"] for part in artifact.get("parts", ())))
+
+                    entry = self.ctx.agent_tasks.entries[first["id"]]
                     events = await self.ctx.store.list_events(entry.context.session_id, event_type="user/message")
                     self.assertEqual(len(events), 4)
                     self.assertIn("budget.csv", str(events[0].payload))
                     self.assertIn("extra.txt", str(events[2].payload))
 
-        mcp_rpc_payloads = [body for method, path, body in requests if method == "POST" and path == f"{ROOT}/mcp"]
-        self.assertEqual(len(interrupted_replies), 1)
-        self.assertEqual(sum(b'"message_id":"mcp-second"' in body for body in mcp_rpc_payloads), 1)
-        self.assertTrue(any(b'"resources/read"' in body for body in mcp_rpc_payloads))
-        self.assertTrue(any(method == "GET" and path.startswith(f"{ROOT}/tasks/") and path.endswith("/download")
-                            for method, path, _body in requests))
+        recent = await self.client.get("/api/v1/remote-agent-connections/recent", headers=self.admin)
+        self.assertEqual((recent.status_code, recent.json()), (200, []))
 
     async def test_inline_image_reaches_model_in_original_task(self):
         from deep_agent.agent_service.output import QUESTION_NAME
@@ -487,13 +539,10 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             name="Reconciliation fixture", prompt="Always use the marker RECON",
             model_id=original.model_id,
         ), user_id="fixture-admin")
-        with patch("deep_agent.api.v1.agent_service.IntegrationAppDirectory.available_apps", return_value=[
-            SimpleNamespace(app_id="budget001", space_id="budget"),
-        ]):
-            response = await self.client.post(f"{ROOT}/publications", headers=self.admin, json={
-                "agent_code": "recon", "name": "对账", "agent_id": agent.id,
-                "scope": {"apps": {"mode": "selected", "items": [{"app_id": "budget001", "space_id": "budget"}]}},
-            })
+        response = await self.client.post(f"{ROOT}/publications", headers=self.admin, json={
+            "agent_code": "recon", "name": "对账", "agent_id": agent.id,
+            "scope": {"apps": {"mode": "selected", "items": [{"app_id": "budget001", "space_id": "budget"}]}},
+        })
         self.assertEqual(response.status_code, 201, response.text)
         self.assertEqual(response.json()["agent_code"], "recon")
         self.assertEqual(response.json()["agent_id"], agent.id)
@@ -647,14 +696,34 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                 if params.get("app_id") and count:
                     self.assertEqual(result["items"][0]["app_id"], params["app_id"])
 
-        with patch("deep_agent.api.v1.agent_service.IntegrationAppDirectory.available_apps",
-                   return_value=[SimpleNamespace(**app)]):
-            response = await self.client.patch(publication, headers=self.admin, json={
-                "revision": 2, "scope": {"apps": {"mode": "selected", "items": [app]}},
-            })
+        response = await self.client.patch(publication, headers=self.admin, json={
+            "revision": 2, "scope": {"apps": {"mode": "selected", "items": [app]}},
+        })
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual((await self.client.get(card_url, headers=HEADERS)).status_code, 200)
         self.assertEqual((await self.client.get(card_url, headers=outside)).status_code, 403)
+
+    async def test_publication_save_does_not_require_app_directory_access(self):
+        headers = {"user": "fixture-admin"}
+        scope = {"apps": {"mode": "selected", "items": [{"app_id": "budget001", "space_id": "budget"}]}}
+        with patch(
+            "deep_agent.api.v1.agent_service.IntegrationAppDirectory.available_apps",
+            side_effect=IntegrationAppAccessError(401, "请使用平台登录身份验证应用权限。"),
+        ) as directory:
+            created = await self.client.post(f"{ROOT}/publications", headers=headers, json={
+                "agent_code": "selected-apps", "name": "指定应用", "agent_id": self.agent, "scope": scope,
+            })
+            self.assertEqual(created.status_code, 201, created.text)
+            response = await self.client.patch(f"{ROOT}/publications/selected-apps", headers=headers, json={
+                "revision": created.json()["revision"], "name": "更新指定应用", "scope": scope,
+            })
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["scope"], scope)
+            directory.assert_not_awaited()
+
+            response = await self.client.get(f"{ROOT}/applications", headers=self.admin)
+            self.assertEqual(response.status_code, 401, response.text)
+            directory.assert_awaited_once()
 
     async def test_download_xlsx_published_by_python_sandbox(self):
         from mcp import ClientSession
@@ -972,8 +1041,8 @@ class IndependentA2ASdkTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(streaming=streaming):
                 app = create_app(base, streaming=streaming)
 
-                def client_factory(headers, *, exact_url=None):
-                    client = http_client(headers, exact_url=exact_url)
+                def client_factory(headers):
+                    client = http_client(headers)
                     client._transport = ASGITransport(app=app)
                     return client
 
@@ -1179,61 +1248,3 @@ class IndependentA2ASdkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(file.name, file.data) for file in finished.files], [
             ("result.csv", b"row,value\nEast,20\n"),
         ])
-
-
-class OutboundMcpTransportTests(unittest.IsolatedAsyncioTestCase):
-    async def test_interrupted_tool_call_reconnects_for_read_only_recovery(self):
-        from contextlib import asynccontextmanager
-        from deep_agent.remote_agents.network import McpAdapter, UNCONFIRMED_ANSWER
-        from deep_agent.remote_agents.contracts import McpConfig, RemoteAgentError, RemoteState
-
-        adapter = McpAdapter(McpConfig(mcp_server_name="fixture", publication_code="budget"),
-                             "https://example.test/api/v1/agent-service/mcp", {})
-        initial = RemoteState(task_id="task", context_id="context", status="input_required", question_id="first")
-        for scenario in ("unchanged", "advanced", "query-interrupted", "resume-unknown"):
-            with self.subTest(scenario=scenario):
-                connections = []
-                call_log = []
-
-                async def call_tool(tool, arguments, *, raise_on_error):
-                    call_log.append((tool, dict(arguments)))
-                    if scenario == "query-interrupted" and tool == "reply_task":
-                        payload = {"id": "task", "context_id": "context", "state": "working"}
-                    elif tool == "get_task" and scenario == "query-interrupted" and len(connections) == 1:
-                        raise ConnectionError("interrupted query")
-                    elif tool == "get_task":
-                        question = "first" if scenario == "unchanged" else "second"
-                        payload = {"id": "task", "context_id": "context", "state": "input_required",
-                                   "question_id": question, "message": f"question {question}"}
-                    else:
-                        raise ConnectionError("interrupted send")
-                    return SimpleNamespace(is_error=False, structured_content=payload)
-
-                @asynccontextmanager
-                async def client():
-                    connections.append(object())
-                    yield SimpleNamespace(call_tool=call_tool)
-
-                checkpoint = AsyncMock()
-                with patch.object(adapter, "_client", client):
-                    if scenario == "resume-unknown":
-                        with self.assertRaises(RemoteAgentError) as error:
-                            await adapter.run(initial.model_copy(update={"status": "completed"}), "continue", [],
-                                              "resume", checkpoint, message_id="next")
-                        self.assertEqual(error.exception.status, "unknown")
-                        self.assertEqual(call_log, [("submit_task", {
-                            "agent_code": "budget", "context_id": "context", "message_id": "next", "text": "continue",
-                        })])
-                        checkpoint.assert_not_awaited()
-                        continue
-                    result = await adapter.run(initial, "answer", [], "answer", checkpoint, message_id="reply")
-                    self.assertEqual(call_log[0], ("reply_task", {
-                        "task_id": "task", "reply_to": "first", "message_id": "reply", "text": "answer",
-                    }))
-                    self.assertTrue(all(name == "get_task" and arguments["task_id"] == "task"
-                                        for name, arguments in call_log[1:]))
-                    self.assertEqual(len(connections), 2)
-                    self.assertEqual(len(call_log), 3 if scenario == "query-interrupted" else 2)
-                    self.assertEqual(result.state.question_id, "first" if scenario == "unchanged" else "second")
-                    self.assertEqual(result.warnings, (UNCONFIRMED_ANSWER,) if scenario == "unchanged" else ())
-                    self.assertEqual(checkpoint.await_args.args[0], result.state)

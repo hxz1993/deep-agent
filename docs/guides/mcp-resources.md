@@ -4,7 +4,7 @@ DeepAgent 使用 Pydantic AI `MCPToolset` 的 Resource API，向模型提供受�
 
 ## 检测并更新
 
-创建或检测 URL MCP 时，DeepAgent 使用本次配置请求的上下文 Header 连接 MCP，并依次执行：
+检测 URL MCP 时，DeepAgent 使用本次配置请求的上下文 Header 连接 MCP，并依次执行：
 
 ```text
 initialize
@@ -39,6 +39,8 @@ resources/list  # 服务声明资源能力时，单独限时检查
 ```http
 POST /api/v1/mcp/{name}/inspect
 ```
+
+「绑定应用」模式在选择目标时列出当前账号可配置的应用。保存时直接记录已选目标和配置。首次配置或修改连接后，在 Console 点「检测」更新工具清单。
 
 旧版 `degraded` 记录若仅有资源错误且工具快照有效，Console 按工具正常展示，并保留资源告警；不回写旧数据。
 

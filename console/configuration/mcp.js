@@ -242,6 +242,10 @@ function inspectionToast(result) {
 
 function savedInspectionToast(server, action) {
   const info = server?.inspection || {};
+  if (server?.request_context?.mode === "bound_app") {
+    const needsInspection = ["unknown", "stale"].includes(info.status) || !info.status;
+    return { message: `MCP 已${action}${needsInspection ? "，可手动检测工具清单" : ""}`, error: false };
+  }
   if (server?.transport === "builtin") {
     const failure = inspectionFailureLabel(info.error) || inspectionFailureLabel(info.tools?.error);
     if (failure || info.tools?.status === "error") return { message: `MCP 已${action}，但清单刷新失败：${failure || "工具清单更新失败"}`, error: true };
@@ -287,8 +291,6 @@ const mcpAdmin = {
     const transport = document.getElementById("mcpTransport")?.value || "url";
     const meta = document.getElementById("mcpEditorMeta");
     if (meta) meta.textContent = `MCP 配置 · ${mcpTransportLabel(transport)}`;
-    const bind = document.getElementById("bindMcpRemoteAgent");
-    if (bind) bind.hidden = transport !== "url" || !state.editingMcp;
   },
 
   isEditorOpen() {
@@ -772,6 +774,8 @@ const mcpAdmin = {
         if (!this.boundApp?.app_id || !this.boundApp.space_id) throw new Error("请选择绑定应用。");
         config.request_context.target_app_id = this.boundApp.app_id;
         config.request_context.target_space_id = this.boundApp.space_id;
+        if (this.boundApp.app_name) config.request_context.target_app_name = this.boundApp.app_name;
+        if (this.boundApp.space_name) config.request_context.target_space_name = this.boundApp.space_name;
       }
       if (mode === "isolated") {
         const headers = parseJsonOrEmpty(document.getElementById("mcpHeaders").value);
@@ -922,9 +926,6 @@ document.addEventListener("DOMContentLoaded", () => {
     mcpAdmin.catalogController = null;
   });
   document.getElementById("newMcpBtn")?.addEventListener("click", () => mcpAdmin.openCreate());
-  document.getElementById("bindMcpRemoteAgent")?.addEventListener("click", () => {
-    if (state.editingMcp) void window.remoteAgentAdmin?.bindMcp(state.editingMcp);
-  });
   document.getElementById("mcpForm")?.addEventListener("submit", (e) => mcpAdmin.save(e));
   document.getElementById("mcpForm")?.addEventListener("input", () => { mcpAdmin.editorDirty = true; });
   document.getElementById("mcpForm")?.addEventListener("change", () => { mcpAdmin.editorDirty = true; });

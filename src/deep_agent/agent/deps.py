@@ -76,7 +76,6 @@ class AgentDeps:
     cancellation_token: CancellationToken | None = field(default=None, repr=False)
     has_context_references: bool = False
     attachment_by_id: dict[str, AttachmentRef] = field(default_factory=dict)
-    remote_attachments: tuple[AttachmentRef, ...] = ()
     remote_user_message: str | None = None
     remote_task_id: str | None = None
     remote_question_id: str | None = None

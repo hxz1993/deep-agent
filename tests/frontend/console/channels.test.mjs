@@ -23,7 +23,7 @@ const consoleStyles = await readFile(new URL("../../../console/console.css", imp
 const sharedPrimitives = await readFile(new URL("../../../console/ui-primitives.css", import.meta.url), "utf8");
 
 test("配置中心提供企微渠道页和完整运行状态", () => {
-  assert.match(indexHtml, /data-tab="channels"[\s\S]*?<span>渠道<\/span>/);
+  assert.match(indexHtml, /data-tab="channels"[^>]*><i[^>]*><\/i><span>消息渠道<\/span>/);
   assert.match(templateHtml, /id="panel-channels"/);
   assert.match(templateHtml, /id="channelRuntimeBanner"/);
   assert.match(templateHtml, /channel-title-row[\s\S]*id="channelRuntimeBanner"[\s\S]*id="refreshChannelsBtn"/);

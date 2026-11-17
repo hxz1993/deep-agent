@@ -241,13 +241,13 @@ class IntegrationAppScopeTests(unittest.IsolatedAsyncioTestCase):
     async def test_same_zip_independent_lifecycle_and_backup_bundle(self):
         code = "scoped-report"
         base_a, base_b = f"{PATH}/{APP_A.app_id}", f"{PATH}/{APP_B.app_id}"
-        await self._install("/api/v1/skills")
+        original = await self._install("/api/v1/skills")
         general = await self.stores.skill_package.get_by_code(code)
         self.assertEqual(general.scope_ref, "general")
         async with self.engine.begin() as db:
             await db.execute(update(SkillPackage).where(SkillPackage.code == code).values(scope_ref=None))
-        original = await self._install(f"{base_a}/skills")
-        await self._install(f"{base_b}/skills")
+        for base in (base_a, base_b):
+            await self._request("POST", f"{base}/skills", 201, files={"file": ("same.zip", original)})
         await self._request("POST", f"{base_a}/skills", 409, files={"file": ("same.zip", original)})
         configs = (await self._request("GET", PATH, 200)).json()
         self.assertEqual([(row["app_id"], row["skill_count"]) for row in configs],

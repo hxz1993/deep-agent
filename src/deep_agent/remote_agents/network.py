@@ -1,13 +1,12 @@
-"""Outbound A2A JSON-RPC and DeepAgent's MCP publication tools."""
+"""Outbound A2A JSON-RPC."""
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import json
 import re
 from collections.abc import AsyncIterator, Sequence
-from contextlib import AsyncExitStack, aclosing, asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import replace
 from pathlib import PurePosixPath
 from urllib.parse import urljoin
@@ -17,17 +16,13 @@ from a2a import types as wire
 from a2a.client import A2AClientError, Client, ClientConfig, ClientFactory
 from a2a.client.card_resolver import parse_agent_card
 from google.protobuf.json_format import MessageToDict, ParseError
-from mcp import types as mcp_types
-
-from deep_agent.capabilities.mcp.toolset_builder import build_resource_client
 
 from .contracts import (
-    A2AConfig, Checkpoint, InputFile, McpConfig, Operation, OutputFile, RemoteAgentError,
+    A2AConfig, Checkpoint, InputFile, Operation, OutputFile, RemoteAgentError,
     RemoteResult, RemoteState, RemoteTaskExpired, Status,
 )
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
-MCP_INLINE_LIMIT = 1024 * 1024
 MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 MAX_CARD_BYTES = 1024 * 1024
 MAX_ARTIFACTS = 128
@@ -54,11 +49,7 @@ def _origin(url: httpx.URL) -> tuple[str, str, int]:
     return url.scheme, url.host, url.port or {"http": 80, "https": 443}[url.scheme]
 
 
-def _http_client(headers: dict[str, str], *, exact_url: str | None = None) -> httpx.AsyncClient:
-    async def check_destination(request: httpx.Request) -> None:
-        if exact_url is not None and request.url != _validate_url(exact_url):
-            raise RemoteAgentError("远端 MCP 请求试图更换目标地址")
-
+def _http_client(headers: dict[str, str]) -> httpx.AsyncClient:
     async def reject_redirect(response: httpx.Response) -> None:
         if response.is_redirect:
             raise RemoteAgentError("远程 Agent 接口返回重定向，请直接配置目标地址")
@@ -66,7 +57,7 @@ def _http_client(headers: dict[str, str], *, exact_url: str | None = None) -> ht
     return httpx.AsyncClient(
         headers=headers, follow_redirects=False, trust_env=False,
         timeout=httpx.Timeout(35, connect=10),
-        event_hooks={"request": [check_destination], "response": [reject_redirect]},
+        event_hooks={"response": [reject_redirect]},
     )
 
 
@@ -445,258 +436,6 @@ class A2AAdapter:
             except (wire.TaskNotCancelableError, wire.UnsupportedOperationError, A2AClientError,
                     httpx.HTTPError, ParseError, ValueError):
                 raise RemoteAgentError("远端尚未确认取消", status="unknown") from None
-            result = self._state(state, task)
-            if (result.task_id != state.task_id or result.status != "canceled"
-                    or (state.context_id and result.context_id != state.context_id)):
-                raise RemoteAgentError("远端尚未确认取消", status="unknown")
-            return RemoteResult(result)
-
-
-class _McpTransportError(RemoteAgentError):
-    def __init__(self) -> None:
-        super().__init__("DeepAgent MCP 连接失败，暂时无法确认远端结果", status="unknown")
-
-
-class McpAdapter:
-    def __init__(self, config: McpConfig, base_url: str, headers: dict[str, str]) -> None:
-        self.config = config
-        self.url = str(_validate_url(base_url))
-        self.headers = headers
-
-    @asynccontextmanager
-    async def _client(self):
-        async with _http_client(self.headers, exact_url=self.url) as http:
-            client = build_resource_client(self.config.mcp_server_name, "url", {"url": self.url}, http_client=http)
-            stack = AsyncExitStack()
-            try:
-                await stack.enter_async_context(client)
-            except Exception:
-                raise _McpTransportError() from None
-            command_failed = False
-            try:
-                yield client.client
-            except BaseException:
-                command_failed = True
-                raise
-            finally:
-                try:
-                    # FastMCP can surface a transport read failure again while
-                    # joining its background session. Keep any earlier error.
-                    await stack.aclose()
-                except Exception:
-                    if not command_failed:
-                        raise _McpTransportError() from None
-
-    @staticmethod
-    async def _call(client, tool: str, arguments: dict) -> dict:
-        try:
-            response = await client.call_tool(tool, arguments, raise_on_error=False)
-        except Exception:
-            raise _McpTransportError() from None
-        payload = response.structured_content
-        if response.is_error:
-            status = payload.get("status") if isinstance(payload, dict) else None
-            if status == 404:
-                if tool in {"get_task", "reply_task", "cancel_task"}:
-                    raise RemoteTaskExpired("远端任务不存在或已过期")
-                raise RemoteAgentError("远端发布、任务或产物不存在，也可能已过期")
-            if status in (401, 403):
-                raise RemoteAgentError("远端拒绝访问，请检查应用范围和鉴权")
-            raise RemoteAgentError("DeepAgent MCP 拒绝本次调用，请检查连接和任务状态")
-        if not isinstance(payload, dict):
-            raise _McpTransportError()
-        return payload
-
-    async def publications(self) -> list[dict[str, str]]:
-        async with self._client() as client:
-            try:
-                tools = await client.list_tools()
-            except Exception:
-                raise _McpTransportError() from None
-            names = {tool.name for tool in tools}
-            required = {"list_agents", "submit_task", "reply_task", "get_task", "cancel_task", "get_artifact"}
-            if not required.issubset(names):
-                raise RemoteAgentError("此 MCP 连接未提供完整的 DeepAgent 发布工具")
-            result = await self._call(client, "list_agents", {})
-        rows = result.get("agents")
-        if not isinstance(rows, list):
-            raise RemoteAgentError("DeepAgent MCP 未返回发布列表")
-        return [
-            {key: str(row.get(key) or "")[:limit] for key, limit in (
-                ("agent_code", 64), ("name", 240), ("description", 1000),
-            )}
-            for row in rows if isinstance(row, dict) and isinstance(row.get("agent_code"), str)
-        ]
-
-    async def inspect(self) -> dict:
-        rows = await self.publications()
-        selected = next((row for row in rows if row["agent_code"] == self.config.publication_code), None)
-        if selected is None:
-            raise RemoteAgentError("配置的 DeepAgent 发布不存在或未启用")
-        return {**selected, "publication_code": selected["agent_code"]}
-
-    @staticmethod
-    def _state(state: RemoteState, task: dict) -> RemoteState:
-        raw_status = task.get("state")
-        if not isinstance(raw_status, str):
-            raise _McpTransportError()
-        status = {
-            "submitted": "submitted", "working": "working", "input_required": "input_required",
-            "completed": "completed", "canceled": "canceled", "failed": "failed", "rejected": "failed",
-            "auth_required": "failed",
-        }.get(raw_status, "unknown")
-        task_id, context_id = task.get("id"), task.get("context_id")
-        question_id = task.get("question_id") if status == "input_required" else None
-        if (not isinstance(task_id, str) or not task_id or not isinstance(context_id, str) or not context_id
-                or (status == "input_required" and (not isinstance(question_id, str) or not question_id))):
-            raise _McpTransportError()
-        return state.model_copy(update={
-            "task_id": task_id, "context_id": context_id, "status": status, "question_id": question_id,
-        })
-
-    async def run(self, state: RemoteState, message: str, attachments: Sequence[InputFile],
-                  mode: Operation, checkpoint: Checkpoint, *, message_id: str) -> RemoteResult:
-        _check_input(attachments)
-        arguments = {"message_id": message_id}
-        if message:
-            arguments["text"] = message
-        if attachments:
-            arguments["attachments"] = [
-                {"name": item.name, "media_type": item.mime, "data_base64": base64.b64encode(item.data).decode("ascii")}
-                for item in attachments
-            ]
-        unanswered = state.question_id if mode == "answer" else None
-        if mode == "answer":
-            if not state.task_id or not state.question_id:
-                raise RemoteAgentError("没有可以补答的远端任务")
-            tool = "reply_task"
-            arguments.update(task_id=state.task_id, reply_to=state.question_id)
-        else:
-            tool = "submit_task"
-            arguments["agent_code"] = self.config.publication_code
-            if mode == "resume":
-                if not state.context_id:
-                    raise RemoteAgentError("没有可以继续的远端会话")
-                arguments["context_id"] = state.context_id
-            state = state.model_copy(update={
-                "task_id": None, "question_id": None, "context_id": None if mode == "start" else state.context_id,
-            })
-        state = state.model_copy(update={"question_id": None, "status": "submitted"})
-        observed = False
-        try:
-            async with self._client() as client:
-                async with asyncio.timeout(OBSERVATION_SECONDS):
-                    task = await self._call(client, tool, arguments)
-                    state = await _accept_state(state, self._state(state, task), checkpoint)
-                    observed = True
-                    while state.status in ACTIVE:
-                        await asyncio.sleep(0.5)
-                        task = await self._call(client, "get_task", {"task_id": state.task_id, "history_length": 0})
-                        state = await _accept_state(state, self._state(state, task), checkpoint)
-                return await self._result(client, task, state)
-        except (_McpTransportError, TimeoutError) as exc:
-            if not state.task_id:
-                raise RemoteAgentError("发送结果未知，未收到 DeepAgent MCP 响应", status="unknown") from None
-            if observed and isinstance(exc, TimeoutError):
-                return RemoteResult(state, "远端任务仍可按原任务回查。")
-            try:
-                async with self._client() as client:
-                    async with asyncio.timeout(RECOVERY_SECONDS):
-                        task = await self._call(client, "get_task", {"task_id": state.task_id, "history_length": 0})
-                    state = await _accept_state(state, self._state(state, task), checkpoint)
-                    result = await self._result(client, task, state)
-            except RemoteTaskExpired:
-                raise
-            except (_McpTransportError, TimeoutError):
-                if observed:
-                    return RemoteResult(state, "远端暂时无法查询，可稍后按原任务回查。")
-                raise RemoteAgentError("补答结果未知，可按原任务回查。", status="unknown") from None
-            return _recovered_result(result, unanswered if not observed else None)
-
-    async def _result(self, client, task: dict, state: RemoteState) -> RemoteResult:
-        text = [str(task.get("message") or "")]
-        if state.status != "completed":
-            return RemoteResult(state, text[0][:MAX_TEXT])
-        warnings: list[str] = []
-        files: list[OutputFile] = []
-        remaining = MAX_OUTPUT_BYTES
-        deadline = asyncio.get_running_loop().time() + ARTIFACT_SECONDS
-        artifacts = task.get("artifacts", [])
-        if not isinstance(artifacts, list):
-            return RemoteResult(state, text[0][:MAX_TEXT], warnings=("远端没有返回有效的产物列表，可回查原任务重试。",))
-        async with _http_client(self.headers) as http:
-            for artifact in artifacts[:MAX_ARTIFACTS]:
-                if not isinstance(artifact, dict):
-                    continue
-                if "parts" in artifact:
-                    if isinstance(artifact["parts"], list):
-                        for part in artifact["parts"]:
-                            if isinstance(part, dict) and ("text" in part or "data" in part):
-                                text.append(_text_value(part.get("text", part.get("data"))))
-                    continue
-                artifact_id = artifact.get("artifact_id")
-                name = _name(str(artifact.get("name") or "artifact"))
-                try:
-                    if asyncio.get_running_loop().time() >= deadline:
-                        raise TimeoutError
-                    async with asyncio.timeout_at(deadline):
-                        reference = await self._call(client, "get_artifact", {
-                            "task_id": state.task_id, "artifact_id": artifact_id,
-                        })
-                        if not isinstance(artifact_id, str) or reference.get("artifact_id") != artifact_id:
-                            raise RemoteAgentError("远端返回了与请求不一致的产物")
-                        size = reference.get("size")
-                        if type(size) is not int or not 0 <= size <= remaining:
-                            raise RemoteAgentError("产物缺少有效大小或超过限制")
-                        data, mime = await self._file_bytes(client, http, state.task_id, artifact_id, reference, size)
-                    if len(data) != size:
-                        raise RemoteAgentError("远端产物大小校验失败")
-                except (RemoteAgentError, httpx.HTTPError, TimeoutError):
-                    warnings.append(f"未能获取产物 {name}，可以回查原任务重试。")
-                    continue
-                remaining -= size
-                files.append(OutputFile(f"{state.task_id}:{artifact_id}", name, _mime(mime), data))
-        return RemoteResult(state, "\n".join(value for value in text if value)[:MAX_TEXT], tuple(files), tuple(warnings))
-
-    async def _file_bytes(self, client, http: httpx.AsyncClient, task_id: str, artifact_id: str,
-                          reference: dict, size: int) -> tuple[bytes, str]:
-        if not all(isinstance(value, str) and re.fullmatch(r"[a-f0-9]{32}", value)
-                   for value in (task_id, artifact_id)):
-            raise RemoteAgentError("远端产物标识无效")
-        uri = reference.get("resource_uri")
-        if size <= MCP_INLINE_LIMIT and uri == f"deepagent://tasks/{task_id}/artifacts/{artifact_id}":
-            try:
-                items = await client.read_resource(uri)
-                if (len(items) == 1 and isinstance(items[0], mcp_types.BlobResourceContents)
-                        and str(items[0].uri) == uri):
-                    data = base64.b64decode(items[0].blob, validate=True)
-                    if len(data) == size:
-                        return data, str(items[0].mimeType or reference.get("media_type") or "")
-            except Exception:
-                pass  # The publication also provides an authorized HTTP download for the same file.
-        path = reference.get("download_path")
-        service_path = "/api/v1/agent-service"
-        expected_path = f"{service_path}/tasks/{task_id}/artifacts/{artifact_id}/download"
-        if path != expected_path:
-            raise RemoteAgentError("远端产物缺少可用的下载地址")
-        url_path = httpx.URL(self.url).path.rstrip("/")
-        proxy_base = url_path.removesuffix(f"{service_path}/mcp") if url_path.endswith(f"{service_path}/mcp") else ""
-        data, mime = await _download(http, self.url, proxy_base + path, size)
-        return data, str(reference.get("media_type") or mime)
-
-    async def refresh(self, state: RemoteState, checkpoint: Checkpoint) -> RemoteResult:
-        if not state.task_id:
-            raise RemoteAgentError("没有可查询的远端任务标识", status="unknown")
-        async with self._client() as client:
-            task = await self._call(client, "get_task", {"task_id": state.task_id, "history_length": 0})
-            state = await _accept_state(state, self._state(state, task), checkpoint)
-            return await self._result(client, task, state)
-
-    async def cancel(self, state: RemoteState) -> RemoteResult:
-        if not state.task_id:
-            raise RemoteAgentError("没有可取消的远端任务标识", status="unknown")
-        async with self._client() as client:
-            task = await self._call(client, "cancel_task", {"task_id": state.task_id})
             result = self._state(state, task)
             if (result.task_id != state.task_id or result.status != "canceled"
                     or (state.context_id and result.context_id != state.context_id)):

@@ -115,7 +115,7 @@ def _file_artifacts(entry: Entry, events, result: Result):
         for part in parts:
             if part.get("part_kind") != "tool-return" or part.get("tool_name") not in {
                 "execute_python", "execute_skill_script", "run_code", "export_file_to_download_center",
-                "delegate_task", "remote_task_result",
+                "delegate_task", "answer_task", "remote_task_result",
             }:
                 continue
             metadata = part.get("metadata") or {}

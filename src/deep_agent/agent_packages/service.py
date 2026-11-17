@@ -25,6 +25,7 @@ from deep_agent.db.reference_integrity import is_unique_conflict
 from deep_agent.db.stores.agent.base import save_output_config, trusted_updater
 from deep_agent.models.provider_registry import model_unavailable_reason
 from deep_agent.models.reasoning import available_efforts, bound_agent_effort, effective_agent_effort, reasoning_protocol
+from deep_agent.remote_agents.contracts import CONNECTION_PREFIX, REMOTE_AGENT_PROTOCOLS
 from deep_agent.schemas.agent import AgentResponse
 from deep_agent.schemas.ui_tools import UiToolCreate
 from deep_agent.skills.catalog import RETIRED_DIAGNOSTICS_SKILL_CODE, active_skill_codes, get_builtin_skill, list_builtin_skills
@@ -98,7 +99,10 @@ def preview_from_snapshot(ctx, package: Package, data, mode='create', target_age
     builtin_ui = {t.package_code for t in builtin_ui_records()}
     builtin_names = {t.name for t in builtin_ui_records()}
     available = set(ctx.registry.codes()) | builtin_ui
-    remote_agents = {f"agent_connection:{row.id}": row.name for row in data.get(RemoteAgentConnection, ())}
+    remote_agents = {
+        CONNECTION_PREFIX + row.id: row.name for row in data.get(RemoteAgentConnection, ())
+        if row.config.get("protocol") in REMOTE_AGENT_PROTOCOLS
+    }
     resources, blocked = [], []
     def add(kind, code, label, status, **extra):
         refs = []

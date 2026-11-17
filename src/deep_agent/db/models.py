@@ -378,9 +378,7 @@ class RemoteAgentConnection(Base):
     config: Mapped[dict] = mapped_column(JSONType, nullable=False)
     inspection: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        UtcTimestamp(), server_default=func.now(), onupdate=func.now(), nullable=False,
-    )
+    updated_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
 
 
 class ChatSessionEvent(Base):

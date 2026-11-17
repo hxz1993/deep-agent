@@ -45,7 +45,7 @@ import {
 import { shouldFollowMessages } from "./message-scroll.js?v=20260912-21";
 import { boundedStreamRequest, verifyStreamStop } from "./stop-recovery.js?v=20260912-21";
 import { appendThinkingMenu, effortLabel, eventEffort, historyEffort } from "./reasoning-ui.js?v=0160-picker-labels";
-import { positionModelPicker, renderModelPickerValue, revealModelPickerOption } from "./ui-select.js?v=0160-session-groups";
+import { positionModelPicker, renderModelPickerValue, revealModelPickerOption } from "./ui-select.js?v=remote-agent-filter-icons";
 import { createHistoryFollower } from "./history-follower.js?v=20261105-v01510";
 import { sameHistoryValue } from "./history-comparison.js?v=20261105-v01510";
 import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260912-21";

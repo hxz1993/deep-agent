@@ -1,6 +1,6 @@
 # Agent 集成服务
 
-Console 的「集成」可以为现有 Agent 新建发布。每份发布有独立的 Agent 编码、用途和应用范围。每份发布提供通用和指定 App 两种 Agent Card 地址。选中发布可复制这两条地址，并按实际调用应用筛选该发布的近期任务。
+Console 的「服务发布 → 发布 Agent」可以为现有 Agent 新建发布。每份发布有独立的 Agent 编码、用途和应用范围。每份发布提供通用和指定 App 两种 Agent Card 地址。选中发布可复制这两条地址，并按实际调用应用筛选该发布的近期任务。
 
 发布管理 API 使用 `agent_code` 表示对外编码，`agent_id` 指向实际执行的内部 Agent。Agent 编码创建后固定。
 
@@ -19,7 +19,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 ## 接入与取件
 
-从「集成」复制完整 Card URL，在 A2A 1.0 客户端登记。两张 Card 都描述同一个 Agent，`supportedInterfaces[].url` 各自指向对应的 JSON-RPC 基址。
+从「发布 Agent」复制完整 Card URL，在 A2A 1.0 客户端登记。两张 Card 都描述同一个 Agent，`supportedInterfaces[].url` 各自指向对应的 JSON-RPC 基址。
 
 | 入口 | Card 路径 | 应用上下文 |
 |---|---|---|
@@ -31,6 +31,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 读取 Agent Card 时可省略协议版本。调用 JSON-RPC 任务接口时传 `A2A-Version: 1.0`。缺省按 A2A 0.3 处理，当前任务接口会返回版本不支持。
 
 发布的「应用范围」可以选择全部有权访问的应用，或指定一项及多项应用。两种入口在同一发布、调用主体和 App 下共用 Task 与 Context。
+「添加允许的应用」从当前平台账号可配置的应用中选择。发布管理员保存配置时直接保存已选的应用范围，外部调用仍按请求检查调用方的权限和发布范围。
 
 可传 `language`，默认 `zh-cn`。
 
@@ -49,13 +50,13 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 ## Task、Context 和会话
 
-一个 A2A `contextId` 对应一个 DeepAgent `session_id`，两个 ID 分别生成。会话保存消息、工具调用和附件引用。`taskId` 对应「集成 → 近期任务」里的工作项，一条会话可以包含多个 Task。每次实际执行有独立的 Run，等待补材料后会在同一 Task、同一会话里启动下一次 Run。
+一个 A2A `contextId` 对应一个 DeepAgent `session_id`，两个 ID 分别生成。会话保存消息、工具调用和附件引用。`taskId` 对应「发布 Agent → 近期任务」里的工作项，一条会话可以包含多个 Task。每次实际执行有独立的 Run，等待补材料后会在同一 Task、同一会话里启动下一次 Run。
 
 首次请求不带这两个 ID，服务端创建 Context 和 Task。已有任务完成后，客户端带上 `contextId` 继续追问，服务端在同一会话创建新 Task。任务仍待补材料时，客户端带上原来的两个 ID 继续该 Task。同一 Context 同时只处理一个活动 Task。
 
 ## MCP 接入
 
-在 Console「集成 → MCP」复制当前环境的 Streamable HTTP 地址和请求 Header 示例。将 `app` 填为应用 ID。平台 Token 可用 `token` 或 `Authorization: Bearer <Token>`，DeepFOS API Key 用 `X-Deepfos-Key`。只传一个鉴权 Header。服务端解析所属空间。把「复制 Agent 接入指引」的内容发给本地 Agent，由它配置宿主连接，凭据通过宿主设置提供。回环地址仅供同机客户端使用。
+在 Console「发布 Agent → MCP」复制当前环境的 Streamable HTTP 地址和请求 Header 示例。将 `app` 填为应用 ID。平台 Token 可用 `token` 或 `Authorization: Bearer <Token>`，DeepFOS API Key 用 `X-Deepfos-Key`。只传一个鉴权 Header。服务端解析所属空间。把「复制 Agent 接入指引」的内容发给本地 Agent，由它配置宿主连接，凭据通过宿主设置提供。回环地址仅供同机客户端使用。
 
 调用 `list_agents` 验证连接并取得 Agent 编码。目录包含所有启用的发布，`submit_task` 会单独检查应用权限与发布范围。`get_task` 查询结果，`list_tasks` 查看近期任务，`reply_task` 用原 Task ID 和问题 ID 补材料，`cancel_task` 取消任务。`get_artifact` 返回资源引用及鉴权下载路径。MCP 资源读取限 1 MiB，完整文件通过下载路径获取，仍需传凭据和 App。
 
@@ -72,11 +73,11 @@ CLI、Python SDK 和通用 HTTP 调用是待评审草案，本版仅在 Console 
 
 ## 将远程 Agent 作为工具
 
-管理员在 Console「远程 Agent」保存、检查和直连调试 A2A、Codex 或 CodeBuddy。对于另一套 DeepAgent，先在「MCP」登记对方的 Streamable HTTP 地址和所需 Header，再从该 MCP 的详情选择「绑定为远程 Agent」及目标发布。目录使用 `list_agents` 返回的发布编码。对端的 App 和凭据随连接配置。
+管理员在 Console「远程 Agent」保存、检查和直连调试 A2A、Codex 或 CodeBuddy。通过 MCP 调用另一套 DeepAgent 时，在「MCP」登记对方的 Streamable HTTP 地址和所需 Header，再在本地 Agent 的「MCP」资源中启用该工具包。用 `list_agents` 取得发布编码，再用 `submit_task` 等工具调用。
 
 在本地 Agent 的资源配置开启指定远程连接。会话中的派单、补答、续接和取消走 Harness。每轮附件按权限由客户端发送，生成文件落到调用方 FileStore，可在原会话下载。待补答时在原会话回复，多个待答任务时通过工具卡指定任务。已保存结果和产物引用在调用方重启后仍从会话读取。已知远端任务 ID 可用于查询和恢复，远端过期或连接撤权时需要重新发起。
 
-Console「近期调用」按进程保留最近 24 小时、最多 30 条本地 Agent 调用。直连调试对话单独保留在内存，两者在重启后清空。Codex 默认只读，生成文件的任务需要可写工作区；CodeBuddy 采用执行账号的权限策略。需要自定义 CLI 安装位置时，在「高级」填写可执行文件路径或命令名。
+Console「近期调用」按进程保留最近 24 小时、最多 30 条 A2A、Codex 和 CodeBuddy 的本地 Agent 委派。MCP 工具调用走普通工具轨迹。直连调试对话单独保留在内存，两者在重启后清空。Codex 默认只读，生成文件的任务需要可写工作区；CodeBuddy 采用执行账号的权限策略。需要自定义 CLI 安装位置时，在「高级」填写可执行文件路径或命令名。
 
 ## 联调
 

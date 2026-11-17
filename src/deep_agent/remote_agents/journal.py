@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from deep_agent.db.models import ChatSession, ChatSessionEvent
@@ -28,6 +28,7 @@ class Invocation(BaseModel):
     space_id: str | None = None
     turn_id: str | None = None
     run_id: str | None = None
+    tool_call_id: str | None = None
     message_id: str | None = None
     state: RemoteState = Field(default_factory=RemoteState)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -36,8 +37,29 @@ class Invocation(BaseModel):
     timeline: list[dict[str, str]] = Field(default_factory=list)
     text: str = ""
     files: dict[str, dict] = Field(default_factory=dict)
+    file_message_ids: dict[str, str] = Field(default_factory=dict)
     warnings: tuple[str, ...] = ()
     sequence: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def restore_file_message_ids(cls, data):
+        if isinstance(data, dict) and data.get("files") and "file_message_ids" not in data:
+            message_id = data.get("message_id") or ""
+            return {**data, "file_message_ids": dict.fromkeys(data["files"], message_id)}
+        return data
+
+    def result_files(self) -> list[dict]:
+        return [
+            file for key, file in self.files.items()
+            if self.file_message_ids.get(key) == (self.message_id or "")
+        ]
+
+    def result_payload(self) -> dict:
+        return {
+            "task_id": self.id, "status": self.state.status, "result": self.text,
+            "files": self.result_files(), "warnings": list(self.warnings),
+        }
 
     def summary(self) -> dict:
         return {

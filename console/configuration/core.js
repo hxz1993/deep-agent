@@ -395,6 +395,79 @@ function parseArgs(text) {
   return trimmed.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+function bindConsolePaneResize(split, layout, property, { pane, sizePrefix, widthBounds } = {}) {
+  const byHeight = split.getAttribute("aria-orientation") === "horizontal";
+  const initial = Number(split.getAttribute("aria-valuenow"));
+  const currentSize = () => {
+    if (!pane) return Number(split.getAttribute("aria-valuenow"));
+    return byHeight ? pane.offsetHeight : pane.offsetWidth;
+  };
+  const bounds = () => {
+    if (widthBounds) return widthBounds();
+    if (!byHeight) return [Number(split.getAttribute("aria-valuemin")), Number(split.getAttribute("aria-valuemax"))];
+    const style = getComputedStyle(layout);
+    const minimum = parseFloat(style.getPropertyValue(`${sizePrefix}-top-min`));
+    const reserved = parseFloat(style.getPropertyValue(`${sizePrefix}-recent-min`));
+    return [minimum, Math.max(minimum, layout.clientHeight - split.offsetHeight - reserved)];
+  };
+  const syncSize = () => {
+    if (!split.offsetHeight) return;
+    const [minimum, maximum] = bounds();
+    split.setAttribute("aria-valuemin", minimum);
+    split.setAttribute("aria-valuemax", maximum);
+    split.setAttribute("aria-valuenow", currentSize());
+  };
+  const apply = (value) => {
+    const [minimum, maximum] = bounds();
+    const size = Math.round(Math.max(minimum, Math.min(maximum, value)));
+    layout.style.setProperty(property, `${size}${pane ? "px" : "%"}`);
+    split.setAttribute("aria-valuenow", size);
+  };
+  split.addEventListener("keydown", (event) => {
+    const smaller = byHeight ? "ArrowUp" : "ArrowLeft";
+    const larger = byHeight ? "ArrowDown" : "ArrowRight";
+    if (![smaller, larger, "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const [minimum, maximum] = bounds();
+    const step = pane ? 16 : 2;
+    const current = currentSize();
+    apply({ Home: minimum, End: maximum, [smaller]: current - step, [larger]: current + step }[event.key]);
+  });
+  split.addEventListener("dblclick", () => {
+    if (pane) {
+      layout.style.removeProperty(property);
+      syncSize();
+    } else apply(initial);
+  });
+  split.addEventListener("pointerdown", (event) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.preventDefault();
+    const startSize = currentSize();
+    const position = (pointer) => byHeight ? pointer.clientY : pointer.clientX;
+    const start = position(event);
+    const scale = pane ? 1 : 100 / layout.clientWidth;
+    const move = (pointer) => {
+      if (pointer.pointerId === event.pointerId) {
+        apply(startSize + (position(pointer) - start) * scale);
+      }
+    };
+    split.setPointerCapture(event.pointerId);
+    split.classList.add("dragging");
+    document.body.classList.add("workspace-pane-resizing");
+    split.addEventListener("pointermove", move);
+    split.addEventListener("lostpointercapture", () => {
+      split.removeEventListener("pointermove", move);
+      split.classList.remove("dragging");
+      document.body.classList.remove("workspace-pane-resizing");
+    }, { once: true });
+  });
+  if (pane) {
+    const resizeObserver = new ResizeObserver(syncSize);
+    resizeObserver.observe(layout);
+    resizeObserver.observe(pane);
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const chatLink = document.getElementById("chatLink");
   if (chatLink && location.protocol !== "file:") {

@@ -137,13 +137,14 @@ function renderAgentCapabilityCounts(agent) {
     ["builtin", "内置工具", "hammer", "个工具包"],
     ["ui", "UI 工具", "monitor-check", "个工具包"],
     ["mcp", "MCP", "plug", "个服务"],
-    ["agent_connection", "远程 Agent", "bot", "个远程 Agent"],
+    ["agent_connection", "远程 Agent", "gamepad-2", "个远程 Agent"],
     ["skills", "Skill", "book-open-check", "个 Skill"],
   ];
   return `<div class="agent-capability-counts">${groups.map(([kind, label, icon, unit]) => {
     const count = kind === "skills" ? new Set(agent.skills || []).size : capabilities.filter(code => code.startsWith(`${kind}:`)).length;
     const description = `${label}：${count} ${unit}`;
-    return `<span class="agent-capability-count${count === 0 ? " is-empty" : ""}" title="${escapeHtml(description)}" aria-label="${escapeHtml(description)}"><i data-lucide="${icon}" aria-hidden="true"></i><span>${count}</span></span>`;
+    const glyph = `<i data-lucide="${icon}" aria-hidden="true"></i>`;
+    return `<span class="agent-capability-count${count === 0 ? " is-empty" : ""}" title="${escapeHtml(description)}" aria-label="${escapeHtml(description)}">${glyph}<span>${count}</span></span>`;
   }).join("")}</div>`;
 }
 
@@ -416,7 +417,7 @@ const agentsAdmin = {
           <label class="cap-switch"><input type="checkbox" role="switch" name="cap" value="${escapeHtml(cap.code)}"
             aria-label="${safeName}" ${checked ? "checked" : ""}><span class="cap-switch-ui"></span></label>
           <div class="cap-card-info">
-            <div class="cap-card-title"><strong>${escapeHtml(displayName)}</strong>${window.remoteAgentAdmin?.driverBadge(cap.protocol) || ""}${window.remoteAgentAdmin?.inspectionState(cap.inspection) || ""}</div>
+            <div class="cap-card-title">${window.remoteAgentAdmin?.inspectionState(cap.inspection, true) || ""}<strong>${escapeHtml(displayName)}</strong>${window.remoteAgentAdmin?.driverBadge(cap.protocol) || ""}</div>
             ${description ? `<p class="cap-card-desc">${escapeHtml(description)}</p>` : ""}
           </div>
         </div>

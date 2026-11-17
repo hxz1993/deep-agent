@@ -2,7 +2,7 @@ import { initSecretInputs } from "./ui-secret-input.js?v=20260929-component-webh
 import "./assets/deepagent-pet/sprite-pet.js?v=0161-pet-transitions";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
-import { initConsoleSelects } from "./ui-select.js?v=0160-session-groups";
+import { initConsoleSelects } from "./ui-select.js?v=remote-agent-filter-icons";
 import { bindContextControls, refreshIdentity } from "./context.js?v=0167-app-directory";
 import { createPageLoader } from "./page-loader.js?v=20261023-console-load1";
 import "./time.js?v=20260913-49";
@@ -32,13 +32,13 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=remote-agents-1");
+    const module = await import("./configuration.js?v=remote-agent-option-hints");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=0170a2-session-source");
+    const module = await import("./workspace.js?v=remote-agent-filter-icons");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
@@ -294,12 +294,6 @@ function bindNavigation() {
   if (resourceNav && template) resourceNav.append(template.content);
   const agentTab = resourceNav?.querySelector('[data-tab="agents"]');
   if (agentTab) document.querySelector(".console-rail .console-nav")?.append(agentTab);
-  const integrationTab = resourceNav?.querySelector('[data-tab="integrations"]');
-  if (integrationTab) document.querySelector(".console-rail .console-nav")?.append(integrationTab);
-  const channelTab = resourceNav?.querySelector('[data-tab="channels"]');
-  if (channelTab) document.querySelector(".console-rail .console-nav")?.append(channelTab);
-  const serviceTab = resourceNav?.querySelector('[data-tab="agent-service"]');
-  if (serviceTab) document.querySelector(".console-rail .console-nav")?.append(serviceTab);
   document.querySelectorAll(".console-rail [data-tab]").forEach((button) => {
     const label = button.querySelector("span")?.textContent.trim();
     if (label) { button.title = label; button.setAttribute("aria-label", label); }

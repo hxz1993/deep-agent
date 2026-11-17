@@ -14,6 +14,7 @@ function mergeSystemToolDomains(domains) {
     },
     { codes: ["runtime:skill"] },
     { code: "runtime:mcp", label: "MCP", codes: ["runtime:mcp-tool-search", "runtime:mcp-resource"] },
+    { codes: ["runtime:remote-agent"] },
     { codes: ["runtime:channel"] },
   ];
   const knownCodes = new Set(groups.flatMap((group) => group.codes));

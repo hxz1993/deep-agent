@@ -2,13 +2,13 @@
 
 45 号课题 · 连接配置与关联设计
 
-[打开 HTML 原型](<Prototype A2A客户端接入/index.html>) · [A2A 协议与版本边界](service-and-client-design.md)
+[A2A 协议与版本边界](service-and-client-design.md) · [Agent 接入指南](../../guides/agent-service.md)
 
 ## 1. Console 与调用入口
 
-一级导航用「远程 Agent」，放在 MCP 附近。页面上方是已接入的 Agent，支持卡片和列表。下方的近期调用记录本地 Agent 发起的任务，「远程 Agent」列分两行显示名称和接入方式。支持按任务名称或 ID、远程 Agent、接入方式和状态筛选，点击任务在右侧查看详情。
+一级导航用「远程 Agent」，放在 MCP 附近。页面上方是已接入的 Agent，支持卡片和列表。下方的近期调用记录本地 Agent 发起的任务，「远程 Agent」列分两行显示名称和接入方式。支持按任务名称或 ID、远程 Agent 和状态筛选，点击任务在右侧查看详情。
 
-原型展示 A2A、Codex 和 CodeBuddy。A2A 与 DeepAgent MCP 都纳入 DeepAgent 调用自身发布服务的验收。MCP 路径复用已有 MCP 连接配置，绑定 `list_agents` 返回的目标发布，再通过同一套主 Agent 委派入口执行。普通 MCP 工具的现有授权和暴露逻辑独立保留。
+远程 Agent 配置 A2A、Codex 和 CodeBuddy。DeepAgent 通过 A2A 和标准 MCP 分别调用自身发布服务。MCP 在普通 MCP 目录登记，在本地 Agent 的 MCP 资源中启用。调用时用 `list_agents` 获取发布编码，再用 `submit_task` 等工具执行，调用记录进入普通工具轨迹。
 
 进入某条连接后，左侧配置连接，中间的直连调试区显示本次对话与结果，右侧显示连接概要。检查操作和保存配置放在页头。同一连接的本地 Agent 调用在首页近期列表及原会话中查看，列表详情展示远端任务或会话标识、结果和进度。
 
@@ -56,7 +56,7 @@ ORM 类名拟为 `RemoteAgentConnection`。一条记录对应一个可委派的�
 | `name` | `String(80)`，唯一 | 连接的本地显示名称。 |
 | `description` | 可空 `Text` | 用途说明。 |
 | `revision` | `Integer`，默认 1 | 当前连接记录的修改版本。保存时用读取版本做并发校验，旧编辑返回冲突。连通性快照也按此版本写回。 |
-| `config` | 现有 `JSONType` | `version` 是配置格式版本，`protocol` 区分 `a2a`、`codex`、`codebuddy`、`mcp`，各自字段见下表。 |
+| `config` | 现有 `JSONType` | `version` 是配置格式版本，`protocol` 区分 `a2a`、`codex`、`codebuddy`，各自字段见下表。 |
 | `inspection` | 可空 `JSONType` | 最近检查的连接版本、时间、结果及能力或执行环境摘要。首次保存为空，影响连接或执行的配置变更时失效。 |
 | `created_at` | 现有 `UtcTimestamp` | 创建时间。 |
 | `updated_at` | 现有 `UtcTimestamp` | 配置更新时间。检查时间单独记录在 `inspection`。 |
@@ -68,7 +68,6 @@ ORM 类名拟为 `RemoteAgentConnection`。一条记录对应一个可委派的�
 | `a2a` | `card_url` 必填，`headers` 可省略，`approved_interface` 由确认流程写入。 |
 | `codex` | `execution` 为 `local` 或 `ssh`，SSH 时填写 `ssh_host`。可选 `cwd`、`model`、`command`、`profile`、`reasoning_effort`。 `sandbox` 为 `read-only` 或 `workspace-write`，默认只读。 |
 | `codebuddy` | 同样配置 `execution` 和适用的 `ssh_host`。可选 `cwd`、`model`、`command`。 |
-| `mcp` | `mcp_server_name` 引用已有 DeepAgent MCP 连接，`publication_code` 指定目标发布。沿用该 MCP 连接的地址和鉴权。 |
 
 ```json
 {
@@ -109,7 +108,7 @@ ORM 类名拟为 `RemoteAgentConnection`。一条记录对应一个可委派的�
 
 ### 主 Agent 委派与文件链路
 
-使用 Pydantic AI Harness 的 `SubAgents`、`RemoteSubAgent` 和 `TaskControl`。优先复用 `delegate_task`、`answer_task`、`message_task` 和 `cancel_task`，各执行适配器处理协议差异。A2A 使用官方 SDK，DeepAgent MCP 使用现有 MCP 客户端，Codex 和 CodeBuddy 按各自 CLI 接口执行。按 Agent 已选用的连接生成可用委派对象。各适配器把自己的 Task／Context／Thread／Session ID 关联到 Harness Task ID。
+使用 Pydantic AI Harness 的 `SubAgents`、`RemoteSubAgent` 和 `TaskControl`。优先复用 `delegate_task`、`answer_task`、`message_task` 和 `cancel_task`，各执行适配器处理协议差异。A2A 使用官方 SDK，Codex 和 CodeBuddy 按各自 CLI 接口执行。按 Agent 已选用的连接生成可用委派对象。各适配器把自己的 Task／Context／Thread／Session ID 关联到 Harness Task ID。
 
 Harness 的委派工具输入是任务文本，远程任务完成事件的结果是文本。DeepAgent 在宿主层把当前调用授权的附件引用与委派关联，按适配器提交文件，必要时为按需选择附件补充窄工具。执行结束后由适配器读取授权产物并写入现有 FileStore，再用可信的 `generated_files` 元数据把文件引用挂到本地工具结果与会话。模型获得业务结果和可用文件引用，文件字节、搬运和远端凭据留在执行层。后续大沙盒接入时，文件落点可在文件适配层调整。
 
@@ -129,7 +128,7 @@ Harness 的委派工具输入是任务文本，远程任务完成事件的结果
 | 接入 | 验收对象 |
 | --- | --- |
 | A2A | DeepAgent 调自身发布服务完整闭环。另用现有 Langflow 或通过检查选出的外部 A2A 服务验证对端兼容。 |
-| DeepAgent MCP | DeepAgent 经 MCP 调自身发布服务完整闭环，覆盖提交附件、`reply_task`、读结果和授权取件。 |
+| DeepAgent MCP | 通过普通 MCP 配置调自身发布服务，覆盖提交附件、`reply_task`、读结果和授权取件。远程 Agent 近期调用表无该会话记录。 |
 | Codex | 本机 CLI 完成附件、补答、原 Thread 续跑、结果和产物回收。 |
 | CodeBuddy | 本机 CLI 完成附件、补答、原 Session 续跑、结果和产物回收。 |
 

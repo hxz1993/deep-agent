@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from sqlalchemy import case, delete, select
 from sqlalchemy.exc import IntegrityError
@@ -11,7 +10,6 @@ from deep_agent.db.models import Agent, McpServer
 from deep_agent.db.reference_integrity import ReferenceConflict, lock_optional
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.schemas.mcp import McpServerCreate, McpServerUpdate
-from deep_agent.remote_agents.store import mcp_connections
 
 _INSPECTION_UNSET = object()
 
@@ -80,11 +78,6 @@ class McpServerStoreBase(SessionBoundMixin):
             if row is None:
                 return None
             updates = data.model_dump(exclude_unset=True)
-            if any(key in updates and updates[key] != getattr(row, key) for key in ("transport", "config")):
-                for connection in await mcp_connections(db, name):
-                    connection.revision += 1
-                    connection.inspection = None
-                    connection.updated_at = datetime.now(UTC)
             for field, value in updates.items():
                 setattr(row, field, value)
             if inspection is not _INSPECTION_UNSET:
@@ -141,9 +134,6 @@ class McpServerStoreBase(SessionBoundMixin):
                     raise PermissionError("stdio MCP 已停止支持；历史配置不能重命名")
                 if new_name == old_name:
                     return McpRenameStoreResult(row=row, updated_agent_names=[])
-                if await mcp_connections(db, old_name):
-                    raise ReferenceConflict("MCP 正在被远程 Agent 引用，不能重命名")
-
                 conflict = await self._get_by_name(db, new_name)
                 if conflict is not None:
                     raise ValueError(f"MCP server already exists: {new_name}")
@@ -178,8 +168,6 @@ class McpServerStoreBase(SessionBoundMixin):
         async with self._write() as db:
             if await lock_optional(db, McpServer, McpServer.name, name) is None:
                 return False
-            if await mcp_connections(db, name):
-                raise ReferenceConflict("MCP 正在被远程 Agent 引用，不能删除")
             refs = (await db.execute(
                 select(Agent.capabilities).order_by(Agent.id).with_for_update()
             )).scalars().all()

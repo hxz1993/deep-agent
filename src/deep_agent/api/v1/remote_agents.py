@@ -13,9 +13,11 @@ from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.reference_integrity import ReferenceConflict
-from deep_agent.remote_agents.contracts import ConnectionWrite, McpConfig, RemoteAgentError
+from deep_agent.remote_agents.contracts import REMOTE_AGENT_PROTOCOLS, ConnectionWrite, RemoteAgentError
 from deep_agent.remote_agents.runtime import RequestScope
+from deep_agent.remote_agents.store import UPDATED_BY_KEY
 from deep_agent.schemas.attachment import AttachmentRef
+from deep_agent.security.diagnostic_users import DiagnosticUserAuthenticationError, resolve_diagnostic_users
 
 router = APIRouter(prefix="/remote-agent-connections", dependencies=CONSOLE_ADMIN_DEPENDENCIES)
 tag = "remote-agents"
@@ -25,15 +27,17 @@ def response(row, agents: dict) -> dict:
     config = dict(row.config)
     if config.get("protocol") == "a2a":
         config["headers"] = dict.fromkeys(config.get("headers", {}))
+    inspection = dict(row.inspection or {})
+    updated_by = inspection.pop(UPDATED_BY_KEY, None)
     return {
-        **{key: getattr(row, key) for key in ("id", "name", "description", "revision", "inspection", "created_at", "updated_at")},
-        "config": config, "agents": agents.get(row.id, []),
+        **{key: getattr(row, key) for key in ("id", "name", "description", "revision", "created_at", "updated_at")},
+        "config": config, "inspection": inspection or None, "updated_by": updated_by, "agents": agents.get(row.id, []),
     }
 
 
 async def required(runtime, connection_id):
     row = await runtime.connections.get(connection_id)
-    if row is None:
+    if row is None or row.config.get("protocol") not in REMOTE_AGENT_PROTOCOLS:
         raise HTTPException(404, "远程 Agent 连接不存在")
     return row
 
@@ -45,10 +49,19 @@ def scope(request: Request, user: str, ctx: AppContextDep) -> RequestScope:
 
 
 @router.get("")
-async def list_connections(ctx: AppContextDep):
+async def list_connections(ctx: AppContextDep, request: Request, user: RequestUserDep):
     store = ctx.get_remote_agents().connections
     agents = await store.agents()
-    return [response(row, agents) for row in await store.list()]
+    rows = [response(row, agents) for row in await store.list() if row.config.get("protocol") in REMOTE_AGENT_PROTOCOLS]
+    user_ids = {row["updated_by"] for row in rows if row["updated_by"]}
+    if user_ids:
+        try:
+            profiles = await resolve_diagnostic_users(request, user, user_ids)
+        except DiagnosticUserAuthenticationError:
+            profiles = {}
+        for row in rows:
+            row["updated_by_username"] = profiles.get(row["updated_by"], {}).get("username")
+    return rows
 
 
 @router.get("/recent")
@@ -61,34 +74,19 @@ async def recent_connections(ctx: AppContextDep, request: Request, user: Request
             for item in links.get(entry["connection_id"], ()))]
 
 
-class McpPublications(BaseModel):
-    mcp_server_name: str = Field(min_length=1, max_length=191)
-
-
-@router.post("/mcp-publications")
-async def mcp_publications(ctx: AppContextDep, body: McpPublications):
-    try:
-        adapter = await ctx.get_remote_agents().mcp_adapter(McpConfig(
-            mcp_server_name=body.mcp_server_name, publication_code="discovery",
-        ))
-        return await adapter.publications()
-    except RemoteAgentError as error:
-        raise HTTPException(422, str(error)) from error
-
-
 @router.get("/{connection_id}")
 async def get_connection(ctx: AppContextDep, connection_id: str):
     runtime = ctx.get_remote_agents()
     return response(await required(runtime, connection_id), await runtime.connections.agents())
 
 
-async def save_connection(ctx, data: dict, connection_id: str | None = None):
+async def save_connection(ctx, data: dict, user: str, connection_id: str | None = None):
     store = ctx.get_remote_agents().connections
     try:
         body = ConnectionWrite.model_validate(data)
         if connection_id and body.revision is None:
             raise HTTPException(422, "更新连接必须携带版本")
-        row = await store.save(body, connection_id)
+        row = await store.save(body, connection_id, updated_by=user)
     except ValidationError as error:
         issues = error.errors(include_context=False, include_input=False, include_url=False)
         raise HTTPException(422, [{"loc": item["loc"], "type": item["type"], "msg": item["msg"]} for item in issues]) from error
@@ -100,13 +98,13 @@ async def save_connection(ctx, data: dict, connection_id: str | None = None):
 
 
 @router.post("", status_code=201)
-async def create_connection(ctx: AppContextDep, body: dict):
-    return await save_connection(ctx, body)
+async def create_connection(ctx: AppContextDep, body: dict, user: RequestUserDep):
+    return await save_connection(ctx, body, user)
 
 
 @router.put("/{connection_id}")
-async def update_connection(ctx: AppContextDep, connection_id: str, body: dict):
-    return await save_connection(ctx, body, connection_id)
+async def update_connection(ctx: AppContextDep, connection_id: str, body: dict, user: RequestUserDep):
+    return await save_connection(ctx, body, user, connection_id)
 
 
 @router.delete("/{connection_id}", status_code=204)

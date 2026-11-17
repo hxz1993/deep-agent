@@ -9,6 +9,7 @@ from deep_agent.agent.observability import token_usage_available
 from deep_agent.agent.planning import is_planning_tool
 from deep_agent.agent.tool_output_limits import artifacts_from_metadata
 from deep_agent.remote_agents.contracts import tool_metadata as remote_agent_metadata
+from deep_agent.remote_agents.journal import EVENT_TYPE as REMOTE_INVOCATION_EVENT, Invocation
 from deep_agent.web.images import safe_web_image_value, web_image_tool_value, view_image_tool_value
 from deep_agent.conversation.models import (
     AssistantConversationItem,
@@ -50,11 +51,17 @@ def project_session_events(
     )
     items: list[ConversationItem] = []
     tool_by_call: dict[str, ToolConversationItem | PlanConversationItem] = {}
+    remote_results: dict[tuple[str, str], Any] = {}
     terminal_by_run: dict[str, str] = {}
     output_calls: set[tuple[str | None, str, str]] = set()
 
     for event in group_message_events(ordered):
         event_type = str(_get(event, "event_type", ""))
+        if event_type == REMOTE_INVOCATION_EVENT:
+            payload = _get(event, "payload") or {}
+            if _get(event, "status") == "completed" and payload.get("tool_call_id") and payload.get("run_id"):
+                remote_results[payload["run_id"], payload["tool_call_id"]] = event
+            continue
         if event_type == "output/attempt":
             payload = _get(event, "payload", {})
             if payload.get("accepted") is True and _get(event, "status") == "completed":
@@ -149,6 +156,14 @@ def project_session_events(
                 _apply_result(existing, event, part)
 
     for item in items:
+        if isinstance(item, ToolConversationItem) and item.tool_name in {"delegate_task", "answer_task"}:
+            event = remote_results.get((item.run_id, item.call_id))
+            if event is not None:
+                invocation = Invocation.model_validate(_get(event, "payload"))
+                _apply_result(item, event, {
+                    "tool_name": item.tool_name, "part_kind": "tool-return", "content": invocation.result_payload(),
+                    "metadata": {"remote_agent": invocation.summary(), "generated_files": invocation.result_files()},
+                })
         # Older releases repaired failed calls with a default-success ToolDenied.
         # Correct only that legacy sentinel, without rewriting Event facts or
         # treating genuine user rejection / successful tools as run failures.

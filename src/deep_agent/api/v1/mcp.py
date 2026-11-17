@@ -85,10 +85,9 @@ async def validate_bound_mcp_import(request: Request, rows) -> None:
         row["config"] = config
 
 
-async def _inspect_row(row, request: Request, verified_headers: dict | None = None):
+async def _inspect_row(row, request: Request):
     if resolve_mcp_request_context_mode(row.transport, row.config) == "bound_app":
-        if verified_headers is None:
-            (_, verified_headers), = await _validate_bound_configs(request, [row.config])
+        (_, verified_headers), = await _validate_bound_configs(request, [row.config])
         return await inspect_mcp_server(row, verified_bound_headers=verified_headers)
     return await inspect_mcp_server(row, request_headers=extract_forward_headers(request))
 
@@ -151,6 +150,16 @@ def _candidate_row(row, body: McpServerUpdate):
         description=body.description if "description" in body.model_fields_set else row.description,
         inspection=getattr(row, "inspection", None),
     )
+
+
+def _bound_for_save(candidate) -> bool:
+    if resolve_mcp_request_context_mode(candidate.transport, candidate.config) != "bound_app":
+        return False
+    try:
+        bound_mcp_target(candidate.config)
+    except IntegrationAppAccessError as exc:
+        raise HTTPException(exc.status, detail=str(exc)) from exc
+    return True
 
 
 def _should_reinspect(row, body: McpServerUpdate) -> bool:
@@ -244,12 +253,9 @@ async def create_mcp_server(
             description=body.description,
             inspection=None,
         )
-        verified_headers = None
-        if resolve_mcp_request_context_mode(candidate.transport, candidate.config) == "bound_app":
-            (candidate.config, verified_headers), = await _validate_bound_configs(request, [candidate.config])
-            body = body.model_copy(update={"config": candidate.config})
-        result = await _inspect_row(candidate, request, verified_headers)
-        inspection = result.inspection.to_storage_value()
+        if not _bound_for_save(candidate):
+            result = await _inspect_row(candidate, request)
+            inspection = result.inspection.to_storage_value()
     try:
         row = await store.create_unique(body, inspection=inspection)
     except ValueError as exc:
@@ -270,15 +276,13 @@ async def update_mcp_server(
     body = _validate_row_update(row, body)
     candidate = _candidate_row(row, body)
     config_changed = bool({"transport", "config"} & body.model_fields_set)
-    verified_headers = None
-    if resolve_mcp_request_context_mode(candidate.transport, candidate.config) == "bound_app":
-        (candidate.config, verified_headers), = await _validate_bound_configs(request, [candidate.config])
-        if config_changed:
-            body = body.model_copy(update={"config": candidate.config})
+    bound = config_changed and _bound_for_save(candidate)
+    if bound:
+        config_changed = candidate.transport != row.transport or candidate.config != row.config
     if config_changed:
         candidate.inspection = mark_mcp_inspection_stale(row).to_storage_value()
-        if _should_reinspect(row, body):
-            result = await _inspect_row(candidate, request, verified_headers)
+        if not bound and _should_reinspect(row, body):
+            result = await _inspect_row(candidate, request)
             candidate.inspection = result.inspection.to_storage_value()
     try:
         if config_changed:

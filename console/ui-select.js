@@ -238,6 +238,7 @@ export function enhanceSelect(select) {
       row.classList.toggle("is-grouped", Boolean(group));
       row.id = `${menu.id}-${index}`;
       row.dataset.index = String(index);
+      if (option.dataset.state) row.dataset.state = option.dataset.state;
       row.setAttribute("role", "option");
       row.setAttribute("aria-selected", String(option.selected));
       row.setAttribute("aria-disabled", String(option.disabled || !!group?.disabled));
@@ -265,9 +266,11 @@ export function enhanceSelect(select) {
       } else {
         row.textContent = option.label;
       }
-      if (/^[a-z][a-z0-9-]*$/.test(option.dataset.icon || "")) {
-        const icon = document.createElement("i");
-        icon.setAttribute("data-lucide", option.dataset.icon);
+      const iconSource = option.dataset.iconSrc;
+      if (iconSource || /^[a-z][a-z0-9-]*$/.test(option.dataset.icon || "")) {
+        const icon = document.createElement(iconSource ? "img" : "i");
+        if (iconSource) { icon.src = iconSource; icon.alt = ""; }
+        else icon.setAttribute("data-lucide", option.dataset.icon);
         icon.setAttribute("aria-hidden", "true");
         row.prepend(icon);
         row.classList.add("has-icon");
@@ -303,7 +306,7 @@ export function enhanceSelect(select) {
     markActive({ reveal: !modelPicker });
     if (modelPicker) optionList.scrollTop = scrollTop;
   }
-  let selectedIconName = "";
+  let selectedIconKey = "";
   function refresh() {
     if (disposed) return;
     const current = options();
@@ -313,16 +316,18 @@ export function enhanceSelect(select) {
     const selectedLabel = selectedOption?.label || (select.dataset.placeholder ?? "—");
     if (modelPicker) renderModelPickerValue(text, selectedLabel, selectedOption && select.consoleSelectedEffort?.(selectedOption));
     else text.textContent = selectedLabel;
+    if (selectedOption?.dataset.state) text.dataset.state = selectedOption.dataset.state;
+    else delete text.dataset.state;
     const iconName = /^[a-z][a-z0-9-]*$/.test(selectedOption?.dataset.icon || "") ? selectedOption.dataset.icon : "";
-    const providerIcon = modelPicker ? selectedOption?.parentElement?.dataset.iconSrc : "";
-    const iconKey = providerIcon || iconName;
-    if (selectedIconName !== iconKey) {
+    const iconSource = selectedOption?.dataset.iconSrc || (modelPicker ? selectedOption?.parentElement?.dataset.iconSrc : "");
+    const iconKey = iconSource || iconName;
+    if (selectedIconKey !== iconKey) {
       trigger.querySelector(".da-select-value-icon")?.remove();
-      selectedIconName = iconKey;
+      selectedIconKey = iconKey;
       if (iconKey) {
-        const icon = document.createElement(providerIcon ? "img" : "i");
+        const icon = document.createElement(iconSource ? "img" : "i");
         icon.className = "da-select-value-icon";
-        if (providerIcon) { icon.src = providerIcon; icon.alt = ""; }
+        if (iconSource) { icon.src = iconSource; icon.alt = ""; }
         else icon.setAttribute("data-lucide", iconName);
         icon.setAttribute("aria-hidden", "true");
         trigger.insertBefore(icon, text);

@@ -772,6 +772,7 @@ function findLocalFileResult(value) {
 
 function renderLocalFileDownload(result, artifacts = [], imageOptions = {}) {
   if (findViewImageResult(result, imageOptions)) return "";
+  if (imageOptions.toolName === "remote_task_result" && imageOptions.metadata?.remote_agent) return "";
   if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
   const file = findLocalFileResult(result);
   if (!file) return "";

@@ -186,7 +186,7 @@
       <div class="panel-toolbar">
         <div class="panel-title-copy">
           <div class="channel-title-row">
-            <h2>渠道</h2>
+            <h2>消息渠道</h2>
             <span class="channel-runtime-chip" id="channelRuntimeBanner" data-state="loading" role="status" aria-live="polite" title="正在读取渠道网关状态…">
               <span class="channel-runtime-dot" aria-hidden="true"></span>
               <strong>网关：读取中</strong>
@@ -273,59 +273,80 @@
     <section class="panel" id="panel-remote-agents">
       <div id="remoteAgentDirectory">
         <header class="panel-toolbar remote-agent-page-heading"><div><h2>远程 Agent</h2><p>接入外部 Agent，作为工具调用。</p></div></header>
-        <section class="console-section" aria-labelledby="remoteConnectionTitle">
-          <div class="console-section-heading remote-agent-toolbar">
-            <h3 class="console-section-title" id="remoteConnectionTitle">已接入的 Agent</h3>
-            <div class="remote-agent-actions">
-              <label class="agent-search"><i data-lucide="search" aria-hidden="true"></i><input id="remoteConnectionSearch" type="search" aria-label="搜索远程 Agent" placeholder="搜索远程 Agent"></label>
-              <div class="agent-view-switch" role="group" aria-label="连接视图">
-                <button id="remoteConnectionCards" class="active" type="button" data-remote-view="cards" aria-pressed="true" aria-label="卡片" title="卡片"><i data-lucide="layout-grid" aria-hidden="true"></i></button>
-                <button id="remoteConnectionList" type="button" data-remote-view="list" aria-pressed="false" aria-label="列表" title="列表"><i data-lucide="list" aria-hidden="true"></i></button>
+        <div class="remote-agent-directory-layout" id="remoteDirectoryLayout">
+          <section class="console-section remote-agent-connections" id="remoteConnectionPane" aria-labelledby="remoteConnectionTitle">
+            <div class="console-section-heading remote-agent-toolbar">
+              <h3 class="console-section-title" id="remoteConnectionTitle">外部 Agent</h3>
+              <div class="remote-agent-actions">
+                <label class="agent-search"><i data-lucide="search" aria-hidden="true"></i><input id="remoteConnectionSearch" type="search" aria-label="搜索远程 Agent" placeholder="搜索远程 Agent"></label>
+                <div class="agent-view-switch" role="group" aria-label="连接视图">
+                  <button id="remoteConnectionCards" class="active" type="button" data-remote-view="cards" aria-pressed="true" aria-label="卡片" title="卡片"><i data-lucide="layout-grid" aria-hidden="true"></i></button>
+                  <button id="remoteConnectionList" type="button" data-remote-view="list" aria-pressed="false" aria-label="列表" title="列表"><i data-lucide="list" aria-hidden="true"></i></button>
+                </div>
+                <button class="btn primary" id="addRemoteConnection" type="button"><i data-lucide="plus" aria-hidden="true"></i>添加远程 Agent</button>
               </div>
-              <button class="btn primary" id="addRemoteConnection" type="button"><i data-lucide="plus" aria-hidden="true"></i>添加远程 Agent</button>
             </div>
-          </div>
-          <div class="remote-agent-cards" id="remoteConnectionCardsHost"></div>
-          <div class="table-wrap console-list-a remote-agent-connection-list" id="remoteConnectionListHost" hidden>
-            <table class="data-table"><thead><tr><th scope="col">远程 Agent</th><th scope="col">用途说明</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody id="remoteConnectionRows"></tbody></table>
-          </div>
-          <p class="remote-agent-notice" id="remoteConnectionNotice" role="status"></p>
-        </section>
-        <section class="console-section remote-agent-recent" aria-labelledby="remoteCallsTitle">
-          <div class="console-section-heading remote-agent-toolbar">
-            <h3 class="console-section-title" id="remoteCallsTitle">近期调用</h3>
-            <div class="remote-agent-actions remote-agent-filters">
-              <label class="agent-search"><i data-lucide="search" aria-hidden="true"></i><input id="remoteCallSearch" type="search" aria-label="搜索任务名称或 ID" placeholder="搜索任务名称或 ID"></label>
-              <select id="remoteCallConnection" aria-label="筛选远程 Agent"><option value="">全部远程 Agent</option></select>
-              <select id="remoteCallProtocol" aria-label="筛选接入方式"><option value="">全部接入方式</option><option value="a2a">A2A</option><option value="codex">Codex</option><option value="codebuddy">CodeBuddy</option><option value="mcp">MCP</option></select>
-              <select id="remoteCallStatus" aria-label="筛选状态"><option value="">全部状态</option><option value="working">进行中</option><option value="input_required">待补答</option><option value="completed">已完成</option><option value="failed">失败</option><option value="canceled">已取消</option><option value="unknown">结果未知</option></select>
+            <div class="remote-agent-connection-content">
+              <div class="remote-agent-cards" id="remoteConnectionCardsHost" hidden></div>
+              <div class="table-wrap console-list-a remote-agent-connection-list" id="remoteConnectionListHost" hidden>
+                <table class="data-table"><thead><tr>
+                  <th scope="col">远程 Agent</th><th scope="col">接入方式</th><th scope="col">用途说明</th>
+                  <th scope="col">状态</th><th scope="col">更新人</th><th scope="col">更新时间</th><th scope="col">操作</th>
+                </tr></thead><tbody id="remoteConnectionRows"></tbody></table>
+              </div>
+              <div class="remote-agent-notice" id="remoteConnectionNotice" role="status"></div>
             </div>
-          </div>
-          <div class="remote-agent-recent-grid">
-            <div class="remote-agent-recent-list">
-              <div class="table-wrap remote-agent-calls-table"><table class="data-table"><thead><tr><th scope="col">任务</th><th scope="col">远程 Agent</th><th scope="col">状态</th><th scope="col">提交时间</th></tr></thead><tbody id="remoteCallRows"></tbody></table></div>
-              <footer class="remote-agent-footer"><span id="remoteCallCount"></span><span>近 24 小时，最多 30 条</span></footer>
+          </section>
+          <div id="remoteDirectorySplitter" class="workspace-resizer workspace-row-resizer" role="separator" aria-label="调整远程 Agent 区域高度" aria-controls="remoteConnectionPane" aria-orientation="horizontal" title="上下拖动调整高度，双击恢复默认" tabindex="0"></div>
+          <section class="console-section remote-agent-recent" aria-labelledby="remoteCallsTitle">
+            <div class="console-section-heading remote-agent-toolbar">
+              <div class="field-label-row"><h3 class="console-section-title" id="remoteCallsTitle">近期调用</h3><span class="field-help" tabindex="0" aria-label="近期调用保留说明" aria-describedby="remoteCallRetention"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="remoteCallRetention" role="tooltip">保留近 24 小时的调用，最多 30 条。</span></span></div>
+              <div class="remote-agent-actions remote-agent-filters">
+                <label class="agent-search"><i data-lucide="search" aria-hidden="true"></i><input id="remoteCallSearch" type="search" aria-label="搜索任务名称或 ID" placeholder="搜索任务名称或 ID"></label>
+                <select id="remoteCallConnection" aria-label="筛选远程 Agent"><option value="">全部远程 Agent</option></select>
+                <select id="remoteCallStatus" aria-label="筛选状态">
+                  <option value="">全部状态</option>
+                  <option value="submitted" data-state="submitted">排队中</option>
+                  <option value="working" data-state="working">进行中</option>
+                  <option value="input_required" data-state="input_required">待补答</option>
+                  <option value="completed" data-state="completed">已完成</option>
+                  <option value="failed" data-state="failed">失败</option>
+                  <option value="canceled" data-state="canceled">已取消</option>
+                  <option value="unknown" data-state="unknown">结果未知</option>
+                </select>
+              </div>
             </div>
-            <aside class="inspector-content remote-agent-call-detail" id="remoteCallDetail" aria-label="调用详情"></aside>
-          </div>
-        </section>
+            <div class="agent-service-task-workbench remote-agent-recent-grid" id="remoteCallWorkbench">
+              <div class="agent-service-task-list remote-agent-recent-list" id="remoteCallList">
+                <div class="table-wrap console-list-a agent-service-scroll remote-agent-calls-table" id="remoteCallTable"><table class="data-table agent-service-table"><thead><tr><th scope="col">任务</th><th scope="col">远程 Agent</th><th scope="col">状态</th><th scope="col" class="agent-task-wide">提交时间</th><th scope="col">交付产物</th></tr></thead><tbody id="remoteCallRows"></tbody></table></div>
+                <footer><nav class="console-pagination" aria-label="近期调用分页">
+                  <button type="button" class="btn btn-sm" id="prevRemoteCalls" hidden>上一页</button>
+                  <span class="models-page-info" id="remoteCallCount" aria-live="polite"></span>
+                  <button type="button" class="btn btn-sm" id="nextRemoteCalls" hidden>下一页</button>
+                </nav></footer>
+              </div>
+              <div id="remoteCallSplitter" class="workspace-resizer workspace-resizer-inspector agent-service-splitter" role="separator" aria-label="调整调用列表宽度" aria-controls="remoteCallList" aria-orientation="vertical" aria-valuemin="40" aria-valuemax="75" aria-valuenow="65" tabindex="0"></div>
+              <aside class="inspector-content agent-service-task-detail remote-agent-call-detail" id="remoteCallDetail" aria-label="调用详情"></aside>
+            </div>
+          </section>
+        </div>
       </div>
       <div id="remoteAgentEditor" hidden>
         <header class="panel-toolbar remote-agent-editor-heading">
-          <button class="btn text" id="closeRemoteEditor" type="button"><i data-lucide="arrow-left" aria-hidden="true"></i><span>返回</span></button>
-          <h2><span id="remoteEditorTitle">添加远程 Agent</span><span id="remoteEditorDriver"></span></h2>
+          <div class="remote-agent-editor-identity"><button class="remote-agent-back" id="closeRemoteEditor" type="button"><i data-lucide="arrow-left" aria-hidden="true"></i><span>返回</span></button>
+            <h2 id="remoteEditorTitle">添加远程 Agent</h2><span id="remoteEditorDriver"></span></div>
           <div class="remote-agent-actions">
             <button class="btn" id="checkRemoteConnection" type="button">检查环境</button>
             <button class="btn primary" id="saveRemoteConnection" type="submit" form="remoteConnectionForm">保存配置</button>
           </div>
         </header>
-        <div class="remote-agent-editor-grid">
+        <div class="remote-agent-editor-grid" id="remoteAgentEditorLayout">
           <form class="remote-agent-config" id="remoteConnectionForm" aria-label="远程 Agent 配置">
             <label class="field"><span>名称</span><input name="name" required maxlength="80" autocomplete="off"></label>
             <label class="field"><span>用途说明</span><input name="description" maxlength="500" placeholder="说明可委托的任务"></label>
             <section class="remote-agent-field-section" aria-labelledby="remoteDriverHeading">
               <h3 id="remoteDriverHeading">接入方式</h3>
-              <div id="remoteDriverOptions" class="remote-agent-driver-options" role="group" aria-labelledby="remoteDriverHeading"></div>
+              <div id="remoteDriverOptions" class="remote-agent-driver-options" role="group" aria-labelledby="remoteDriverHeading" aria-describedby="remoteDriverNote"></div>
               <p class="muted remote-agent-driver-note" id="remoteDriverNote"></p>
             </section>
             <section class="remote-agent-field-section" aria-labelledby="remoteConfigHeading">
@@ -333,34 +354,39 @@
                 <h3 id="remoteConfigHeading">接入配置</h3>
                 <button class="btn text compact" type="button" id="toggleRemoteConfigMode"><i data-lucide="arrow-right-left" aria-hidden="true"></i><span>切换为 JSON</span></button>
               </div>
-              <div id="remoteDriverFields"></div>
-              <label class="field" id="remoteConfigJsonField" hidden><textarea id="remoteConfigJson" rows="12" aria-label="接入配置 JSON" spellcheck="false" autocomplete="off"></textarea></label>
+              <div class="remote-agent-config-body">
+                <fieldset id="remoteDriverFields" aria-label="接入配置表单"></fieldset>
+                <textarea class="console-input" id="remoteConfigJson" aria-label="接入配置 JSON" spellcheck="false" autocomplete="off" hidden></textarea>
+              </div>
+              <p class="remote-agent-error" id="remoteConfigStatus" role="alert"></p>
             </section>
-            <p class="remote-agent-error" id="remoteConfigStatus" role="alert"></p>
+            <div id="remoteConfigSplitter" class="workspace-resizer" role="separator" aria-label="调整远程 Agent 配置栏宽度" aria-controls="remoteConnectionForm" aria-orientation="vertical" title="左右拖动调整宽度，双击恢复默认" tabindex="0"></div>
           </form>
-          <section class="remote-agent-debug" aria-labelledby="remoteDebugHeading">
+          <section class="remote-agent-debug" id="remoteDebugPanel" aria-labelledby="remoteDebugHeading">
             <div class="remote-agent-toolbar">
               <h3 id="remoteDebugHeading">直连调试</h3>
               <div class="remote-agent-actions"><button class="btn" type="button" id="refreshRemoteDebug" hidden>重新获取</button><button class="btn" type="button" id="cancelRemoteDebug" hidden>取消任务</button><button class="btn" id="resetRemoteDebug" type="button">新对话</button></div>
             </div>
+            <div class="remote-agent-debug-workspace">
             <p class="muted remote-agent-debug-notice" id="remoteDebugNotice" role="status"></p>
             <div class="remote-agent-debug-thread" id="remoteDebugThread" role="log" aria-label="调试消息"></div>
-            <form class="remote-agent-compose" id="remoteDebugForm">
+            <form class="composer-inner remote-agent-compose" id="remoteDebugForm" aria-describedby="remoteDebugNotice">
               <div class="remote-agent-debug-files" id="remoteDebugFiles" aria-label="待发送附件" hidden></div>
               <input type="file" id="remoteDebugFileInput" multiple hidden>
-              <textarea id="remoteDebugPrompt" aria-label="调试消息" rows="2" placeholder="输入调试消息"></textarea>
-              <div class="remote-agent-actions">
-                <button class="btn icon-only" id="attachRemoteDebug" type="button" aria-label="添加附件" title="添加附件"><i data-lucide="paperclip" aria-hidden="true"></i></button>
-                <button class="btn primary icon-only" id="sendRemoteDebug" type="submit" aria-label="发送消息" title="发送消息"><i data-lucide="send" aria-hidden="true"></i></button>
+              <div class="composer-input-row"><textarea id="remoteDebugPrompt" class="composer-input" aria-label="调试消息" rows="2" placeholder="输入调试消息"></textarea></div>
+              <div class="composer-toolbar">
+                <button class="composer-icon-btn attach-btn" id="attachRemoteDebug" type="button" aria-label="添加附件" title="添加附件"><i data-lucide="paperclip" aria-hidden="true"></i></button>
+                <button class="send-btn" id="sendRemoteDebug" type="submit" aria-label="发送消息" title="发送消息"><i data-lucide="send" aria-hidden="true"></i></button>
               </div>
             </form>
+            </div>
           </section>
           <aside class="inspector-content remote-agent-summary" id="remoteConnectionSummary" aria-label="远程 Agent 概览"></aside>
         </div>
       </div>
     </section>
     <section class="panel" id="panel-agent-service">
-      <div class="panel-toolbar"><div><h2>集成</h2><p class="panel-subtitle">发布选定的 Agent，供授权的外部 Agent 和业务程序调用。</p></div></div>
+      <div class="panel-toolbar"><div><h2>发布 Agent</h2><p class="panel-subtitle">发布选定的 Agent，供授权的外部 Agent 和业务程序调用。</p></div></div>
       <div class="agent-service-layout">
         <div id="agentServiceTop" class="agent-service-top">
           <section id="agentServicePublications" class="console-section agent-service-publications">
@@ -381,7 +407,7 @@
             <div id="agentServiceAccess" class="agent-service-access-body" role="tabpanel" aria-labelledby="agentServiceTabA2a"></div>
           </section>
         </div>
-        <div id="agentServiceRowSplitter" class="workspace-resizer agent-service-row-resizer" role="separator" aria-label="调整 Agent 发布区域高度" aria-controls="agentServiceTop" aria-orientation="horizontal" title="上下拖动调整高度，双击恢复默认" tabindex="0"></div>
+        <div id="agentServiceRowSplitter" class="workspace-resizer workspace-row-resizer agent-service-row-resizer" role="separator" aria-label="调整 Agent 发布区域高度" aria-controls="agentServiceTop" aria-orientation="horizontal" title="上下拖动调整高度，双击恢复默认" tabindex="0"></div>
         <section class="console-section agent-service-recent">
           <div class="console-section-heading"><div class="field-label-row"><h3 class="console-section-title">近期任务</h3><span class="field-help" tabindex="0" aria-label="近期任务保留说明" aria-describedby="agentTaskRetentionHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="agentTaskRetentionHelp" role="tooltip">任务受理后出现在列表中。结束后最多保留 24 小时，实例最多保留 500 条已结束任务。服务重启后清空列表。</span></span></div><div class="agent-service-filters">
             <label class="console-search"><i data-lucide="search"></i><input type="search" id="agentTaskSearch" aria-label="搜索任务" placeholder="搜索任务名称或 ID"></label>
@@ -572,7 +598,7 @@
     </section>
 
     <section class="panel integrations-admin-panel" id="panel-integrations">
-      <div class="panel-toolbar" id="integrationPageToolbar"><div><h2>场景配置</h2><p class="panel-subtitle">为各个业务场景选择 Agent，并按需配置专用提示词和 Skill。</p></div></div>
+      <div class="panel-toolbar" id="integrationPageToolbar"><div><h2>组件场景</h2><p class="panel-subtitle">为各个业务场景选择 Agent，并按需配置专用提示词和 Skill。</p></div></div>
       <div class="integration-workspace" id="integrationWorkspace">
         <nav id="integrationDirectory" class="integration-directory" aria-label="场景列表"></nav>
         <div class="integration-details" id="integrationDetails" hidden>
@@ -931,7 +957,7 @@
               <button type="button" class="cap-tab active" role="tab" data-kind="builtin" aria-selected="true"><i data-lucide="hammer" aria-hidden="true"></i>内置 <span class="cap-tab-badge" data-kind-badge="builtin">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="ui" aria-selected="false"><i data-lucide="monitor-check" aria-hidden="true"></i>UI <span class="cap-tab-badge" data-kind-badge="ui">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="mcp" aria-selected="false"><i data-lucide="plug" aria-hidden="true"></i>MCP <span class="cap-tab-badge" data-kind-badge="mcp">0</span></button>
-              <button type="button" class="cap-tab" role="tab" data-kind="agent_connection" aria-selected="false"><i data-lucide="bot" aria-hidden="true"></i>远程 Agent <span class="cap-tab-badge" data-kind-badge="agent_connection">0</span></button>
+              <button type="button" class="cap-tab" role="tab" data-kind="agent_connection" aria-selected="false"><i data-lucide="gamepad-2" aria-hidden="true"></i>远程 Agent <span class="cap-tab-badge" data-kind-badge="agent_connection">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="skills" aria-selected="false"><i data-lucide="book-open-check" aria-hidden="true"></i>Skill <span class="cap-tab-badge" id="agentSkillCounter">0</span></button>
               <button type="button" class="cap-tab" role="tab" data-kind="output" aria-selected="false"><i data-lucide="braces" aria-hidden="true"></i>输出</button>
             </nav>
@@ -1487,7 +1513,6 @@
           <span class="modal-entity-id" id="mcpEditorMeta">MCP 配置 · URL</span>
         </div>
         <div class="agent-editor-header-actions">
-          <button type="button" class="btn" id="bindMcpRemoteAgent" hidden><i data-lucide="bot" aria-hidden="true"></i>绑定为远程 Agent</button>
           <button type="submit" class="btn primary">保存</button>
         </div>
       </div>

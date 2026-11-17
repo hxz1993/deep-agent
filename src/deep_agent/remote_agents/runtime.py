@@ -15,7 +15,7 @@ from deep_agent.schemas.attachment import AttachmentRef
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 from .contracts import (
-    CONFIG_ADAPTER, CONNECTION_PREFIX, A2AConfig, Adapter, InputFile, McpConfig, Operation,
+    CONFIG_ADAPTER, CONNECTION_PREFIX, REMOTE_AGENT_PROTOCOLS, A2AConfig, Adapter, InputFile, Operation,
     RemoteAgentError, RemoteResult, RemoteState, RemoteTaskExpired,
 )
 from .journal import Invocation, InvocationJournal
@@ -36,6 +36,7 @@ class RequestScope:
     space_id: str | None = None
     turn_id: str | None = None
     run_id: str | None = None
+    tool_call_id: str | None = None
     attachments: Sequence[AttachmentRef] = ()
     user_message: str | None = None
     remote_task_id: str | None = None
@@ -47,7 +48,7 @@ class RequestScope:
         return cls(
             deps.user, deps.file_store, deps.execution_request_headers or deps.request_headers,
             agent_id=deps.agent_id, session_id=deps.session_id, app_id=deps.app_id, space_id=deps.space_id,
-            turn_id=deps.turn_id, run_id=deps.run_id, attachments=deps.remote_attachments,
+            turn_id=deps.turn_id, run_id=deps.run_id,
             user_message=deps.remote_user_message, remote_task_id=deps.remote_task_id,
             remote_question_id=deps.remote_question_id, allowed_connections=allowed_connections,
         )
@@ -69,6 +70,8 @@ class RecentInvocations:
             del self.entries[oldest]
 
     def record(self, entry: Invocation):
+        if entry.protocol not in REMOTE_AGENT_PROTOCOLS:
+            return
         self.entries[entry.id] = entry.model_copy(deep=True)
         self._prune()
 
@@ -93,27 +96,14 @@ class RemoteAgentRuntime:
         self.harness_sessions = {}
 
     async def adapter(self, connection) -> Adapter:
+        if connection.config.get("protocol") not in REMOTE_AGENT_PROTOCOLS:
+            raise RemoteAgentError("此远程 Agent 接入方式已不可用")
         config = CONFIG_ADAPTER.validate_python(connection.config)
         if isinstance(config, A2AConfig):
             from .network import A2AAdapter
             return A2AAdapter(config)
-        if isinstance(config, McpConfig):
-            adapter = await self.mcp_adapter(config)
-            # The MCP endpoint and its connection revision are updated in one
-            # transaction. Reject a mixed snapshot before using new credentials.
-            current = await self.connections.get(connection.id)
-            if current is None or current.revision != connection.revision:
-                raise RemoteAgentError("远程连接配置已变更，请发起新任务")
-            return adapter
         from .cli import CliAdapter
         return CliAdapter(config, self.workspace_root)
-
-    async def mcp_adapter(self, config: McpConfig):
-        from .network import McpAdapter
-        row = await self.ctx.stores.mcp.get_by_name(config.mcp_server_name)
-        if row is None or row.transport != "url" or not row.config.get("url"):
-            raise RemoteAgentError("MCP 连接已变更或不可用")
-        return McpAdapter(config, str(row.config["url"]), row.config.get("headers") or {})
 
     async def authorize(self, entry: Invocation, request: RequestScope):
         if (entry.session_id, entry.agent_id, entry.user, entry.app_id, entry.space_id) != (
@@ -125,6 +115,8 @@ class RemoteAgentRuntime:
         connection = await self.connections.get(entry.connection_id)
         if connection is None or connection.revision != entry.connection_revision:
             raise RemoteAgentError("远程连接配置已变更，请发起新任务")
+        if connection.config.get("protocol") not in REMOTE_AGENT_PROTOCOLS:
+            raise RemoteAgentError("此远程 Agent 接入方式已不可用")
         if request.agent_id:
             agent = await self.ctx.stores.agent.get_by_id(request.agent_id)
             if agent is None or CONNECTION_PREFIX + connection.id not in (agent.capabilities or []):
@@ -205,13 +197,17 @@ class RemoteAgentRuntime:
             file = {"kind": "remote_agent_output", "file_id": stored.id,
                 "file_name": stored.file_name, "mime": output.mime, "mime_type": output.mime,
                 "byte_size": len(output.data), "sha256": hashlib.sha256(output.data).hexdigest()}
-            await self._save(entry, state=state, text=text, files={**entry.files, output.key: file})
+            await self._save(
+                entry, files={**entry.files, output.key: file},
+                file_message_ids={**entry.file_message_ids, output.key: entry.message_id or ""},
+            )
         notices = tuple(dict.fromkeys(warnings))
         if (state, text, notices) != (entry.state, entry.text, entry.warnings):
             await self._save(entry, state=state, text=text, warnings=notices)
         return entry
 
-    async def execute(self, entry: Invocation, request: RequestScope, message: str, mode: Operation) -> Invocation:
+    async def execute(self, entry: Invocation, request: RequestScope, message: str, mode: Operation,
+                      *, files: Sequence[InputFile] | None = None) -> Invocation:
         connection = await self.authorize(entry, request)
         if mode == "resume" and request.run_id and entry.run_id == request.run_id and entry.state.status == "completed":
             return entry
@@ -222,19 +218,25 @@ class RemoteAgentRuntime:
             raise RemoteAgentError("远程补问已更新，请刷新后重新选择问题")
         if mode == "resume" and entry.state.status != "completed":
             raise RemoteAgentError("远程任务尚未完成，不能开启后续任务")
-        files = await self._inputs(request)
+        if files is None:
+            files = await self._inputs(request)
         previous = entry.state.model_copy(deep=True)
         message_id = uuid4().hex
         title = entry.title or " ".join((request.user_message or message).split())[:120]
         started = {"status": "submitted", "question_id": None}
-        if mode == "resume" and entry.protocol in {"a2a", "mcp"}:
+        if mode == "resume" and entry.protocol == "a2a":
             # A follow-up creates a different upstream task. Until its ID is
             # known, the previous completed task is not a recovery handle.
             started["task_id"] = None
         await self._save(entry, message_id=message_id, title=title, turn_id=request.turn_id,
+                         tool_call_id=request.tool_call_id,
                          run_id=request.run_id, state=previous.model_copy(update=started), text="", warnings=())
 
         async def checkpoint(state: RemoteState):
+            # Save the upstream recovery handle immediately. Publish completion
+            # only after _complete has collected text, file references and warnings.
+            if state.status == "completed":
+                state = state.model_copy(update={"status": entry.state.status})
             if entry.state != state:
                 await self._save(entry, state=state.model_copy(deep=True))
 
@@ -265,6 +267,8 @@ class RemoteAgentRuntime:
         adapter = await self.adapter(connection)
 
         async def checkpoint(state):
+            if state.status == "completed":
+                state = state.model_copy(update={"status": entry.state.status})
             if state != entry.state:
                 await self._save(entry, state=state)
 

@@ -1015,7 +1015,6 @@ class AgentRunner:
             attachments=attachments,
             messages=raw_history,
         )
-        deps.remote_attachments = tuple(attachments or ())
         deps.remote_user_message = message or ("请使用本轮补充的附件。" if attachments else None)
         deps.has_context_references = history_has_context_references(history)
         return _PreparedHistory(

@@ -315,7 +315,7 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
     async def test_016_restores_remote_connection_and_its_agent_binding(self) -> None:
         backup_path, _, _ = await self._backup(revision="016")
         connection_id = "70000000-0000-0000-0000-000000000001"
-        config = {"version": 1, "protocol": "mcp", "mcp_server_name": "remote", "publication_code": "budget"}
+        config = {"version": 1, "protocol": "a2a", "card_url": "https://agent.example.test/agent-card.json", "headers": {}}
         capabilities = [f"agent_connection:{connection_id}"]
         with sqlite3.connect(backup_path) as connection:
             connection.execute("INSERT INTO remote_agent_connections (id,name,config) VALUES (?,?,?)",
@@ -360,6 +360,12 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 ("pub-1", "budget-report", "预算报告", "", "agent-1", json.dumps({"apps": {"mode": "all"}})),
             )
+            db.execute(
+                "INSERT INTO remote_agent_connections (id, name, config) VALUES (?, ?, ?)",
+                ("retired-connection", "旧 MCP", json.dumps({
+                    "version": 1, "protocol": "mcp", "mcp_server_name": "old-server", "publication_code": "budget-report",
+                })),
+            )
 
         backup = await export_backup(self._url(source), environment="test", output_root=self.root / "backup")
         target = await self._target_engine(revision="016")
@@ -368,7 +374,9 @@ class ConfigurationImportTests(unittest.IsolatedAsyncioTestCase):
             await apply_configuration_import(plan, target_engine=target, file_store=_MemoryFileStore(), request_headers={})
             async with target.connect() as connection:
                 row = (await connection.execute(text("SELECT code, agent_id FROM agent_publications"))).one()
+                retired = await connection.scalar(text("SELECT id FROM remote_agent_connections"))
             self.assertEqual(tuple(row), ("budget-report", "agent-1"))
+            self.assertEqual(retired, "retired-connection")
         finally:
             await target.dispose()
 

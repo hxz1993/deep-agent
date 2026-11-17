@@ -52,7 +52,7 @@ flowchart LR
 - [状态、执行、鉴权及产物](server-state-artifacts.md)：内存生命周期、发布配置边界、文件权限和迁移门槛。
 - [CLI、Python SDK 与 MCP](server-clients.md)：分发、调用语法、认证、上传/续跑/查询/下载、结构和错误。
 - [隔离验证与实施验收矩阵](server-validation.md)：实测结果、复现步骤、协议/产品/运维门槛。
-- [服务端页面设计](server-console-design.md)和[交互原型](<Prototype A2A服务端接入/index.html>)：页面布局和字段。后续入口示例留作预览，阶段 1 不把未交付客户端标为可用。
+- [服务端页面设计](server-console-design.md)记录页面布局和字段。后续入口示例留作预览，阶段 1 不把未交付客户端标为可用。
 - [原始 Dot 交接稿](https://chatgpt.com/space/page_dd86da26ca8c8191b5c07d19ef7ff85f)及[授权专题](access-control-design.md)。执行方案中与本计划冲突的旧口径以本计划为准。
 
 ## 范围和决策点

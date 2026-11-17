@@ -1,6 +1,6 @@
 # 发布选路、A2A 操作与联调
 
-[实施总案](server-implementation-plan.md) · [服务端原型](<Prototype A2A服务端接入/index.html>)
+[实施总案](server-implementation-plan.md) · [服务端页面设计](server-console-design.md)
 
 ## 三个助手怎么选
 

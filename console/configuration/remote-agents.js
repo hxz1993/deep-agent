@@ -7,16 +7,16 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   const icon = (name) => `<i data-lucide="${name}" aria-hidden="true"></i>`;
   const icons = () => window.lucide?.createIcons();
   const drivers = {
-    a2a: { label: "A2A", icon: "network", help: "从 Agent Card 发现远端 Agent，并通过 A2A 提交任务。" },
-    codex: { label: "Codex", icon: "terminal", help: "使用 Codex CLI 执行任务并续接原有对话。" },
-    codebuddy: { label: "CodeBuddy", icon: "bot", help: "使用 CodeBuddy CLI 执行任务并续接原有对话。" },
-    mcp: { label: "MCP", icon: "plug", help: "使用已有的 MCP 连接调用 DeepAgent 发布的 Agent。" },
+    a2a: { label: "A2A", logo: "a2a.svg", transport: "A2A · HTTP", help: "读取 Agent Card 获取远端接口，通过 A2A 发送消息并查询任务状态。" },
+    codex: { label: "Codex", badge: "Codex Exec", logo: "codex.png", transport: "单次命令 · JSONL", command: "codex exec --json", help: "以非交互模式执行任务，运行事件逐行返回，可跟踪进度和结果。" },
+    codebuddy: { label: "CodeBuddy", badge: "CodeBuddy -p", logo: "codebuddy.svg", transport: "单次命令 · JSONL", command: "codebuddy -p --output-format stream-json", help: "以非交互模式执行任务，逐行返回运行事件和结果。" },
   };
   const labels = {
     submitted: "排队中", working: "进行中", input_required: "待补答", completed: "已完成",
     failed: "失败", canceled: "已取消", unknown: "结果未知",
   };
   const activeStates = new Set(["submitted", "working"]);
+  const recentPageSize = 20;
   const fieldOptions = {
     execution: { local: "本机", ssh: "SSH" },
     cwd: { default: "默认", custom: "指定" },
@@ -25,55 +25,94 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   };
   let connections = [];
   let recent = [];
+  let recentPage = 1;
+  let recentPending = true;
+  let recentError = "";
+  let connectionPending = true;
+  let connectionError = "";
   let selectedRecent;
   let view = "cards";
   let editor;
   let homeRequest;
+  let recentRequest;
   let openRequest = 0;
   let pollTimer;
   let debugPollTimer;
-  let binding = false;
 
   const path = (id) => `${endpoint}/${encodeURIComponent(id)}`;
   const post = (url, body, method = "POST") => apiFetch(url, { method, body: JSON.stringify(body) });
   const protocolOf = (row) => row?.config?.protocol || row?.protocol;
+  const driverLogoUrl = (protocol) => {
+    const logo = drivers[protocol]?.logo;
+    return logo ? new URL(`../assets/remote-agents/${logo}`, import.meta.url).href : "";
+  };
+  const driverLogo = (protocol) => {
+    const source = driverLogoUrl(protocol);
+    return source ? `<img class="remote-agent-driver-logo" src="${attr(source)}" alt="" width="16" height="16">` : icon("bot");
+  };
 
   function driverBadge(protocol) {
     const driver = drivers[protocol];
-    return driver ? `<span class="remote-agent-driver">${icon(driver.icon)}${driver.label}</span>` : "—";
+    return driver ? `<span class="remote-agent-driver">${driverLogo(protocol)}${driver.badge || driver.label}</span>` : "—";
   }
 
-  function status(value, label = labels[value]) {
-    return `<span class="remote-agent-state" data-state="${attr(value)}">${escapeHtml(label || "未知")}</span>`;
-  }
-
-  function inspectionState(inspection) {
-    if (!inspection) return status("unchecked", "未检查");
-    if (["ok", "healthy", "ready", "success"].includes(inspection.status) || inspection.ok === true) {
-      return status("completed", "正常");
+  function status(value, label = labels[value], dotOnly = false) {
+    const name = label || "未知";
+    const state = attr(value);
+    if (dotOnly) {
+      return `<span class="remote-agent-state" data-state="${state}" role="img" aria-label="${attr(name)}" title="${attr(name)}"></span>`;
     }
-    if (inspection.status === "approval_required" || inspection.proposed_interface) return status("input_required", "待确认");
-    return status("failed", "异常");
+    return `<span class="remote-agent-state" data-state="${state}">${escapeHtml(name)}</span>`;
+  }
+
+  function inspectionState(inspection, dotOnly = false) {
+    if (!inspection) return status("unchecked", "未检查", dotOnly);
+    if (["ok", "healthy", "ready", "success"].includes(inspection.status) || inspection.ok === true) {
+      return status("completed", "正常", dotOnly);
+    }
+    if (inspection.status === "approval_required" || inspection.proposed_interface) return status("input_required", "待确认", dotOnly);
+    return status("failed", "异常", dotOnly);
+  }
+
+  function updater(row) {
+    const name = row.updated_by_username || row.updated_by || "—";
+    return `<span class="agent-updater" title="更新人：${attr(name)}">${icon("user-round")}<span class="agent-updater-name">${escapeHtml(name)}</span></span>`;
+  }
+
+  function updatedTime(row) {
+    const time = escapeHtml(formatDate(row.updated_at));
+    return row.updated_at ? `<time class="agent-update-time" datetime="${attr(row.updated_at)}">${time}</time>` : time;
   }
 
   function renderConnections() {
     const q = el("remoteConnectionSearch").value.trim().toLocaleLowerCase();
-    const shown = connections.filter(row => `${row.name} ${row.description || ""} ${drivers[protocolOf(row)]?.label || ""}`.toLocaleLowerCase().includes(q));
+    const shown = connectionPending || connectionError ? [] : connections.filter(row =>
+      `${row.name} ${row.description || ""} ${drivers[protocolOf(row)]?.label || ""}`.toLocaleLowerCase().includes(q));
     const cards = el("remoteConnectionCardsHost");
     const list = el("remoteConnectionListHost");
     cards.hidden = view !== "cards" || !shown.length;
     list.hidden = view !== "list" || !shown.length;
     const remove = (row) => `<button type="button" class="row-action icon-only danger" data-remote-delete="${attr(row.id)}" title="删除" aria-label="删除 ${attr(row.name)}">${icon("trash-2")}</button>`;
-    const open = (row) => `<button type="button" class="btn text remote-agent-open" data-remote-open="${attr(row.id)}" title="${attr(row.name)}">${escapeHtml(row.name)}</button>`;
+    const open = (row) => `<button type="button" class="remote-agent-open" data-remote-open="${attr(row.id)}" title="${attr(row.name)}">${escapeHtml(row.name)}</button>`;
     cards.innerHTML = shown.map(row => `
       <article class="remote-agent-card" data-remote-card="${attr(row.id)}">
-        <header><span class="remote-agent-card-icon">${icon(drivers[protocolOf(row)]?.icon || "bot")}</span>${open(row)}${driverBadge(protocolOf(row))}</header>
+        <header><span class="remote-agent-card-icon" aria-hidden="true">${driverLogo(protocolOf(row))}</span>${open(row)}${driverBadge(protocolOf(row))}</header>
         <p>${escapeHtml(row.description || "—")}</p>
-        <footer>${inspectionState(row.inspection)}<div class="row-actions agent-row-actions">${remove(row)}</div></footer>
+        <footer class="agent-card-footer">
+          <span class="agent-card-update">${updater(row)}${updatedTime(row)}</span>
+          ${inspectionState(row.inspection)}<div class="row-actions agent-row-actions">${remove(row)}</div>
+        </footer>
       </article>`).join("");
     el("remoteConnectionRows").innerHTML = shown.map(row => `
-      <tr><td>${open(row)}${driverBadge(protocolOf(row))}</td><td>${escapeHtml(row.description || "—")}</td><td>${inspectionState(row.inspection)}</td><td><div class="row-actions agent-row-actions">${remove(row)}</div></td></tr>`).join("");
-    el("remoteConnectionNotice").textContent = shown.length ? "" : q ? "没有匹配的远程 Agent" : "暂无远程 Agent";
+      <tr><td>${open(row)}</td><td>${driverBadge(protocolOf(row))}</td>
+        <td title="${attr(row.description || "")}">${escapeHtml(row.description || "—")}</td>
+        <td>${inspectionState(row.inspection)}</td><td>${updater(row)}</td><td>${updatedTime(row)}</td>
+        <td><div class="row-actions agent-row-actions">${remove(row)}</div></td></tr>`).join("");
+    const message = connectionError || (connectionPending ? "正在加载远程 Agent…"
+      : q ? "没有匹配的远程 Agent" : "暂无远程 Agent");
+    replaceMarkup(el("remoteConnectionNotice"), shown.length ? "" :
+      `${icon(connectionError ? "triangle-alert" : connectionPending ? "loader-circle" : q ? "search" : "bot")}
+      <span>${escapeHtml(message)}</span>${connectionError ? '<button class="btn text compact" id="retryRemoteDirectory" type="button">重试</button>' : ""}`);
     icons();
   }
 
@@ -89,40 +128,53 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   function renderRecentFilter() {
     const select = el("remoteCallConnection");
     const previous = select.value;
-    const names = new Map(connections.map(row => [row.id, row.name]));
-    for (const row of recent) if (!names.has(row.connection_id)) {
-      names.set(row.connection_id, row.connection_name || row.name || row.connection_id);
+    const agents = new Map(connections.map(row => [row.id, { name: row.name, protocol: protocolOf(row) }]));
+    for (const row of recent) if (!agents.has(row.connection_id)) {
+      agents.set(row.connection_id, { name: row.connection_name || row.name || row.connection_id, protocol: row.protocol });
     }
-    const options = [new Option("全部远程 Agent", ""), ...Array.from(names, ([id, name]) => new Option(name, id))];
-    if (Array.from(select.options).map(o => [o.value, o.text]).toString() === options.map(o => [o.value, o.text]).toString()) return;
+    const options = [new Option("全部远程 Agent", ""), ...Array.from(agents, ([id, { name, protocol }]) => {
+      const option = new Option(name, id);
+      const source = driverLogoUrl(protocol);
+      if (source) option.dataset.iconSrc = source;
+      return option;
+    })];
+    if (select.options.length === options.length && options.every((option, index) => {
+      const current = select.options[index];
+      return current.value === option.value && current.text === option.text && current.dataset.iconSrc === option.dataset.iconSrc;
+    })) return;
     select.replaceChildren(...options);
-    select.value = names.has(previous) ? previous : "";
+    select.value = agents.has(previous) ? previous : "";
   }
 
   function recentConnectionName(row, connection = connections.find(item => item.id === row.connection_id)) {
     return connection?.name || row.connection_name || row.name;
   }
 
-  function renderRecent(message = "") {
+  function renderRecent() {
     renderRecentFilter();
     const keyword = el("remoteCallSearch").value.trim().toLocaleLowerCase();
     const connectionId = el("remoteCallConnection").value;
-    const protocol = el("remoteCallProtocol").value;
     const filterStatus = el("remoteCallStatus").value;
     const shown = recent.filter(row => (!connectionId || connectionId === row.connection_id)
-      && (!protocol || protocol === row.protocol)
-      && (!filterStatus || (filterStatus === "working" ? activeStates.has(row.status) : filterStatus === row.status))
+      && (!filterStatus || filterStatus === row.status)
       && (!keyword || `${row.title || row.task || ""} ${row.id} ${row.remote_task_id || ""}`.toLocaleLowerCase().includes(keyword)));
-    const selected = shown.find(row => row.id === selectedRecent) || shown[0];
+    const pageCount = Math.ceil(shown.length / recentPageSize);
+    recentPage = Math.min(recentPage, Math.max(1, pageCount));
+    const rows = shown.slice((recentPage - 1) * recentPageSize, recentPage * recentPageSize);
+    const selected = rows.find(row => row.id === selectedRecent) || rows[0];
     selectedRecent = selected?.id;
-    const markup = shown.length ? shown.map(row => {
+    const emptyLabel = recentError || (recentPending ? "正在加载近期调用…"
+      : keyword || connectionId || filterStatus ? "没有符合条件的调用" : "暂无调用记录");
+    const markup = rows.length ? rows.map(row => {
       const name = recentConnectionName(row);
       const title = row.title || row.task || row.label || "远程 Agent 调用";
       return `<tr data-remote-call-row="${attr(row.id)}" class="${row.id === selectedRecent ? "selected" : ""}">
-        <td><button type="button" class="btn text remote-agent-call-name" data-remote-call="${attr(row.id)}" aria-pressed="${row.id === selectedRecent}"><span title="${attr(title)}">${escapeHtml(title)}</span><code title="${attr(row.id)}">${escapeHtml(String(row.id).slice(0, 8))}</code></button></td>
+        <td><button type="button" class="btn text agent-service-select" data-remote-call="${attr(row.id)}" aria-controls="remoteCallDetail" aria-pressed="${row.id === selectedRecent}"><span title="${attr(title)}">${escapeHtml(title)}</span><code title="${attr(row.id)}">${escapeHtml(String(row.id).slice(0, 8))}</code></button></td>
         <td><div class="remote-agent-call-name"><span title="${attr(name || "—")}">${escapeHtml(name || "—")}</span>${driverBadge(row.protocol)}</div></td>
-        <td>${status(row.status)}</td><td><time datetime="${attr(row.created_at)}">${escapeHtml(formatDate(row.created_at))}</time></td></tr>`;
-    }).join("") : `<tr><td colspan="4" class="remote-agent-empty">${escapeHtml(message || (keyword || connectionId || protocol || filterStatus ? "暂无符合条件的调用记录" : "暂无调用记录"))}</td></tr>`;
+        <td>${status(row.status)}</td><td class="agent-task-wide"><time datetime="${attr(row.created_at)}">${escapeHtml(formatDate(row.created_at))}</time></td>
+        <td>${row.files?.length ? `<span class="agent-task-file-count" aria-label="${row.files.length} 个文件">${icon("file-text")}${row.files.length}</span>` : "—"}</td></tr>`;
+    }).join("") : `<tr><td colspan="5" class="empty-cell agent-task-wide">${escapeHtml(emptyLabel)}</td>
+      <td colspan="4" class="empty-cell agent-task-compact">${escapeHtml(emptyLabel)}</td></tr>`;
     const body = el("remoteCallRows");
     const focused = body.contains(document.activeElement) && document.activeElement.dataset.remoteCall;
     replaceMarkup(body, markup);
@@ -130,9 +182,22 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       const button = Array.from(body.querySelectorAll("[data-remote-call]")).find(node => node.dataset.remoteCall === focused);
       button?.focus({ preventScroll: true });
     }
-    el("remoteCallCount").textContent = `共 ${shown.length} 条`;
+    const previous = el("prevRemoteCalls");
+    const next = el("nextRemoteCalls");
+    previous.hidden = next.hidden = pageCount <= 1;
+    previous.disabled = recentPage === 1;
+    next.disabled = recentPage >= pageCount;
+    const totalLabel = `共 ${shown.length.toLocaleString()} 条调用`;
+    const pageLabel = pageCount > 1 ? `第 ${recentPage} / ${pageCount} 页 · ${totalLabel}` : totalLabel;
+    if (el("remoteCallCount").textContent !== pageLabel) el("remoteCallCount").textContent = pageLabel;
     renderRecentDetail(selected);
     icons();
+  }
+
+  function setRecentPage(page) {
+    recentPage = page;
+    renderRecent();
+    el("remoteCallTable").scrollTop = 0;
   }
 
   function replaceMarkup(host, markup) {
@@ -160,7 +225,9 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
 
   function renderRecentDetail(row) {
     if (!row) {
-      replaceMarkup(el("remoteCallDetail"), '<p class="remote-agent-empty">选择调用查看详情</p>');
+      const message = recentError ? "暂时无法查看调用详情" : recentPending ? "正在加载…" : "暂无调用可查看";
+      replaceMarkup(el("remoteCallDetail"), `<div class="agent-service-detail-heading"><h3>调用详情</h3></div>
+        <p class="agent-service-empty" role="status">${message}</p>`);
       return;
     }
     const title = row.title || row.task || row.label || "调用详情";
@@ -177,8 +244,15 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       fact(row.protocol === "codex" ? "Thread ID" : row.protocol === "codebuddy" ? "Session ID" : "Context ID", row.remote_context_id || row.remote_session_id || row.thread_id),
       fact("提问 ID", row.question_id),
     ].join("");
-    replaceMarkup(el("remoteCallDetail"), `
-      <div class="remote-agent-toolbar remote-agent-detail-heading"><h3>${escapeHtml(title)}</h3>${status(row.status)}</div>
+    const detail = el("remoteCallDetail");
+    const previousScroll = detail.querySelector(".inspector-tab-panel")?.scrollTop || 0;
+    const sameCall = detail.dataset.invocation === row.id;
+    replaceMarkup(detail, `
+      <div class="agent-service-detail-heading">
+        <div class="agent-service-detail-title"><h3 title="${attr(title)}">${escapeHtml(title)}</h3></div>
+        <span class="inspector-tab-status">${status(row.status)}</span>
+      </div>
+      <div class="inspector-tab-panel">
       <dl class="remote-agent-facts">
         <div><dt>接入方式</dt><dd>${driverBadge(row.protocol)}</dd></div>
         ${fact("远程 Agent", recentConnectionName(row, connection))}
@@ -192,7 +266,9 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       ${question ? `<section class="remote-agent-detail-section"><h4>待补材料</h4><p>${escapeHtml(question)}</p>${sessionUrl ? '<p class="muted">请在原 Agent 会话补答。</p>' : ""}</section>` : ""}
       ${result ? `<section class="remote-agent-detail-section remote-agent-result"><h4>任务结果</h4><p>${escapeHtml(result)}</p></section>` : ""}
       ${(row.warnings || []).map(warning => `<p class="muted">${escapeHtml(warning)}</p>`).join("")}
-      ${renderFiles(row.files)}`);
+      ${renderFiles(row.files)}</div>`);
+    detail.dataset.invocation = row.id;
+    if (sameCall) detail.querySelector(".inspector-tab-panel").scrollTop = previousScroll;
   }
 
   function schedulePoll() {
@@ -202,15 +278,25 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
 
   async function updateRecent() {
     if (!recentIsVisible()) return;
+    recentRequest?.abort();
+    const request = new AbortController();
+    recentRequest = request;
     try {
-      const rows = await apiFetch(`${endpoint}/recent`);
-      if (!recentIsVisible()) return;
-      recent = rows;
+      const rows = await apiFetch(`${endpoint}/recent`, { signal: request.signal, reportStatus: false });
+      if (request.signal.aborted || !recentIsVisible()) return;
+      recent = rows.filter(row => Object.hasOwn(drivers, row.protocol));
+      recentPending = false;
+      recentError = "";
       renderRecent();
     } catch (error) {
-      if (recentIsVisible()) renderRecent(error.message || "近期调用加载失败");
+      if (!request.signal.aborted && recentIsVisible()) {
+        recent = [];
+        recentPending = false;
+        recentError = error.status === 404 ? "当前服务未提供近期调用接口" : "近期调用加载失败，请稍后重试";
+        renderRecent();
+      }
     } finally {
-      schedulePoll();
+      if (recentRequest === request) schedulePoll();
     }
   }
 
@@ -219,23 +305,23 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     homeRequest?.abort();
     const request = new AbortController();
     homeRequest = request;
-    el("remoteConnectionNotice").textContent = "正在加载远程 Agent…";
+    connectionPending = true;
+    connectionError = "";
+    renderConnections();
+    renderRecent();
+    void updateRecent();
     try {
       const rows = await apiFetch(endpoint, { signal: request.signal });
       if (request.signal.aborted) return;
-      connections = rows;
+      connections = rows.filter(row => Object.hasOwn(drivers, protocolOf(row)));
+      connectionPending = false;
       renderConnections();
-      await updateRecent();
+      renderRecent();
     } catch (error) {
       if (!request.signal.aborted) {
-        const notice = el("remoteConnectionNotice");
-        const retry = document.createElement("button");
-        retry.className = "btn text compact";
-        retry.type = "button";
-        retry.textContent = "重试";
-        retry.addEventListener("click", () => void refresh());
-        notice.replaceChildren(document.createTextNode(error.message || "加载远程 Agent 失败"), retry);
-        schedulePoll();
+        connectionPending = false;
+        connectionError = error.status === 404 ? "当前服务未提供远程 Agent 接口" : "加载远程 Agent 失败";
+        renderConnections();
       }
     }
   }
@@ -251,20 +337,21 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   function nameInput() { return el("remoteConnectionForm").elements.namedItem("name"); }
   function descInput() { return el("remoteConnectionForm").elements.namedItem("description"); }
 
-  function openEditor(row = {}, initial = {}) {
+  function openEditor(row = {}) {
     homeRequest?.abort();
+    recentRequest?.abort();
     clearTimeout(pollTimer);
     clearTimeout(debugPollTimer);
-    const config = { ...baseConfig(protocolOf(row) || initial.protocol || "a2a"), ...(row.config || initial.config) };
+    const config = { ...baseConfig(protocolOf(row) || "a2a"), ...row.config };
     editor = {
       row, config, formModes: { cwd: config.cwd ? "custom" : "default", model: config.model ? "custom" : "default" },
-      dirty: Boolean(initial.config), json: false, advanced: false, busy: false, debugBusy: false,
+      dirty: false, json: false, advanced: false, busy: false, debugBusy: false,
       headers: Object.entries(config.headers || {}), debug: { files: [], messages: [], invocation: null },
     };
     el("remoteAgentDirectory").hidden = true;
     el("remoteAgentEditor").hidden = false;
-    nameInput().value = row.name || initial.name || "";
-    descInput().value = row.description || initial.description || "";
+    nameInput().value = row.name || "";
+    descInput().value = row.description || "";
     el("remoteEditorTitle").textContent = row.id ? `编辑远程 Agent · ${row.name}` : "添加远程 Agent";
     el("remoteConfigJson").value = "";
     el("remoteDebugPrompt").value = "";
@@ -306,10 +393,10 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     return true;
   }
 
-  function field(label, key, { value, hint, placeholder, type = "text", required = false, readonly = false } = {}) {
+  function field(label, key, { value, hint, placeholder, type = "text", required = false } = {}) {
     const identifier = `remote-field-${key}`;
     return `<label class="field"><span class="field-label-row">${label}${hint ? tooltip(identifier, hint) : ""}</span>
-      <input type="${type}" id="${identifier}" ${readonly ? "readonly" : `data-config-field="${key}"`} value="${attr(value ?? editor.config[key])}" ${placeholder ? `placeholder="${attr(placeholder)}"` : ""} autocomplete="off" ${required ? "required" : ""}></label>`;
+      <input type="${type}" id="${identifier}" data-config-field="${key}" value="${attr(value ?? editor.config[key])}" ${placeholder ? `placeholder="${attr(placeholder)}"` : ""} autocomplete="off" ${required ? "required" : ""}></label>`;
   }
 
   function tooltip(id, content) {
@@ -328,36 +415,32 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
 
   function driverFields() {
     const config = editor.config;
-    if (config.protocol === "mcp") {
-      return field("MCP 连接", "mcp_server_name", { readonly: true })
-        + field("目标发布", "publication_code", { readonly: true });
-    }
     if (config.protocol === "a2a") {
       return `${field("Agent Card 地址", "card_url", { type: "url", required: true, placeholder: "https://example.com/.well-known/agent-card.json" })}
-        <div class="remote-agent-header-fields"><div class="remote-agent-toolbar"><strong>请求 Header</strong>
-          <button type="button" class="btn text compact" id="addRemoteHeader">${icon("plus")}添加</button></div>
+        <div class="remote-agent-header-fields"><h3>请求头（可选）</h3>
           ${editor.headers.map(([key, value], index) => `
             <div class="remote-agent-header-row">
               <input class="console-input" data-header-key="${index}" value="${attr(key)}" aria-label="Header 名称" placeholder="Header 名称" autocomplete="off">
               <input class="console-input" type="password" data-header-value="${index}" value="${attr(value)}" aria-label="Header 值" placeholder="${value === null ? "•••••• 保留原值" : "Header 值"}" autocomplete="new-password">
               <div class="row-actions agent-row-actions"><button type="button" class="row-action icon-only" data-header-remove="${index}" aria-label="删除 Header" title="删除 Header">${icon("trash-2")}</button></div>
-            </div>`).join("")}</div>`;
+            </div>`).join("")}
+          <button type="button" class="btn" id="addRemoteHeader">${icon("plus")}添加请求头</button></div>`;
     }
     const codex = config.protocol === "codex";
     const modelExample = codex ? "gpt-5.4" : "gpt-5";
     return `
       ${segmented("执行位置", "execution", config.execution, config.execution === "ssh"
         ? optionField("ssh_host", "SSH 主机别名", "SSH 主机名，如 build-runner", true)
-        : '<span class="muted">在本机执行。</span>')}
+        : '<span class="remote-agent-option-hint">在本机运行 CLI。</span>')}
       ${segmented("工作目录", "cwd", editor.formModes.cwd, editor.formModes.cwd === "custom"
         ? optionField("cwd", "工作目录", "输入执行环境中的绝对路径", true)
-        : '<span class="muted">为任务使用独立工作目录。</span>')}
+        : '<span class="remote-agent-option-hint">使用为此连接分配的工作目录。</span>')}
       ${segmented("模型", "model", editor.formModes.model, editor.formModes.model === "custom"
         ? optionField("model", "模型", `例如 ${modelExample}`, true)
-        : `<span class="muted">沿用 ${drivers[config.protocol].label} 的默认模型。</span>`, `指定时填写执行账号可用的模型名，例如 ${modelExample}。`)}
+        : `<span class="remote-agent-option-hint">沿用 ${drivers[config.protocol].label} 的默认模型。</span>`, `指定时填写执行账号可用的模型名，例如 ${modelExample}。`)}
       ${codex ? segmented("工作区权限", "sandbox", config.sandbox) : ""}
       <details class="remote-agent-advanced" ${editor.advanced ? "open" : ""}>
-        <summary>高级</summary>
+        <summary>高级${icon("chevron-right")}</summary>
         ${field("启动命令", "command", { placeholder: `默认 ${config.protocol}，支持绝对路径`, hint: "只填命令名或执行环境中的可执行文件绝对路径。" })}
         ${codex ? field("配置档（Profile）", "profile", { placeholder: "沿用默认配置，如 review", hint: "填写执行账号在 Codex 中已定义的配置档名称。配置档可为不同工作场景预设模型等选项；留空使用 CLI 默认配置。" })
           + field("推理强度", "reasoning_effort", { placeholder: "沿用默认档位，如 medium", hint: "常见档位为 minimal、low、medium、high、xhigh。可用值取决于模型。" }) : ""}
@@ -366,24 +449,24 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
 
   function renderConfig() {
     const cfg = editor.config;
-    const mcp = cfg.protocol === "mcp";
     const cli = cfg.protocol === "codex" || cfg.protocol === "codebuddy";
     el("remoteEditorDriver").innerHTML = driverBadge(cfg.protocol);
-    el("remoteDriverOptions").innerHTML = Object.entries(drivers).filter(([key]) => mcp ? key === "mcp" : key !== "mcp").map(([key, driver]) =>
-      `<button type="button" class="btn remote-agent-driver-option ${key === cfg.protocol ? "active" : ""}" data-remote-driver="${key}" aria-pressed="${key === cfg.protocol}" ${mcp ? "disabled" : ""}>${icon(driver.icon)}<span>${driver.label}</span></button>`).join("");
-    el("remoteDriverNote").textContent = drivers[cfg.protocol].help;
+    el("remoteDriverOptions").innerHTML = Object.entries(drivers).map(([key, driver]) =>
+      `<button type="button" class="btn remote-agent-driver-option" data-remote-driver="${key}" aria-pressed="${key === cfg.protocol}">${driverLogo(key)}<strong>${driver.label}</strong></button>`).join("");
+    const driver = drivers[cfg.protocol];
+    el("remoteDriverNote").innerHTML = `${driver.command ? `运行 <code>${driver.command}</code>，` : ""}${driver.help}`;
     el("remoteDebugHeading").textContent = cli ? "任务调试" : "对话调试";
     el("resetRemoteDebug").textContent = cli ? "清空调试" : "新对话";
     el("remoteDebugPrompt").placeholder = cli ? "描述要执行的任务…" : "给远程 Agent 发送消息…";
     const fields = el("remoteDriverFields");
-    fields.hidden = editor.json;
-    fields.innerHTML = editor.json ? "" : driverFields();
+    fields.disabled = editor.json;
+    fields.setAttribute("aria-hidden", String(editor.json));
+    fields.innerHTML = driverFields();
     fields.querySelector("details")?.addEventListener("toggle", (event) => {
       if (editor) editor.advanced = event.target.open;
     });
-    el("remoteConfigJsonField").hidden = !editor.json;
+    el("remoteConfigJson").hidden = !editor.json;
     el("toggleRemoteConfigMode").querySelector("span").textContent = editor.json ? "切换为表单" : "切换为 JSON";
-    el("toggleRemoteConfigMode").hidden = mcp;
     icons();
   }
 
@@ -396,7 +479,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       const names = headers.map(([key]) => key.trim().toLowerCase());
       if (new Set(names).size !== names.length) throw new Error("Header 名称不能重复");
       config.headers = Object.fromEntries(headers.map(([key, value]) => [key.trim(), value]));
-    } else if (config.protocol !== "mcp") {
+    } else {
       if (editor.formModes.cwd !== "custom") delete config.cwd;
       if (editor.formModes.model !== "custom") delete config.model;
       if (config.execution !== "ssh") delete config.ssh_host;
@@ -463,7 +546,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     const proposed = inspection?.proposed_interface
       || (inspection?.status === "approval_required" ? inspection.interface : null);
     summary.innerHTML = `${heading}
-      <dl class="remote-agent-facts">${fact("接入方式", drivers[config.protocol].label)}
+      <dl class="remote-agent-facts">${fact("接入方式", drivers[config.protocol].transport || drivers[config.protocol].label)}
         <div><dt>状态</dt><dd>${inspectionState(inspection)}</dd></div>
         ${fact("远端 Agent", inspection?.agent_name || inspection?.name)}
         ${fact("检查时间", inspection?.checked_at && formatDate(inspection.checked_at))}
@@ -472,7 +555,6 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
         ${fact("已批准接口", config.approved_interface?.url || inspection?.approved_interface?.url)}
         ${fact("执行位置", config.execution === "ssh" ? config.ssh_host : config.execution === "local" ? "本机" : null)}
         ${fact("工作目录", config.cwd)}${fact("模型", config.model)}
-        ${fact("发布编码", config.publication_code)}
       </dl>
       ${inspection?.message ? `<p class="muted">${escapeHtml(inspection.message)}</p>` : ""}
       ${proposed ? `<p class="remote-agent-proposed"><code>${escapeHtml(proposed.url || proposed)}</code><button type="button" id="approveRemoteInterface" class="btn" ${editor.dirty || editor.busy ? "disabled" : ""}>批准接口</button></p>` : ""}`;
@@ -482,7 +564,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     const ready = Boolean(editor.row.id && !editor.dirty && !editor.busy);
     const active = editor.debug.invocation && activeStates.has(editor.debug.invocation.status);
     el("checkRemoteConnection").disabled = !ready;
-    el("checkRemoteConnection").textContent = editor.checking ? "正在检查…" : ["a2a", "mcp"].includes(editor.config.protocol) ? "检查连接" : "检查环境";
+    el("checkRemoteConnection").textContent = editor.checking ? "正在检查…" : editor.config.protocol === "a2a" ? "检查连接" : "检查环境";
     el("saveRemoteConnection").disabled = editor.busy || editor.debugBusy;
     el("remoteConnectionForm").inert = editor.busy;
     el("remoteDebugPrompt").disabled = !ready || editor.debugBusy || active;
@@ -496,7 +578,13 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       || (invocation.status === "unknown" && invocation.remote_task_id));
     el("refreshRemoteDebug").disabled = !ready || editor.debugBusy || active;
     const notice = el("remoteDebugNotice");
-    if (!editor.row.id) notice.textContent = "保存连接后可发送调试消息。";
+    el("remoteDebugPanel").toggleAttribute("data-unsaved", !editor.row.id);
+    if (!editor.row.id) {
+      if (!notice.firstElementChild) {
+        notice.innerHTML = `${icon("triangle-alert")}<span>保存后可调试</span>`;
+        icons();
+      }
+    }
     else if (editor.dirty) notice.textContent = "保存当前修改后继续调试。";
     else if (!editor.debug.error) notice.textContent = active ? "远端任务正在执行…" : editor.debug.invocation?.status === "input_required" ? "回复下方追问以继续原任务。" : "";
   }
@@ -739,37 +827,6 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     }
   }
 
-  async function bindMcp(mcpServerName) {
-    if (binding) return;
-    binding = true;
-    try {
-      const publications = await post(`${endpoint}/mcp-publications`, { mcp_server_name: mcpServerName });
-      if (!publications.length) { showToast("当前 MCP 连接没有可用的 Agent 发布"); return; }
-      const selected = await requestActionFields({
-        title: "绑定为远程 Agent", icon: "bot", confirmLabel: "继续",
-        fields: [{ name: "code", label: "目标发布", required: true, value: publications[0].agent_code, options: publications.map(item => ({
-          value: item.agent_code, label: item.name ? `${item.name} · ${item.agent_code}` : item.agent_code,
-        })) }],
-      });
-      if (!selected) return;
-      const pub = publications.find(item => item.agent_code === selected.code);
-      if (!pub || !await window.mcpAdmin.requestCloseEditor()) return;
-      document.querySelector('[data-tab="remote-agents"]')?.click();
-      await window.configurationTabsAdmin?.pending;
-      if (!el("panel-remote-agents").classList.contains("active")) return;
-      openEditor({}, {
-        name: pub.name || pub.agent_code,
-        description: pub.description || "",
-        protocol: "mcp",
-        config: { mcp_server_name: mcpServerName, publication_code: pub.agent_code },
-      });
-    } catch (error) {
-      showToast(error.message, true);
-    } finally {
-      binding = false;
-    }
-  }
-
   function bind() {
     const panel = el("panel-remote-agents");
     if (!panel) return;
@@ -794,6 +851,9 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       } else if (data.remoteOpen) await loadEditor(data.remoteOpen);
       else if (data.remoteDelete) await removeConnection(data.remoteDelete);
       else if (data.remoteCall) { selectedRecent = data.remoteCall; renderRecent(); }
+      else if (button.id === "retryRemoteDirectory") await refresh();
+      else if (button.id === "prevRemoteCalls") setRecentPage(recentPage - 1);
+      else if (button.id === "nextRemoteCalls") setRecentPage(recentPage + 1);
       else if (button.id === "addRemoteConnection") openEditor();
       else if (button.id === "closeRemoteEditor") { if (await requestCloseEditor()) await refresh(); }
       else if (button.id === "checkRemoteConnection") await check();
@@ -830,8 +890,24 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       else if (data.debugRemove != null) { editor.debug.files.splice(Number(data.debugRemove), 1); renderDebug(); }
     });
     el("remoteConnectionSearch").addEventListener("input", renderConnections);
-    el("remoteCallSearch").addEventListener("input", () => renderRecent());
-    for (const id of ["remoteCallConnection", "remoteCallProtocol", "remoteCallStatus"]) el(id).addEventListener("change", () => renderRecent());
+    el("remoteCallSearch").addEventListener("input", () => setRecentPage(1));
+    for (const id of ["remoteCallConnection", "remoteCallStatus"]) el(id).addEventListener("change", () => setRecentPage(1));
+    window.bindConsolePaneResize(el("remoteDirectorySplitter"), el("remoteDirectoryLayout"),
+      "--remote-agent-top-height", { pane: el("remoteConnectionPane"), sizePrefix: "--remote-agent" });
+    window.bindConsolePaneResize(el("remoteCallSplitter"), el("remoteCallWorkbench"), "--task-list-width");
+    const editorLayout = el("remoteAgentEditorLayout");
+    const configPane = el("remoteConnectionForm");
+    window.bindConsolePaneResize(el("remoteConfigSplitter"), editorLayout, "--remote-config-width", {
+      pane: configPane,
+      widthBounds() {
+        const style = getComputedStyle(editorLayout);
+        const minimum = parseFloat(style.getPropertyValue("--remote-config-min"));
+        const limit = parseFloat(style.getPropertyValue("--remote-config-max"));
+        const debugMinimum = parseFloat(style.getPropertyValue("--remote-debug-min"));
+        const available = configPane.offsetWidth + el("remoteDebugPanel").offsetWidth - debugMinimum;
+        return [minimum, Math.max(minimum, Math.min(limit, available))];
+      },
+    });
     el("remoteConnectionForm").addEventListener("input", (event) => {
       if (!editor) return;
       const { configField, headerKey, headerValue } = event.target.dataset;
@@ -858,12 +934,12 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
 
   async function catalog() {
     const rows = await apiFetch(endpoint);
-    return rows.map(row => ({
+    return rows.filter(row => Object.hasOwn(drivers, protocolOf(row))).map(row => ({
       code: `agent_connection:${row.id}`, category: "agent_connection", label: row.name,
       protocol: protocolOf(row), description: row.description, inspection: row.inspection,
     }));
   }
 
-  window.remoteAgentAdmin = { refresh, requestCloseEditor, bindMcp, catalog, driverBadge, inspectionState };
+  window.remoteAgentAdmin = { refresh, requestCloseEditor, catalog, driverBadge, inspectionState };
   document.addEventListener("DOMContentLoaded", bind);
 })();

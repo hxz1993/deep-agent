@@ -422,13 +422,6 @@
     renderScope();
     el("agentPublicationDialog").showModal();
     form.elements[row ? "name" : "agent_code"].focus();
-    if (draft.items.some((app) => !apps.has(app.app_id))) {
-      const currentDraft = draft;
-      void window.DeepAgentAppPicker.getApps(`${root}/applications`).then((directory) => {
-        directory.forEach((app) => apps.set(app.app_id, app));
-        if (draft === currentDraft && el("agentPublicationDialog").open) renderScope();
-      }).catch(() => {});
-    }
   }
 
   async function save(event) {
@@ -492,77 +485,6 @@
       selectPublication(row.agent_code);
       renderPublications();
       await loadTasks();
-    }
-  }
-
-  function bindResize(split, layout, property, topPane = null) {
-    const byHeight = Boolean(topPane);
-    const initial = Number(split.getAttribute("aria-valuenow"));
-    const currentSize = () => byHeight
-      ? Math.round(topPane.getBoundingClientRect().height)
-      : Number(split.getAttribute("aria-valuenow"));
-    const bounds = () => {
-      if (!byHeight) return [Number(split.getAttribute("aria-valuemin")), Number(split.getAttribute("aria-valuemax"))];
-      const style = getComputedStyle(layout);
-      const minimum = parseFloat(style.getPropertyValue("--agent-service-top-min"));
-      const reserved = parseFloat(style.getPropertyValue("--agent-service-recent-min"));
-      return [minimum, Math.max(minimum, layout.clientHeight - split.offsetHeight - reserved)];
-    };
-    const syncHeight = () => {
-      if (!split.offsetHeight) return;
-      const [minimum, maximum] = bounds();
-      split.setAttribute("aria-valuemin", minimum);
-      split.setAttribute("aria-valuemax", maximum);
-      split.setAttribute("aria-valuenow", currentSize());
-    };
-    const apply = (value) => {
-      const [minimum, maximum] = bounds();
-      const size = Math.round(Math.max(minimum, Math.min(maximum, value)));
-      layout.style.setProperty(property, `${size}${byHeight ? "px" : "%"}`);
-      split.setAttribute("aria-valuenow", size);
-    };
-    split.addEventListener("keydown", (event) => {
-      const smaller = byHeight ? "ArrowUp" : "ArrowLeft";
-      const larger = byHeight ? "ArrowDown" : "ArrowRight";
-      if (![smaller, larger, "Home", "End"].includes(event.key)) return;
-      event.preventDefault();
-      const [minimum, maximum] = bounds();
-      const step = byHeight ? 16 : 2;
-      const current = currentSize();
-      apply({ Home: minimum, End: maximum, [smaller]: current - step, [larger]: current + step }[event.key]);
-    });
-    split.addEventListener("dblclick", () => {
-      if (byHeight) {
-        layout.style.removeProperty(property);
-        syncHeight();
-      } else apply(initial);
-    });
-    split.addEventListener("pointerdown", (event) => {
-      if (!event.isPrimary || event.button !== 0) return;
-      event.preventDefault();
-      const startSize = currentSize();
-      const position = (pointer) => byHeight ? pointer.clientY : pointer.clientX;
-      const start = position(event);
-      const scale = byHeight ? 1 : 100 / layout.clientWidth;
-      const move = (pointer) => {
-        if (pointer.pointerId === event.pointerId) {
-          apply(startSize + (position(pointer) - start) * scale);
-        }
-      };
-      split.setPointerCapture(event.pointerId);
-      split.classList.add("dragging");
-      document.body.classList.add("workspace-pane-resizing");
-      split.addEventListener("pointermove", move);
-      split.addEventListener("lostpointercapture", () => {
-        split.removeEventListener("pointermove", move);
-        split.classList.remove("dragging");
-        document.body.classList.remove("workspace-pane-resizing");
-      }, { once: true });
-    });
-    if (byHeight) {
-      const resizeObserver = new ResizeObserver(syncHeight);
-      resizeObserver.observe(layout);
-      resizeObserver.observe(topPane);
     }
   }
 
@@ -701,9 +623,10 @@
     el("prevAgentTasks").addEventListener("click", () => { page--; void loadTasks(); });
     el("nextAgentTasks").addEventListener("click", () => { page++; void loadTasks(); });
     const topPane = el("agentServiceTop");
-    bindResize(el("agentServiceRowSplitter"), topPane.parentElement, "--agent-service-top-height", topPane);
-    bindResize(el("agentServiceTopSplitter"), topPane, "--agent-publications-width");
-    bindResize(el("agentTaskSplitter"), el("agentTaskWorkbench"), "--task-list-width");
+    window.bindConsolePaneResize(el("agentServiceRowSplitter"), topPane.parentElement, "--agent-service-top-height",
+      { pane: topPane, sizePrefix: "--agent-service" });
+    window.bindConsolePaneResize(el("agentServiceTopSplitter"), topPane, "--agent-publications-width");
+    window.bindConsolePaneResize(el("agentTaskSplitter"), el("agentTaskWorkbench"), "--task-list-width");
     clearInterval(timer);
     timer = setInterval(() => {
       if (panel.classList.contains("active") && document.body.dataset.consolePage === "configuration" && !document.hidden) void loadTasks();

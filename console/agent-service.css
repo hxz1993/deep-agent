@@ -9,14 +9,6 @@
     clamp(var(--agent-service-top-min), var(--agent-service-top-height, min(48dvh, 420px)), calc(100% - var(--agent-service-row-resizer-height) - var(--agent-service-recent-min)))
     var(--agent-service-row-resizer-height) minmax(var(--agent-service-recent-min), 1fr);
 }
-.workspace-resizer.agent-service-row-resizer { width:100%; min-width:0; cursor:row-resize; }
-.workspace-resizer.agent-service-row-resizer::before { inset:0; }
-.workspace-resizer.agent-service-row-resizer::after {
-  inset:50% auto auto 50%; width:40px; height:2px; transform:translate(-50%, -50%);
-  background:var(--console-card-border); transition:background .14s ease;
-}
-.workspace-resizer.agent-service-row-resizer:is(:hover, :focus-visible, .dragging)::after { background:var(--accent); }
-body.workspace-pane-resizing:has(.agent-service-row-resizer.dragging) { cursor:row-resize; }
 .agent-service-top { display:grid; grid-template-columns:minmax(0,var(--agent-publications-width,62%)) var(--console-resizer-width) minmax(0,1fr); column-gap:10px; min-height:0; }
 .agent-service-publications,.agent-service-access,.agent-service-recent,.agent-service-task-list { display:flex; flex-direction:column; min-height:0; min-width:0; }
 .agent-service-layout .console-section-heading { align-items:center; }
@@ -145,7 +137,7 @@ body.workspace-pane-resizing:has(.agent-service-row-resizer.dragging) { cursor:r
 .agent-service-detail-status[data-state="TASK_STATE_COMPLETED"]::before { background:var(--success); }
 .agent-service-detail-status[data-state="TASK_STATE_WORKING"]::before { background:var(--accent); }
 .agent-service-detail-status[data-state="TASK_STATE_FAILED"]::before { background:var(--danger-text); }
-dialog.console-detail-dialog.modal.agent-service-dialog[open] { display:flex; flex-direction:column; height:auto; max-height:calc(100dvh - 32px); }
+dialog.console-detail-dialog.modal.agent-service-dialog[open] { display:flex; flex-direction:column; height:fit-content; max-height:calc(100dvh - 32px); }
 #agentPublicationForm { display:flex; flex-direction:column; min-height:0; }
 #agentPublicationForm > .modal-body { flex:1; min-height:0; max-height:none; overflow-y:auto; display:flex; flex-direction:column; gap:var(--ui-group-gap); }
 #agentPublicationForm > .modal-body > * { flex:none; }

@@ -324,6 +324,15 @@
 #configurationHost .agent-view-switch button { font-family: var(--font); font-size: var(--ui-font-helper); }
 #configurationHost .wecom-member-table thead th { height: 36px; }
 #configurationHost .catalog-panel .models-desc { margin-top: var(--ui-group-content-gap); }
+.workspace-resizer.workspace-row-resizer { width:100%; min-width:0; cursor:row-resize; }
+.workspace-resizer.workspace-row-resizer::before { inset:0; }
+.workspace-resizer.workspace-row-resizer::after {
+  inset:50% auto auto 50%; width:40px; height:2px; transform:translate(-50%, -50%);
+  background:var(--console-card-border); transition:background .14s ease;
+}
+.workspace-resizer.workspace-row-resizer:is(:hover, :focus-visible, .dragging)::after { background:var(--accent); }
+body.workspace-pane-resizing:has(.workspace-row-resizer.dragging) { cursor:row-resize; }
+
 .console-pagination, .models-pagination, .diagnostic-pagination { display:flex; align-items:center; justify-content:flex-end; gap:12px; color:var(--text-dim); font-size:var(--ui-font-helper); }
 .console-pagination, .models-pagination { margin-top:10px; }
 

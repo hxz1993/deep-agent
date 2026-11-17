@@ -1915,6 +1915,7 @@ html, body {
   transition: border-color 0.15s;
 }
 .composer-inner:focus-within { border-color: var(--accent); }
+.composer-input,
 #input {
   flex: 1;
   resize: none;
@@ -2492,6 +2493,7 @@ html, body {
 }
 .composer-inner:focus-within { border-color: var(--border); box-shadow: 0 1px 2px color-mix(in srgb, #000 7%, transparent); }
 .composer-input-row { display: flex; min-height: 38px; }
+.composer-input,
 #input { width: 100%; min-height: 38px; max-height: 180px; padding: 3px 2px 1px; font-size: 13px; line-height: 18px; }
 .composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 26px; }
 .composer-toolbar-start,

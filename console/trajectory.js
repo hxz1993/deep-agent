@@ -429,11 +429,19 @@ export function buildTrajectory(history = {}) {
   let inputSequence = 0;
   const projected = [];
   const tools = new Map();
+  const remoteCompletions = new Map();
   const outputCallsByRun = new Map();
   const assistantMessages = new Map();
   const automaticTitles = new Map();
   const outputFacts = items.filter(event => event.event_type === "output/attempt");
   for (const event of items) {
+    if (event.event_type === "remote_agent/invocation") {
+      const { tool_call_id, run_id } = event.payload || {};
+      if (event.status === "completed" && tool_call_id && run_id) {
+        remoteCompletions.set(JSON.stringify([run_id, tool_call_id]), event);
+      }
+      continue;
+    }
     if (event.event_type === "output/attempt") {
       projected.push(projectOutputAttempt(event, inputSequence, items));
       continue;
@@ -632,6 +640,28 @@ export function buildTrajectory(history = {}) {
         tool.summary = tool.dispatched === false ? "未分发：模型响应被拒绝" : eventSummary(tool.kind, { type: "tool_result", result: part.content });
       }
     });
+  }
+  for (const event of remoteCompletions.values()) {
+    const invocation = event.payload;
+    const tool = (tools.get(invocation.tool_call_id) || []).find(row =>
+      row.run_id === invocation.run_id && ["delegate_task", "answer_task"].includes(row.label)
+      && row.dispatched !== false && row.native?.call_event_id);
+    if (!tool) continue;
+    const files = Object.entries(invocation.files || {})
+      .filter(([key]) => !invocation.file_message_ids || invocation.file_message_ids[key] === (invocation.message_id || ""))
+      .map(([, file]) => file);
+    const result = {
+      task_id: invocation.id, status: "completed", result: invocation.text, files, warnings: invocation.warnings || [],
+    };
+    tool.status = "completed";
+    tool.summary = eventSummary(tool.kind, { type: "tool_result", result });
+    tool.result = redactTrajectoryValue(jsonClone({
+      ...tool.result, result, outcome: "success", artifacts: toolResultArtifacts({ generated_files: files }),
+      metadata: { ...tool.result?.metadata, remote_agent: {
+        id: invocation.id, name: invocation.name, protocol: invocation.protocol, status: "completed",
+      } },
+    }));
+    tool.native = { ...tool.native, result_event_id: event.event_id };
   }
   // Pending records describe the pause at persistence time. Resolve only calls
   // belonging to this response, not an unrelated later run with the same ID.
@@ -990,6 +1020,7 @@ function localFileDownload(value) {
 
 function renderLocalFileDownload(value, artifacts = [], imageOptions = {}) {
   if (findViewImageResult(value, imageOptions)) return "";
+  if (imageOptions.toolName === "remote_task_result" && imageOptions.metadata?.remote_agent) return "";
   if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
   const file = localFileDownload(value);
   if (!file || artifacts.some((item) => (item?.file_id || item?.artifact_id) === file.fileId)) return "";

@@ -172,6 +172,28 @@ _SYSTEM_TOOL_DOMAINS = (
             ),
         ),
     ),
+    SystemToolDomain(
+        code="runtime:remote-agent",
+        label="远程 Agent",
+        description="委派给已绑定的远程 Agent，按次发送选定附件，并接收任务结果和文件。",
+        tools=tuple(
+            SystemToolDescription(
+                name=name,
+                display_name=label,
+                source="DeepAgent" if name == "remote_task_result" else "Pydantic AI Harness",
+                injection_condition="Agent 已绑定至少一个本轮可用的远程连接",
+                description=description,
+            )
+            for name, label, description in (
+                ("delegate_task", "委派远程任务", "发起或续跑远程任务，可选择本次发送的附件。"),
+                ("list_tasks", "查看委派任务", "查看当前委派任务的 ID、状态和待答提示。"),
+                ("message_task", "追加任务指令", "Harness 的运行中指令入口，当前远程接入暂不接受追加指令。"),
+                ("answer_task", "补答远程任务", "回复远端的待答问题，可选择本次发送的附件。"),
+                ("cancel_task", "取消委派任务", "请求取消任务，以执行端确认的状态为准。"),
+                ("remote_task_result", "补查远程结果", "按任务 ID 补查结果、文件和警告，可请求回查远端。"),
+            )
+        ),
+    ),
 )
 
 

@@ -26,6 +26,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
                 "runtime:tool-result",
                 "runtime:mcp-tool-search",
                 "runtime:mcp-resource",
+                "runtime:remote-agent",
             ],
         )
         self.assertEqual(
@@ -43,6 +44,7 @@ class SystemToolCatalogTests(unittest.IsolatedAsyncioTestCase):
                     "list_mcp_resources",
                     "read_mcp_resource",
                 ],
+                ["delegate_task", "list_tasks", "message_task", "answer_task", "cancel_task", "remote_task_result"],
             ],
         )
 

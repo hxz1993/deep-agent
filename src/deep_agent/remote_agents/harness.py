@@ -4,8 +4,10 @@ import asyncio
 import json
 from contextlib import suppress
 from contextvars import ContextVar
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 
+from pydantic import TypeAdapter, ValidationError
 from pydantic_ai import ModelRetry, RunContext, ToolReturn
 from pydantic_ai.capabilities import AbstractCapability, on_event
 from pydantic_ai.toolsets import FunctionToolset
@@ -17,9 +19,25 @@ from pydantic_ai_harness.subagents import (
 )
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.schemas.attachment import AttachmentRef
 
-from .contracts import RemoteAgentError
+from .contracts import InputFile, RemoteAgentError
 from .runtime import RequestScope
+
+
+_ATTACHMENT_TOOLS = frozenset({"delegate_task", "answer_task"})
+_ATTACHMENT_REFS = TypeAdapter(list[AttachmentRef])
+_CHAT_ATTACHMENT_FIELDS = AttachmentRef.model_json_schema()["properties"]
+
+
+@dataclass
+class RemoteStep:
+    request: RequestScope
+    files: list[InputFile] = field(repr=False)
+
+    def take_files(self) -> list[InputFile]:
+        files, self.files = self.files, []
+        return files
 
 
 def _target(connection_id: str) -> str:
@@ -27,10 +45,10 @@ def _target(connection_id: str) -> str:
 
 
 class HarnessSession(InMemoryTransport):
-    def __init__(self, runtime, request):
+    def __init__(self, runtime):
         super().__init__()
         self.runtime = runtime
-        self.request = request
+        self.answers: dict[tuple[str, str], RemoteStep] = {}
         self.owner = DelegationTasks(max_depth=2)
         self.manager = self.owner.opened()
         self.workers: dict[str, asyncio.Task] = {}
@@ -53,7 +71,10 @@ class HarnessSession(InMemoryTransport):
     async def send(self, message):
         if isinstance(message, TaskRequestEvent):
             if message.task_id not in self.workers:
-                self.workers[message.task_id] = asyncio.create_task(self._work(message))
+                step = SessionTransport.step.get()
+                if step is None:
+                    raise RemoteAgentError("缺少本次远程工具调用的信息")
+                self.workers[message.task_id] = asyncio.create_task(self._work(message, step))
             return
         if isinstance(message, (TaskCancelRequestedEvent, TaskForceCancelRequestedEvent)):
             worker = self.workers.get(message.task_id)
@@ -65,10 +86,10 @@ class HarnessSession(InMemoryTransport):
             return
         await super().send(message)
 
-    async def _work(self, event: TaskRequestEvent):
+    async def _work(self, event: TaskRequestEvent, step: RemoteStep):
+        request = step.request
         identifiers = {"task_id": event.task_id, "agent_name": event.agent_name}
         entry = self.entries.get(event.task_id)
-        request = self.request
         try:
             await super().send(TaskStartedEvent(**identifiers))
             if isinstance(event, TaskResumedEvent) and entry is None:
@@ -85,11 +106,18 @@ class HarnessSession(InMemoryTransport):
                     raise RemoteAgentError("请让用户先回复远程 Agent 的补充问题")
                 if request.remote_task_id and request.remote_task_id != entry.id:
                     raise RemoteAgentError("用户选择了其他远程任务")
+                question_id = entry.state.question_id
+                if request.remote_question_id not in (None, question_id):
+                    raise RemoteAgentError("远程补问已更新，请刷新后重新选择问题")
+                await self.runtime.refresh(entry, request)
+                if entry.state.status != "input_required" or entry.state.question_id != question_id:
+                    raise RemoteAgentError("远程补问已更新，请刷新后重新选择问题")
+                request = replace(request, remote_question_id=question_id)
                 mode, prompt = "answer", request.user_message
             else:
                 mode, prompt = "resume", event.prompt
             while True:
-                await self.runtime.execute(entry, request, prompt, mode)
+                await self.runtime.execute(entry, request, prompt, mode, files=step.take_files())
                 try:
                     async with asyncio.timeout(600):
                         while entry.state.status in ("submitted", "working") and entry.state.task_id:
@@ -109,18 +137,15 @@ class HarnessSession(InMemoryTransport):
                 async with asyncio.timeout(24 * 60 * 60):
                     while True:
                         answer = await self.receive(f"task:{entry.id}:worker")
-                        candidate = self.request
-                        if (isinstance(answer, TaskAnsweredEvent) and answer.question_id == question_id
-                                and candidate.run_id != entry.run_id and candidate.user_message
-                                and candidate.remote_task_id in (None, entry.id)
-                                and candidate.remote_question_id in (None, question_id)):
-                            request, prompt = candidate, candidate.user_message
-                            break
+                        if isinstance(answer, TaskAnsweredEvent) and answer.question_id == question_id:
+                            step = self.answers.pop((entry.id, question_id), None)
+                            if step is not None:
+                                request = step.request
+                                prompt = request.user_message
+                                break
                 mode = "answer"
             if entry.state.status == "completed":
-                output = entry.text
-                if entry.files or entry.warnings:
-                    output += f"\nUse remote_task_result(task_id={entry.id!r}) to retrieve the generated files and notices."
+                output = json.dumps(entry.result_payload(), ensure_ascii=False)
                 await super().send(TaskCompletedEvent(**identifiers, output=output))
             elif entry.state.status == "canceled":
                 await super().send(TaskCancelledEvent(**identifiers, forced=False))
@@ -140,6 +165,9 @@ class HarnessSession(InMemoryTransport):
             await super().send(TaskFailedEvent(**identifiers, error="远程 Agent 调用未完成，请查询任务状态"))
         finally:
             self.workers.pop(event.task_id, None)
+            for key in tuple(self.answers):
+                if key[0] == event.task_id:
+                    self.answers.pop(key, None)
             await self.release(f"task:{event.task_id}:worker")
             async with self.advanced:
                 self.advanced.notify_all()
@@ -147,6 +175,7 @@ class HarnessSession(InMemoryTransport):
 
 class SessionTransport(InMemoryTransport):
     current = ContextVar("deep_agent_remote_session", default=None)
+    step: ContextVar[RemoteStep | None] = ContextVar("deep_agent_remote_step", default=None)
 
     async def send(self, message):
         await self.current.get().send(message)
@@ -178,13 +207,13 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
             "or an exact identifier in the SubAgents list. "
             "Remote agents can ask the user for additional information. Relay each question to the user and "
             "finish the current reply. Prefer foreground delegation when the user is waiting for a reply. "
-            "Use remote_task_result if the decision or question text is not yet in the tool receipt. "
-            "Do not invent answers. A normal user reply continues the sole waiting "
-            "delegation. For multiple waiting tasks use answer_task only for the user's chosen task. "
-            "If a waiting task was restored after a restart, delegate with resume=<original task id> and the "
-            "same agent, using the user's reply. To attach delegated files to this conversation, call "
-            "remote_task_result after the task completes, and present those files to the user. "
-            "Use delegate_task with resume for a new question that continues a completed remote conversation."
+            "Use attachments to explicitly select only the file IDs needed for each task, follow-up or answer. "
+            "Omitting attachments sends no new files. Use IDs from this conversation, including its history. "
+            "Do not invent answers. After the user replies, use answer_task for the chosen pending question. "
+            "For a restored pending question use delegate_task with resume set to its original task ID. "
+            "Use delegate_task with resume for a new question in a completed remote conversation. "
+            "Present the result and its file references together. Use remote_task_result only to recover "
+            "a missing result or retry retrieval of unavailable files."
         )
 
     async def wrap_run(self, ctx, *, handler):
@@ -196,19 +225,18 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
         session = self.runtime.harness_sessions.get(key)
         if session is None:
             await self._prune_sessions()
-            session = HarnessSession(self.runtime, request)
+            session = HarnessSession(self.runtime)
             self.runtime.harness_sessions[key] = session
             await session.open()
         session.active_runs += 1
         try:
-            session.request = request
             session.owner.aliases.clear()
             session.owner.aliases.update(self.target_aliases)
             await self._restore(ctx.conversation_id, session, request)
             token = SessionTransport.current.set(session)
             try:
                 with session.owner.bind():
-                    await self._answer_user_reply(ctx, session, request)
+                    self._describe_pending_reply(ctx, session, request)
                     return await handler()
             finally:
                 SessionTransport.current.reset(token)
@@ -245,68 +273,50 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
                         "Use resume to answer its pending question, or remote_task_result to check it."),
             ))
 
-    async def _answer_user_reply(self, ctx, session, request):
+    def _describe_pending_reply(self, ctx, session, request):
         if not request.user_message:
             return
-        waiting = [(entry, session.owner.pending_question(entry.id)) for entry in session.entries.values()
-                   if entry.state.status == "input_required" and entry.run_id != request.run_id
-                   and entry.connection_id in self.connection_ids
-                   and request.remote_task_id in (None, entry.id)]
-        if len(waiting) != 1:
-            if request.remote_task_id:
-                ctx.enqueue("所选远程任务在当前会话中没有待回答的问题，本轮未向该任务发送补答。")
-            return
-        entry, question = waiting[0]
-        try:
-            await self.runtime.authorize(entry, request)
-            if request.remote_question_id not in (None, entry.state.question_id):
-                raise RemoteAgentError("远程补问已更新，请刷新后重新选择问题")
-        except RemoteAgentError as error:
-            if request.remote_task_id:
-                ctx.enqueue(str(error))
-            return
-        if question is None and entry.id not in session.workers:
-            await self._answer_recovered(ctx, entry, request)
-        elif question and session.owner.answer(entry.id, question_id=question[0], answer=request.user_message):
-            with suppress(TimeoutError):
-                async with asyncio.timeout(75), session.advanced:
-                    await session.advanced.wait_for(lambda: entry.id not in session.workers or (
-                        entry.run_id == request.run_id and entry.state.status == "input_required"
-                        and entry.state.question_id != question[0]
-                    ))
-            self._publish_answer_state(ctx, entry)
-
-    async def _answer_recovered(self, ctx, entry, request) -> None:
-        previous_question = entry.state.question_id
-        try:
-            await self.runtime.refresh(entry, request)
-            if entry.state.status == "input_required" and entry.state.question_id == previous_question:
-                await self.runtime.execute(entry, request, request.user_message, "answer")
-        except RemoteAgentError as error:
-            ctx.enqueue("远程任务暂时无法续跑。运行时返回：" + str(error))
-            return
-        self._publish_answer_state(ctx, entry)
-
-    @staticmethod
-    def _publish_answer_state(ctx, entry):
-        ctx.enqueue("<remote_task_update>" + json.dumps({
-            "task_id": entry.id, "status": entry.state.status,
-            "question": entry.text if entry.state.status == "input_required" else None,
-            "has_files": bool(entry.files), "warnings": entry.warnings,
-        }, ensure_ascii=False) + "</remote_task_update>")
+        pending = [
+            {
+                "task_id": entry.id, "agent_name": entry.name, "question": entry.text,
+                "tool": "answer_task" if entry.id in session.workers else "delegate_task with resume",
+            }
+            for entry in session.entries.values()
+            if entry.state.status == "input_required" and entry.run_id != request.run_id
+            and request.remote_task_id in (None, entry.id)
+            and request.remote_question_id in (None, entry.state.question_id)
+        ]
+        if pending:
+            encoded = json.dumps(pending, ensure_ascii=False).replace("<", "\\u003c")
+            ctx.enqueue(f"<pending_remote_questions>{encoded}</pending_remote_questions>")
 
     @on_event(TaskAnsweredEvent)
     async def validate_answer(self, ctx, event):
         session = SessionTransport.current.get()
         entry = session.entries.get(event.task_id) if session is not None else None
-        if entry is not None and (entry.run_id == ctx.deps.run_id or not ctx.deps.remote_user_message):
+        step = SessionTransport.step.get()
+        if entry is None or step is None:
+            event.veto("No pending remote task in this conversation.")
+            return
+        request = step.request
+        key = (event.task_id, event.question_id)
+        if entry.run_id == request.run_id or not request.user_message:
             event.veto("Wait for the user to answer this question in the next turn.")
-        elif ctx.deps.remote_task_id is not None and ctx.deps.remote_task_id != event.task_id:
+        elif request.remote_task_id not in (None, event.task_id):
             event.veto("The user chose a different task for this reply.")
-        elif entry is not None and entry.connection_id not in self.connection_ids:
-            event.veto("This remote connection is disabled for the current turn.")
-        elif ctx.deps.remote_question_id not in (None, event.question_id):
+        elif entry.state.question_id != event.question_id or request.remote_question_id not in (None, event.question_id):
             event.veto("The chosen remote question is no longer pending.")
+        else:
+            try:
+                await self.runtime.authorize(entry, request)
+            except RemoteAgentError as error:
+                event.veto(str(error))
+                return
+            if key in session.answers or session.owner.pending_question(entry.id) is None:
+                event.veto("This question already has an answer.")
+                return
+            session.answers[key] = RemoteStep(replace(request, remote_question_id=event.question_id), step.take_files())
+            self.task_for_call[request.tool_call_id] = entry.id
 
     @on_event(TaskSteeredEvent)
     async def unsupported_steering(self, ctx, event):
@@ -317,17 +327,91 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
         if ctx.tool_call_id:
             self.task_for_call[ctx.tool_call_id] = event.task_id
 
+    async def prepare_tools(self, ctx, tool_defs):
+        return [
+            replace(tool, parameters_json_schema={
+                **tool.parameters_json_schema,
+                "properties": {
+                    **tool.parameters_json_schema["properties"],
+                    "attachments": {
+                        "type": "array",
+                        "description": "Select file IDs for this request only. Omit to send no new files.",
+                        "items": {
+                            "type": "object",
+                            "properties": {key: _CHAT_ATTACHMENT_FIELDS[key] for key in ("id", "name", "mime")},
+                            "required": ["id"],
+                        },
+                    },
+                },
+            }) if tool.name in _ATTACHMENT_TOOLS else tool
+            for tool in tool_defs
+        ]
+
+    async def before_tool_validate(self, ctx, *, call, tool_def, args):
+        if call.tool_name not in _ATTACHMENT_TOOLS:
+            return args
+        try:
+            selected = call.args_as_dict()
+        except ValueError:
+            return args
+        if "attachments" in selected:
+            return {key: value for key, value in selected.items() if key != "attachments"}
+        return args
+
+    async def _selected_files(self, ctx, session, request, call):
+        try:
+            requested = _ATTACHMENT_REFS.validate_python(call.args_as_dict().get("attachments", []))
+        except ValidationError as error:
+            raise ModelRetry("attachments must be an array of file references with an id.") from error
+        attachments = []
+        for file_id in dict.fromkeys(ref.id for ref in requested):
+            if ref := ctx.deps.attachment_by_id.get(file_id):
+                attachments.append(ref)
+                continue
+            artifact = ctx.deps.session_file_artifacts.get(file_id)
+            if artifact is None:
+                artifact = next((
+                    artifact for entry in session.entries.values() for artifact in entry.files.values()
+                    if artifact["file_id"] == file_id
+                ), None)
+            if artifact is None or artifact.get("kind") == "tool_result_overflow":
+                raise ModelRetry(f"File {file_id!r} is not a sendable file in this conversation.")
+            attachments.append(AttachmentRef(
+                id=file_id, name=artifact.get("file_name"), mime=artifact.get("mime_type") or artifact.get("mime"),
+            ))
+        try:
+            return await self.runtime._inputs(replace(request, attachments=attachments)) if attachments else []
+        except RemoteAgentError as error:
+            raise ModelRetry(str(error)) from error
+
     async def wrap_tool_execute(self, ctx, *, call, tool_def, args, handler):
-        result = await handler(args)
-        task_id = self.task_for_call.pop(call.tool_call_id, None)
         session = SessionTransport.current.get()
-        entry = session.entries.get(task_id) if task_id and session is not None else None
-        if entry is None:
-            return result
-        generated = list(entry.files.values()) if entry.state.status == "completed" else []
-        if entry.state.status == "input_required":
-            result = {"receipt": result, "status": entry.state.status, "task_id": entry.id, "question": entry.text}
-        return ToolReturn(result, metadata={"remote_agent": entry.summary(), "generated_files": generated})
+        if session is None or call.tool_name not in _ATTACHMENT_TOOLS:
+            return await handler(args)
+        request = replace(RequestScope.from_deps(ctx.deps, self.connection_ids), tool_call_id=call.tool_call_id)
+        files = await self._selected_files(ctx, session, request, call)
+        token = SessionTransport.step.set(RemoteStep(request, files))
+        try:
+            result = await handler(args)
+            task_id = self.task_for_call.get(call.tool_call_id)
+            entry = session.entries.get(task_id) if task_id else None
+            if entry is None:
+                return result
+            if call.tool_name == "answer_task":
+                with suppress(TimeoutError):
+                    async with asyncio.timeout(75), session.advanced:
+                        await session.advanced.wait_for(lambda: entry.id not in session.workers or (
+                            entry.tool_call_id == call.tool_call_id and entry.state.status == "input_required"
+                        ))
+            if entry.tool_call_id == call.tool_call_id:
+                if entry.state.status == "completed":
+                    return portable_result(entry)
+                if entry.state.status == "input_required":
+                    result = {"receipt": result, "status": entry.state.status, "task_id": entry.id, "question": entry.text}
+            return ToolReturn(result, metadata={"remote_agent": entry.summary()})
+        finally:
+            self.task_for_call.pop(call.tool_call_id, None)
+            SessionTransport.step.reset(token)
 
     async def remote_task_result(self, ctx: RunContext[AgentDeps], task_id: str, refresh: bool = False) -> ToolReturn:
         """Read the status, result and generated files of a remote task in this conversation."""
@@ -336,21 +420,19 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
         if entry is None:
             raise ModelRetry("No such remote task in this conversation.")
         try:
-            await self.runtime.authorize(entry, session.request)
-            missing_result = entry.state.status == "completed" and not entry.text and not entry.files
-            if (refresh or missing_result) and task_id not in session.workers:
-                await self.runtime.refresh(entry, session.request)
+            request = RequestScope.from_deps(ctx.deps, self.connection_ids)
+            await self.runtime.authorize(entry, request)
+            if refresh and task_id not in session.workers:
+                await self.runtime.refresh(entry, request)
         except RemoteAgentError as error:
             raise ModelRetry(str(error)) from error
-        return portable_result(entry)
+        return ToolReturn(entry.result_payload(), metadata={"remote_agent": entry.summary()})
 
 
 def portable_result(entry) -> ToolReturn:
-    return ToolReturn(
-        {"task_id": entry.id, "status": entry.state.status, "result": entry.text,
-         "files": list(entry.files.values()), "warnings": entry.warnings},
-        metadata={"generated_files": list(entry.files.values()), "remote_agent": entry.summary()},
-    )
+    return ToolReturn(entry.result_payload(), metadata={
+        "generated_files": entry.result_files(), "remote_agent": entry.summary(),
+    })
 
 
 def remote_capabilities(runtime, connections):

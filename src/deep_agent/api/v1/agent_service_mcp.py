@@ -140,14 +140,14 @@ async def call_tool(name: str, arguments: dict):
     except Exception as exc:
         error = task_error(exc)
         return tool_error(error.status_code, error.detail)
+    # Some MCP hosts consume only the content blocks, including when a
+    # ResourceLink is present. Keep the download receipt in that channel too.
+    content: list[types.ContentBlock] = [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
     if name == "get_artifact":
-        content = [types.ResourceLink(
+        content.append(types.ResourceLink(
             type="resource_link", name=result["name"], uri=result["resource_uri"],
             mimeType=result["media_type"], size=result["size"],
-        )]
-    else:
-        # Include the actual result for hosts that only read the text channel.
-        content = [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
+        ))
     return types.CallToolResult(content=content, structuredContent=result)
 
 

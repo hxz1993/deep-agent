@@ -109,10 +109,9 @@ async def get_publication(ctx: AppContextDep, agent_code: AgentCode):
 
 
 @router.post("/publications", status_code=201, dependencies=admin)
-async def create_publication(ctx: AppContextDep, request: Request, user: RequestUserDep, body: PublicationCreate):
+async def create_publication(ctx: AppContextDep, body: PublicationCreate):
     address_for(body.agent_code)
     await permitted_agent(ctx, body.agent_id)
-    await verify_scopes(request, user, [body.scope])
     try:
         async with task_store(ctx).admission:
             return serialize_publication(await PublicationStore(ctx.db_session_factory).create(body))
@@ -121,9 +120,7 @@ async def create_publication(ctx: AppContextDep, request: Request, user: Request
 
 
 @router.patch("/publications/{agent_code}", dependencies=admin)
-async def edit_publication(ctx: AppContextDep, request: Request, user: RequestUserDep, agent_code: AgentCode, body: PublicationPatch):
-    if body.scope:
-        await verify_scopes(request, user, [body.scope])
+async def edit_publication(ctx: AppContextDep, agent_code: AgentCode, body: PublicationPatch):
     if body.enabled is True:
         address_for(agent_code)
     async with task_store(ctx).admission:

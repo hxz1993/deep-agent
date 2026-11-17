@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -52,6 +53,36 @@ class McpConfigurationAtomicityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIsNone(await self.stores.mcp.get_by_name("blank-url"))
+
+    async def test_bound_app_save_uses_selected_scope_without_platform_login(self) -> None:
+        url = "https://platform.example/deepfos-server/deepfos-mcp/mcp"
+        config = {"url": url, "request_context": {
+            "mode": "bound_app", "target_app_id": "demo001", "target_space_id": "demo",
+            "target_app_name": "示例应用",
+        }}
+        platform = SimpleNamespace(server=SimpleNamespace(base="https://platform.example/deepfos-server"))
+        with (
+            patch("deep_agent.services.mcp_bound_app.PLATFORM_OPTION", platform),
+            patch("deep_agent.api.v1.mcp.IntegrationAppDirectory") as directory,
+            patch("deep_agent.api.v1.mcp.inspect_mcp_server") as inspect,
+        ):
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post("/api/v1/mcp", json={
+                    "name": "bound-example", "transport": "url", "config": config,
+                })
+                self.assertEqual(response.status_code, 201, response.text)
+                response = await client.patch("/api/v1/mcp/bound-example", json={
+                    "description": "更新说明", "config": config,
+                })
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["config"]["request_context"], config["request_context"])
+                self.assertEqual(response.json()["description"], "更新说明")
+                response = await client.patch("/api/v1/mcp/bound-example", json={
+                    "config": {**config, "url": "https://other.example/mcp"},
+                })
+                self.assertEqual(response.status_code, 422, response.text)
+            directory.assert_not_called()
+            inspect.assert_not_awaited()
 
     async def test_create_pipeline_failure_does_not_leave_duplicate_row(self) -> None:
         with patch(

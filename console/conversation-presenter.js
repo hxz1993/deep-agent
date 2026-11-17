@@ -565,7 +565,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
           <span class="chevron">${lucideIcon("chevron-right")}</span>
         </button>
         <div class="tool-body">
-          <div class="label">参数 args</div>
+          <div class="label">参数</div>
           <div data-tool-args=""></div>
         </div>`;
       toolDetailStates.set(block, { args: renderedArgs, argsDirty: true, resultDirty: false });
@@ -594,15 +594,13 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       if (!block) return;
       block.dataset.done = "1";
       block.classList.remove("hitl-pending");
-      if (isRemoteAgentToolEvent(data) && !block.classList.contains("remote-agent-tool-block")) {
+      const isRemoteAgent = isRemoteAgentToolEvent({ ...data, tool: data.tool || block.dataset.toolName });
+      if (isRemoteAgent && !block.classList.contains("remote-agent-tool-block")) {
         block.classList.add("remote-agent-tool-block");
         block.querySelector(".tool-icon").innerHTML = lucideIcon("bot");
       }
       const title = block.querySelector(".tool-name");
-      if (title && block.dataset.defaultTitle) {
-        const remoteName = data.metadata?.remote_agent?.name;
-        title.textContent = remoteName ? `${remoteName} · ${block.dataset.defaultTitle}` : block.dataset.defaultTitle;
-      }
+      if (title && block.dataset.defaultTitle) title.textContent = block.dataset.defaultTitle;
       const resultStatus = toolResultPresentation(data);
       block.querySelector(".tool-status").innerHTML = `<span class="${resultStatus.className}">${resultStatus.label}</span>`;
       refreshLucideIcons(row);
@@ -624,7 +622,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         artifactsHost.dataset.toolArtifacts = "1";
         block.insertBefore(artifactsHost, body);
       }
-      artifactsHost.innerHTML = `${renderToolResultArtifacts(data.artifacts, { allowPlatformDownload: Boolean(data.metadata?.remote_agent) })}${media || ""}${renderLocalFileDownload(data.result, data.artifacts, imageOptions)}`;
+      artifactsHost.innerHTML = `${renderToolResultArtifacts(data.artifacts, { hideGeneratedFiles: isRemoteAgent })}${media || ""}${isRemoteAgent ? "" : renderLocalFileDownload(data.result, data.artifacts, imageOptions)}`;
       const remote = data.metadata?.remote_agent;
       if (!readOnly && onRemoteTaskReply && typeof remote?.id === "string") {
         for (const previous of messages.querySelectorAll("[data-remote-task-reply]")) {
@@ -644,7 +642,8 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
           artifactsHost.appendChild(reply);
         }
       }
-      res.innerHTML = media ? "" : '<div class="label" style="margin-top:8px">结果 result</div><div data-tool-result-content=""></div>';
+      res.innerHTML = media ? "" : `<div class="label" style="margin-top:8px">结果</div>
+        <div data-tool-result-content=""></div>`;
       body.appendChild(res);
       const details = toolDetailStates.get(block);
       if (details) {
@@ -782,10 +781,10 @@ function renderLocalFileDownload(result, artifacts = [], imageOptions = {}) {
   return `<a class="local-file-download" href="${escapeHtml(href)}" download>${lucideIcon("download")}<span>${escapeHtml(file.fileName)}</span></a>`;
 }
 
-function renderToolResultArtifacts(artifacts, { allowPlatformDownload = false } = {}) {
+function renderToolResultArtifacts(artifacts, { allowPlatformDownload = false, hideGeneratedFiles = false } = {}) {
   if (!Array.isArray(artifacts) || artifacts.length === 0) return "";
   const overflow = artifacts.filter((item) => item?.kind !== "sandbox_output");
-  const generated = artifacts.filter((item) => item?.kind === "sandbox_output");
+  const generated = hideGeneratedFiles ? [] : artifacts.filter((item) => item?.kind === "sandbox_output");
   const totalBytes = overflow.reduce(
     (total, item) => total + (Number.isFinite(Number(item?.byte_size)) ? Number(item.byte_size) : 0),
     0,

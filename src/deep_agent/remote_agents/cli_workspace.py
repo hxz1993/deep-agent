@@ -22,6 +22,7 @@ MAX_LINE = 1024 * 1024
 MAX_FILES = 10
 TURN_SECONDS = 300
 SAFE_ID = re.compile(r"[a-f0-9]{32}")
+DEFAULT_CLI_WORKSPACE_ROOT = "~/.deep-agent/remote-agent-workspaces"
 
 
 def file_name(value: str) -> bool:
@@ -51,16 +52,21 @@ def _paths(root: Path, workspace_id: str, turn_id: str) -> tuple[Path, Path, Pat
 
 
 def _prepare(workspace: Path, turn: Path, output: Path, request: dict) -> dict:
-    input_dir = workspace / "work" / "inputs" / turn.name
-    workdir = Path(request["cwd"]) if request.get("cwd") else workspace / "work"
-    if request.get("cwd") and (not workdir.is_absolute() or not workdir.is_dir()):
-        raise ValueError("unavailable working directory")
-    turn.mkdir(parents=True, mode=0o700)
-    input_dir.mkdir(parents=True, mode=0o700)
-    output.mkdir(parents=True, mode=0o700)
+    workdir = workspace / "work"
     files = request["files"]
     if len(files) > MAX_FILES:
         raise ValueError("too many attachments")
+    if request.get("reuse_workspace"):
+        if not workdir.is_dir():
+            return {"workspace_missing": True}
+    else:
+        workspace.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        workspace.mkdir(mode=0o700)
+    input_dir = workdir / "inputs" / turn.name
+    turn.mkdir(parents=True, mode=0o700)
+    output.mkdir(parents=True, mode=0o700)
+    if files:
+        input_dir.mkdir(parents=True, mode=0o700)
     paths: list[str] = []
     size = 0
     for index, item in enumerate(files, start=1):
@@ -294,23 +300,25 @@ def _collect(workspace: Path, output: Path, names: list[str]) -> dict:
     return result
 
 
-def _inspect(request: dict) -> dict:
-    cwd = request.get("cwd")
-    if cwd and (not Path(cwd).is_absolute() or not Path(cwd).is_dir()):
-        raise ValueError("unavailable working directory")
+def _inspect(root: Path, request: dict) -> dict:
+    parent = root
+    while not parent.exists() and parent != parent.parent:
+        parent = parent.parent
+    if not parent.is_dir() or not os.access(parent, os.W_OK | os.X_OK):
+        return {"workspace_unavailable": True}
     command = shutil.which(request["command"])
     if command is None:
         return {"available": False}
     try:
         probe = subprocess.run(
-            [command, "--version"], cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            [command, "--version"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, env=_execution_env(), timeout=8, check=False,
         )
     except subprocess.TimeoutExpired:
         return {"available": True, "ready": False}
     version = re.search(rb"\b[0-9]+\.[0-9]+\.[0-9]+(?:[-a-zA-Z0-9.+]{0,30})\b", probe.stdout[:256])
     return {"available": True, "ready": probe.returncode == 0,
-            "version": version[0].decode("ascii") if version else None}
+            "version": version[0].decode("ascii") if version else None, "workspace_root": str(root)}
 
 
 def main() -> None:
@@ -319,7 +327,6 @@ def main() -> None:
     workspace, turn, output = _paths(root, workspace_id, turn_id)
     request = json.loads(sys.stdin.buffer.read(MAX_INPUT * 2))
     if operation == "prepare":
-        root.mkdir(parents=True, mode=0o700, exist_ok=True)
         result = _prepare(workspace, turn, output, request)
     elif operation == "run":
         _run(workspace, turn, request)
@@ -333,7 +340,7 @@ def main() -> None:
             (turn / "cancel").touch()
         result = _snapshot(workspace, turn)
     elif operation == "inspect":
-        result = _inspect(request)
+        result = _inspect(root, request)
     else:
         raise ValueError("unrecognized operation")
     print(json.dumps(result))

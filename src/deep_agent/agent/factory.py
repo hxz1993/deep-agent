@@ -372,6 +372,14 @@ def build_agent(
     instructions: list[Any] = []
     if spec.instructions:
         instructions.append(spec.instructions)
+    instructions.append(
+        "If the reply needs to deliver a FileStore file, copy its exact File ID from the tool result. "
+        "Use [label](attachment://<file_id>) for download or ![alt](attachment://<file_id>) for an inline image. "
+        "Use the original image File ID, including for SVG; inline display does not require conversion. "
+        "If the user asks for a particular file or image, reference only that file in the requested mode. "
+        "Do not add links for other generated files or duplicate an inline image as a download unless asked. "
+        "For a status-only reply or when the user declines files, omit file links, images, and File IDs."
+    )
     if skill_capability is not None:
         instructions.append(SKILL_SELECTION_INSTRUCTIONS)
     instructions.append(context_reference_instructions)

@@ -27,6 +27,7 @@ from deep_agent.services.integration_app_runtime import RunAppContext, ensure_sc
 from deep_agent.options import OPTION
 from deep_agent.api.v1.channel_auth import ChannelAccountDep, ChannelRequestUserDep
 from deep_agent.api.v1.stream_diagnostics import DiagnosticEventSourceResponse, transport_cancel_reason
+from deep_agent.conversation.file_links import ReplyFiles
 from deep_agent.core.context import AppContextDep
 from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.db.ids import normalize_agent_id
@@ -377,11 +378,18 @@ async def chat(
         result = {"output": "", "usage": usage_dict(exc.usage), "status": "cancelled"}
     finally:
         ctx.active_runs.unregister(active_run)
+    output = result["output"]
+    if isinstance(output, str) and not result.get("output_info"):
+        files = ReplyFiles(
+            request, ctx.file_store, session_id, request_headers,
+            load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
+        )
+        output = await files.text(output)
     return ChatResponse(
         session_id=session_id,
         conversation_id=deps.conversation_id,
         run_id=deps.run_id,
-        output=result["output"],
+        output=output,
         output_info=result.get("output_info"),
         usage=result["usage"],
         status=result.get("status", "completed"),
@@ -481,6 +489,10 @@ async def chat_stream(
 
     async def event_generator():
         nonlocal stream_run
+        files = ReplyFiles(
+            request, ctx.file_store, session_id, request_headers,
+            load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
+        )
         try:
             active_run = ctx.active_runs.register(
                 agent_id=deps.agent_id,
@@ -540,7 +552,8 @@ async def chat_stream(
             )) as stream:
                 async for ev in stream:
                     ctx.session_live.publish(live_key, deps.run_id, ev["type"], ev)
-                    yield {"event": ev["type"], "data": json.dumps(ev, ensure_ascii=False)}
+                    async for projected in files.event(ev):
+                        yield {"event": projected["type"], "data": json.dumps(projected, ensure_ascii=False)}
         except DeferredResultConflict as exc:
             # A concurrent resume can pass HTTP preflight before the first completes.
             # Reject only this request; do not persist an execution/error or final.

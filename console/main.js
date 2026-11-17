@@ -32,13 +32,13 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=remote-agent-option-hints");
+    const module = await import("./configuration.js?v=remote-agent-workdir");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=remote-agent-filter-icons");
+    const module = await import("./workspace.js?v=remote-agent-composer");
     await module.initWorkspace();
     workspaceModule = module;
     return module;

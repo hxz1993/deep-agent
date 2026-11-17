@@ -105,7 +105,7 @@ test("delete followed by a new filter rejects its pre-delete page and reloads th
         : new Promise(resolve => gets.push({ url, resolve, signal: options.signal })),
     mergeSessionsFromBackend: rows => { state.sessions = rows.map(row => ({ id: row.session_id, agentId: row.agent_id })); },
   });
-  loadDeletion(context, source.slice(source.indexOf("let sessionPage ="), source.indexOf("function autoGrow()")));
+  loadDeletion(context, source.slice(source.indexOf("let sessionPage ="), source.indexOf("/* --------------------------- 会话管理")));
   const deleting = context.deleteSession(original);
   await new Promise(setImmediate);
   const stale = context.syncSessionsFromBackend();

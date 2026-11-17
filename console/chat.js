@@ -1,10 +1,11 @@
 import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
+import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from "./composer-input.js?v=20261117";
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-usage-tab-2";
 import { renderPlanItems } from "./plan-view.js?v=20261103-view-image1";
 import { prepareSessionRender } from "./session-loading.js?v=20260918-release01012";
 import { savedSessionCounts, savedRunFacts, savedRunState } from "./session-presentation.js?v=20261106-ptc-source";
 import { cacheTrajectorySummary } from "./cache-usage.js?v=20260923-usage-tab-2";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20261105-v01510";
+import { createConversationPresenter } from "./conversation-presenter.js?v=remote-tool-card-labels";
 import { buildChoiceResult, normalizeOption, normalizeStructuredFields, validateUiToolCall } from "./hitl.js?v=20260912-21";
 import {
   contextCompactionPresentation,
@@ -194,7 +195,6 @@ const state = {
   messageAutoFollow: true,
   messageScrollFrame: null,
   modelMenuOpen: false,
-  composerDragDepth: 0,
   planSnapshot: null,
   planningCallIds: new Set(),
 };
@@ -248,6 +248,8 @@ const el = {
   attachmentImageDialog: $("attachmentImageDialog"),
   attachmentImageDialogImage: $("attachmentImageDialogImage"),
   attachmentImageDialogName: $("attachmentImageDialogName"),
+  attachmentImageDialogError: $("attachmentImageDialogError"),
+  attachmentImageDialogOpen: $("attachmentImageDialogOpen"),
   attachmentImageDialogClose: $("attachmentImageDialogClose"),
   attachmentImageDialogPrevious: $("attachmentImageDialogPrevious"),
   attachmentImageDialogNext: $("attachmentImageDialogNext"),
@@ -576,6 +578,7 @@ function init() {
     }
   });
   el.attachmentImageDialogClose?.addEventListener("click", closeAttachmentImagePreview);
+  el.attachmentImageDialogImage?.addEventListener("error", () => el.attachmentImageDialogError?.classList.remove("hidden"));
   bindAttachmentImagePreviews({ root: document.getElementById("workspaceGrid"), openImage: openAttachmentImagePreview });
   const disposeViewImagePreviews = bindViewImagePreviews({ root: document.getElementById("workspaceGrid"), dialog: el.attachmentImageDialog, openImage: openAttachmentImagePreview });
   window.addEventListener("pagehide", disposeViewImagePreviews, { once: true });
@@ -602,7 +605,7 @@ function init() {
     setComposerPlanExpanded(!el.composerPlan.classList.contains("open"));
   });
 
-  bindComposerInput(el.input);
+  bindComposerInput(el.input, onSend);
   el.attachBtn?.addEventListener("click", () => {
     // Keep the native picker in the user gesture; refresh limits before selection
     // validation without delaying the click until transient activation expires.
@@ -610,7 +613,7 @@ function init() {
     el.fileInput?.click();
   });
   el.fileInput?.addEventListener("change", onFilesSelected);
-  el.input?.addEventListener("paste", onPaste);
+  bindComposerAttachments(el.input, el.composerDropZone, el.composerDropOverlay, uploadAttachmentBatch);
   el.messages?.addEventListener("scroll", () => {
     state.messageAutoFollow = state.messageAutoFollow
       ? shouldFollowMessages(el.messages)
@@ -619,10 +622,6 @@ function init() {
   el.messages?.addEventListener("wheel", (event) => {
     if (event.deltaY < 0) state.messageAutoFollow = false;
   }, { passive: true });
-  el.composerDropZone?.addEventListener("dragenter", onComposerDragEnter);
-  el.composerDropZone?.addEventListener("dragover", onComposerDragOver);
-  el.composerDropZone?.addEventListener("dragleave", onComposerDragLeave);
-  el.composerDropZone?.addEventListener("drop", onComposerDrop);
 
   // 聊天标题点击编辑
   el.chatTitle.addEventListener("click", () => {
@@ -873,26 +872,6 @@ function bindSessionListFeedback() {
   list.addEventListener("touchend", () => { touchY = null; }, { passive: true });
   list.addEventListener("touchcancel", () => { touchY = null; }, { passive: true });
   new ResizeObserver(updateSessionListFooter).observe(list);
-}
-
-function bindComposerInput(input) {
-  let composing = false;
-  input.addEventListener("compositionstart", () => { composing = true; });
-  input.addEventListener("compositionend", () => { composing = false; });
-  input.addEventListener("keydown", (event) => {
-    // Safari can end composition before keydown and still report IME key code 229.
-    if (composing || event.isComposing || event.keyCode === 229 || event.key === "Process") return;
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      onSend();
-    }
-  });
-  input.addEventListener("input", autoGrow);
-}
-
-function autoGrow() {
-  el.input.style.height = "auto";
-  el.input.style.height = Math.min(el.input.scrollHeight, 200) + "px";
 }
 
 /* --------------------------- 会话管理 --------------------------- */
@@ -1223,7 +1202,7 @@ async function loadAllSessionEvents(session, { signal } = {}) {
     items.push(...(Array.isArray(page.items) ? page.items : []));
     const next = Number(page.next_after_sequence);
     if (!Number.isInteger(next) || next <= afterSequence) {
-      return { response, data: { items, next_after_sequence: null } };
+      return { response, data: { session_id: session.id, items, next_after_sequence: null } };
     }
     afterSequence = next;
   }
@@ -1554,6 +1533,7 @@ function updateObservedSessionMetrics(session, events) {
 }
 
 function applyObservedHistory(history, status) {
+  trajectory?.setConversationHistory(history.items);
   const latestAssistant = [...history.items].reverse().find((item) => item.kind === "assistant_message");
   if (state.lastRunMetrics?.run_id !== latestAssistant?.run_id) state.lastRunUsage = null;
   state.conversationId = latestAssistant?.conversation_id || null;
@@ -2524,7 +2504,7 @@ async function onSend() {
   state.messageAutoFollow = true;
   el.input.value = "";
   clearPendingAttachments();
-  autoGrow();
+  resizeComposerInput(el.input);
 
   clearComposerPlan();
   const turnStartedAt = new Date().toISOString();
@@ -3041,44 +3021,6 @@ async function onFilesSelected(e) {
   await uploadAttachmentBatch(files);
 }
 
-async function onPaste(e) {
-  const files = Array.from(e.clipboardData?.files || []);
-  if (!files.length) return;
-  e.preventDefault();
-  await uploadAttachmentBatch(files);
-}
-
-function setComposerDragging(active) {
-  el.composerDropZone?.classList.toggle("dragging", active);
-  el.composerDropOverlay?.setAttribute("aria-hidden", String(!active));
-}
-
-function onComposerDragEnter(event) {
-  if (!event.dataTransfer?.types?.includes("Files")) return;
-  event.preventDefault();
-  state.composerDragDepth += 1;
-  setComposerDragging(true);
-}
-
-function onComposerDragOver(event) {
-  if (!event.dataTransfer?.types?.includes("Files")) return;
-  event.preventDefault();
-  event.dataTransfer.dropEffect = "copy";
-}
-
-function onComposerDragLeave(event) {
-  event.preventDefault();
-  state.composerDragDepth = Math.max(0, state.composerDragDepth - 1);
-  if (state.composerDragDepth === 0) setComposerDragging(false);
-}
-
-async function onComposerDrop(event) {
-  event.preventDefault();
-  state.composerDragDepth = 0;
-  setComposerDragging(false);
-  await uploadAttachmentBatch(Array.from(event.dataTransfer?.files || []));
-}
-
 async function uploadAttachmentBatch(files) {
   if (!files.length) return;
   if (!await loadUploadCapabilities()) {
@@ -3175,6 +3117,14 @@ function renderAttachmentImagePreview() {
   const { items, index } = attachmentImageGallery;
   const attachment = items[index];
   if (!attachment) return;
+  el.attachmentImageDialogError?.classList.add("hidden");
+  const original = el.attachmentImageDialogOpen;
+  if (original) {
+    const isWebUrl = /^https?:\/\//i.test(attachment.previewUrl);
+    if (isWebUrl) original.href = attachment.previewUrl;
+    else original.removeAttribute("href");
+    original.hidden = !isWebUrl;
+  }
   el.attachmentImageDialogImage.src = attachment.previewUrl;
   el.attachmentImageDialogImage.alt = attachment.name || "图片附件";
   el.attachmentImageDialogName.textContent = `${attachment.name || "图片附件"}${items.length > 1 ? ` · ${index + 1} / ${items.length}` : ""}`;
@@ -3605,7 +3555,7 @@ window.DeepAgentConsoleChat = {
   },
   setComposerText(text) {
     el.input.value = String(text || "");
-    autoGrow();
+    resizeComposerInput(el.input);
     el.input.focus();
   },
   selectAgent,

@@ -360,8 +360,8 @@
               </div>
               <p class="remote-agent-error" id="remoteConfigStatus" role="alert"></p>
             </section>
-            <div id="remoteConfigSplitter" class="workspace-resizer" role="separator" aria-label="调整远程 Agent 配置栏宽度" aria-controls="remoteConnectionForm" aria-orientation="vertical" title="左右拖动调整宽度，双击恢复默认" tabindex="0"></div>
           </form>
+          <div id="remoteConfigSplitter" class="workspace-resizer" role="separator" aria-label="调整远程 Agent 配置栏宽度" aria-controls="remoteConnectionForm" aria-orientation="vertical" title="左右拖动调整宽度，双击恢复默认" tabindex="0"></div>
           <section class="remote-agent-debug" id="remoteDebugPanel" aria-labelledby="remoteDebugHeading">
             <div class="remote-agent-toolbar">
               <h3 id="remoteDebugHeading">直连调试</h3>
@@ -371,7 +371,10 @@
             <p class="muted remote-agent-debug-notice" id="remoteDebugNotice" role="status"></p>
             <div class="remote-agent-debug-thread" id="remoteDebugThread" role="log" aria-label="调试消息"></div>
             <form class="composer-inner remote-agent-compose" id="remoteDebugForm" aria-describedby="remoteDebugNotice">
-              <div class="remote-agent-debug-files" id="remoteDebugFiles" aria-label="待发送附件" hidden></div>
+              <div class="composer-drop-overlay" id="remoteDebugDropOverlay" aria-hidden="true">
+                <i data-lucide="file-up" aria-hidden="true"></i><span>松开添加附件</span>
+              </div>
+              <div class="attachment-preview" id="remoteDebugFiles" aria-label="待发送附件" hidden></div>
               <input type="file" id="remoteDebugFileInput" multiple hidden>
               <div class="composer-input-row"><textarea id="remoteDebugPrompt" class="composer-input" aria-label="调试消息" rows="2" placeholder="输入调试消息"></textarea></div>
               <div class="composer-toolbar">

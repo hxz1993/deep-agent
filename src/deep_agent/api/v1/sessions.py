@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from typing import Any, Literal, Optional
 
@@ -26,6 +27,7 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.context.manual import manual_compaction_availability
 from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.display_names import decorate_history_display_names
+from deep_agent.conversation.file_links import ReplyFiles
 from deep_agent.conversation.projector import ConversationProjectionError, project_session_events
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
 from deep_agent.schemas.chat import (
@@ -388,6 +390,7 @@ async def get_session_run_status(
 
 @router.get("/sessions/{session_id}/live")
 async def observe_session_run(
+    request: Request,
     ctx: AppContextDep,
     user_id: RequestUserDep,
     session_id: str,
@@ -413,6 +416,28 @@ async def observe_session_run(
     ctx.session_live.unsubscribe(probe)
 
     async def stream():
+        files = ReplyFiles(
+            request, ctx.file_store, resolved[1], {"user": user_id},
+            load_history=lambda: ctx.store.get_raw_history(resolved[1], agent_id=key[0]),
+        )
+
+        async def project_frame(frame):
+            if frame.event == "observation":
+                data = json.loads(frame.data)
+                async for event in files.event(data["data"], event_type=data["event"]):
+                    if event is data["data"]:
+                        yield frame.sse()
+                    else:
+                        envelope = {**data, "event": event.get("type", data["event"]), "data": event}
+                        yield {"event": "observation", "data": json.dumps(envelope, ensure_ascii=False)}
+            else:
+                if frame.event in {"observation_end", "observation_reset"}:
+                    async for event in files.event({"type": frame.event}):
+                        if event["type"] == "text":
+                            yield {"event": "observation", "data": json.dumps(
+                                {"run_id": run_id, "event": "text", "data": event}, ensure_ascii=False)}
+                yield frame.sse()
+
         try:
             subscription = ctx.session_live.subscribe(key, run_id)
         except (LookupError, BufferError, RuntimeError):
@@ -423,11 +448,13 @@ async def observe_session_run(
             for frame in subscription.initial:
                 if subscription.closed:
                     break
-                yield frame.sse()
+                async for projected in project_frame(frame):
+                    yield projected
             subscription.initial = ()
             while True:
                 frame = await subscription.get()
-                yield frame.sse()
+                async for projected in project_frame(frame):
+                    yield projected
                 if frame.event in {"observation_end", "observation_reset"}:
                     break
         finally:
@@ -461,6 +488,7 @@ class SessionEventsResponse(BaseModel):
     response_model=ConversationHistoryResponse,
 )
 async def get_session_history(
+    request: Request,
     ctx: AppContextDep,
     user_id: RequestUserDep,
     session_id: str,
@@ -496,7 +524,10 @@ async def get_session_history(
         ctx.stores,
         capabilities=(list(row.capabilities or []) if row is not None else None),
     )
-    return decorate_history_display_names(projected, display_names)
+    files = ReplyFiles(
+        request, ctx.file_store, resolved_session_id, {"user": user_id},
+    )
+    return await files.history(decorate_history_display_names(projected, display_names))
 
 
 @router.get("/sessions/{session_id}/events", response_model=SessionEventsResponse)

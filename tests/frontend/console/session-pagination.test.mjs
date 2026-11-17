@@ -19,7 +19,7 @@ function harness(fetch) {
     renderSessions() {}, requestAnimationFrame() {},
     mergeSessionsFromBackend: (rows, options) => merges.push({ rows, options }),
   });
-  vm.runInContext(source.slice(source.indexOf("let sessionPage ="), source.indexOf("function autoGrow()")), context);
+  vm.runInContext(source.slice(source.indexOf("let sessionPage ="), source.indexOf("/* --------------------------- 会话管理")), context);
   return { context, merges, urls, requests, search };
 }
 const response = (items, total) => ({ ok: true, json: async () => ({ items, total }) });

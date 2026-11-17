@@ -66,8 +66,10 @@ ORM 类名拟为 `RemoteAgentConnection`。一条记录对应一个可委派的�
 | `config.protocol` | 专用字段 |
 | --- | --- |
 | `a2a` | `card_url` 必填，`headers` 可省略，`approved_interface` 由确认流程写入。 |
-| `codex` | `execution` 为 `local` 或 `ssh`，SSH 时填写 `ssh_host`。可选 `cwd`、`model`、`command`、`profile`、`reasoning_effort`。 `sandbox` 为 `read-only` 或 `workspace-write`，默认只读。 |
-| `codebuddy` | 同样配置 `execution` 和适用的 `ssh_host`。可选 `cwd`、`model`、`command`。 |
+| `codex` | `execution` 为 `local` 或 `ssh`，SSH 时填写 `ssh_host`。可选 `workspace_root`、`model`、`command`、`profile`、`reasoning_effort`。 `sandbox` 为 `read-only` 或 `workspace-write`，默认只读。 |
+| `codebuddy` | 同样配置 `execution` 和适用的 `ssh_host`。可选 `workspace_root`、`model`、`command`。 |
+
+工作根目录默认是执行账号的 `~/.deep-agent/remote-agent-workspaces`。指定时填写执行机器上的绝对路径。两种模式均从 `<工作根目录>/<任务 ID>/work` 启动 CLI，补答和续跑复用目录和原生会话 ID。只有本轮选择附件时才创建 `work/inputs/<轮次 ID>/`，并把附件路径传给 CLI。声明的产物从 `work/outputs/<轮次 ID>/` 回收到 FileStore。任务目录暂不自动清理。
 
 ```json
 {

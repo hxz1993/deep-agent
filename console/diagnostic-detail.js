@@ -1,6 +1,6 @@
 import { sessionLoadingHtml, prepareSessionRender, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
 import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20261106-ptc-source";
-import { createConversationPresenter } from "./conversation-presenter.js?v=20261105-v01510";
+import { createConversationPresenter } from "./conversation-presenter.js?v=remote-tool-card-labels";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20261103-view-image1";
 import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261103-view-image1";
 import { createTrajectoryController } from "./trajectory.js?v=20261106-ptc-source";
@@ -255,6 +255,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     // and disclosure state instead of parsing every long reply again.
     if (historyChanged) renderConversation();
     if (eventsChanged) trajectory.setHistory({ session_id: state.sessionId, items: data.events }, { preserveView: Boolean(previous) });
+    if (historyChanged) trajectory.setConversationHistory(data.history.items || []);
     trajectory.setExportReady(next.eventsComplete === true && !next.eventsError);
     if (previous) restore(previous); else { currentView = "conversation"; trajectory.selectView("conversation", { notify: false }); renderInspector(); }
     if (next.history == null && !next.historyError) messages.innerHTML = `<div class="diagnostic-detail-error" role="status"><p>正在读取已保存对话…</p></div>`;

@@ -550,13 +550,24 @@ class LocalFileStore:
     ) -> LocalFileMetadata:
         return await asyncio.to_thread(self._describe_sync, file_id, dict(request_headers))
 
+    async def describe_available(
+        self, file_id: str, request_headers: Mapping[str, str],
+    ) -> LocalFileMetadata:
+        return await asyncio.to_thread(
+            self._describe_sync, file_id, dict(request_headers), check_blob=True,
+        )
+
     def _describe_sync(
         self,
         file_id: str,
         request_headers: Mapping[str, str],
+        *,
+        check_blob: bool = False,
     ) -> LocalFileMetadata:
         row = self._row(file_id)
         self._authorize(row, request_headers)
+        if check_blob and not self._blob_path(row).is_file():
+            raise FileStoreNotFoundError("File contents are not available")
         return LocalFileMetadata(
             id=str(row["file_id"]),
             file_name=str(row["file_name"]),

@@ -241,6 +241,20 @@
         node.setAttribute("target", "_blank");
         node.setAttribute("rel", "noopener noreferrer");
       }
+      if (node.tagName === "IMG") node.removeAttribute("data-markdown-image");
+      if (node.tagName === "IMG" && node.hasAttribute("src")) {
+        node.setAttribute("loading", "lazy");
+        node.setAttribute("referrerpolicy", "no-referrer");
+        try {
+          const url = new URL(node.getAttribute("src"), global.document.baseURI);
+          if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password && !node.closest("a")) {
+            node.setAttribute("data-markdown-image", "");
+            node.setAttribute("tabindex", "0");
+            node.setAttribute("role", "button");
+            node.setAttribute("aria-label", node.getAttribute("alt") ? `预览图片 ${node.getAttribute("alt")}` : "预览图片");
+          }
+        } catch { /* Unresolvable sources remain ordinary images. */ }
+      }
     });
     ready = true;
     return true;

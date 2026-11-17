@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from uuid import uuid4
 
-from .cli_workspace import MAX_FILES, MAX_INPUT, MAX_LINE, MAX_OUTPUT, SAFE_ID, TURN_SECONDS, file_name
+from .cli_workspace import DEFAULT_CLI_WORKSPACE_ROOT, MAX_FILES, MAX_INPUT, MAX_LINE, MAX_OUTPUT, SAFE_ID, TURN_SECONDS, file_name
 from .contracts import (
     Checkpoint, CodeBuddyConfig, CodexConfig, InputFile, Operation, OutputFile, RemoteAgentError,
     RemoteResult, RemoteState, RemoteTaskExpired,
@@ -105,7 +105,8 @@ def _decode_outcome(value: dict | str | None) -> tuple[str, str, list[str]]:
 class CliAdapter:
     def __init__(self, config: CodexConfig | CodeBuddyConfig, workspace_root: Path) -> None:
         self.config = config
-        self.workspace_root = workspace_root.resolve()
+        default_root = workspace_root if config.execution == "local" else DEFAULT_CLI_WORKSPACE_ROOT
+        self.workspace_root = Path(config.workspace_root or default_root)
 
     @property
     def command(self) -> str:
@@ -116,7 +117,7 @@ class CliAdapter:
         if self.config.execution == "local":
             return [sys.executable, str(_HELPER), str(self.workspace_root), *arguments]
         remote = shlex.join(["python3", "-c", _HELPER.read_text(encoding="utf-8"),
-                            "~/.cache/deep-agent/remote-agents", *arguments])
+                            str(self.workspace_root), *arguments])
         return ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
                 "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "--",
                 self.config.ssh_host, remote]
@@ -168,8 +169,6 @@ class CliAdapter:
             return [*args, "-"]
         args = [self.command, "-p", "--verbose", "--output-format", "stream-json",
                 "--json-schema", json.dumps(_RESULT_SCHEMA)]
-        if config.cwd:
-            args += ["--add-dir", str(Path(paths["output_dir"]).parents[1])]
         if config.model:
             args += ["--model", config.model]
         if session:
@@ -178,13 +177,15 @@ class CliAdapter:
 
     async def inspect(self) -> dict:
         probe = "0" * 32
-        result = await self._helper("inspect", probe, probe, {"cwd": self.config.cwd, "command": self.command})
+        result = await self._helper("inspect", probe, probe, {"command": self.command})
+        if result.get("workspace_unavailable"):
+            raise RemoteAgentError("工作根目录不可写，请检查执行账号权限")
         if not result.get("available"):
             raise RemoteAgentError("执行账号找不到该命令，请检查 PATH 或填写绝对路径")
         if not result.get("ready"):
             raise RemoteAgentError("执行账号无法运行该命令，请检查安装和执行权限")
         return {"execution": self.config.execution, "command": self.command, "version": result.get("version"),
-                "working_directory": self.config.cwd}
+                "workspace_root": result.get("workspace_root")}
 
     @staticmethod
     def _ids(state: RemoteState) -> tuple[str, str] | None:
@@ -207,14 +208,19 @@ class CliAdapter:
             raise RemoteAgentError("请先确认上一条 CLI 指令的执行状态", status="unknown")
         workspace = ids[0] if ids else uuid4().hex
         paths = await self._helper("prepare", workspace, turn, {
-            "cwd": self.config.cwd, "schema": _RESULT_SCHEMA,
+            "schema": _RESULT_SCHEMA, "reuse_workspace": mode != "start",
             "files": [{"name": file.name, "data": base64.b64encode(file.data).decode("ascii")}
                       for file in attachments],
         })
+        if paths.get("workspace_missing"):
+            raise RemoteTaskExpired("原任务工作目录不可用，无法继续")
+        attachment_line = ""
+        if paths["input_paths"]:
+            attachment_line = f"New attachments: {json.dumps(paths['input_paths'], ensure_ascii=False)}\n"
         prompt = (
             f"{_RESULT_INSTRUCTIONS}\n"
             f"Output directory: {json.dumps(paths['output_dir'], ensure_ascii=False)}\n"
-            f"New attachments: {json.dumps(paths['input_paths'], ensure_ascii=False)}\n"
+            f"{attachment_line}"
             f"<task_or_reply>\n{message}\n</task_or_reply>"
         )
         current = state.model_copy(update={

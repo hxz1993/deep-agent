@@ -91,7 +91,11 @@ class AllowTextOutputDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(definition.json_schema, changed["json_schema"] if edit == "schema" else CONFIG["json_schema"])
                     self.assertEqual(fresh.prompt, "updated prompt" if edit == "prompt" else "original prompt")
                 finally:
-                    await stores.agent.delete(row.id)
+                    # This fixture is still on 013. Current Agent deletion also
+                    # checks publication references, introduced in 016.
+                    async with source.begin() as db:
+                        await db.execute(sa.delete(AgentOutputConfig).where(AgentOutputConfig.agent_id == row.id))
+                        await db.execute(sa.delete(Agent).where(Agent.id == row.id))
 
     async def migrate(self, url, target, *, downgrade=False):
         def run():

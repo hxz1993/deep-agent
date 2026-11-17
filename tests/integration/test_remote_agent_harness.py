@@ -54,6 +54,12 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(rejected.json()["detail"][0]["type"], "union_tag_invalid")
             self.assertEqual((await client.get(api)).json(), [])
             runtime = ctx.get_remote_agents()
+            defaults = await client.get(f"{api}/workspace-defaults")
+            self.assertEqual(defaults.status_code, 200, defaults.text)
+            self.assertEqual(defaults.json(), {
+                "local": "~/.deep-agent/remote-agent-workspaces",
+                "ssh": "~/.deep-agent/remote-agent-workspaces",
+            })
             self.assertIsNotNone(await stores.mcp.rename_with_agent_references("published", "standard-mcp"))
             self.assertTrue(await stores.mcp.delete("standard-mcp"))
 

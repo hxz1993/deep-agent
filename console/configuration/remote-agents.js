@@ -1,4 +1,5 @@
 import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-image1";
+import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from "../composer-input.js?v=20261117";
 
 (() => {
   const endpoint = "/api/v1/remote-agent-connections";
@@ -19,7 +20,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   const recentPageSize = 20;
   const fieldOptions = {
     execution: { local: "本机", ssh: "SSH" },
-    cwd: { default: "默认", custom: "指定" },
+    workspace_root: { default: "默认", custom: "指定" },
     model: { default: "默认", custom: "指定" },
     sandbox: { "read-only": "只读", "workspace-write": "可写" },
   };
@@ -38,6 +39,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   let openRequest = 0;
   let pollTimer;
   let debugPollTimer;
+  let defaultWorkdirsRequest;
 
   const path = (id) => `${endpoint}/${encodeURIComponent(id)}`;
   const post = (url, body, method = "POST") => apiFetch(url, { method, body: JSON.stringify(body) });
@@ -344,7 +346,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     clearTimeout(debugPollTimer);
     const config = { ...baseConfig(protocolOf(row) || "a2a"), ...row.config };
     editor = {
-      row, config, formModes: { cwd: config.cwd ? "custom" : "default", model: config.model ? "custom" : "default" },
+      row, config, formModes: { workspace_root: config.workspace_root ? "custom" : "default", model: config.model ? "custom" : "default" },
       dirty: false, json: false, advanced: false, busy: false, debugBusy: false,
       headers: Object.entries(config.headers || {}), debug: { files: [], messages: [], invocation: null },
     };
@@ -432,19 +434,35 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       ${segmented("执行位置", "execution", config.execution, config.execution === "ssh"
         ? optionField("ssh_host", "SSH 主机别名", "SSH 主机名，如 build-runner", true)
         : '<span class="remote-agent-option-hint">在本机运行 CLI。</span>')}
-      ${segmented("工作目录", "cwd", editor.formModes.cwd, editor.formModes.cwd === "custom"
-        ? optionField("cwd", "工作目录", "输入执行环境中的绝对路径", true)
-        : '<span class="remote-agent-option-hint">使用为此连接分配的工作目录。</span>')}
+      ${segmented("工作根目录", "workspace_root", editor.formModes.workspace_root, editor.formModes.workspace_root === "custom"
+        ? optionField("workspace_root", "工作根目录", "输入执行机器上的绝对路径", true)
+        : '<span class="remote-agent-option-hint remote-agent-root-hint"><code id="remoteDefaultWorkdir">~/.deep-agent/remote-agent-workspaces</code></span>',
+        ["每次独立派单创建 <工作根目录>/<任务 ID>/work，补答和续跑沿用。",
+          "本轮选了附件才创建 work/inputs/<轮次 ID>/。",
+          "work/outputs/<轮次 ID>/ 存放本轮生成的产物，完成后回收到 FileStore。",
+          "使用 SSH 时，路径在远端执行机器上解析。"].join("\n"))}
       ${segmented("模型", "model", editor.formModes.model, editor.formModes.model === "custom"
         ? optionField("model", "模型", `例如 ${modelExample}`, true)
         : `<span class="remote-agent-option-hint">沿用 ${drivers[config.protocol].label} 的默认模型。</span>`, `指定时填写执行账号可用的模型名，例如 ${modelExample}。`)}
       ${codex ? segmented("工作区权限", "sandbox", config.sandbox) : ""}
       <details class="remote-agent-advanced" ${editor.advanced ? "open" : ""}>
         <summary>高级${icon("chevron-right")}</summary>
-        ${field("启动命令", "command", { placeholder: `默认 ${config.protocol}，支持绝对路径`, hint: "只填命令名或执行环境中的可执行文件绝对路径。" })}
-        ${codex ? field("配置档（Profile）", "profile", { placeholder: "沿用默认配置，如 review", hint: "填写执行账号在 Codex 中已定义的配置档名称。配置档可为不同工作场景预设模型等选项；留空使用 CLI 默认配置。" })
-          + field("推理强度", "reasoning_effort", { placeholder: "沿用默认档位，如 medium", hint: "常见档位为 minimal、low、medium、high、xhigh。可用值取决于模型。" }) : ""}
+        <div class="remote-agent-advanced-fields">
+          ${field("启动命令", "command", { placeholder: `默认 ${config.protocol}，支持绝对路径`, hint: "只填命令名或执行环境中的可执行文件绝对路径。" })}
+          ${codex ? field("配置档（Profile）", "profile", { placeholder: "沿用默认配置，如 review", hint: "填写执行账号在 Codex 中已定义的配置档名称。配置档可为不同工作场景预设模型等选项；留空使用 CLI 默认配置。" })
+            + field("推理强度", "reasoning_effort", { placeholder: "沿用默认档位，如 medium", hint: "常见档位为 minimal、low、medium、high、xhigh。可用值取决于模型。" }) : ""}
+        </div>
       </details>`;
+  }
+
+  function showDefaultWorkdir(element, execution) {
+    defaultWorkdirsRequest ??= apiFetch(`${endpoint}/workspace-defaults`).catch(() => {
+      defaultWorkdirsRequest = null;
+      return {};
+    });
+    void defaultWorkdirsRequest.then((paths) => {
+      if (element.isConnected && paths[execution]) element.textContent = paths[execution];
+    });
   }
 
   function renderConfig() {
@@ -457,11 +475,13 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
     el("remoteDriverNote").innerHTML = `${driver.command ? `运行 <code>${driver.command}</code>，` : ""}${driver.help}`;
     el("remoteDebugHeading").textContent = cli ? "任务调试" : "对话调试";
     el("resetRemoteDebug").textContent = cli ? "清空调试" : "新对话";
-    el("remoteDebugPrompt").placeholder = cli ? "描述要执行的任务…" : "给远程 Agent 发送消息…";
+    el("remoteDebugPrompt").placeholder = "给 Agent 发送消息…（Enter 发送，Shift+Enter 换行）";
     const fields = el("remoteDriverFields");
     fields.disabled = editor.json;
     fields.setAttribute("aria-hidden", String(editor.json));
     fields.innerHTML = driverFields();
+    const workdir = el("remoteDefaultWorkdir");
+    if (workdir && !editor.json) showDefaultWorkdir(workdir, cfg.execution);
     fields.querySelector("details")?.addEventListener("toggle", (event) => {
       if (editor) editor.advanced = event.target.open;
     });
@@ -480,7 +500,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       if (new Set(names).size !== names.length) throw new Error("Header 名称不能重复");
       config.headers = Object.fromEntries(headers.map(([key, value]) => [key.trim(), value]));
     } else {
-      if (editor.formModes.cwd !== "custom") delete config.cwd;
+      if (editor.formModes.workspace_root !== "custom") delete config.workspace_root;
       if (editor.formModes.model !== "custom") delete config.model;
       if (config.execution !== "ssh") delete config.ssh_host;
       for (const key of ["command", "profile", "reasoning_effort"]) {
@@ -515,7 +535,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
         const config = configFromJson();
         if (config.headers && (Array.isArray(config.headers) || typeof config.headers !== "object")) throw new Error("请求 Header 必须是 JSON 对象");
         editor.config = config;
-        editor.formModes = { cwd: config.cwd ? "custom" : "default", model: config.model ? "custom" : "default" };
+        editor.formModes = { workspace_root: config.workspace_root ? "custom" : "default", model: config.model ? "custom" : "default" };
         editor.headers = Object.entries(config.headers || {});
       } else {
         const config = configFromForm();
@@ -554,7 +574,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
         ${fact("Agent Card", config.card_url)}
         ${fact("已批准接口", config.approved_interface?.url || inspection?.approved_interface?.url)}
         ${fact("执行位置", config.execution === "ssh" ? config.ssh_host : config.execution === "local" ? "本机" : null)}
-        ${fact("工作目录", config.cwd)}${fact("模型", config.model)}
+        ${fact("工作根目录", config.workspace_root || inspection?.workspace_root)}${fact("模型", config.model)}
       </dl>
       ${inspection?.message ? `<p class="muted">${escapeHtml(inspection.message)}</p>` : ""}
       ${proposed ? `<p class="remote-agent-proposed"><code>${escapeHtml(proposed.url || proposed)}</code><button type="button" id="approveRemoteInterface" class="btn" ${editor.dirty || editor.busy ? "disabled" : ""}>批准接口</button></p>` : ""}`;
@@ -592,20 +612,33 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
   function renderDebug() {
     const thread = el("remoteDebugThread");
     const state = editor.debug;
-    const markup = state.messages.map(item => `<article class="remote-agent-message ${item.role}">
-      <header><strong>${item.role === "user" ? "你" : escapeHtml(editor.row.name || "远程 Agent")}</strong>${item.status ? status(item.status) : ""}</header>
-      ${item.text ? `<p>${escapeHtml(item.text)}</p>` : ""}
-      ${item.attachments?.length ? `<ul class="remote-agent-message-attachments" aria-label="已发送附件">${item.attachments.map(name => `<li>${icon("paperclip")}${escapeHtml(name)}</li>`).join("")}</ul>` : ""}
-      ${(item.warnings || []).map(warning => `<p class="muted">${escapeHtml(warning)}</p>`).join("")}
-      ${renderFiles(item.files)}</article>`).join("");
+    const markup = state.messages.map(item => {
+      if (item.role === "user") {
+        const attachments = item.attachments?.length
+          ? `<ul class="msg-attachments remote-agent-message-attachments" aria-label="已发送附件">${item.attachments.map(name => `<li>${icon("paperclip")}${escapeHtml(name)}</li>`).join("")}</ul>` : "";
+        return `<article class="msg-row user"><div class="bubble-wrap"><div class="bubble">${attachments}${item.text ? `<div class="bubble-text">${escapeHtml(item.text)}</div>` : ""}</div></div></article>`;
+      }
+      return `<article class="msg-row assistant assistant-answer"><div class="bubble-wrap assistant-message">
+        ${item.text ? `<div class="assistant-final" data-remote-answer>${escapeHtml(item.text)}</div>` : ""}
+        ${renderFiles(item.files)}
+        ${(item.warnings || []).map(warning => `<div class="muted">${escapeHtml(warning)}</div>`).join("")}
+        ${item.status && item.status !== "completed" ? status(item.status) : ""}
+      </div></article>`;
+    }).join("");
     if (thread.remoteAgentMarkup !== markup) {
+      const markdown = window.DeepAgentMarkdown;
+      const codeState = markdown?.captureCodeState(thread);
       replaceMarkup(thread, markup);
+      thread.querySelectorAll("[data-remote-answer]").forEach(body => markdown?.replaceBody(body, body.textContent));
+      markdown?.restoreCodeState(thread, codeState);
+      void markdown?.renderDiagrams(thread);
       thread.scrollTop = thread.scrollHeight;
     }
     const files = el("remoteDebugFiles");
     files.hidden = !state.files.length;
-    files.innerHTML = state.files.map((file, i) => `<span>${icon("paperclip")}${escapeHtml(file.name)}
-      <button type="button" class="btn text compact" data-debug-remove="${i}" aria-label="移除 ${attr(file.name)}" title="移除附件">${icon("x")}</button></span>`).join("");
+    files.innerHTML = state.files.map((file, i) => `<div class="pending-attachment"><span class="pending-attachment-name">${escapeHtml(file.name)}</span>
+      <button type="button" class="pending-attachment-remove" data-debug-remove="${i}" aria-label="移除 ${attr(file.name)}" title="移除附件">${icon("x")}</button></div>`).join("");
+    resizeComposerInput(el("remoteDebugPrompt"));
     renderEditorState();
     icons();
   }
@@ -649,7 +682,7 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       editor.headers = Object.entries(row.config.headers || {});
       editor.dirty = false;
       editor.json = false;
-      editor.formModes = { cwd: row.config.cwd ? "custom" : "default", model: row.config.model ? "custom" : "default" };
+      editor.formModes = { workspace_root: row.config.workspace_root ? "custom" : "default", model: row.config.model ? "custom" : "default" };
       editor.debug.error = false;
       if (revision !== row.revision) editor.debug = { files: [], messages: [], invocation: null };
       el("remoteConfigJson").value = "";
@@ -871,14 +904,14 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
         if (editor.json) return;
         editor.config = baseConfig(data.remoteDriver);
         editor.headers = [];
-        editor.formModes = { cwd: "default", model: "default" };
+        editor.formModes = { workspace_root: "default", model: "default" };
         editor.advanced = false;
         dirty();
         renderConfig();
         renderSummary();
         el("remoteDriverOptions").querySelector(`[data-remote-driver="${data.remoteDriver}"]`)?.focus();
       } else if (data.configOption) {
-        if (data.configOption === "cwd" || data.configOption === "model") editor.formModes[data.configOption] = data.configValue;
+        if (data.configOption === "workspace_root" || data.configOption === "model") editor.formModes[data.configOption] = data.configValue;
         else editor.config[data.configOption] = data.configValue;
         dirty();
         renderConfig();
@@ -922,8 +955,14 @@ import { attachmentDownloadUrl } from "../attachment-preview.js?v=20261103-view-
       dirty();
     });
     el("remoteConnectionForm").addEventListener("submit", save);
-    el("remoteDebugForm").addEventListener("submit", (event) => { event.preventDefault(); void debugAction("send"); });
-    el("remoteDebugPrompt").addEventListener("input", renderEditorState);
+    const debugForm = el("remoteDebugForm");
+    const debugInput = el("remoteDebugPrompt");
+    debugForm.addEventListener("submit", (event) => { event.preventDefault(); void debugAction("send"); });
+    bindComposerInput(debugInput, () => {
+      if (!el("sendRemoteDebug").disabled) debugForm.requestSubmit();
+    });
+    bindComposerAttachments(debugInput, debugForm, el("remoteDebugDropOverlay"), uploadFiles);
+    debugInput.addEventListener("input", renderEditorState);
     el("remoteDebugFileInput").addEventListener("change", (event) => {
       const files = Array.from(event.target.files || []);
       event.target.value = "";

@@ -55,6 +55,53 @@ function withController(check, options = {}) {
   }
 }
 
+test("assistant previews reuse authorized History links by source event while Raw retains the original message", () => {
+  withController((controller, elements) => {
+    const original = "![图](attachment://local_image)";
+    const url = "https://deepagent.test/api/v1/local-files/local_image/download";
+    const html = () => elements.get("inspectorContent").innerHTML;
+    controller.setHistory({ session_id: "one", items: [
+      fact("thinking", 1, 0, 0, { part_kind: "thinking", content: "准备附件" }),
+      fact("final", 2, 0, 1, { part_kind: "text", content: original }),
+    ] });
+    controller.restore({ selectedId: "thinking" });
+    assert.match(html(), /attachment:\/\/local_image/);
+    controller.setConversationHistory([
+      { kind: "assistant_message", source_event_ids: ["other"], text: "另一个回复" },
+      { kind: "assistant_message", source_event_ids: ["thinking", "final"], text: "下载链接" },
+      { kind: "assistant_message", source_event_ids: ["thinking", "final"], text: "![图](<" + url + ">)" },
+    ]);
+    assert.ok(html().includes(url));
+    assert.doesNotMatch(html(), /attachment:\/\/|另一个回复/);
+    controller.restore({ selectedId: "thinking", detailTab: "preview" });
+    assert.ok(html().includes(url));
+    controller.restore({ selectedId: "thinking", detailTab: "raw" });
+    assert.match(html(), /attachment:\/\/local_image/);
+    assert.equal(controller.events()[0].payload.content, original);
+    controller.setHistory({ session_id: "two", items: [
+      fact("thinking", 1, 0, 0, { part_kind: "text", content: original }),
+    ] });
+    assert.doesNotMatch(html(), /deepagent\.test/);
+  });
+});
+
+test("live final Markdown upgrades only the latest assistant reply in its run", () => {
+  withController((controller, elements) => {
+    const original = "[下载](attachment://local_report)";
+    const url = "https://deepagent.test/api/v1/local-files/local_report/download";
+    const html = () => elements.get("inspectorContent").innerHTML;
+    for (const [id, sequence] of [["earlier", 1], ["last", 2]]) {
+      controller.ingest({ event: "session_event_appended", data: { event:
+        fact(id, sequence, sequence, 0, { part_kind: "text", content: original }) } });
+    }
+    controller.ingest({ event: "final", data: { run_id: "run-1", output: "[下载](<" + url + ">)" } });
+    controller.restore({ selectedId: "last", detailTab: "preview" });
+    assert.ok(html().includes(url));
+    controller.restore({ selectedId: "earlier", detailTab: "preview" });
+    assert.doesNotMatch(html(), /deepagent\.test/);
+  });
+});
+
 const contextReferences = [
   { key: "budget.range", type: "deeptable.selection", schema_version: "1.0", label: "预算选区",
     payload: { range: "B2:D4", amount: 0, enabled: false, missing: null, notes: "<script>unsafe</script>" },
@@ -874,6 +921,47 @@ test("output details have only Summary, Output and Raw and show the attempt payl
     assert.match(markup, /&quot;attempt&quot;: 1/);
     assert.doesNotMatch(markup, /json_schema|historical snapshot|current Agent configuration/);
   });
+});
+
+test("remote task Input and Result reuse session file links and display the tool's completion", () => {
+  withController((controller, elements) => {
+    const user = fact("question", 1, 0, 0, {
+      part_kind: "user-prompt", content: [
+        { kind: "text-content", content: "Use one file" },
+        { kind: "attachment-ref", id: "local_selected", name: "selected.txt", mime: "text/plain" },
+        { kind: "attachment-ref", id: "local_unused", name: "unused.txt", mime: "text/plain" },
+      ],
+    }, "user/message");
+    const call = fact("remote-call", 2, 1, 0, {
+      part_kind: "tool-call", tool_name: "delegate_task", tool_call_id: "remote",
+      args: JSON.stringify({ task: "Use one file", attachments: [{ id: "local_selected" }, { id: "local_unknown" }] }),
+    });
+    const result = fact("remote-result", 3, 2, 0, {
+      part_kind: "tool-return", tool_name: "delegate_task", tool_call_id: "remote",
+      content: { status: "input_required", result: "Which month?" },
+      metadata: { remote_agent: { status: "input_required" }, generated_files: [
+        { file_id: "local_report", file_name: "report.txt", mime: "text/plain", byte_size: 30 },
+      ] },
+    }, "tool/results");
+    controller.setHistory({ items: [user, call, result] });
+    const html = () => elements.get("inspectorContent").innerHTML;
+    controller.restore({ selectedId: "question", detailTab: "summary" });
+    assert.match(html(), /href="\/files\/local_selected"/);
+    controller.restore({ selectedId: "tool:remote", detailTab: "summary" });
+    const [input, output] = html().split(/<span>Input<\/span>|<span>Result<\/span>/).slice(1);
+    assert.match(input, /trajectory-attachment-row.*href="\/files\/local_selected"/);
+    assert.doesNotMatch(input, /href="\/files\/local_(?:unknown|unused|report)"/);
+    assert.match(output, /input_required/);
+    assert.doesNotMatch(output, /Needs answer/);
+    assert.match(output, /generated-file-item.*href="\/files\/local_report"/);
+    assert.match(html(), /Completed/);
+    assert.doesNotMatch(html(), /工具产物/);
+    controller.restore({ selectedId: "tool:remote", detailTab: "input" });
+    assert.match(html(), /href="\/files\/local_selected"/);
+    controller.restore({ selectedId: "tool:remote", detailTab: "result" });
+    assert.match(html(), /href="\/files\/local_report"/);
+    assert.doesNotMatch(html(), /href="\/files\/local_selected"/);
+  }, { attachmentUrl: file => `/files/${file.id}` });
 });
 
 test('view_image metadata renders all pages consistently in live and durable trajectory without first-file duplicates', () => {

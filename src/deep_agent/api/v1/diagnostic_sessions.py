@@ -17,6 +17,7 @@ from deep_agent.agent.tool_output_limits import session_file_metadata_from_histo
 from deep_agent.files.storage import LOCAL_FILE_PREFIX, LocalFileStore
 from deep_agent.capabilities.display_names import resolve_tool_display_name_map
 from deep_agent.conversation.display_names import decorate_history_display_names
+from deep_agent.conversation.file_links import ReplyFiles
 from deep_agent.conversation.models import ConversationHistoryResponse
 from deep_agent.conversation.projector import ConversationProjectionError
 from deep_agent.schemas.session_source import SessionSourceType
@@ -181,7 +182,7 @@ async def get_diagnostic_session(request: Request, ctx: AppContextDep, caller_us
 
 
 @router.get("/{session_id}/history", response_model=ConversationHistoryResponse)
-async def get_diagnostic_history(ctx: AppContextDep, session_id: str):
+async def get_diagnostic_history(request: Request, ctx: AppContextDep, session_id: str):
     async with query_budget():
         detail = await service(ctx).identity(session_id)
         events = await ctx.store.list_all_events(session_id)
@@ -192,7 +193,9 @@ async def get_diagnostic_history(ctx: AppContextDep, session_id: str):
         row = await ctx.stores.agent.get_by_id(detail["agent_id"]) if detail["agent_id"] else None
         names = await resolve_tool_display_name_map(ctx.registry, ctx.stores,
             capabilities=list(row.capabilities or []) if row else None)
-        return await run_in_threadpool(decorate_history_display_names, projected, names)
+        history = await run_in_threadpool(decorate_history_display_names, projected, names)
+        files = ReplyFiles(request, ctx.file_store, session_id, {"user": detail["user_id"]}, diagnostic=True)
+        return await files.history(history)
 
 
 @router.get("/{session_id}/files/{file_id}/download", include_in_schema=False)

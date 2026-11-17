@@ -153,6 +153,7 @@
     "tests/unit/test_reader_runtime.py",
     "tests/unit/test_reading_budget.py",
     "tests/unit/test_remote_agent_cli.py",
+    "tests/unit/test_reply_file_links.py",
     "tests/unit/test_runtime_dependencies.py",
     "tests/unit/test_sandbox_framing.py",
     "tests/unit/test_sandbox_input_capacity.py",

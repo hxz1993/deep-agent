@@ -381,11 +381,11 @@ test("大工具结果显示外置提示并保留预览", () => {
   assert.match(workspaceCss, /\.tool-result-artifact/);
 });
 
-test("远程任务等待时提供补答语义，普通 MCP 的同名工具保持原样", () => {
+test("工具状态与远程任务状态独立，普通 MCP 的同名工具保持原样", () => {
   assert.equal(isRemoteAgentToolEvent({ tool: "delegate_task" }), true);
   assert.equal(isRemoteAgentToolEvent({ tool: "delegate_task", source: "mcp" }), false);
-  assert.equal(toolResultPresentation({ metadata: { remote_agent: { status: "input_required" } } }).label, "待补答");
-  assert.equal(toolResultPresentation({ metadata: { remote_agent: { status: "unknown" } } }).label, "结果未知");
+  assert.equal(toolResultPresentation({ metadata: { remote_agent: { status: "input_required" } } }).label, "完成");
+  assert.equal(toolResultPresentation({ outcome: "failed", metadata: { remote_agent: { status: "unknown" } } }).label, "失败");
 });
 
 test("无参数工具显示空对象且参数和结果 JSON 不重复绘制边框", () => {

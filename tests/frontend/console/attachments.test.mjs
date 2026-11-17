@@ -14,6 +14,7 @@ const template = await readFile(
   "utf8",
 );
 const workspaceSource = await readPresentationSource("workspace.js");
+const composerSource = await readFile(new URL("../../../console/composer-input.js", import.meta.url), "utf8");
 
 test("附件上传不再要求可配置的附件工具包", () => {
   assert.match(agentSource, /builtin:\s*"内置工具"/);
@@ -99,11 +100,12 @@ test("热切换后的迟到上传能力响应不能恢复旧供应商类型", as
 test("输入框支持点击、粘贴和拖拽附件", () => {
   assert.match(template, /id="composerDropZone"/);
   assert.match(template, /id="composerDropOverlay"/);
-  assert.match(chatSource, /addEventListener\("paste", onPaste\)/);
-  assert.match(chatSource, /addEventListener\("dragenter", onComposerDragEnter\)/);
-  assert.match(chatSource, /addEventListener\("drop", onComposerDrop\)/);
-  assert.match(chatSource, /e\.clipboardData\?\.files/);
-  assert.match(chatSource, /event\.dataTransfer\?\.files/);
+  assert.match(chatSource, /bindComposerAttachments\(el\.input, el\.composerDropZone, el\.composerDropOverlay, uploadAttachmentBatch\)/);
+  assert.match(composerSource, /addEventListener\("paste"/);
+  assert.match(composerSource, /addEventListener\("dragenter"/);
+  assert.match(composerSource, /addEventListener\("drop"/);
+  assert.match(composerSource, /event\.clipboardData\?\.files/);
+  assert.match(composerSource, /event\.dataTransfer\?\.files/);
   assert.match(chatSource, /支持点击、拖拽或粘贴/);
 });
 

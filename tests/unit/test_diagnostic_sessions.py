@@ -646,7 +646,7 @@ class DiagnosticSessionTests(unittest.IsolatedAsyncioTestCase):
     async def test_admin_cross_owner_history_event_permissions_and_no_store(self):
         await self.question("private", user="other-user", terminal="completed")
         ctx = SimpleNamespace(db_session_factory=self.factory, active_runs=self.active, store=self.store,
-            stores=self.stores, registry=ToolPackageRegistry())
+            stores=self.stores, registry=ToolPackageRegistry(), file_store=None)
         app = FastAPI()
         app.include_router(router, prefix="/api/v1")
         app.include_router(ordinary_router, prefix="/api/v1")

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
+import shutil
 import tempfile
 import textwrap
 import unittest
@@ -45,7 +47,12 @@ values = {
     for line in header.splitlines() if line.startswith(("Output directory:", "New attachments:"))
 }
 output = Path(values["Output directory"])
-inputs = [Path(path) for path in values["New attachments"]]
+inputs = [Path(path) for path in values.get("New attachments", [])]
+assert Path.cwd() == output.parent.parent
+if not inputs:
+    assert "New attachments" not in values
+    assert not (Path.cwd() / "inputs" / output.name).exists()
+    assert output.is_dir()
 if message == "slow":
     time.sleep(120)
 if message == "expired":
@@ -91,18 +98,51 @@ class RemoteCliAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.root = Path(temp.name)
         self.checkpoints = []
 
-    def adapter(self, protocol):
+    def adapter(self, protocol, *, workspace_root=None):
         command = self.root / protocol
         command.write_text("#!/usr/bin/env python3\n" + textwrap.dedent(_CLI_FIXTURE), encoding="utf-8")
         command.chmod(0o700)
         config = (
-            CodexConfig(command=str(command), sandbox="workspace-write")
-            if protocol == "codex" else CodeBuddyConfig(command=str(command))
+            CodexConfig(command=str(command), sandbox="workspace-write", workspace_root=workspace_root)
+            if protocol == "codex" else CodeBuddyConfig(command=str(command), workspace_root=workspace_root)
         )
         return CliAdapter(config, self.root / f"{protocol}-state")
 
     async def checkpoint(self, state):
         self.checkpoints.append(state)
+
+    async def test_custom_root_is_created_on_dispatch_and_isolates_parallel_jobs(self):
+        root = self.root / "custom root"
+        adapter = self.adapter("codex", workspace_root=str(root))
+        self.assertEqual((await adapter.inspect())["workspace_root"], str(root.resolve()))
+        self.assertFalse(root.exists())
+        root.mkdir(mode=0o755)
+        results = await asyncio.gather(*(
+            adapter.run(RemoteState(), "plain task", [InputFile("same.txt", "text/plain", contents)],
+                        "start", self.checkpoint, message_id="first")
+            for contents in (b"one", b"two")
+        ))
+        self.assertEqual([result.state.status for result in results], ["completed", "completed"])
+        self.assertNotEqual(results[0].state.task_id, results[1].state.task_id)
+        for result, contents in zip(results, (b"one", b"two"), strict=True):
+            turn = result.state.cursor["turn_id"]
+            work = root / result.state.task_id / "work"
+            self.assertEqual(work.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((work / "inputs" / turn / "01-same.txt").read_bytes(), contents)
+            self.assertTrue((work / "outputs" / turn).is_dir())
+        removed = results[0].state
+        shutil.rmtree(root / removed.task_id)
+        with self.assertRaisesRegex(RemoteTaskExpired, "原任务工作目录不可用"):
+            await adapter.run(removed, "resume", [], "resume", self.checkpoint, message_id="next")
+        self.assertFalse((root / removed.task_id).exists())
+
+    def test_ssh_passes_roots_to_the_remote_execution_account(self):
+        for configured, expected in ((None, "~/.deep-agent/remote-agent-workspaces"),
+                                     ("/srv/agent work", "/srv/agent work")):
+            config = CodeBuddyConfig(execution="ssh", ssh_host="runner", workspace_root=configured)
+            adapter = CliAdapter(config, self.root)
+            remote_command = shlex.split(adapter._args("prepare", "a" * 32, "b" * 32)[-1])
+            self.assertEqual(remote_command[-4], expected)
 
     async def test_two_pauses_native_resume_and_explicit_regular_artifacts(self):
         for protocol in ("codex", "codebuddy"):

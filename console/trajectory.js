@@ -799,7 +799,7 @@ function eventKindClass(event) {
 }
 
 function eventKindBadge(event) {
-  if (eventKindClass(event) === "remote-agent") return "远程 Agent";
+  if (eventKindClass(event) === "remote-agent") return "远程";
   return isRunCodeEvent(event) ? "PTC" : kindBadge(event?.kind);
 }
 
@@ -917,19 +917,7 @@ function renderJumpLink({ eventId, iconName, text, detail = "" }) {
   return `<button type="button" class="trajectory-summary-link"${attributes}>${icon(iconName)}<span><strong>${escapeHtml(text)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</span>${eventId ? icon("arrow-up-right") : ""}</button>`;
 }
 
-function renderInputSummary(event, _events, attachmentUrl = attachmentDownloadUrl) {
-  const contextRefs = Array.isArray(event.payload?.context_refs) ? event.payload.context_refs : [];
-  const attachments = Array.isArray(event.payload?.attachments) ? event.payload.attachments : [];
-  const contextLinks = contextRefs.map((reference, index) => {
-    const safe = redactTrajectoryValue(reference);
-    const label = safe?.label || safe?.key || safe?.type || "Unnamed context";
-    const identity = `${index}:${safe?.key || ""}`;
-    const type = [safe?.type, safe?.schema_version ? `v${safe.schema_version}` : null].filter(Boolean).join(" · ");
-    return `<details class="trajectory-context-reference" data-trajectory-context="${escapeHtml(identity)}">
-      <summary class="trajectory-context-heading">${icon("braces")}<span class="trajectory-context-copy"><strong><span class="trajectory-context-index">${index + 1}.</span> ${escapeHtml(label)}</strong><small>${escapeHtml(type)}</small>${safe?.key ? `<code>${escapeHtml(safe.key)}</code>` : ""}</span>${icon("chevron-right")}</summary>
-      <div class="trajectory-context-content">${renderJsonBlock(safe, { expanded: true })}</div>
-    </details>`;
-  }).join("");
+function renderAttachmentRows(attachments, attachmentUrl) {
   const attachmentLinks = attachments.map((attachment) => {
     const href = attachmentUrl(attachment);
     const name = attachment.name || attachment.id || "Unnamed attachment";
@@ -943,11 +931,27 @@ function renderInputSummary(event, _events, attachmentUrl = attachmentDownloadUr
       : renderJumpLink({ eventId: null, iconName: "paperclip", text: name, detail });
     return `<div class="trajectory-attachment-row">${main}${download}</div>`;
   }).join("");
+  return attachmentLinks ? `<div class="trajectory-summary-links">${attachmentLinks}</div>` : "";
+}
+
+function renderInputSummary(event, _events, attachmentUrl = attachmentDownloadUrl) {
+  const contextRefs = Array.isArray(event.payload?.context_refs) ? event.payload.context_refs : [];
+  const attachments = Array.isArray(event.payload?.attachments) ? event.payload.attachments : [];
+  const contextLinks = contextRefs.map((reference, index) => {
+    const safe = redactTrajectoryValue(reference);
+    const label = safe?.label || safe?.key || safe?.type || "Unnamed context";
+    const identity = `${index}:${safe?.key || ""}`;
+    const type = [safe?.type, safe?.schema_version ? `v${safe.schema_version}` : null].filter(Boolean).join(" · ");
+    return `<details class="trajectory-context-reference" data-trajectory-context="${escapeHtml(identity)}">
+      <summary class="trajectory-context-heading">${icon("braces")}<span class="trajectory-context-copy"><strong><span class="trajectory-context-index">${index + 1}.</span> ${escapeHtml(label)}</strong><small>${escapeHtml(type)}</small>${safe?.key ? `<code>${escapeHtml(safe.key)}</code>` : ""}</span>${icon("chevron-right")}</summary>
+      <div class="trajectory-context-content">${renderJsonBlock(safe, { expanded: true })}</div>
+    </details>`;
+  }).join("");
   return `${renderSummarySection(
     "Preview",
     renderMarkdown(event.payload?.content, "This message only contains attachments or context references."),
     { targetTab: "preview", className: "trajectory-summary-preview is-scroll" },
-  )}${attachmentLinks ? renderSummarySection("Attachments", `<div class="trajectory-summary-links">${attachmentLinks}</div>`) : ""}
+  )}${renderSummarySection("Attachments", renderAttachmentRows(attachments, attachmentUrl))}
     ${contextLinks ? renderSummarySection("Context references", `<div class="trajectory-summary-links">${contextLinks}</div>`) : ""}`;
 }
 
@@ -979,9 +983,9 @@ function renderAssistantTools(event, events) {
   }).join("")}</div>`;
 }
 
-function renderAssistantSummary(event, events) {
+function renderAssistantSummary(event, events, _attachmentUrl, previewText) {
   const preview = `${renderThinking(event.payload?.thinking)}${renderMarkdown(
-    event.payload?.content,
+    previewText ?? event.payload?.content,
     event.payload?.thinking ? "No text output yet." : "No text in this model response.",
   )}`;
   return `${renderSummarySection(
@@ -1026,10 +1030,7 @@ function renderLocalFileDownload(value, artifacts = [], imageOptions = {}) {
   if (!file || artifacts.some((item) => (item?.file_id || item?.artifact_id) === file.fileId)) return "";
   const path = `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`;
   const href = imageOptions.attachmentUrl?.({ id: file.fileId, name: file.fileName }) || globalThis.serviceUrl?.(path) || `/${path}`;
-  return renderSummarySection(
-    "Files",
-    `<a class="trajectory-summary-link local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span><strong>${escapeHtml(file.fileName)}</strong></span></a>`,
-  );
+  return `<a class="trajectory-summary-link local-file-download" href="${escapeHtml(href)}" download>${icon("download")}<span><strong>${escapeHtml(file.fileName)}</strong></span></a>`;
 }
 
 function formatFileBytes(value) {
@@ -1063,27 +1064,62 @@ function renderGeneratedFiles(artifacts, attachmentUrl) {
       : "";
     return `<div class="generated-file-item"><span class="generated-file-icon">${icon("file-output")}</span><span class="generated-file-copy">${label}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${icon("copy")}</button></span></div>`;
   }).join("");
-  return rows ? renderSummarySection("工具产物", `<div class="generated-file-list">${rows}</div>`) : "";
+  return rows ? `<div class="generated-file-list">${rows}</div>` : "";
+}
+
+function toolInputAttachments(event, events) {
+  if (eventKindClass(event) !== "remote-agent" || !["delegate_task", "answer_task"].includes(event.label)) return [];
+  let args = event.payload?.args;
+  if (typeof args === "string") {
+    try { args = JSON.parse(args); } catch { return []; }
+  }
+  if (!Array.isArray(args?.attachments)) return [];
+  const selected = new Map(args.attachments.filter(ref => typeof ref?.id === "string" && ref.id).map(ref => [ref.id, null]));
+  if (!selected.size) return [];
+  for (const row of events) {
+    if (row.id === event.id) break;
+    if (row.kind === "input") {
+      for (const attachment of row.payload?.attachments || []) {
+        if (selected.has(attachment.id)) selected.set(attachment.id, attachment);
+      }
+    }
+    for (const file of row.result?.artifacts || []) {
+      if (selected.get(file.file_id) === null && ["sandbox_output", "document_evidence"].includes(file.kind)) {
+        selected.set(file.file_id, { id: file.file_id, name: file.file_name, mime: file.mime });
+      }
+    }
+  }
+  return [...selected.values()].filter(Boolean);
+}
+
+function renderSummaryCode(value, limit) {
+  return hasMeaningfulValue(value) ? `<p class="trajectory-summary-code">${escapeHtml(valuePreview(value, limit))}</p>` : "";
 }
 
 function renderPayloadResultSections({ payload, result }) {
-  const payloadText = hasMeaningfulValue(payload) ? valuePreview(payload, 280) : null;
-  const resultText = hasMeaningfulValue(result) ? valuePreview(result, 360) : null;
-  return `${payloadText ? renderSummarySection("Input", `<p class="trajectory-summary-code">${escapeHtml(payloadText)}</p>`, { targetTab: "input" }) : ""}
-    ${resultText ? renderSummarySection("Result", `<p class="trajectory-summary-code">${escapeHtml(resultText)}</p>`, { targetTab: "result" }) : ""}`;
+  return renderSummarySection("Input", renderSummaryCode(payload, 280), { targetTab: "input" })
+    + renderSummarySection("Result", renderSummaryCode(result, 360), { targetTab: "result" });
 }
 
-function renderToolSummary(event, _events, attachmentUrl = attachmentDownloadUrl) {
+function renderToolResultFiles(event, attachmentUrl) {
   const result = toolResultValue(event);
   const artifacts = Array.isArray(event.result?.artifacts) ? event.result.artifacts : [];
+  return renderGeneratedFiles(artifacts, attachmentUrl)
+    + renderLocalFileDownload(result, artifacts, { toolName: event.label, metadata: event.result?.metadata, attachmentUrl });
+}
+
+function renderToolSummary(event, events, attachmentUrl = attachmentDownloadUrl) {
+  const result = toolResultValue(event);
   // Tool event labels are projected from the actual tool name, never its result.
   const imageOptions = { toolName: event.label, metadata: event.result?.metadata, attachmentUrl };
   const imageResults = renderViewImageResult(result, imageOptions);
   const imagePreview = imageResults ? "" : renderWebImagePreview(result, { className: "trajectory-web-image-preview" });
-  return `${imageResults ? renderSummarySection("查看图片", imageResults) : ""}${imagePreview ? renderSummarySection("Web image", imagePreview) : ""}${renderGeneratedFiles(artifacts, attachmentUrl)}${renderPayloadResultSections({
-    payload: event.payload?.args ?? event.payload,
-    result,
-  })}${renderLocalFileDownload(result, artifacts, imageOptions)}`;
+  const input = renderSummaryCode(event.payload?.args ?? event.payload, 280)
+    + renderAttachmentRows(toolInputAttachments(event, events), attachmentUrl);
+  const output = renderSummaryCode(result, 360) + renderToolResultFiles(event, attachmentUrl);
+  return (imageResults ? renderSummarySection("Images", imageResults) : renderSummarySection("Web image", imagePreview))
+    + renderSummarySection("Input", input, { targetTab: "input", className: "trajectory-tool-section" })
+    + renderSummarySection("Result", output, { targetTab: "result", className: "trajectory-tool-section" });
 }
 
 function planSnapshot(event) {
@@ -1165,10 +1201,10 @@ function renderOutputSummary(event) {
     + (event.payload?.errors?.length ? renderSummarySection("Validation", renderJsonBlock(event.payload.errors)) : "");
 }
 
-function renderSummary(event, events, attachmentUrl) {
+function renderSummary(event, events, attachmentUrl, previewText) {
   const renderer = SUMMARY_RENDERERS[event.kind];
   const primary = renderer
-    ? renderer(event, events, attachmentUrl)
+    ? renderer(event, events, attachmentUrl, previewText)
     : renderSummarySection("Event", `<p class="trajectory-summary-lead">${escapeHtml(event.summary || event.label)}</p>`);
   return `<section class="trajectory-summary">${renderMeta(event)}<div class="trajectory-summary-primary">${primary}</div></section>`;
 }
@@ -1301,20 +1337,21 @@ function renderRaw(event) {
   return `<pre class="trajectory-raw">${escapeHtml(content || "None")}</pre>`;
 }
 
-function renderPreview(event) {
+function renderPreview(event, previewText) {
   if (event.kind === "assistant") {
-    return `<section class="trajectory-preview">${renderThinking(event.payload?.thinking)}${renderMarkdown(event.payload?.content, "No text in this model response.")}</section>`;
+    return `<section class="trajectory-preview">${renderThinking(event.payload?.thinking)}${renderMarkdown(previewText ?? event.payload?.content, "No text in this model response.")}</section>`;
   }
   return `<section class="trajectory-preview">${renderMarkdown(event.payload?.content, "No text in this user message.")}</section>`;
 }
 
-function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, ptcState = {}) {
+function renderDetail(event, activeTab = "summary", events = [], attachmentUrl = attachmentDownloadUrl, ptcState = {}, previewText) {
   if (!event) return `<div class="trajectory-detail-empty">${icon("scan-search")}<p>Select an event to inspect</p></div>`;
   const tabs = detailTabs(event);
   const allowedTabs = new Set(tabs.map(([id]) => id));
   if (!allowedTabs.has(activeTab)) activeTab = "summary";
-  let content = renderSummary(event, events, attachmentUrl);
+  let content = activeTab === "summary" ? renderSummary(event, events, attachmentUrl, previewText) : "";
   if (["input", "message", "event"].includes(activeTab)) content = renderJsonBlock(event.payload);
+  if (activeTab === "input" && event.kind === "tool") content += renderAttachmentRows(toolInputAttachments(event, events), attachmentUrl);
   if (activeTab === "event" && event.kind === "title" && event.native?.event_ids?.length > 1) {
     // These are title lifecycle records, never an HTTP request/response pair.
     content = renderJsonBlock({
@@ -1322,10 +1359,13 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl, 
       latest: { event_id: event.native.event_ids.at(-1), payload: event.native.title_result || event.payload },
     });
   }
-  if (activeTab === "result") content = renderJsonBlock(event.result);
+  if (activeTab === "result") {
+    content = renderJsonBlock(event.result);
+    if (event.kind === "tool") content += renderToolResultFiles(event, attachmentUrl);
+  }
   if (activeTab === "output" && event.kind === "output") content = event.candidate_found
     ? '<div data-structured-output-detail></div>' : '<p class="trajectory-summary-empty">Original candidate unavailable.</p>';
-  if (activeTab === "preview") content = renderPreview(event);
+  if (activeTab === "preview") content = renderPreview(event, previewText);
   if (activeTab === "raw") content = renderRaw(event);
   if (activeTab === "usage") content = renderTrajectoryUsage(event);
   if (activeTab === "code") content = renderRunCode(event);
@@ -1378,6 +1418,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let history = { items: [] };
   let historyEvents = [];
   let liveEvents = [];
+  let replyTextByEvent = new Map();
+  const liveRepliesByRun = new Map();
   let currentRunId = null;
   const runTurns = new Map();
   let pendingResults = [];
@@ -1515,6 +1557,16 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
           : (event.native?.event_ids || [event.id]).includes(item.native?.call_event_id)))?.id || "").join("\n");
   }
 
+  function assistantPreviewText(event, events) {
+    if (event?.kind !== "assistant" || !event.payload?.content?.includes("attachment://")) return undefined;
+    const saved = replyTextByEvent.get(event.id);
+    if (saved !== undefined) return saved;
+    const live = liveRepliesByRun.get(event.run_id);
+    if (live === undefined) return undefined;
+    const lastReply = events.findLast(row => row.kind === "assistant" && row.run_id === event.run_id && row.payload?.content);
+    return lastReply === event ? live : undefined;
+  }
+
   function render() {
     if (disposed || activeView !== "trajectory") return;
     const listScrollTop = list.scrollTop;
@@ -1537,13 +1589,15 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     const selected = events.find((event) => event.id === selectedId) || visible[0] || null;
     selectedId = selected?.id || null;
     renderRows(visible);
-    const detailState = [selected, selected ? eventVersions.get(selected) : 0, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, detailContext(selected, events)];
+    const previewText = ["summary", "preview"].includes(detailTab) ? assistantPreviewText(selected, events) : undefined;
+    const detailState = [selected, selected ? eventVersions.get(selected) : 0, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, detailContext(selected, events), previewText];
     if (!renderedDetail || detailState.some((value, index) => value !== renderedDetail[index])) {
       renderedDetail = detailState;
       const codeState = selectedId === renderedSelectedId && detailTab === renderedDetailTab ? globalThis.DeepAgentMarkdown?.captureCodeState?.(detail) : [];
       const openContexts = selectedId === renderedSelectedId && detailTab === renderedDetailTab
         ? new Set(Array.from(detail.querySelectorAll?.("details[data-trajectory-context]") || []).filter(item => item.open).map(item => item.dataset.trajectoryContext)) : new Set();
-      detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl, { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab });
+      detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl,
+        { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab }, previewText);
       for (const item of detail.querySelectorAll?.("details[data-trajectory-context]") || []) item.open = openContexts.has(item.dataset.trajectoryContext);
       const outputHost = detail.querySelector?.("[data-structured-output-detail]");
       if (outputHost && selected?.candidate_found) mountStructuredOutput(outputHost, { id: selected.id, name: selected.payload.name, output: selected.candidate, failed: !selected.payload.accepted });
@@ -1592,8 +1646,12 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   function setHistory(nextHistory, { preserveView = false } = {}) {
     const sessionChanged = nextHistory?.session_id && history.session_id
       && nextHistory.session_id !== history.session_id;
-    if (sessionChanged) exportUI?.close();
-    if (sessionChanged) clearRenderedTrajectory();
+    if (sessionChanged) {
+      exportUI?.close();
+      replyTextByEvent.clear();
+      liveRepliesByRun.clear();
+      clearRenderedTrajectory();
+    }
     history = nextHistory || { items: [] };
     historyEvents = buildTrajectory(history);
     liveEvents = [];
@@ -1614,8 +1672,23 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     scheduleRender();
   }
 
+  function setConversationHistory(items) {
+    const segments = new Map();
+    for (const item of items) {
+      const sourceId = item.source_event_ids?.[0];
+      if (item.kind !== "assistant_message" || !sourceId || typeof item.text !== "string") continue;
+      const texts = segments.get(sourceId) || [];
+      texts.push(item.text);
+      segments.set(sourceId, texts);
+    }
+    replyTextByEvent = new Map([...segments].map(([sourceId, texts]) => [sourceId, texts.join("\n")]));
+    scheduleRender();
+  }
+
   function reset() {
     exportUI?.close();
+    replyTextByEvent.clear();
+    liveRepliesByRun.clear();
     setHistory({ items: [] });
     selectView("conversation");
     clearRenderedTrajectory();
@@ -1896,6 +1969,10 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       }
     }
         if (type === "final") {
+          const runId = payload.run_id || currentRunId;
+          if (runId && !payload.output_info && typeof payload.output === "string") {
+            liveRepliesByRun.set(runId, payload.output);
+          }
           liveEvents.filter((item) => item.run_id === currentRunId && item.status === "running")
             .forEach((item) => {
               item.status = "completed"; item.timestamp_end = timestamp;
@@ -2107,5 +2184,5 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     bindings.splice(0).forEach((remove) => remove()); historyEvents = []; liveEvents = []; history = {};
     pendingResults = []; runTurns.clear(); liveCalls = new WeakMap(); liveTextPreviews = new WeakMap(); inputCount = null; rowElements.clear(); renderedDetail = null;
   }
-  return { setHistory, setExportReady, reset, addUser, ingest, selectView, focus, snapshot, restore, destroy, events: allEvents };
+  return { setHistory, setConversationHistory, setExportReady, reset, addUser, ingest, selectView, focus, snapshot, restore, destroy, events: allEvents };
 }

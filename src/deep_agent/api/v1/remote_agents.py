@@ -13,6 +13,7 @@ from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.reference_integrity import ReferenceConflict
+from deep_agent.remote_agents.cli_workspace import DEFAULT_CLI_WORKSPACE_ROOT
 from deep_agent.remote_agents.contracts import REMOTE_AGENT_PROTOCOLS, ConnectionWrite, RemoteAgentError
 from deep_agent.remote_agents.runtime import RequestScope
 from deep_agent.remote_agents.store import UPDATED_BY_KEY
@@ -27,6 +28,8 @@ def response(row, agents: dict) -> dict:
     config = dict(row.config)
     if config.get("protocol") == "a2a":
         config["headers"] = dict.fromkeys(config.get("headers", {}))
+    elif "cwd" in config:
+        config.setdefault("workspace_root", config.pop("cwd"))
     inspection = dict(row.inspection or {})
     updated_by = inspection.pop(UPDATED_BY_KEY, None)
     return {
@@ -72,6 +75,14 @@ async def recent_connections(ctx: AppContextDep, request: Request, user: Request
     links = await runtime.connections.agents()
     return [entry for entry in entries if any(item["id"] == entry["agent_id"]
             for item in links.get(entry["connection_id"], ()))]
+
+
+@router.get("/workspace-defaults")
+async def workspace_defaults(ctx: AppContextDep):
+    return {
+        "local": str(ctx.get_remote_agents().workspace_root),
+        "ssh": DEFAULT_CLI_WORKSPACE_ROOT,
+    }
 
 
 @router.get("/{connection_id}")

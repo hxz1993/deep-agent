@@ -89,9 +89,9 @@ class AppContext:
 
     def get_remote_agents(self):
         if self.remote_agents is None:
+            from deep_agent.remote_agents.cli_workspace import DEFAULT_CLI_WORKSPACE_ROOT
             from deep_agent.remote_agents.runtime import RemoteAgentRuntime
-            workspace = Path(OPTION.agent.sqlite_path).parent / "remote-agent-workspaces"
-            self.remote_agents = RemoteAgentRuntime(self, workspace_root=workspace)
+            self.remote_agents = RemoteAgentRuntime(self, workspace_root=Path(DEFAULT_CLI_WORKSPACE_ROOT))
         return self.remote_agents
 
     @property

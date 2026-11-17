@@ -1,17 +1,15 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import vm from "node:vm";
 
-const source = await readFile(new URL("../../../console/chat.js", import.meta.url), "utf8");
-const binder = source.slice(source.indexOf("function bindComposerInput("), source.indexOf("function autoGrow("));
+const source = await readFile(new URL("../../../console/composer-input.js", import.meta.url), "utf8");
+const { bindComposerInput } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
 
 function harness() {
   const listeners = new Map();
   const input = { addEventListener: (type, handler) => listeners.set(type, handler) };
   let sends = 0;
-  const context = { input, autoGrow() {}, onSend() { sends++; } };
-  vm.runInNewContext(binder + "\nbindComposerInput(input);", context);
+  bindComposerInput(input, () => { sends++; });
   return {
     sendCount: () => sends,
     composition: (type) => listeners.get(type)(),

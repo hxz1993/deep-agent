@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from unittest.mock import AsyncMock, patch
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelRequest, UserPromptPart
@@ -145,6 +145,27 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("replay", response.json()["detail"].lower())
 
+    async def test_observer_replay_resolves_file_references_split_between_frames(self):
+        hub = self.ctx.session_live
+        hub.begin(self.key, "active")
+        hub.publish(self.key, "active", "tool_result", {
+            "type": "tool_result", "artifacts": [{"file_id": "file123", "kind": "sandbox_output"}],
+        })
+        hub.publish(self.key, "active", "text", {"type": "text", "delta": "结果：[下载](attach"})
+        observer = self._request(query={"run_id": "active"})
+        self.assertEqual((await observer.started())["status"], 200)
+        self.assertEqual((await observer.frame())[0], "observation_sync")
+        self.assertEqual((await observer.frame())[1]["event"], "tool_result")
+        self.assertEqual((await observer.frame())[1]["data"]["delta"], "结果：")
+        hub.publish(self.key, "active", "text", {"type": "text", "delta": "ment://file123)"})
+        self.assertEqual(
+            (await observer.frame())[1]["data"]["delta"],
+            "[下载](<http://test/deepfos-server/platform-file-server/files/download?id=file123>)",
+        )
+        hub.end(self.key, "active")
+        self.assertEqual((await observer.frame())[0], "observation_end")
+        await observer.close()
+
     async def test_omitted_agent_resolves_owner_and_stream_ends_before_next_run(self):
         hub = self.ctx.session_live
         hub.begin(self.key, "active")
@@ -166,11 +187,12 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_generator_dispatch_race_and_preiteration_disconnect_do_not_leak(self):
         hub = self.ctx.session_live
         hub.begin(self.key, "active")
-        response = await observe_session_run(self.ctx, TEST_USER_ID, self.session, "active", self.agent_id)
+        request = Request({"type": "http", "scheme": "http", "server": ("test", 80), "headers": []})
+        response = await observe_session_run(request, self.ctx, TEST_USER_ID, self.session, "active", self.agent_id)
         self.assertEqual(hub._subscribers, {})
         await response.body_iterator.aclose()
         self.assertEqual(hub._subscribers, {})
-        response = await observe_session_run(self.ctx, TEST_USER_ID, self.session, "active", self.agent_id)
+        response = await observe_session_run(request, self.ctx, TEST_USER_ID, self.session, "active", self.agent_id)
         hub.end(self.key, "active")
         hub.begin(self.key, "next")
         frames = [frame async for frame in response.body_iterator]
@@ -182,7 +204,8 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
         hub = self.ctx.session_live
         hub.begin(self.key, "active", baseline_sequence=1)
         hub.publish(self.key, "active", "text", {"delta": "old-prefix"})
-        response = await observe_session_run(self.ctx, TEST_USER_ID, self.session, "active", self.agent_id)
+        request = Request({"type": "http", "scheme": "http", "server": ("test", 80), "headers": []})
+        response = await observe_session_run(request, self.ctx, TEST_USER_ID, self.session, "active", self.agent_id)
         self.assertEqual((await anext(response.body_iterator))["event"], "observation_sync")
         hub.end(self.key, "active")
         hub.begin(self.key, "next")

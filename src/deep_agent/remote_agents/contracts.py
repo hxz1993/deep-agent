@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, Literal, Protocol
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, field_validator, model_validator
 
 CONNECTION_PREFIX = "agent_connection:"
 REMOTE_AGENT_PROTOCOLS = frozenset({"a2a", "codex", "codebuddy"})
@@ -65,7 +65,8 @@ class A2AConfig(ConnectionConfig):
 class CliConfig(ConnectionConfig):
     execution: Literal["local", "ssh"] = "local"
     ssh_host: str | None = Field(default=None, max_length=255)
-    cwd: str | None = Field(default=None, max_length=2048)
+    workspace_root: str | None = Field(default=None, max_length=2048,
+                                       validation_alias=AliasChoices("workspace_root", "cwd"))
     model: str | None = Field(default=None, max_length=128)
     command: str | None = Field(default=None, max_length=2048)
 
@@ -77,7 +78,9 @@ class CliConfig(ConnectionConfig):
             raise ValueError("本机执行无需 SSH 主机")
         if self.command and not (self.command.startswith("/") or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", self.command)):
             raise ValueError("启动命令应为命令名或绝对路径")
-        for value in (self.cwd, self.command, self.model):
+        if self.workspace_root is not None and not self.workspace_root.startswith("/"):
+            raise ValueError("工作根目录必须是执行机器上的绝对路径")
+        for value in (self.workspace_root, self.command, self.model):
             if value and any(ord(character) < 32 for character in value):
                 raise ValueError("执行配置包含无效字符")
         if self.model and self.model.startswith("-"):

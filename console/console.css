@@ -508,8 +508,6 @@ textarea {
 #workspaceLegacyHost #toggleSidebar { display: none; }
 :is(#workspaceLegacyHost, .diagnostic-session-detail) .messages { padding: 18px 0; }
 #workspaceLegacyHost .message { max-width: min(820px, calc(100% - 38px)); }
-#workspaceLegacyHost .composer { padding: 10px 16px 12px; }
-#workspaceLegacyHost .composer-inner { max-width: none; }
 #workspaceLegacyHost .composer-meta {
   max-width: none;
   display: grid;
@@ -1474,7 +1472,7 @@ body:not(.console-nav-collapsed):not(.console-theme-compact) .console-rail-setti
 }
 #workspaceLegacyHost .agent-switcher,
 #workspaceLegacyHost .composer { background: var(--console-surface); }
-#workspaceLegacyHost .composer { padding: 11px 14px 14px; }
+#workspaceLegacyHost .composer { padding: 11px var(--chat-content-gutter) 14px; }
 #workspaceLegacyHost .composer-inner { border-radius: 13px; }
 .inspector-pane { padding-top: 0; }
 .inspector-content { padding: 12px; }

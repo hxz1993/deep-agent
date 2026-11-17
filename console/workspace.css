@@ -1,5 +1,7 @@
 :root {
   --radius: 14px;
+  --chat-content-width: 772px;
+  --chat-content-gutter: 24px;
   --font: "Segoe UI", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
 }
@@ -734,6 +736,7 @@ html, body {
 .trajectory-summary-primary { padding: 8px 0; }
 .trajectory-summary-section + .trajectory-summary-section,
 .trajectory-plan + .trajectory-summary-section { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
+.trajectory-tool-section + .trajectory-tool-section { border-top: 0; padding-top: 0; }
 .trajectory-summary-section > :first-child {
   width: 100%;
   min-height: 22px;
@@ -760,6 +763,8 @@ html, body {
   overflow-y: auto;
 }
 .trajectory-summary-links { display: grid; gap: 5px; }
+.trajectory-summary-code + .trajectory-summary-links,
+.trajectory-json + .trajectory-summary-links { margin-top: 8px; }
 .trajectory-context-reference { min-width: 0; }
 .trajectory-context-heading {
   display: flex; align-items: flex-start; gap: 8px; padding: 8px 0;
@@ -1001,7 +1006,13 @@ html, body {
 }
 .suggestion:hover { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
 
-.msg-row { max-width: 820px; margin: 0 auto; padding: 12px 24px; display: flex; gap: 12px; }
+.msg-row {
+  max-width: calc(var(--chat-content-width) + 2 * var(--chat-content-gutter));
+  margin: 0 auto;
+  padding: 12px var(--chat-content-gutter);
+  display: flex;
+  gap: 12px;
+}
 .msg-row.user { flex-direction: row-reverse; }
 .msg-row.assistant-answer { display: block; }
 
@@ -1903,7 +1914,6 @@ html, body {
   opacity: 0.92;
 }
 .composer-inner {
-  max-width: 820px;
   margin: 0 auto;
   display: flex;
   align-items: flex-end;
@@ -2118,7 +2128,8 @@ html, body {
 ::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 760px) {
-  .msg-row { padding: 10px 16px; }
+  :root { --chat-content-gutter: 16px; }
+  .msg-row { padding-block: 10px; }
   .msg-row.user .bubble-wrap { max-width: 96%; }
 }
 
@@ -2476,10 +2487,10 @@ html, body {
 
 /* ---------- 2026-09-02 DeepCube 风格输入区 ---------- */
 .messages { scroll-behavior: auto; }
-.composer { padding: 10px 24px 16px; border-top: 0; }
+.composer { padding: 10px var(--chat-content-gutter) 16px; border-top: 0; }
 .composer-inner {
   position: relative;
-  max-width: 820px;
+  max-width: var(--chat-content-width);
   min-height: 82px;
   margin: 0 auto;
   padding: 7px 9px 8px;
@@ -2499,6 +2510,7 @@ html, body {
 .composer-toolbar-start,
 .composer-toolbar-end { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .attachment-preview { width: 100%; max-width: none; margin: 0 0 4px; }
+.attachment-preview[hidden] { display: none; }
 .pending-attachment { background: var(--bg-soft); }
 .composer-model-select { display: none; }
 .composer-model-picker { position: relative; display: block; min-width: 0; }
@@ -2682,6 +2694,9 @@ html, body {
 .attachment-image-dialog-content { position: relative; width: 100%; height: 100%; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; place-items: center; }
 .attachment-image-dialog img { max-width: 100%; max-height: 100%; min-height: 0; border-radius: 10px; object-fit: contain; box-shadow: 0 16px 56px color-mix(in srgb, #000 45%, transparent); }
 .attachment-image-dialog p { margin: 0; color: #fff; font-size: 12px; }
+.attachment-image-dialog p a { margin-inline-start: 6px; color: inherit; text-decoration: underline; }
+.markdown-body img[data-markdown-image] { cursor: zoom-in; }
+.markdown-body .markdown-image-fallback { margin-inline-start: 6px; }
 .attachment-image-dialog-close { position: absolute; z-index: 1; top: -12px; right: -12px; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 50%; background: color-mix(in srgb, #171821 88%, transparent); color: #fff; cursor: pointer; }
 .attachment-image-dialog-close svg { width: 16px; height: 16px; }
 .attachment-image-dialog-nav { position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, #171821 88%, transparent); color: #fff; cursor: pointer; }

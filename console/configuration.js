@@ -11,7 +11,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "remote-agents-4";
+const CONFIGURATION_ASSET_VERSION = "remote-agent-composer";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -138,7 +138,7 @@ async function loadAdminScripts() {
   try {
     const loaded = Promise.all([
       ...scripts.map(loadClassicScript),
-      import("./configuration/remote-agents.js?v=remote-agent-option-hints"),
+      import("./configuration/remote-agents.js?v=remote-agent-workdir"),
     ]).then(async () => {
       if (hasExecutionError) return;
       // These scripts arrived after the browser's original DOMContentLoaded.

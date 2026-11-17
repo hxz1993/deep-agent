@@ -284,7 +284,7 @@ test("输入框提供附件入口和圆环预算且不再暴露手动压缩", ()
   assert.match(workspaceCss, /\.context-budget-badge \{[\s\S]*width: 14px;[\s\S]*height: 14px;/);
   assert.match(workspaceCss, /\.attach-btn \{[^}]*width: 16px;[^}]*height: 16px;/);
   assert.match(workspaceCss, /\.attach-btn svg \{[^}]*width: 16px;[^}]*height: 16px;/);
-  assert.match(workspaceCss, /\.composer \{[^}]*padding: 10px 24px 16px;[^}]*border-top: 0;/);
+  assert.match(workspaceCss, /\.composer \{[^}]*padding: 10px var\(--chat-content-gutter\) 16px;[^}]*border-top: 0;/);
   assert.match(workspaceCss, /\.composer-model-picker\.open \.composer-model-trigger \{[^}]*background: var\(--bg-hover\);[^}]*box-shadow: none;/);
   assert.match(workspaceCss, /\.composer-icon-btn:focus-visible \{[^}]*background: var\(--bg-hover\);[^}]*box-shadow: none;/);
   assert.match(workspaceCss, /#input \{[^}]*font-size: 13px;[^}]*line-height: 18px;/);

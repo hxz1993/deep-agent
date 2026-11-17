@@ -43,11 +43,7 @@ export function isPlanningToolEvent(event = {}) {
 }
 
 export function toolResultPresentation(result = {}) {
-  const remote = result.metadata?.remote_agent?.status;
-  if (remote === "input_required") return { status: "pending", label: "待补答", className: "tool-status-pending" };
-  if (remote === "submitted" || remote === "working") return { status: "running", label: "远端执行中", className: "tool-status-pending" };
-  if (remote === "unknown") return { status: "failed", label: "结果未知", className: "tool-status-error" };
-  const values = [result.outcome, result.status, remote];
+  const values = [result.outcome, result.status];
   if (values.some((value) => ['interrupted', 'cancelled', 'canceled'].includes(value))) {
     return { status: 'interrupted', label: '已中断', className: 'tool-status-interrupted' };
   }

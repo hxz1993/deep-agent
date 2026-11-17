@@ -212,7 +212,7 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
             "Do not invent answers. After the user replies, use answer_task for the chosen pending question. "
             "For a restored pending question use delegate_task with resume set to its original task ID. "
             "Use delegate_task with resume for a new question in a completed remote conversation. "
-            "Present the result and its file references together. Use remote_task_result only to recover "
+            "Use remote_task_result only to recover "
             "a missing result or retry retrieval of unavailable files."
         )
 

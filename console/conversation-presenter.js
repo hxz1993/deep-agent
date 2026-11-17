@@ -3,8 +3,6 @@ import { mountStructuredOutput, serializeStructuredOutput } from "./structured-o
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20261103-view-image1";
-import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
-import { findViewImageResult, renderViewImageResult } from "./view-image.js?v=20261103-view-image3";
 import { isPlanningToolEvent, isRemoteAgentToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=remote-agents-1";
 
 // No controller imports or initialization: each host owns its DOM and capabilities.
@@ -612,17 +610,6 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       previousResult?.remove();
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
-      const imageOptions = { toolName: data.tool || block.dataset.toolName, metadata: data.metadata, attachmentUrl };
-      const media = renderViewImageResult(data.result, { attachmentUrl, ...imageOptions })
-        || renderWebImagePreview(data.result, { className: "tool-web-image-preview" });
-      // File and image controls remain available without mounting the raw result.
-      let artifactsHost = block.querySelector("[data-tool-artifacts]");
-      if (!artifactsHost) {
-        artifactsHost = document.createElement("div");
-        artifactsHost.dataset.toolArtifacts = "1";
-        block.insertBefore(artifactsHost, body);
-      }
-      artifactsHost.innerHTML = `${renderToolResultArtifacts(data.artifacts, { hideGeneratedFiles: isRemoteAgent })}${media || ""}${isRemoteAgent ? "" : renderLocalFileDownload(data.result, data.artifacts, imageOptions)}`;
       const remote = data.metadata?.remote_agent;
       if (!readOnly && onRemoteTaskReply && typeof remote?.id === "string") {
         for (const previous of messages.querySelectorAll("[data-remote-task-reply]")) {
@@ -639,17 +626,16 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
             reply.remove();
             updateProcessDisclosure();
           }, { once: true });
-          artifactsHost.appendChild(reply);
+          block.insertBefore(reply, body);
         }
       }
-      res.innerHTML = media ? "" : `<div class="label" style="margin-top:8px">结果</div>
+      res.innerHTML = `<div class="label" style="margin-top:8px">结果</div>
         <div data-tool-result-content=""></div>`;
       body.appendChild(res);
       const details = toolDetailStates.get(block);
       if (details) {
         details.result = data.result;
-        details.imageOptions = imageOptions;
-        details.resultDirty = !media;
+        details.resultDirty = true;
         details.codeState = codeState;
       }
       if (block.classList.contains("open")) hydrateToolDetails(block);
@@ -722,7 +708,7 @@ function hydrateToolDetails(block) {
   if (state.resultDirty) {
     const host = block.querySelector("[data-tool-result-content]");
     if (host) {
-      host.innerHTML = renderToolResult(state.result, state.imageOptions);
+      host.innerHTML = renderToolResult(state.result);
       window.DeepAgentMarkdown?.restoreCodeState?.(host, state.codeState);
       state.codeState = null;
     }
@@ -737,88 +723,12 @@ function pretty(v) {
   try { return JSON.stringify(v, null, 2); } catch (_) { return String(v); }
 }
 
-function renderToolResult(result, imageOptions = {}) {
-  const imageResults = renderViewImageResult(result, { attachmentUrl, ...imageOptions });
-  if (imageResults) return imageResults;
-  const imagePreview = renderWebImagePreview(result, { className: "tool-web-image-preview" });
-  if (imagePreview) return imagePreview;
+function renderToolResult(result) {
   if (typeof result === "string") {
     return `<div class="md-content tool-result-md markdown-body">${renderMarkdown(result)}</div>`;
   }
   return window.DeepAgentJson?.renderBlock(result, { ariaLabel: "工具结果 JSON" })
     || `<pre>${escapeHtml(pretty(result))}</pre>`;
-}
-
-function findLocalFileResult(value) {
-  if (Array.isArray(value)) {
-    for (const child of value) {
-      const found = findLocalFileResult(child);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (!value || typeof value !== "object") return null;
-  const fileId = String(value.file_id || "");
-  if (fileId.startsWith("local_")) {
-    return { fileId, fileName: value.file_name || fileId };
-  }
-  for (const child of Object.values(value)) {
-    const found = findLocalFileResult(child);
-    if (found) return found;
-  }
-  return null;
-}
-
-function renderLocalFileDownload(result, artifacts = [], imageOptions = {}) {
-  if (findViewImageResult(result, imageOptions)) return "";
-  if (imageOptions.toolName === "remote_task_result" && imageOptions.metadata?.remote_agent) return "";
-  if (artifacts.some((item) => item?.kind === "sandbox_output")) return "";
-  const file = findLocalFileResult(result);
-  if (!file) return "";
-  const href = window.serviceUrl(
-    `api/v1/local-files/${encodeURIComponent(file.fileId)}/download`,
-  );
-  return `<a class="local-file-download" href="${escapeHtml(href)}" download>${lucideIcon("download")}<span>${escapeHtml(file.fileName)}</span></a>`;
-}
-
-function renderToolResultArtifacts(artifacts, { allowPlatformDownload = false, hideGeneratedFiles = false } = {}) {
-  if (!Array.isArray(artifacts) || artifacts.length === 0) return "";
-  const overflow = artifacts.filter((item) => item?.kind !== "sandbox_output");
-  const generated = hideGeneratedFiles ? [] : artifacts.filter((item) => item?.kind === "sandbox_output");
-  const totalBytes = overflow.reduce(
-    (total, item) => total + (Number.isFinite(Number(item?.byte_size)) ? Number(item.byte_size) : 0),
-    0,
-  );
-  const size = totalBytes > 0 ? ` · ${formatArtifactBytes(totalBytes)}` : "";
-  const overflowHtml = overflow.length
-    ? `<div class="tool-result-artifact">${lucideIcon("archive")}<span>完整结果已外置${escapeHtml(size)}，当前展示预览；Agent 可按需读取。</span></div>`
-    : "";
-  const generatedHtml = generated.length
-    ? `<div class="generated-file-list"><div class="generated-file-heading">${lucideIcon("files")}<span>生成文件</span></div>${generated.map(artifact => renderGeneratedFileArtifact(artifact, { allowPlatformDownload })).join("")}</div>`
-    : "";
-  return `${overflowHtml}${generatedHtml}`;
-}
-
-function renderGeneratedFileArtifact(artifact, { allowPlatformDownload = false } = {}) {
-  const fileId = String(artifact?.file_id || artifact?.artifact_id || "");
-  const fileName = String(artifact?.file_name || fileId || "未命名文件");
-  const details = [artifact?.mime, formatArtifactBytes(artifact?.byte_size)].filter(Boolean).join(" · ");
-  const downloadUrl = fileId.startsWith("local_")
-    ? attachmentUrl({ id: fileId, name: fileName, mime: artifact?.mime })
-      || window.serviceUrl(`api/v1/local-files/${encodeURIComponent(fileId)}/download`)
-    : allowPlatformDownload && fileId ? attachmentUrl({ id: fileId, name: fileName, mime: artifact?.mime }) : null;
-  const download = downloadUrl
-    ? `<a href="${escapeHtml(downloadUrl)}" download title="下载文件">${lucideIcon("download")}</a>`
-    : "";
-  return `<div class="generated-file-item"><span class="generated-file-icon">${lucideIcon("file-output")}</span><span class="generated-file-copy"><strong>${escapeHtml(fileName)}</strong>${details ? `<small>${escapeHtml(details)}</small>` : ""}<code title="${escapeHtml(fileId)}">${escapeHtml(fileId)}</code></span><span class="generated-file-actions">${download}<button type="button" data-copy-file-id="${escapeHtml(fileId)}" title="复制 File ID">${lucideIcon("copy")}</button></span></div>`;
-}
-
-function formatArtifactBytes(value) {
-  const bytes = Number(value);
-  if (!Number.isFinite(bytes) || bytes <= 0) return "";
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${Math.round(bytes)} B`;
 }
 
 function formatMessageTime(iso) {
@@ -866,5 +776,5 @@ function renderMarkdownDiagrams(root) {
   return window.DeepAgentMarkdown?.renderDiagrams(root) ?? Promise.resolve();
 }
 
-  return { createMessageActions, addMessage, renderMessageContextRefs, renderMessageAttachments, processElapsedSecondsBetween, createAssistantMessage, pretty, renderToolResult, findLocalFileResult, renderLocalFileDownload, renderToolResultArtifacts, renderGeneratedFileArtifact, formatArtifactBytes, formatMessageTime, hasNonEmptyArgs, setToolBlockExpanded, escapeHtml, renderMarkdown, renderMarkdownBody, renderMarkdownDiagrams };
+  return { addMessage, renderMessageAttachments, createAssistantMessage, pretty, hasNonEmptyArgs, setToolBlockExpanded, escapeHtml };
 }

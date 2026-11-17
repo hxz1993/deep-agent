@@ -113,8 +113,7 @@ Responses 通过既有 tags 中的 `openai_responses` 保存；不是能力复�
 ModelRetry 撤回的工具通过 SSE `tool_call_removed` 删除直播项，History 的 `status=removed`
 同样不进入普通对话正文，避免重新打开后显示成完成；原始 History 和轨迹仍保留撤回事实。
 
-`execute_python`返回的生成文件在聊天工具卡与轨迹中展示名称、MIME、大小和可复制File ID；本地
-FileStore复用现有下载链接，平台FileStore不新增代理下载接口。页面不得渲染Base64或宿主临时路径。
+生成文件、工具图片预览和下载入口从轨迹详情查看。对话的工具区保留可展开的原始结果，文件交付和图片展示使用回复正文的 FileStore 链接。
 
 v0.3.12 的配置卡只读展示工具披露策略：附件包为“有附件时可用”，大型 MCP 为“自动预选 Top 3 / 搜索 Top 5”。聊天中的 `search_tools` 是运行诊断过程，默认折叠显示为“搜索MCP工具”，不伪装成业务 MCP 工具。
 

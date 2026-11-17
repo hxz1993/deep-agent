@@ -83,13 +83,24 @@
       card.innerHTML = `${inGuide ? "" : accessToolbar("mcp")}<p>当前环境暂未提供 MCP 接入地址。</p>`;
       return;
     }
-    const headers = JSON.stringify({ app: "<App ID>", "X-Deepfos-Key": "<API Key>" }, null, 2);
+    const scope = rows.find((row) => row.agent_code === selected)?.scope.apps;
+    const app = scope?.mode === "selected" && scope.items.length === 1 ? scope.items[0].app_id : "<App ID>";
+    const config = JSON.stringify({
+      mcpServers: {
+        "deepagent-agents": {
+          type: "streamableHttp",
+          url: endpoint,
+          headers: { app, "X-Deepfos-Key": "<API Key>" },
+        },
+      },
+    }, null, 2);
     const instructions = [
-      "请在当前 Agent 客户端中添加名为 DeepAgent 的 MCP 连接，选择 Streamable HTTP。",
-      `MCP 地址：${endpoint}`,
-      `请求 Header 示例：\n${headers}`,
+      "请在当前 Agent 客户端中添加下面的 MCP 配置。",
+      config,
       "配置前，先引导用户确认 App ID 并选择一种鉴权凭据。推荐使用有权访问该应用的 DeepFOS API Key，填入 X-Deepfos-Key。使用平台 Token 时，填入 token 或 Authorization: Bearer <Token>。请引导用户在客户端的安全凭据设置中提供，或自行填到本地配置的占位符里，避免在对话中粘贴或回显真实凭据。",
       "连接后调用 list_agents 验证。目录展示所有已启用的发布，发起任务时仍会检查应用权限和发布范围。",
+      "用 submit_task 发起任务，用 get_task 查看正文和产物。附件传 name、media_type 和 data_base64，单次解码后最多 8 MiB。任务待补答时，用 reply_task 传原任务 ID、question_id 作为 reply_to 和新的 message_id。",
+      "对 get_task 或 get_artifact 返回的完整 download_url 发 HTTP GET，携带 MCP 连接的原 app 和鉴权 Header。若客户端无法携带这些 Header，至多 20 MiB 的文件可用 get_artifact(format=base64)，从文本 JSON 读取 data_base64 并解码保存。更大的文件走下载链接。",
       "如果地址指向 localhost 或 127.0.0.1，请在同一台电脑上运行客户端。云端客户端需要可达的服务地址。",
     ].join("\n\n");
     const guideButton = copyButton(instructions, "复制 Agent 接入指引", "compact");
@@ -101,13 +112,9 @@
     card.innerHTML = `${accessToolbar("mcp", guideButton)}
       <div class="agent-service-card-option agent-service-card-options">
         <section>
-          <div class="agent-service-card-heading"><h5>MCP 地址</h5>${copyButton(endpoint, "复制地址")}</div>
-          <pre class="agent-service-client-snippet">${escapeHtml(endpoint)}</pre>
-          <p class="agent-service-access-help">Streamable HTTP · 填写应用 ID 和一种凭据</p>
-        </section>
-        <section>
-          <div class="agent-service-card-heading"><h5>请求 Header</h5>${copyButton(headers, "复制示例")}</div>
-          <pre class="agent-service-client-snippet">${escapeHtml(headers)}</pre>
+          <div class="agent-service-card-heading"><h5>MCP 配置</h5><span>${copyButton(endpoint, "复制地址")}${copyButton(config, "复制配置")}</span></div>
+          <pre class="agent-service-client-snippet">${escapeHtml(config)}</pre>
+          <p class="agent-service-access-help">填写应用 ID 和一种凭据。</p>
         </section>
       </div>`;
   }

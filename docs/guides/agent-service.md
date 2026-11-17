@@ -6,7 +6,7 @@ Console 的「服务发布 → 发布 Agent」可以为现有 Agent 新建发布
 
 ## 部署与本地启动
 
-- `DEEP_AGENT_AGENT_SERVICE_ADMIN_USERS` 填逗号分隔的平台用户 ID。发布管理同时要求该名单和 Console 管理权限。名单为空时关闭发布管理。
+- 发布管理沿用 Console 管理权限。选择现有 Agent 后即可保存，模型、Skill 和工具沿用 Agent 自身配置，由公共 Runner 在调用时装配。
 - `DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL` 填调用方可达的 HTTPS 基址。开发机可使用 `http://127.0.0.1:8002`。部署在网关子路径下时，填带该路径的基址。
 - Task 和 Context 由当前 API 进程管理。首期使用单 API 进程、单实例。重启会清空近期任务和旧 Task、Context，现有会话及其文件沿用原保留策略。
 - 从仓库根目录使用独立的本地 SQLite、FileStore、渠道令牌和 Profile。该 Profile 的渠道端口用 8012，并停用复制过来的渠道账号，以免重复收消息。
@@ -58,16 +58,21 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 在 Console「发布 Agent → MCP」复制当前环境的 Streamable HTTP 地址和请求 Header 示例。将 `app` 填为应用 ID。平台 Token 可用 `token` 或 `Authorization: Bearer <Token>`，DeepFOS API Key 用 `X-Deepfos-Key`。只传一个鉴权 Header。服务端解析所属空间。把「复制 Agent 接入指引」的内容发给本地 Agent，由它配置宿主连接，凭据通过宿主设置提供。回环地址仅供同机客户端使用。
 
-调用 `list_agents` 验证连接并取得 Agent 编码。目录包含所有启用的发布，`submit_task` 会单独检查应用权限与发布范围。`get_task` 查询结果，`list_tasks` 查看近期任务，`reply_task` 用原 Task ID 和问题 ID 补材料，`cancel_task` 取消任务。`get_artifact` 返回资源引用及鉴权下载路径。MCP 资源读取限 1 MiB，完整文件通过下载路径获取，仍需传凭据和 App。
+| 工具 | 用途 |
+| --- | --- |
+| `list_agents` | 查找已启用的发布及 Agent 编码 |
+| `submit_task` | 发起任务，或用原 `context_id` 在已完成的会话中继续 |
+| `get_task` | 查询状态、正文、待答问题和文件的完整下载 URL |
+| `list_tasks` | 查询指定发布在当前应用下的近期任务，支持按状态或会话筛选和续页 |
+| `reply_task` | 用原 `task_id`、`question_id` 作为 `reply_to`、新 `message_id` 回复待答问题 |
+| `cancel_task` | 请求停止未结束的任务，根据返回状态确认 |
+| `get_artifact` | 按 `task_id` 和 `artifact_id` 返回单份文件的下载地址，可显式请求 Base64 |
 
-同一凭据主体和应用可以在 A2A 与 MCP 间继续同一个任务。任务 ID 保持不变。
+`submit_task` 和 `reply_task` 可以附带文件，每项传 `name`、`media_type` 和 `data_base64`，解码后的附件总量最多 8 MiB。重试同一次提交时沿用原消息 ID 和内容。同一凭据主体和应用可以在 A2A 与 MCP 间继续同一个任务。
 
-支持浏览 MCP 资源的客户端可以用 `resources/list` 发现两份调用指南，再用 `resources/read` 读取示例：
+从 `get_task` 的 `artifacts` 选择文件，或按 ID 调用 `get_artifact`。默认返回完整 `download_url`，客户端携带 MCP 连接的原 `app` 和鉴权 Header 发 HTTP GET。客户端无法携带这些 Header 时，可对至多 20 MiB 的文件显式传 `format="base64"`。从同一次响应的 `content[].text` 解析 JSON，解码 `data_base64` 后按 `name` 保存原件。超过 20 MiB 时始终返回 `delivery=http_download` 和完整下载地址。服务基址取 `DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL`。基址缺失或无效时，`get_task` 省略下载地址，`get_artifact` 的链接模式返回配置错误。
 
-- `deepagent://guides/agent-tasks` 覆盖发现 Agent、提交、查看状态、补材料和在同一会话下追问。
-- `deepagent://guides/attachments-artifacts` 覆盖发送文件、读取任务结果和下载文件。
-
-任务产物通过 `get_artifact` 按任务授权取得资源地址。
+支持 MCP Resources 的客户端可用 `resources/list` 发现统一指南 `deepagent://guides/mcp`，通过 `resources/read` 查看七个工具、附件、补答、续跑和取件示例。
 
 CLI、Python SDK 和通用 HTTP 调用是待评审草案，本版仅在 Console 保留入口占位。草案可能改写或移除，当前服务仅注册 A2A、MCP 及必要的鉴权取件接口。
 

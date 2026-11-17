@@ -374,13 +374,6 @@ test("共享动作入口恢复 Deferred 时仍补齐 UI 工具元数据", () => 
   );
 });
 
-test("大工具结果显示外置提示并保留预览", () => {
-  assert.match(chatSource, /renderToolResultArtifacts\(data\.artifacts(?:,|\))/);
-  assert.match(chatSource, /完整结果已外置/);
-  assert.match(chatSource, /Agent 可按需读取/);
-  assert.match(workspaceCss, /\.tool-result-artifact/);
-});
-
 test("工具状态与远程任务状态独立，普通 MCP 的同名工具保持原样", () => {
   assert.equal(isRemoteAgentToolEvent({ tool: "delegate_task" }), true);
   assert.equal(isRemoteAgentToolEvent({ tool: "delegate_task", source: "mcp" }), false);
@@ -396,15 +389,6 @@ test("无参数工具显示空对象且参数和结果 JSON 不重复绘制边�
     workspaceCss,
     /\.tool-body > \.json-view\.args,[\s\S]*?\.tool-body \[data-tool-result\] > \.json-view\s*\{[\s\S]*?border:\s*0;/,
   );
-});
-
-test("Python 生成文件显示文件信息、下载与可复制 File ID", () => {
-  assert.match(chatSource, /item\?\.kind === "sandbox_output"/);
-  assert.match(chatSource, /renderGeneratedFileArtifact/);
-  assert.match(chatSource, /data-copy-file-id/);
-  assert.match(chatSource, /api\/v1\/local-files/);
-  assert.match(workspaceCss, /\.generated-file-item/);
-  assert.match(workspaceCss, /\.generated-file-actions/);
 });
 
 test("任务计划在消息区底部浮层展示最新快照", () => {

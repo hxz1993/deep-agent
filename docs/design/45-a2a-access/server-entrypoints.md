@@ -61,11 +61,11 @@ HTTP 路径均相对于 `/api/v1/agent-service`。CLI 示例省略 `deepfos-agen
 | 原任务补材料 | `SendMessage` 带原 Task ID | `POST /tasks/{task_id}/messages` | `reply_task(task_id, text, …)` | `tasks reply <id> --text …` | `reply(task_id, text=…)` |
 | 取消任务 | `CancelTask` | `POST /tasks/{task_id}/cancel` | `cancel_task(task_id)` | `tasks cancel <id>` | `cancel(task_id)` |
 | 等待任务变化 | `SendStreamingMessage` / `SubscribeToTask` | 首版通过查询接口轮询 | `get_task(task_id)` | `tasks wait <id>` | `wait(task_id, timeout=…)` |
-| 读取文件产物 | Task Artifact 引用及授权下载 | `GET /tasks/{task_id}/artifacts/{artifact_id}/download` | `get_artifact(task_id, artifact_id)` 返回元数据与资源引用 | `artifacts download <id> <artifact> -o report.xlsx` | `download_artifact(task_id, artifact_id, destination=…)` |
+| 读取文件产物 | Task Artifact 引用及授权下载 | `GET /tasks/{task_id}/artifacts/{artifact_id}/download` | `get_task` 或 `get_artifact` 返回完整下载 URL，至多 20 MiB 可显式请求 Base64 | `artifacts download <id> <artifact> -o report.xlsx` | `download_artifact(task_id, artifact_id, destination=…)` |
 
 - MCP 的 `tools/list` 负责工具定义，业务目录由 `list_agents` 返回。发起和补答快速返回统一任务快照。Task ID 用于继续查询，Context ID 用于在原会话发起下一项任务。提交或补答携带稳定 `message_id`，同一次请求重试沿用该值。补材料时使用原 Task ID 和返回的问题标识。
 - MCP 工具返回结构化快照，包含状态、待补说明、文本／结构化结果及文件引用。CLI、SDK 等到终态或待输入／待鉴权就返回，等待超时保留 Task ID，任务仍可查询。已有 A2A SSE 照常使用。
-- CLI `--attach` 和 SDK `attachments=[Path(…)]` 由客户端读取文件并作为内联附件提交。MCP 宿主能传文件字节时用同一内联附件结构。服务端复用现有 MIME、数量和体积限制。MCP `get_artifact` 返回文件名、类型、大小和 `resource_link`，兼容宿主走授权 `resources/read` 取限量内容，完整大文件用同一鉴权下载接口流式读取。取件链接只带资源标识，调用时仍需配置的凭据和 App。 [MCP 工具结果与资源链接](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
+- CLI `--attach` 和 SDK `attachments=[Path(…)]` 由客户端读取文件并作为内联附件提交。MCP 使用同一内联附件结构，服务端复用现有 MIME、数量和体积限制。MCP 客户端默认用配置的凭据和 App 对返回的完整地址发起流式下载。显式传 `format="base64"` 且文件至多 20 MiB 时，`get_artifact` 在文本 JSON 中返回 `data_base64` 供客户端解码。
 
 例如用 `app: finops001` 调 `POST /agents/budget-variance-report/tasks`，HTTP 请求体与 MCP `submit_task` 使用相同的消息字段。MCP 把 `agent_code` 放在工具参数，HTTP 从路径取得。
 

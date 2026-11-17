@@ -109,20 +109,23 @@ test('saved history renders immediately without starting timers or delaying full
   assert.equal(h.markdown.at(-1).options.highlight, true);
 });
 
-test('folded tool data is parsed only when expanded while file download stays available', () => {
+test('tool results mount on expansion without injecting file cards or overflow banners', () => {
   const h = harness();
-  const result = { large: 'x'.repeat(100000) };
+  const result = { large: 'x'.repeat(100000), file_id: 'local_fixture', file_name: 'report.txt' };
   h.assistant.addToolCall({ tool: 'generate', tool_call_id: 'file', args: { query: 'a'.repeat(20000) } });
   h.assistant.addToolResult({ tool: 'generate', tool_call_id: 'file', result,
-    artifacts: [{ kind: 'sandbox_output', file_id: 'local_fixture', file_name: 'report.txt', mime: 'text/plain', byte_size: 100000 }],
+    artifacts: [
+      { kind: 'sandbox_output', file_id: 'local_fixture', file_name: 'report.txt', mime: 'text/plain', byte_size: 100000 },
+      { kind: 'tool_result_overflow', artifact_id: 'local_spill', byte_size: 275315 },
+    ],
   });
   assert.equal(h.json.length, 0);
   assert.equal(h.host.querySelectorAll('.args').length, 0);
-  assert.equal(h.host.querySelectorAll('.generated-file-item').length, 1);
-  assert.match(h.host.querySelector('[data-tool-artifacts]').innerHTML, /download/);
+  assert.equal(h.host.querySelector('[data-tool-artifacts]'), null);
   const block = h.host.querySelector('.tool-block');
   block.querySelector('.tool-head').click();
   assert.equal(h.json.length, 2); assert.equal(h.json[1], result);
+  assert.equal(block.querySelector('.generated-file-list, .local-file-download, .tool-result-artifact'), null);
   block.querySelector('.tool-head').click(); block.querySelector('.tool-head').click();
   assert.equal(h.json.length, 2, 'reopening unchanged details does not repeat parsing');
   h.assistant.complete('完成');

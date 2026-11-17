@@ -1,12 +1,12 @@
 """Environment-level MCP endpoint for published agents."""
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-import re
+from base64 import b64encode
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
+from typing import Literal
 from urllib.parse import urlsplit
 
 import anyio
@@ -20,9 +20,9 @@ from mcp.shared.exceptions import McpError
 from pydantic import ValidationError
 
 from deep_agent.agent_service.download import artifact_download
-from deep_agent.agent_service.mcp_guides import MCP_GUIDES
+from deep_agent.agent_service.mcp_guides import MCP_GUIDE, MCP_GUIDE_URI, MCP_INSTRUCTIONS
 from deep_agent.agent_service.public import (
-    HistoryLength, PublicInput, PublicTasks, ReplyInput, SubmitInput, TaskId, TaskQuery, task_error,
+    HistoryLength, PublicInput, PublicTasks, ReplyInput, SubmitInput, TaskId, TaskQuery, artifact_reference, task_error,
 )
 from deep_agent.agent_service.publications import AgentCode
 from deep_agent.agent_service.security import platform_caller, public_base_url
@@ -32,14 +32,9 @@ from deep_agent.core.context import AppContextDep
 
 router = APIRouter(prefix="/agent-service")
 tag = "agent-service"
-server = Server(
-    "deepagent-agents",
-    instructions="Use list_agents to discover enabled agents. Keep the task ID for polling or reply, "
-                 "and reuse the same message_id when retrying a submission. Use resources/list to "
-                 "discover call examples for tasks, supplemental input, attachments, and artifacts.",
-)
+server = Server("deepagent-agents", instructions=MCP_INSTRUCTIONS)
 current: ContextVar[PublicTasks] = ContextVar("agent_service_mcp")
-RESOURCE_LIMIT = 1024 * 1024
+INLINE_ARTIFACT_LIMIT = 20 * 1024 * 1024
 
 
 def mcp_base_url() -> str | None:
@@ -61,7 +56,7 @@ async def download(ctx: AppContextDep, request: Request, task_id: TaskId, artifa
     headers = await platform_caller(request)
     tasks = PublicTasks(ctx, headers, "mcp")
     try:
-        _, artifact = await tasks.artifact(task_id, artifact_id)
+        artifact = await tasks.artifact(task_id, artifact_id)
     except Exception as exc:
         error = task_error(exc)
         if error is exc:
@@ -92,25 +87,48 @@ class ReplyTool(ReplyInput):
 
 class ArtifactTool(TaskTool):
     artifact_id: TaskId
+    format: Literal["url", "base64"] = "url"
 
 
-async def artifact_tool(tasks: PublicTasks, args: ArtifactTool) -> dict:
-    result, _ = await tasks.artifact(args.task_id, args.artifact_id)
-    return result
+async def get_artifact(tasks: PublicTasks, args: ArtifactTool) -> dict:
+    artifact = await tasks.artifact(args.task_id, args.artifact_id)
+    if args.format == "url" or artifact.size > INLINE_ARTIFACT_LIMIT:
+        if not tasks.download_base_url:
+            raise HTTPException(503, "服务未配置有效的对外下载基址")
+        reference = artifact_reference(args.task_id, args.artifact_id, artifact, tasks.download_base_url)
+        return {**reference, "delivery": "http_download"}
+
+    metadata = artifact_reference(args.task_id, args.artifact_id, artifact)
+    with await tasks.service.open_artifact(artifact, tasks.headers) as handle:
+        data = await anyio.to_thread.run_sync(handle.read, artifact.size + 1)
+    if len(data) != artifact.size:
+        raise HTTPException(502, "文件大小与产物元数据不一致")
+    encoded = await anyio.to_thread.run_sync(b64encode, data)
+    return {**metadata, "delivery": "inline", "data_base64": encoded.decode("ascii")}
 
 
 TOOLS: dict[str, tuple[str, type[PublicInput], Callable[..., Awaitable[dict]]]] = {
-    "list_agents": ("List enabled Agent publications.", PublicInput, lambda tasks, _: tasks.list_agents()),
-    "submit_task": ("Send a message to a published Agent. Supply a stable message_id for safe retries.",
+    "list_agents": ("Discover enabled published Agents and their agent_code values.",
+                    PublicInput, lambda tasks, _: tasks.list_agents()),
+    "submit_task": ("Start a task with text, data or attachments. Use context_id to continue a completed conversation, "
+                    "and reuse the same message_id and payload on retry.",
                     SubmitTool, lambda tasks, a: tasks.submit(a.agent_code, a)),
-    "get_task": ("Read task status, results, and artifact references.",
+    "get_task": ("Read task status, output, and file artifacts. Use question_id to reply. Download selected files via "
+                 "HTTP GET to download_url using the MCP connection's app and authentication headers.",
                  GetTool, lambda tasks, a: tasks.get(a.task_id, a.history_length)),
-    "list_tasks": ("List recent tasks started for this Agent using the configured App.",
+    "list_tasks": ("List recent tasks for a published Agent in the configured App. Filter by state or context_id "
+                   "and pass next_cursor as cursor to continue.",
                    ListTool, lambda tasks, a: tasks.list_tasks(a.agent_code, a)),
-    "reply_task": ("Supply requested input to an existing task. Use the returned question_id as reply_to.",
+    "reply_task": ("Answer a task in input_required, using its task_id, question_id as reply_to, "
+                   "and a new message_id. Attachments can accompany the answer.",
                    ReplyTool, lambda tasks, a: tasks.reply(a.task_id, a)),
-    "cancel_task": ("Cancel a task.", TaskTool, lambda tasks, a: tasks.cancel(a.task_id)),
-    "get_artifact": ("Get an authorized file artifact reference.", ArtifactTool, artifact_tool),
+    "cancel_task": ("Request cancellation of an unfinished task by task_id and read the returned state.",
+                    TaskTool, lambda tasks, a: tasks.cancel(a.task_id)),
+    "get_artifact": ("Get a file's complete download_url by task_id and artifact_id (format=url by default). "
+                     "Download with the connection's app and authentication headers. If your client cannot send those "
+                     "headers, request format=base64 for a file up to 20 MiB. Decode data_base64 from the original "
+                     "text JSON and save the bytes under name. Larger files always return the download URL.",
+                     ArtifactTool, get_artifact),
 }
 
 
@@ -140,15 +158,11 @@ async def call_tool(name: str, arguments: dict):
     except Exception as exc:
         error = task_error(exc)
         return tool_error(error.status_code, error.detail)
-    # Some MCP hosts consume only the content blocks, including when a
-    # ResourceLink is present. Keep the download receipt in that channel too.
-    content: list[types.ContentBlock] = [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
+    content = types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))
     if name == "get_artifact":
-        content.append(types.ResourceLink(
-            type="resource_link", name=result["name"], uri=result["resource_uri"],
-            mimeType=result["media_type"], size=result["size"],
-        ))
-    return types.CallToolResult(content=content, structuredContent=result)
+        # Keep file bytes only in the text JSON so clients receive a single payload.
+        result.pop("data_base64", None)
+    return types.CallToolResult(content=[content], structuredContent=result)
 
 
 def tool_error(status_code: int, detail: str):
@@ -160,36 +174,17 @@ def tool_error(status_code: int, detail: str):
 
 @server.list_resources()
 async def list_resources():
-    return [
-        types.Resource(uri=uri, name=name, description=description, mimeType="text/markdown")
-        for uri, (name, description, _) in MCP_GUIDES.items()
-    ]
+    return [types.Resource(
+        uri=MCP_GUIDE_URI, name="发布 Agent MCP 接入指南",
+        description="工具示例、任务续跑、附件与产物", mimeType="text/markdown",
+    )]
 
 
 @server.read_resource()
 async def read_resource(uri):
-    uri = str(uri)
-    if guide := MCP_GUIDES.get(uri):
-        return [ReadResourceContents(guide[2], "text/markdown")]
-    match = re.fullmatch(r"deepagent://tasks/([a-f0-9]{32})/artifacts/([a-f0-9]{32})", uri)
-    try:
-        if not match:
-            raise HTTPException(404, "未知产物引用")
-        tasks = current.get()
-        _, artifact = await tasks.artifact(*match.groups())
-        if artifact.size > RESOURCE_LIMIT:
-            raise HTTPException(413, "请使用鉴权下载接口获取完整文件")
-        handle = await tasks.service.open_artifact(artifact, tasks.headers)
-        try:
-            content = await asyncio.to_thread(handle.read, RESOURCE_LIMIT + 1)
-        finally:
-            handle.close()
-        if len(content) != artifact.size:
-            raise HTTPException(502, "文件大小与产物元数据不一致")
-        return [ReadResourceContents(content, artifact.mime)]
-    except Exception as exc:
-        error = task_error(exc)
-        raise McpError(types.ErrorData(code=-32002, message=str(error.detail), data={"status": error.status_code})) from exc
+    if str(uri) == MCP_GUIDE_URI:
+        return [ReadResourceContents(MCP_GUIDE, "text/markdown")]
+    raise McpError(types.ErrorData(code=-32002, message="未知资源", data={"status": 404}))
 
 
 class MCPResponse(Response):
@@ -231,7 +226,8 @@ class MCPResponse(Response):
 async def mcp(request: Request, ctx: AppContextDep):
     origin = request.headers.get("origin")
     allowed_origins = set()
-    if base := mcp_base_url():
+    base = mcp_base_url()
+    if base:
         public = urlsplit(base)
         allowed_origins.add(f"{public.scheme}://{public.netloc}")
     if request.url.hostname in {"localhost", "127.0.0.1", "::1"}:
@@ -240,4 +236,4 @@ async def mcp(request: Request, ctx: AppContextDep):
         raise HTTPException(403, "MCP Origin 不受信任")
     headers = await platform_caller(request, require_app=False)
     body = await bounded_body(request) if request.method == "POST" else b""
-    return MCPResponse(PublicTasks(ctx, headers, "mcp"), body)
+    return MCPResponse(PublicTasks(ctx, headers, "mcp", download_base_url=base), body)

@@ -20,12 +20,10 @@ import {
   assistantActionsFromSse,
   isPlanningToolEvent,
   planPanelState,
-  processDisclosureLabel,
-  toolResultPresentation,
 } from "./assistant-presentation.js?v=20261103-view-image1";
 import { createTrajectoryController } from "./trajectory.js?v=20261106-ptc-source";
-import { attachmentPreviewUrl, bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20261103-view-image1";
-import { bindWebImagePreviewFallback, renderWebImagePreview } from "./web-image.js?v=20260912-21";
+import { bindAttachmentImagePreviews, createImageGallery } from "./attachment-preview.js?v=20261103-view-image1";
+import { bindWebImagePreviewFallback } from "./web-image.js?v=20260912-21";
 import { bindViewImagePreviews } from "./view-image.js?v=20261103-view-image3";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import {
@@ -546,30 +544,6 @@ function init() {
     if (el.newChatMenu?.classList.contains("hidden")) return;
     if (e.target.closest("#newChatMenu, #newChatBtn, #newChatBtnWide")) return;
     closeNewChatMenu();
-  });
-  document.addEventListener("click", (e) => {
-    if (!document.getElementById("workspaceGrid")?.contains(e.target)) return;
-    const button = e.target.closest("[data-copy-file-id]");
-    if (!button) return;
-    const fileId = button.dataset.copyFileId;
-    if (!fileId) return;
-    button.disabled = true;
-    copyTextToClipboard(fileId).then(() => {
-      button.classList.add("copied");
-      button.title = "File ID 已复制";
-      button.innerHTML = lucideIcon("check");
-      refreshLucideIcons();
-      window.setTimeout(() => {
-        if (!button.isConnected) return;
-        button.classList.remove("copied");
-        button.title = "复制 File ID";
-        button.innerHTML = lucideIcon("copy");
-        button.disabled = false;
-        refreshLucideIcons();
-      }, 1500);
-    }).catch(() => {
-      button.disabled = false;
-    });
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -3007,13 +2981,7 @@ function renderUsage(usage) {
 }
 
 /* --------------------------- 消息渲染 --------------------------- */
-function createMessageActions(...args) { return getConversationPresenter().createMessageActions(...args); }
-
 function addMessage(...args) { return getConversationPresenter().addMessage(...args); }
-
-function renderMessageContextRefs(...args) { return getConversationPresenter().renderMessageContextRefs(...args); }
-
-function renderMessageAttachments(...args) { return getConversationPresenter().renderMessageAttachments(...args); }
 
 async function onFilesSelected(e) {
   const files = Array.from(e.target.files || []);
@@ -3162,8 +3130,6 @@ function addSystemNote(text) {
   refreshLucideIcons();
   scrollToBottom();
 }
-
-function processElapsedSecondsBetween(...args) { return getConversationPresenter().processElapsedSecondsBetween(...args); }
 
 function createAssistantMessage(...args) { return getConversationPresenter().createAssistantMessage(...args); }
 
@@ -3441,8 +3407,6 @@ function formatDateSeparator(iso) {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-function formatMessageTime(...args) { return getConversationPresenter().formatMessageTime(...args); }
-
 function lastUserText() {
   const rows = el.messages.querySelectorAll(".msg-row.user .bubble");
   return rows.length ? rows[rows.length - 1].textContent : "";
@@ -3462,29 +3426,11 @@ function hasNonEmptyArgs(...args) { return getConversationPresenter().hasNonEmpt
 
 function pretty(...args) { return getConversationPresenter().pretty(...args); }
 
-function renderToolResult(...args) { return getConversationPresenter().renderToolResult(...args); }
-
-function findLocalFileResult(...args) { return getConversationPresenter().findLocalFileResult(...args); }
-
-function renderLocalFileDownload(...args) { return getConversationPresenter().renderLocalFileDownload(...args); }
-
-function renderToolResultArtifacts(...args) { return getConversationPresenter().renderToolResultArtifacts(...args); }
-
-function renderGeneratedFileArtifact(...args) { return getConversationPresenter().renderGeneratedFileArtifact(...args); }
-
-function formatArtifactBytes(...args) { return getConversationPresenter().formatArtifactBytes(...args); }
-
 function escapeHtml(...args) { return getConversationPresenter().escapeHtml(...args); }
 
 function initMarkdown() {
   window.DeepAgentMarkdown?.init();
 }
-
-function renderMarkdown(...args) { return getConversationPresenter().renderMarkdown(...args); }
-
-function renderMarkdownBody(...args) { return getConversationPresenter().renderMarkdownBody(...args); }
-
-function renderMarkdownDiagrams(...args) { return getConversationPresenter().renderMarkdownDiagrams(...args); }
 
 async function selectAgent(agentId) {
   if (!agentId || !state.agents.some((agent) => agent.id === agentId)) return false;

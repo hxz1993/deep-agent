@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Mapping
 from unittest.mock import AsyncMock, patch
 
@@ -144,7 +143,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
             ["agent-1"],
         )
 
-    async def test_publication_backup_roundtrip_requires_environment_admin(self) -> None:
+    async def test_publication_backup_roundtrip_keeps_saved_app_scope(self) -> None:
         root = Path(self._tmp.name)
         source = root / "source.db"
         with sqlite3.connect(source) as connection:
@@ -159,18 +158,7 @@ class ConfigurationImportApiTests(unittest.IsolatedAsyncioTestCase):
             environment="test", output_root=root / "publication-backup",
         )
         self.backup_path = backup.path
-        with patch("deep_agent.api.v1.configuration_import.require_request_user", return_value="fixture-admin"):
-            with patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_ADMIN_USERS": ""}):
-                rejected = await self._post(apply=True, confirm=True)
-            self.assertEqual(rejected.status_code, 403, rejected.text)
-            with (
-                patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_ADMIN_USERS": "fixture-admin"}),
-                patch("deep_agent.api.v1.agent_service.IntegrationAppDirectory.available_apps",
-                      return_value=[SimpleNamespace(app_id="budget001", space_id="budget")]),
-            ):
-                imported = await self._post(
-                    apply=True, confirm=True, headers={"authorization": "Bearer fixture-admin"},
-                )
+        imported = await self._post(apply=True, confirm=True)
         self.assertEqual(imported.status_code, 200, imported.text)
         row = await PublicationStore(get_context().db_session_factory).get("fixture")
         self.assertEqual((row.id, row.agent_id), ("publication-id", "agent-1"))

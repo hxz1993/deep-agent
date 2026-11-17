@@ -506,7 +506,7 @@
                   <tr><th scope="row">查询结果 / 取消</th><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td><code>get_task</code>、<code>list_tasks</code>、<code>cancel_task</code></td><td>查询、等待及取消</td></tr>
                   <tr><th scope="row">获取进度</th><td><code>SendStreamingMessage</code>、<code>SubscribeToTask</code></td><td>轮询 <code>get_task</code></td><td>等待及查询状态</td></tr>
                   <tr><th scope="row">发送附件</th><td>消息 Part 传 Base64 字节</td><td><code>attachments</code> 传 Base64 字节</td><td>读取本地文件后随任务发送</td></tr>
-                  <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>get_artifact</code>，读取资源或鉴权下载</td><td>读取结果并下载文件</td></tr>
+                  <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>get_task</code> 或 <code>get_artifact</code> 返回鉴权下载链接</td><td>读取结果并下载文件</td></tr>
                 </tbody>
               </table>
             </div>
@@ -544,7 +544,7 @@
                 <tr><td><code>Agent Card · HTTP GET</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>每个发布有独立 Card URL，通过平台鉴权后读取。</td></tr>
                 <tr><td><code>SendMessage</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>可等待结果或立即获得 Task ID。补材料时带原 Task ID。</td></tr>
                 <tr><td><code>SendStreamingMessage</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>断开连接后任务继续执行。</td></tr>
-                <tr><td><code>GetTask</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>可查看当前状态和已交付产物。任务超过保留期后不可查询。</td></tr>
+                <tr><td><code>GetTask</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>查看状态和产物。文件产物包含完整下载 URL，请携带适用的 App 和鉴权 Header 下载。任务超过保留期后不可查询。</td></tr>
                 <tr><td><code>ListTasks</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>只列出当前发布下该调用方有权查看的近期任务。</td></tr>
                 <tr><td><code>CancelTask</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>返回任务状态，实际停止后进入已取消。</td></tr>
                 <tr><td><code>SubscribeToTask</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>用于订阅进行中的任务。终态任务用 GetTask 查询。</td></tr>
@@ -553,7 +553,6 @@
                 <tr><td><code>ListTaskPushNotificationConfigs</code></td><td><span role="img" aria-label="未支持">—</span></td><td>列出任务的回调配置。</td></tr>
                 <tr><td><code>DeleteTaskPushNotificationConfig</code></td><td><span role="img" aria-label="未支持">—</span></td><td>删除一条回调配置。</td></tr>
                 <tr><td><code>GetExtendedAgentCard</code></td><td><span role="img" aria-label="未支持">—</span></td><td>认证后读取扩展 Card。</td></tr>
-                <tr><td><code>Artifact 下载 · DeepAgent 扩展</code></td><td><span class="agent-service-supported" role="img" aria-label="支持">✓</span></td><td>使用 Task 返回的授权链接取件。A2A 标准没有单独的下载方法。</td></tr>
               </tbody></table>
             </div>
             <section class="agent-service-guide-block">
@@ -572,13 +571,13 @@
                 <table class="data-table" aria-label="MCP 工具">
                   <thead><tr><th scope="col">工具</th><th scope="col">用途</th></tr></thead>
                   <tbody>
-                    <tr><th scope="row"><code>list_agents</code></th><td>列出已启用的 Agent 发布</td></tr>
-                    <tr><th scope="row"><code>submit_task</code></th><td>发起任务，支持附件</td></tr>
-                    <tr><th scope="row"><code>get_task</code></th><td>查询状态、结果和产物引用</td></tr>
-                    <tr><th scope="row"><code>list_tasks</code></th><td>列出当前应用下的近期任务</td></tr>
-                    <tr><th scope="row"><code>reply_task</code></th><td>向原任务补充材料</td></tr>
-                    <tr><th scope="row"><code>cancel_task</code></th><td>取消任务</td></tr>
-                    <tr><th scope="row"><code>get_artifact</code></th><td>取得授权的资源引用和下载路径</td></tr>
+                    <tr><th scope="row"><code>list_agents</code></th><td>查找已启用的发布及 Agent 编码</td></tr>
+                    <tr><th scope="row"><code>submit_task</code></th><td>发起任务或沿已完成的会话继续，支持附件</td></tr>
+                    <tr><th scope="row"><code>get_task</code></th><td>查询状态、正文、待答问题和文件的完整下载 URL</td></tr>
+                    <tr><th scope="row"><code>list_tasks</code></th><td>按发布、状态或会话查看当前应用下的近期任务</td></tr>
+                    <tr><th scope="row"><code>reply_task</code></th><td>回答原任务的待答问题，支持附件</td></tr>
+                    <tr><th scope="row"><code>cancel_task</code></th><td>请求停止未结束的任务</td></tr>
+                    <tr><th scope="row"><code>get_artifact</code></th><td>默认返回完整下载地址。显式传 <code>format="base64"</code> 可获取至多 20 MiB 的文件</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -586,9 +585,7 @@
                 <table class="data-table" aria-label="MCP 资源">
                   <thead><tr><th scope="col">资源</th><th scope="col">URI / 读取方式</th></tr></thead>
                   <tbody>
-                    <tr><th scope="row">任务调用与补材料</th><td><code>deepagent://guides/agent-tasks</code></td></tr>
-                    <tr><th scope="row">附件与取件</th><td><code>deepagent://guides/attachments-artifacts</code></td></tr>
-                    <tr><th scope="row">任务产物</th><td>用 <code>get_artifact</code> 返回的 URI 读取，单个资源上限 1 MiB。完整文件可通过鉴权地址下载。</td></tr>
+                    <tr><th scope="row">发布 Agent MCP 接入指南</th><td>用 <code>resources/read</code> 读取 <code>deepagent://guides/mcp</code></td></tr>
                   </tbody>
                 </table>
               </div>

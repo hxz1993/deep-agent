@@ -152,6 +152,8 @@ class SnapshotMcpToolset(AbstractToolset[AgentDeps]):
                 description=description,
                 parameters_json_schema=item.input_schema,
                 return_schema=item.output_schema,
+                # The MCP server owns argument validation, including nested optional fields.
+                strict=False,
                 metadata={
                     **({"deep_agent_mcp_target": target} if target else {}),
                     "title": item.title,

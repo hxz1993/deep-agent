@@ -147,8 +147,12 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
       if (node.type === "user") {
         row = conversation.addMessage("user", node.text, node.createdAt, node.order?.sequence, node.attachments, node.contextRefs);
       } else {
-        // Message event timestamps are not an exact execution duration.
-        const presenter = conversation.createAssistantMessage(node.createdAt, node.order?.sequence, null, { allowDeferred: false, autoAttachDeferred: false });
+        const presenter = conversation.createAssistantMessage(node.createdAt, node.order?.sequence, null, {
+          startedAt: node.startedAt,
+          completedAt: node.completedAt,
+          allowDeferred: false,
+          autoAttachDeferred: false,
+        });
         applyAssistantPresentationActions(presenter, node.actions); presenters.push(presenter); row = presenter.row;
       }
       row.dataset.conversationItemId = node.itemId;
@@ -323,10 +327,10 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     else if (button.hasAttribute("data-detail-refresh")) onRefresh();
     else if (button.hasAttribute("data-detail-inspector")) setInspectorVisible(button.getAttribute("aria-pressed") !== "true");
     else if (button.dataset.inspectorTab) { inspectorTab = button.dataset.inspectorTab; renderInspector(); }
-    else if (button.hasAttribute("data-detail-copy-session") || button.dataset.inspectorCopy || (button.dataset.copyFileId && currentView !== "trajectory")) {
+    else if (button.hasAttribute("data-detail-copy-session") || button.dataset.inspectorCopy) {
       event.stopPropagation();
       try {
-        await copyTextToClipboard(button.dataset.inspectorCopy || button.dataset.copyFileId || state.sessionId);
+        await copyTextToClipboard(button.dataset.inspectorCopy || state.sessionId);
         if (disposed) return;
         toast("已复制");
         if (button.hasAttribute("data-detail-copy-session")) {

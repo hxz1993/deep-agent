@@ -8,18 +8,16 @@ from pathlib import PurePath
 from uuid import uuid4
 
 from a2a import types as wire
-from fastapi import HTTPException
 from google.protobuf import json_format
 from google.protobuf.struct_pb2 import Value
 from pydantic_ai.exceptions import RunCancelled
-from sqlalchemy import select
 
 from deep_agent.agent.headers import filter_verified_mcp_headers
-from deep_agent.agent.media_pipeline import MediaPipelineError, process_upload
 from deep_agent.agent.input_capabilities import document_upload_mimes
+from deep_agent.agent.media_pipeline import MediaPipelineError, process_upload
 from deep_agent.agent.tool_output_limits import artifacts_from_metadata
-from deep_agent.mcp_request_context import resolve_mcp_request_context_mode
-from deep_agent.db.models import Agent, ChatSession, McpServer
+from deep_agent.core.exceptions import AgentModelNotConfiguredError, LlmModelNotFoundError
+from deep_agent.db.models import Agent, ChatSession
 from deep_agent.db.reference_integrity import lock_reference
 from deep_agent.db.stores._session import SessionBoundMixin
 from deep_agent.documents.settings import load_document_parsing_config
@@ -36,25 +34,6 @@ from .tasks import AUTH_REQUIRED, CANCELED, FAILED, INPUT_REQUIRED, MAX_ARTIFACT
 MAX_INPUT_BYTES = 8 * 1024 * 1024
 MAX_TEXT_BYTES = 128 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
-
-
-async def permitted_agent(ctx, agent_id: str) -> list[str]:
-    row = await ctx.stores.agent.get_by_id(agent_id)
-    if row is None or not row.model_id:
-        raise HTTPException(422, "请选择已配置默认模型的 Agent")
-    capabilities = row.capabilities or []
-    if any(code.startswith("ui:") for code in capabilities):
-        raise HTTPException(422, "请选择无需前端 UI 工具的 Agent")
-    names = [code[4:] for code in capabilities if code.startswith("mcp:")]
-    if names:
-        async with SessionBoundMixin(ctx.db_session_factory)._read() as db:
-            servers = (await db.scalars(select(McpServer).where(McpServer.name.in_(names)))).all()
-        for server in servers:
-            config = server.config
-            mode = resolve_mcp_request_context_mode(server.transport, config)
-            if mode != "inherit" or config.get("headers"):
-                raise HTTPException(422, "发布的 Agent 不能使用带独立凭据或固定请求头的 MCP")
-    return capabilities
 
 
 async def prepare_input(ctx, message: wire.Message):
@@ -168,7 +147,6 @@ class RunnerExecution:
                 or not PublicationScope.model_validate(publication.scope).allows(scope.owner.app, scope.owner.space)):
             return Result(state=FAILED, question="应用已移出发布范围")
         entry.retry_input = None
-        capabilities = await permitted_agent(ctx, scope.agent_id)
         app, space = scope.owner.app, scope.owner.space
         row = await ctx.stores.integration_app.get_for_agent(app, space, scope.agent_id)
         app_context = RunAppContext(app, space) if row is None else RunAppContext(
@@ -178,8 +156,14 @@ class RunnerExecution:
         from deep_agent.api.v1.chat import _agent_deps
         from deep_agent.api.v1.deps import build_runner_for_agent
 
-        runner = await build_runner_for_agent(ctx, scope.agent_id, capabilities=capabilities,
-                                               app_context=app_context, request_headers=mcp_headers, a2a=True)
+        try:
+            runner = await build_runner_for_agent(
+                ctx, scope.agent_id, app_context=app_context, request_headers=mcp_headers, a2a=True,
+            )
+        except AgentModelNotConfiguredError as exc:
+            return Result(state=FAILED, question=str(exc))
+        except LlmModelNotFoundError:
+            return Result(state=FAILED, question="Agent 配置的模型不存在")
         deps = _agent_deps(ctx, session_id=scope.session_id, user=scope.owner.user, agent_id=scope.agent_id,
                            request_headers=mcp_headers, execution_request_headers=headers, app_context=app_context)
         deps.a2a = True

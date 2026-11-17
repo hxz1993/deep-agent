@@ -60,7 +60,8 @@ A2A 1.0 规定单张 Agent Card 的格式，承认目录是发现方式之一。
 | `ListTaskPushNotificationConfigs` | `GET /tasks/{id}/pushNotificationConfigs` | 暂缓 | 列出任务回调配置，现有会话无对应接口。 |
 | `DeleteTaskPushNotificationConfig` | `DELETE /tasks/{id}/pushNotificationConfigs/{configId}` | 暂缓 | 删除任务回调配置，现有会话无对应接口。 |
 | `GetExtendedAgentCard` | `GET /extendedAgentCard` | 暂缓 | 提供认证后的扩展 Card，现有会话无对应接口。 |
-| Artifact 取件 | DeepAgent 扩展 `GET /api/v1/agent-service/a2a/{agent_code}/tasks/{taskId}/artifacts/{artifactId}/download` | 支持 | Task 或 SSE 按当前接入地址返回取件 URL。二进制文件走现有 FileStore，每次取件重新校验归属。A2A 1.0 无 `DownloadArtifact` RPC。 |
+
+Task 和 SSE 的文件产物通过标准 `parts[].url` 返回完整下载 URL。客户端携带适用的 App 和鉴权 Header 发 HTTP GET，服务端校验任务归属并从 FileStore 流式返回原文件。
 
 以上是能力和执行层映射。A2A 入口在进程内调用共用服务，避免发 HTTP 请求回调自己。内部历史和诊断继续使用已有会话与事件查询，外部只收到该发布允许披露的内容。[Chat 源码](../../../src/deep_agent/api/v1/chat.py) · [Session 源码](../../../src/deep_agent/api/v1/sessions.py)
 

@@ -36,16 +36,6 @@ A2A Agent Card 随所选发布切换。MCP 按环境接入。A2A 和 MCP 共用�
 
 Revision `016` 创建 `agent_publications` 和 `remote_agent_connections`。连接保存后即可调试，在 Agent 编辑页选用，引用存入 `agents.capabilities`。身份、凭据、调用记录和联调见[远程 Agent 实施方案](client-implementation-plan.md)。
 
-## 早期布局备选
-
-| 方案 | 布局 | 适用情况 |
-| --- | --- | --- |
-| [A · 上下分区](assets/a-stacked.png) | 上部是发布、权限和接入方式，下部是外部 Agent 连接。 | 首期以服务端为主，后续能力在同一页有清晰位置。 |
-| [B · 左右双栏](assets/b-two-columns.png) | 左侧发布及四个入口，右侧外部连接列表与表单。 | 两种角色都需要频繁配置时，便于并排操作。 |
-| [C · 任务工作台](assets/c-task-workbench.png) | 主区放发布详情、四个入口与任务列表，右侧放外部连接。 | 运营需要持续查看任务、失败状态和产物时。 |
-
-三个 PNG 为未采用的早期布局对照。图中的 URL、命令、认证值、输出格式、版本和已发布状态仅作视觉示意。
-
 ## 实施与待确认
 
 - [服务端与客户端实施方案](service-and-client-design.md)涵盖协议选型、现有 Runner 复用、Task 与会话映射、去重、流式订阅、取消、重启边界、产物和分期验收。

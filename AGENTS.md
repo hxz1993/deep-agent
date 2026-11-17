@@ -1,5 +1,10 @@
 # AGENTS.md — 项目索引
 
+## Console 配置限制：新增前单独确认
+
+- Agent 发布像 IM 和组件场景一样绑定现有 Agent。保存检查名称、编码、必填字段和引用有效性。模型可用性、工具权限和未适配的交互交给正常运行链路处理。调用入口负责验证调用人及 App/Space，再按 Agent 配置执行模型、Skill 和工具。MCP 的固定凭据、会话透传和绑定应用沿用其自身配置。
+- 新增或加严配置保存、启停、编辑、删除或导入的拦截规则，实施前必须单独明确确认。用一两句话单列要拦什么、理由和影响，取得答复再落地。
+
 ## 数据库结构变更：必须单独明确确认
 
 - 将表结构变更视为重大生产发布事项，不能按本地 JSONL 或临时文件的修改成本决策。生产环境可能需要单独申请数据库权限、等待专门发版窗口；大数据量下改索引、删列等操作可能耗时很长，并带来锁表、资源占用和恢复成本。
@@ -31,7 +36,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.17.0a7`，数据库 Head 为 `016` |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.17.0a8`，数据库 Head 为 `016` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | 按影响面运行定向测试；可先用 `scripts/run_tests.py --suite affected --base HEAD --list` 查看选测范围 |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -103,6 +108,8 @@ PYTHONPATH=src python3.12 -m deep_agent.local_dev \
   `platform`。文件正文保存为私有Blob，独立`metadata.sqlite3`只存索引；业务API与线上保持一致。
 
 ### 稳定 SQLite 本地开发基线
+
+本机 8002 新建联调 Agent 时，默认从订阅 Provider（`openai_codex`）选用 `gpt-6.1-sol`，备选 `gpt-6.1-terra`。按 Provider 类型核对同名模型。
 
 v0.10.16 本地升级验证使用仓库 `.venv/bin/python`，依赖按 `requirements.txt` 安装；
 不要用仍装旧依赖的全局解释器启动。该环境可复用已安装的内部 DeepCube wheel。

@@ -89,20 +89,21 @@ def artifact_path(task_id: str, artifact_id: str) -> str:
     return f"/api/v1/agent-service/tasks/{task_id}/artifacts/{artifact_id}/download"
 
 
-def artifact_reference(entry, artifact_id, file) -> dict:
-    return {
+def artifact_reference(task_id: str, artifact_id, file, download_base_url: str | None = None) -> dict:
+    reference = {
         "artifact_id": artifact_id, "name": file.name, "media_type": file.mime, "size": file.size,
-        "download_path": artifact_path(entry.task.id, artifact_id),
-        "resource_uri": f"deepagent://tasks/{entry.task.id}/artifacts/{artifact_id}",
     }
+    if download_base_url:
+        reference["download_url"] = download_base_url + artifact_path(task_id, artifact_id)
+    return reference
 
 
-def snapshot(entry, task=None, *, history_length=None) -> dict:
+def snapshot(entry, task=None, *, history_length=None, download_base_url: str | None = None) -> dict:
     task = entry.snapshot(history_length) if task is None else task
     artifacts = []
     for item in task.artifacts:
         if file := entry.files.get(item.artifact_id):
-            artifacts.append(artifact_reference(entry, item.artifact_id, file))
+            artifacts.append(artifact_reference(task.id, item.artifact_id, file, download_base_url))
         else:
             artifacts.append({
                 "artifact_id": item.artifact_id, "name": item.name,
@@ -119,11 +120,16 @@ def snapshot(entry, task=None, *, history_length=None) -> dict:
 
 
 class PublicTasks:
-    def __init__(self, ctx, headers: dict[str, str], source: str, *, client: str | None = None):
+    def __init__(self, ctx, headers: dict[str, str], source: str, *,
+                 client: str | None = None, download_base_url: str | None = None):
         self.service = AgentService(ctx)
         self.headers = headers
         self.source = source
         self.client = client
+        self.download_base_url = download_base_url
+
+    def _snapshot(self, entry, task=None, *, history_length=None) -> dict:
+        return snapshot(entry, task, history_length=history_length, download_base_url=self.download_base_url)
 
     async def list_agents(self) -> dict:
         return {"agents": [
@@ -139,11 +145,11 @@ class PublicTasks:
                 context_id=body.context_id or "", reference_task_ids=body.reference_task_ids,
             ), source=self.source, client=self.client,
         )
-        return snapshot(entry)
+        return self._snapshot(entry)
 
     async def get(self, task_id: str, history_length: int | None = None) -> dict:
         _, entry = await self.service.find_task(task_id, self.headers)
-        return snapshot(entry, history_length=history_length)
+        return self._snapshot(entry, history_length=history_length)
 
     async def list_tasks(self, agent_code: str, query: TaskQuery) -> dict:
         row = await self.service.publication(agent_code)
@@ -154,7 +160,7 @@ class PublicTasks:
             status=wire.TaskState.Value(f"TASK_STATE_{query.state.upper()}") if query.state else 0,
         ))
         return {
-            "items": [snapshot(self.service.tasks.entries[task.id], task) for task in page.tasks],
+            "items": [self._snapshot(self.service.tasks.entries[task.id], task) for task in page.tasks],
             "next_cursor": page.next_page_token or None, "total": page.total_size,
         }
 
@@ -166,13 +172,12 @@ class PublicTasks:
         entry = await self.service.submit(
             row.code, entry.context.owner, self.headers, message, source=self.source, require_question=True,
         )
-        return snapshot(entry)
+        return self._snapshot(entry)
 
     async def cancel(self, task_id: str) -> dict:
         _, entry = await self.service.find_task(task_id, self.headers)
-        return snapshot(entry, await self.service.tasks.cancel(entry))
+        return self._snapshot(entry, await self.service.tasks.cancel(entry))
 
     async def artifact(self, task_id: str, artifact_id: str):
         _, entry = await self.service.find_task(task_id, self.headers)
-        file = self.service.artifact(entry, artifact_id)
-        return artifact_reference(entry, artifact_id, file), file
+        return self.service.artifact(entry, artifact_id)

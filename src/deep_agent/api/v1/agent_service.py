@@ -6,7 +6,7 @@ from dataclasses import asdict
 
 from a2a import types as wire
 from a2a.server.routes.jsonrpc_dispatcher import JsonRpcDispatcher
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from google.protobuf.json_format import MessageToDict
 from sqlalchemy import and_, select
@@ -14,13 +14,12 @@ from sqlalchemy import and_, select
 from deep_agent.agent.input_capabilities import document_upload_mimes
 from deep_agent.agent.media_pipeline import allowed_mimes
 from deep_agent.agent_service.download import artifact_download
-from deep_agent.agent_service.execution import permitted_agent
 from deep_agent.agent_service.protocol import PublicationHandler, agent_card
-from deep_agent.agent_service.publications import AgentCode, PublicationCreate, PublicationPatch, PublicationScope, PublicationStore, ScopeId
+from deep_agent.agent_service.publications import AgentCode, PublicationCreate, PublicationPatch, PublicationStore, ScopeId
 from deep_agent.agent_service.security import platform_caller, public_base_url
 from deep_agent.agent_service.service import AgentService, bounded_body, task_store
 from deep_agent.agent_service.tasks import TERMINAL
-from deep_agent.api.v1.admin import require_console_admin
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.models import ChatSession, ChatSessionEvent
@@ -43,14 +42,7 @@ def address_for(agent_code: str, app_id: str | None = None) -> str:
     return f"{address}/apps/{app_id}" if app_id is not None else address
 
 
-async def require_publication_admin(user: RequestUserDep) -> str:
-    admins = {value.strip() for value in os.getenv("DEEP_AGENT_AGENT_SERVICE_ADMIN_USERS", "").split(",")}
-    if user not in admins:
-        raise HTTPException(403, "当前账号没有 Agent 发布管理权限")
-    return user
-
-
-admin = (Depends(require_console_admin), Depends(require_publication_admin))
+admin = CONSOLE_ADMIN_DEPENDENCIES
 
 
 async def publication(ctx, agent_code: str):
@@ -77,19 +69,6 @@ def serialize_publication(row) -> dict:
     }
 
 
-async def verify_scopes(request: Request, user: str, scopes: list[PublicationScope]):
-    selected = {(item.app_id, item.space_id) for scope in scopes for item in scope.apps.items}
-    if not selected:
-        return
-    try:
-        directory = IntegrationAppDirectory(request, user)
-        available = {(app.app_id, app.space_id) for app in await directory.available_apps()}
-    except IntegrationAppAccessError as exc:
-        raise HTTPException(exc.status, str(exc)) from exc
-    if not selected <= available:
-        raise HTTPException(403, "指定应用不在当前账号的可配置范围内")
-
-
 @router.get("/publications", dependencies=admin)
 async def list_publications(ctx: AppContextDep):
     return [serialize_publication(row) for row in await PublicationStore(ctx.db_session_factory).list()]
@@ -110,8 +89,6 @@ async def get_publication(ctx: AppContextDep, agent_code: AgentCode):
 
 @router.post("/publications", status_code=201, dependencies=admin)
 async def create_publication(ctx: AppContextDep, body: PublicationCreate):
-    address_for(body.agent_code)
-    await permitted_agent(ctx, body.agent_id)
     try:
         async with task_store(ctx).admission:
             return serialize_publication(await PublicationStore(ctx.db_session_factory).create(body))
@@ -121,12 +98,7 @@ async def create_publication(ctx: AppContextDep, body: PublicationCreate):
 
 @router.patch("/publications/{agent_code}", dependencies=admin)
 async def edit_publication(ctx: AppContextDep, agent_code: AgentCode, body: PublicationPatch):
-    if body.enabled is True:
-        address_for(agent_code)
     async with task_store(ctx).admission:
-        current = await publication(ctx, agent_code)
-        if body.agent_id or body.enabled is True:
-            await permitted_agent(ctx, body.agent_id or current.agent_id)
         try:
             row = await PublicationStore(ctx.db_session_factory).update(agent_code, body)
         except ReferenceConflict as exc:

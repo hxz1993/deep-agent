@@ -1271,33 +1271,11 @@ html, body {
 .tool-body [data-tool-result] > .json-view {
   border: 0;
 }
-.tool-result-artifact {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  color: var(--text-muted);
-  background: var(--surface-soft);
-  font-size: 12px;
-}
-.tool-result-artifact svg { width: 14px; height: 14px; flex: none; }
 .generated-file-list {
   display: grid;
   gap: 6px;
   margin-top: 8px;
 }
-.generated-file-heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-.generated-file-heading svg,
 .generated-file-icon svg,
 .generated-file-actions svg { width: 14px; height: 14px; }
 .generated-file-item {

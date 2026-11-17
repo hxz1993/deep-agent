@@ -26,7 +26,7 @@
 - 同步适配由 CLI 进程自行组织，Python SDK 首版提供 async 客户端。SDK 核心采用轻量 HTTP 依赖，安装包无需 DeepAgent 服务、模型运行时或 A2A SDK。
 - MCP 使用 [输入 Schema](mcp-tool-inputs.json)，`tools/list` 返回稳定的一组工具，`list_agents()` 返回所有已启用发布。任务业务失败由任务状态表达，参数和访问错误使用 MCP 工具错误。工具结果以 `structuredContent` 为主，同时提供兼容只读取文本的宿主的 JSON 文本。
 - 输入文件采用 `attachments[]` 内联字节表示，由 CLI 或 SDK 本地读取。共用文件类型、数量和总量校验。三种服务端入口统一限制附件总量为 8 MiB，并在请求体读取阶段限制 JSON 至 11,446,954 字节。部署代理需容纳 Base64 和 JSON 包装，建议请求体上限至少 11 MiB。MCP 宿主未提供附件字节时，可通过 CLI 或 SDK 上传并完成同一 Task。
-- 文件产物来自可信的执行事件。MCP 返回元数据及受控资源引用，小文件可走 `resources/read`，完整文件用授权下载接口。验收区分「看到了文件名」「客户端拿到文件字节」「保存并打开成功」。
+- 文件产物来自可信的执行事件。MCP 默认返回完整鉴权下载 URL，至多 20 MiB 可用 `get_artifact(format="base64")` 从文本 JSON 取得原字节。验收区分「看到了文件名」「客户端拿到文件字节」「保存并打开成功」。
 
 ## 客户端验收
 

@@ -1,70 +1,63 @@
-"""Read-only MCP guides for callers of published Agents."""
+"""MCP initialization instructions and the published Agent guide."""
 
-MCP_GUIDES = {
-    "deepagent://guides/agent-tasks": (
-        "任务调用与补材料",
-        "发现 Agent、发送任务、查询状态以及继续同一任务的工具示例。",
-        """# 调用已发布的 Agent
+MCP_GUIDE_URI = "deepagent://guides/mcp"
 
-1. 调用 `list_agents`，从返回的发布列表取得 `agent_code`。
-2. 调用 `submit_task` 发起任务。为每条消息生成唯一的 `message_id`，同一条消息重试时沿用原 ID 和内容。
-3. 保留返回的 `id`（Task ID）和 `context_id`。用 `get_task` 查询状态和结果，或用 `list_tasks` 查看指定 Agent 的近期任务。
+MCP_INSTRUCTIONS = (
+    "Discover published Agents with list_agents, submit a task with submit_task, and read its state and output "
+    "with get_task. Keep task_id and context_id. Reuse message_id and the original payload when retrying a send. "
+    "For input_required, ask the user the returned question, then call reply_task with the original task_id, "
+    "question_id as reply_to, and a new message_id. Use submit_task with the same context_id after completion. "
+    "Submit and reply accept attachments as name, media_type, and data_base64, with at most 8 MiB decoded per message. "
+    "To save a selected file, send HTTP GET to the download_url from get_task or get_artifact using the connection's "
+    "app and authentication headers. If your client cannot send those headers, explicitly call get_artifact with "
+    "format=base64 for a file up to 20 MiB. Decode data_base64 programmatically from the original text JSON and "
+    "save the bytes under name. Files larger than 20 MiB always use the download URL."
+)
 
-## 发起任务
+MCP_GUIDE = """# 发布 Agent MCP 接入
 
-工具 `submit_task` 示例：
+使用同一个 Streamable HTTP 连接调用已发布的 Agent。配置 `app` 为应用 ID，并提供一种凭据：
+`X-Deepfos-Key`、`Authorization: Bearer <Token>` 或 `token`。服务端从应用解析 Space。
+`list_agents` 展示已启用的发布，发起任务时核对应用权限和发布范围。
 
-```json
-{
-  "agent_code": "budget-report",
-  "message_id": "example-submit-001",
-  "text": "核对这份预算，汇总金额差异。"
-}
-```
+## 工具一览
 
-用 `get_task` 传 `{"task_id":"<任务 ID>"}`。若任务需要资料，状态为 `input_required`，响应中会给出补充问题及 `question_id`。
+| 工具 | 用途 | 参数示例 |
+| --- | --- | --- |
+| `list_agents` | 查找已发布 Agent 和编码 | `{}` |
+| `submit_task` | 发起任务，或在已完成的会话里继续追问 | `{"agent_code":"budget-report","message_id":"budget-001","text":"核对预算"}` |
+| `get_task` | 查看状态、正文、待答问题和文件下载地址 | `{"task_id":"<Task ID>"}` |
+| `list_tasks` | 查近期任务，按状态或会话筛选，使用 `next_cursor` 续页 | `{"agent_code":"budget-report","state":"completed","page_size":10}` |
+| `reply_task` | 在原任务上回答待答问题 | `{"task_id":"<Task ID>","reply_to":"<Question ID>","message_id":"budget-002","text":"按 11 月口径"}` |
+| `cancel_task` | 请求停止未结束的任务 | `{"task_id":"<Task ID>"}` |
+| `get_artifact` | 默认返回一份文件的完整下载地址，支持显式请求 Base64 | `{"task_id":"<Task ID>","artifact_id":"<Artifact ID>"}` |
 
-## 补材料或继续追问
+## 发起、补答与续跑
 
-在等待补材料的任务上调用 `reply_task`，使用原 Task ID、新 Message ID 和返回的 Question ID：
+1. 用 `list_agents` 取得 `agent_code`，再调用 `submit_task`。每条新消息分配一个 `message_id`，重试同一消息时沿用原 ID 和原内容。
+2. 保留返回的 `id` 和 `context_id`。用 `get_task` 查询同一个任务直到结束或需要补答。正文和结构化结果在 `artifacts` 的 `parts` 中。
+3. 状态为 `input_required` 时，先显示 `message` 并等待用户。用 `reply_task` 传原 Task ID、`question_id` 作为 `reply_to`、新 Message ID 和用户补充的内容。
+4. 任务完成后要沿原会话继续，调用 `submit_task` 传原 `context_id` 和新 Message ID，服务端会创建新 Task。
 
-```json
-{
-  "task_id": "<任务 ID>",
-  "reply_to": "<问题 ID>",
-  "message_id": "example-reply-001",
-  "text": "请按 11 月月末口径核对。"
-}
-```
-
-任务完成后，在 `submit_task` 中附上原 `context_id` 继续追问，服务端会创建新任务。要停止进行中的任务，调用 `cancel_task` 并传该 Task ID。执行与查询使用同一应用和调用身份。
-""",
-    ),
-    "deepagent://guides/attachments-artifacts": (
-        "附件与取件",
-        "发送 Base64 附件、读取返回文件的 MCP Resource 或下载完整文件。",
-        """# 随任务发送附件
-
-`submit_task` 和 `reply_task` 都接收 `attachments`。每个附件含文件名、MIME 类型和 Base64 文件字节。单次附件解码后总量最多 8 MiB，并受部署的文件类型、大小和数量设置限制。示例中的 Base64 是演示文字：
+`submit_task` 和 `reply_task` 的 `attachments` 每项传文件名、MIME 类型和客户端编码的原文件字节。
+单次解码后总量最多 8 MiB，并受平台文件类型、大小和数量设置限制。
 
 ```json
 {
   "agent_code": "budget-report",
-  "message_id": "example-with-attachment-001",
-  "text": "请查看附件并生成核对结果。",
+  "message_id": "budget-files-001",
+  "text": "核对随附预算。",
   "attachments": [
     {"name": "notes.txt", "media_type": "text/plain", "data_base64": "SGVsbG8="}
   ]
 }
 ```
 
-# 读取返回的文件
+## 获取用户选中的产物
 
-1. 用 `get_task` 查看 `artifacts`。文本和结构化结果直接出现在 `parts` 中。
-2. 如需取回文件，用 `get_artifact` 传原 `task_id` 和该文件的 `artifact_id`，取得服务端返回的 `resource_uri` 和 `download_path`。
-3. 通过 MCP 的 `resources/read` 读取返回的 URI，单个文件上限 1 MiB。也可用 `download_path` 在同一个 DeepAgent 服务上下载完整文件，请求携带原任务的应用和凭据。
-
-产物引用按任务授权，使用工具返回的 URI。任务过期后引用也随之失效。
-""",
-    ),
-}
+从 `get_task` 的 `artifacts` 选取文件，也可用 `get_artifact` 按 ID 查询单个文件。
+默认对完整 `download_url` 发 HTTP GET，携带 MCP 连接的原 `app` 和鉴权 Header。
+客户端无法携带这些 Header 时，对至多 20 MiB 的文件显式传 `format="base64"`。
+从同一次响应的 `content[].text` 解析 JSON，解码 `data_base64` 并按 `name` 保存。
+超过 20 MiB 时始终返回 `delivery=http_download` 和完整下载地址。任务过期后下载链接失效。
+"""

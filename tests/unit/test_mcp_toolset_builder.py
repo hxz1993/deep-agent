@@ -279,6 +279,7 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
         mcp_toolset_cls.assert_not_called()
         self.assertEqual(list(tools), ["mcp__biz__query"])
         self.assertEqual(tools["mcp__biz__query"].tool_def.return_schema, {"type": "object"})
+        self.assertIs(tools["mcp__biz__query"].tool_def.strict, False)
         self.assertEqual([part.content for part in instructions], ["Use the business catalog."])
 
     async def test_connects_on_first_call_and_reuses_connection(self) -> None:

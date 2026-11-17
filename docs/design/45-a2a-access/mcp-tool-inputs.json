@@ -130,7 +130,7 @@
     },
     {
       "name": "get_task",
-      "description": "Read task status, results, and artifact references.",
+      "description": "Read task status, output, and file artifacts. Use question_id to reply. Download selected files via HTTP GET to download_url using the MCP connection's app and authentication headers.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -369,7 +369,7 @@
     },
     {
       "name": "get_artifact",
-      "description": "Get an authorized file artifact reference.",
+      "description": "Get a file's complete download_url by task_id and artifact_id (format=url by default). Download with the connection's app and authentication headers. If your client cannot send those headers, request format=base64 for a file up to 20 MiB. Decode data_base64 from the original text JSON and save the bytes under name. Larger files always return the download URL.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -383,6 +383,15 @@
             "maxLength": 128,
             "minLength": 1,
             "title": "Artifact Id",
+            "type": "string"
+          },
+          "format": {
+            "default": "url",
+            "enum": [
+              "url",
+              "base64"
+            ],
+            "title": "Format",
             "type": "string"
           }
         },

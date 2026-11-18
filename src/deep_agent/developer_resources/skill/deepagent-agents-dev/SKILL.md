@@ -1,11 +1,11 @@
 ---
 name: deepagent-agents-dev
-description: 配置、开发和排查 DeepAgent 业务助手，包括模型与MCP、业务Skill、电子表格、结构化流程及会话诊断。没有框架源码时通过服务接口工作；有源码时支持后端、Console及业务客户端开发。
+description: 配置、开发和排查 DeepAgent 业务助手，包括模型与 MCP、业务 Skill、电子表格、结构化流程、Agent 发布与远程委派、附件取件及会话诊断。无框架源码时通过服务接口工作，有源码时支持后端、Console 和业务客户端开发。
 ---
 
 # DeepAgent 业务助手开发
 
-本 Skill 在 Coding Agent 中使用。首次安装和连接读 [README](README.md)；资料基线 **{{DEEP_AGENT_VERSION}} / 数据库 015**，目标版本和接口以 `/info`、`/openapi.json` 为准。
+本 Skill 在 Coding Agent 中使用。首次安装和连接读 [README](README.md)。资料基线为 **{{DEEP_AGENT_VERSION}} / 数据库 016**，目标版本和接口以 `/info`、`/openapi.json` 为准。
 
 先确定目标服务、Agent 和任务范围，再从下表选择资料。只读相关章节，不一次加载整个包。配置和排障无需取得框架源码。
 
@@ -13,6 +13,7 @@ description: 配置、开发和排查 DeepAgent 业务助手，包括模型与MC
 | --- | --- |
 | 连接、授权、权限错误 | [连接与授权](references/01-connect-and-permissions.md) |
 | 模型、MCP、Agent 配置 | [配置 Agent](references/02-configure-agent.md) |
+| 通过 A2A 或 MCP 发布、远程委派、附件取件与排障 | [发布与远程 Agent](references/12-agent-service.md) |
 | 提示词与业务上下文 | [提示词与上下文](references/03-prompt-and-context.md) |
 | Skill、Python、多模块和文件产物 | [脚本与文件](references/04-skill-python-files.md) |
 | Chat、SSE、附件、历史与续跑 | [客户端调用](references/05-chat-and-session.md) |

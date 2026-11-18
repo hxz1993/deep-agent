@@ -155,6 +155,7 @@ def project_session_events(
                     items.append(existing)
                 _apply_result(existing, event, part)
 
+    shown_remote_files: set[str] = set()
     for item in items:
         if isinstance(item, ToolConversationItem) and item.tool_name in {"delegate_task", "answer_task"}:
             event = remote_results.get((item.run_id, item.call_id))
@@ -164,6 +165,17 @@ def project_session_events(
                     "tool_name": item.tool_name, "part_kind": "tool-return", "content": invocation.result_payload(),
                     "metadata": {"remote_agent": invocation.summary(), "generated_files": invocation.result_files()},
                 })
+        if isinstance(item, ToolConversationItem) and (item.metadata or {}).get("remote_agent"):
+            # A result lookup may recover the original files, including when the
+            # original call is outside this page. Keep their first visible cards.
+            if item.tool_name == "remote_task_result":
+                item.artifacts = [
+                    artifact for artifact in item.artifacts
+                    if artifact.role != "generated_file" or artifact.file_id not in shown_remote_files
+                ]
+            shown_remote_files.update(
+                artifact.file_id for artifact in item.artifacts if artifact.role == "generated_file" and artifact.file_id
+            )
         # Older releases repaired failed calls with a default-success ToolDenied.
         # Correct only that legacy sentinel, without rewriting Event facts or
         # treating genuine user rejection / successful tools as run failures.

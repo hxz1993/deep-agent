@@ -11,7 +11,8 @@ from uuid import uuid4
 
 from a2a import types as wire
 from google.protobuf.timestamp_pb2 import Timestamp
-from loguru import logger
+
+from deep_agent import diagnostics
 
 SUBMITTED = wire.TaskState.TASK_STATE_SUBMITTED
 WORKING = wire.TaskState.TASK_STATE_WORKING
@@ -56,6 +57,8 @@ class Result:
     files: dict[str, ArtifactFile] = field(default_factory=dict)
     question: str | None = None
     state: int = COMPLETED
+    reason: str | None = None
+    error_type: str | None = None
 
 
 @dataclass
@@ -77,6 +80,8 @@ class Entry:
     changed: datetime
     source: str = "a2a"
     client: str | None = None
+    segment_protocol: str | None = None
+    segment_run_id: str | None = None
     run_ids: list[str] = field(default_factory=list)
     files: dict[str, ArtifactFile] = field(default_factory=dict)
     progress: list[tuple[int, datetime]] = field(default_factory=list)
@@ -100,8 +105,21 @@ class Entry:
             task.ClearField("artifacts")
         return task
 
-    def status(self, state: int, message: str | None = None) -> None:
+    def diagnose(self, *, status: str, phase: str, duration_ms: int, protocol: str | None = None,
+                 reason: str | None = None, error_type: str | None = None) -> None:
+        diagnostics.emit(
+            "published_agent_task", level="ERROR" if status == "failed" else "INFO",
+            task_id=self.task.id, publication_id=self.context.owner.publication_id,
+            session_id=self.context.session_id, agent_id=self.context.agent_id, run_id=self.segment_run_id,
+            protocol=protocol or self.segment_protocol or self.source, phase=phase, status=status,
+            duration_ms=duration_ms, artifact_count=len(self.files), reason=reason, error_type=error_type,
+        )
+
+    def status(self, state: int, message: str | None = None, *,
+               reason: str | None = None, error_type: str | None = None) -> None:
+        previous = self.state
         self.changed = datetime.now(UTC)
+        self.question_id = uuid4().hex if state == INPUT_REQUIRED else None
         timestamp = Timestamp()
         timestamp.FromDatetime(self.changed)
         status = wire.TaskStatus(state=state, timestamp=timestamp)
@@ -119,6 +137,10 @@ class Entry:
         if state in TERMINAL:
             self.context.active_id = None
             self.retry_input = None
+        if state != previous:
+            self.diagnose(status=wire.TaskState.Name(state).removeprefix("TASK_STATE_").lower(),
+                          phase="task", duration_ms=round((self.changed - self.created).total_seconds() * 1000),
+                          reason=reason, error_type=error_type)
 
     def append_history(self, message: wire.Message) -> None:
         self.task.history.add().CopyFrom(message)
@@ -160,7 +182,7 @@ class TaskStore:
         now = datetime.now(UTC)
         for entry in self.entries.values():
             if entry.state in PAUSED and now - entry.changed >= RETENTION:
-                entry.status(FAILED, "等待补充已超时")
+                entry.status(FAILED, "等待补充已超时", reason="input_expired")
         terminal = sorted((entry for entry in self.entries.values() if entry.state in TERMINAL),
                           key=lambda entry: entry.changed)
         remove = {entry.task.id for index, entry in enumerate(terminal)
@@ -245,7 +267,6 @@ class TaskStore:
             self.entries[task.id] = entry
             context.active_id = task.id
 
-        entry.question_id = None
         inbound = wire.Message()
         inbound.CopyFrom(message)
         inbound.context_id, inbound.task_id = entry.context.id, entry.task.id
@@ -258,6 +279,8 @@ class TaskStore:
                 part.text = "已提交附件"
         entry.append_history(history)
         self.messages[key] = entry.task.id, digest
+        entry.segment_protocol = source
+        entry.segment_run_id = None
         entry.status(SUBMITTED)
         self._pending_input_bytes += input_size
         worker = entry.worker = asyncio.create_task(self._run(entry, history, continuing, execute))
@@ -278,7 +301,7 @@ class TaskStore:
                 async with asyncio.timeout(600):
                     result = await execute(entry, message, continuing)
                 if len(entry.task.artifacts) + len(result.artifacts) > MAX_ARTIFACTS:
-                    entry.status(FAILED, "任务产物超过交付上限")
+                    entry.status(FAILED, "任务产物超过交付上限", reason="artifact_limit")
                     return
                 for artifact in result.artifacts:
                     entry.task.artifacts.append(artifact)
@@ -286,20 +309,19 @@ class TaskStore:
                         task_id=entry.task.id, context_id=entry.context.id, artifact=artifact, last_chunk=True,
                     ))
                 entry.files.update(result.files)
-                if result.state == INPUT_REQUIRED:
-                    entry.question_id = uuid4().hex
-                entry.status(result.state, result.question)
+                entry.status(result.state, result.question, reason=result.reason, error_type=result.error_type)
                 if result.state in PAUSED and result.question:
                     entry.append_history(entry.task.status.message)
         except asyncio.CancelledError:
             if entry.state not in TERMINAL:
-                entry.status(CANCELED if entry.cancellation_requested else FAILED, "执行已停止")
+                entry.status(CANCELED if entry.cancellation_requested else FAILED, "执行已停止",
+                             reason="execution_canceled", error_type="CancelledError")
             raise
         except TimeoutError:
-            entry.status(FAILED, "执行超时")
+            entry.status(FAILED, "执行超时", reason="execution_timeout", error_type="TimeoutError")
         except Exception as exc:
-            logger.warning("A2A task {} failed ({})", entry.task.id, type(exc).__name__)
-            entry.status(FAILED, "执行失败，请查看 DeepAgent 诊断")
+            entry.status(FAILED, "执行失败，请查看 DeepAgent 诊断",
+                         reason="execution_failed", error_type=type(exc).__name__)
         finally:
             entry.worker = None
             entry.stop = None

@@ -4,11 +4,14 @@ import asyncio
 import hashlib
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from time import monotonic
 from uuid import uuid4
 
+from deep_agent.diagnostics import emit
 from deep_agent.files.storage import FileStore
 from deep_agent.files.upload_settings import load_upload_settings
 from deep_agent.schemas.attachment import AttachmentRef
@@ -52,6 +55,36 @@ class RequestScope:
             user_message=deps.remote_user_message, remote_task_id=deps.remote_task_id,
             remote_question_id=deps.remote_question_id, allowed_connections=allowed_connections,
         )
+
+
+def _log_operation(entry, request, phase, status, started, *, reason=None, error_type=None, artifact_count=None):
+    emit("remote_agent_operation", level="WARNING" if status in {"failed", "unknown"} else "INFO",
+         task_id=entry.id, connection_id=entry.connection_id, protocol=entry.protocol,
+         agent_id=request.agent_id, session_id=request.session_id, run_id=request.run_id,
+         phase=phase, status=status, duration_ms=round((monotonic() - started) * 1000),
+         reason=reason, error_type=error_type, artifact_count=artifact_count)
+
+
+@contextmanager
+def _observe_operation(entry, request, phase):
+    started = monotonic()
+    previous = entry.state.status
+    if phase != "refresh":
+        _log_operation(entry, request, phase, "started", started)
+    failure = {"stage": "preparation_failed"}
+    try:
+        yield failure
+    except asyncio.CancelledError:
+        _log_operation(entry, request, phase, "interrupted", started)
+        raise
+    except Exception as error:
+        _log_operation(entry, request, phase, "failed", started, reason=failure["stage"], error_type=type(error).__name__)
+        raise
+    else:
+        status = entry.state.status
+        if phase != "refresh" or status != previous or "error_type" in failure:
+            _log_operation(entry, request, phase, status, started, artifact_count=len(entry.result_files()),
+                           reason=failure.get("reason"), error_type=failure.get("error_type"))
 
 
 class RecentInvocations:
@@ -159,6 +192,8 @@ class RemoteAgentRuntime:
                     del self.debug_entries[key]
 
     async def _inputs(self, request: RequestScope) -> list[InputFile]:
+        if not request.attachments:
+            return []
         files = []
         remaining = MAX_INPUT_BYTES
         settings = await load_upload_settings(self.ctx.stores.global_setting)
@@ -179,18 +214,24 @@ class RemoteAgentRuntime:
         state = result.state
         text = result.text[:MAX_TEXT] if result.text or state.status == "input_required" else entry.text
         warnings = list(result.warnings)
-        remaining = MAX_OUTPUT_BYTES - sum(file.get("byte_size", 0) for file in entry.files.values())
+        current_files = entry.result_files()
+        remaining = MAX_OUTPUT_BYTES - sum(file.get("byte_size", 0) for file in current_files)
         settings = await load_upload_settings(self.ctx.stores.global_setting) if result.files else None
+        upload_started = monotonic()
+        upload_failures = 0
+        upload_error_type = None
         for output in result.files:
             if output.key in entry.files:
                 continue
-            if len(entry.files) >= settings.max_count or len(output.data) > min(remaining, settings.max_bytes):
+            if len(current_files) >= settings.max_count or len(output.data) > min(remaining, settings.max_bytes):
                 warnings.append("部分产物超过文件大小或数量限制")
                 continue
             try:
                 stored = await request.file_store.upload(file_type=FILE_TYPE_ATTACHMENT,
                     file_name=output.name, mime=output.mime, data=output.data, request_headers=request.headers)
-            except Exception:
+            except Exception as error:
+                upload_failures += 1
+                upload_error_type = type(error).__name__
                 warnings.append("部分远程产物上传失败，可重新获取")
                 continue
             remaining -= len(output.data)
@@ -201,6 +242,10 @@ class RemoteAgentRuntime:
                 entry, files={**entry.files, output.key: file},
                 file_message_ids={**entry.file_message_ids, output.key: entry.message_id or ""},
             )
+            current_files.append(file)
+        if upload_failures:
+            _log_operation(entry, request, "artifact_upload", "failed", upload_started, reason="upload_failed",
+                           error_type=upload_error_type, artifact_count=upload_failures)
         notices = tuple(dict.fromkeys(warnings))
         if (state, text, notices) != (entry.state, entry.text, entry.warnings):
             await self._save(entry, state=state, text=text, warnings=notices)
@@ -208,45 +253,50 @@ class RemoteAgentRuntime:
 
     async def execute(self, entry: Invocation, request: RequestScope, message: str, mode: Operation,
                       *, files: Sequence[InputFile] | None = None) -> Invocation:
-        connection = await self.authorize(entry, request)
-        if mode == "resume" and request.run_id and entry.run_id == request.run_id and entry.state.status == "completed":
-            return entry
-        adapter = await self.adapter(connection)
-        if mode == "answer" and entry.state.status != "input_required":
-            raise RemoteAgentError("此任务当前没有待回答的问题")
-        if mode == "answer" and request.remote_question_id and entry.state.question_id != request.remote_question_id:
-            raise RemoteAgentError("远程补问已更新，请刷新后重新选择问题")
-        if mode == "resume" and entry.state.status != "completed":
-            raise RemoteAgentError("远程任务尚未完成，不能开启后续任务")
-        if files is None:
-            files = await self._inputs(request)
-        previous = entry.state.model_copy(deep=True)
-        message_id = uuid4().hex
-        title = entry.title or " ".join((request.user_message or message).split())[:120]
-        started = {"status": "submitted", "question_id": None}
-        if mode == "resume" and entry.protocol == "a2a":
-            # A follow-up creates a different upstream task. Until its ID is
-            # known, the previous completed task is not a recovery handle.
-            started["task_id"] = None
-        await self._save(entry, message_id=message_id, title=title, turn_id=request.turn_id,
-                         tool_call_id=request.tool_call_id,
-                         run_id=request.run_id, state=previous.model_copy(update=started), text="", warnings=())
+        with _observe_operation(entry, request, mode) as failure:
+            connection = await self.authorize(entry, request)
+            if mode == "resume" and request.run_id and entry.run_id == request.run_id and entry.state.status == "completed":
+                return entry
+            adapter = await self.adapter(connection)
+            if mode == "answer" and entry.state.status != "input_required":
+                raise RemoteAgentError("此任务当前没有待回答的问题")
+            if mode == "answer" and request.remote_question_id and entry.state.question_id != request.remote_question_id:
+                raise RemoteAgentError("远程补问已更新，请刷新后重新选择问题")
+            if mode == "resume" and entry.state.status != "completed":
+                raise RemoteAgentError("远程任务尚未完成，不能开启后续任务")
+            if files is None:
+                files = await self._inputs(request)
+            previous = entry.state.model_copy(deep=True)
+            message_id = uuid4().hex
+            title = entry.title or " ".join((request.user_message or message).split())[:120]
+            started = {"status": "submitted", "question_id": None}
+            if mode == "resume" and entry.protocol == "a2a":
+                # A follow-up creates a different upstream task. Until its ID is
+                # known, the previous completed task is not a recovery handle.
+                started["task_id"] = None
+            await self._save(entry, message_id=message_id, title=title, turn_id=request.turn_id,
+                             tool_call_id=request.tool_call_id,
+                             run_id=request.run_id, state=previous.model_copy(update=started), text="", warnings=())
 
-        async def checkpoint(state: RemoteState):
-            # Save the upstream recovery handle immediately. Publish completion
-            # only after _complete has collected text, file references and warnings.
-            if state.status == "completed":
-                state = state.model_copy(update={"status": entry.state.status})
-            if entry.state != state:
-                await self._save(entry, state=state.model_copy(deep=True))
+            async def checkpoint(state: RemoteState):
+                # Save the upstream recovery handle immediately. Publish completion
+                # only after _complete has collected text, file references and warnings.
+                if state.status == "completed":
+                    state = state.model_copy(update={"status": entry.state.status})
+                if entry.state != state:
+                    await self._save(entry, state=state.model_copy(deep=True))
 
-        try:
-            result = await adapter.run(previous, message, files, mode, checkpoint, message_id=message_id)
-        except RemoteAgentError as error:
-            result = RemoteResult(entry.state.model_copy(update={"status": error.status}), str(error))
-        except TimeoutError:
-            result = RemoteResult(entry.state.model_copy(update={"status": "unknown"}), "远程调用超时，请查询原任务状态")
-        return await self._complete(entry, request, result)
+            failure["stage"] = "adapter_failed"
+            try:
+                result = await adapter.run(previous, message, files, mode, checkpoint, message_id=message_id)
+            except RemoteAgentError as error:
+                failure.update(reason="adapter_failed", error_type=type(error).__name__)
+                result = RemoteResult(entry.state.model_copy(update={"status": error.status}), str(error))
+            except TimeoutError:
+                failure.update(reason="adapter_timeout", error_type="TimeoutError")
+                result = RemoteResult(entry.state.model_copy(update={"status": "unknown"}), "远程调用超时，请查询原任务状态")
+            failure["stage"] = "result_save_failed"
+            return await self._complete(entry, request, result)
 
     async def execute_debug(self, entry: Invocation, request: RequestScope, message: str, mode: Operation):
         try:
@@ -263,30 +313,37 @@ class RemoteAgentRuntime:
             return entry
 
     async def refresh(self, entry: Invocation, request: RequestScope):
-        connection = await self.authorize(entry, request)
-        adapter = await self.adapter(connection)
+        with _observe_operation(entry, request, "refresh") as failure:
+            connection = await self.authorize(entry, request)
+            adapter = await self.adapter(connection)
 
-        async def checkpoint(state):
-            if state.status == "completed":
-                state = state.model_copy(update={"status": entry.state.status})
-            if state != entry.state:
-                await self._save(entry, state=state)
+            async def checkpoint(state):
+                if state.status == "completed":
+                    state = state.model_copy(update={"status": entry.state.status})
+                if state != entry.state:
+                    await self._save(entry, state=state)
 
-        try:
-            result = await adapter.refresh(entry.state, checkpoint)
-        except RemoteTaskExpired as error:
-            result = RemoteResult(entry.state.model_copy(update={"status": "failed", "question_id": None}), str(error))
-        return await self._complete(entry, request, result)
+            failure["stage"] = "adapter_failed"
+            try:
+                result = await adapter.refresh(entry.state, checkpoint)
+            except RemoteTaskExpired as error:
+                failure.update(reason="task_expired", error_type=type(error).__name__)
+                result = RemoteResult(entry.state.model_copy(update={"status": "failed", "question_id": None}), str(error))
+            failure["stage"] = "result_save_failed"
+            return await self._complete(entry, request, result)
 
     async def cancel(self, entry: Invocation, request: RequestScope):
-        connection = await self.authorize(entry, request)
-        adapter = await self.adapter(connection)
-        result = await adapter.cancel(entry.state)
-        active = self.operations.get(entry.id)
-        if active and result.state.status == "canceled":
-            active.cancel()
-            await asyncio.gather(active, return_exceptions=True)
-        return await self._complete(entry, request, result)
+        with _observe_operation(entry, request, "cancel") as failure:
+            connection = await self.authorize(entry, request)
+            adapter = await self.adapter(connection)
+            failure["stage"] = "adapter_failed"
+            result = await adapter.cancel(entry.state)
+            active = self.operations.get(entry.id)
+            if active and result.state.status == "canceled":
+                active.cancel()
+                await asyncio.gather(active, return_exceptions=True)
+            failure["stage"] = "result_save_failed"
+            return await self._complete(entry, request, result)
 
     async def close(self):
         for session in list(self.harness_sessions.values()):

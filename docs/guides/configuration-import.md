@@ -50,6 +50,8 @@ confirm=false                          正式执行时必须为true
 新增配置表需同步维护`configuration_transfer.CONFIGURATION_TABLE_ORDER`的逻辑顺序、分类和引用校验；
 不再通过ORM数据库外键推导导入顺序。
 
+`016` 备份包含发布配置、允许的应用范围、远程 Agent 连接及 Agent 对连接的绑定。远程连接里配置的固定请求头也会随备份转移，请按凭据文件保管备份。恢复范围仅限配置，接入任务、CLI 工作目录与 FileStore 产物不随备份迁移。
+
 `004`新增的`integration_settings`按通用JSON配置原样备份与导入；目录定义不备份，也不随导入自动初始化。
 
 `005` 允许 `agents.model_id` 为空，配置备份与导入保留空值。Agent 安装包与全量配置备份是不同格式，不互相替代。

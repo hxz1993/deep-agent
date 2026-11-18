@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from time import monotonic
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -13,6 +14,7 @@ from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.db.reference_integrity import ReferenceConflict
+from deep_agent.diagnostics import emit
 from deep_agent.remote_agents.cli_workspace import DEFAULT_CLI_WORKSPACE_ROOT
 from deep_agent.remote_agents.contracts import REMOTE_AGENT_PROTOCOLS, ConnectionWrite, RemoteAgentError
 from deep_agent.remote_agents.runtime import RequestScope
@@ -145,6 +147,8 @@ async def check_connection(ctx: AppContextDep, connection_id: str, body: Connect
     if body and body.approve_interface and (body.expected_revision != row.revision or not body.expected_interface):
         raise HTTPException(409, "接口候选已变更，请重新检查")
     interface = None
+    started = monotonic()
+    error_type = None
     try:
         async with asyncio.timeout(30):
             inspection = await (await runtime.adapter(row)).inspect()
@@ -161,7 +165,12 @@ async def check_connection(ctx: AppContextDep, connection_id: str, body: Connect
             else:
                 inspection = {**inspection, "status": "approval_required", "proposed_interface": proposed}
     except (RemoteAgentError, TimeoutError) as error:
+        error_type = type(error).__name__
         inspection = {"status": "failed", "message": str(error) if isinstance(error, RemoteAgentError) else "连接检查超时"}
+    emit("remote_agent_operation", level="WARNING" if error_type else "INFO",
+         connection_id=row.id, protocol=row.config.get("protocol"), phase="inspect",
+         status=inspection["status"], error_type=error_type,
+         duration_ms=round((monotonic() - started) * 1000))
     try:
         updated = await runtime.connections.inspection(row, inspection, interface)
     except ReferenceConflict as error:
@@ -182,6 +191,16 @@ class DebugRequest(BaseModel):
     action: Literal["send", "refresh", "cancel", "clear"] = "send"
 
 
+def debug_snapshot(entry, *, running=False):
+    snapshot = entry.summary()
+    snapshot["files"] = entry.result_files()
+    # Continuations may still be loading attachments while the journal holds
+    # the previous completed answer. Keep the new bubble polling in that gap.
+    if running and entry.state.status in {"completed", "input_required"}:
+        snapshot.update(status="submitted", question_id=None, text="", files=[], warnings=[])
+    return snapshot
+
+
 @router.post("/{connection_id}/debug")
 async def debug_connection(ctx: AppContextDep, connection_id: str, body: DebugRequest, request: Request, user: RequestUserDep):
     runtime = ctx.get_remote_agents()
@@ -196,7 +215,7 @@ async def debug_connection(ctx: AppContextDep, connection_id: str, body: DebugRe
             await runtime.authorize(entry, current)
             if entry.id in runtime.debug_actions:
                 if body.action == "refresh":
-                    return entry.summary()
+                    return debug_snapshot(entry, running=entry.id in runtime.operations)
                 raise HTTPException(409, "调试任务正在更新，请稍后再试")
         if body.action == "clear":
             if entry:
@@ -210,11 +229,11 @@ async def debug_connection(ctx: AppContextDep, connection_id: str, body: DebugRe
             if body.action == "refresh":
                 state = entry.state
                 if entry.id in runtime.operations or not (state.task_id or state.session_id or state.cursor):
-                    return entry.summary()
+                    return debug_snapshot(entry, running=entry.id in runtime.operations)
             operation = runtime.refresh if body.action == "refresh" else runtime.cancel
             runtime.debug_actions.add(entry.id)
             try:
-                return (await operation(entry, current)).summary()
+                return debug_snapshot(await operation(entry, current))
             finally:
                 runtime.debug_actions.discard(entry.id)
         message = body.message.strip() or ("请使用本轮补充的附件。" if files else "")
@@ -239,6 +258,6 @@ async def debug_connection(ctx: AppContextDep, connection_id: str, body: DebugRe
         task.add_done_callback(lambda finished: (runtime.operations.pop(entry.id, None),
                                                  finished.exception() if not finished.cancelled() else None))
         await asyncio.wait({task}, timeout=0.35)
-        return (task.result() if task.done() else entry).summary()
+        return debug_snapshot(task.result()) if task.done() else debug_snapshot(entry, running=True)
     except RemoteAgentError as error:
         raise HTTPException(409, str(error)) from error

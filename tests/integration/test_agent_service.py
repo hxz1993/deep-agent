@@ -6,11 +6,12 @@ import base64
 import hashlib
 import io
 import json
+import re
 import tempfile
 import unittest
 from datetime import timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from a2a import types as wire
 from a2a.client.card_resolver import parse_agent_card
@@ -20,6 +21,7 @@ from PIL import Image
 from pydantic_ai.messages import BinaryContent, ModelResponse, TextPart, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
 
+from deep_agent.agent_service.download import ArtifactDownloadResponse
 from deep_agent.agent_service.publications import PublicationCreate, PublicationStore
 from deep_agent.agent_service.tasks import RETENTION, ArtifactFile, Result
 from deep_agent.api.v1 import api_router
@@ -122,8 +124,14 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         wrong_version = await self.rpc("ListTasks", {}, headers={**app, "token": "fixture-owner"})
         self.assertEqual(wrong_version.json()["error"]["code"], -32009)
         conflicting = {**app, "token": "fixture-owner", "Authorization": "Bearer fixture-owner"}
-        self.assertEqual((await self.client.get(f"{self.url}/agent-card.json", headers=conflicting)).status_code, 401)
-        self.assertEqual((await self.client.post(mcp_url, headers={**rpc_call, **conflicting}, json=mcp_request)).status_code, 401)
+        with patch("deep_agent.agent_service.security.emit") as logged:
+            self.assertEqual((await self.client.get(f"{self.url}/agent-card.json", headers=conflicting)).status_code, 401)
+            self.assertEqual((await self.client.post(mcp_url, headers={**rpc_call, **conflicting}, json=mcp_request)).status_code, 401)
+        self.assertEqual([call.kwargs["protocol"] for call in logged.call_args_list], ["a2a", "mcp"])
+        for call in logged.call_args_list:
+            self.assertEqual(call.args, ("published_agent_access_failed",))
+            self.assertEqual(call.kwargs["http_status"], 401)
+            self.assertNotIn("fixture-owner", str(call))
 
     @staticmethod
     def message(id, content, **bindings):
@@ -230,6 +238,26 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                 task = self.ctx.agent_tasks.entries[task_id]
                 self.assertEqual((await self.ctx.agent_tasks.wait(task)).status.state, wire.TaskState.TASK_STATE_COMPLETED)
             self.assertCountEqual(executing, ids[:4])
+
+    async def test_pending_question_expires_with_its_task(self):
+        from deep_agent.agent_service.public import snapshot
+
+        async def ask(*_args):
+            return Result(state=wire.TaskState.TASK_STATE_INPUT_REQUIRED, question="月份？")
+
+        with patch("deep_agent.agent_service.protocol.RunnerExecution", return_value=ask):
+            for terminal in ("cancel", "expire"):
+                task = self.result(await self.rpc("SendMessage", {"message": self.message(terminal, "开始")}))["task"]
+                entry = self.ctx.agent_tasks.entries[task["id"]]
+                question = task["status"]["message"]["messageId"]
+                self.assertEqual(snapshot(entry)["question_id"], question)
+                if terminal == "cancel":
+                    self.result(await self.rpc("CancelTask", {"id": task["id"]}))
+                else:
+                    entry.changed -= RETENTION
+                    self.ctx.agent_tasks.prune()
+                    self.assertNotEqual(entry.task.status.message.message_id, question)
+                self.assertIsNone(snapshot(entry)["question_id"])
 
     async def test_question_and_continuation(self):
         from deep_agent.agent_service.output import QUESTION_NAME
@@ -722,11 +750,72 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 401, response.text)
             directory.assert_awaited_once()
 
-        result = self.result(await self.rpc("SendMessage", {
-            "message": self.message("unconfigured-model", "测试执行"),
-        }, url=f"{ROOT}/a2a/selected-apps"))["task"]
+        with patch("deep_agent.diagnostics.emit") as emit:
+            result = self.result(await self.rpc("SendMessage", {
+                "message": self.message("unconfigured-model", "测试执行"),
+            }, url=f"{ROOT}/a2a/selected-apps"))["task"]
         self.assertEqual(result["status"]["state"], "TASK_STATE_FAILED")
         self.assertEqual(result["status"]["message"]["parts"][0]["text"], "Agent 尚未配置模型")
+        events = [call.kwargs for call in emit.call_args_list if call.args == ("published_agent_task",)]
+        self.assertEqual([event["status"] for event in events], ["submitted", "working", "failed"])
+        entry = self.ctx.agent_tasks.entries[result["id"]]
+        self.assertTrue(all(event["task_id"] == result["id"] and event["protocol"] == "a2a" and
+                            event["session_id"] == entry.context.session_id and event["agent_id"] == agent.id and
+                            event["publication_id"] == entry.context.owner.publication_id for event in events))
+        self.assertEqual(events[-1]["reason"], "model_not_configured")
+        self.assertEqual(events[-1]["error_type"], "AgentModelNotConfiguredError")
+        self.assertGreaterEqual(events[-1]["duration_ms"], 0)
+        self.assertNotIn("测试执行", str(events))
+
+    async def test_download_document_evidence_from_published_agent(self):
+        from tests.unit.test_document_layout_tool import original
+        from tests.unit.test_document_tools import pdf
+
+        await self.ctx.stores.agent.update_unique(self.agent, AgentUpdate(capabilities=["builtin:document"]))
+        await self.ctx.stores.global_setting.upsert(
+            "document_parsing", value={"mode": "provider", "provider": "glm", "api_key": "fixture"}, version=1,
+        )
+        self.ctx.registry = build_registry()
+        exported_files = []
+
+        def respond(messages, info):
+            if any(tool.name == "parse_document" for tool in info.function_tools):
+                for message in messages:
+                    for part in message.parts:
+                        if part.part_kind == "tool-return" and part.tool_name == "parse_document":
+                            exported_files.append(part.content["export"]["file"])
+                            return ModelResponse(parts=[TextPart("证据已导出")])
+                file_id = re.search(r"local_[0-9a-f]{32}", str(messages))[0]
+                return ModelResponse(parts=[ToolCallPart("parse_document", {
+                    "resource": {"type": "attachment", "file_id": file_id}, "export_file": True,
+                })])
+            return ModelResponse(parts=[TextPart("导出文档证据")])
+
+        message = self.message("parse", "解析附件并导出文档证据")
+        message["parts"].append({
+            "raw": base64.b64encode(pdf(4)).decode(), "mediaType": "application/pdf", "filename": "sample.pdf",
+        })
+        with (
+            patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)),
+            patch("deep_agent.documents.toolset.parse_with_provider", AsyncMock(return_value=original())),
+        ):
+            task = self.result(await self.rpc("SendMessage", {"message": message}))["task"]
+            with (
+                patch("deep_agent.agent_service.execution.MAX_ARTIFACTS", 1),
+                patch("deep_agent.agent_service.tasks.MAX_ARTIFACTS", 1),
+            ):
+                over_limit = self.result(await self.rpc("SendMessage", {
+                    "message": {**message, "messageId": "parse-limit"},
+                }))["task"]
+        self.assertEqual(over_limit["status"]["state"], "TASK_STATE_FAILED", over_limit)
+        self.assertIn("产物超过", over_limit["status"]["message"]["parts"][0]["text"])
+        self.assertEqual(task["status"]["state"], "TASK_STATE_COMPLETED", task)
+        file = exported_files[0]
+        artifact, = [part for item in task["artifacts"] for part in item["parts"] if "url" in part]
+        self.assertEqual((artifact["filename"], artifact["mediaType"]), (file["file_name"], "application/zip"))
+        response = await self.client.get(artifact["url"], headers=HEADERS)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(hashlib.sha256(response.content).hexdigest(), file["sha256"])
 
     async def test_download_xlsx_published_by_python_sandbox(self):
         from mcp import ClientSession
@@ -905,14 +994,75 @@ w.save(publish_path("预算.xlsx"))
                     finally:
                         self.client.headers.update(HEADERS)
                 await self.ctx.file_store.delete(artifacts["empty"].id, headers)
-                self.assertEqual((await self.client.get(download_urls["empty"])).status_code, 404)
-                self.assertEqual((await fetch_artifact("empty", format="base64")).structuredContent["status"], 404)
+                with patch("deep_agent.diagnostics.emit") as emit:
+                    self.assertEqual((await self.client.get(download_urls["empty"])).status_code, 404)
+                    self.assertEqual((await fetch_artifact("empty", format="base64")).structuredContent["status"], 404)
+                events = [call.kwargs for call in emit.call_args_list if call.args == ("published_agent_task",)]
+                self.assertEqual(len(events), 2)
+                for event in events:
+                    self.assertEqual((event["phase"], event["protocol"], event["task_id"], event["reason"]),
+                                     ("artifact_read", "mcp", task_id, "artifact_unavailable"))
+                    self.assertNotIn("empty.txt", str(event))
+                short_file = io.BytesIO(b"one chunk")
+                with patch.object(self.ctx.file_store, "open_download", return_value=short_file), \
+                     patch("deep_agent.diagnostics.emit") as emit:
+                    failed = await fetch_artifact("boundary", format="base64")
+                self.assertTrue(short_file.closed)
+                self.assertTrue(failed.isError)
+                self.assertEqual(failed.structuredContent["status"], 502)
+                reads = [call.kwargs for call in emit.call_args_list if call.args == ("published_agent_task",)]
+                self.assertEqual([(row["protocol"], row["reason"], row["error_type"]) for row in reads],
+                                 [("mcp", "artifact_read_failed", "FileStoreIntegrityError")])
                 self.ctx.agent_tasks.entries[task_id].changed -= RETENTION + timedelta(seconds=1)
                 expired = await fetch()
                 self.assertTrue(expired.isError)
                 self.assertEqual(expired.structuredContent["status"], 404)
                 self.assertEqual((await fetch_artifact("boundary")).structuredContent["status"], 404)
                 self.assertEqual((await self.client.get(download_urls["large"])).status_code, 404)
+
+    async def test_download_read_failure_and_disconnect_after_headers(self):
+        class BrokenFile(io.BytesIO):
+            def read(self, size):
+                if self.tell() > 0:
+                    raise OSError("private storage path")
+                return super().read(size)
+
+        artifact = ArtifactFile("test-id", "test.bin", "application/octet-stream", 10)
+        scope = {"type": "http", "asgi": {"spec_version": "2.3"}}
+        for handle, expected_error in ((BrokenFile(b"x"), "OSError"),
+                                       (io.BytesIO(b"x"), "FileStoreIntegrityError"),
+                                       (io.BytesIO(b"x" * 10), None)):
+            with self.subTest(expected_error=expected_error):
+                entry = Mock()
+                response = ArtifactDownloadResponse(entry, artifact, handle, protocol="a2a")
+                messages = []
+                disconnect = asyncio.Event()
+
+                async def receive():
+                    await disconnect.wait()
+                    return {"type": "http.disconnect"}
+
+                async def send(message):
+                    messages.append(message)
+                    if expected_error is None and message["type"] == "http.response.body":
+                        disconnect.set()
+                        await asyncio.Event().wait()
+
+                if expected_error:
+                    with self.assertRaises(Exception):
+                        await response(scope, receive, send)
+                    entry.diagnose.assert_called_once()
+                    event = entry.diagnose.call_args.kwargs
+                    self.assertEqual((event["phase"], event["protocol"], event["error_type"], event["reason"]),
+                                     ("artifact_read", "a2a", expected_error, "artifact_read_failed"))
+                    self.assertNotIn("private storage path", str(event))
+                else:
+                    await response(scope, receive, send)
+                    entry.diagnose.assert_not_called()
+                self.assertTrue(handle.closed)
+                self.assertEqual(messages[0]["status"], 200)
+                self.assertTrue(messages[1]["body"])
+                self.assertTrue(all(m.get("more_body", True) for m in messages))
 
     async def test_file_events_use_each_subscriber_address(self):
         done = asyncio.Event()

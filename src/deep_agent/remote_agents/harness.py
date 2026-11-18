@@ -19,6 +19,7 @@ from pydantic_ai_harness.subagents import (
 )
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_output_limits import artifacts_from_metadata
 from deep_agent.schemas.attachment import AttachmentRef
 
 from .contracts import InputFile, RemoteAgentError
@@ -283,6 +284,7 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
             }
             for entry in session.entries.values()
             if entry.state.status == "input_required" and entry.run_id != request.run_id
+            and entry.connection_id in self.connection_ids
             and request.remote_task_id in (None, entry.id)
             and request.remote_question_id in (None, entry.state.question_id)
         ]
@@ -405,7 +407,7 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
                         ))
             if entry.tool_call_id == call.tool_call_id:
                 if entry.state.status == "completed":
-                    return portable_result(entry)
+                    return portable_result(entry, ctx.deps)
                 if entry.state.status == "input_required":
                     result = {"receipt": result, "status": entry.state.status, "task_id": entry.id, "question": entry.text}
             return ToolReturn(result, metadata={"remote_agent": entry.summary()})
@@ -426,13 +428,14 @@ class RemoteLifecycle(AbstractCapability[AgentDeps]):
                 await self.runtime.refresh(entry, request)
         except RemoteAgentError as error:
             raise ModelRetry(str(error)) from error
-        return ToolReturn(entry.result_payload(), metadata={"remote_agent": entry.summary()})
+        return portable_result(entry, ctx.deps)
 
 
-def portable_result(entry) -> ToolReturn:
-    return ToolReturn(entry.result_payload(), metadata={
-        "generated_files": entry.result_files(), "remote_agent": entry.summary(),
-    })
+def portable_result(entry, deps: AgentDeps) -> ToolReturn:
+    metadata = {"generated_files": entry.result_files(), "remote_agent": entry.summary()}
+    for artifact in artifacts_from_metadata(metadata):
+        deps.session_file_artifacts[artifact["file_id"]] = artifact
+    return ToolReturn(entry.result_payload(), metadata=metadata)
 
 
 def remote_capabilities(runtime, connections):

@@ -19,16 +19,17 @@ from mcp.server.streamable_http import StreamableHTTPServerTransport
 from mcp.shared.exceptions import McpError
 from pydantic import ValidationError
 
-from deep_agent.agent_service.download import artifact_download
+from deep_agent.agent_service.download import ArtifactDownloadResponse, artifact_chunks
 from deep_agent.agent_service.mcp_guides import MCP_GUIDE, MCP_GUIDE_URI, MCP_INSTRUCTIONS
 from deep_agent.agent_service.public import (
     HistoryLength, PublicInput, PublicTasks, ReplyInput, SubmitInput, TaskId, TaskQuery, artifact_reference, task_error,
 )
 from deep_agent.agent_service.publications import AgentCode
-from deep_agent.agent_service.security import platform_caller, public_base_url
+from deep_agent.agent_service.security import observe_access, platform_caller, public_base_url
 from deep_agent.agent_service.service import bounded_body
 from deep_agent.api.v1.agent_service import admin
 from deep_agent.core.context import AppContextDep
+from deep_agent.files.storage import FileStoreError, FileStoreIntegrityError
 
 router = APIRouter(prefix="/agent-service")
 tag = "agent-service"
@@ -53,16 +54,18 @@ async def client_config():
 
 @router.get("/tasks/{task_id}/artifacts/{artifact_id}/download")
 async def download(ctx: AppContextDep, request: Request, task_id: TaskId, artifact_id: TaskId):
-    headers = await platform_caller(request)
+    with observe_access("mcp"):
+        headers = await platform_caller(request)
     tasks = PublicTasks(ctx, headers, "mcp")
     try:
-        artifact = await tasks.artifact(task_id, artifact_id)
+        entry, artifact = await tasks.artifact(task_id, artifact_id)
     except Exception as exc:
         error = task_error(exc)
         if error is exc:
             raise
         raise error from exc
-    return await artifact_download(tasks.service, artifact, headers)
+    handle = await tasks.service.open_artifact(entry, artifact, headers, protocol="mcp")
+    return ArtifactDownloadResponse(entry, artifact, handle, protocol="mcp")
 
 
 class SubmitTool(SubmitInput):
@@ -91,7 +94,7 @@ class ArtifactTool(TaskTool):
 
 
 async def get_artifact(tasks: PublicTasks, args: ArtifactTool) -> dict:
-    artifact = await tasks.artifact(args.task_id, args.artifact_id)
+    entry, artifact = await tasks.artifact(args.task_id, args.artifact_id)
     if args.format == "url" or artifact.size > INLINE_ARTIFACT_LIMIT:
         if not tasks.download_base_url:
             raise HTTPException(503, "服务未配置有效的对外下载基址")
@@ -99,10 +102,15 @@ async def get_artifact(tasks: PublicTasks, args: ArtifactTool) -> dict:
         return {**reference, "delivery": "http_download"}
 
     metadata = artifact_reference(args.task_id, args.artifact_id, artifact)
-    with await tasks.service.open_artifact(artifact, tasks.headers) as handle:
-        data = await anyio.to_thread.run_sync(handle.read, artifact.size + 1)
-    if len(data) != artifact.size:
-        raise HTTPException(502, "文件大小与产物元数据不一致")
+    data = bytearray()
+    with await tasks.service.open_artifact(entry, artifact, tasks.headers, protocol="mcp") as handle:
+        try:
+            async for chunk in artifact_chunks(entry, artifact, handle, protocol="mcp"):
+                data.extend(chunk)
+        except FileStoreIntegrityError as exc:
+            raise HTTPException(502, "文件大小与产物元数据不一致") from exc
+        except FileStoreError as exc:
+            raise HTTPException(502, "文件暂不可读取") from exc
     encoded = await anyio.to_thread.run_sync(b64encode, data)
     return {**metadata, "delivery": "inline", "data_base64": encoded.decode("ascii")}
 
@@ -232,8 +240,9 @@ async def mcp(request: Request, ctx: AppContextDep):
         allowed_origins.add(f"{public.scheme}://{public.netloc}")
     if request.url.hostname in {"localhost", "127.0.0.1", "::1"}:
         allowed_origins.add(f"{request.url.scheme}://{request.url.netloc}")
-    if origin and origin not in allowed_origins:
-        raise HTTPException(403, "MCP Origin 不受信任")
-    headers = await platform_caller(request, require_app=False)
+    with observe_access("mcp"):
+        if origin and origin not in allowed_origins:
+            raise HTTPException(403, "MCP Origin 不受信任")
+        headers = await platform_caller(request, require_app=False)
     body = await bounded_body(request) if request.method == "POST" else b""
     return MCPResponse(PublicTasks(ctx, headers, "mcp", download_base_url=base), body)

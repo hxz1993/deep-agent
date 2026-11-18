@@ -1,6 +1,8 @@
 """Task operations shared by the published Agent transports."""
 from __future__ import annotations
 
+from time import monotonic
+
 from a2a import types as wire
 from fastapi import HTTPException, Request
 
@@ -89,10 +91,15 @@ class AgentService:
             raise HTTPException(404, "文件不存在或已过期")
         return artifact
 
-    async def open_artifact(self, artifact, headers):
+    async def open_artifact(self, entry, artifact, headers, *, protocol):
+        started = monotonic()
         try:
             return await self.ctx.file_store.open_download(artifact.id, headers, expected_size=artifact.size)
-        except (FileStorePermissionError, FileStoreNotFoundError) as exc:
-            raise HTTPException(404, "文件不存在或已过期") from exc
         except FileStoreError as exc:
+            unavailable = isinstance(exc, (FileStorePermissionError, FileStoreNotFoundError))
+            entry.diagnose(phase="artifact_read", status="failed", protocol=protocol,
+                           duration_ms=round((monotonic() - started) * 1000), error_type=type(exc).__name__,
+                           reason="artifact_unavailable" if unavailable else "artifact_read_failed")
+            if unavailable:
+                raise HTTPException(404, "文件不存在或已过期") from exc
             raise HTTPException(502, "文件暂不可读取") from exc

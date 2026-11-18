@@ -15,9 +15,11 @@ from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from deep_agent.api.v1 import api_router
 from deep_agent.api.v1.chat import _agent_deps, _prepare_remote_reply
 from deep_agent.api.v1.deps import build_runner_for_agent
+from deep_agent.agent.tool_output_limits import session_file_metadata_from_history
 from deep_agent.conversation.projector import project_session_events
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.files.storage import FileStoreError, LocalFileStore
+from deep_agent.files.upload_settings import UploadSettings
 from deep_agent.remote_agents.contracts import ConnectionWrite, OutputFile, RemoteAgentError, RemoteResult, RemoteState
 from deep_agent.remote_agents.journal import Invocation
 from deep_agent.schemas.agent import AgentUpdate
@@ -30,7 +32,7 @@ from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 
 
 class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
-    async def test_admin_api_masks_headers_and_reports_delayed_debug_failure(self):
+    async def management_client(self):
         temporary = self.enterContext(tempfile.TemporaryDirectory(prefix="TMP_to_delete_remote_management_"))
         files = LocalFileStore(Path(temporary) / "files")
         await files.initialize()
@@ -44,7 +46,13 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
         app.include_router(api_router)
         api = "/api/v1/remote-agent-connections"
         headers = {"user": "owner", "authorization": "Bearer test-token"}
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test", headers=headers) as client:
+        client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test", headers=headers)
+        return ctx, api, client
+
+    async def test_admin_api_masks_headers_and_reports_delayed_debug_failure(self):
+        ctx, api, client = await self.management_client()
+        stores = ctx.stores
+        async with client:
             mcp_config = {"protocol": "mcp", "mcp_server_name": "published", "publication_code": "budget"}
             await stores.mcp.create_unique(McpServerCreate(
                 name="published", transport="url", config={"url": "https://agent.example/mcp"},
@@ -101,7 +109,7 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
                 await release.wait()
                 raise RemoteAgentError("无法读取附件")
 
-            with patch.object(runtime, "_inputs", side_effect=input_error):
+            with patch.object(runtime, "_inputs", side_effect=input_error), patch("deep_agent.remote_agents.runtime.emit") as log:
                 first = await client.post(url + "/debug", json={"file_ids": ["inaccessible"]})
                 self.assertEqual(first.status_code, 200, first.text)
                 self.assertEqual(first.json()["status"], "submitted")
@@ -120,8 +128,63 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
                 result = await client.post(url + "/debug", json={"action": "refresh", "invocation_id": invocation_id})
                 self.assertEqual((result.json()["status"], result.json()["text"]), ("failed", "无法读取附件"))
                 self.assertEqual((await client.get(api + "/recent")).json(), [])
+                failure = log.call_args.kwargs
+                self.assertEqual((failure["phase"], failure["status"], failure["reason"], failure["error_type"]),
+                                 ("start", "failed", "preparation_failed", "RemoteAgentError"))
+                self.assertNotIn("无法读取附件", str(failure))
+
+    async def test_debug_reply_refresh_and_cancel_return_only_current_turn_files(self):
+        ctx, api, client = await self.management_client()
+        runtime = ctx.get_remote_agents()
+        initial = RemoteResult(RemoteState(status="completed", session_id="debug"), "First answer", (
+            OutputFile("one", "first.txt", "text/plain", b"first"),
+        ))
+        question = RemoteResult(RemoteState(status="input_required", session_id="debug", question_id="q"), "Which month?", (
+            OutputFile("two", "second.txt", "text/plain", b"second"),
+        ))
+        adapter = AsyncMock()
+        adapter.run.side_effect = [initial, question]
+        adapter.refresh.return_value = question
+        adapter.cancel.return_value = RemoteResult(RemoteState(status="canceled", session_id="debug"))
+        release = asyncio.Event()
+
+        async def delayed_inputs(_request):
+            await release.wait()
+            return []
+
+        async with client:
+            connection = await client.post(api, json={"name": "Debug files", "config": {"protocol": "codex"}})
+            self.assertEqual(connection.status_code, 201, connection.text)
+            url = f"{api}/{connection.json()['id']}/debug"
+
+            async def debug(**body):
+                response = await client.post(url, json=body)
+                self.assertEqual(response.status_code, 200, response.text)
+                return response.json()
+
+            with patch.object(runtime, "adapter", return_value=adapter):
+                first = await debug(message="Create first file")
+                self.assertEqual([file["file_name"] for file in first["files"]], ["first.txt"])
+                key = first["id"]
+                with patch.object(runtime, "_inputs", side_effect=delayed_inputs):
+                    second = await debug(invocation_id=key, message="Create second file")
+                    pending = runtime.operations[key]
+                    try:
+                        polled = await debug(invocation_id=key, action="refresh")
+                        for result in (second, polled):
+                            self.assertEqual((result["status"], result["text"], result["files"]), ("submitted", "", []))
+                    finally:
+                        release.set()
+                        await asyncio.wait_for(pending, 2)
+                updated = await debug(invocation_id=key, action="refresh")
+                self.assertEqual((updated["status"], updated["text"]), ("input_required", "Which month?"))
+                self.assertEqual([file["file_name"] for file in updated["files"]], ["second.txt"])
+                canceled = await debug(invocation_id=key, action="cancel")
+                self.assertEqual((canceled["status"], canceled["files"]), ("canceled", updated["files"]))
+                self.assertEqual(runtime.debug_entries[key].summary()["files"], first["files"] + updated["files"])
 
     async def test_harness_keeps_two_questions_and_exports_files_in_normal_chat(self):
+        diagnostic_log = self.enterContext(patch("deep_agent.remote_agents.runtime.emit"))
         temporary = self.enterContext(tempfile.TemporaryDirectory(prefix="TMP_to_delete_remote_harness_"))
         files = LocalFileStore(Path(temporary) / "files")
         await files.initialize()
@@ -173,7 +236,7 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
                     return RemoteResult(RemoteState(status="input_required", session_id="same-session", question_id=str(step)),
                                         "Month?" if step == 1 else "Region?")
                 return RemoteResult(RemoteState(status="completed", session_id="same-session"), "20", (
-                    OutputFile("result", "result.csv", "text/csv", b"variance\n20\n"),
+                    OutputFile("follow-up" if mode == "resume" else "result", "result.csv", "text/csv", b"variance\n20\n"),
                 ))
 
         selected_files = {}
@@ -268,7 +331,8 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
                 capabilities=capabilities,
             ))
             runner = await build_runner_for_agent(ctx, agent_id, capabilities=capabilities)
-            return await asyncio.wait_for(runner.run("session", text, deps, attachments=list(attachments), run_id=deps.run_id), 15)
+            await asyncio.wait_for(runner.run("session", text, deps, attachments=list(attachments), run_id=deps.run_id), 15)
+            return deps
 
         async def upload(name, data):
             item = await files.upload(file_type=FILE_TYPE_ATTACHMENT, file_name=name, mime="text/csv", data=data,
@@ -298,7 +362,9 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any(isinstance(part, ToolReturnPart) and part.tool_name == "delegate_task"
                                 and (part.metadata or {}).get("remote_agent", {}).get("id") == first.id
                                 for message in history if isinstance(message, ModelRequest) for part in message.parts))
-            await run("Unrelated request", capabilities=[f"agent_connection:{other.id}"])
+            with patch("pydantic_ai.RunContext.enqueue") as enqueue:
+                await run("Unrelated request", capabilities=[f"agent_connection:{other.id}"])
+                self.assertNotIn("<pending_remote_questions>", str(enqueue.call_args_list))
             self.assertEqual(len(received), 1)
             await run("October", selected=first.id, question="1")
             second = await state("input_required")
@@ -314,7 +380,11 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
             ctx.remote_agents = None
             await run("East", [await upload("extra.csv", b"East\n")], selected=second.id, question="2")
             final = await state("completed")
-            await run("Follow-up")
+            with patch("deep_agent.remote_agents.runtime.load_upload_settings", return_value=UploadSettings(max_count=1)):
+                follow_up = await run("Follow-up")
+            resumed = await state("completed")
+            self.assertEqual(list(resumed.files), ["result", "follow-up"])
+            self.assertIn(resumed.files["follow-up"]["file_id"], follow_up.session_file_artifacts)
             self.assertEqual(received, [
                 ("start", "Read budget", [("budget.csv", b"budget,actual\n100,120\n")]),
                 ("answer", "October", [("other.csv", b"private\n")]),
@@ -370,11 +440,16 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(list(partial.files), ["accepted"])
             self.assertTrue(partial.warnings)
             command_tasks["partial"] = partial.id
-            await run("Retry artifacts")
+            retry_deps = await run("Retry artifacts")
             restored = await state("completed")
             self.assertEqual(list(restored.files), ["accepted", "retry"])
             self.assertEqual(restored.files["accepted"], partial.files["accepted"])
             self.assertFalse(restored.warnings)
+            recovered_id = restored.files["retry"]["file_id"]
+            self.assertIn(recovered_id, retry_deps.session_file_artifacts)
+            raw = await ctx.store.get_raw_history("session", agent_id=agent_id)
+            self.assertEqual(session_file_metadata_from_history(raw)[recovered_id]["file_name"], "retry.csv")
+            self.assertEqual(await files.download(recovered_id, headers), b"retry\n")
             await run("Retry artifacts")
             self.assertEqual((await state("completed")).files, restored.files)
             recovered_view = project_session_events(await ctx.store.list_all_events("session"))
@@ -386,6 +461,22 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
                 artifact.file_id == restored.files["retry"]["file_id"]
                 for item in recovered_view.items if item.kind == "tool" for artifact in item.artifacts
             ), 1)
+            lookup = next(item for item in recovered_view.items if item.kind == "tool" and item.tool_name == "remote_task_result")
+            lookup_events = [event for event in await ctx.store.list_all_events("session") if event.run_id == lookup.run_id]
+            lookup_page = project_session_events(lookup_events)
+            visible = next(item for item in lookup_page.items if item.kind == "tool" and item.tool_name == "remote_task_result")
+            self.assertIn(recovered_id, [file.file_id for file in visible.artifacts])
+            records = [event.kwargs for event in diagnostic_log.call_args_list]
+            self.assertTrue({("start", "completed"), ("answer", "input_required"), ("resume", "completed"),
+                             ("cancel", "canceled")} <= {(event["phase"], event["status"]) for event in records})
+            uploads = [event for event in records if event["phase"] == "artifact_upload"]
+            self.assertEqual(len(uploads), 1)
+            self.assertEqual((uploads[0]["task_id"], uploads[0]["connection_id"], uploads[0]["reason"],
+                              uploads[0]["error_type"], uploads[0]["artifact_count"]),
+                             (partial.id, connection.id, "upload_failed", "FileStoreError", 1))
+            self.assertFalse(any(event["phase"] == "refresh" and event["status"] == "started" for event in records))
+            self.assertNotIn("retry.csv", str(records))
+            self.assertNotIn("simulated transient", str(records))
         self.assertEqual((final.id, final.state.session_id, final.text), (first.id, "same-session", "20"))
         result = final.files["result"]
         legacy_payload = final.model_dump(exclude={"file_message_ids"})

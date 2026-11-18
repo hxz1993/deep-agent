@@ -13,10 +13,10 @@ from sqlalchemy import and_, select
 
 from deep_agent.agent.input_capabilities import document_upload_mimes
 from deep_agent.agent.media_pipeline import allowed_mimes
-from deep_agent.agent_service.download import artifact_download
+from deep_agent.agent_service.download import ArtifactDownloadResponse
 from deep_agent.agent_service.protocol import PublicationHandler, agent_card
 from deep_agent.agent_service.publications import AgentCode, PublicationCreate, PublicationPatch, PublicationStore, ScopeId
-from deep_agent.agent_service.security import platform_caller, public_base_url
+from deep_agent.agent_service.security import observe_access, platform_caller, public_base_url
 from deep_agent.agent_service.service import AgentService, bounded_body, task_store
 from deep_agent.agent_service.tasks import TERMINAL
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
@@ -228,8 +228,9 @@ async def recent_task(ctx: AppContextDep, request: Request, user: RequestUserDep
 
 async def authorized_publication(ctx, agent_code: str, request: Request, app_id: str | None):
     row = await publication(ctx, agent_code)
-    headers = await platform_caller(request, path_app=app_id)
-    return row, AgentService.owner(row, headers), headers
+    with observe_access("a2a", row.id):
+        headers = await platform_caller(request, path_app=app_id)
+        return row, AgentService.owner(row, headers), headers
 
 
 async def _get_card(ctx: AppContextDep, agent_code: AgentCode, request: Request, app_id: str | None = None):
@@ -271,7 +272,8 @@ async def _download_artifact(ctx: AppContextDep, agent_code: AgentCode, task_id:
         raise HTTPException(404, "文件不存在或已过期") from exc
     service = AgentService(ctx)
     artifact = service.artifact(entry, artifact_id)
-    return await artifact_download(service, artifact, headers)
+    handle = await service.open_artifact(entry, artifact, headers, protocol="a2a")
+    return ArtifactDownloadResponse(entry, artifact, handle, protocol="a2a")
 
 
 _A2A_PATH = "/a2a/{agent_code}"

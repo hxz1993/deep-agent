@@ -93,13 +93,13 @@ def _file_artifacts(entry: Entry, events, result: Result):
         parts = payload.get("parts") or []
         for part in parts:
             if part.get("part_kind") != "tool-return" or part.get("tool_name") not in {
-                "execute_python", "execute_skill_script", "run_code", "export_file_to_download_center",
+                "execute_python", "execute_skill_script", "run_code", "export_file_to_download_center", "parse_document",
                 "delegate_task", "answer_task", "remote_task_result",
             }:
                 continue
             metadata = part.get("metadata") or {}
             for item in artifacts_from_metadata(metadata):
-                if len(result.artifacts) >= MAX_ARTIFACTS:
+                if len(entry.task.artifacts) + len(result.artifacts) > MAX_ARTIFACTS:
                     return
                 if item.get("role") != "generated_file":
                     continue
@@ -138,14 +138,15 @@ class RunnerExecution:
         except IntegrationAppAccessError as exc:
             if exc.status == 401 and not uploads:
                 entry.retry_input = (text, uploads)
-                return Result(state=AUTH_REQUIRED, question="请更新平台凭据后继续。")
+                return Result(state=AUTH_REQUIRED, question="请更新平台凭据后继续。",
+                              reason="credential_expired", error_type=type(exc).__name__)
             raise
         if entry.cancellation_requested:
             return Result(state=CANCELED)
         publication = await PublicationStore(ctx.db_session_factory).get(self.publication_code)
         if (publication is None or publication.id != scope.owner.publication_id
                 or not PublicationScope.model_validate(publication.scope).allows(scope.owner.app, scope.owner.space)):
-            return Result(state=FAILED, question="应用已移出发布范围")
+            return Result(state=FAILED, question="应用已移出发布范围", reason="scope_changed")
         entry.retry_input = None
         app, space = scope.owner.app, scope.owner.space
         row = await ctx.stores.integration_app.get_for_agent(app, space, scope.agent_id)
@@ -161,9 +162,9 @@ class RunnerExecution:
                 ctx, scope.agent_id, app_context=app_context, request_headers=mcp_headers, a2a=True,
             )
         except AgentModelNotConfiguredError as exc:
-            return Result(state=FAILED, question=str(exc))
-        except LlmModelNotFoundError:
-            return Result(state=FAILED, question="Agent 配置的模型不存在")
+            return Result(state=FAILED, question=str(exc), reason="model_not_configured", error_type=type(exc).__name__)
+        except LlmModelNotFoundError as exc:
+            return Result(state=FAILED, question="Agent 配置的模型不存在", reason="model_not_found", error_type=type(exc).__name__)
         deps = _agent_deps(ctx, session_id=scope.session_id, user=scope.owner.user, agent_id=scope.agent_id,
                            request_headers=mcp_headers, execution_request_headers=headers, app_context=app_context)
         deps.a2a = True
@@ -187,10 +188,12 @@ class RunnerExecution:
                 return Result(state=CANCELED)
             started = True
             if deps.run_id:
+                entry.segment_run_id = deps.run_id
                 entry.run_ids.append(deps.run_id)
             output = await runner.run(scope.session_id, text, deps, attachments=attachments, run_id=deps.run_id)
         except RunCancelled:
-            return Result(state=CANCELED if entry.cancellation_requested else FAILED)
+            return Result(state=CANCELED if entry.cancellation_requested else FAILED,
+                          reason="execution_canceled", error_type="RunCancelled")
         finally:
             try:
                 if not started:
@@ -203,12 +206,12 @@ class RunnerExecution:
             result.state = INPUT_REQUIRED
             result.question = output["a2a_question"]
         elif output.get("status") != "completed":
-            return Result(state=FAILED, question="Agent 需要本入口未提供的交互")
+            return Result(state=FAILED, question="Agent 需要本入口未提供的交互", reason="unsupported_interaction")
         else:
             value = output.get("output")
             encoded = json.dumps(value, ensure_ascii=False).encode()
             if len(encoded) > MAX_OUTPUT_BYTES:
-                return Result(state=FAILED, question="Agent 输出超过 A2A 交付上限")
+                return Result(state=FAILED, question="Agent 输出超过 A2A 交付上限", reason="output_limit")
             if isinstance(value, str) and not output.get("output_info"):
                 part = wire.Part(text=value, media_type="text/plain")
             else:

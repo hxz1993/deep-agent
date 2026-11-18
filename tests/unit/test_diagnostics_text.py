@@ -28,7 +28,9 @@ class DiagnosticsTextTests(unittest.TestCase):
                 self.assertEqual(record["raw"], line)
                 self.assertIn(record["message"], line)
                 self.assertNotIn("tool=execute_python", record["message"])
-                self.assertIn("tool=execute_python", record["raw"])
+                self.assertIn("session_id=session-1", record["raw"])
+                if "tool" in safe_fields(payload, event=event):
+                    self.assertIn("tool=execute_python", record["raw"])
                 self.assertEqual(record["message"], record["summary"])
                 self.assertFalse(line.startswith("{"))
                 self.assertNotIn("\n", line)

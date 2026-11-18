@@ -53,6 +53,29 @@ def event(
 
 
 class ConversationProjectorTests(unittest.TestCase):
+    def test_remote_lookup_before_original_result_keeps_each_tool_output(self) -> None:
+        file = {"file_id": "saved-report", "file_name": "report.txt"}
+        metadata = {"remote_agent": {"id": "task"}, "generated_files": [file]}
+        events = [
+            event(1, "assistant/message", message=ModelResponse(parts=[
+                ToolCallPart("delegate_task", {}, "original"),
+                ToolCallPart("remote_task_result", {"task_id": "task"}, "lookup"),
+            ])),
+            event(2, "tool/results", message=ModelRequest(parts=[
+                ToolReturnPart("remote_task_result", {"files": [file]}, "lookup", metadata=metadata),
+            ])),
+        ]
+        lookup = project_session_events(events).items[1]
+        self.assertEqual([artifact.file_id for artifact in lookup.artifacts], ["saved-report"])
+
+        events.append(event(3, "tool/results", message=ModelRequest(parts=[
+            ToolReturnPart("delegate_task", {"files": [file]}, "original", metadata=metadata),
+        ])))
+        original, lookup = project_session_events(events).items
+        self.assertEqual([artifact.file_id for artifact in original.artifacts], ["saved-report"])
+        self.assertEqual(lookup.artifacts, [])
+        self.assertEqual(original.output["files"], lookup.output["files"])
+
     def test_interleaved_native_search_keeps_final_text_after_tools(self) -> None:
         native = event(1, "assistant/message", status="completed", message=ModelResponse(parts=[
             ThinkingPart(content="准备查询"), TextPart(content="先搜索"),

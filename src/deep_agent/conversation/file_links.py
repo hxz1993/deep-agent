@@ -23,10 +23,11 @@ _MAX_PENDING = 8192
 class MarkdownFileLinks:
     """Incremental scanner for the inline Markdown spelling used by the Agent."""
 
-    def __init__(self, resolve: Callable[[str, bool], Awaitable[str | None]]):
+    def __init__(self, resolve: Callable[[str, bool], Awaitable[str | None]], *, in_link_label: bool = False):
         self.resolve = resolve
         self.pending = ""
-        self.normal_line = False
+        self.in_link_label = in_link_label
+        self.normal_line = in_link_label
         self.verbatim_line = False
         self.fence = ""
         self.code_ticks = 0
@@ -97,7 +98,7 @@ class MarkdownFileLinks:
                 result.append(source[cursor:end])
                 cursor = end
                 continue
-            elif not self.code_ticks and char in "[!":
+            elif not self.code_ticks and (char == "!" or (char == "[" and not self.in_link_label)):
                 start = cursor + (char == "!")
                 if start == len(source) and not finish:
                     break
@@ -112,19 +113,24 @@ class MarkdownFileLinks:
                         if rest.startswith("("):
                             target = rest[1:].lstrip(" \t")
                             prefix = target.removeprefix("<")
+                            match = None
                             if prefix.startswith(_SCHEME) or _SCHEME.startswith(prefix):
                                 match = _DESTINATION.match(rest, 1)
-                                if match:
-                                    angle, bare = match.groups()
-                                    label = source[start + 1:end]
-                                    url = await self.resolve(angle or bare, char == "!")
-                                    result.append(f"{source[cursor:end + 1]}(<{url}>)" if url else label)
-                                    cursor = end + 1 + match.end()
-                                    continue
-                                if not finish and ")" not in rest and "\n" not in rest and len(rest) < _MAX_PENDING:
+                                if not match and not finish and ")" not in rest and "\n" not in rest and len(rest) < _MAX_PENDING:
                                     break
+                            label = source[start + 1:end]
+                            if char == "[" and "![" in label and _SCHEME in label:
+                                # A link's visible text can contain an inline image.
+                                label = await MarkdownFileLinks(self.resolve, in_link_label=True).feed(label, finish=True)
+                            head = source[cursor:start + 1] + label + "]"
+                            if match:
+                                angle, bare = match.groups()
+                                url = await self.resolve(angle or bare, char == "!")
+                                result.append(f"{head}(<{url}>)" if url else label)
+                                cursor = end + 1 + match.end()
+                                continue
                             self.link_depth = 1
-                            result.append(source[cursor:end + 2])
+                            result.append(head + "(")
                             cursor = end + 2
                             continue
             result.append(char)

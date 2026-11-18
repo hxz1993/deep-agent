@@ -9,6 +9,7 @@
   let selected = "", selectedTask = "", access = "a2a", a2aCardMode = "general", page = 1;
   let clientConfig = {};
   let draft, detailRequest, taskRequest, timer, searchTimer;
+  let directoryGeneration = 0;
   let taskRowsMarkup = "", taskDetailSnapshot = "", shownTask = "";
   const icon = (name) => `<i data-lucide="${name}"></i>`;
   const attr = (value) => escapeHtml(value).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -124,10 +125,9 @@
       app: "budget001",
       space: "budget",
       language: "zh-cn",
-      "A2A-Version": "1.0",
     };
     const credential = useToken ? { token: "<Token>" } : { "X-Deepfos-Key": "<API Key>" };
-    return JSON.stringify({ ...context, ...credential }, null, 2);
+    return JSON.stringify({ ...context, "A2A-Version": "1.0", ...credential }, null, 2);
   }
 
   function renderA2aAccess(card, row) {
@@ -192,12 +192,14 @@
   }
 
   async function refresh() {
+    const generation = ++directoryGeneration;
     try {
       const [publications, agentList, distribution] = await Promise.all([
         apiFetch(`${root}/publications`),
         apiFetch("/api/v1/agents").catch(() => []),
         apiFetch(`${root}/client-config`).catch(() => ({})),
       ]);
+      if (generation !== directoryGeneration) return;
       rows = publications;
       agents = agentList;
       const mcpAddressChanged = clientConfig.mcp_url !== distribution.mcp_url;
@@ -212,9 +214,9 @@
       renderPublications();
       await loadTasks();
     } catch (error) {
+      if (generation !== directoryGeneration) return;
+      selectPublication("");
       rows = [];
-      tasks = [];
-      selectedTask = "";
       el("newAgentPublication").disabled = true;
       renderPublications(error.message);
       renderTasks(0);
@@ -223,8 +225,8 @@
 
   async function loadTasks() {
     taskRequest?.abort();
-    const request = taskRequest = new AbortController();
     if (!selected) { tasks = []; renderTasks(0); return; }
+    const request = taskRequest = new AbortController();
     const appFilter = el("agentTaskApp");
     const params = new URLSearchParams({ page, q: el("agentTaskSearch").value, state: el("agentTaskState").value });
     if (appFilter.value) params.set("app_id", appFilter.value);
@@ -250,6 +252,8 @@
       if (request.signal.aborted) return;
       tasks = [];
       renderTasks(0, error.message);
+    } finally {
+      if (taskRequest === request) taskRequest = null;
     }
   }
 
@@ -376,6 +380,8 @@
       refreshIcons();
     } catch (error) {
       if (!request.signal.aborted) renderDetailPlaceholder(error.message);
+    } finally {
+      if (detailRequest === request) detailRequest = null;
     }
   }
 
@@ -636,7 +642,8 @@
     window.bindConsolePaneResize(el("agentTaskSplitter"), el("agentTaskWorkbench"), "--task-list-width");
     clearInterval(timer);
     timer = setInterval(() => {
-      if (panel.classList.contains("active") && document.body.dataset.consolePage === "configuration" && !document.hidden) void loadTasks();
+      if (!taskRequest && !detailRequest && panel.classList.contains("active")
+        && document.body.dataset.consolePage === "configuration" && !document.hidden) void loadTasks();
     }, 5000);
   });
 })();

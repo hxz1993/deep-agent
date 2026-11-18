@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "list_agents",
-      "description": "List enabled Agent publications.",
+      "description": "Discover enabled published Agents and their agent_code values.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -12,7 +12,7 @@
     },
     {
       "name": "submit_task",
-      "description": "Send a message to a published Agent. Supply a stable message_id for safe retries.",
+      "description": "Start a task with text, data or attachments. Use context_id to continue a completed conversation, and reuse the same message_id and payload on retry.",
       "inputSchema": {
         "$defs": {
           "Attachment": {
@@ -164,7 +164,7 @@
     },
     {
       "name": "list_tasks",
-      "description": "List recent tasks started for this Agent using the configured App.",
+      "description": "List recent tasks for a published Agent in the configured App. Filter by state or context_id and pass next_cursor as cursor to continue.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -241,7 +241,7 @@
     },
     {
       "name": "reply_task",
-      "description": "Supply requested input to an existing task. Use the returned question_id as reply_to.",
+      "description": "Answer a task in input_required, using its task_id, question_id as reply_to, and a new message_id. Attachments can accompany the answer.",
       "inputSchema": {
         "$defs": {
           "Attachment": {
@@ -349,7 +349,7 @@
     },
     {
       "name": "cancel_task",
-      "description": "Cancel a task.",
+      "description": "Request cancellation of an unfinished task by task_id and read the returned state.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

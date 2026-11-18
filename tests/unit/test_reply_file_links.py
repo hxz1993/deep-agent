@@ -44,6 +44,22 @@ class ReplyFileLinksTests(unittest.IsolatedAsyncioTestCase):
                 actual += await parser.feed("", finish=True)
                 self.assertEqual(actual, expected)
 
+    async def test_linked_image_resolves_each_destination_across_stream_splits(self):
+        async def url(file_id, image):
+            return {"pic": "https://files.example/preview", "doc": "https://files.example/download"}.get(file_id)
+
+        for destination, expected in [
+            ("https://example.test", "[![预览](<https://files.example/preview>)](https://example.test)"),
+            ("attachment://doc", "[![预览](<https://files.example/preview>)](<https://files.example/download>)"),
+            ("attachment://missing", "![预览](<https://files.example/preview>)"),
+        ]:
+            source = f"[![预览](attachment://pic)]({destination})"
+            for cut in range(len(source) + 1):
+                with self.subTest(destination=destination, cut=cut):
+                    parser = MarkdownFileLinks(url)
+                    actual = await parser.feed(source[:cut]) + await parser.feed(source[cut:], finish=True)
+                    self.assertEqual(actual, expected)
+
     async def test_unfinished_reference_and_normal_text(self):
         async def unexpected(*_):
             self.fail("Incomplete link cannot resolve a File ID")

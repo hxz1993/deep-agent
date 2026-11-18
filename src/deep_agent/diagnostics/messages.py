@@ -16,6 +16,12 @@ def describe(record: dict) -> str:
     state = _STATE.get(suffix, "")
     message = record["summary"]
     details = []
+    if "protocol" in record:
+        details.append(f"接入方式 {record['protocol']}")
+        if "http_status" in record:
+            details.append(f"HTTP {record['http_status']}")
+    if "artifact_count" in record:
+        details.append(f"产物数 {record['artifact_count']}")
     if event == "message_persistence_failed":
         for key, label in (("persistence_reason", "分类"), ("write_hook", "写入边界"),
                            ("conflict_field", "冲突字段"), ("failure_location", "位置")):

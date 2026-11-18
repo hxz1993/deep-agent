@@ -52,6 +52,8 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 一个 A2A `contextId` 对应一个 DeepAgent `session_id`，两个 ID 分别生成。会话保存消息、工具调用和附件引用。`taskId` 对应「发布 Agent → 近期任务」里的工作项，一条会话可以包含多个 Task。每次实际执行有独立的 Run，等待补材料后会在同一 Task、同一会话里启动下一次 Run。
 
+排查接入、执行或取件失败时，在「诊断 → 日志」按请求 ID 或任务 ID 检索。远程委派使用工具返回的任务 ID，连接检查使用连接 ID。[发布和远程 Agent 日志](diagnostic-logs.md#排查发布和远程-agent)
+
 首次请求不带这两个 ID，服务端创建 Context 和 Task。已有任务完成后，客户端带上 `contextId` 继续追问，服务端在同一会话创建新 Task。任务仍待补材料时，客户端带上原来的两个 ID 继续该 Task。同一 Context 同时只处理一个活动 Task。
 
 ## MCP 接入

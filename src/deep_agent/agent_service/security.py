@@ -1,17 +1,32 @@
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
+from time import monotonic
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
 from deep_agent.agent.request_context import DEFAULT_LANGUAGE
+from deep_agent.diagnostics import emit
 from deep_agent.security.console_admin import ConsoleAdminAuthenticationError, ConsoleAdminUnavailableError, PlatformEnterpriseAdminChecker
 from deep_agent.services.integration_app_access import (
     IntegrationAppAccessError, PlatformAppAccessClient, app_space,
 )
 
 _CREDENTIALS = ("authorization", "token", "x-user-token", "x-deepfos-key")
+
+
+@contextmanager
+def observe_access(protocol: str, publication_id: str | None = None):
+    started = monotonic()
+    try:
+        yield
+    except HTTPException as exc:
+        emit("published_agent_access_failed", level="WARNING", protocol=protocol,
+             publication_id=publication_id, http_status=exc.status_code,
+             duration_ms=round((monotonic() - started) * 1000))
+        raise
 
 
 def public_base_url(value: str) -> str:

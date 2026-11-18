@@ -10,6 +10,9 @@ from urllib.parse import urlsplit
 from .messages import describe
 
 EVENTS = {
+    "published_agent_access_failed": "发布 Agent 接入校验失败",
+    "published_agent_task": "发布 Agent 任务",
+    "remote_agent_operation": "远程 Agent 调用",
     "integration_app_context": "已检查会话应用专用配置",
     "document_configuration_updated": "文档解析配置已更新",
     "document_parse_started": "文档解析开始",
@@ -144,6 +147,15 @@ BUNDLE_FIELDS = BUNDLE_NUMBER_FIELDS | frozenset({
     "request_id", "session_id", "run_id", "agent_id", "tool_call_id", "provider_name",
     "model_name", "tool", "phase", "status", "elapsed_ms", "byte_size", "reason_code",
 })
+AGENT_OPERATION_IDS = {
+    "published_agent_access_failed": {"publication_id"},
+    "published_agent_task": {"task_id", "publication_id"},
+    "remote_agent_operation": {"task_id", "connection_id"},
+}
+AGENT_OPERATION_FIELDS = frozenset({
+    "request_id", "session_id", "run_id", "agent_id", "protocol", "phase", "status",
+    "error_type", "reason", "duration_ms", "artifact_count", "byte_size", "http_status",
+})
 BOOLEAN_FIELDS = frozenset({"cache_hit", "has_more", "parse_merge_tables", "parse_relevel_titles", "parse_layout_visualization"})
 PERSISTENCE_NUMBER_FIELDS = frozenset({
     "write_message_count", "write_part_count", "message_ordinal", "part_index",
@@ -273,7 +285,11 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     adapting = event == "document_adaptation_completed"
     layout = event in LAYOUT_EVENTS
     bundle = event in BUNDLE_EVENTS
-    if adapting:
+    operation_ids = AGENT_OPERATION_IDS.get(event)
+    if operation_ids:
+        allowed = AGENT_OPERATION_FIELDS | operation_ids
+        fields = {key: value for key, value in fields.items() if key in allowed}
+    elif adapting:
         fields = {key: value for key, value in fields.items() if key in ADAPTATION_FIELDS}
     elif layout:
         fields = {key: value for key, value in fields.items() if key in LAYOUT_FIELDS}
@@ -294,6 +310,11 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     }:
         result["document_api_path"] = fields["document_api_path"]
     event_identifiers = {"adaptation_version"} if adapting else {"layout_version"} if layout else {"reason_code"} if bundle else set()
+    if operation_ids:
+        event_identifiers = operation_ids
+        protocol = fields.get("protocol")
+        if type(protocol) is str and protocol in {"a2a", "mcp", "codex", "codebuddy"}:
+            result["protocol"] = protocol
     for name in IDENTIFIER_FIELDS | event_identifiers:
         value = fields.get(name)
         # No coercion/repr: even exception __str__ and custom number objects may
@@ -301,6 +322,8 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
         if type(value) is str and TOKEN.fullmatch(value) and "://" not in value:
             result[name] = value
     event_numbers = ADAPTATION_NUMBER_FIELDS if adapting else LAYOUT_NUMBER_FIELDS if layout else BUNDLE_NUMBER_FIELDS if bundle else set()
+    if operation_ids:
+        event_numbers = {"artifact_count"}
     for name in NUMBER_FIELDS | event_numbers:
         value = fields.get(name)
         if type(value) in (int, float) and 0 <= value <= 10**15 and math.isfinite(value):

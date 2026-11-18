@@ -180,4 +180,4 @@ class PublicTasks:
 
     async def artifact(self, task_id: str, artifact_id: str):
         _, entry = await self.service.find_task(task_id, self.headers)
-        return self.service.artifact(entry, artifact_id)
+        return entry, self.service.artifact(entry, artifact_id)

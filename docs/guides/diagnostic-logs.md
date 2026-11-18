@@ -15,6 +15,14 @@
 - `synthesized / reason=missing_result_cancelled` 或 `missing_result_failed`：调用确实缺少结果，分别补取消或异常结束结果。
 - `phase=history_prepare/terminal_persistence` 区分模型历史准备与终态持久化；可按 Session、Run、工具名和 `tool_call_id` 关联。只记录固定原因与标识，不保存正文。匹配日志描述本次历史读取，不代表工具又执行了一次。
 
+### 排查发布和远程 Agent
+
+如果读取 Agent Card 或建立 MCP 连接时就返回 401 或 403，先搜 `published_agent_access_failed`，按请求 ID 和 HTTP 状态定位。这一步通常还没有 Task ID。
+
+在「诊断 → 日志」的关键词框粘贴任务 ID。用发布页看到的 Task ID 可以查到 `published_agent_task`，查看 A2A 或 MCP 的任务状态、累计耗时和产物数量。取件失败时看 `phase=artifact_read` 和 `reason`。用同一条记录里的 Session ID 可以继续查模型和工具调用。
+
+远程委派使用工具返回的 `task_id` 查 `remote_agent_operation`。按 `phase` 区分首次委派、补答、续跑、取消和产物上传。检查连接时还没有任务，可以用连接 ID 搜 `phase=inspect`。两类记录只写关联标识、阶段、状态、耗时和错误类别，提示词、Header 和附件内容均不入日志。日志从新版运行时开始产生。
+
 ## 使用
 
 进入控制台「诊断 → 日志」（`/console/#/diagnostics/logs`），选择时间、来源、级别或关键词，

@@ -11,7 +11,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "remote-agent-composer";
+const CONFIGURATION_ASSET_VERSION = "agent-protocol-icons";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",

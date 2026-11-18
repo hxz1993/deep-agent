@@ -31,3 +31,17 @@ export function channelOriginPresentation(session) {
     description: `${accountName} · ${conversationType} · ${peerKey}: ${channel.peer_id || "未记录"}${displayName ? ` · ${peerName}` : ""}`,
   };
 }
+
+export function renderSessionSource(session) {
+  const sourceType = session?.source_type;
+  const channel = channelOriginPresentation(session);
+  let source = '<img class="session-source-logo" src="./favicon.svg?v=20260922-d-rounded" alt="" />DeepFOS';
+  if (channel) {
+    source = `<img class="session-source-logo" src="${channel.logo}" alt="" />${channel.platform}`;
+  } else if (sourceType === "a2a" || sourceType === "mcp") {
+    source = `<span class="agent-protocol-logo" data-protocol="${sourceType}" aria-hidden="true"></span>${sourceType.toUpperCase()}`;
+  } else if (sourceType === "http") {
+    source = '<i class="session-source-logo" data-lucide="globe" aria-hidden="true"></i>HTTP';
+  }
+  return `<span class="inspector-channel-name">${source}</span>`;
+}

@@ -32,19 +32,19 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=remote-agent-workdir");
+    const module = await import("./configuration.js?v=agent-protocol-icons");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=remote-agent-composer");
+    const module = await import("./workspace.js?v=session-source-rows");
     await module.initWorkspace();
     workspaceModule = module;
     return module;
   },
   diagnostics: async () => {
-    const module = await import("./diagnostics-center.js?v=0170a2-session-source");
+    const module = await import("./diagnostics-center.js?v=session-source-column");
     module.initDiagnostics();
     diagnosticsModule = module;
     return module;

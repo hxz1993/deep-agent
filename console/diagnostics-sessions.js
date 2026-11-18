@@ -1,12 +1,12 @@
-import { channelOriginPresentation } from "./session-display.js?v=20260929-release0124";
+import { renderSessionSource } from "./session-display.js?v=session-source-rows";
 import { DIAGNOSTIC_PERIODS as PERIODS, diagnosticRangeHelpHtml, bindDiagnosticRangeDismiss } from "./diagnostic-range-control.js?v=20261019-release0138";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 import { escapeHtml as e, icon, icons, localInput, selectHtml, bindDiagnosticSelects, diagnosticRequest } from "./diagnostics-ui.js?v=20261019-release0138";
 import { diagnosticTime } from "./diagnostics.js?v=20261019-release0138";
 import { diagnosticTarget, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
-import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=20260917-release01010";
+import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=session-source-column";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261112-busy-retry";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=0170a2-session-source";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=session-source-rows";
 import { ensureSessionViewTemplate } from "./session-view-shell.js?v=20261025-readonly-load2";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
@@ -17,11 +17,6 @@ const empty = message => `<div class="diagnostics-empty">${e(message)}</div>`;
 export function userCardHtml(id, profiles = {}) {
   const user = profiles[id] || {}, name = user.username || user.display_name || id || "未记录";
   return `<span class="diagnostic-user diagnostic-username" title="${e(id)}">${e(name)}</span>`;
-}
-export function sessionAgentIconHtml(item) {
-  const origin = channelOriginPresentation(item);
-  if (!origin) return `<span class="diagnostic-agent-icon">${icon("bot")}</span>`;
-  return `<span class="diagnostic-agent-icon diagnostic-channel-icon" title="${e(origin.accountName === "未记录" ? origin.platform : origin.accountName)}" aria-label="${e(origin.accountName === "未记录" ? origin.platform : origin.accountName)}"><img src="${origin.logo}" width="20" height="20" alt="${e(origin.platform)}" /></span>`;
 }
 export function shortQuestionTime(value) {
   const full = diagnosticTime(value);
@@ -176,10 +171,11 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
         </div>
       </form>
       <div class="diagnostic-session-table-scroll"><div class="diagnostic-session-table" role="table" aria-label="会话查询列表">
-        <div class="diagnostic-session-row diagnostic-session-columns" role="row">${["会话", "Agent", "用户", "App ID", "状态", "最近活动"].map((label, i) => `<span role="columnheader">${label}${i === 5 ? icon("arrow-down") : `<span class="diagnostic-column-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整${label}列宽" aria-valuemin="${COLUMN_BOUNDS[i][0]}" aria-valuemax="${COLUMN_BOUNDS[i][1]}" data-resize-column="${i}"></span>`}</span>`).join("")}</div>
+        <div class="diagnostic-session-row diagnostic-session-columns" role="row">${["会话", "Agent", "会话来源", "用户", "App ID", "状态", "最近活动"].map((label, i, labels) => `<span role="columnheader">${label}${i === labels.length - 1 ? icon("arrow-down") : `<span class="diagnostic-column-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="调整${label}列宽" aria-valuemin="${COLUMN_BOUNDS[i][0]}" aria-valuemax="${COLUMN_BOUNDS[i][1]}" data-resize-column="${i}"></span>`}</span>`).join("")}</div>
         ${items.map(item => `<div class="diagnostic-session-row" role="row" tabindex="0" data-session-id="${e(item.session_id)}">
           <div class="diagnostic-session-name" role="cell"><div class="diagnostic-session-title"><strong title="${e(item.title || "未命名会话")}">${e(item.title || "未命名会话")}</strong></div><div class="diagnostic-session-id"><code title="${e(item.session_id)}">${e(String(item.session_id).slice(0, 8))}</code><button type="button" class="diagnostic-copy-separator" data-copy-session="${e(item.session_id)}" aria-label="复制 Session ID" title="复制 Session ID：${e(item.session_id)}">${icon("copy")}</button><p title="${e(item.recent_question?.summary || "当前范围暂无提问")}">${e(item.recent_question?.summary || "当前范围暂无提问")}</p></div></div>
-          <span class="diagnostic-agent-name" role="cell">${sessionAgentIconHtml(item)}<span title="${e(item.agent_name || item.agent_id)}">${e(item.agent_name || item.agent_id || "未记录")}</span></span>
+          <span class="diagnostic-agent-name" role="cell"><span class="diagnostic-session-icon">${icon("bot")}</span><span class="diagnostic-agent-title" title="${e(item.agent_name || item.agent_id)}">${e(item.agent_name || item.agent_id || "未记录")}</span></span>
+          <span class="diagnostic-session-source" role="cell">${renderSessionSource(item)}</span>
           <span role="cell">${renderUserIdentity(state.users[item.user_id] || {}, {userId:item.user_id, copyable:false})}</span>
           <span class="diagnostic-session-app" role="cell" title="${e(item.app_id || "")}">${e(item.app_id || "—")}</span>
           <span role="cell"><span class="diagnostic-status ${e(item.latest_status)}">${e(SESSION_STATUSES[item.latest_status] || "未确认")}</span></span>

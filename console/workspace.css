@@ -2759,7 +2759,7 @@ html, body {
 .composer-channel-warning { visibility: hidden; min-width: 0; padding: 5px 8px; border-left: 2px solid var(--warning, #b9893b); border-radius: 4px; background: color-mix(in srgb, var(--warning, #b9893b) 9%, var(--bg-primary, #fff)); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer:has(.composer-inner:focus-within) .composer-channel-warning { visibility: visible; }
 .composer-channel-label { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; margin-left: auto; color: var(--text-secondary); }
-.composer-channel-label img, .session-source-logo { width: 14px; height: 14px; object-fit: contain; flex-shrink: 0; }
+.composer-channel-label img, .inspector-channel-name > .session-source-logo { width: var(--ui-icon); height: var(--ui-icon); object-fit: contain; flex-shrink: 0; }
 .inspector-channel-name { display: inline-flex; align-items: center; gap: 5px; }
 
 

@@ -1,4 +1,4 @@
-import { channelOriginPresentation } from "../../../console/session-display.js";
+import { renderSessionSource } from "../../../console/session-display.js";
 import { renderUserIdentity } from "../../../console/user-identity.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -58,7 +58,7 @@ function sessionHarness(request = async () => overview()) {
   };
   let selectCallback;
   const copied = [], toasts = [];
-  const context = vm.createContext({ channelOriginPresentation, renderUserIdentity,
+  const context = vm.createContext({ renderSessionSource, renderUserIdentity,
     URL, URLSearchParams, Date, Intl, AbortController, setTimeout, clearTimeout,
     document: { baseURI: "https://console.example/console/", addEventListener(name, handler) { documentListeners.set(name, handler); } },
     window: { location: { href: "https://console.example/console/" }, DeepAgentConsole: { toast: (...args) => toasts.push(args) } },
@@ -215,7 +215,7 @@ function centerHarness(initialHash = diagnosticTarget("logs", { q: "original", l
   const logs = { activated: [], saved: { scroll: 88, selectedId: "log-record" }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const sessions = { activated: [], saved: { scroll: 321, filters: { ...filters, offset: 50 } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
   const channels = { activated: [], saved: { filters: { period: "720", account_id: "account-a" } }, snapshot() { return this.saved; }, activate(...args) { this.activated.push(args); }, deactivate() {}, clear() { this.saved = null; } };
-  const context = vm.createContext({ channelOriginPresentation, renderUserIdentity,
+  const context = vm.createContext({ renderSessionSource, renderUserIdentity,
     location: { get hash() { return navigation.hash; } }, history: navigation.history,
     document: { getElementById: () => node(), querySelectorAll: () => [] },
     window: { addEventListener(name, callback) { handlers.set(name, callback); }, dispatchEvent() {}, DeepAgentConsole: { showPage(page, options) { navCalls.push({ page, options }); } } },
@@ -417,6 +417,25 @@ test("failed status filter never leaves other-filter results or counts on screen
   assert.equal(h.controller.snapshot().data, null);
   assert.match(h.root.innerHTML, /加载失败/);
   assert.doesNotMatch(h.root.innerHTML, /真实会话|共 128 项|共 0 项|没有匹配会话/);
+});
+
+test("the Agent and saved session source have separate adjacent columns", async () => {
+  const items = [
+    { ...session(), session_id: "mcp", agent_name: "MCP Agent", source_type: "mcp" },
+    { ...session(), session_id: "wecom", agent_name: "Channel Agent", source_type: "channel:wecom" },
+    { ...session(), session_id: "internal", agent_name: "Console Agent" },
+  ];
+  const h = sessionHarness(async () => ({ total: items.length, items }));
+  h.activate("list"); await settle();
+  const headers = [...h.root.innerHTML.matchAll(/role="columnheader">([^<]+)/g)].map(([, label]) => label);
+  assert.deepEqual(headers, ["会话", "Agent", "会话来源", "用户", "App ID", "状态", "最近活动"]);
+  for (const item of items) {
+    const agent = `<span class="diagnostic-agent-name" role="cell"><span class="diagnostic-session-icon">${icon("bot")}</span><span class="diagnostic-agent-title" title="${item.agent_name}">${item.agent_name}</span></span>`;
+    const source = `<span class="diagnostic-session-source" role="cell">${renderSessionSource(item)}</span>`;
+    assert.ok(h.root.innerHTML.includes(
+      `${agent}\n          ${source}`,
+    ), item.session_id);
+  }
 });
 
 test("failed page query hides the previously known total and disables pagination", async () => {
@@ -799,7 +818,7 @@ test("production session controller does not import live workspace state or writ
 
 test("diagnostic request uses same-origin API helper, no App, no cache and propagates permission loss", async () => {
   const calls = [], events = [];
-  const context = vm.createContext({ channelOriginPresentation, renderUserIdentity,  AbortController, setTimeout, clearTimeout,
+  const context = vm.createContext({ renderSessionSource, renderUserIdentity,  AbortController, setTimeout, clearTimeout,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     window: { serviceUrl: path => `/prefix/${path}`, daFetch: async (path, options) => { calls.push({ path, options }); return { ok: false, status: 403, json: async () => ({ detail: "denied" }) }; }, dispatchEvent: event => events.push(event) },
   });

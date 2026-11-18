@@ -6,8 +6,8 @@ import { applyAssistantPresentationActions } from "./assistant-presentation.js?v
 import { createTrajectoryController } from "./trajectory.js?v=20261106-ptc-source";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { eventEffort, historyEffort } from "./reasoning-ui.js?v=0160";
-import { renderSessionInspector } from "./session-inspector.js?v=0170a2-session-source";
-import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=20260929-release0124";
+import { renderSessionInspector } from "./session-inspector.js?v=session-source-rows";
+import { channelOriginPresentation, formatSessionIdSubtitle } from "./session-display.js?v=session-source-rows";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { bindAttachmentImagePreviews, attachmentDownloadUrl } from "./attachment-preview.js?v=20261103-view-image1";

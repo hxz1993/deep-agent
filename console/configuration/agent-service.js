@@ -59,19 +59,16 @@
     renderAccess();
   }
 
-  const methods = {
-    a2a: { label: "A2A", icon: "network" },
-    mcp: { label: "MCP", icon: "plug" },
-    http: { label: "HTTP", icon: "globe" },
-  };
+  const methods = { a2a: "A2A", mcp: "MCP", http: "HTTP" };
+  const methodIcon = (method) => method === "http" ? icon("globe")
+    : `<span class="agent-protocol-logo" data-protocol="${method}" aria-hidden="true"></span>`;
 
   function accessToolbar(method, controls = "", publicationName = "") {
-    const { label, icon: glyph } = methods[method];
     const publication = publicationName
       ? `<span class="agent-service-publication-name" title="当前发布 ${attr(publicationName)}">${escapeHtml(publicationName)}</span>` : "";
     return `<div class="agent-service-card-heading agent-service-card-toolbar">
       <div class="agent-service-access-identity">
-        <h4 class="agent-service-access-title" data-service-access="${method}">${icon(glyph)}<span>${label} 接入</span></h4>
+        <h4 class="agent-service-access-title" data-service-access="${method}">${methodIcon(method)}<span>${methods[method]} 接入</span></h4>
         ${publication}
       </div>
       ${controls}
@@ -264,7 +261,7 @@
     const markup = tasks.length ? tasks.map((row) => `
       <tr data-agent-task="${attr(row.id)}" class="${row.id === selectedTask ? "selected" : ""}">
         <td><button type="button" class="btn text agent-service-select" aria-controls="agentTaskDetail" aria-pressed="${row.id === selectedTask}"><span title="${attr(row.title)}">${escapeHtml(row.title)}</span><code title="${attr(row.id)}">${escapeHtml(row.id.slice(0, 8))}</code></button></td>
-        <td><span class="agent-service-status" data-state="${attr(row.status)}">${statusLabel(row.status)}</span></td><td>${methods[row.source]?.label || "A2A"}</td>
+        <td><span class="agent-service-status" data-state="${attr(row.status)}">${statusLabel(row.status)}</span></td><td>${Object.hasOwn(methods, row.source) ? methods[row.source] : methods.a2a}</td>
         <td class="agent-task-wide" title="${attr(row.caller_username ? `${row.caller_username} · ${row.caller}` : row.caller)}">${escapeHtml(row.caller_username || row.caller?.slice(0, 8) || "—")}</td>
         <td class="agent-task-wide">${escapeHtml(formatDate(row.created_at))}</td>
         <td class="agent-task-wide">${duration(row)}</td>
@@ -320,6 +317,7 @@
     const sessions = row.session_id ? [taskIdValue(row.session_id, "会话 ID", sessionUrl)] : [];
     const appName = row.app_name || (row.app_id ? "名称未获取" : "未关联应用");
     const spaceName = row.space_name || (row.space_id ? "名称未获取" : "未关联空间");
+    const method = Object.hasOwn(methods, row.source) ? row.source : "a2a";
     const scope = `<span class="inspector-scope-value">
       <span class="inspector-scope-names"><span title="${attr(appName)}">${escapeHtml(appName)}</span><span>/</span><span title="${attr(spaceName)}">${escapeHtml(spaceName)}</span></span>
       <span class="inspector-scope-codes"><code>${escapeHtml(row.app_id || "—")}</code><span>/</span><code>${escapeHtml(row.space_id || "—")}</code></span>
@@ -327,7 +325,7 @@
     return `<section class="inspector-section agent-service-task-facts">
       <dl class="agent-service-facts">
         <div><dt>调用方</dt><dd>${callerName}${taskIdValue(row.caller, "User ID")}</dd></div>
-        <div><dt>接入方式</dt><dd><span class="agent-service-access-method" data-service-access="${attr(row.source || "a2a")}">${icon((methods[row.source] || methods.a2a).icon)}${(methods[row.source] || methods.a2a).label}</span></dd></div>
+        <div><dt>接入方式</dt><dd><span class="agent-service-access-method" data-service-access="${method}">${methodIcon(method)}${methods[method]}</span></dd></div>
         <div><dt>应用 / 空间</dt><dd>${scope}</dd></div>
         <div><dt>提交时间</dt><dd>${escapeHtml(formatDate(row.created_at))}${Number.isFinite(row.duration_seconds) ? `<span class="agent-service-fact-meta">耗时 ${duration(row)}</span>` : ""}</dd></div>
       </dl>

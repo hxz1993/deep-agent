@@ -40,9 +40,11 @@
   flex:1; min-width:min(100%, 208px);
 }
 .console-segmented.agent-service-tabs button { min-width:0; padding-inline:3px; white-space:nowrap; }
+.agent-protocol-logo { display:inline-block; width:var(--ui-icon); height:var(--ui-icon); flex:none; background:center / contain no-repeat; }
+.agent-protocol-logo[data-protocol="a2a"] { background-image:url("./assets/remote-agents/a2a.svg"); }
+.agent-protocol-logo[data-protocol="mcp"] { background-image:url("./assets/mcp-logo.png"); }
+[data-theme="dark"] .agent-protocol-logo[data-protocol="mcp"] { filter:invert(1); }
 .agent-service-tabs button svg { flex:none; }
-.agent-service-access-method[data-service-access="a2a"] svg,.agent-service-tabs [data-service-access="a2a"] svg,.agent-service-access-title[data-service-access="a2a"] svg { color:var(--accent); }
-.agent-service-tabs [data-service-access="mcp"] svg,.agent-service-access-title[data-service-access="mcp"] svg { color:var(--success, var(--accent)); }
 .agent-service-tabs [data-service-access="cli"] svg { color:var(--info, var(--accent)); }
 .agent-service-tabs [data-service-access="sdk"] svg { color:var(--warning, var(--accent)); }
 .agent-service-access-body { flex:1; min-height:0; overflow:auto; padding:12px; border:1px solid var(--console-card-border); border-radius:var(--console-card-radius); color:var(--text-dim); }
@@ -54,7 +56,7 @@
 .agent-service-card-toolbar { flex-wrap:nowrap; min-height:var(--ui-control-height); margin-bottom:8px; }
 .agent-service-access-identity { display:flex; align-items:center; gap:8px; min-width:0; }
 .agent-service-access-title { display:flex; align-items:center; gap:6px; flex:none; line-height:1.4; white-space:nowrap; }
-.agent-service-access-title svg { width:var(--ui-icon-action); height:var(--ui-icon-action); flex:none; }
+.agent-service-access-title .agent-protocol-logo { width:var(--ui-icon-action); height:var(--ui-icon-action); }
 .agent-service-publication-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--ui-font-helper); }
 .agent-service-card-toolbar .console-segmented { display:grid; grid-template-columns:repeat(2,1fr); flex:none; }
 .agent-service-card-toolbar button { white-space:nowrap; }
@@ -223,7 +225,7 @@ dialog.console-detail-dialog.modal.agent-service-guide { width:min(980px,calc(10
   .agent-service-access { margin-top:12px; }
 }
 @container (max-width:235px) {
-  .agent-service-tabs button svg { display:none; }
+  .agent-service-tabs button :is(svg, .agent-protocol-logo) { display:none; }
 }
 @media (max-width:860px) {
   #panel-agent-service.active { height:auto; min-height:100%; }

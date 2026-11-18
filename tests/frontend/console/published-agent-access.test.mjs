@@ -38,6 +38,7 @@ test("both A2A card modes supply copyable headers for RPC", async () => {
   });
   await ui.refresh();
   const card = ui.element("agentServiceAccess");
+  assert.match(card.innerHTML, /<h4 class="agent-service-access-title"[^>]*><span class="agent-protocol-logo" data-protocol="a2a"/);
   assert.match(card.innerHTML, /&quot;A2A-Version&quot;: &quot;1\.0&quot;/);
   card.querySelector = () => ({ focus() {} });
   card.listeners.get("click")({ target: { closest: () => ({
@@ -60,7 +61,7 @@ test("timer leaves slow list and detail requests in flight and resumes after del
   ui.poll();
   assert.equal(pending.length, 1);
   assert.equal(pending[0].signal.aborted, false);
-  const task = { id: "sample", title: "Example", status: "COMPLETED" };
+  const task = { id: "sample", title: "Example", status: "COMPLETED", source: "mcp" };
   pending[0].resolve({ items: [task], total: 1 });
   await refresh;
   ui.poll();
@@ -69,6 +70,7 @@ test("timer leaves slow list and detail requests in flight and resumes after del
   pending[1].resolve({ ...task, message: [], files: [{ name: "output.xlsx" }] });
   await new Promise(resolve => setImmediate(resolve));
   assert.match(ui.element("agentTaskDetail").innerHTML, /output\.xlsx/);
+  assert.match(ui.element("agentTaskDetail").innerHTML, /agent-protocol-logo" data-protocol="mcp"/);
   ui.poll();
   assert.equal(pending.length, 3);
 });

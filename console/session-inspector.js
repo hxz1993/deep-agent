@@ -1,6 +1,7 @@
 import { contextOccupancyPresentation, tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderUserIdentity } from "./user-identity.js?v=20260917-release01010";
 import { composerProviderIcon } from "./provider-icons.js?v=20261013-providers";
+import { renderSessionSource } from "./session-display.js?v=session-source-rows";
 // Pure shared inspector markup. Hosts supply identity, historical data and tab state.
 const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -219,11 +220,7 @@ export function renderSessionInspector({
       ${inspectorFact("会话 ID", state.sessionId || "尚未创建", { mono: true, wide: true, copy: Boolean(state.sessionId), displayValue: state.sessionId?.slice(0, 8) })}
       ${inspectorFact("Agent", agentName, { wide: true })}
       ${inspectorFactHtml("模型", `<span class="inspector-channel-name">${modelProvider ? `<span class="composer-provider-icon">${composerProviderIcon(modelProvider)}</span>` : ""}${escapeHtml(model ? modelWithEffort(model.name || model.model || "未记录", sessionReasoningEffort) : "未记录")}</span>`)}
-      ${inspectorFactHtml("会话来源", channelOrigin
-        ? `<span class="inspector-channel-name"><img class="session-source-logo" src="${channelOrigin.logo}" alt="" />${escapeHtml(channelOrigin.platform)}</span>`
-        : ["a2a", "mcp", "http"].includes(activeSession.source_type)
-          ? `<span class="inspector-channel-name">集成<span class="inspector-channel-badge">${activeSession.source_type.toUpperCase()}</span></span>`
-          : '<span class="inspector-channel-name"><img class="session-source-logo" src="./favicon.svg?v=20260922-d-rounded" alt="" />DeepFOS</span>')}
+      ${inspectorFactHtml("会话来源", renderSessionSource(activeSession))}
       ${inspectorFactHtml("App / Space", sessionScope, { wide: true })}
       ${inspectorFactHtml("会话统计", sessionCounts)}
       ${inspectorFact("Language", context.language || "未记录")}

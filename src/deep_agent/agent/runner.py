@@ -8,6 +8,7 @@ import time
 from contextlib import aclosing, asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from itertools import groupby
 from typing import Any, AsyncIterator
 
 import anyio
@@ -99,6 +100,7 @@ from deep_agent.agent.tool_output_limits import PlatformToolResultStore
 from deep_agent.agent.history import (
     deduplicate_adjacent_tool_returns,
     incremental_append_messages,
+    is_user_only_request,
     mark_cancelled_response_interrupted,
     repair_unprocessed_tool_calls,
 )
@@ -236,6 +238,31 @@ def _should_publish_tool_call(
     # their native PartStartEvent stream. Plain ToolCallPart starts are only a
     # provisional model emission; a validated FunctionToolCallEvent follows.
     return not isinstance(getattr(event, "part", None), ToolCallPart)
+
+
+def _compaction_source_view(stored: list[ModelMessage], outgoing: list[ModelMessage]) -> list[ModelMessage]:
+    """Validate the model view and preserve event boundaries for the cutoff."""
+    if len(stored) == len(outgoing):
+        if _common_message_suffix(stored, outgoing) == len(stored):
+            return outgoing
+    elif len(stored) > len(outgoing):
+        # An unanswered user turn can adjoin the next question. The SDK joins
+        # their parts on the wire and drops application-only request metadata.
+        def plain_user(message):
+            return is_user_only_request(message) and not ((message.metadata or {}).keys() - {"reasoning_effort"})
+
+        grouped = []
+        for mergeable, items in groupby(stored, key=plain_user):
+            batch = list(items)
+            instructions = {m.instructions for m in batch if mergeable and m.instructions}
+            if mergeable and len(batch) > 1 and len(instructions) <= 1:
+                grouped.append(replace(batch[0], parts=[p for m in batch for p in m.parts],
+                                       instructions=next(iter(instructions), None), metadata=None))
+            else:
+                grouped.extend(batch)
+        if len(grouped) == len(outgoing) and _common_message_suffix(grouped, outgoing) == len(outgoing):
+            return stored
+    raise SummaryUnavailable("source_history_changed")
 
 
 def _history_hash(messages: list[ModelMessage]) -> str:
@@ -687,12 +714,10 @@ class AgentRunner:
         assert self._context_compaction is not None
 
         async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id):
-            raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
-            raw = await raw_reader(session_id, agent_id=deps.agent_id)
+            raw, visible = await self._read_history_pair(session_id, deps)
             if not raw:
                 yield manual_result("noop", "empty_history")
                 return
-            visible = await self.store.get_history(session_id, agent_id=deps.agent_id)
             deps.has_context_references = history_has_context_references(visible)
             projected = project_context_references_in_history(visible)
             budget = build_context_budget(
@@ -842,6 +867,7 @@ class AgentRunner:
                         await queue_task
 
             try:
+                raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
                 current_raw = await raw_reader(session_id, agent_id=deps.agent_id)
             except asyncio.CancelledError:
                 with anyio.CancelScope(shield=True):
@@ -941,6 +967,16 @@ class AgentRunner:
                 },
             )
 
+    async def _read_history_pair(
+        self, session_id: str, deps: AgentDeps,
+    ) -> tuple[list[ModelMessage], list[ModelMessage]]:
+        paired_reader = getattr(self.store, "get_history_pair", None)
+        if paired_reader is not None:
+            return await paired_reader(session_id, agent_id=deps.agent_id)
+        raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
+        raw = await raw_reader(session_id, agent_id=deps.agent_id)
+        return raw, await self.store.get_history(session_id, agent_id=deps.agent_id)
+
     async def _prepare_history(
         self,
         session_id: str,
@@ -956,10 +992,8 @@ class AgentRunner:
     ) -> _PreparedHistory:
         if branch_from is not None:
             raise ValueError("Branch From is not implemented for session events")
-        raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
-        raw_history = await raw_reader(session_id, agent_id=deps.agent_id)
+        raw_history, history = await self._read_history_pair(session_id, deps)
         await self._prepare_output_contract(session_id, deps)
-        history = await self.store.get_history(session_id, agent_id=deps.agent_id)
         deps.turn_id = deps.turn_id or deps.run_id
         if not deferred_tool_results:
             repaired = repair_unprocessed_tool_calls(history, diagnostic_fields={
@@ -1143,31 +1177,22 @@ class AgentRunner:
             if _common_message_suffix([source], [resolved]) != 1
         ]) if model_history is not None else [])
 
-        async def refresh_raw_history(request_messages=None):
-            reader = getattr(self.store, "get_raw_history", self.store.get_history)
-            raw = await reader(session_id, agent_id=deps.agent_id)
-            if request_messages is not None:
-                visible = await self.store.get_history(session_id, agent_id=deps.agent_id)
-                normalized = [next((resolved for source, resolved in input_projection
-                                    if _common_message_suffix([source], [message]) == 1), message)
-                              for message in visible]
-                # A checkpoint anchor is re-rendered on every read, so its
-                # synthetic UserPrompt timestamp is not an original Event fact.
-                # All content, evidence and protected context still compare.
-                if (normalized and request_messages
-                        and summary_contents([normalized[0]])
-                        and summary_contents([request_messages[0]])):
-                    normalized[0] = replace(normalized[0], parts=[
-                        replace(normalized[0].parts[0], timestamp=request_messages[0].parts[0].timestamp)
-                    ])
-                if (len(normalized) != len(request_messages)
-                        or _common_message_suffix(normalized, request_messages) != len(normalized)):
-                    raise SummaryUnavailable("source_history_changed")
-            # Read raw before visible: writes between these reads either fail
-            # this full comparison or the atomic raw comparison at commit.
-            return raw
+        async def refresh_compaction_history(request_messages):
+            raw, visible = await self._read_history_pair(session_id, deps)
+            normalized = [next((resolved for source, resolved in input_projection
+                                if _common_message_suffix([source], [message]) == 1), message)
+                          for message in visible]
+            # Re-rendered anchors have a fresh synthetic UserPrompt timestamp.
+            if (normalized and request_messages
+                    and summary_contents([normalized[0]])
+                    and summary_contents([request_messages[0]])):
+                normalized[0] = replace(normalized[0], parts=[
+                    replace(normalized[0].parts[0], timestamp=request_messages[0].parts[0].timestamp)
+                ])
+            # The store compares the source again at commit to reject later writes.
+            return raw, _compaction_source_view(normalized, request_messages)
 
-        state.refresh_raw_history = refresh_raw_history
+        state.refresh_compaction_history = refresh_compaction_history
 
         async def commit_projection(projected):
             # Manual and overflow callers persist immediately themselves.

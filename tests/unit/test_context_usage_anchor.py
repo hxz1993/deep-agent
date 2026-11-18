@@ -15,7 +15,7 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import RequestUsage
 
-from deep_agent.agent.context.estimator import TokenEstimator, USAGE_ANCHOR_METADATA
+from deep_agent.agent.context.estimator import REQUEST_ENVELOPE_TOKENS, TokenEstimator, USAGE_ANCHOR_METADATA
 from deep_agent.agent.context.compaction import DeepAgentContextCompaction
 from deep_agent.agent.context.runtime import ContextRunState
 from deep_agent.db.serialization import serialize_message, deserialize_message
@@ -100,6 +100,7 @@ class UsageAnchorTests(unittest.TestCase):
                 result = estimator.estimate_request(history, params)
                 self.assertEqual(result.source, "estimated")
                 self.assertEqual(result.fallback_reason, reason)
+                self.assertEqual(result.tokens, result.message_tokens + result.parameter_tokens + REQUEST_ENVELOPE_TOKENS)
                 self.assertEqual(history, original)
 
     def test_fallback_instructions_change_invalidates_without_schema_change(self):

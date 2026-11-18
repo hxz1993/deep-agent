@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal, Sequence
 
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, UserPromptPart
-from sqlalchemy import Select, select, update
+from sqlalchemy import Select, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -75,6 +76,14 @@ class SessionEventSnapshot:
         }
 
 
+def _latest_compaction(session_id: str) -> Select:
+    return select(ChatSessionEvent).where(
+        ChatSessionEvent.session_id == session_id,
+        ChatSessionEvent.event_type == "compaction",
+        ChatSessionEvent.status == "completed",
+    ).order_by(ChatSessionEvent.sequence.desc()).limit(1)
+
+
 class SessionEventStore(SessionBoundMixin):
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         super().__init__(session_factory)
@@ -88,17 +97,7 @@ class SessionEventStore(SessionBoundMixin):
             return await self._get_raw_history(db, session_id)
 
     async def _get_history(self, db: AsyncSession, session_id: str) -> list[ModelMessage]:
-        compaction = (
-            await db.execute(
-                select(ChatSessionEvent)
-                .where(
-                    ChatSessionEvent.session_id == session_id,
-                    ChatSessionEvent.event_type == "compaction",
-                    ChatSessionEvent.status == "completed",
-                )
-                .order_by(ChatSessionEvent.sequence.desc()).limit(1)
-            )
-        ).scalar_one_or_none()
+        compaction = (await db.execute(_latest_compaction(session_id))).scalar_one_or_none()
         cutoff = 0
         anchor: list[ModelMessage] = []
         if compaction is not None:
@@ -115,6 +114,37 @@ class SessionEventStore(SessionBoundMixin):
             .order_by(ChatSessionEvent.sequence)
         )
         return [*anchor, *decode_message_events(list(result.scalars()))]
+
+    async def get_history_pair(
+        self, session_id: str, *, agent_id: str,
+    ) -> tuple[list[ModelMessage], list[ModelMessage]]:
+        """Read raw facts and the visible projection from the same scoped snapshot."""
+        latest_id = (_latest_compaction(session_id).with_only_columns(ChatSessionEvent.event_id)
+                     .correlate(None).scalar_subquery())
+        statement = select(ChatSessionEvent).join(
+            ChatSession, ChatSession.session_id == ChatSessionEvent.session_id,
+        ).where(
+            ChatSession.agent_id == agent_id,
+            ChatSessionEvent.session_id == session_id,
+            or_(ChatSessionEvent.event_type.in_(MESSAGE_EVENT_TYPES),
+                ChatSessionEvent.event_id == latest_id),
+        ).order_by(ChatSessionEvent.sequence)
+        async with self._read() as db:
+            rows = (await db.scalars(statement)).all()
+        cutoff = 0
+        anchor = []
+        messages = []
+        for row in rows:
+            if row.event_type == "compaction":
+                cutoff = int(row.payload.get("source", {}).get("through_sequence") or 0)
+                anchor.append(_compaction_anchor(row.payload))
+            else:
+                messages.append(row)
+        raw = decode_message_events(messages)
+        # The SDK may mutate nested tool JSON or attachment references. Keep
+        # its model view separate from the original facts used for authorization.
+        tail = decode_message_events([row for row in messages if row.sequence > cutoff]) if cutoff else raw
+        return raw, [*anchor, *deepcopy(tail)]
 
     async def _get_raw_history(self, db: AsyncSession, session_id: str) -> list[ModelMessage]:
         result = await db.execute(
@@ -574,17 +604,7 @@ class SessionEventStore(SessionBoundMixin):
         self, session_id: str,
     ) -> SessionEventSnapshot | None:
         async with self._read() as db:
-            row = (
-                await db.execute(
-                    select(ChatSessionEvent)
-                    .where(
-                        ChatSessionEvent.session_id == session_id,
-                        ChatSessionEvent.event_type == "compaction",
-                        ChatSessionEvent.status == "completed",
-                    )
-                    .order_by(ChatSessionEvent.sequence.desc()).limit(1)
-                )
-            ).scalar_one_or_none()
+            row = (await db.execute(_latest_compaction(session_id))).scalar_one_or_none()
         return SessionEventSnapshot.from_row(row) if row is not None else None
 
     async def find_call_origin(

@@ -529,7 +529,7 @@ class CompactionPreparationProgressTests(unittest.IsolatedAsyncioTestCase):
             messages.extend([ModelResponse(parts=[ToolCallPart("query", {}, str(index))]),
                              ModelRequest(parts=[ToolReturnPart("query", "结果" * 2500, str(index))])])
         state = ContextRunState(raw_history=messages[:1], estimator=TokenEstimator.conservative())
-        state.refresh_raw_history = AsyncMock(return_value=messages[:])
+        state.refresh_compaction_history = AsyncMock(return_value=(messages[:], messages[:]))
         committed = []
         async def persist(projected):
             self.assertTrue(state.telemetry.summary_applied)
@@ -543,7 +543,7 @@ class CompactionPreparationProgressTests(unittest.IsolatedAsyncioTestCase):
             projected, _ = await comp._compact_projection(messages, SimpleNamespace(),
                 SimpleNamespace(model_request_parameters=None), 80_000, state,
                 require_summary=True, emit_deterministic=False, reserve_answer_request=False)
-        state.refresh_raw_history.assert_awaited_once()
+        state.refresh_compaction_history.assert_awaited_once()
         self.assertEqual(committed, [projected])
         self.assertEqual(state.raw_history, messages)
 

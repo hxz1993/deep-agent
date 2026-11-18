@@ -78,7 +78,9 @@ class ContextRunState:
     estimator: TokenEstimator
     usage_limits: UsageLimits | None = None
     event_queue: asyncio.Queue[dict[str, Any]] | None = None
-    refresh_raw_history: Callable[[list[ModelMessage] | None], Awaitable[list[ModelMessage]]] | None = None
+    refresh_compaction_history: Callable[
+        [list[ModelMessage]], Awaitable[tuple[list[ModelMessage], list[ModelMessage]]]
+    ] | None = None
     checkpoint_history: Callable[[RunContext[Any]], Awaitable[None]] | None = field(default=None, repr=False)
     output_samples: list[OutputTokenSample] = field(default_factory=list)
     telemetry: CompactionTelemetry = field(default_factory=CompactionTelemetry)

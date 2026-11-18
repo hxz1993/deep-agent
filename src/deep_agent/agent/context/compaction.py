@@ -1092,8 +1092,8 @@ class DeepAgentContextCompaction(AbstractCapability[Any]):
     ) -> tuple[list[ModelMessage], int]:
         """Build a handoff bounded by the usable request budget."""
 
-        if state.refresh_raw_history is not None:
-            state.raw_history = await state.refresh_raw_history(messages)
+        if state.refresh_compaction_history is not None:
+            state.raw_history, messages = await state.refresh_compaction_history(messages)
         compacted = list(messages)
         estimated_tokens = _request_estimate(
             state.estimator,

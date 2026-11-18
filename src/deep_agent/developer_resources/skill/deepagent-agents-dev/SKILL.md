@@ -15,7 +15,7 @@ description: 配置、开发和排查 DeepAgent 业务助手，包括模型与MC
 | 模型、MCP、Agent 配置 | [配置 Agent](references/02-configure-agent.md) |
 | 提示词与业务上下文 | [提示词与上下文](references/03-prompt-and-context.md) |
 | Skill、Python、多模块和文件产物 | [脚本与文件](references/04-skill-python-files.md) |
-| Chat、SSE、附件、历史与续跑 | [客户端调用](references/05-chat-and-session.md) |
+| Chat、SSE、观察运行、停止与历史恢复 | [客户端调用](references/05-chat-and-session.md) |
 | BOM、合同等 JSON 与人审流程 | [结构化流程](references/06-structured-workflows.md) |
 | 电子表格选区、分析、填充和图表 | [电子表格助手](references/07-spreadsheet-assistant.md) |
 | 文档、OCR、图片及 PDF 核验 | [文档与视觉](references/08-document-and-vision.md) |

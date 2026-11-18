@@ -213,6 +213,11 @@ class SqlConversationCoordinator:
             return []
         return await self._events.get_raw_history(session_id)
 
+    async def get_history_pair(
+        self, session_id: str, *, agent_id: str | None = None,
+    ) -> tuple[list[ModelMessage], list[ModelMessage]]:
+        return await self._events.get_history_pair(session_id, agent_id=normalize_agent_scope(agent_id))
+
     async def append(
         self, session_id: str, messages: list[ModelMessage], *,
         agent_id: str | None = None, user_id: str | None = None,

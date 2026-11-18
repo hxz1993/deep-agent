@@ -490,24 +490,25 @@ class TokenEstimator:
                 anchor_index, anchor = index, data
             break
 
+        if anchor_index is None:
+            # With no provider usage the entire request is unmeasured. The
+            # Harness text estimate cancels out of our media/envelope correction.
+            tokens = message_tokens + parameter_tokens + REQUEST_ENVELOPE_TOKENS
+            return RequestEstimate(max(0, tokens), message_tokens, parameter_tokens,
+                                   fallback_reason=reason)
+
         # Only the verified anchor is visible to Harness. Never alter persisted Usage.
         normalized = [replace(message, usage=RequestUsage())
                       if isinstance(message, ModelResponse) and index != anchor_index else message
                       for index, message in enumerate(normalized)]
-        if anchor_index is not None:
-            # Unchanged instructions were paid for by the anchor. Avoid Harness
-            # treating moving the effective instructions to the last request as a change.
-            normalized = [replace(m, instructions=None) if isinstance(m, ModelRequest) else m
-                          for m in normalized]
+        # The verified anchor already paid for unchanged instructions.
+        normalized = [replace(m, instructions=None) if isinstance(m, ModelRequest) else m
+                      for m in normalized]
         base = estimate_context_tokens(normalized, tokenizer=self.text)
-        tail = normalized if anchor_index is None else normalized[anchor_index + 1:]
+        tail = normalized[anchor_index + 1:]
         # Harness counts text; retain our media, context-ref projection, message
         # envelope and structured-part accounting only for the unmeasured suffix.
         supplement = self.messages(tail) - estimate_token_count(tail, tokenizer=self.text)
         tokens = base + supplement
-        if anchor_index is None:
-            tokens += parameter_tokens + REQUEST_ENVELOPE_TOKENS
         return RequestEstimate(max(0, tokens), message_tokens, parameter_tokens,
-                               "provider_usage_plus_estimate" if anchor else "estimated",
-                               anchor.get("id") if anchor else None,
-                               None if anchor else reason)
+                               "provider_usage_plus_estimate", anchor.get("id"))

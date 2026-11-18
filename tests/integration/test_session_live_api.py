@@ -16,10 +16,12 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic_ai import Agent, Tool
-from pydantic_ai.messages import ModelRequest, UserPromptPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.usage import UsageLimits
+from sqlalchemy import event as sql_event
 
+from deep_agent.agent.context.compaction import DeepAgentContextCompaction, summary_contents
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_names import READ_ONLY_TOOL
@@ -32,6 +34,7 @@ from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.skills.runtime import SkillRuntimeLibrary
 from tests.helpers.request_identity import TEST_USER_ID
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
+from tests.unit.test_context_compaction import valid_summary
 
 
 class _StreamingRequest:
@@ -505,3 +508,131 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
         after = (await self.http.get(history_url, params=params)).json()["items"]
         self.assertEqual([item["output"] for item in after if item["kind"] == "tool"], ["SAVED_ON_DISCONNECT"])
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
+
+    async def test_stop_after_compaction_persists_buffered_results(self):
+        await self._interrupt_after_compaction("stop")
+
+    async def test_disconnect_after_compaction_persists_buffered_results(self):
+        await self._interrupt_after_compaction("disconnect")
+
+    async def test_provider_failure_after_compaction_persists_buffered_results(self):
+        await self._interrupt_after_compaction("provider_failure")
+
+    async def test_shutdown_after_compaction_persists_buffered_results(self):
+        await self._interrupt_after_compaction("shutdown")
+
+    async def test_approval_after_compaction_persists_and_resumes_once(self):
+        await self._interrupt_after_compaction("approval")
+
+    async def _interrupt_after_compaction(self, ending):
+        ready, release = asyncio.Event(), asyncio.Event()
+        old_input = "历史资料" * 1000
+        results = ["本轮新证据" * 2320, "复核值 128"]
+        await self.ctx.store.append(self.session, [
+            ModelRequest(parts=[UserPromptPart(old_input)]),
+            ModelResponse(parts=[TextPart("历史结论" * 1000)]),
+        ], agent_id=self.agent_id, user_id=TEST_USER_ID, run_id="prior-data")
+        calls = summaries = requests = 0
+        recording = False
+        statements = []
+
+        def record(_conn, _cursor, statement, *_):
+            if recording:
+                statements.append(statement)
+
+        async def lookup() -> str:
+            nonlocal calls
+            calls += 1
+            return results[calls - 1]
+
+        def summarize(messages, info):
+            nonlocal summaries
+            summaries += 1
+            return ModelResponse(parts=[TextPart(valid_summary())])
+
+        async def stream(messages, info):
+            nonlocal requests, recording
+            requests += 1
+            if requests > 1:
+                self.assertEqual(len(summary_contents(messages)), 1)
+                self.assertFalse(any(part.content == old_input for m in messages for part in m.parts
+                                     if isinstance(part, UserPromptPart)))
+            if requests <= 2:
+                recording = requests == 2
+                yield {0: DeltaToolCall(name="lookup", json_args="{}", tool_call_id=f"read-{requests}")}
+                return
+            recording = False
+            returns = {p.tool_call_id: p.content for m in messages for p in m.parts if isinstance(p, ToolReturnPart)}
+            self.assertEqual(returns["read-2"], results[1])
+            if requests == 3:
+                if ending == "approval":
+                    yield {0: DeltaToolCall(name="builtin__confirm", json_args='{"message":"确认结果？"}',
+                                            tool_call_id="approval")}
+                    return
+                yield "正在复核"
+                ready.set()
+                await release.wait()
+                raise RuntimeError("synthetic provider interruption")
+            if ending == "approval":
+                self.assertEqual(returns["approval"], {"confirmed": True})
+            yield results[1]
+
+        capability = DeepAgentContextCompaction(context_window_tokens=16000, max_output_tokens=1000)
+        model = FunctionModel(summarize, stream_function=stream)
+        agent = Agent(model, deps_type=AgentDeps, tools=[Tool(lookup, metadata={READ_ONLY_TOOL: True})],
+                      toolsets=[build_external_toolset(builtin_ui_records())] if ending == "approval" else [],
+                      capabilities=[capability])
+        runner = AgentRunner(agent, self.ctx.store, UsageLimits(request_limit=8), active_runs=self.ctx.active_runs,
+                             context_compaction=capability, context_window_tokens=16000, max_output_tokens=1000)
+        engine = self.ctx.db_engine.sync_engine
+        sql_event.listen(engine, "before_cursor_execute", record)
+        self.addCleanup(sql_event.remove, engine, "before_cursor_execute", record)
+        params = {"agent_id": self.agent_id}
+        body = {**params, "session_id": self.session}
+        path = f"/api/v1/sessions/{self.session}"
+        with patch("deep_agent.api.v1.chat.build_runner_for_agent", new=AsyncMock(return_value=runner)), \
+             patch.object(AgentRunner, "_generate_model_title", new_callable=AsyncMock):
+            producer = self._request("/api/v1/chat/stream", method="POST", body={**body, "message": "核对本期"})
+            self.assertEqual((await producer.started())["status"], 200)
+            followup = {"message": "沿用刚才的复核值"}
+            if ending == "approval":
+                final = (await producer.until("final"))[-1][1]
+                self.assertEqual(final["status"], "pending")
+                followup = {"deferred_tool_results": [{"tool_call_id": "approval", "result": {"confirmed": True}}]}
+            else:
+                await asyncio.wait_for(ready.wait(), 5)
+                await producer.until("text")
+                if ending == "disconnect":
+                    await producer.close()
+                elif ending == "stop":
+                    stop = await self.http.post(path + "/cancel", params=params)
+                    self.assertEqual(stop.json()["status"], "cancel_requested")
+                    self.assertTrue((await producer.until("cancelled"))[-1][1]["history_persisted"])
+                elif ending == "shutdown":
+                    self.ctx.active_runs.cancel_all()
+                else:
+                    release.set()
+                    await producer.until("error")
+            await asyncio.wait_for(producer.task, 5)
+            self.assertEqual(statements, [], "Ordinary post-compaction tool round must execute zero SQL")
+            self.assertEqual(self.ctx.active_runs.active_count(), 0)
+            reopened = await self.http.get(path + "/history", params=params)
+            self.assertEqual(reopened.status_code, 200)
+            tools = [item for item in reopened.json()["items"] if item["kind"] == "tool"]
+            self.assertEqual([(t["call_id"], t["output"]) for t in tools[:2]], list(zip(("read-1", "read-2"), results)))
+            if ending == "approval":
+                self.assertEqual([(t["call_id"], t["status"]) for t in tools[2:]], [("approval", "awaiting_input")])
+            else:
+                self.assertEqual(len(tools), 2)
+                partial = [item for item in reopened.json()["items"]
+                           if item["kind"] == "assistant_message" and item["text"] == "正在复核"]
+                self.assertEqual(len(partial), 1)
+            events = await self.ctx.store.list_all_events(self.session)
+            self.assertEqual([e.status for e in events if e.event_type == "compaction"], ["completed"])
+            self.assertEqual(sum(e.event_type == "execution/error" for e in events), int(ending == "provider_failure"))
+            resumed = self._request("/api/v1/chat/stream", method="POST", body={**body, **followup})
+            self.assertEqual((await resumed.started())["status"], 200)
+            final = (await resumed.until("final"))[-1][1]
+            self.assertEqual((final["status"], final["output"]), ("completed", results[1]))
+            await asyncio.wait_for(resumed.task, 5)
+        self.assertEqual((requests, calls, summaries), (4, 2, 1))

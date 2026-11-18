@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.models.provider_registry import (
@@ -9,7 +9,7 @@ from deep_agent.models.provider_registry import (
     effective_base_url,
     load_provider_for_model,
 )
-from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
+from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES, require_console_admin, resolve_console_admin_access
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.services.resource_deletion import DeleteConfirmation, delete_resource
 from deep_agent.core.context import AppContextDep
@@ -22,6 +22,7 @@ from deep_agent.db.stores.llm_model import LlmModelStoreBase
 from deep_agent.models.reasoning import ReasoningEffortError
 from deep_agent.schemas.agent import (
     AgentCreate,
+    AgentSummary,
     AgentPromptEstimateRequest,
     AgentPromptEstimateResponse,
     AgentResponse,
@@ -110,27 +111,32 @@ async def _validate_skills(
         )
 
 
-@router.get(
-    "/agents",
-    response_model=list[AgentResponse],
-    dependencies=CONSOLE_ADMIN_DEPENDENCIES,
-)
+@router.get("/agents", response_model=list[AgentSummary], response_model_exclude_unset=True)
 async def list_agents(
     request: Request,
     user: RequestUserDep,
+    ctx: AppContextDep,
+    q: str = Query(default="", max_length=191, description="Filter by Agent name or ID."),
+    include_updater: bool = Query(default=False, description="Include updater information for Console administrators."),
     store: AgentStoreBase = Depends(get_agent_store),
-) -> list[AgentResponse]:
-    rows = await store.list_all()
+) -> list[AgentSummary]:
+    if include_updater:
+        await require_console_admin(await resolve_console_admin_access(request, user, ctx))
+    rows = await store.list_summaries(q.strip(), include_updater=include_updater)
+    responses = [AgentSummary.from_row(row, row.llm_model) for row in rows]
+    if not include_updater:
+        return responses
+
     try:
         profiles = await resolve_diagnostic_users(request, user, (row.updated_by for row in rows if row.updated_by))
     except DiagnosticUserAuthenticationError as exc:
         raise HTTPException(status_code=exc.status_code, detail="Platform account authorization rejected") from exc
-    responses = [_agent_response(row) for row in rows]
-    for response in responses:
-        if response.updated_by:
-            profile = profiles.get(response.updated_by, {})
+    for row, response in zip(rows, responses, strict=True):
+        response.updated_by = row.updated_by
+        if row.updated_by:
+            profile = profiles.get(row.updated_by, {})
             response.updated_by_user = AgentUpdater(
-                id=response.updated_by, username=profile.get("username"),
+                id=row.updated_by, username=profile.get("username"),
                 resolution=profile.get("resolution", "unavailable"),
             )
     return responses

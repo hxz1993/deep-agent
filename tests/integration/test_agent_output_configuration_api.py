@@ -67,13 +67,13 @@ class AgentOutputConfigurationApiTests(unittest.IsolatedAsyncioTestCase):
         profiles = AsyncMock(return_value={"package-admin": {
             "id": "package-admin", "username": "operator-name", "nickname": "not-the-username", "resolution": "resolved"}})
         with patch("deep_agent.api.v1.agents.resolve_diagnostic_users", profiles):
-            listing = await self.client.get("/api/v1/agents", headers=self.headers)
+            listing = await self.client.get("/api/v1/agents?include_updater=true", headers=self.headers)
         self.assertEqual(listing.status_code, 200, listing.text)
         self.assertEqual(listing.json()[0]["updated_by_user"], {
             "id": "package-admin", "username": "operator-name", "resolution": "resolved"})
         self.assertEqual(profiles.await_count, 1)
         with patch("deep_agent.api.v1.agents.resolve_diagnostic_users", side_effect=DiagnosticUserAuthenticationError(403)):
-            denied = await self.client.get("/api/v1/agents", headers=self.headers)
+            denied = await self.client.get("/api/v1/agents?include_updater=true", headers=self.headers)
         self.assertEqual(denied.status_code, 403, denied.text)
 
     async def test_install_records_target_operator_and_ignores_zip_source_actor(self):

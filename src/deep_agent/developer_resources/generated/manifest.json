@@ -1,12 +1,12 @@
 {
-  "version": "0.16.14",
+  "version": "0.16.15",
   "items": [
     {
       "code": "initialization-guide",
       "name": "电子表格助手初始化",
       "filename": "DeepAgent-电子表格助手初始化.pdf",
       "media_type": "application/pdf",
-      "version": "0.16.14",
+      "version": "0.16.15",
       "size_bytes": 1011947,
       "sha256": "eab914d4d4658224a9d8e926c3fcf1ac21e4b795add9109dde002a13882c662d",
       "download_url": "api/v1/developer-resources/initialization-guide/download",
@@ -15,11 +15,11 @@
     {
       "code": "development-skill",
       "name": "DeepAgent 开发 Skill",
-      "filename": "deepagent-agents-dev-0.16.14.zip",
+      "filename": "deepagent-agents-dev-0.16.15.zip",
       "media_type": "application/zip",
-      "version": "0.16.14",
-      "size_bytes": 156752,
-      "sha256": "56c5b725c4f82e61cf013383be28a4f675e6dd596d32d64aeaf656372491e327",
+      "version": "0.16.15",
+      "size_bytes": 156812,
+      "sha256": "3de993f22df6652b3abe731864602b8c015554c16d3fadfa2133baecce0d6ba6",
       "download_url": "api/v1/developer-resources/development-skill/download",
       "document_count": 37
     }

@@ -9,7 +9,9 @@
 | 健康、产品信息、接口定义 | GET /health、/info、/openapi.json | 按目标网关 |
 | 管理权限确认 | GET /api/v1/admin/access | 当前认证用户 |
 | 当前有效请求范围 | GET /api/v1/request-context | 当前认证用户 |
-| Agent目录/创建 | GET、POST /api/v1/agents | 管理员 |
+| Agent 列表与搜索 | GET /api/v1/agents，使用 `q` 按名称或 ID 搜索 | 当前认证用户 |
+| Agent 更新人 | GET /api/v1/agents?include_updater=true | 管理员 |
+| 创建 Agent | POST /api/v1/agents | 管理员 |
 | 指定Agent展示/更新 | GET、PATCH /api/v1/agents/{id} | GET按业务、PATCH管理员 |
 | 完整原生输出配置 | GET /api/v1/agents/{id}/output-config | 管理员 |
 | Provider目录/配置 | /api/v1/llm-providers | 管理员 |

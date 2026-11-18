@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 from sqlalchemy.orm.attributes import set_committed_value
 
 from deep_agent.db.models import Agent, AgentOutputConfig, LlmModel, LlmProvider, UiToolPackage, ChatSession, ChatSessionEvent, ChannelAccount, ChannelSessionBinding, McpServer
@@ -70,6 +71,22 @@ class AgentStoreBase(SessionBoundMixin):
     async def list_all(self) -> list[Agent]:
         async with self._read() as db:
             return await self._list_all(db)
+
+    async def list_summaries(self, search: str, *, include_updater: bool) -> list[Agent]:
+        columns = [
+            Agent.id, Agent.name, Agent.model_id, Agent.reasoning_effort,
+            Agent.capabilities, Agent.skills, Agent.updated_at,
+        ]
+        if include_updater:
+            columns.append(Agent.updated_by)
+        query = select(Agent).options(load_only(*columns, raiseload=True)).order_by(Agent.name)
+        if search:
+            query = query.where(or_(
+                Agent.name.icontains(search, autoescape=True),
+                Agent.id.icontains(search, autoescape=True),
+            ))
+        async with self._read() as db:
+            return list((await db.scalars(query)).all())
 
     async def list_skill_references(self) -> list[dict]:
         """Read the Skill reference directory without loading Agent configuration."""

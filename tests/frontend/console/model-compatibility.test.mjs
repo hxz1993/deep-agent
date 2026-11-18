@@ -226,7 +226,7 @@ test("高级开关与说明可访问，兼容标记不加入能力复选框", ()
   assert.doesNotMatch(template, /name="llmModelTag" value="inline_tool_schema_refs"/);
 });
 
-test("Responses 协议显式选择、复制及目录刷新保留，Chat 兼容设置仅隐藏", async () => {
+test("切换协议保留高级区展开状态，Responses 下禁用 Chat 兼容开关", async () => {
   const h = harness([marker, inlineMarker, 'reasoning'], 'private');
   h.row.reasoning_options = [{ type: "effort", values: ["low", "high"] }];
   h.row.reasoning_source = "manual";
@@ -234,12 +234,31 @@ test("Responses 协议显式选择、复制及目录刷新保留，Chat 兼容�
   h.state.llmProviderTypes.push({ code: 'openai', model_protocol: 'openai_responses' });
   await h.admin.openEdit('saved');
   assert.equal(h.element('llmModelProtocolChat').checked, true);
+  const details = h.element('llmModelAdvancedSettings');
+  const mergeSystem = h.element('llmModelMergeSystem');
+  const inlineRefs = h.element('llmModelInlineToolRefs');
+  const reset = h.element('restoreLlmModelAdvanced');
+  details.open = true;
+  await details.fire('toggle');
+  assert.equal(reset.classList.contains('hidden'), false);
   h.element('llmModelProtocolResponses').checked = true;
   await h.element('llmModelProtocolResponses').fire('change');
-  assert.equal(h.element('llmModelAdvancedSection').classList.contains('hidden'), true);
+  assert.equal(h.element('llmModelAdvancedSection').classList.contains('hidden'), false);
+  assert.equal(details.open, true);
+  assert.equal(mergeSystem.disabled, true);
+  assert.equal(inlineRefs.disabled, true);
+  assert.equal(reset.classList.contains('hidden'), true);
   assert.equal(h.admin.modelTags().includes('openai_responses'), true);
   assert.equal(h.admin.modelTags().includes(marker), true);
   assert.deepEqual(h.admin.reasoningOptions, h.row.reasoning_options);
+  h.element('llmModelProtocolChat').checked = true;
+  await h.element('llmModelProtocolChat').fire('change');
+  assert.equal(details.open, true);
+  assert.equal(mergeSystem.disabled, false);
+  assert.equal(inlineRefs.disabled, false);
+  assert.equal(reset.classList.contains('hidden'), false);
+  h.element('llmModelProtocolResponses').checked = true;
+  await h.element('llmModelProtocolResponses').fire('change');
   await h.admin.updateFromCatalog();
   await h.admin.save({ preventDefault() {}, currentTarget: h.element('llmModelForm') });
   assert.equal(JSON.parse(h.requests.at(-1).body).tags.includes('openai_responses'), true);

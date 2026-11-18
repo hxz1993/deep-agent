@@ -2,6 +2,10 @@
 
 本文件只保留尚未完成或需要外部条件的事项。已交付能力不再重复拆成待办，历史决策从Git记录恢复。
 
+## 原生搜索与原生生图（2026-11-19）
+
+暂缓产品接入。已记录 DeepSeek 搜索、URL 读取与 OpenAI 搜索的直连结果，并保留只读能力展示原型。后续扩大供应商和模型覆盖后，再决定轨迹细节、实际能力维护方式和生图产物链路。详见 [21 课题](21-web-tools/native-search-and-image-generation-research.md)。
+
 ## 结构化输出与 Agent 更新人（0.14.0）
 
 用户批准的 `STRUCTURED-OUTPUT-001`、`AGENT-UPDATER-001` 已进入本次正式实现及数据库 012。默认关闭、单一组合 Schema、原子更新、可信更新人、公共协议、Console 和新旧安装兼容均按 [09 课题](09-structured-output/README.md) 落地，不再列为“设计未开始”。验收逐项追踪见 [286 项清单](../reports/Report%20DeepAgent%200.14.0%20验收/286项追踪.md)，研究期只读验证不充当产品验收。

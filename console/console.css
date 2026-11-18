@@ -666,14 +666,16 @@ textarea {
 .llm-advanced-divider .llm-advanced-label { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; }
 .llm-model-advanced-section { position: relative; margin-top: 18px; }
 .llm-model-compatibility { margin: 0; }
-.llm-model-advanced-trigger { display: inline-flex; align-items: center; min-height: 28px; max-width: calc(100% - 88px); list-style: none; color: var(--text-dim); font-size: var(--ui-font-helper); font-weight: 500; cursor: pointer; }
+.llm-model-advanced-trigger { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 0 8px; min-height: 28px; max-width: calc(100% - 88px); list-style: none; color: var(--text-dim); font-size: var(--ui-font-helper); font-weight: 500; cursor: pointer; }
 .llm-model-advanced-trigger::-webkit-details-marker { display: none; }
 .llm-model-advanced-trigger:hover { color: var(--accent); }
 .llm-model-advanced-label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .llm-model-advanced-label svg { width: var(--ui-icon); height: var(--ui-icon); transition: transform .12s; }
 .llm-model-compatibility[open] .llm-model-advanced-label svg { transform: rotate(90deg); }
-.llm-model-advanced-summary { display: inline-flex; align-items: center; min-height: 20px; margin-left: 8px; padding: 1px 6px; border-radius: var(--ui-radius-inner); color: var(--accent); background: var(--accent-soft); font-size: var(--ui-font-meta); font-weight: 400; white-space: nowrap; }
+.llm-model-advanced-hint { color: var(--text-faint); font-size: var(--ui-font-meta); font-weight: 400; }
+.llm-model-advanced-summary { display: inline-flex; align-items: center; min-height: 20px; padding: 1px 6px; border-radius: var(--ui-radius-inner); color: var(--accent); background: var(--accent-soft); font-size: var(--ui-font-meta); font-weight: 400; white-space: nowrap; }
 .llm-model-compatibility-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; min-height: 64px; padding: 10px 0 4px; }
+.llm-model-compatibility-row .model-enabled-switch:disabled { opacity: .45; cursor: default; }
 .llm-model-compatibility-copy label { font-size: var(--ui-font-body); color: var(--text); }
 .llm-model-compatibility-copy p { margin: 5px 0 0; font-size: var(--ui-font-helper); color: var(--text-muted); line-height: 1.5; }
 .llm-model-advanced-reset { position: absolute; top: 0; right: 0; display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0; border: 0; background: transparent; color: var(--text-dim); font-family: var(--font); font-size: var(--ui-font-helper); line-height: 18px; cursor: pointer; }

@@ -1117,9 +1117,12 @@
           <span class="field-label-row"><span>供应商</span><small class="field-subtitle">统一维护地址和凭据</small></span>
           <select id="llmModelProviderId" required></select>
         </label>
-        <div class="field hidden" id="llmModelProtocolField">
-          <span class="field-label-row"><span id="llmModelProtocolLabel">API 协议</span><small class="field-subtitle">按服务实际支持选择</small></span>
-          <div class="console-segmented llm-model-protocol-options" role="radiogroup" aria-labelledby="llmModelProtocolLabel">
+        <div class="field llm-model-protocol-field hidden" id="llmModelProtocolField">
+          <div class="llm-model-compatibility-copy">
+            <span id="llmModelProtocolLabel">API 协议</span>
+            <p id="llmModelProtocolHint">Chat Completions 适用于常见兼容网关，Responses 可接入供应商的原生工具。</p>
+          </div>
+          <div class="console-segmented llm-model-protocol-options" role="radiogroup" aria-labelledby="llmModelProtocolLabel" aria-describedby="llmModelProtocolHint">
             <label><input type="radio" name="llmModelProtocol" id="llmModelProtocolChat" checked /><span>Chat Completions</span></label>
             <label><input type="radio" name="llmModelProtocol" id="llmModelProtocolResponses" /><span>Responses</span></label>
           </div>
@@ -1191,6 +1194,7 @@
           <details class="llm-model-compatibility" id="llmModelAdvancedSettings">
             <summary class="llm-model-advanced-trigger">
               <span class="llm-model-advanced-label">高级设置<i data-lucide="chevron-right" aria-hidden="true"></i></span>
+              <small class="llm-model-advanced-hint">仅 Chat Completions 生效</small>
               <span class="llm-model-advanced-summary hidden" id="llmModelAdvancedSummary" aria-live="polite"></span>
             </summary>
             <div class="llm-model-compatibility-row">

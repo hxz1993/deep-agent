@@ -1,5 +1,9 @@
 # 21 · Web 工具
 
+2026-11-19 补充 [原生搜索与原生生图研究](native-search-and-image-generation-research.md) 和
+[会话轨迹、测试对话及供应商弹框原型](Prototype%20%5BDeepAgent%20%E5%8E%9F%E7%94%9F%E7%BD%91%E7%BB%9C%E6%90%9C%E7%B4%A2%5D/index.html)。
+原生能力仍处于研究阶段，已完成多工具直连对照，产品接入与配置存储待确认。
+
 > 2026-09-19：**独立搜索服务改版v0.10.14 已实现**。
 
 2026-10-16增量：DeepSeek已迁移独立Search，DeepSeek／Kimi Fetch按“跟随搜索”接入；历史默认系统内置，移除搜索模型。当前权威说明为[使用与API指南](../../guides/web-tools.md)、[本轮验收](web-search-fetch-20261016-validation.md)。[前期调研](deepseek-search-fetch-20261016-research.md)保留政策快照，以下为2026-09-19历史实施记录，不代表当前仍使用Messages。

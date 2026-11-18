@@ -167,22 +167,23 @@ const llmModelsAdmin = {
     document.getElementById("llmModelProtocolResponses").checked = this.useResponses;
     const supported = this.supportsCompatibilityOverrides();
     const details = document.getElementById("llmModelAdvancedSettings");
-    document.getElementById("llmModelAdvancedSection").classList.toggle("hidden", !supported);
-    if (!supported) details.open = false;
+    document.getElementById("llmModelAdvancedSection").classList.toggle("hidden", !canSelectProtocol);
+    if (!canSelectProtocol) details.open = false;
     for (const [id, enabled] of [
       ["llmModelMergeSystem", this.mergeLeadingSystem],
       ["llmModelInlineToolRefs", this.inlineToolSchemaRefs],
     ]) {
       const toggle = document.getElementById(id);
+      toggle.disabled = !supported;
       toggle.setAttribute("aria-checked", String(enabled));
       toggle.classList.toggle("on", enabled);
       toggle.classList.toggle("off", !enabled);
     }
-    const count = supported ? Number(this.mergeLeadingSystem) + Number(this.inlineToolSchemaRefs) : 0;
+    const count = canSelectProtocol ? Number(this.mergeLeadingSystem) + Number(this.inlineToolSchemaRefs) : 0;
     const summary = document.getElementById("llmModelAdvancedSummary");
     summary.textContent = count ? `已调整 ${count} 项` : "";
     summary.classList.toggle("hidden", !count);
-    document.getElementById("restoreLlmModelAdvanced").classList.toggle("hidden", !details.open || !count);
+    document.getElementById("restoreLlmModelAdvanced").classList.toggle("hidden", !supported || !details.open || !count);
   },
 
   restoreCompatibilityDefaults() {

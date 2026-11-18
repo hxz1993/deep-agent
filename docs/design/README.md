@@ -25,7 +25,7 @@
 | `18` | [`会话事件与轨迹`](18-session-trajectory/README.md) | 2026-08 | v0.6.0统一Event Store、Event API、持久化SSE、Plan与Console轨迹 |
 | `19` | [`Provider与模型分层`](19-model-provider-architecture/README.md) | 2026-08 | v0.5.6已完成两层归一化、007迁移与统一运行门禁 |
 | `20` | [`PTC程序编排`](20-code-mode/README.md) | 2026-08 | v0.14.7已接入现有Python／Skill／Web／下载中心双入口，内部完整数据交接与普通大结果保护分开；固定256 MiB／32 MiB／120秒／100次，不加配置项或会话工作区 |
-| `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | 2026-09-19独立搜索服务、空态兼容及非终止失败结果纳入 v0.10.14；DeepSeek/Kimi管理草稿实测通过 |
+| `21` | [`Web 工具`](21-web-tools/README.md) | 2026-09 | 独立搜索已落地。2026-11-19 归档原生搜索、生图研究和展示原型，产品接入暂缓 |
 | `22` | [`渠道网关与企微 Channel`](22-wecom-channel/README.md) | 2026-09 | v0.7.0公共Gateway/官方SDK Adapter、三表、五个渠道命令与来源标题；002不变 |
 | `23` | [`诊断中心与日志`](23-diagnostics-and-logs/README.md) | 2026-09 | 日志、管理员会话查询与统计已发布；保留设计与实施说明，原型已清理 |
 | `24` | [`业务助手初始化与升级`](24-assistant-installation/README.md) | 2026-09 | 已由正式 Agent 安装包方案替代；旧稿已清理，保留指南入口 |

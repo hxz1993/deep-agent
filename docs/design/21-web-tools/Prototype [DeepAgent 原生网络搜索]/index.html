@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepAgent · 原生搜索局部原型</title>
+<style>
+  :root {
+    color-scheme: light;
+    --canvas: #f5f7f8;
+    --surface: #fff;
+    --soft: #f4f7f8;
+    --border: #dce4ea;
+    --text: #20262e;
+    --dim: #424c59;
+    --muted: #687482;
+    --accent: #4f46e5;
+    --selection: #eeedfc;
+    --ok: #197750;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--text); background: var(--canvas); font: 13px/1.55 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { width: min(100%, 1452px); margin-inline: auto; padding: 22px 24px 28px; }
+  section + section { margin-top: 22px; }
+  h1, h2, h3, h4, p { margin: 0; }
+  h1, h2 { font-size: 17px; font-weight: 650; }
+  h3 { font-size: 13px; font-weight: 650; }
+  h4 { font-size: 12px; font-weight: 650; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  button, input, select { font: inherit; }
+  button, summary { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  [hidden] { display: none !important; }
+  code, time, pre { font: 11px/1.6 var(--mono); }
+  pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .section-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 9px; }
+  .note, .muted { color: var(--muted); font-size: 12px; }
+  .comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .sample { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+  .sample-head { min-height: 36px; display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 5px 12px; background: var(--soft); border-bottom: 1px solid var(--border); }
+  .workbench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(216px, 42%); min-height: 214px; }
+  .side { min-width: 0; padding: 7px 9px 10px; border-left: 1px solid var(--border); background: var(--surface); }
+  .side-head { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+  .side-head strong { font-size: 12px; }
+  .side-head .muted, .side-head .status { margin-left: auto; }
+  .tabs { display: flex; align-items: center; gap: 8px; min-height: 30px; margin: 1px 0 8px; border-bottom: 1px solid var(--border); }
+  .tabs button { min-height: 30px; padding: 1px 1px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--dim); font-size: 11px; white-space: nowrap; }
+  .tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .side-status { margin-left: auto; white-space: nowrap; }
+  .status { color: var(--ok); font-size: 11px; white-space: nowrap; }
+  .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 4px 10px; margin: 0; }
+  .facts dt { color: var(--muted); font-size: 11px; }
+  .facts dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+  .trace { padding: 7px 0 8px; }
+  .modes { display: flex; gap: 2px; width: max-content; margin: 0 9px 5px; padding: 2px; border: 1px solid var(--border); border-radius: 5px; background: var(--soft); }
+  .modes button { display: flex; gap: 5px; align-items: center; border: 0; border-radius: 3px; padding: 1px 7px; color: var(--dim); background: transparent; font-size: 12px; }
+  .modes button[aria-pressed="true"] { color: var(--accent); background: var(--surface); }
+  .row { display: flex; align-items: center; gap: 6px; width: 100%; height: 30px; padding: 4px 9px; border: 0; color: var(--text); background: transparent; text-align: left; }
+  .row:hover { background: var(--soft); }
+  .row[aria-current="true"] { background: var(--selection); box-shadow: inset 2px 0 0 var(--accent); }
+  .badge { display: inline-flex; flex: none; align-items: center; height: 17px; padding: 0 4px; border-radius: 4px; background: #edf0f5; color: #596579; font-size: 10px; white-space: nowrap; }
+  .badge.user { background: #eef4ff; color: #245ab4; }
+  .badge.assistant { background: #f3edff; color: #7134b6; }
+  .badge.tool { background: #fff2e8; color: #aa4f12; }
+  .row-copy { min-width: 0; flex: 1; overflow: hidden; color: var(--dim); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+  .row-copy strong { color: var(--text); font-weight: 600; }
+  .row time { color: var(--muted); }
+  .row-stamp { flex: none; color: var(--muted); font-size: 10px; white-space: nowrap; }
+  .native-mark { color: #226b60; white-space: nowrap; font-size: 11px; }
+  .side-section + .side-section { margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--border); }
+  .side-section .entry { margin: 3px 0 0; color: var(--dim); font-size: 12px; }
+  .data-block { margin-top: 4px; padding: 4px 6px; border-radius: 4px; background: var(--soft); }
+  .trace-empty { padding: 14px 8px; color: var(--muted); text-align: center; font-size: 12px; }
+  .chat { padding: 12px 12px 10px; }
+  .user-bubble { width: fit-content; max-width: 94%; margin: 0 0 11px auto; padding: 6px 9px; border-radius: 7px; background: var(--soft); }
+  .process { margin-bottom: 7px; border-bottom: 1px solid var(--border); }
+  .process-head, .tool-line { display: flex; align-items: center; gap: 5px; min-height: 25px; list-style: none; color: var(--muted); font-size: 12px; }
+  summary::-webkit-details-marker { display: none; }
+  .caret { width: 6px; height: 6px; flex: none; margin-right: 2px; border: solid currentColor; border-width: 0 1px 1px 0; transform: rotate(-45deg); }
+  details[open] > summary > .caret { transform: rotate(45deg) translateY(-1px); }
+  .process-body { padding: 0 0 4px 11px; }
+  .tool-line { gap: 7px; width: fit-content; }
+  .tool-line code { font-size: 12px; }
+  .tool-line .caret { opacity: 0; }
+  .tool-line:hover .caret, .tool-line:focus-visible .caret { opacity: 1; }
+  .inline-svg { width: 13px; height: 13px; flex: none; }
+  .tool-data { margin: 2px 0 3px 7px; padding-left: 9px; border-left: 2px solid var(--selection); }
+  .answer { font-size: 12px; line-height: 1.75; }
+  .answer code { padding: 1px 3px; background: var(--soft); border-radius: 3px; }
+  .action { min-height: 30px; padding: 4px 10px; border: 1px solid #d2dce4; border-radius: 6px; background: var(--surface); color: var(--text); }
+  .action:hover { background: var(--soft); }
+  .action.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  .action.primary:hover { background: #4338ca; }
+  .provider-dialog { width: min(535px, calc(100% - 24px)); max-height: calc(100% - 24px); padding: 0; border: 1px solid #d2dce4; border-radius: 10px; background: var(--surface); color: var(--text); }
+  .provider-dialog::backdrop { background: rgb(31 42 49 / 39%); }
+  .modal-head, .modal-footer { display: flex; align-items: center; gap: 8px; padding: 11px 15px; }
+  .modal-head { justify-content: space-between; border-bottom: 1px solid var(--border); }
+  .modal-head h2 { font-size: 15px; }
+  .modal-body { display: grid; gap: 11px; padding: 14px 15px 15px; }
+  .field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field { display: grid; min-width: 0; gap: 4px; color: var(--dim); }
+  .field input:not([type="checkbox"]), .field select { width: 100%; min-height: 31px; padding: 4px 8px; border: 1px solid #cbd7e1; border-radius: 6px; background: var(--surface); color: var(--text); }
+  .field :disabled { color: var(--muted); background: var(--soft); }
+  .field-title, .capability-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .check-text { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 12px; }
+  input[type="checkbox"] { accent-color: var(--accent); }
+  .capability { margin-top: 1px; }
+  .capability h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .capability h3::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  .capability-box { border: 1px solid var(--border); border-radius: 6px; padding: 8px 9px; }
+  .capability-models { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 5px; }
+  .modal-footer { justify-content: flex-end; border-top: 1px solid var(--border); }
+  .icon-button { padding: 2px 7px; border: 0; background: transparent; color: var(--dim); font-size: 19px; }
+  @media (max-width: 1100px) { .comparison { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 560px) {
+    main { padding: 12px 9px; }
+    .workbench { grid-template-columns: minmax(0, 1fr); }
+    .side { border-top: 1px solid var(--border); border-left: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section aria-labelledby="trace-heading">
+    <header class="section-head"><h1 id="trace-heading">会话轨迹</h1><button type="button" class="action" id="open-provider">编辑供应商</button></header>
+    <div class="comparison" id="trajectories"></div>
+  </section>
+  <section aria-labelledby="chat-heading">
+    <header class="section-head"><h2 id="chat-heading">测试页 · 对话</h2><span class="note">原型示例</span></header>
+    <div class="comparison" id="conversations"></div>
+  </section>
+</main>
+
+<dialog class="provider-dialog" id="provider" aria-labelledby="provider-title">
+  <form method="dialog" id="provider-form">
+    <header class="modal-head"><h2 id="provider-title">编辑供应商 · DeepSeek</h2><button type="submit" value="cancel" class="icon-button" aria-label="关闭" formnovalidate>×</button></header>
+    <div class="modal-body">
+      <div class="field-pair">
+        <label class="field"><span>名称</span><input name="providerName" value="DeepSeek" required></label>
+        <label class="field"><span>供应商类型</span><select name="providerType"><option>DeepSeek</option></select></label>
+      </div>
+      <div class="field">
+        <div class="field-title"><label for="base-url">Base URL</label><label class="check-text"><input id="default-url" type="checkbox" checked>使用默认地址</label></div>
+        <input id="base-url" type="url" value="https://api.deepseek.com" disabled required>
+      </div>
+      <label class="field"><span>API Key</span><input type="password" autocomplete="new-password" placeholder="已配置"></label>
+      <section class="capability" aria-labelledby="capability-title">
+        <h3 id="capability-title">原生能力</h3>
+        <div class="capability-box">
+          <div class="capability-head"><strong>原生搜索</strong><span class="muted">Chat Completions</span></div>
+          <p class="capability-models"><span class="muted">支持的模型</span><code>deepseek-flash</code><code>deepseek-v4-pro</code></p>
+        </div>
+      </section>
+    </div>
+    <footer class="modal-footer"><button type="submit" class="action" value="cancel" formnovalidate>取消</button><button type="submit" class="action primary" value="save">保存</button></footer>
+  </form>
+</dialog>
+
+<script>
+  const question = "帮我查一下 uv 的官方安装方式，给我一个链接。";
+  const source = '<a href="https://docs.astral.sh/uv/getting-started/installation/">uv 官方安装文档</a>';
+  const answer = `可以运行官方安装脚本，也可以用 <code>pip install uv</code> 安装。来源见${source}。`;
+  const toolIcon = '<svg class="inline-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.7 6.3 3 3a1 1 0 0 0 1.4 0l2.8-2.8a6 6 0 0 1-7.9 7.9l-5 5a2.1 2.1 0 0 1-3-3l5-5a6 6 0 0 1 7.9-7.9l-2.8 2.8a1 1 0 0 0-1.4 1z"/></svg>';
+  const toolDetail = '<div class="side-section"><h4>Input</h4><pre class="data-block">{"query":"uv 官方安装方式"}</pre></div><div class="side-section"><h4>Result</h4><p class="entry">1 条来源 · ' + source + '</p></div>';
+  const inputRow = { id: "input", label: "用户", kind: "user", copy: question, time: "10:24:06" };
+  const asstRow = { id: "answer", label: "助手", kind: "assistant", copy: "可以运行官方安装脚本，也可以用 pip 安装。", time: "10:24:09" };
+  const modes = [
+    { name: "独立搜索", calls: 1, requests: 2, elapsed: "3", native: false, run: "8ac25416", selected: "tool", rows: [
+      inputRow,
+      { id: "call", label: "助手", kind: "assistant", copy: "调用 1 个工具", time: "10:24:07" },
+      { id: "tool", label: "工具", kind: "tool", copy: '<strong>web_search</strong> · uv 官方安装方式', time: "10:24:08" },
+      asstRow
+    ] },
+    { name: "原生搜索", calls: 0, requests: 1, elapsed: "2", native: true, run: "a227458d", selected: "answer", rows: [
+      inputRow,
+      { ...asstRow, time: "10:24:08", copy: '<span class="native-mark">DeepSeek 已联网</span> · ' + asstRow.copy }
+    ] }
+  ];
+
+  function heading(sample) {
+    return `<header class="sample-head"><h3>${sample.name}</h3><span class="muted">DeepSeek Flash</span></header>`;
+  }
+
+  function tabBar(names, label, selected = names[0]) {
+    return `<div class="tabs" role="tablist" aria-label="${label}">${names.map(name => `<button type="button" role="tab" aria-selected="${name === selected}">${name}</button>`).join("")}</div>`;
+  }
+
+  function tabsControl(side, content) {
+    const selected = side.querySelector("[role=tab][aria-selected=true]");
+    side.querySelector("[data-tab-body]").innerHTML = content[selected.textContent];
+    for (const button of side.querySelectorAll("[role=tab]")) {
+      button.addEventListener("click", () => {
+        for (const item of side.querySelectorAll("[role=tab]")) item.setAttribute("aria-selected", String(item === button));
+        side.querySelector("[data-tab-body]").innerHTML = content[button.textContent];
+      });
+    }
+  }
+
+  function renderEvent(side, sample, row) {
+    if (!row) {
+      side.innerHTML = '<div class="trace-empty">Select an event to inspect</div>';
+      return;
+    }
+    const isTool = row.kind === "tool";
+    const hasNative = sample.native && row.id === "answer";
+    const preview = row.id === "input" ? question : row.id === "call" ? "调用 1 个工具" : answer;
+    const previewHtml = `<div class="side-section"><h4>Preview</h4><p class="entry">${preview}</p></div>`;
+    const optionalNative = hasNative ? '<div class="side-section"><h4>供应商联网</h4><p class="entry">DeepSeek · 已使用原生搜索</p></div>' : "";
+    const content = isTool
+      ? {Summary: toolDetail, Input: '<pre class="data-block">{"query":"uv 官方安装方式"}</pre>', Result: '<p class="entry">1 条来源 · ' + source + '</p>'}
+      : {Summary: previewHtml + optionalNative, ...(row.kind === "assistant" ? {Usage: '<dl class="facts"><dt>模型</dt><dd>deepseek-flash</dd></dl>'} : {}), Message: previewHtml, Preview: previewHtml, Raw: '<pre class="data-block">' + (row.id === "input" ? question : row.id === "call" ? "调用 1 个工具" : "可以运行官方安装脚本，也可以用 pip 安装。") + '</pre>'};
+    side.innerHTML = `<header class="side-head"><span class="badge ${row.kind}">${row.label}</span><strong>${isTool ? "web_search" : "Run " + sample.run}</strong><span class="muted">Completed</span></header>${tabBar(Object.keys(content), "轨迹详情")}<div data-tab-body></div>`;
+    tabsControl(side, content);
+  }
+
+  function renderTrace(sample) {
+    const panel = document.createElement("article");
+    panel.className = "sample";
+    panel.setAttribute("aria-label", "会话轨迹 · " + sample.name);
+    panel.innerHTML = `${heading(sample)}<div class="workbench"><div class="trace"><div class="modes" role="group" aria-label="轨迹筛选"><button type="button" data-mode="sequence" aria-pressed="true">顺序</button><button type="button" data-mode="calls" aria-pressed="false">调用 <code>${sample.calls}</code></button></div><div data-rows></div></div><aside class="side" aria-label="轨迹详情"></aside></div>`;
+    let mode = "sequence";
+    let selectedId = sample.selected;
+    const side = panel.querySelector(".side");
+    const host = panel.querySelector("[data-rows]");
+    function update() {
+      const rows = mode === "sequence" ? sample.rows : sample.rows.filter(row => row.kind === "tool");
+      const selected = rows.find(row => row.id === selectedId) || rows[0];
+      host.innerHTML = rows.length ? rows.map(row => `<button class="row" type="button" data-row="${row.id}" aria-current="${selected?.id === row.id}"><span class="badge ${row.kind}">${row.label}</span><span class="row-copy">${row.copy}</span><time>${row.time}</time><span class="row-stamp">Completed</span></button>`).join("") : '<div class="trace-empty">当前筛选下没有轨迹。</div>';
+      renderEvent(side, sample, selected);
+    }
+    host.addEventListener("click", event => {
+      const button = event.target.closest("[data-row]");
+      if (!button) return;
+      selectedId = button.dataset.row;
+      for (const row of host.querySelectorAll("[data-row]")) row.setAttribute("aria-current", String(row === button));
+      renderEvent(side, sample, sample.rows.find(row => row.id === selectedId));
+    });
+    for (const button of panel.querySelectorAll("[data-mode]")) {
+      button.addEventListener("click", () => {
+        mode = button.dataset.mode;
+        for (const item of panel.querySelectorAll("[data-mode]")) item.setAttribute("aria-pressed", String(item === button));
+        update();
+      });
+    }
+    update();
+    return panel;
+  }
+
+  function renderChat(sample) {
+    const panel = document.createElement("article");
+    panel.className = "sample";
+    panel.setAttribute("aria-label", "测试页对话 · " + sample.name);
+    const process = sample.native ? "" : `
+      <details class="process" open>
+        <summary class="process-head"><span class="caret" aria-hidden="true"></span><strong>已处理 · 用时 ${sample.elapsed}s</strong></summary>
+        <div class="process-body"><details><summary class="tool-line">${toolIcon}<code>web_search</code>完成<span class="caret" aria-hidden="true"></span></summary><div class="tool-data">${toolDetail}</div></details></div>
+      </details>`;
+    const content = {
+      概览: '<dl class="facts"><dt>Agent</dt><dd>测试助手</dd><dt>模型</dt><dd>deepseek-flash</dd><dt>会话来源</dt><dd>DeepFOS</dd><dt>会话统计</dt><dd>1 轮</dd></dl>',
+      当前: `<dl class="facts"><dt>终态</dt><dd>已完成</dd><dt>请求</dt><dd>${sample.requests}</dd><dt>工具调用</dt><dd>${sample.calls}</dd><dt>Tool Search</dt><dd>0</dd><dt>耗时</dt><dd>${sample.elapsed},000 ms</dd><dt>Run ID</dt><dd><code>${sample.run}</code></dd><dt>模型</dt><dd>deepseek-flash</dd></dl>`,
+      上下文: '<dl class="facts"><dt>上下文窗口</dt><dd>128,000 Token</dd></dl>'
+    };
+    panel.innerHTML = `${heading(sample)}<div class="workbench"><div class="chat"><p class="user-bubble">${question}</p>${process}<p class="answer">${answer}</p></div><aside class="side" aria-label="会话详情">${tabBar(Object.keys(content), "会话详情", "当前")}<div data-tab-body></div></aside></div>`;
+    panel.querySelector(".tabs").insertAdjacentHTML("beforeend", '<span class="side-status status">已完成</span>');
+    tabsControl(panel.querySelector(".side"), content);
+    return panel;
+  }
+
+  for (const sample of modes) {
+    document.getElementById("trajectories").append(renderTrace(sample));
+    document.getElementById("conversations").append(renderChat(sample));
+  }
+
+  const dialog = document.getElementById("provider");
+  const form = document.getElementById("provider-form");
+  const nameField = form.elements.providerName;
+  const useDefault = document.getElementById("default-url");
+  const baseUrl = document.getElementById("base-url");
+  const syncFields = () => {
+    baseUrl.disabled = useDefault.checked;
+  };
+  let saved = { name: nameField.value, useDefault: true, url: baseUrl.value };
+  document.getElementById("open-provider").addEventListener("click", () => {
+    form.reset();
+    nameField.value = saved.name;
+    useDefault.checked = saved.useDefault;
+    baseUrl.value = saved.url;
+    syncFields();
+    dialog.showModal();
+  });
+  useDefault.addEventListener("change", syncFields);
+  form.addEventListener("submit", event => {
+    if (event.submitter?.value === "save") {
+      saved = { name: nameField.value, useDefault: useDefault.checked, url: baseUrl.value };
+      document.getElementById("provider-title").textContent = "编辑供应商 · " + saved.name;
+    }
+  });
+</script>
+</body>
+</html>

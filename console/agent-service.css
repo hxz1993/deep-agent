@@ -1,5 +1,6 @@
 #panel-agent-service.active { container-type:inline-size; display:flex; flex-direction:column; height:calc(100dvh - 44px); min-height:660px; }
-#configurationHost #panel-agent-service > .panel-toolbar { min-height:var(--ui-control-height); margin-bottom:var(--ui-group-content-gap); }
+#panel-agent-service > .panel-toolbar { flex-wrap:wrap; }
+#panel-agent-service > [hidden] { display:none; }
 .agent-service-layout {
   --agent-service-top-min:210px;
   --agent-service-recent-min:330px;
@@ -9,14 +10,12 @@
     clamp(var(--agent-service-top-min), var(--agent-service-top-height, min(48dvh, 420px)), calc(100% - var(--agent-service-row-resizer-height) - var(--agent-service-recent-min)))
     var(--agent-service-row-resizer-height) minmax(var(--agent-service-recent-min), 1fr);
 }
-.agent-service-top { display:grid; grid-template-columns:minmax(0,var(--agent-publications-width,62%)) var(--console-resizer-width) minmax(0,1fr); column-gap:10px; min-height:0; }
+.agent-service-top { display:grid; grid-template-columns:minmax(0,var(--agent-publications-width,62%)) var(--console-resizer-width) minmax(0,1fr); gap:12px 10px; min-height:0; }
 .agent-service-publications,.agent-service-access,.agent-service-recent,.agent-service-task-list { display:flex; flex-direction:column; min-height:0; min-width:0; }
 .agent-service-layout .console-section-heading { align-items:center; }
 .agent-service-layout .console-section-title { font-size:14px; }
 .agent-service-recent .console-section-heading > .field-label-row { flex-wrap:nowrap; gap:6px; }
 .agent-service-access { row-gap:8px; }
-.agent-service-access-heading { display:flex; flex-wrap:wrap; align-items:center; gap:var(--ui-group-content-gap); min-width:0; }
-.agent-service-access-heading > .btn { flex:none; margin-inline-start:auto; }
 .agent-service-scroll { min-height:0; flex:1; }
 .agent-service-table { width:100%; table-layout:fixed; }
 .agent-service-publications .agent-service-table { min-width:480px; }
@@ -25,7 +24,8 @@
 .agent-service-publications th:first-child { width:33%; }
 #configurationHost .agent-service-publications th:last-child { width:90px; text-align:right; }
 .agent-service-table tr[data-publication],.agent-service-table tr[data-agent-task] { cursor:pointer; }
-.agent-service-table tr.selected { background:var(--accent-soft, var(--bg-soft)); }
+#configurationHost .agent-service-table tbody tr.selected { background:var(--accent-soft); }
+.agent-service-table tr.selected > td:first-child { box-shadow:inset 3px 0 var(--accent); }
 .agent-service-pub-name { display:flex; align-items:center; gap:8px; }
 .agent-service-pub-name .model-enabled-switch { flex:none; }
 .agent-service-select.btn { display:grid; justify-items:start; align-content:center; gap:2px; min-width:0; min-height:0; height:auto; padding:0; max-width:100%; text-align:left; }
@@ -33,11 +33,10 @@
 .agent-service-select > span { color:var(--text); font-weight:600; }
 #configurationHost .console-list-a .data-table td .agent-service-select > code { color:var(--text-faint); font-size:var(--ui-font-meta); font-weight:400; }
 .agent-service-publications .agent-update-time { max-width:100%; overflow:hidden; text-overflow:ellipsis; }
-.agent-service-empty { text-align:center; padding:26px 10px; color:var(--text-faint); }
 .console-segmented.agent-service-tabs {
   display:grid;
   grid-template-columns:repeat(4,minmax(max-content,1fr));
-  flex:1; min-width:min(100%, 208px);
+  flex:none;
 }
 .console-segmented.agent-service-tabs button { min-width:0; padding-inline:3px; white-space:nowrap; }
 .agent-protocol-logo { display:inline-block; width:var(--ui-icon); height:var(--ui-icon); flex:none; background:center / contain no-repeat; }
@@ -86,8 +85,9 @@
 }
 .agent-service-task-list > footer { flex:none; padding:6px 12px; }
 .agent-service-task-list .console-pagination { margin-top:0; }
-.agent-service-task-list .console-pagination [hidden] { display:none; }
+.agent-service-task-list .console-pagination > .models-page-info { flex:0 1 160px; min-width:0; text-align:center; font-variant-numeric:tabular-nums; }
 .agent-service-task-detail { min-width:0; }
+.agent-service-task-detail > .inspector-tab-empty { flex:1; min-height:0; }
 .agent-service-detail-heading { padding-block:5px; }
 .agent-service-detail-title { min-width:0; }
 .agent-service-detail-heading h3 { margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--ui-font-body); }
@@ -201,16 +201,17 @@ dialog.console-detail-dialog.modal.agent-service-guide { width:min(980px,calc(10
   font-family:inherit; font-size:var(--ui-font-helper); line-height:1.45;
   white-space:pre-wrap; overflow-wrap:anywhere;
 }
-.agent-service-mcp-guide-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:16px; }
+.agent-service-mcp-guide:not([hidden]) { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; column-gap:16px; }
+.agent-service-mcp-guide-reference { display:grid; gap:8px; min-width:0; }
 .agent-service-mcp-reference th:first-child { width:33%; }
-.agent-service-guide-client-links { display:flex; flex-wrap:wrap; gap:6px 16px; }
+.agent-service-guide-client-links { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:6px 16px; }
 @media (max-height:850px) {
   .agent-service-guide-flow:not([hidden]) { gap:8px; }
   .agent-service-guide-preview { padding-block:8px; line-height:1.35; }
   #configurationHost .agent-service-guide .agent-service-guide-table .data-table :is(th,td) { padding-block:3px; }
 }
 @media (max-width:640px) {
-  .agent-service-mcp-guide-columns { grid-template-columns:minmax(0,1fr); }
+  .agent-service-mcp-guide:not([hidden]) { grid-template-columns:minmax(0,1fr); }
   .agent-service-links li { grid-template-columns:minmax(0,1fr); gap:2px; }
   #configurationHost .agent-service-guide .agent-service-guide-table .data-table :is(th,td) { padding-inline:6px; }
   #configurationHost .agent-service-methods :is(th,td):nth-child(2) { width:44px; }
@@ -222,7 +223,6 @@ dialog.console-detail-dialog.modal.agent-service-guide { width:min(980px,calc(10
   .agent-service-top > .agent-service-splitter { display:none; }
   .agent-service-publications .agent-service-scroll { max-height:230px; }
   .agent-service-access-body { flex:none; min-height:116px; }
-  .agent-service-access { margin-top:12px; }
 }
 @container (max-width:235px) {
   .agent-service-tabs button :is(svg, .agent-protocol-logo) { display:none; }

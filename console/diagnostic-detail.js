@@ -18,9 +18,10 @@ const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace
 const icon = (name) => `<i data-lucide="${name}" aria-hidden="true"></i>`;
 
 /** Locate a saved Conversation item, never guess from visible text or truncated IDs. */
-export function findConversationFocus(items = [], events = [], { eventId, runId } = {}) {
+export function findConversationFocus(items = [], events = [], { eventId, runId, turnId } = {}) {
   const ordered = sortConversationItems(items);
   if (eventId) return ordered.find((item) => item.item_id === eventId || item.source_event_ids?.includes(eventId)) || null;
+  if (turnId) return ordered.find((item) => item.kind === "user_message" && item.turn_id === turnId) || null;
   if (!runId) return null;
   const ids = new Set(events.filter((event) => event.run_id === runId).map((event) => event.event_id));
   return ordered.find((item) => item.source_event_ids?.some((id) => ids.has(id))) || null;
@@ -177,11 +178,11 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
 
   function focus(target = {}) {
     if (disposed) return false;
-    const view = target.view || (target.eventId || target.runId ? "conversation" : currentView);
+    const view = target.view || (target.eventId || target.runId || target.turnId ? "conversation" : currentView);
     currentView = view === "trajectory" ? "trajectory" : "conversation";
     trajectory.selectView(currentView, { notify: false });
     renderedRows.forEach(({ row }) => markMessage(row, false));
-    if (!target.eventId && !target.runId) return true;
+    if (!target.eventId && !target.runId && (currentView !== "conversation" || !target.turnId)) return true;
     if (currentView === "trajectory") {
       const found = trajectory.focus(target);
       if (!found) showNotice(target.eventId ? "未找到对应事件；当前展示此会话已保存的轨迹。" : "未找到该轮对应记录；当前展示此会话已保存的轨迹。");
@@ -265,8 +266,8 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     if (next.history == null && !next.historyError) messages.innerHTML = `<div class="diagnostic-detail-error" role="status"><p>正在读取已保存对话…</p></div>`;
     if (next.focus) {
       const target = next.focus;
-      const key = JSON.stringify([target.view || "conversation", target.eventId || "", target.runId || ""]);
-      const needsEvents = target.view === "trajectory" || (target.runId && !target.eventId);
+      const key = JSON.stringify([target.view || "conversation", target.eventId || "", target.runId || "", target.turnId || ""]);
+      const needsEvents = target.view === "trajectory" || (target.runId && !target.eventId && !target.turnId);
       const ready = next.history != null && (!needsEvents || next.eventsComplete !== false);
       // Context estimates and refreshes must not move an already inspected view.
       if (key !== lastFocusKey) {

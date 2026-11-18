@@ -1,8 +1,6 @@
 #panel-remote-agents [hidden] { display: none !important; }
 #remoteAgentEditor:not([hidden]) { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
-#configurationHost #remoteAgentDirectory > .remote-agent-page-heading { margin-bottom: var(--ui-group-content-gap); }
-.remote-agent-page-heading p { margin: 4px 0 0; color: var(--text-dim); }
 #remoteAgentDirectory:not([hidden]) { display: flex; flex-direction: column; height: calc(100dvh - 44px); min-height: 620px; }
 .remote-agent-directory-layout {
   --remote-agent-top-min: 145px;
@@ -49,6 +47,8 @@
 }
 .remote-agent-card:hover, .remote-agent-card:focus-within { border-color: var(--accent); }
 .remote-agent-card > header { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 9px; }
+.remote-agent-card > header > .remote-agent-state { align-self: start; }
+.remote-agent-card-identity { display: grid; justify-items: start; gap: 3px; min-width: 0; }
 .remote-agent-card-icon {
   display: grid;
   width: 38px;
@@ -89,7 +89,7 @@
 :is(.remote-agent-state, .remote-agent-filters [data-state])[data-state="working"] { color: var(--accent); }
 :is(.remote-agent-state, .remote-agent-filters [data-state]):is([data-state="input_required"], [data-state="unknown"]) { color: var(--duration-slow); }
 :is(.remote-agent-state, .remote-agent-filters [data-state])[data-state="failed"] { color: var(--danger-text); }
-.remote-agent-notice {
+.remote-agent-notice:not(.agent-list-state) {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -101,8 +101,9 @@
   background: var(--console-readonly-surface);
   color: var(--text-dim);
 }
-.remote-agent-notice svg { width: var(--ui-icon-action); height: var(--ui-icon-action); }
+.remote-agent-notice:not(.agent-list-state) svg { width: var(--ui-icon-action); height: var(--ui-icon-action); }
 .remote-agent-notice:empty { display: none; }
+.remote-agent-notice.agent-list-state { min-height: 100%; padding: 16px; }
 .remote-agent-recent > .console-section-heading > .field-label-row { flex-wrap: nowrap; gap: 6px; }
 .remote-agent-recent-grid { grid-template-rows: minmax(0, 1fr); }
 #configurationHost #remoteConnectionListHost .data-table td { min-height: 0; padding-block: 6px; }
@@ -122,7 +123,6 @@
 .remote-agent-connection-list th:nth-child(5) { width: 15%; }
 .remote-agent-connection-list th:nth-child(6) { width: 160px; }
 .remote-agent-connection-list th:last-child { width: 64px; }
-.remote-agent-calls-table tr.selected { background: var(--accent-soft); }
 .remote-agent-calls-table tr[data-remote-call-row] { cursor: pointer; }
 .remote-agent-call-name { display: grid; justify-items: start; gap: 1px; min-width: 0; }
 .remote-agent-call-name > * { display: block; max-width: 100%; }
@@ -143,6 +143,7 @@
 .remote-agent-facts dt { color: var(--text-dim); }
 .remote-agent-facts dd { margin: 0; overflow-wrap: anywhere; }
 .remote-agent-facts a { color: var(--accent); }
+.remote-agent-facts .agent-service-id-value { max-width: 100%; }
 
 .remote-agent-editor-heading, .remote-agent-editor-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 #configurationHost .remote-agent-editor-heading { min-height: 32px; align-items: center; margin-bottom: 12px; }
@@ -292,7 +293,7 @@
   .remote-agent-directory-layout { grid-template-rows: auto minmax(var(--remote-agent-recent-min), 1fr); gap: 18px; }
   #remoteDirectorySplitter { display: none; }
   .remote-agent-connection-content { max-height: 320px; }
-  .remote-agent-notice { min-height: 90px; }
+  .remote-agent-notice:not(.agent-list-state) { min-height: 90px; }
   .remote-agent-editor-grid { grid-template-columns: minmax(0, 1fr); }
   #remoteConfigSplitter { display: none; }
   .remote-agent-filters { justify-content: flex-start; }
@@ -301,8 +302,5 @@
   .remote-agent-calls-table time { white-space: normal; overflow-wrap: anywhere; }
 }
 @media (max-width: 550px) {
-  .remote-agent-card > header { grid-template-columns: 38px minmax(0, 1fr); row-gap: 2px; }
-  .remote-agent-card-icon { grid-row: span 2; }
-  .remote-agent-card > header > .remote-agent-driver { justify-self: start; }
   .remote-agent-calls-table table { min-width: 390px; }
 }

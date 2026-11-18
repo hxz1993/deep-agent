@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 # Core agent runtime. Slim package + only the provider/mcp/web extras we use,
 # to avoid pulling in every provider SDK (bedrock, cohere, huggingface, ...).
-pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.68.0
-# Pydantic AI 2.68 requires OpenAI >=3.31. DeepAgent uses its aiohttp transport.
+pydantic-ai-slim[openai,anthropic,google,mcp,duckduckgo,tavily,web-fetch]==2.70.0
+# Pydantic AI requires OpenAI >=3.31,<4. DeepAgent uses its aiohttp transport.
 openai[aiohttp]==3.51.0
 # Anthropic 2 sends API keys as Bearer tokens. Existing compatible endpoints
 # use x-api-key, so keep Anthropic on its compatible 1.x wire contract.
 anthropic>=1.15,<2
-pydantic-ai-harness[skills,exa,youdotcom]==0.68.0
+pydantic-ai-harness[skills,exa,youdotcom]==0.70.0
 # Harness CodeMode uses Monty as its isolated Python-subset runtime. Keep the
 # direct pin instead of enabling the broader code-mode extra.
 pydantic-monty==1.6.0

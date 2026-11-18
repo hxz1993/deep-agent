@@ -718,6 +718,12 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                 if params.get("app_id") and count:
                     self.assertEqual(result["items"][0]["app_id"], params["app_id"])
 
+        response = await self.client.get(f"{publication}/tasks", headers={
+            **self.admin, "X-Deep-Agent-App": "budget001",
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertCountEqual([entry["app_id"] for entry in response.json()["items"]], ["budget001", "budget002"])
+
         response = await self.client.patch(publication, headers=self.admin, json={
             "revision": 2, "scope": {"apps": {"mode": "selected", "items": [app]}},
         })
@@ -731,12 +737,18 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         agent = await self.ctx.stores.agent.create_unique(AgentCreate(
             name="Unconfigured model fixture", prompt="Test publication save and runtime validation.",
         ), user_id="fixture-admin")
+        listing = await self.client.get("/api/v1/agents", headers=headers, params={"q": agent.name})
+        self.assertEqual(listing.status_code, 200, listing.text)
+        summary, = listing.json()
+        self.assertEqual((summary["id"], summary["name"]), (agent.id, agent.name))
+        self.assertNotIn("prompt", summary)
+        self.assertNotIn("updated_by_user", summary)
         with patch(
             "deep_agent.api.v1.agent_service.IntegrationAppDirectory.available_apps",
             side_effect=IntegrationAppAccessError(401, "请使用平台登录身份验证应用权限。"),
         ) as directory:
             created = await self.client.post(f"{ROOT}/publications", headers=headers, json={
-                "agent_code": "selected-apps", "name": "指定应用", "agent_id": agent.id, "scope": scope,
+                "agent_code": "selected-apps", "name": "指定应用", "agent_id": summary["id"], "scope": scope,
             })
             self.assertEqual(created.status_code, 201, created.text)
             response = await self.client.patch(f"{ROOT}/publications/selected-apps", headers=headers, json={

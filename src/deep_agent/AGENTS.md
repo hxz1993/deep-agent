@@ -836,9 +836,10 @@ alembic upgrade head
 | GET | `/health`, `/info`, `/docs` | 否 |
 | GET | `/api/v1/admin/access` | 否；当前平台身份，企业管理员返回`allowed=true` |
 | POST | `/api/v1/chat`, `/api/v1/chat/stream` | 否（持久化需 DB） |
+| GET | `/api/v1/agents` | 是；当前登录用户读取摘要，支持 `q` 按名称或 ID 搜索。`include_updater=true` 需要管理员权限 |
 | GET | `/api/v1/agents/{agent_id}` | 是；可信登录用户读取固定Agent，无需管理员 |
 | GET | `/api/v1/llm-models`、`/api/v1/llm-models/{model_id}` | 是；可信登录用户；默认只列可选模型。`selectable_only=false`全量列表仍要求管理员 |
-| CRUD | `/api/v1/agents` | 是；企业管理员，单个GET除外 |
+| POST／PATCH／DELETE | `/api/v1/agents`、`/api/v1/agents/{agent_id}` | 是；企业管理员 |
 | CRUD | `/api/v1/mcp` | 是；企业管理员 |
 | CRUD | `/api/v1/ui-tools` | 是；企业管理员 |
 | GET | `/api/v1/tools` | 企业管理员；无 DB 时跳过动态 UI 工具 |

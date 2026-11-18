@@ -32,6 +32,7 @@
 
 | 前端用途 | 方法与路径 |
 | --- | --- |
+| Agent 列表与搜索 | `GET /agents?q=...`，返回摘要，支持按名称或 ID 搜索 |
 | Agent 展示信息 | `GET /agents/{agent_id}` |
 | 模型选择 | `GET /llm-models` |
 | 会话列表 | `GET /sessions?agent_id=...&has_messages=true&limit=...&offset=...&sort=updated_at` |

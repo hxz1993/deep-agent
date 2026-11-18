@@ -277,20 +277,22 @@
 
     <section class="panel" id="panel-remote-agents">
       <div id="remoteAgentDirectory">
-        <header class="panel-toolbar remote-agent-page-heading"><div><h2>远程 Agent</h2><p>接入外部 Agent，作为工具调用。</p></div></header>
-        <div class="remote-agent-directory-layout" id="remoteDirectoryLayout">
-          <section class="console-section remote-agent-connections" id="remoteConnectionPane" aria-labelledby="remoteConnectionTitle">
-            <div class="console-section-heading remote-agent-toolbar">
-              <h3 class="console-section-title" id="remoteConnectionTitle">外部 Agent</h3>
-              <div class="remote-agent-actions">
-                <label class="agent-search"><i data-lucide="search" aria-hidden="true"></i><input id="remoteConnectionSearch" type="search" aria-label="搜索远程 Agent" placeholder="搜索远程 Agent"></label>
-                <div class="agent-view-switch" role="group" aria-label="连接视图">
-                  <button id="remoteConnectionCards" class="active" type="button" data-remote-view="cards" aria-pressed="true" aria-label="卡片" title="卡片"><i data-lucide="layout-grid" aria-hidden="true"></i></button>
-                  <button id="remoteConnectionList" type="button" data-remote-view="list" aria-pressed="false" aria-label="列表" title="列表"><i data-lucide="list" aria-hidden="true"></i></button>
-                </div>
-                <button class="btn primary" id="addRemoteConnection" type="button"><i data-lucide="plus" aria-hidden="true"></i>添加远程 Agent</button>
-              </div>
+        <header class="panel-toolbar agent-list-toolbar">
+          <div>
+            <h2 id="remoteAgentDirectoryTitle">远程 Agent</h2>
+            <p class="panel-subtitle">接入外部 Agent，作为工具调用。</p>
+          </div>
+          <div class="panel-toolbar-actions">
+            <label class="agent-search"><i data-lucide="search" aria-hidden="true"></i><input id="remoteConnectionSearch" type="search" aria-label="搜索远程 Agent" placeholder="搜索远程 Agent"></label>
+            <div class="agent-view-switch" role="group" aria-label="连接视图">
+              <button id="remoteConnectionCards" class="active" type="button" data-remote-view="cards" aria-pressed="true" aria-label="卡片" title="卡片"><i data-lucide="layout-grid" aria-hidden="true"></i></button>
+              <button id="remoteConnectionList" type="button" data-remote-view="list" aria-pressed="false" aria-label="列表" title="列表"><i data-lucide="list" aria-hidden="true"></i></button>
             </div>
+            <button class="btn primary" id="addRemoteConnection" type="button"><i data-lucide="plus" aria-hidden="true"></i>添加远程 Agent</button>
+          </div>
+        </header>
+        <div class="remote-agent-directory-layout" id="remoteDirectoryLayout">
+          <section class="console-section remote-agent-connections" id="remoteConnectionPane" aria-labelledby="remoteAgentDirectoryTitle">
             <div class="remote-agent-connection-content">
               <div class="remote-agent-cards" id="remoteConnectionCardsHost" hidden></div>
               <div class="table-wrap console-list-a remote-agent-connection-list" id="remoteConnectionListHost" hidden>
@@ -325,9 +327,9 @@
               <div class="agent-service-task-list remote-agent-recent-list" id="remoteCallList">
                 <div class="table-wrap console-list-a agent-service-scroll remote-agent-calls-table" id="remoteCallTable"><table class="data-table agent-service-table"><thead><tr><th scope="col">任务</th><th scope="col">远程 Agent</th><th scope="col">状态</th><th scope="col" class="agent-task-wide">提交时间</th><th scope="col">交付产物</th></tr></thead><tbody id="remoteCallRows"></tbody></table></div>
                 <footer><nav class="console-pagination" aria-label="近期调用分页">
-                  <button type="button" class="btn btn-sm" id="prevRemoteCalls" hidden>上一页</button>
+                  <button type="button" class="btn btn-sm" id="prevRemoteCalls" disabled>上一页</button>
                   <span class="models-page-info" id="remoteCallCount" aria-live="polite"></span>
-                  <button type="button" class="btn btn-sm" id="nextRemoteCalls" hidden>下一页</button>
+                  <button type="button" class="btn btn-sm" id="nextRemoteCalls" disabled>下一页</button>
                 </nav></footer>
               </div>
               <div id="remoteCallSplitter" class="workspace-resizer workspace-resizer-inspector agent-service-splitter" role="separator" aria-label="调整调用列表宽度" aria-controls="remoteCallList" aria-orientation="vertical" aria-valuemin="40" aria-valuemax="75" aria-valuenow="65" tabindex="0"></div>
@@ -394,23 +396,26 @@
       </div>
     </section>
     <section class="panel" id="panel-agent-service">
-      <div class="panel-toolbar"><div><h2>发布 Agent</h2><p class="panel-subtitle">发布选定的 Agent，供授权的外部 Agent 和业务程序调用。</p></div></div>
-      <div class="agent-service-layout">
+      <header class="panel-toolbar">
+        <div><h2>发布 Agent</h2><p class="panel-subtitle">发布选定的 Agent，供授权的外部 Agent 和业务程序调用。</p></div>
+        <div class="panel-toolbar-actions">
+          <button type="button" class="btn primary" id="newAgentPublication"><i data-lucide="plus"></i>发布 Agent</button>
+          <button type="button" class="btn channel-help-btn" id="agentServiceProtocolBtn" aria-haspopup="dialog" aria-controls="agentServiceProtocol"><i data-lucide="info" aria-hidden="true"></i><span>帮助</span></button>
+        </div>
+      </header>
+      <div class="agent-list-state" id="agentServiceEmpty" role="status" hidden><i data-lucide="bot" aria-hidden="true"></i><strong>暂无发布</strong><span>点击「发布 Agent」选择要发布的 Agent。</span></div>
+      <div class="agent-service-layout" id="agentServiceLayout">
         <div id="agentServiceTop" class="agent-service-top">
-          <section id="agentServicePublications" class="console-section agent-service-publications">
-            <div class="console-section-heading"><h3 class="console-section-title">Agent 发布</h3><button type="button" class="btn primary" id="newAgentPublication"><i data-lucide="plus"></i>发布 Agent</button></div>
+          <section id="agentServicePublications" class="console-section agent-service-publications" aria-label="发布列表">
             <div class="table-wrap console-list-a agent-service-scroll"><table class="data-table agent-service-table"><thead><tr><th scope="col">发布名称</th><th scope="col">关联 Agent</th><th scope="col">应用范围</th><th scope="col">最近更新</th><th scope="col">操作</th></tr></thead><tbody id="agentPublicationRows"></tbody></table></div>
           </section>
           <div id="agentServiceTopSplitter" class="workspace-resizer agent-service-splitter" role="separator" aria-label="调整发布列表宽度" aria-controls="agentServicePublications" aria-orientation="vertical" aria-valuemin="55" aria-valuemax="72" aria-valuenow="62" tabindex="0"></div>
-          <section class="console-section agent-service-access">
-            <div class="agent-service-access-heading">
-              <div id="agentServiceTabs" class="console-segmented agent-service-tabs" role="tablist" aria-label="接入方式">
-                <button id="agentServiceTabA2a" class="active" type="button" role="tab" data-service-access="a2a" aria-selected="true" aria-controls="agentServiceAccess"><span class="agent-protocol-logo" data-protocol="a2a" aria-hidden="true"></span>A2A</button>
-                <button id="agentServiceTabMcp" type="button" role="tab" data-service-access="mcp" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><span class="agent-protocol-logo" data-protocol="mcp" aria-hidden="true"></span>MCP</button>
-                <button id="agentServiceTabCli" type="button" role="tab" data-service-access="cli" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>CLI</button>
-                <button id="agentServiceTabSdk" type="button" role="tab" data-service-access="sdk" aria-selected="false" aria-controls="agentServiceAccess" aria-label="Python SDK" tabindex="-1"><i data-lucide="code-xml" aria-hidden="true"></i>SDK</button>
-              </div>
-              <button type="button" class="btn channel-help-btn" id="agentServiceProtocolBtn" aria-haspopup="dialog" aria-controls="agentServiceProtocol"><i data-lucide="info" aria-hidden="true"></i><span>帮助</span></button>
+          <section class="console-section agent-service-access" aria-label="接入配置">
+            <div id="agentServiceTabs" class="console-segmented agent-service-tabs" role="tablist" aria-label="接入方式">
+              <button id="agentServiceTabA2a" class="active" type="button" role="tab" data-service-access="a2a" aria-selected="true" aria-controls="agentServiceAccess"><span class="agent-protocol-logo" data-protocol="a2a" aria-hidden="true"></span>A2A</button>
+              <button id="agentServiceTabMcp" type="button" role="tab" data-service-access="mcp" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><span class="agent-protocol-logo" data-protocol="mcp" aria-hidden="true"></span>MCP</button>
+              <button id="agentServiceTabCli" type="button" role="tab" data-service-access="cli" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>CLI</button>
+              <button id="agentServiceTabSdk" type="button" role="tab" data-service-access="sdk" aria-selected="false" aria-controls="agentServiceAccess" aria-label="Python SDK" tabindex="-1"><i data-lucide="code-xml" aria-hidden="true"></i>SDK</button>
             </div>
             <div id="agentServiceAccess" class="agent-service-access-body" role="tabpanel" aria-labelledby="agentServiceTabA2a"></div>
           </section>
@@ -425,9 +430,9 @@
           <div id="agentTaskWorkbench" class="agent-service-task-workbench">
             <div id="agentTaskList" class="agent-service-task-list"><div class="table-wrap console-list-a agent-service-scroll"><table class="data-table agent-service-table"><thead><tr><th scope="col">任务</th><th scope="col">状态</th><th scope="col">接入方式</th><th scope="col" class="agent-task-wide">调用方</th><th scope="col" class="agent-task-wide">提交时间</th><th scope="col" class="agent-task-wide">耗时</th><th scope="col">交付产物</th></tr></thead><tbody id="agentTaskRows"></tbody></table></div>
               <footer><nav class="console-pagination" aria-label="任务分页">
-                <button type="button" class="btn btn-sm" id="prevAgentTasks" hidden>上一页</button>
+                <button type="button" class="btn btn-sm" id="prevAgentTasks" disabled>上一页</button>
                 <span class="models-page-info" id="agentTaskPage" aria-live="polite"></span>
-                <button type="button" class="btn btn-sm" id="nextAgentTasks" hidden>下一页</button>
+                <button type="button" class="btn btn-sm" id="nextAgentTasks" disabled>下一页</button>
               </nav></footer>
             </div>
             <div id="agentTaskSplitter" class="workspace-resizer workspace-resizer-inspector agent-service-splitter" role="separator" aria-label="调整任务列表宽度" aria-controls="agentTaskList" aria-orientation="vertical" aria-valuemin="40" aria-valuemax="75" aria-valuenow="65" tabindex="0"></div>
@@ -569,20 +574,20 @@
               </ul>
             </section>
           </section>
-          <section class="channel-help-panel agent-service-guide-flow" id="agentServiceMcpHelpPanel" role="tabpanel" aria-labelledby="agentServiceMcpHelpTab" hidden>
+          <section class="channel-help-panel agent-service-guide-flow agent-service-mcp-guide" id="agentServiceMcpHelpPanel" role="tabpanel" aria-labelledby="agentServiceMcpHelpTab" hidden>
             <section class="agent-service-guide-block" id="agentServiceMcpGuideSetup"></section>
-            <div class="agent-service-mcp-guide-columns">
+            <div class="agent-service-mcp-guide-reference">
               <div class="table-wrap console-list-a agent-service-guide-table agent-service-mcp-reference">
                 <table class="data-table" aria-label="MCP 工具">
                   <thead><tr><th scope="col">工具</th><th scope="col">用途</th></tr></thead>
                   <tbody>
                     <tr><th scope="row"><code>list_agents</code></th><td>查找已启用的发布及 Agent 编码</td></tr>
                     <tr><th scope="row"><code>submit_task</code></th><td>发起任务或沿已完成的会话继续，支持附件</td></tr>
-                    <tr><th scope="row"><code>get_task</code></th><td>查询状态、正文、待答问题和文件的完整下载 URL</td></tr>
+                    <tr><th scope="row"><code>get_task</code></th><td>查看任务状态、正文、待答问题和产物</td></tr>
                     <tr><th scope="row"><code>list_tasks</code></th><td>按发布、状态或会话查看当前应用下的近期任务</td></tr>
                     <tr><th scope="row"><code>reply_task</code></th><td>回答原任务的待答问题，支持附件</td></tr>
                     <tr><th scope="row"><code>cancel_task</code></th><td>请求停止未结束的任务</td></tr>
-                    <tr><th scope="row"><code>get_artifact</code></th><td>默认返回完整下载地址。显式传 <code>format="base64"</code> 可获取至多 20 MiB 的文件</td></tr>
+                    <tr><th scope="row"><code>get_artifact</code></th><td>获取指定产物</td></tr>
                   </tbody>
                 </table>
               </div>

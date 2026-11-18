@@ -285,7 +285,9 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   }
   async function loadDetail() {
     contextReader.cancel(); eventsReader.cancel(); eventsLoading = false;
-    const scope = reader.begin(), id = state.route.id, focus = { view: state.route.filters.view || "conversation", eventId: state.route.filters.event_id, runId: state.route.filters.run_id };
+    const scope = reader.begin(), id = state.route.id;
+    const { view, event_id, run_id, turn_id } = state.route.filters;
+    const focus = { view: view || "conversation", eventId: event_id, runId: run_id, turnId: turn_id };
     detailData = null; detail.setLoading?.(true);
     try {
       const session = await scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}`);
@@ -303,7 +305,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       await detail.prepareRender?.();
       if (!scope.current() || state.route.id !== id || !state.active) return;
       if (detailData.historyError || detailData.eventsError) detail.setError?.({ history: detailData.historyError, events: detailData.eventsError });
-      if (state.route.filters.view === "trajectory" || (focus.runId && !focus.eventId)) void loadEvents();
+      if (state.route.filters.view === "trajectory" || (focus.runId && !focus.eventId && !focus.turnId)) void loadEvents();
       if (!detailData.historyError) void loadContext();
     } catch (error) { if (scope.current() && state.active) detail.setError?.(sessionQueryError(error)); }
     finally { if (scope.current() && state.active) detail.setLoading?.(false); }

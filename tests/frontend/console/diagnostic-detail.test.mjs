@@ -40,12 +40,15 @@ test("readonly detail uses the pristine workspace shell and does not restyle its
 
 test("question/run focus follows exact saved event identities instead of text", () => {
   const items = [
-    { item_id: "message:a", kind: "user_message", text: "same question", source_event_ids: ["a"], order: { sequence: 1 } },
-    { item_id: "message:b", kind: "user_message", text: "same question", source_event_ids: ["b"], order: { sequence: 4 } },
+    { item_id: "message:a", kind: "user_message", turn_id: "turn-a", text: "same question", source_event_ids: ["a"], order: { sequence: 1 } },
+    { item_id: "message:b", kind: "user_message", turn_id: "turn-b", text: "same question", source_event_ids: ["b"], order: { sequence: 4 } },
+    { item_id: "message:c", kind: "assistant_message", turn_id: "turn-b", order: { sequence: 5 } },
   ];
   const events = [{ event_id: "a", run_id: "run-a" }, { event_id: "b", run_id: "run-b" }];
   assert.equal(findConversationFocus(items, events, { eventId: "b" }).item_id, "message:b");
   assert.equal(findConversationFocus(items, events, { runId: "run-b" }).item_id, "message:b");
+  assert.equal(findConversationFocus(items, [], { turnId: "turn-b" }).item_id, "message:b");
+  assert.equal(findConversationFocus(items, events, { turnId: "turn", runId: "run-b" }), null);
   assert.equal(findConversationFocus(items, events, { eventId: "missing", runId: "run-a" }), null);
   assert.equal(findConversationFocus(items, events, { runId: "run" }), null);
 });

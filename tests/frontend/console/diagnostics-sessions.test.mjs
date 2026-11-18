@@ -238,6 +238,8 @@ test("diagnostic routes accept only internal views and preserve complete IDs wit
   const route = parseDiagnosticRoute(diagnosticTarget("detail", { view: "trajectory", event_id: "e&1", run_id: "r+1", token: "secret", prompt: "private", return: "https://evil.example" }, "session:exact-ID"));
   assert.equal(route.id, "session:exact-ID");
   assert.deepEqual(route.filters, { view: "trajectory", event_id: "e&1", run_id: "r+1" });
+  const turn = parseDiagnosticRoute(diagnosticHash("detail", { view: "conversation", turn_id: "turn:full+id" }, "session:exact-ID"));
+  assert.deepEqual(turn.filters, { view: "conversation", turn_id: "turn:full+id" });
 });
 
 test("session range defaults to seven days, freezes supplied UTC range, enforces 31 days and half-open order", () => {

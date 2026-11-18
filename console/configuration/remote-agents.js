@@ -17,6 +17,7 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     failed: "失败", canceled: "已取消", unknown: "结果未知",
   };
   const activeStates = new Set(["submitted", "working"]);
+  const checkingConnections = new Set();
   const recentPageSize = 20;
   const fieldOptions = {
     execution: { local: "本机", ssh: "SSH" },
@@ -36,6 +37,7 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
   let editor;
   let homeRequest;
   let recentRequest;
+  let recentSession;
   let openRequest = 0;
   let pollTimer;
   let debugPollTimer;
@@ -53,9 +55,9 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     return source ? `<img class="remote-agent-driver-logo" src="${attr(source)}" alt="" width="16" height="16">` : icon("bot");
   };
 
-  function driverBadge(protocol) {
+  function driverBadge(protocol, showLogo = true) {
     const driver = drivers[protocol];
-    return driver ? `<span class="remote-agent-driver">${driverLogo(protocol)}${driver.badge || driver.label}</span>` : "—";
+    return driver ? `<span class="remote-agent-driver">${showLogo ? driverLogo(protocol) : ""}${driver.badge || driver.label}</span>` : "—";
   }
 
   function status(value, label = labels[value], dotOnly = false) {
@@ -96,15 +98,26 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     list.hidden = view !== "list" || !shown.length;
     const remove = (row) => `<button type="button" class="row-action icon-only danger" data-remote-delete="${attr(row.id)}" title="删除" aria-label="删除 ${attr(row.name)}">${icon("trash-2")}</button>`;
     const open = (row) => `<button type="button" class="remote-agent-open" data-remote-open="${attr(row.id)}" title="${attr(row.name)}">${escapeHtml(row.name)}</button>`;
-    cards.innerHTML = shown.map(row => `
+    cards.innerHTML = shown.map(row => {
+      const checking = checkingConnections.has(row.id);
+      const checkLabel = checking ? "正在检查" : protocolOf(row) === "a2a" ? "检查连接" : "检查环境";
+      return `
       <article class="remote-agent-card" data-remote-card="${attr(row.id)}">
-        <header><span class="remote-agent-card-icon" aria-hidden="true">${driverLogo(protocolOf(row))}</span>${open(row)}${driverBadge(protocolOf(row))}</header>
+        <header>
+          <span class="remote-agent-card-icon" aria-hidden="true">${driverLogo(protocolOf(row))}</span>
+          <div class="remote-agent-card-identity">${open(row)}${driverBadge(protocolOf(row), false)}</div>
+          ${checking ? status("working", "检查中") : inspectionState(row.inspection)}
+        </header>
         <p>${escapeHtml(row.description || "—")}</p>
         <footer class="agent-card-footer">
           <span class="agent-card-update">${updater(row)}${updatedTime(row)}</span>
-          ${inspectionState(row.inspection)}<div class="row-actions agent-row-actions">${remove(row)}</div>
+          <div class="row-actions agent-row-actions">
+            <button type="button" class="row-action icon-only" data-remote-check="${attr(row.id)}" title="${checkLabel}" aria-label="${checkLabel} ${attr(row.name)}"${checking ? " disabled" : ""}>${icon(checking ? "loader-circle" : "activity")}</button>
+            ${remove(row)}
+          </div>
         </footer>
-      </article>`).join("");
+      </article>`;
+    }).join("");
     el("remoteConnectionRows").innerHTML = shown.map(row => `
       <tr><td>${open(row)}</td><td>${driverBadge(protocolOf(row))}</td>
         <td title="${attr(row.description || "")}">${escapeHtml(row.description || "—")}</td>
@@ -112,7 +125,10 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
         <td><div class="row-actions agent-row-actions">${remove(row)}</div></td></tr>`).join("");
     const message = connectionError || (connectionPending ? "正在加载远程 Agent…"
       : q ? "没有匹配的远程 Agent" : "暂无远程 Agent");
-    replaceMarkup(el("remoteConnectionNotice"), shown.length ? "" :
+    const notice = el("remoteConnectionNotice");
+    const empty = !connectionPending && !connectionError && !connections.length;
+    notice.classList.toggle("agent-list-state", empty);
+    replaceMarkup(notice, empty ? `${icon("bot")}<strong>暂无远程 Agent</strong><span>点击「添加远程 Agent」配置一个连接。</span>` : shown.length ? "" :
       `${icon(connectionError ? "triangle-alert" : connectionPending ? "loader-circle" : q ? "search" : "bot")}
       <span>${escapeHtml(message)}</span>${connectionError ? '<button class="btn text compact" id="retryRemoteDirectory" type="button">重试</button>' : ""}`);
     icons();
@@ -159,11 +175,11 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     const filterStatus = el("remoteCallStatus").value;
     const shown = recent.filter(row => (!connectionId || connectionId === row.connection_id)
       && (!filterStatus || filterStatus === row.status)
-      && (!keyword || `${row.title || row.task || ""} ${row.id} ${row.remote_task_id || ""}`.toLocaleLowerCase().includes(keyword)));
-    const pageCount = Math.ceil(shown.length / recentPageSize);
-    recentPage = Math.min(recentPage, Math.max(1, pageCount));
+      && (!keyword || `${row.title || row.task || ""} ${row.id} ${row.remote_task_id || ""} ${formatExternalId(row.remote_task_id || "")}`.toLocaleLowerCase().includes(keyword)));
+    const pageCount = Math.max(1, Math.ceil(shown.length / recentPageSize));
+    recentPage = Math.min(recentPage, pageCount);
     const rows = shown.slice((recentPage - 1) * recentPageSize, recentPage * recentPageSize);
-    const selected = rows.find(row => row.id === selectedRecent) || rows[0];
+    const selected = rows.find(row => row.id === selectedRecent);
     selectedRecent = selected?.id;
     const emptyLabel = recentError || (recentPending ? "正在加载近期调用…"
       : keyword || connectionId || filterStatus ? "没有符合条件的调用" : "暂无调用记录");
@@ -184,16 +200,32 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
       const button = Array.from(body.querySelectorAll("[data-remote-call]")).find(node => node.dataset.remoteCall === focused);
       button?.focus({ preventScroll: true });
     }
-    const previous = el("prevRemoteCalls");
-    const next = el("nextRemoteCalls");
-    previous.hidden = next.hidden = pageCount <= 1;
-    previous.disabled = recentPage === 1;
-    next.disabled = recentPage >= pageCount;
-    const totalLabel = `共 ${shown.length.toLocaleString()} 条调用`;
-    const pageLabel = pageCount > 1 ? `第 ${recentPage} / ${pageCount} 页 · ${totalLabel}` : totalLabel;
+    el("prevRemoteCalls").disabled = recentPage === 1;
+    el("nextRemoteCalls").disabled = recentPage >= pageCount;
+    const pageLabel = recentError ? "加载失败" : recentPending ? "正在加载…"
+      : `第 ${recentPage} / ${pageCount} 页 · 共 ${shown.length.toLocaleString()} 条调用`;
     if (el("remoteCallCount").textContent !== pageLabel) el("remoteCallCount").textContent = pageLabel;
-    renderRecentDetail(selected);
+    void loadRecentSession(selected?.session_id);
+    renderRecentDetail(selected, rows.length);
     icons();
+  }
+
+  async function loadRecentSession(sessionId) {
+    if (recentSession?.id === sessionId) return;
+    recentSession?.request.abort();
+    if (!sessionId) { recentSession = undefined; return; }
+    const request = new AbortController();
+    const selected = recentSession = { id: sessionId, request, data: null };
+    try {
+      const session = await apiFetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+        signal: request.signal, includeContext: false, reportStatus: false,
+      });
+      if (request.signal.aborted) return;
+      selected.data = session;
+      if (recentIsVisible()) renderRecent();
+    } catch {
+      // Session information is supplemental to the invocation and may be unavailable.
+    }
   }
 
   function setRecentPage(page) {
@@ -213,6 +245,35 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     return `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`;
   }
 
+  function formatExternalId(id) {
+    return id.replace(/^([0-9a-f]{8})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})$/i, "$1-$2-$3-$4-$5");
+  }
+
+  function callId(id, label, { url = "", external = false } = {}) {
+    if (!id) return "—";
+    const display = external ? formatExternalId(id) : id.slice(0, 8);
+    const value = `<code title="${attr(id)}">${escapeHtml(display)}</code>`;
+    return `<span class="agent-service-id-value">${url
+      ? `<a class="agent-service-session-link" href="${attr(url)}" aria-label="查看 ${label} ${attr(display)}">${value}</a>` : value}
+      <button type="button" class="console-inline-id-copy" data-remote-copy="${attr(id)}" data-copy-label="${label}" aria-label="复制 ${label}" title="复制 ${label}">${icon("copy")}</button></span>`;
+  }
+
+  function idFact(label, id, options) {
+    return id ? `<div><dt>${label}</dt><dd>${callId(id, label, options)}</dd></div>` : "";
+  }
+
+  function renderScope(session) {
+    const app = session?.app_id || "";
+    const space = session?.space_id || "";
+    if (!app && !space) return "";
+    const appName = app ? session.app_name || "名称未获取" : "";
+    const spaceName = space ? session.space_name || "名称未获取" : "";
+    return `<span class="inspector-scope-value">
+      <span class="inspector-scope-names"><span title="${attr(appName)}">${escapeHtml(appName)}</span><span>/</span><span title="${attr(spaceName)}">${escapeHtml(spaceName)}</span></span>
+      <span class="inspector-scope-codes"><code>${escapeHtml(app)}</code><span>/</span><code>${escapeHtml(space)}</code></span>
+    </span>`;
+  }
+
   function renderFiles(files) {
     if (!Array.isArray(files) || !files.length) return "";
     return `<div class="remote-agent-output-files">${files.map(file => {
@@ -225,11 +286,14 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     }).join("")}</div>`;
   }
 
-  function renderRecentDetail(row) {
+  function renderRecentDetail(row, visibleCount) {
+    const detail = el("remoteCallDetail");
     if (!row) {
-      const message = recentError ? "暂时无法查看调用详情" : recentPending ? "正在加载…" : "暂无调用可查看";
-      replaceMarkup(el("remoteCallDetail"), `<div class="agent-service-detail-heading"><h3>调用详情</h3></div>
-        <p class="agent-service-empty" role="status">${message}</p>`);
+      const message = recentError ? "暂时无法查看调用详情" : recentPending ? "正在加载…"
+        : visibleCount ? "请选择一条调用查看详情" : "暂无调用可查看";
+      delete detail.dataset.invocation;
+      replaceMarkup(detail, `<div class="agent-service-detail-heading"><h3>调用详情</h3></div>
+        <div class="inspector-tab-empty" role="status"><span>${message}</span></div>`);
       return;
     }
     const title = row.title || row.task || row.label || "调用详情";
@@ -238,20 +302,25 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     const question = row.question || (row.status === "input_required" ? row.text : "");
     const result = row.result || (row.status === "input_required" ? "" : row.text);
     const sessionUrl = row.session_id && window.DeepAgentConsoleAPI?.consoleUrl(
-      `#/diagnostics/sessions/${encodeURIComponent(row.session_id)}`,
+      `#/diagnostics/sessions/${encodeURIComponent(row.session_id)}?view=conversation`,
     );
+    const turnUrl = sessionUrl && row.turn_id ? `${sessionUrl}&turn_id=${encodeURIComponent(row.turn_id)}` : "";
+    const session = recentSession?.data;
     const events = (Array.isArray(row.timeline) ? row.timeline : []).map(item => `<li>${status(item.status, item.label)}<time>${escapeHtml(formatDate(item.at || item.created_at))}</time></li>`).join("");
+    const external = { external: true };
     const remoteSession = [
-      fact("任务 ID", row.remote_task_id),
-      fact(row.protocol === "codex" ? "Thread ID" : row.protocol === "codebuddy" ? "Session ID" : "Context ID", row.remote_context_id || row.remote_session_id || row.thread_id),
-      fact("提问 ID", row.question_id),
+      idFact("任务 ID", row.remote_task_id, external),
+      idFact(row.protocol === "codex" ? "Thread ID" : row.protocol === "codebuddy" ? "Session ID" : "Context ID", row.remote_context_id || row.remote_session_id || row.thread_id, external),
+      idFact("提问 ID", row.question_id, external),
     ].join("");
-    const detail = el("remoteCallDetail");
     const previousScroll = detail.querySelector(".inspector-tab-panel")?.scrollTop || 0;
     const sameCall = detail.dataset.invocation === row.id;
     replaceMarkup(detail, `
       <div class="agent-service-detail-heading">
-        <div class="agent-service-detail-title"><h3 title="${attr(title)}">${escapeHtml(title)}</h3></div>
+        <div class="agent-service-detail-title">
+          <h3 title="${attr(title)}">${escapeHtml(title)}</h3>
+          <div class="session-subtitle-row">${callId(row.id, "调用 ID")}</div>
+        </div>
         <span class="inspector-tab-status">${status(row.status)}</span>
       </div>
       <div class="inspector-tab-panel">
@@ -260,10 +329,15 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
         ${fact("远程 Agent", recentConnectionName(row, connection))}
         ${fact("本地 Agent", localAgent?.name || row.agent_id)}
         ${fact("提交时间", formatDate(row.created_at))}
-        ${fact("调用 ID", row.id)}
+        ${idFact("调用 ID", row.id)}
       </dl>
-      ${remoteSession ? `<section class="remote-agent-detail-section"><h4>外部会话</h4><dl class="remote-agent-facts">${remoteSession}</dl></section>` : ""}
-      ${sessionUrl ? `<section class="remote-agent-detail-section"><h4>本地会话</h4><dl class="remote-agent-facts"><div><dt>会话 ID</dt><dd><a href="${attr(sessionUrl)}">${escapeHtml(row.session_id)}</a></dd></div>${fact("提问 ID", row.turn_id)}</dl></section>` : ""}
+      ${row.session_id || row.turn_id ? `<section class="remote-agent-detail-section"><h4>DeepAgent 会话</h4><dl class="remote-agent-facts">
+        ${idFact("提问 ID", row.turn_id, { url: turnUrl })}
+        ${idFact("会话 ID", row.session_id, { url: sessionUrl })}
+        <div><dt>会话名称</dt><dd>${escapeHtml(session?.title || "")}</dd></div>
+        <div><dt>应用 / 空间</dt><dd>${renderScope(session)}</dd></div>
+      </dl></section>` : ""}
+      ${remoteSession ? `<section class="remote-agent-detail-section"><h4>远程会话</h4><dl class="remote-agent-facts">${remoteSession}</dl></section>` : ""}
       ${events ? `<section class="remote-agent-detail-section"><h4>任务进度</h4><ol>${events}</ol></section>` : ""}
       ${question ? `<section class="remote-agent-detail-section"><h4>待补材料</h4><p>${escapeHtml(question)}</p>${sessionUrl ? '<p class="muted">请在原 Agent 会话补答。</p>' : ""}</section>` : ""}
       ${result ? `<section class="remote-agent-detail-section remote-agent-result"><h4>任务结果</h4><p>${escapeHtml(result)}</p></section>` : ""}
@@ -701,6 +775,15 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     }
   }
 
+  async function inspectConnection(target, approve = false) {
+    const result = await post(`${path(target.id)}/check`, approve ? {
+      approve_interface: true,
+      expected_revision: target.revision,
+      expected_interface: target.inspection?.proposed_interface,
+    } : {});
+    return result.config ? result : { ...target, inspection: result.inspection || result };
+  }
+
   async function check(approve = false) {
     const target = editor;
     if (!target?.row.id || target.busy || target.dirty) return;
@@ -716,13 +799,9 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     renderEditorState();
     renderSummary();
     try {
-      const row = await post(`${path(target.row.id)}/check`, approve ? {
-        approve_interface: true,
-        expected_revision: target.row.revision,
-        expected_interface: target.row.inspection?.proposed_interface,
-      } : {});
+      const row = await inspectConnection(target.row, approve);
       if (target !== editor) return;
-      target.row = row.config ? row : { ...target.row, inspection: row.inspection || row };
+      target.row = row;
       target.config = target.row.config;
     } catch (error) {
       notice.textContent = error.message;
@@ -733,6 +812,31 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
         renderEditorState();
         renderSummary();
         icons();
+      }
+    }
+  }
+
+  async function checkFromCard(button) {
+    const id = button.dataset.remoteCheck;
+    const row = connections.find(item => item.id === id);
+    if (!row || checkingConnections.has(id)) return;
+    const wasFocused = document.activeElement === button;
+    checkingConnections.add(id);
+    renderConnections();
+    try {
+      const checked = await inspectConnection(row);
+      connections = connections.map(item => item.id === id && item.revision <= checked.revision ? checked : item);
+      const inspection = checked.inspection;
+      if (inspection.status === "failed") showToast(inspection.message || "检查失败", true);
+      else if (inspection.status === "approval_required") showToast("检查完成，请在详情中批准 A2A 接口");
+      else showToast("检查完成");
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      checkingConnections.delete(id);
+      renderConnections();
+      if (wasFocused && document.activeElement === document.body && recentIsVisible() && view === "cards") {
+        el("remoteConnectionCardsHost").querySelector(`[data-remote-check="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
       }
     }
   }
@@ -882,8 +986,17 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
         });
         renderConnections();
       } else if (data.remoteOpen) await loadEditor(data.remoteOpen);
+      else if (data.remoteCheck) await checkFromCard(button);
       else if (data.remoteDelete) await removeConnection(data.remoteDelete);
       else if (data.remoteCall) { selectedRecent = data.remoteCall; renderRecent(); }
+      else if (data.remoteCopy) {
+        try {
+          await navigator.clipboard.writeText(data.remoteCopy);
+          showToast(`${data.copyLabel} 已复制`);
+        } catch {
+          showToast("复制失败", true);
+        }
+      }
       else if (button.id === "retryRemoteDirectory") await refresh();
       else if (button.id === "prevRemoteCalls") setRecentPage(recentPage - 1);
       else if (button.id === "nextRemoteCalls") setRecentPage(recentPage + 1);

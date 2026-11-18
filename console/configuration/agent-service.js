@@ -41,6 +41,9 @@
   }
 
   function renderPublications(message = "") {
+    const empty = !rows.length && !message;
+    el("agentServiceEmpty").hidden = !empty;
+    el("agentServiceLayout").hidden = empty;
     const body = el("agentPublicationRows");
     body.innerHTML = rows.length ? rows.map((row) => {
       const name = escapeHtml(row.name);
@@ -50,7 +53,7 @@
         scope.items.map((item) => apps.get(item.app_id)?.app_name || item.app_id).join("、");
       return `<tr data-publication="${attr(row.agent_code)}" class="${selected === row.agent_code ? "selected" : ""}">
         <td><div class="agent-service-pub-name"><button type="button" class="model-enabled-switch ${row.enabled ? "on" : "off"}" role="switch" aria-checked="${row.enabled}" aria-label="${attr(row.name)}启用状态" data-service-action="toggle"><span></span></button>
-        <button type="button" class="btn text agent-service-select" aria-pressed="${selected === row.agent_code}"><span title="${attr(row.name)}">${name}</span><code title="${attr(row.agent_code)}">${escapeHtml(row.agent_code)}</code></button></div></td>
+        <button type="button" class="btn text agent-service-select" aria-controls="agentServiceAccess agentTaskList" aria-pressed="${selected === row.agent_code}"><span title="${attr(row.name)}">${name}</span><code title="${attr(row.agent_code)}">${escapeHtml(row.agent_code)}</code></button></div></td>
         <td title="${attr(target)}">${escapeHtml(target)}</td><td title="${attr(scopeText)}">${escapeHtml(scopeText)}</td>
         <td>${publicationUpdate(row)}</td>
         <td><div class="row-actions agent-row-actions"><button type="button" class="row-action icon-only" data-service-action="edit" aria-label="编辑${attr(row.name)}" title="编辑">${icon("pencil")}</button>
@@ -77,11 +80,12 @@
 
   function renderMcpAccess(card, inGuide = false) {
     const endpoint = clientConfig.mcp_url;
+    const publication = rows.find((row) => row.agent_code === selected);
     if (!endpoint) {
-      card.innerHTML = `${inGuide ? "" : accessToolbar("mcp")}<p>当前环境暂未提供 MCP 接入地址。</p>`;
+      card.innerHTML = `${inGuide ? "" : accessToolbar("mcp", "", publication?.name)}<p>当前环境暂未提供 MCP 接入地址。</p>`;
       return;
     }
-    const scope = rows.find((row) => row.agent_code === selected)?.scope.apps;
+    const scope = publication?.scope.apps;
     const app = scope?.mode === "selected" && scope.items.length === 1 ? scope.items[0].app_id : "<App ID>";
     const config = JSON.stringify({
       mcpServers: {
@@ -92,25 +96,22 @@
         },
       },
     }, null, 2);
-    const instructions = [
-      "请在当前 Agent 客户端中添加下面的 MCP 配置。",
+    const setupGuide = [
+      "在 Agent 客户端的 MCP 设置中添加以下 Streamable HTTP 配置，将 app 填为目标应用 ID。",
       config,
-      "配置前，先引导用户确认 App ID 并选择一种鉴权凭据。推荐使用有权访问该应用的 DeepFOS API Key，填入 X-Deepfos-Key。使用平台 Token 时，填入 token 或 Authorization: Bearer <Token>。请引导用户在客户端的安全凭据设置中提供，或自行填到本地配置的占位符里，避免在对话中粘贴或回显真实凭据。",
-      "连接后调用 list_agents 验证。目录展示所有已启用的发布，发起任务时仍会检查应用权限和发布范围。",
-      "用 submit_task 发起任务，用 get_task 查看正文和产物。附件传 name、media_type 和 data_base64，单次解码后最多 8 MiB。任务待补答时，用 reply_task 传原任务 ID、question_id 作为 reply_to 和新的 message_id。",
-      "对 get_task 或 get_artifact 返回的完整 download_url 发 HTTP GET，携带 MCP 连接的原 app 和鉴权 Header。若客户端无法携带这些 Header，至多 20 MiB 的文件可用 get_artifact(format=base64)，从文本 JSON 读取 data_base64 并解码保存。更大的文件走下载链接。",
-      "如果地址指向 localhost 或 127.0.0.1，请在同一台电脑上运行客户端。云端客户端需要可达的服务地址。",
+      "在客户端设置中填写一种凭据。有权访问该应用的 DeepFOS API Key 填入 X-Deepfos-Key。使用平台 Token 时，将 X-Deepfos-Key 换成 token 或 Authorization: Bearer <Token>。",
+      "客户端须能访问配置中的 URL。localhost 和 127.0.0.1 仅供同机客户端使用。",
     ].join("\n\n");
-    const guideButton = copyButton(instructions, "复制 Agent 接入指引", "compact");
+    const guideButton = copyButton(setupGuide, "复制 Agent 接入指引", "compact");
     if (inGuide) {
       card.innerHTML = `<div class="agent-service-guide-heading"><h4>Agent 接入指引</h4>${guideButton}</div>
-        <pre class="agent-service-guide-preview">${escapeHtml(instructions)}</pre>`;
+        <pre class="agent-service-guide-preview">${escapeHtml(setupGuide)}</pre>`;
       return;
     }
-    card.innerHTML = `${accessToolbar("mcp", guideButton)}
+    card.innerHTML = `${accessToolbar("mcp", guideButton, publication?.name)}
       <div class="agent-service-card-option agent-service-card-options">
         <section>
-          <div class="agent-service-card-heading"><h5>MCP 配置</h5><span>${copyButton(endpoint, "复制地址")}${copyButton(config, "复制配置")}</span></div>
+          <div class="agent-service-card-heading"><h5>MCP 配置</h5>${copyButton(config, "复制配置")}</div>
           <pre class="agent-service-client-snippet">${escapeHtml(config)}</pre>
           <p class="agent-service-access-help">填写应用 ID 和一种凭据。</p>
         </section>
@@ -242,7 +243,6 @@
         return loadTasks();
       }
       tasks = result.items;
-      if (!tasks.some((row) => row.id === selectedTask)) selectedTask = tasks[0]?.id || "";
       renderTasks(result.total);
       void loadDetail();
     } catch (error) {
@@ -255,6 +255,7 @@
   }
 
   function renderTasks(total, message = "") {
+    if (!tasks.some((row) => row.id === selectedTask)) selectedTask = "";
     const body = el("agentTaskRows");
     const filtering = el("agentTaskSearch").value.trim() || el("agentTaskState").value || el("agentTaskApp").value;
     const emptyLabel = message || (filtering ? "没有符合条件的任务" : "暂无任务");
@@ -276,26 +277,24 @@
       if (focusedId) body.querySelector(`[data-agent-task="${CSS.escape(focusedId)}"] button`)?.focus({ preventScroll: true });
       refreshIcons();
     }
-    const pageCount = Math.ceil(total / 20);
-    const previous = el("prevAgentTasks");
-    const next = el("nextAgentTasks");
-    previous.hidden = next.hidden = pageCount <= 1;
-    previous.disabled = page <= 1;
-    next.disabled = page >= pageCount;
-    const totalLabel = `共 ${total.toLocaleString()} 条任务`;
-    const pageLabel = pageCount > 1 ? `第 ${page} / ${pageCount} 页 · ${totalLabel}` : totalLabel;
+    const pageCount = Math.max(1, Math.ceil(total / 20));
+    el("prevAgentTasks").disabled = total === 0 || page <= 1;
+    el("nextAgentTasks").disabled = page >= pageCount;
+    const pageLabel = message ? "加载失败" : `第 ${page} / ${pageCount} 页 · 共 ${total.toLocaleString()} 条任务`;
     if (el("agentTaskPage").textContent !== pageLabel) clearText("agentTaskPage", pageLabel);
-    if (!tasks.length) {
+    if (!selectedTask) {
       detailRequest?.abort();
       shownTask = "";
-      renderDetailPlaceholder("暂无任务可查看");
+      renderDetailPlaceholder(message ? "暂时无法查看任务详情" : tasks.length ? "请选择一条任务查看详情" : "暂无任务可查看");
     }
   }
 
   function renderDetailPlaceholder(message) {
-    taskDetailSnapshot = "";
-    el("agentTaskDetail").innerHTML = `<div class="agent-service-detail-heading"><h3>任务详情</h3></div>
-      <p class="agent-service-empty" role="status">${escapeHtml(message)}</p>`;
+    const markup = `<div class="agent-service-detail-heading"><h3>任务详情</h3></div>
+      <div class="inspector-tab-empty" role="status"><span>${escapeHtml(message)}</span></div>`;
+    if (taskDetailSnapshot === markup) return;
+    taskDetailSnapshot = markup;
+    el("agentTaskDetail").innerHTML = markup;
   }
 
   function taskIdValue(id, label, url = "") {

@@ -133,6 +133,36 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
                                  ("start", "failed", "preparation_failed", "RemoteAgentError"))
                 self.assertNotIn("无法读取附件", str(failure))
 
+    async def test_recent_calls_list_all_apps_for_the_current_user(self):
+        ctx, api, client = await self.management_client()
+        agent_id = await seed_default_agent(ctx.stores)
+        runtime = ctx.get_remote_agents()
+        async with client:
+            created = await client.post(api, json={"name": "Remote review", "config": {"protocol": "codex"}})
+            self.assertEqual(created.status_code, 201, created.text)
+            connection_id = created.json()["id"]
+            await ctx.stores.agent.update_unique(agent_id, AgentUpdate(
+                capabilities=[f"agent_connection:{connection_id}"],
+            ))
+            for call_id, user, app_id, space_id in (
+                ("unscoped", "owner", None, None),
+                ("app-a", "owner", "alpha001", "alpha"),
+                ("app-b", "owner", "beta002", "beta"),
+                ("other-user", "other", "alpha001", "alpha"),
+            ):
+                runtime.recent.record(Invocation(
+                    id=call_id, protocol="codex", name="Remote review", connection_id=connection_id,
+                    connection_revision=1, agent_id=agent_id, user=user, app_id=app_id, space_id=space_id,
+                ))
+            for headers in ({}, {"X-Deep-Agent-App": "alpha001"}, {"X-Deep-Agent-App": "beta002"}):
+                with self.subTest(headers=headers):
+                    result = await client.get(f"{api}/recent", headers=headers)
+                    self.assertEqual(result.status_code, 200, result.text)
+                    self.assertCountEqual([entry["id"] for entry in result.json()], ["app-a", "app-b", "unscoped"])
+            other = await client.get(f"{api}/recent", headers={"user": "other", "X-Deep-Agent-App": "beta002"})
+            self.assertEqual(other.status_code, 200, other.text)
+            self.assertEqual([entry["id"] for entry in other.json()], ["other-user"])
+
     async def test_debug_reply_refresh_and_cancel_return_only_current_turn_files(self):
         ctx, api, client = await self.management_client()
         runtime = ctx.get_remote_agents()

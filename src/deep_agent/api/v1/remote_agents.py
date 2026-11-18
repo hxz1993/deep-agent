@@ -70,10 +70,9 @@ async def list_connections(ctx: AppContextDep, request: Request, user: RequestUs
 
 
 @router.get("/recent")
-async def recent_connections(ctx: AppContextDep, request: Request, user: RequestUserDep):
+async def recent_connections(ctx: AppContextDep, user: RequestUserDep):
     runtime = ctx.get_remote_agents()
-    current = scope(request, user, ctx)
-    entries = runtime.recent.list(current)
+    entries = runtime.recent.list(user)
     links = await runtime.connections.agents()
     return [entry for entry in entries if any(item["id"] == entry["agent_id"]
             for item in links.get(entry["connection_id"], ()))]

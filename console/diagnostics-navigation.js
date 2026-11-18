@@ -9,7 +9,7 @@ export const LOG_FILTER_KEYS = ["start", "end", "source", "level", "q", "session
 export const USAGE_FILTER_KEYS = ["start", "end", "timezone", "agent_id", "period"];
 export const CHANNEL_FILTER_KEYS = ["period", "start", "end", "timezone", "account_id", "kind", "query", "offset", "peer_id", "filter_peer_id", "channel_user_id", "channel_group_id"];
 export const channelEntryFilters = filters => ({ period: ["24", "168", "720"].includes(String(filters.period)) ? String(filters.period) : "168" });
-export const DETAIL_KEYS = ["view", "event_id", "run_id"];
+export const DETAIL_KEYS = ["view", "event_id", "run_id", "turn_id"];
 
 const filterKeys = view => view === "channels" ? CHANNEL_FILTER_KEYS : view === "logs" ? LOG_FILTER_KEYS : view === "usage" ? USAGE_FILTER_KEYS : view === "detail" ? DETAIL_KEYS : view === "overview" ? OVERVIEW_FILTER_KEYS : LIST_FILTER_KEYS;
 const selectFilters = (view, filters = {}) => Object.fromEntries(filterKeys(view).filter(key => filters[key] !== undefined && filters[key] !== null && filters[key] !== "" && filters[key] !== false).map(key => [key, String(filters[key])]));

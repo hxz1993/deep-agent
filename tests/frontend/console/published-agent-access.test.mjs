@@ -64,6 +64,18 @@ test("timer leaves slow list and detail requests in flight and resumes after del
   const task = { id: "sample", title: "Example", status: "COMPLETED", source: "mcp" };
   pending[0].resolve({ items: [task], total: 1 });
   await refresh;
+  assert.equal(pending.length, 1);
+  const taskRows = ui.element("agentTaskRows");
+  assert.match(taskRows.innerHTML, /aria-pressed="false"/);
+  assert.match(ui.element("agentTaskDetail").innerHTML, /请选择一条任务查看详情/);
+  const row = ui.element("fixtureTaskRow");
+  const button = ui.element("fixtureTaskButton");
+  row.dataset.agentTask = task.id;
+  row.parentElement = { children: [row] };
+  row.querySelector = () => button;
+  taskRows.listeners.get("click")({ target: { closest: () => row } });
+  assert.equal(button.getAttribute("aria-pressed"), "true");
+  assert.ok(row.classList.contains("selected"));
   ui.poll();
   assert.equal(pending.length, 2);
   assert.equal(pending[1].signal.aborted, false);

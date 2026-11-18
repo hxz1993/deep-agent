@@ -108,11 +108,9 @@ class RecentInvocations:
         self.entries[entry.id] = entry.model_copy(deep=True)
         self._prune()
 
-    def list(self, request: RequestScope) -> list[dict]:
+    def list(self, user: str) -> list[dict]:
         self._prune()
-        visible = (entry for entry in self.entries.values() if (
-            entry.user, entry.app_id, entry.space_id
-        ) == (request.user, request.app_id, request.space_id))
+        visible = (entry for entry in self.entries.values() if entry.user == user)
         return [entry.summary() for entry in sorted(visible, key=lambda entry: entry.created_at, reverse=True)]
 
 

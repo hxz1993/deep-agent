@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -13,6 +14,7 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.moonshotai import MoonshotAIProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openai_compatible import OpenAICompatibleProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.providers.zai import ZaiProvider
 
@@ -94,10 +96,11 @@ class ProviderDefinitionTests(unittest.TestCase):
                 "minimax",
                 "stepfun",
                 "anthropic_compatible",
+                "xai",
             ],
         )
         self.assertEqual(
-            [item.order for item in PROVIDER_TYPES], list(range(1, 14))
+            [item.order for item in PROVIDER_TYPES], list(range(1, 15))
         )
         self.assertEqual(
             {item.code: item.default_base_url for item in PROVIDER_TYPES},
@@ -115,6 +118,7 @@ class ProviderDefinitionTests(unittest.TestCase):
                 "minimax": "https://api.minimax.cn/anthropic",
                 "stepfun": "https://api.stepfun.com/v1",
                 "anthropic_compatible": None,
+                "xai": "https://api.x.ai/v1",
             },
         )
         self.assertFalse(
@@ -234,7 +238,22 @@ class ProviderLookupTests(unittest.IsolatedAsyncioTestCase):
             await load_provider_for_model(model, store)
 
 class ProviderModelAssemblyTests(unittest.TestCase):
-    def test_responses_is_explicit_model_opt_in_for_both_openai_types(self):
+    def test_xai_uses_compatible_responses_and_deepagent_history(self) -> None:
+        for use_default, endpoint in (
+            (True, "https://api.x.ai/v1/"),
+            (False, "https://gateway.example.com/v1/"),
+        ):
+            with self.subTest(use_default=use_default):
+                model = resolve_provider_model(
+                    model_name="grok-4.7", provider=_config("xai", use_default_base_url=use_default),
+                )
+                self.assertIsInstance(model, OpenAIResponsesModel)
+                self.assertIsInstance(model.provider, OpenAICompatibleProvider)
+                self.assertEqual(model.base_url, endpoint)
+                self.assertEqual(model.deepagent_provider_type, "xai")
+                self.assertIs(model.settings["openai_store"], False)
+
+    def test_responses_is_fixed_on_openai_and_opt_in_on_compatible(self):
         for provider_type in ('openai', 'openai_compatible'):
             config = _config(provider_type, use_default_base_url=False)
             for tags, reasoning in [(['openai_responses'], False), (['openai_responses', 'reasoning'], True)]:
@@ -244,8 +263,9 @@ class ProviderModelAssemblyTests(unittest.TestCase):
                     self.assertEqual(model.settings.get('openai_reasoning_summary'), 'auto' if reasoning else None)
                     self.assertNotIn('openai_reasoning_effort', model.settings)
                     self.assertEqual(model.settings['extra_headers']['Accept-Encoding'], 'identity')
+            expected = OpenAIResponsesModel if provider_type == 'openai' else OpenAIChatModel
             for tags in (None, [], ['reasoning']):
-                self.assertIsInstance(resolve_provider_model(model_name='gpt-6-luna', provider=config, tags=tags), OpenAIChatModel)
+                self.assertIsInstance(resolve_provider_model(model_name='gpt-6-luna', provider=config, tags=tags), expected)
         for provider_type in ('alibaba', 'stepfun', 'deepseek', 'moonshotai', 'openrouter'):
             model = resolve_provider_model(model_name='openai/gpt-6-luna' if provider_type == 'openrouter' else 'gpt-6-luna', provider=_config(provider_type), tags=['openai_responses', 'reasoning'])
             self.assertIsInstance(model, OpenAIChatModel)
@@ -299,7 +319,8 @@ class ProviderModelAssemblyTests(unittest.TestCase):
                     model_name=model_name,
                     provider=_config(provider_type),
                 )
-                self.assertIsInstance(model, OpenAIChatModel)
+                expected = OpenAIResponsesModel if provider_type == "openai" else OpenAIChatModel
+                self.assertIsInstance(model, expected)
                 self.assertIsInstance(model._provider, provider_class)
                 self.assertEqual(model.model_name, model_name)
 
@@ -350,7 +371,21 @@ class ProviderModelAssemblyTests(unittest.TestCase):
             provider=_config("openai_compatible", use_default_base_url=False),
         )
         self.assertIsInstance(model, OpenAIChatModel)
-        self.assertIs(type(model._provider), OpenAIProvider)
+        self.assertIs(type(model.provider), OpenAICompatibleProvider)
+        self.assertEqual(model.base_url, "https://gateway.example.com/v1/")
+
+    def test_compatible_identity_is_shared_by_protocols_and_isolated_by_connection(self) -> None:
+        config = _config("openai_compatible", use_default_base_url=False)
+        chat = resolve_provider_model(model_name="custom-model", provider=config)
+        responses = resolve_provider_model(
+            model_name="custom-model",
+            provider=replace(config, base_url="https://GATEWAY.example.com/v1"),
+            tags=["openai_responses"],
+        )
+        self.assertEqual(chat.system, responses.system)
+        for other in (replace(config, id="another-provider"), replace(config, base_url="https://gateway.example.com/v2")):
+            model = resolve_provider_model(model_name="custom-model", provider=other)
+            self.assertNotEqual(model.provider.canonical_system, chat.provider.canonical_system)
 
     def test_video_capability_selects_video_adapter(self) -> None:
         model = resolve_provider_model(

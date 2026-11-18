@@ -9,6 +9,7 @@ export const PROVIDER_CATALOG_IDS = Object.freeze({
   google: "google",
   minimax: "minimax-cn",
   stepfun: "stepfun",
+  xai: "xai",
 });
 
 export function isGenericCatalogProvider(providerType) {
@@ -17,12 +18,12 @@ export function isGenericCatalogProvider(providerType) {
 
 export function groupProviderTypes(types) {
   const groups = [
-    { label: "OpenAI 兼容协议", protocol: "openai_chat", items: [] },
-    { label: "Anthropic 兼容协议", protocol: "anthropic", items: [] },
-    { label: "其他协议", protocol: null, items: [] },
+    { label: "OpenAI 兼容协议", protocols: ["openai_chat", "openai_responses"], items: [] },
+    { label: "Anthropic 兼容协议", protocols: ["anthropic"], items: [] },
+    { label: "其他协议", protocols: [], items: [] },
   ];
   for (const type of types || []) {
-    const group = groups.find((item) => item.protocol === type.model_protocol) || groups[2];
+    const group = groups.find((item) => item.protocols.includes(type.model_protocol)) || groups[2];
     group.items.push(type);
   }
   for (const group of groups) {

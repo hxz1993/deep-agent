@@ -5,7 +5,7 @@ import unittest
 from unittest import mock
 
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -218,10 +218,10 @@ class ResolveModelTests(unittest.TestCase):
             any(module.startswith("deep_agent.models") for module in capability_modules)
         )
 
-    def test_web_toolset_preserves_main_chat_protocol_for_all_chat_providers(self) -> None:
+    def test_web_toolset_preserves_configured_provider_protocol(self) -> None:
         for provider_type in (
             "deepseek", "moonshotai", "openai", "openrouter", "alibaba", "zai",
-            "openai_compatible",
+            "openai_compatible", "xai",
         ):
             with self.subTest(provider_type=provider_type):
                 web_toolset = FunctionToolset()
@@ -240,7 +240,8 @@ class ResolveModelTests(unittest.TestCase):
                 ) as resolve:
                     agent = build_agent(spec, build_registry(), web_toolset=web_toolset)
                 resolve.assert_called_once_with(spec)
-                self.assertIsInstance(agent.model, OpenAIChatModel)
+                expected = OpenAIResponsesModel if provider_type in {"openai", "xai"} else OpenAIChatModel
+                self.assertIsInstance(agent.model, expected)
                 self.assertEqual(agent.model.model_name, model_name)
                 self.assertIn(web_toolset, agent.toolsets)
                 self.assertFalse(any(

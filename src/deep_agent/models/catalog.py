@@ -40,7 +40,7 @@ PROVIDER_ADAPTERS: dict[str, str] = {
     "zhipuai": "openai_compatible",
     "minimax-cn": "anthropic_compatible",
     "stepfun": "openai_compatible",
-    "xai": "openai_compatible",
+    "xai": "xai",
 }
 
 PROVIDER_API_DEFAULTS = {
@@ -316,7 +316,7 @@ def provider_runtime_fields(
     adapter = PROVIDER_ADAPTERS.get(provider_id)
     if adapter is None:
         raise CatalogValidationError(f"Provider 尚无运行适配：{provider_id}")
-    if adapter in {"openai", "openai_compatible"}:
+    if adapter in {"openai", "openai_compatible", "xai"}:
         runtime_prefix = "openai"
     elif adapter in {"anthropic", "anthropic_compatible"}:
         runtime_prefix = "anthropic"

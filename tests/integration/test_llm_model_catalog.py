@@ -115,6 +115,44 @@ class LlmModelCatalogIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(option["adapter"], adapter)
                         self.assertEqual(option["runtime_model"], runtime_model)
 
+    async def test_xai_catalog_model_can_be_added_to_branded_provider_with_efforts(self) -> None:
+        provider_model = "grok-4.7"
+        xai_catalog = {
+            "name": "xAI",
+            "models": {
+                provider_model: {
+                    "id": provider_model,
+                    "name": "Grok 4.7",
+                    "modalities": {"input": ["text", "image"], "output": ["text"]},
+                    "limit": {"context": 200_000, "output": 32_768},
+                    "reasoning": True,
+                    "reasoning_options": [{"type": "effort", "values": ["low", "medium", "high"]}],
+                },
+            },
+        }
+        rows, _ = normalize_models_dev_bundle({}, {"xai": xai_catalog}, [])
+        await self.stores.model_catalog.replace_all(rows)
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            catalog = await client.get("/api/v1/llm-models/catalog", params={"lab_id": "xai"})
+            self.assertEqual(catalog.status_code, 200, catalog.text)
+            entry = catalog.json()["items"][0]["providers"][0]
+            self.assertEqual(entry["adapter"], "xai")
+            self.assertEqual(entry["runtime_model"], "openai:grok-4.7")
+            provider = await client.post("/api/v1/llm-providers", json={
+                "name": "xAI fixture", "provider_type": "xai", "use_default_base_url": True,
+                "api_key": "fixture-not-a-real-key",
+            })
+            self.assertEqual(provider.status_code, 201, provider.text)
+            model = await client.post("/api/v1/llm-models", json={
+                "provider_id": provider.json()["id"], "name": provider_model, "model": provider_model,
+                "reasoning_catalog": {"provider_id": "xai", "provider_model_id": provider_model},
+                "input_modalities": entry["input_modalities"], "tags": entry["tags"],
+                "context_window_tokens": entry["context_window_tokens"],
+                "max_output_tokens": entry["max_output_tokens"],
+            })
+            self.assertEqual(model.status_code, 201, model.text)
+            self.assertEqual(model.json()["reasoning_options"], entry["reasoning_options"])
+
     async def test_saved_legacy_minimax_snapshot_exposes_only_domestic_entry(self) -> None:
         rows, _ = normalize_models_dev_bundle({}, ADDITIONAL_PROVIDERS, [])
         cn = next(row for row in rows if row["provider_id"] == "minimax-cn")

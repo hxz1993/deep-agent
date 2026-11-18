@@ -161,9 +161,10 @@ const llmModelsAdmin = {
   renderCompatibility() {
     const providerId = document.getElementById("llmModelProviderId").value;
     const provider = state.llmProviders.find((item) => item.id === providerId);
-    const canSelectProtocol = ["openai", "openai_compatible"].includes(provider?.provider_type);
+    const canSelectProtocol = provider?.provider_type === "openai_compatible";
     document.getElementById("llmModelProtocolField").classList.toggle("hidden", !canSelectProtocol);
-    document.getElementById("llmModelProtocol").value = this.useResponses ? "openai_responses" : "openai_chat";
+    document.getElementById("llmModelProtocolChat").checked = !this.useResponses;
+    document.getElementById("llmModelProtocolResponses").checked = this.useResponses;
     const supported = this.supportsCompatibilityOverrides();
     const details = document.getElementById("llmModelAdvancedSettings");
     document.getElementById("llmModelAdvancedSection").classList.toggle("hidden", !supported);
@@ -666,7 +667,7 @@ document.addEventListener("DOMContentLoaded", () => {
   field("llmModelModal")?.addEventListener("close", (event) => {
     if (!event.currentTarget.open) llmModelsAdmin.cancelCatalogRefresh();
   });
-  for (const id of ["llmModelProviderId", "llmModelModel", "llmModelProtocol"]) {
+  for (const id of ["llmModelProviderId", "llmModelModel"]) {
     field(id)?.addEventListener("change", () => {
       llmModelsAdmin.cancelCatalogRefresh();
       llmModelsAdmin.setReasoningDraft();
@@ -684,10 +685,14 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("llmModelModal").close();
   });
   document.getElementById("llmModelProviderId")?.addEventListener("change", () => llmModelsAdmin.renderCompatibility());
-  document.getElementById("llmModelProtocol")?.addEventListener("change", (event) => {
-    llmModelsAdmin.useResponses = event.currentTarget.value === "openai_responses";
-    llmModelsAdmin.renderCompatibility();
-  });
+  for (const id of ["llmModelProtocolChat", "llmModelProtocolResponses"]) {
+    document.getElementById(id)?.addEventListener("change", (event) => {
+      if (!event.currentTarget.checked) return;
+      llmModelsAdmin.cancelCatalogRefresh();
+      llmModelsAdmin.useResponses = id === "llmModelProtocolResponses";
+      llmModelsAdmin.renderCompatibility();
+    });
+  }
   document.getElementById("llmModelAdvancedSettings")?.addEventListener("toggle", () => llmModelsAdmin.renderCompatibility());
   document.getElementById("llmModelMergeSystem")?.addEventListener("click", () => {
     llmModelsAdmin.mergeLeadingSystem = !llmModelsAdmin.mergeLeadingSystem;

@@ -10,7 +10,7 @@ from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
 from pydantic_ai.models import ModelRequestParameters
-from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openai_compatible import OpenAICompatibleProvider
 
 from deep_agent.models.provider_registry import ProviderRuntimeConfig, resolve_provider_model
 
@@ -51,7 +51,7 @@ class SystemMessageProfileTests(unittest.TestCase):
                 })
 
     def test_disabled_does_not_override_a_provider_that_already_merges(self):
-        with patch.object(OpenAIProvider, "model_profile", return_value={
+        with patch.object(OpenAICompatibleProvider, "model_profile", return_value={
             "openai_chat_supports_multiple_system_messages": False,
         }):
             self.assertFalse(make_model().profile["openai_chat_supports_multiple_system_messages"])
@@ -95,7 +95,9 @@ class SystemMessageWireTests(unittest.IsolatedAsyncioTestCase):
                                                        "finish_reason": "stop"}]})
 
         async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
-            provider = OpenAIProvider(base_url="https://model.example.test/v1", api_key="test", http_client=client)
+            provider = OpenAICompatibleProvider(
+                "fixture", base_url="https://model.example.test/v1", api_key="test", http_client=client,
+            )
             with patch("deep_agent.models.provider_registry._openai_style_provider", return_value=provider):
                 model = make_model(enabled)
             if streaming:
@@ -162,7 +164,9 @@ class SystemMessageWireTests(unittest.IsolatedAsyncioTestCase):
                 return value
 
             async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
-                provider = OpenAIProvider(base_url="https://model.example.test/v1", api_key="test", http_client=client)
+                provider = OpenAICompatibleProvider(
+                    "fixture", base_url="https://model.example.test/v1", api_key="test", http_client=client,
+                )
                 with patch("deep_agent.models.provider_registry._openai_style_provider", return_value=provider):
                     model = make_model(enabled)
                 agent = Agent(model, system_prompt=["System A", "System B"], tools=[probe])

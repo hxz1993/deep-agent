@@ -3,6 +3,13 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.17.0a15
+
+- OpenAI 供应商统一使用 Responses，包含使用自定义 Base URL 的 OpenAI 配置。模型保存时清除旧协议标签，既有思考档位仍可用。
+- OpenAI Compatible 使用 Pydantic AI 专用适配器。控制台提供 Chat Completions 和 Responses 两个选项，保留思考档位及 Chat 高级设置。支持从其他供应商目录带入模型配置，并在对应模型行显示添加失败原因。
+- 新增 xAI（Grok）供应商，使用 Responses 接口并关联 Models.dev 的 xAI 模型目录。
+- 依赖变更：无。数据库版本为 016。
+
 ## v0.17.0a14
 
 - 跨组件调用失败记录脱敏堆栈，保留异常类型、出错位置和既有关联标识。覆盖平台账号、发布与远程 Agent、MCP 检查、渠道、文档解析和文件操作。

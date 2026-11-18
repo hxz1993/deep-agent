@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.models.provider_registry import (
+    OPENAI_RESPONSES_TAG,
     UnknownProviderTypeError,
     provider_type_definition,
 )
@@ -35,6 +36,12 @@ class LlmConfigurationValidationError(ValueError):
 
 def _is_unique_constraint_error(exc: IntegrityError) -> bool:
     return is_unique_conflict(exc)
+
+
+def _model_tags_for_save(tags: list[str] | None, provider_type: str) -> list[str] | None:
+    if tags and provider_type == "openai":
+        return [tag for tag in tags if tag != OPENAI_RESPONSES_TAG]
+    return tags
 
 
 def resolve_provider_base_url(
@@ -278,7 +285,8 @@ class LlmConfigurationService(SessionBoundMixin):
                 provider_npm=catalog.provider_npm, provider_api_url=catalog.provider_api_url,
             )
             matches_provider = (
-                provider.provider_type == catalog_provider_type(catalog.provider_id)
+                provider.provider_type in {"openai_compatible", "anthropic_compatible"}
+                or provider.provider_type == catalog_provider_type(catalog.provider_id)
                 or provider.provider_type == adapter
                 or (provider.provider_type == "openai_codex" and catalog.provider_id == "openai")
             )
@@ -324,7 +332,7 @@ class LlmConfigurationService(SessionBoundMixin):
                     input_modalities=data.input_modalities,
                     context_window_tokens=data.context_window_tokens,
                     max_output_tokens=data.max_output_tokens,
-                    tags=data.tags,
+                    tags=_model_tags_for_save(data.tags, provider.provider_type),
                     enabled=data.enabled,
                     purpose=data.purpose,
                 )
@@ -383,6 +391,7 @@ class LlmConfigurationService(SessionBoundMixin):
                         )
                 for field, value in updates.items():
                     setattr(row, field, value)
+                row.tags = _model_tags_for_save(row.tags, provider.provider_type)
                 _validate_runtime_metadata(row)
                 await self._save_reasoning_options(db, row, provider, data)
                 await db.flush()

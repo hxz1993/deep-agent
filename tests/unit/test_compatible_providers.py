@@ -11,6 +11,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessagesTypeAdapter, ThinkingPart
 from pydantic_ai.messages import BinaryContent
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openai_compatible import OpenAICompatibleProvider
 from pydantic import BaseModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 
@@ -228,6 +229,40 @@ class CompatibleProviderWireTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(requests[0]['text']['format']['type'], 'json_schema')
                 self.assertTrue(requests[0]['text']['format']['strict'])
                 self.assertTrue(any(item.get('type') == 'input_image' for message in requests[0]['input'] for item in message.get('content', []) if isinstance(item, dict)))
+
+    async def test_xai_responses_stream_sends_effort_and_replays_tool_result(self):
+        requests = []
+
+        def respond(request):
+            body = json.loads(request.content)
+            requests.append(body)
+            self.assertEqual(str(request.url), "https://api.x.ai/v1/responses")
+            self.assertEqual(body["model"], "grok-4.7")
+            self.assertEqual(body["reasoning"], {"effort": "medium"})
+            self.assertFalse(body["store"])
+            self.assertNotIn("previous_response_id", body)
+            return _responses_reply(tools=len(requests) == 1, stream=body.get("stream", False))
+
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+            with patch("deep_agent.models.provider_registry.OpenAICompatibleProvider",
+                       side_effect=lambda name, **kw: OpenAICompatibleProvider(name, http_client=client, **kw)):
+                model = resolve_provider_model(model_name="grok-4.7", provider=_config("xai"))
+            agent = Agent(model, model_settings={"openai_reasoning_effort": "medium"})
+
+            @agent.tool_plain
+            def add(left: int, right: int) -> int:
+                return left + right
+
+            async with agent.run_stream("add") as result:
+                self.assertEqual(await result.get_output(), "260")
+                restored = ModelMessagesTypeAdapter.validate_json(result.all_messages_json())
+            self.assertEqual((await agent.run("repeat", message_history=restored)).output, "260")
+        self.assertEqual(len(requests), 3)
+        for body in requests[1:]:
+            self.assertTrue(any(
+                item.get("type") == "function_call_output" and item.get("call_id") == "call-add"
+                for item in body["input"]
+            ))
 
     async def _tool_round_trip(self, code: str, stream: bool) -> list:
         calls, executions = [], []

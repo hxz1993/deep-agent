@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from deep_agent.models.provider_registry import OPENAI_RESPONSES_TAG, provider_type_definition
+from deep_agent.models.provider_registry import model_protocol, provider_type_definition
 
 DEFAULT_EFFORT = "default"
 _EFFORT_PATTERN = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}\Z")
@@ -62,18 +62,26 @@ def catalog_row_options(row) -> list[dict] | None:
 
 
 def reasoning_protocol(model, provider) -> str:
-    protocol = provider_type_definition(provider.provider_type).model_protocol
-    if provider.provider_type in {"openai", "openai_compatible"} and OPENAI_RESPONSES_TAG in (model.tags or []):
-        return "openai_responses"
-    return protocol
+    return model_protocol(provider_type_definition(provider.provider_type), getattr(model, "tags", None))
 
 
-def model_binding(model, provider) -> str:
+def model_binding(model, provider, *, protocol: str | None = None) -> str:
     definition = provider_type_definition(provider.provider_type)
     raw_url = (definition.default_base_url if provider.use_default_base_url else provider.base_url) or ""
     url = urlsplit(raw_url.strip())
     endpoint = (url.scheme.lower(), url.hostname, url.port, url.path.rstrip("/"))
-    return sha256(json.dumps([provider.id, provider.provider_type, reasoning_protocol(model, provider), model.model, endpoint]).encode()).hexdigest()
+    identity = [provider.id, provider.provider_type, protocol or reasoning_protocol(model, provider), model.model, endpoint]
+    return sha256(json.dumps(identity).encode()).hexdigest()
+
+
+def _matches_model_binding(binding, model, provider) -> bool:
+    if binding == model_binding(model, provider):
+        return True
+    if provider.provider_type not in {"openai", "openai_compatible"}:
+        return False
+    # Accept legacy Chat bindings on OpenAI and both protocol bindings on Compatible.
+    alternate = "openai_chat" if reasoning_protocol(model, provider) == "openai_responses" else "openai_responses"
+    return binding == model_binding(model, provider, protocol=alternate)
 
 
 def model_reasoning_options(model, provider) -> list[dict] | None:
@@ -81,7 +89,7 @@ def model_reasoning_options(model, provider) -> list[dict] | None:
     if not isinstance(saved, dict) or provider is None:
         return None
     try:
-        if saved.get("binding") == model_binding(model, provider):
+        if _matches_model_binding(saved.get("binding"), model, provider):
             return catalog_effort_options(saved.get("options"))
     except ValueError:
         pass
@@ -156,6 +164,6 @@ def effective_agent_effort(agent, model, provider) -> str | None:
         return None
     saved = getattr(agent, "reasoning_effort", None)
     value = saved_effort(saved)
-    if value is not None and value in available_efforts(model, provider) and saved.get("binding") == model_binding(model, provider):
+    if value is not None and value in available_efforts(model, provider) and _matches_model_binding(saved.get("binding"), model, provider):
         return value
     return None

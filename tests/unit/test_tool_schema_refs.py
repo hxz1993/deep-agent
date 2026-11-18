@@ -14,7 +14,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart, VideoUrl
 from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.output import OutputObjectDefinition
-from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openai_compatible import OpenAICompatibleProvider
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.usage import RunUsage
 
@@ -70,7 +70,9 @@ def completion(message, *, streaming, finish="stop"):
 
 
 def mock_provider(client):
-    provider = OpenAIProvider(base_url="https://schema-probe.invalid/v1", api_key="test", http_client=client)
+    provider = OpenAICompatibleProvider(
+        "schema-fixture", base_url="https://schema-probe.invalid/v1", api_key="test", http_client=client,
+    )
     return patch("deep_agent.models.provider_registry._openai_style_provider", return_value=provider)
 
 

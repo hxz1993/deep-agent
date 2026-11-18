@@ -49,14 +49,17 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         items = response.json()["items"]
         self.assertEqual(items[0]["code"], "deepseek")
-        self.assertEqual(items[-1]["code"], "anthropic_compatible")
+        self.assertEqual(items[-1]["code"], "xai")
         self.assertEqual(
-            [item["code"] for item in items[-3:]],
-            ["minimax", "stepfun", "anthropic_compatible"],
+            [item["code"] for item in items[-4:]],
+            ["minimax", "stepfun", "anthropic_compatible", "xai"],
         )
         self.assertEqual(
-            {item["code"]: item["model_protocol"] for item in items[-3:]},
-            {"minimax": "anthropic", "stepfun": "openai_chat", "anthropic_compatible": "anthropic"},
+            {item["code"]: item["model_protocol"] for item in items[-4:]},
+            {
+                "minimax": "anthropic", "stepfun": "openai_chat",
+                "anthropic_compatible": "anthropic", "xai": "openai_responses",
+            },
         )
         self.assertNotIn("openai_codex", [item["code"] for item in items])
         self.assertEqual(
@@ -71,14 +74,16 @@ class LlmProviderApiTests(unittest.IsolatedAsyncioTestCase):
                 "model_protocol",
             },
         )
-        self.assertFalse(items[-1]["supports_default_base_url"])
-        self.assertIsNone(items[-1]["default_base_url"])
+        self.assertFalse(items[-2]["supports_default_base_url"])
+        self.assertIsNone(items[-2]["default_base_url"])
+        self.assertEqual(items[-1]["default_base_url"], "https://api.x.ai/v1")
 
     async def test_new_provider_types_persist_and_generic_models_keep_customer_endpoint(self) -> None:
         for code, use_default, endpoint in (
             ("minimax", True, "https://api.minimax.cn/anthropic"),
             ("stepfun", True, "https://api.stepfun.com/v1"),
             ("anthropic_compatible", False, "https://customer.example/anthropic"),
+            ("xai", True, "https://api.x.ai/v1"),
         ):
             with self.subTest(provider_type=code):
                 response = await self._client.post("/api/v1/llm-providers", json={

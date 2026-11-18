@@ -21,8 +21,9 @@ from deep_agent.agent.runner import AgentRunner
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
+from deep_agent.db.models import Agent as AgentRow, LlmModel
 from deep_agent.models.provider_registry import OPENAI_RESPONSES_TAG, ProviderRuntimeConfig, resolve_provider_model
-from deep_agent.models.reasoning import reasoning_settings
+from deep_agent.models.reasoning import available_efforts, effective_agent_effort, model_binding, reasoning_settings
 from deep_agent.schemas.agent import AgentCreate, AgentUpdate
 from deep_agent.schemas.llm_model import LlmModelCreate, LlmModelUpdate
 from deep_agent.schemas.llm_provider import LlmProviderCreate
@@ -54,6 +55,20 @@ class ReasoningEffortIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     self.wfile.write(encoded)
                     return
                 root = {"id": "synthetic", "created": 1700000000, "model": request["model"]}
+                if self.path.endswith("/responses"):
+                    body = json.dumps({
+                        **root, "id": "resp-synthetic", "object": "response", "created_at": root["created"],
+                        "status": "completed", "output": [{
+                            "type": "message", "id": "msg-synthetic", "status": "completed", "role": "assistant",
+                            "content": [{"type": "output_text", "text": "ok", "annotations": []}],
+                        }],
+                    }).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 usage = {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}
                 answered_tools = sum(message["role"] == "tool" for message in request["messages"])
                 if request.get("stream") and request.get("tools") and answered_tools < 2 and any(
@@ -290,25 +305,75 @@ class ReasoningEffortIntegrationTests(unittest.IsolatedAsyncioTestCase):
         changed = await stores.agent.update_unique(self.agent.id, AgentUpdate(model_id=self.other.id))
         self.assertIsNone(changed.reasoning_effort)
 
-    async def test_catalog_effort_binds_native_model_code_without_cross_provider_match(self):
+    async def test_switching_openai_protocol_keeps_saved_model_and_agent_effort(self):
+        responses = await self.stores.llm_configuration.update_model(
+            self.model.id, LlmModelUpdate(tags=[OPENAI_RESPONSES_TAG]),
+        )
+        self.assertEqual(available_efforts(responses, self.provider), ["low", "high"])
+        self.assertEqual(effective_agent_effort(self.agent, responses, self.provider), "high")
+
+        agent = await self.stores.agent.update_unique(self.agent.id, AgentUpdate(reasoning_effort="low"))
+        chat = await self.stores.llm_configuration.update_model(self.model.id, LlmModelUpdate(tags=[]))
+        self.assertEqual(available_efforts(chat, self.provider), ["low", "high"])
+        self.assertEqual(effective_agent_effort(agent, chat, self.provider), "low")
+
+    async def test_catalog_effort_accepts_native_and_custom_routes_for_the_same_model(self):
         code = "synthetic-effort-a"
         entry = catalog_row(code)
         entry["capabilities"]["reasoning_options"] = [{"type": "effort", "values": ["low", "high"]}]
         await self.stores.model_catalog.replace_all([entry])
         reference = {"provider_id": "openai", "provider_model_id": code}
         with self.assertRaisesRegex(LlmConfigurationValidationError, "目录档位与模型接入不匹配"):
-            await self.stores.llm_configuration.update_model(self.model.id, LlmModelUpdate(reasoning_catalog=reference))
-        provider = await self.stores.llm_configuration.create_provider(LlmProviderCreate(
+            await self.stores.llm_configuration.update_model(self.other.id, LlmModelUpdate(reasoning_catalog=reference))
+        native = await self.stores.llm_configuration.create_provider(LlmProviderCreate(
             name="native-catalog-provider", provider_type="openai", use_default_base_url=False,
             base_url=self.provider.base_url, api_key="synthetic",
         ))
-        model = await self.stores.llm_configuration.create_model(LlmModelCreate(
-            provider_id=provider.id, name=code, model=code, input_modalities=["text"],
-            context_window_tokens=32768, max_output_tokens=1024,
-            reasoning_catalog=reference,
+        for provider in (native, self.provider):
+            with self.subTest(provider=provider.provider_type):
+                model = await self.stores.llm_configuration.create_model(LlmModelCreate(
+                    provider_id=provider.id, name="from-catalog", model=code, input_modalities=["text"],
+                    context_window_tokens=32768, max_output_tokens=1024, reasoning_catalog=reference,
+                ))
+                agent = await self.stores.agent.update_unique(self.agent.id, AgentUpdate(model_id=model.id, reasoning_effort="low"))
+                response = await self.client.post("/api/v1/chat", json={"agent_id": agent.id, "message": "native code"})
+                self.assertEqual(response.status_code, 200, response.text)
+                expected_effort = (self.wire[-1]["reasoning"]["effort"] if provider.provider_type == "openai"
+                                   else self.wire[-1]["reasoning_effort"])
+                self.assertEqual((self.wire[-1]["model"], expected_effort), (code, "low"))
+                self.assertEqual(model.reasoning_options["source"], "catalog")
+
+    async def test_openai_legacy_marker_and_chat_bindings_survive_save(self):
+        provider = await self.stores.llm_configuration.create_provider(LlmProviderCreate(
+            name="legacy OpenAI fixture", provider_type="openai", use_default_base_url=False,
+            base_url=self.provider.base_url, api_key="synthetic",
         ))
-        agent = await self.stores.agent.update_unique(self.agent.id, AgentUpdate(model_id=model.id, reasoning_effort="low"))
-        response = await self.client.post("/api/v1/chat", json={"agent_id": agent.id, "message": "native code"})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual((self.wire[-1]["model"], self.wire[-1]["reasoning_effort"]), (code, "low"))
-        self.assertEqual(model.reasoning_options["source"], "catalog")
+        model = await self.stores.llm_configuration.create_model(LlmModelCreate(
+            provider_id=provider.id, name="legacy", model=self.model.model, input_modalities=["text"],
+            context_window_tokens=32768, max_output_tokens=1024,
+            tags=["tool_call", OPENAI_RESPONSES_TAG],
+            reasoning_options=[{"type": "effort", "values": ["high"]}],
+        ))
+        self.assertEqual(model.tags, ["tool_call"])
+        agent = await self.stores.agent.update_unique(
+            self.agent.id, AgentUpdate(model_id=model.id, reasoning_effort="high"),
+        )
+        legacy_binding = model_binding(model, provider, protocol="openai_chat")
+        async with get_context().db_session_factory.begin() as db:
+            saved = await db.get(LlmModel, model.id)
+            saved.tags = [*model.tags, OPENAI_RESPONSES_TAG]
+            saved.reasoning_options = {**model.reasoning_options, "binding": legacy_binding}
+            saved_agent = await db.get(AgentRow, agent.id)
+            saved_agent.reasoning_effort = {"value": "high", "binding": legacy_binding}
+        legacy_agent = SimpleNamespace(
+            model_id=agent.model_id, reasoning_effort={"value": "high", "binding": legacy_binding},
+        )
+        for expected_tags in (["tool_call", OPENAI_RESPONSES_TAG], ["tool_call"]):
+            saved = await self.stores.llm_model.get_by_id(model.id)
+            self.assertEqual(saved.tags, expected_tags)
+            self.assertEqual(effective_agent_effort(legacy_agent, saved, provider), "high")
+            response = await self.client.post("/api/v1/chat", json={"agent_id": agent.id, "message": "hello"})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(self.wire[-1]["reasoning"]["effort"], "high")
+            self.assertIn("input", self.wire[-1])
+            await self.stores.llm_configuration.update_model(model.id, LlmModelUpdate(description="saved"))

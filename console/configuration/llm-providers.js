@@ -48,6 +48,7 @@ const PROVIDER_BRANDS = {
   minimax: { src: "./assets/provider-logos/minimax.ico", tone: "minimax" },
   stepfun: { src: "./assets/provider-logos/stepfun.svg", tone: "stepfun" },
   google: { src: "./assets/provider-logos/google-gemini.png", tone: "google" },
+  xai: { src: "./assets/provider-logos/xai.svg", tone: "xai" },
   openai_compatible: { src: "./assets/provider-logos/openai-compatible.svg", tone: "compatible" },
 };
 
@@ -464,8 +465,9 @@ const llmProvidersAdmin = {
       const modalities = (choice.payload.input_modalities || []).map((item) => labels[item] || item).join("、") || "文本";
       return `<label class="provider-catalog-choice ${choice.added || created ? "is-added" : ""}">
         <input type="checkbox" name="providerCatalogChoice" value="${escapeHtml(choice.id)}" ${disabled ? "disabled" : ""} ${picker.selectedIds.has(choice.id) ? "checked" : ""} />
-        <span class="provider-catalog-choice-copy"><code title="${escapeHtml(choice.model)}">${escapeHtml(choice.model)}</code><small>${escapeHtml(modalities)} · ${escapeHtml(context)}</small>${choice.error ? `<small class="provider-catalog-choice-error">${escapeHtml(choice.error)}</small>` : ""}</span>
-        <span class="badge ${choice.added || created ? "on" : ""}">${created ? "本次已添加" : choice.added ? "已添加" : choice.error ? "添加失败" : "可添加"}</span>
+        <span class="provider-catalog-choice-copy"><code title="${escapeHtml(choice.model)}">${escapeHtml(choice.model)}</code><small>${escapeHtml(modalities)} · ${escapeHtml(context)}</small></span>
+        ${choice.error ? `<span class="provider-catalog-choice-error">${escapeHtml(choice.error)}</span>` :
+          `<span class="badge ${choice.added || created ? "on" : ""}">${created ? "本次已添加" : choice.added ? "已添加" : "可添加"}</span>`}
       </label>`;
     }).join("") : `<div class="provider-model-empty">${generic && !picker.sourceId ? "请先选择目录供应商" : picker.query ? "未找到匹配模型" : "目录中暂无模型"}</div>`;
     host.querySelectorAll('input[name="providerCatalogChoice"]').forEach((input) => {

@@ -50,6 +50,7 @@ test("供应商类型按协议分组，通用供应商排在各组末尾，订�
     { code: "anthropic_compatible", label: "Anthropic Compatible", model_protocol: "anthropic" },
     { code: "google", label: "Google", model_protocol: "google" },
     { code: "stepfun", label: "阶跃", model_protocol: "openai_chat" },
+    { code: "xai", label: "xAI (Grok)", model_protocol: "openai_responses" },
     { code: "minimax", label: "MiniMax", model_protocol: "anthropic" },
     { code: "openai_codex", label: "ChatGPT", model_protocol: "openai_codex" },
   ] });
@@ -60,7 +61,7 @@ test("供应商类型按协议分组，通用供应商排在各组末尾，订�
     codes: [...options.matchAll(/<option value="([^"]+)"/g)].map(([, code]) => code),
   }));
   assert.deepEqual(groups, [
-    { label: "OpenAI 兼容协议", codes: ["stepfun", "openai_compatible"] },
+    { label: "OpenAI 兼容协议", codes: ["stepfun", "xai", "openai_compatible"] },
     { label: "Anthropic 兼容协议", codes: ["minimax", "anthropic_compatible"] },
     { label: "其他协议", codes: ["google"] },
   ]);
@@ -68,6 +69,7 @@ test("供应商类型按协议分组，通用供应商排在各组末尾，订�
   assert.doesNotMatch(html, /openai_codex/);
   assert.equal(catalog.catalogProviderIdForType("minimax"), "minimax-cn");
   assert.equal(catalog.catalogProviderIdForType("stepfun"), "stepfun");
+  assert.equal(catalog.catalogProviderIdForType("xai"), "xai");
 });
 
 for (const type of ["openai_compatible", "anthropic_compatible"]) {

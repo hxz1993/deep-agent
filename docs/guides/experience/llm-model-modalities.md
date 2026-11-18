@@ -21,9 +21,14 @@ llm_models
 
 品牌供应商按实际调用协议分组：OpenAI 兼容协议、Anthropic 兼容协议、其他协议；
 OpenAI Compatible、Anthropic Compatible 分别放在各自协议组的末尾，不另设“自定义接入”分组。
-MiniMax 使用 Anthropic Messages API，默认地址为 `https://api.minimax.cn/anthropic`；
+OpenAI 类型固定使用 Responses，包括使用自定义 Base URL 的 OpenAI 配置。GPT 订阅使用 Codex 接口。
+历史 OpenAI 模型保存时清除旧的协议标签，保留思考档位。OpenAI Compatible 可在模型编辑器选择
+Chat Completions 或 Responses，新模型初始选择 Chat Completions。
+MiniMax 使用 Anthropic Messages API，默认地址为 `https://api.minimax.cn/anthropic`。
 StepFun（阶跃星辰）使用 OpenAI Chat Completions API，默认地址为 `https://api.stepfun.com/v1`。
-两者允许自定义地址。Pydantic AI 保持 2.46.0，协议收发复用其现有实现。
+xAI（Grok）使用 Responses HTTP API，默认地址为 `https://api.x.ai/v1`，模型从 models.dev 的
+xAI Lab 添加。DeepAgent 从本地历史构建请求，并为 xAI 发送 `store: false`。
+这三个供应商都允许自定义地址。
 
 `OpenAI Compatible` 与 `Anthropic Compatible` 都必须填写服务商提供的 Base URL 和 Key。
 两者的“从目录添加”先选择目录供应商，再搜索、勾选模型；可选范围是本地模型目录中的全部

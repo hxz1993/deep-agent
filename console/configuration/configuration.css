@@ -2018,6 +2018,47 @@ dialog.console-deletion-progress { width: min(360px, calc(100vw - 32px)); }
   flex-shrink: 0;
 }
 
+.field .llm-model-protocol-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 320px);
+  height: auto;
+  min-height: var(--ui-control-height);
+}
+
+.llm-model-protocol-options label {
+  position: relative;
+  display: flex;
+  cursor: pointer;
+}
+
+.llm-model-protocol-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+}
+
+.field .llm-model-protocol-options label span {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: var(--ui-radius-inner);
+  text-align: center;
+}
+
+.field .llm-model-protocol-options input:checked + span {
+  color: var(--accent);
+  background: var(--console-surface);
+}
+
+.llm-model-protocol-options input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .provider-catalog-picker-toolbar {
   display: flex;
   align-items: flex-start;
@@ -2048,6 +2089,7 @@ dialog.console-deletion-progress { width: min(360px, calc(100vw - 32px)); }
 
 .provider-catalog-choice-list {
   display: grid;
+  grid-auto-rows: max-content;
   align-content: start;
   gap: 6px;
   flex: 1;
@@ -2104,7 +2146,14 @@ dialog.console-deletion-progress { width: min(360px, calc(100vw - 32px)); }
 
 .provider-catalog-choice.is-added .provider-catalog-choice-copy code { color: var(--text-dim); }
 .provider-catalog-choice-copy small { color: var(--text-faint); font-size: 12px; }
-.provider-catalog-choice-copy .provider-catalog-choice-error { color: var(--danger); overflow-wrap: anywhere; }
+.provider-catalog-choice-error {
+  max-width: min(30ch, 36vw);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 
 @media (max-width: 900px) {
   .provider-admin-workspace { grid-template-columns: minmax(210px, 280px) minmax(360px, 1fr); }

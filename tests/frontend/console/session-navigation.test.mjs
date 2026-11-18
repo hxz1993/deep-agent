@@ -96,6 +96,18 @@ function streamHarness() {
   h.emit=(i,event,data={})=>sockets[i].controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
   return h;
 }
+test('session list shows server-reported activity without clearing a newer run on late completion', () => {
+  const h = streamHarness();
+  h.state.sessions = [{ id: 'old', agentId: 'agent', activeRunId: 'current-run' }];
+  h.updateSessionRunIndicators();
+  assert.equal(h.rows[0].indicator.hidden, false);
+  assert.equal(h.rows[1].indicator.hidden, true);
+  h.clearListedSessionRun(h.state.sessions[0], 'previous-run');
+  assert.equal(h.rows[0].indicator.hidden, false);
+  h.clearListedSessionRun(h.state.sessions[0], 'current-run');
+  assert.equal(h.rows[0].indicator.hidden, true);
+});
+
 test('switching leaves the producer connected; old text and final cannot alter the new view',async()=>{
   const h=streamHarness();const task=h.runChatStream({session_id:'old'},{});await tick();
   h.emit(0,'text',{delta:'visible'});await tick();

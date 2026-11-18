@@ -3,7 +3,7 @@ import "./assets/deepagent-pet/sprite-pet.js?v=0161-pet-transitions";
 import { initUserIdentityControls } from "./user-identity.js?v=20260917-release01010";
 import { initFieldHelp } from "./ui-field-help.js?v=20260913-49";
 import { initConsoleSelects } from "./ui-select.js?v=remote-agent-filter-icons";
-import { bindContextControls, refreshIdentity } from "./context.js?v=0167-app-directory";
+import { bindContextControls, refreshIdentity } from "./context.js?v=20261118-mcp-debug-hint";
 import { createPageLoader } from "./page-loader.js?v=20261023-console-load1";
 import "./time.js?v=20260913-49";
 import "./configuration-directory.js?v=20261019-release0137";
@@ -32,13 +32,13 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=agent-protocol-icons");
+    const module = await import("./configuration.js?v=20261118-a2a-test-merge");
     await module.initConfiguration();
     configurationModule = module;
     return module;
   },
   workspace: async () => {
-    const module = await import("./workspace.js?v=session-source-rows");
+    const module = await import("./workspace.js?v=20261118-a2a-test-merge");
     await module.initWorkspace();
     workspaceModule = module;
     return module;

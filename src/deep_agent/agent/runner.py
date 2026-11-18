@@ -8,6 +8,7 @@ import time
 from contextlib import aclosing, asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from itertools import groupby
 from typing import Any, AsyncIterator
 
 import anyio
@@ -80,6 +81,8 @@ from deep_agent.agent.request_budget import TurnRequestBudget, restored_request_
 from deep_agent.agent.observability import (
     cache_usage_available,
     log_event,
+    log_run_phase,
+    observe_run_phase,
     run_metrics,
     usage_dict,
 )
@@ -97,6 +100,7 @@ from deep_agent.agent.tool_output_limits import PlatformToolResultStore
 from deep_agent.agent.history import (
     deduplicate_adjacent_tool_returns,
     incremental_append_messages,
+    is_user_only_request,
     mark_cancelled_response_interrupted,
     repair_unprocessed_tool_calls,
 )
@@ -107,7 +111,7 @@ from deep_agent.capabilities.display_names import (
 )
 from loguru import logger
 
-from deep_agent.db.conversation import SessionStore, _common_message_suffix
+from deep_agent.db.conversation import AutomaticTitleFallback, SessionEventSnapshot, SessionStore, _common_message_suffix
 from deep_agent.time import utc_rfc3339
 from deep_agent.db.serialization import StoredUserPromptPart, serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
@@ -191,7 +195,7 @@ class _PreparedHistory:
     projected: list[ModelMessage]
     raw: list[ModelMessage]
     pre_persisted_user: bool
-    user_event_id: str | None = None
+    fallback_title: SessionEventSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -234,6 +238,31 @@ def _should_publish_tool_call(
     # their native PartStartEvent stream. Plain ToolCallPart starts are only a
     # provisional model emission; a validated FunctionToolCallEvent follows.
     return not isinstance(getattr(event, "part", None), ToolCallPart)
+
+
+def _compaction_source_view(stored: list[ModelMessage], outgoing: list[ModelMessage]) -> list[ModelMessage]:
+    """Validate the model view and preserve event boundaries for the cutoff."""
+    if len(stored) == len(outgoing):
+        if _common_message_suffix(stored, outgoing) == len(stored):
+            return outgoing
+    elif len(stored) > len(outgoing):
+        # An unanswered user turn can adjoin the next question. The SDK joins
+        # their parts on the wire and drops application-only request metadata.
+        def plain_user(message):
+            return is_user_only_request(message) and not ((message.metadata or {}).keys() - {"reasoning_effort"})
+
+        grouped = []
+        for mergeable, items in groupby(stored, key=plain_user):
+            batch = list(items)
+            instructions = {m.instructions for m in batch if mergeable and m.instructions}
+            if mergeable and len(batch) > 1 and len(instructions) <= 1:
+                grouped.append(replace(batch[0], parts=[p for m in batch for p in m.parts],
+                                       instructions=next(iter(instructions), None), metadata=None))
+            else:
+                grouped.extend(batch)
+        if len(grouped) == len(outgoing) and _common_message_suffix(grouped, outgoing) == len(outgoing):
+            return stored
+    raise SummaryUnavailable("source_history_changed")
 
 
 def _history_hash(messages: list[ModelMessage]) -> str:
@@ -579,12 +608,14 @@ class AgentRunner:
         leaves the legacy path and all pre-accept failures unchanged, and does
         not suppress transport/task cancellation.
         """
-        try:
-            yield
-        except Exception as exc:
-            if deps.output_state is None or deps.output_state.accepted is None:
-                raise
-            self._log_post_accept_failure(deps, stage, exc)
+        with observe_run_phase(f"completion_{stage}", session_id=deps.session_id,
+                               run_id=deps.run_id, agent_id=deps.agent_id, agent_name=deps.agent_name):
+            try:
+                yield
+            except Exception as exc:
+                if deps.output_state is None or deps.output_state.accepted is None:
+                    raise
+                self._log_post_accept_failure(deps, stage, exc)
 
     @staticmethod
     def _log_post_accept_failure(deps: AgentDeps, stage: str, exc: Exception):
@@ -687,12 +718,10 @@ class AgentRunner:
         assert self._context_compaction is not None
 
         async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id):
-            raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
-            raw = await raw_reader(session_id, agent_id=deps.agent_id)
+            raw, visible = await self._read_history_pair(session_id, deps)
             if not raw:
                 yield manual_result("noop", "empty_history")
                 return
-            visible = await self.store.get_history(session_id, agent_id=deps.agent_id)
             deps.has_context_references = history_has_context_references(visible)
             projected = project_context_references_in_history(visible)
             budget = build_context_budget(
@@ -842,6 +871,7 @@ class AgentRunner:
                         await queue_task
 
             try:
+                raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
                 current_raw = await raw_reader(session_id, agent_id=deps.agent_id)
             except asyncio.CancelledError:
                 with anyio.CancelScope(shield=True):
@@ -941,6 +971,16 @@ class AgentRunner:
                 },
             )
 
+    async def _read_history_pair(
+        self, session_id: str, deps: AgentDeps,
+    ) -> tuple[list[ModelMessage], list[ModelMessage]]:
+        paired_reader = getattr(self.store, "get_history_pair", None)
+        if paired_reader is not None:
+            return await paired_reader(session_id, agent_id=deps.agent_id)
+        raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
+        raw = await raw_reader(session_id, agent_id=deps.agent_id)
+        return raw, await self.store.get_history(session_id, agent_id=deps.agent_id)
+
     async def _prepare_history(
         self,
         session_id: str,
@@ -956,10 +996,8 @@ class AgentRunner:
     ) -> _PreparedHistory:
         if branch_from is not None:
             raise ValueError("Branch From is not implemented for session events")
-        raw_reader = getattr(self.store, "get_raw_history", self.store.get_history)
-        raw_history = await raw_reader(session_id, agent_id=deps.agent_id)
+        raw_history, history = await self._read_history_pair(session_id, deps)
         await self._prepare_output_contract(session_id, deps)
-        history = await self.store.get_history(session_id, agent_id=deps.agent_id)
         deps.turn_id = deps.turn_id or deps.run_id
         if not deferred_tool_results:
             repaired = repair_unprocessed_tool_calls(history, diagnostic_fields={
@@ -969,7 +1007,7 @@ class AgentRunner:
             if repaired is not history:
                 history = repaired
         pre_persisted_user = False
-        user_event_id: str | None = None
+        title_fallback: SessionEventSnapshot | None = None
         if has_user_turn(message, attachments, context_refs):
             content = refs_from_attachments(message, attachments, context_refs)
             part = UserPromptPart(content) if isinstance(content, str) else StoredUserPromptPart(content)
@@ -977,6 +1015,15 @@ class AgentRunner:
                 parts=[part],
                 metadata={'reasoning_effort': self._reasoning_effort} if self._reasoning_effort else None,
             )
+            automatic_title = None
+            if session_title is None:
+                from deep_agent.agent.title_generator import fallback_title
+
+                automatic_title = AutomaticTitleFallback(
+                    fallback_title(message, context_refs, attachments),
+                    attachment_count=len(attachments or ()),
+                    context_count=len(context_refs or ()),
+                )
             rows = await self.store.append(
                 session_id,
                 [user_request],
@@ -986,9 +1033,14 @@ class AgentRunner:
                 space_id=deps.space_id,
                 turn_id=deps.turn_id,
                 run_id=deps.run_id,
+                automatic_title=automatic_title,
             )
-            if session_event_queue is not None:
-                for row in rows:
+            for row in rows:
+                if row.event_type == "session/title":
+                    title_fallback = row
+                    if session_event_queue is not None:
+                        self._publish_title_events(session_event_queue, row)
+                elif session_event_queue is not None:
                     session_event_queue.put_nowait(
                         {
                             "type": "session_event_appended",
@@ -996,12 +1048,10 @@ class AgentRunner:
                             "event": row.public_dict(),
                         }
                     )
-            if rows:
-                user_event_id = rows[0].event_id
-            if user_event_id is not None and session_title is not None:
+            if rows and session_title is not None:
                 title_event = await self.store.apply_initial_session_title(
                     session_id, agent_id=deps.agent_id, user_id=deps.user,
-                    title=session_title, source_event_id=user_event_id,
+                    title=session_title, source_event_id=rows[0].event_id,
                     turn_id=deps.turn_id, run_id=deps.run_id,
                 )
                 if title_event is not None and session_event_queue is not None:
@@ -1021,7 +1071,7 @@ class AgentRunner:
             projected=history,
             raw=raw_history,
             pre_persisted_user=pre_persisted_user,
-            user_event_id=user_event_id,
+            fallback_title=title_fallback,
         )
 
     def _context_status(
@@ -1125,6 +1175,8 @@ class AgentRunner:
     def _run_capabilities(deps: AgentDeps, progress):
         if deps.output_state is not None:
             deps.output_state.progress = progress
+        if deps.context_state is not None and progress is not None:
+            deps.context_state.checkpoint_history = progress.checkpoint_history
         return [capability for capability in (progress, deps.request_budget, deps.output_state) if capability is not None]
 
     def _bind_compaction_lifecycle(
@@ -1143,31 +1195,22 @@ class AgentRunner:
             if _common_message_suffix([source], [resolved]) != 1
         ]) if model_history is not None else [])
 
-        async def refresh_raw_history(request_messages=None):
-            reader = getattr(self.store, "get_raw_history", self.store.get_history)
-            raw = await reader(session_id, agent_id=deps.agent_id)
-            if request_messages is not None:
-                visible = await self.store.get_history(session_id, agent_id=deps.agent_id)
-                normalized = [next((resolved for source, resolved in input_projection
-                                    if _common_message_suffix([source], [message]) == 1), message)
-                              for message in visible]
-                # A checkpoint anchor is re-rendered on every read, so its
-                # synthetic UserPrompt timestamp is not an original Event fact.
-                # All content, evidence and protected context still compare.
-                if (normalized and request_messages
-                        and summary_contents([normalized[0]])
-                        and summary_contents([request_messages[0]])):
-                    normalized[0] = replace(normalized[0], parts=[
-                        replace(normalized[0].parts[0], timestamp=request_messages[0].parts[0].timestamp)
-                    ])
-                if (len(normalized) != len(request_messages)
-                        or _common_message_suffix(normalized, request_messages) != len(normalized)):
-                    raise SummaryUnavailable("source_history_changed")
-            # Read raw before visible: writes between these reads either fail
-            # this full comparison or the atomic raw comparison at commit.
-            return raw
+        async def refresh_compaction_history(request_messages):
+            raw, visible = await self._read_history_pair(session_id, deps)
+            normalized = [next((resolved for source, resolved in input_projection
+                                if _common_message_suffix([source], [message]) == 1), message)
+                          for message in visible]
+            # Re-rendered anchors have a fresh synthetic UserPrompt timestamp.
+            if (normalized and request_messages
+                    and summary_contents([normalized[0]])
+                    and summary_contents([request_messages[0]])):
+                normalized[0] = replace(normalized[0], parts=[
+                    replace(normalized[0].parts[0], timestamp=request_messages[0].parts[0].timestamp)
+                ])
+            # The store compares the source again at commit to reject later writes.
+            return raw, _compaction_source_view(normalized, request_messages)
 
-        state.refresh_raw_history = refresh_raw_history
+        state.refresh_compaction_history = refresh_compaction_history
 
         async def commit_projection(projected):
             # Manual and overflow callers persist immediately themselves.
@@ -1636,7 +1679,7 @@ class AgentRunner:
         )
 
 
-    async def _start_title_generation(
+    def _start_title_generation(
         self,
         session_id: str,
         deps: AgentDeps,
@@ -1647,44 +1690,14 @@ class AgentRunner:
         context_refs: list[ContextReference] | None,
         session_event_queue: asyncio.Queue[dict[str, Any]] | None = None,
     ) -> asyncio.Task[None] | None:
-        """Persist the fallback once, then start one independent model request."""
-
-        if prepared.user_event_id is None:
+        """Run title generation alongside the main model request."""
+        if prepared.fallback_title is None:
             return None
-        from deep_agent.agent.title_generator import fallback_title
-
-        details = {
-            "context_count": len(context_refs or ()),
-            "attachment_count": len(attachments or ()),
-            "image_used": False,
-        }
-        try:
-            fallback = await self.store.ensure_title_fallback(
-                session_id,
-                agent_id=deps.agent_id,
-                user_id=deps.user,
-                title=fallback_title(message, context_refs, attachments),
-                source_event_id=prepared.user_event_id,
-                turn_id=deps.turn_id,
-                run_id=deps.run_id,
-                details=details,
-            )
-        except Exception as exc:  # noqa: BLE001 - title must never fail the chat run
-            logger.warning(
-                "Fallback title persistence failed for session {}: {}",
-                session_id,
-                type(exc).__name__,
-            )
-            return None
-        if fallback is None:
-            return None
-        if session_event_queue is not None:
-            self._publish_title_events(session_event_queue, fallback)
         return asyncio.create_task(
             self._generate_model_title(
                 session_id,
                 deps,
-                fallback_event=fallback,
+                fallback_event=prepared.fallback_title,
                 message=message,
                 attachments=attachments,
                 context_refs=context_refs,
@@ -1890,14 +1903,6 @@ class AgentRunner:
                     before_first_response=True,
                 )
                 raise
-            title_task = await self._start_title_generation(
-                session_id,
-                deps,
-                prepared,
-                message=message,
-                attachments=attachments,
-                context_refs=context_refs,
-            )
             self._bind_tool_output_store(deps, prepared.raw)
             try:
                 llm_history, user_prompt = await self._llm_inputs(
@@ -1924,16 +1929,24 @@ class AgentRunner:
                     error=type(exc).__name__, exception=exc,
                     before_first_response=True,
                 )
-                await self._cancel_title_task(title_task)
                 raise
             self._prepare_context_state(deps, prepared, model_history=llm_history)
             progress = (
                 MessagePersistenceCapability(self.store, history_length=len(llm_history),
                                       skip_user_prompt=prepared.pre_persisted_user,
-                                      model_name=self._model_id, provider_id=self._provider_id)
+                                      model_name=self._model_id, provider_id=self._provider_id,
+                                      defer_read_only=deps.output_state is None)
                 if callable(getattr(self.store, "append_message_parts", None)) else None
             )
             try:
+                title_task = self._start_title_generation(
+                    session_id,
+                    deps,
+                    prepared,
+                    message=message,
+                    attachments=attachments,
+                    context_refs=context_refs,
+                )
                 result = await self.agent.run(
                     user_prompt,
                     deps=deps,
@@ -1955,9 +1968,10 @@ class AgentRunner:
                     # Non-streaming callers also preserve completed message facts.
                     with anyio.CancelScope(shield=True):
                         cancelled = isinstance(exc, (RunCancelled, asyncio.CancelledError))
+                        completed = progress.completed_messages()
                         recovered = (
-                            mark_cancelled_response_interrupted(progress.messages)
-                            if cancelled else _with_failed_response_diagnostic(progress.messages, _safe_run_failure(exc))
+                            mark_cancelled_response_interrupted(completed)
+                            if cancelled else _with_failed_response_diagnostic(completed, _safe_run_failure(exc))
                         )
                         try:
                             await self._persist_run_messages(
@@ -1977,7 +1991,7 @@ class AgentRunner:
                     usage=getattr(exc, "usage", None),
                     error=type(exc).__name__, exception=exc,
                     before_first_response=progress is None or not any(
-                        isinstance(item, ModelResponse) for item in progress.messages
+                        isinstance(item, ModelResponse) for item in completed
                     ),
                 )
                 await self._cancel_title_task(title_task)
@@ -2267,12 +2281,15 @@ class AgentRunner:
         persister: EventPersister,
         active_run: ActiveRun | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        runner_entered_at = time.perf_counter()
         deps.agent_name = self.agent_name
         self._start_run_identity(
             session_id,
             deps,
             run_id=active_run.run_id if active_run is not None else None,
         )
+        timing_ids = {"session_id": session_id, "run_id": deps.run_id,
+                      "agent_id": deps.agent_id, "agent_name": deps.agent_name}
         await validate_deferred_results(self.store, session_id, deferred_tool_results)
         await self._ensure_turn_identity(
             session_id, deps, message=message, attachments=attachments,
@@ -2282,6 +2299,7 @@ class AgentRunner:
         self._prepare_skill_runtime(deps)
         started_at = time.perf_counter()
         run_event = await self._start_run_event(session_id, deps, mode="stream")
+        log_run_phase("runner_initialization", runner_entered_at, **timing_ids)
         log_event(
             "agent_run_started",
             conversation_id=deps.conversation_id,
@@ -2302,23 +2320,27 @@ class AgentRunner:
         title_task: asyncio.Task[None] | None = None
         stream_snapshot = _StreamRunSnapshot()
         self._set_tool_discovery_inputs(deps, message, context_refs)
+        session_lock_started_at = time.perf_counter()
         async with self._session_lock(session_id, agent_id=deps.agent_id, run_id=deps.run_id), execution_context_scope(deps):
+            log_run_phase("wait_session_lock", session_lock_started_at, **timing_ids)
             # Recheck after waiting: another request may have consumed the UI result.
             # This rejection must stay outside the execution-error persistence block.
             await validate_deferred_results(self.store, session_id, deferred_tool_results)
             try:
-                prepared = await self._prepare_history(
-                    session_id,
-                    message,
-                    deps,
-                    session_title=session_title,
-                    attachments=attachments,
-                    context_refs=context_refs,
-                    branch_from=branch_from,
-                    deferred_tool_results=deferred_tool_results,
-                    session_event_queue=session_events,
-                )
-                await self._prepare_request_budget(session_id, deps)
+                with observe_run_phase("prepare_history", **timing_ids):
+                    prepared = await self._prepare_history(
+                        session_id,
+                        message,
+                        deps,
+                        session_title=session_title,
+                        attachments=attachments,
+                        context_refs=context_refs,
+                        branch_from=branch_from,
+                        deferred_tool_results=deferred_tool_results,
+                        session_event_queue=session_events,
+                    )
+                with observe_run_phase("prepare_request_budget", **timing_ids):
+                    await self._prepare_request_budget(session_id, deps)
                 if deps.output_state is not None:
                     deps.output_state.queue = session_events
             except BaseException as exc:
@@ -2346,26 +2368,18 @@ class AgentRunner:
                     raise
                 yield events.error(format_stream_error(exc))
                 return
-            title_task = await self._start_title_generation(
-                session_id,
-                deps,
-                prepared,
-                message=message,
-                attachments=attachments,
-                context_refs=context_refs,
-                session_event_queue=session_events,
-            )
             self._bind_tool_output_store(deps, prepared.raw)
             try:
-                llm_history, user_prompt = await self._llm_inputs(
-                    prepared.projected,
-                    message,
-                    attachments,
-                    context_refs,
-                    deps,
-                    pre_persisted_user=prepared.pre_persisted_user,
-                    deferred_tool_results=deferred_tool_results,
-                )
+                with observe_run_phase("prepare_model_input", **timing_ids):
+                    llm_history, user_prompt = await self._llm_inputs(
+                        prepared.projected,
+                        message,
+                        attachments,
+                        context_refs,
+                        deps,
+                        pre_persisted_user=prepared.pre_persisted_user,
+                        deferred_tool_results=deferred_tool_results,
+                    )
             except Exception as exc:  # attachment/media validation before model start
                 self._log_run_terminal(run_event, status="failed", started_at=started_at, error=exc, phase="input")
                 logger.warning(
@@ -2390,7 +2404,6 @@ class AgentRunner:
                     format_stream_error(exc),
                     history_persisted=prepared.pre_persisted_user,
                 )
-                await self._cancel_title_task(title_task)
                 return
             self._prepare_context_state(
                 deps,
@@ -2420,8 +2433,18 @@ class AgentRunner:
                         "Run cancelled before model start",
                         usage=RunUsage(),
                     )
+                title_task = self._start_title_generation(
+                    session_id,
+                    deps,
+                    prepared,
+                    message=message,
+                    attachments=attachments,
+                    context_refs=context_refs,
+                    session_event_queue=session_events,
+                )
                 model_history = llm_history
                 model_usage = RunUsage()
+                seen_sdk_phases: set[str] = set()
                 provider_retry_safe = True
                 progress = (
                     StreamMessagePersistenceCapability(
@@ -2429,6 +2452,7 @@ class AgentRunner:
                         skip_user_prompt=prepared.pre_persisted_user, model_name=self._model_id,
                         provider_id=self._provider_id,
                         event_queue=session_events,
+                        defer_read_only=deps.output_state is None,
                     )
                     if callable(getattr(self.store, "append_message_parts", None)) else None
                 )
@@ -2467,9 +2491,20 @@ class AgentRunner:
                                     continue
                                 if isinstance(event, AgentRunResultEvent):
                                     result = event.result
+                                    log_run_phase("sdk_result_ready", runner_entered_at, **timing_ids,
+                                                  request_index=model_usage.requests)
                                     continue
                                 await self._capture_planning_result(event, deps)
                                 mapped = events.map_event(event)
+                                if mapped is not None:
+                                    kind = mapped.get("type")
+                                    if kind not in seen_sdk_phases and (
+                                        kind == "tool_call"
+                                        or (kind in {"text", "thinking"} and mapped.get("delta", "").strip())
+                                    ):
+                                        seen_sdk_phases.add(kind)
+                                        log_run_phase(f"sdk_first_{kind}", runner_entered_at, **timing_ids,
+                                                      request_index=model_usage.requests)
                                 if (deps.output_state is not None and mapped is not None
                                         and mapped.get("type") == "text"):
                                     # Mixed-mode prose is released via the status
@@ -2520,6 +2555,12 @@ class AgentRunner:
                                     if event_type == "tool_result" and tool_call_id:
                                         buffered_call = buffered_ui_tool_calls.pop(tool_call_id, None)
                                         if buffered_call is not None:
+                                            if title_task is not None:
+                                                async with self._completion_step(deps, "title"):
+                                                    await title_task
+                                                title_task = None
+                                                while not session_events.empty():
+                                                    yield session_events.get_nowait()
                                             published_tool_calls[tool_call_id] = (
                                                 str(buffered_call.get("tool") or "tool"), buffered_call.get("source"),
                                             )
@@ -2612,12 +2653,13 @@ class AgentRunner:
                 await self._cancel_title_task(title_task)
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
+                await self._cancel_title_task(title_task)
                 logger.exception("Agent stream failed for session {}", session_id)
                 failure_diagnostic = _safe_run_failure(exc)
                 official_failed = stream_snapshot.new_messages
                 if progress is not None:
                     official_failed = (progress.canonical_messages(official_failed)
-                                       if official_failed else progress.messages)
+                                       if official_failed else progress.completed_messages())
                 failed_messages = _with_failed_response_diagnostic(
                     official_failed, failure_diagnostic,
                 )
@@ -2697,7 +2739,6 @@ class AgentRunner:
                     format_stream_error(exc),
                     history_persisted=history_persisted,
                 )
-                await self._cancel_title_task(title_task)
                 return
             finally:
                 cancelled_run_event = None
@@ -2710,7 +2751,7 @@ class AgentRunner:
                     official_cancelled = cancelled_run.new_messages()
                     if progress is not None:
                         official_cancelled = (progress.canonical_messages(official_cancelled)
-                                              if official_cancelled else progress.messages)
+                                              if official_cancelled else progress.completed_messages())
                     cancelled_messages = mark_cancelled_response_interrupted(official_cancelled)
                     # Transport cancellation re-raises before the normal cancelled
                     # SSE path below. Close its durable lifecycle here as well,
@@ -2828,6 +2869,7 @@ class AgentRunner:
                 async with self._completion_step(deps, "optional_flush"):
                     await persister.flush(session_id, agent_id=deps.agent_id)
             except Exception as exc:
+                await self._cancel_title_task(title_task)
                 self._log_run_terminal(run_event, status="failed", started_at=started_at, error=exc, phase="persistence")
                 failed_run_event = await self._finish_run_event(
                     run_event,
@@ -2843,10 +2885,16 @@ class AgentRunner:
                         "event": failed_run_event.public_dict(),
                     }
                 yield events.error(f"会话事件持久化失败：{type(exc).__name__}")
-                await self._cancel_title_task(title_task)
                 return
             while not session_events.empty():
                 yield session_events.get_nowait()
+        if title_task is not None:
+            async with self._completion_step(deps, "title"):
+                await title_task
+            while not session_events.empty():
+                yield session_events.get_nowait()
+        # Actionable UI calls can be shown once the title and durable pending state are ready.
+        if result is not None:
             for buffered_call in buffered_ui_tool_calls.values():
                 tool_call_id = str(buffered_call.get("tool_call_id") or "")
                 tool_name = str(buffered_call.get("tool") or "tool")
@@ -2854,11 +2902,6 @@ class AgentRunner:
                     published_tool_calls[tool_call_id] = (tool_name, buffered_call.get("source"))
                 yield buffered_call
             buffered_ui_tool_calls.clear()
-        if title_task is not None:
-            async with self._completion_step(deps, "title"):
-                await title_task
-            while not session_events.empty():
-                yield session_events.get_nowait()
         committed_compaction = deps.context_state.committed_event if deps.context_state is not None else None
         compaction_event_saved: bool | None = (
             True if pre_saved_compaction_event is not None or committed_compaction is not None else None
@@ -2923,12 +2966,13 @@ class AgentRunner:
             if result is not None and isinstance(result.output, DeferredToolRequests)
             else "completed"
         )
-        updated_run_event = await self._finish_run_event(
-            run_event,
-            status=terminal_status,
-            started_at=started_at,
-            usage=result.usage if result is not None else None,
-        )
+        with observe_run_phase("finish_run_event", **timing_ids):
+            updated_run_event = await self._finish_run_event(
+                run_event,
+                status=terminal_status,
+                started_at=started_at,
+                usage=result.usage if result is not None else None,
+            )
         if updated_run_event is not None:
             yield {
                 "type": "session_event_updated",

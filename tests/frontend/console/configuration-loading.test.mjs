@@ -170,6 +170,36 @@ test("恢复配置标签等待目标刷新，已激活标签和未激活标签�
   assert.equal(restored, true);
 });
 
+test("刷新调试应用后，MCP 原行等待列表加载并且只检测一次", async () => {
+  const h = configurationLoaderHarness();
+  const calls = [];
+  const pending = deferred();
+  const tab = node();
+  tab.dataset.tab = "mcp";
+  tab.click = () => {
+    tab.classList.add("active");
+    h.sandbox.window.configurationTabsAdmin = { pending: pending.promise };
+  };
+  h.sandbox.window.history = {
+    state: { debugContextResume: { tab: "mcp", app: "test001", inspectMcp: "deepfos" } },
+    replaceState(next) { this.state = next; },
+  };
+  h.sandbox.window.DeepAgentConsoleAPI = { loadContext: () => ({ app: "test001" }) };
+  h.sandbox.document.querySelector = () => tab;
+  h.sandbox.document.querySelectorAll = () => [
+    { dataset: { inspectMcp: "other" }, click: () => assert.fail("不能检测其他行") },
+    { dataset: { inspectMcp: "deepfos" }, click: () => calls.push("deepfos") },
+  ];
+  const restoring = h.sandbox.restoreConfigurationTab();
+  await tick();
+  assert.deepEqual(calls, []);
+  assert.equal(h.sandbox.window.history.state.debugContextResume, undefined);
+  pending.resolve();
+  await restoring;
+  await h.sandbox.restoreConfigurationTab();
+  assert.deepEqual(calls, ["deepfos"]);
+});
+
 test("配置绑定阶段不查询隐藏页目录、数据库或 Agent，模型目录绑定不请求模型", () => {
   const calls = [];
   const h = classic(core, { location: { protocol: "http:" }, apiFetch: async path => calls.push(path) });

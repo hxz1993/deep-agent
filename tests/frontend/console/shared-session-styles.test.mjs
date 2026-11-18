@@ -7,8 +7,12 @@ const detailStyles = await readFile(new URL("../../../console/diagnostic-detail.
 
 test("工作台和只读诊断共用标题栏、操作和正文间距规则，不维护复制样式", () => {
   const scope = ":is(#workspaceLegacyHost, .diagnostic-session-detail)";
-  for (const selector of [".chat-header", ".chat-title", ".chat-actions", ".workspace-header-action", ".workspace-header-action:hover", ".workspace-header-action.active", ".workspace-header-action svg", ".messages"]) {
+  for (const selector of [".chat-header", ".chat-title", ".chat-actions", ".workspace-header-action.active", ".messages"]) {
     assert.ok(styles.includes(`${scope} ${selector} {`), `Missing shared presentation: ${selector}`);
+  }
+  const actionScope = ":is(#workspaceLegacyHost, .diagnostic-session-detail, #panel-mcp)";
+  for (const selector of [".workspace-header-action", ".workspace-header-action:hover", ".workspace-header-action svg"]) {
+    assert.ok(styles.includes(`${actionScope} ${selector} {`), `Missing shared presentation: ${selector}`);
   }
   assert.doesNotMatch(detailStyles, /\.diagnostic-detail-header[^{}]*\{/);
   assert.doesNotMatch(detailStyles, /\.messages\s*\{[^}]*padding:/);

@@ -143,7 +143,7 @@ class DuplicateDeferredRunnerTests(unittest.IsolatedAsyncioTestCase):
         cap._results = {"ordinary": result}
         # This is the public SDK's pending request shape after draining a queued
         # discovery notice: the ordinary result was already saved incrementally.
-        draft = cap._completed_messages()
+        draft = cap.completed_messages()
         await self.stores.coordinator.append_message_parts(
             session, messages=draft, agent_id=self.agent_id, user_id=deps.user,
             run_id=deps.run_id, turn_id=deps.turn_id, first_message_ordinal=1)

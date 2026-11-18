@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
@@ -18,7 +19,7 @@ from deep_agent.agent.deferred import (
     DeferredResultConflict, build_deferred_tool_results, validate_deferred_results,
 )
 from deep_agent.agent.deps import AgentDeps
-from deep_agent.agent.observability import usage_dict
+from deep_agent.agent.observability import log_run_phase, observe_run_phase, usage_dict
 from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_execution_context_headers, extract_forward_headers
 from deep_agent.agent.run_identity import conversation_id_for, new_run_id
@@ -45,6 +46,7 @@ class _ChatBodyValidationRoute(APIRoute):
         original = super().get_route_handler()
 
         async def handler(request: Request) -> Response:
+            request.state.chat_received_at = time.perf_counter()
             try:
                 return await original(request)
             except StarletteHTTPException as exc:
@@ -407,6 +409,8 @@ async def chat_stream(
     user: ChannelRequestUserDep,
     channel_account: ChannelAccountDep,
 ) -> DiagnosticEventSourceResponse:
+    handler_started_at = time.perf_counter()
+    request_started_at = getattr(request.state, "chat_received_at", handler_started_at)
     admission_generation = ctx.active_runs.generation
     max_count = (await load_upload_settings(getattr(ctx.stores, "global_setting", None))).max_count if body.attachments else 10
     _validate_chat_body(body, max_count=max_count)
@@ -436,10 +440,12 @@ async def chat_stream(
     elif deferred_tool_results is not None:
         effort = DEFAULT_EFFORT
     message_source = await _resolve_message_source(request, ctx, channel_account, session_id, agent_id, user)
+    app_started_at = time.perf_counter()
     app_context = await resolve_run_app(
         request, ctx, agent_id=agent_id, session_id=body.session_id,
         headers=execution_request_headers, channel_account=channel_account,
     )
+    app_resolved_at = time.perf_counter()
     _apply_scoped_run_headers(app_context, request_headers, execution_request_headers)
     try:
         runner = await build_runner_for_agent(
@@ -484,6 +490,14 @@ async def chat_stream(
         "run_id": deps.run_id,
         **({'reasoning_effort': pending_reasoning.effort} if pending_reasoning is not None else {}),
     }
+    timing_ids = {"session_id": session_id, "run_id": deps.run_id,
+                  "agent_id": deps.agent_id, "agent_name": getattr(runner, "agent_name", None)}
+    admitted_at = time.perf_counter()
+    log_run_phase("stream_admission", request_started_at, ended_at=admitted_at, **timing_ids)
+    log_run_phase("stream_route_prepare", request_started_at, ended_at=handler_started_at, **timing_ids)
+    log_run_phase("stream_run_lookup", handler_started_at, ended_at=app_started_at, **timing_ids)
+    log_run_phase("stream_app_context", app_started_at, ended_at=app_resolved_at, **timing_ids)
+    log_run_phase("stream_runner_build", app_resolved_at, ended_at=admitted_at, **timing_ids)
 
     stream_run = None
 
@@ -535,9 +549,11 @@ async def chat_stream(
             # Register the cancellable run first so an immediate stop cannot race
             # asynchronous history/input preparation and incorrectly return 404.
             ctx.session_live.publish(live_key, deps.run_id, "session", session_data)
+            log_run_phase("sse_session", request_started_at, **timing_ids)
             yield {"event": "session", "data": json.dumps(session_data)}
             await _adopt_channel_session_scope(ctx, channel_account, deps)
             await _current_channel_context(ctx, body, channel_account)
+            seen_sse_phases: set[str] = set()
             async with aclosing(runner.run_stream(
                 session_id,
                 message,
@@ -553,7 +569,14 @@ async def chat_stream(
                 async for ev in stream:
                     ctx.session_live.publish(live_key, deps.run_id, ev["type"], ev)
                     async for projected in files.event(ev):
-                        yield {"event": projected["type"], "data": json.dumps(projected, ensure_ascii=False)}
+                        kind = projected["type"]
+                        if kind not in seen_sse_phases and (
+                            kind in {"tool_call", "final", "error", "cancelled"}
+                            or (kind in {"text", "thinking"} and str(projected.get("delta") or "").strip())
+                        ):
+                            seen_sse_phases.add(kind)
+                            log_run_phase(f"sse_first_{kind}", request_started_at, **timing_ids)
+                        yield {"event": kind, "data": json.dumps(projected, ensure_ascii=False)}
         except DeferredResultConflict as exc:
             # A concurrent resume can pass HTTP preflight before the first completes.
             # Reject only this request; do not persist an execution/error or final.
@@ -571,7 +594,8 @@ async def chat_stream(
             try:
                 with anyio.move_on_after(5, shield=True):
                     try:
-                        await ctx.event_persister.flush(session_id, agent_id=agent_id)
+                        with observe_run_phase("stream_cleanup_flush", **timing_ids):
+                            await ctx.event_persister.flush(session_id, agent_id=agent_id)
                     except Exception as exc:
                         # Runner reports write failures before its terminal frame.
                         logger.error("Stream cleanup persistence failed session={} error={}",

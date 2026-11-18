@@ -8,6 +8,7 @@ let identity = null;
 let identityGeneration = 0;
 let databaseVersionLoaded = false;
 let databaseVersionPromise = null;
+let inspectionMcp = null;
 
 function loadUserDatabaseVersion() {
   if (databaseVersionLoaded || databaseVersionPromise) return databaseVersionPromise;
@@ -73,7 +74,9 @@ function renderEffectiveContextValues(context) {
 }
 
 function previewContextFromInput() {
-  const app = valueOrNull(document.getElementById("contextAppInput")?.value);
+  const input = document.getElementById("contextAppInput");
+  input?.setCustomValidity("");
+  const app = valueOrNull(input?.value);
   let space = null;
   if (app) {
     try {
@@ -114,7 +117,8 @@ function renderContext() {
   });
 
   const appInput = document.getElementById("contextAppInput");
-  if (appInput) {
+  const contextOpen = document.getElementById("contextPopover")?.open;
+  if (appInput && !contextOpen) {
     appInput.value = overrides.app || "";
     appInput.placeholder = inheritedContext.app || "继承平台";
   }
@@ -132,7 +136,7 @@ function renderContext() {
     currentUserButton.removeAttribute("title");
     currentUserButton.setAttribute("aria-label", `当前平台用户：${currentUser}`);
   }
-  renderEffectiveContextValues(effectiveContext);
+  if (!contextOpen) renderEffectiveContextValues(effectiveContext);
   window.DeepAgentConsoleWorkspace?.renderInspector?.();
 }
 
@@ -269,25 +273,35 @@ function renderContextAppChoices(filter = false) {
   }
 }
 
-function openContextPopover(trigger) {
-  renderContext();
+function openContextPopover(trigger, { inspectMcp = null } = {}) {
   const popover = document.getElementById("contextPopover");
-  if (!popover) return;
-  positionContextPopover(trigger);
-  popover.inert = false;
-  popover.classList.remove("hidden");
-  popover.setAttribute("aria-hidden", "false");
+  if (!popover || popover.open) return;
+  renderContext();
+  inspectionMcp = inspectMcp;
+  const modal = Boolean(inspectMcp);
+  document.getElementById("contextTitle").textContent = modal ? "选择调试应用" : "调试";
+  document.getElementById("contextHint").hidden = modal;
+  document.getElementById("contextInspectionHint").hidden = !modal;
+  document.getElementById("resetContextBtn").textContent = modal ? "取消" : "不分应用";
+  if (modal) {
+    popover.style.removeProperty("top");
+    popover.style.removeProperty("left");
+    popover.showModal();
+  } else {
+    positionContextPopover(trigger);
+    popover.show();
+  }
   document.getElementById("contextAppInput")?.focus();
 }
 
 function closeContextPopover() {
   const popover = document.getElementById("contextPopover");
+  if (!popover?.open) return;
   toggleContextAppChoices(false);
   appOptions = null;
-  if (popover?.contains(document.activeElement)) document.activeElement.blur();
-  if (popover) popover.inert = true;
-  popover?.classList.add("hidden");
-  popover?.setAttribute("aria-hidden", "true");
+  document.getElementById("contextAppInput")?.setCustomValidity("");
+  inspectionMcp = null;
+  popover.close();
 }
 
 function closeUserPopover() {
@@ -316,23 +330,37 @@ function currentFormContext() {
   });
 }
 
+function reloadForContextChange(app, inspectMcp = null) {
+  const tab = document.body.dataset.consolePage === "configuration"
+    ? document.querySelector(".resource-btn.active")?.dataset.tab : null;
+  if (tab) {
+    history.replaceState({ ...history.state, debugContextResume: { tab, app, inspectMcp } }, "");
+  }
+  location.reload();
+}
+
 function saveContext() {
   if (window.DeepAgentConsoleChat?.state?.streaming) {
     window.DeepAgentConsole?.toast("请先停止当前生成，再修改调试上下文", true);
     return;
   }
   const before = api.loadContext();
+  const selection = currentFormContext();
+  const inspectMcp = inspectionMcp;
+  const input = document.getElementById("contextAppInput");
   let next;
   try {
-    next = api.saveContext(currentFormContext());
+    if (inspectMcp && !selection.app) throw new Error("请选择或输入应用 ID");
+    next = api.saveContext(selection);
   } catch (error) {
-    window.DeepAgentConsole?.toast(error.message, true);
+    input.setCustomValidity(error.message);
+    input.reportValidity();
     return;
   }
   closeContextPopover();
 
-  if (before.app !== next.app) {
-    location.reload();
+  if (before.app !== next.app || inspectMcp) {
+    reloadForContextChange(next.app || null, inspectMcp);
     return;
   }
   renderContext();
@@ -340,6 +368,10 @@ function saveContext() {
 }
 
 function resetContext() {
+  if (inspectionMcp) {
+    closeContextPopover();
+    return;
+  }
   if (window.DeepAgentConsoleChat?.state?.streaming) {
     window.DeepAgentConsole?.toast("请先停止当前生成，再重置调试上下文", true);
     return;
@@ -348,7 +380,7 @@ function resetContext() {
   api.clearContext();
   closeContextPopover();
   if (hadScope) {
-    location.reload();
+    reloadForContextChange(null);
     return;
   }
   renderContext();
@@ -366,7 +398,7 @@ export function bindContextControls() {
     if (trigger) {
       closeUserPopover();
       const popover = document.getElementById("contextPopover");
-      if (popover?.classList.contains("hidden")) openContextPopover(trigger);
+      if (!popover?.open) openContextPopover(trigger);
       else closeContextPopover();
       return;
     }
@@ -379,6 +411,10 @@ export function bindContextControls() {
     }
   });
   document.getElementById("closeContextBtn")?.addEventListener("click", closeContextPopover);
+  document.getElementById("contextPopover")?.addEventListener("cancel", event => {
+    event.preventDefault();
+    closeContextPopover();
+  });
   document.getElementById("saveContextBtn")?.addEventListener("click", saveContext);
   document.getElementById("resetContextBtn")?.addEventListener("click", resetContext);
   const appInput = document.getElementById("contextAppInput");
@@ -397,6 +433,7 @@ export function bindContextControls() {
   });
   choices?.addEventListener("keydown", event => {
     if (event.key === "Escape") {
+      event.preventDefault();
       event.stopPropagation();
       toggleContextAppChoices(false);
       appInput.focus();
@@ -415,8 +452,12 @@ export function bindContextControls() {
       closeUserPopover();
     }
   });
-  window.addEventListener("resize", closeContextPopover);
-  window.addEventListener("scroll", closeContextPopover, true);
+  window.addEventListener("resize", () => { if (!inspectionMcp) closeContextPopover(); });
+  window.addEventListener("scroll", event => {
+    const insidePopover = event.target instanceof Node
+      && document.getElementById("contextPopover")?.contains(event.target);
+    if (!inspectionMcp && !insidePopover) closeContextPopover();
+  }, true);
   window.addEventListener("storage", event => {
     if (event.key !== api.CONTEXT_KEY && event.key !== null) return;
     renderContext();

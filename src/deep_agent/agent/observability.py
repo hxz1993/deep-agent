@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from contextlib import contextmanager
 from typing import Any, Iterable
 
 from pydantic_ai.messages import ModelMessage, ModelResponse
@@ -110,3 +111,17 @@ def log_event(event: str, **fields: Any) -> None:
         emit(event, level=level, **fields)
     except Exception:
         pass
+
+
+def log_run_phase(phase: str, started_at: float, *, ended_at: float | None = None, **fields: Any) -> None:
+    end = time.perf_counter() if ended_at is None else ended_at
+    log_event("agent_run_phase", phase=phase, duration_ms=max(0, round((end - started_at) * 1000)), **fields)
+
+
+@contextmanager
+def observe_run_phase(phase: str, **fields: Any):
+    started_at = time.perf_counter()
+    try:
+        yield
+    finally:
+        log_run_phase(phase, started_at, **fields)

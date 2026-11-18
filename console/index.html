@@ -23,8 +23,8 @@
   <link rel="stylesheet" href="./themes.css?v=20261015-duration-colors" />
   <link rel="stylesheet" href="./workspace.css?v=session-source-icons" />
   <link rel="stylesheet" href="./trajectory-export.css?v=20261106-trajectory-export" />
-  <link rel="stylesheet" href="./configuration/configuration.css?v=0160-picker-shared" />
-  <link rel="stylesheet" href="./console.css?v=remote-agent-composer" />
+  <link rel="stylesheet" href="./configuration/configuration.css?v=20261118-mcp-count-alignment" />
+  <link rel="stylesheet" href="./console.css?v=20261118-a2a-test-merge" />
   <link rel="stylesheet" href="./diagnostics.css?v=20260924-shared-controls-1" />
   <link rel="stylesheet" href="./diagnostics-design.css?v=20260924-shared-controls-1" />
   <link rel="stylesheet" href="./diagnostics-sessions.css?v=session-source-column" />
@@ -206,8 +206,15 @@
     <div class="auth-lock-content"><i data-lucide="shield-alert" data-access-lock-icon></i><h2 id="authLockTitle">正在检查控制台权限</h2><p id="authLockMessage">请稍候…</p><button type="button" id="retryIdentityBtn">重新检查</button></div>
   </div>
 
-  <aside class="context-popover hidden" id="contextPopover" aria-hidden="true" role="dialog" aria-label="调试" inert>
-    <header><div><strong>调试</strong><span>仅影响当前控制台请求</span></div><button type="button" id="closeContextBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></header>
+  <dialog class="context-popover" id="contextPopover" aria-labelledby="contextTitle">
+    <header>
+      <div>
+        <strong id="contextTitle">调试</strong>
+        <span id="contextHint">仅影响当前控制台请求</span>
+        <span id="contextInspectionHint" hidden><strong>会话应用</strong>随页面入口确定。控制台当前不分应用，请选一个<strong>调试应用</strong>后继续检测。</span>
+      </div>
+      <button type="button" id="closeContextBtn" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button>
+    </header>
     <div class="context-app-field"><label class="field-label-row" for="contextAppInput">应用 ID</label>
       <div class="context-app-combobox">
         <input id="contextAppInput" role="combobox" aria-expanded="false" aria-controls="contextAppChoices" aria-autocomplete="list" autocomplete="off" placeholder="输入应用 ID 或下拉选择" />
@@ -217,7 +224,7 @@
     </div>
     <dl class="context-effective-values" id="effectiveContext"></dl>
     <footer><button type="button" id="resetContextBtn">不分应用</button><button type="button" class="primary" id="saveContextBtn">确定</button></footer>
-  </aside>
+  </dialog>
 
   <div class="console-toast hidden" id="consoleToast" role="status" aria-live="polite"></div>
   <div class="hidden" id="consoleRuntimeControls">
@@ -238,6 +245,6 @@
   <script src="./json-view.js?v=20261028-context-details1"></script>
   <script src="./g2-chart.js?v=20261106-authenticated-assets"></script>
   <script src="./markdown.js?v=20261105-g2-card"></script>
-  <script type="module" src="./main.js?v=session-source-column"></script>
+  <script type="module" src="./main.js?v=20261118-a2a-test-merge"></script>
 </body>
 </html>

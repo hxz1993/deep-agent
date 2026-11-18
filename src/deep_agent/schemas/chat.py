@@ -187,8 +187,15 @@ class SessionInfo(BaseModel):
     updated_at: UtcDatetime | None = Field(default=None, description="Last conversation activity time (UTC).")
 
 
+class SessionListItem(SessionInfo):
+    active_run_id: str | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+        description="Current execution on the serving instance, when requested.",
+    )
+
+
 class SessionListResponse(BaseModel):
-    items: list[SessionInfo]
+    items: list[SessionListItem]
     total: int = Field(description="Total sessions matching the filters.")
     limit: int
     offset: int

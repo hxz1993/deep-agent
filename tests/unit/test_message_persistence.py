@@ -23,6 +23,7 @@ from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.message_persistence import (
     MessagePersistenceCapability, MessagePersistenceError, StreamMessagePersistenceCapability,
 )
+from deep_agent.agent.tool_names import ToolName
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.registry import build_external_toolset
 from deep_agent.db.run_ownership import run_is_live
@@ -81,12 +82,13 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(write["messages"] for write in self.store.writes))
         self.assertEqual(cap.canonical_messages([]), [])
 
-    async def test_only_identical_stream_finalization_skips_write(self):
+    async def test_identical_stream_facts_skip_repeated_writes(self):
         cap = self.capability()
         response = ModelResponse(parts=[TextPart("final")], usage=RequestUsage(), run_id="run")
         await cap.wrap_model_request(self.ctx, request_context=None, handler=AsyncMock(return_value=response))
         await cap.after_node_run(self.ctx, node=object(), result=object())
-        await cap._flush(self.ctx, hook="stream_end")
+        for hook in ("_prepare_model_node", "after_model_request", "wrap_run_event_stream", "stream_end"):
+            await cap._flush(self.ctx, hook=hook)
         self.assertEqual(len(self.store.writes), 1)
 
         # An explicit zero changes durable metering even though the normal SDK
@@ -99,6 +101,31 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.store.writes), 3)
         await cap._flush(self.ctx, hook="before_tool_execute")
         self.assertEqual(len(self.store.writes), 4)
+
+    async def test_first_model_request_only_writes_when_user_input_is_not_already_saved(self):
+        request = ModelRequest(parts=[UserPromptPart("question")])
+        node = ModelRequestNode(request=request)
+        await self.capability()._prepare_model_node(self.ctx, node)
+        self.assertEqual(self.store.writes, [])
+
+        cap = StreamMessagePersistenceCapability(self.store, history_length=0, skip_user_prompt=False)
+        await cap._prepare_model_node(self.ctx, node)
+        self.assertEqual([p.content for p in parts(self.store.writes[0]["messages"], UserPromptPart)], ["question"])
+
+    async def test_duplicate_stream_check_includes_public_tool_names(self):
+        cap = self.capability()
+        call = ToolCallPart("read_alias", {}, "call")
+        response = ModelResponse(parts=[call], run_id="run")
+        await cap.after_model_request(self.ctx, request_context=None, response=response)
+        self.ctx.messages.append(response)
+        await cap.before_tool_execute(self.ctx, call=call, tool_def=None, args={})
+        await cap._flush(self.ctx, hook="_prepare_model_node")
+        self.assertEqual(len(self.store.writes), 2)
+
+        self.deps.tool_names["read_alias"] = ToolName("mcp", "read", "service")
+        await cap._flush(self.ctx, hook="_prepare_model_node")
+        self.assertEqual(len(self.store.writes), 3)
+        self.assertEqual([p.tool_name for p in parts(self.store.writes[-1]["messages"], ToolCallPart)], ["service_read"])
 
     async def test_native_search_parts_preserve_order_without_exposing_local_args(self):
         cap = self.capability()

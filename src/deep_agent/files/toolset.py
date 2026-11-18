@@ -28,6 +28,7 @@ from deep_agent.agent.context.estimator import TokenEstimator
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.media_pipeline import max_upload_bytes
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.files.office_markdown import pptx_body
 from deep_agent.files.pdf_reading import pdf_document
 from deep_agent.files.reading_budget import ReadingBudget, paginate_items
@@ -533,7 +534,7 @@ def build_file_toolset(
         ),
     )
 
-    @toolset.tool
+    @toolset.tool(metadata={READ_ONLY_TOOL: True})
     async def read_file(
         ctx: RunContext[AgentDeps],
         resource: FileResourceRef,

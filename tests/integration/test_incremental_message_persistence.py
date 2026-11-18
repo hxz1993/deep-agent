@@ -15,14 +15,17 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from httpx2 import DecodingError
-from pydantic_ai import Agent, FunctionToolset, ModelRetry
+from pydantic_ai import Agent, FunctionToolset, ModelRetry, Tool
 from pydantic_ai.messages import BinaryContent, ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturn, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.usage import UsageLimits
+from sqlalchemy import event as sql_event
 
+from deep_agent.agent.context.compaction import DeepAgentContextCompaction
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.runner import AgentRunner
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
@@ -78,14 +81,20 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
         reset_context()
         self.tmp.cleanup()
 
-    def _runner(self, stream, *, tools=(), ui=False) -> AgentRunner:
+    def _runner(self, stream, *, tools=(), ui=False, context_window=None, instructions=None) -> AgentRunner:
         toolsets = [FunctionToolset(tools=list(tools))] if tools else []
         if ui:
             toolsets.append(build_external_toolset(builtin_ui_records()))
+        context_compaction = (
+            DeepAgentContextCompaction(context_window_tokens=context_window, max_output_tokens=1024)
+            if context_window is not None else None
+        )
         return AgentRunner(
-            Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps, toolsets=toolsets),
+            Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps, toolsets=toolsets, instructions=instructions,
+                  capabilities=[context_compaction] if context_compaction else None),
             self.store, UsageLimits(request_limit=8), active_runs=self.ctx.active_runs,
             ui_tool_hints={"builtin__confirm": {"widget": "confirm"}} if ui else None,
+            context_compaction=context_compaction, context_window_tokens=context_window,
         )
 
     def _start(self, runner, session: str, *, on_event=None):
@@ -144,6 +153,66 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
         ids = [item["item_id"] for item in history["items"]]
         self.assertEqual(len(ids), len(set(ids)))
 
+    async def test_read_only_loop_does_no_sql_and_publishes_committed_facts_at_finish(self):
+        session = "buffered-read"
+        ready, release = asyncio.Event(), asyncio.Event()
+        requests = 0
+        recording = False
+        statements = []
+
+        def count_statements(_conn, _cursor, statement, *_):
+            if recording:
+                statements.append(statement)
+
+        async def read_value() -> str:
+            return "READ_RESULT"
+
+        async def stream(messages, info):
+            nonlocal requests, recording
+            requests += 1
+            if requests < 3:
+                recording = True
+                yield f"ROUND_{requests}"
+                yield _call("read_value", f"read-{requests}")
+            else:
+                recording = False
+                ready.set()
+                await release.wait()
+                yield "FINAL_ANSWER"
+
+        tool = Tool(read_value, metadata={READ_ONLY_TOOL: True})
+        engine = self.ctx.db_engine.sync_engine
+        sql_event.listen(engine, "before_cursor_execute", count_statements)
+        self.addCleanup(sql_event.remove, engine, "before_cursor_execute", count_statements)
+        runner = self._runner(stream, tools=[tool], context_window=32768, instructions="Preserve the model instructions.")
+        task, events = self._start(runner, session)
+        await self._ready(ready, task)
+        self.assertEqual(statements, [], "Model and read-only tool loop should execute zero SQL")
+        self._canonical_once(await self._history(session), answers=[], calls=[])
+        self.assertEqual(
+            [item["tool_call_id"] for item in events if item["type"] == "tool_result"],
+            ["read-1", "read-2"],
+        )
+        await self._finish(task, release)
+        self.assertEqual(events[-1]["type"], "final")
+        self._canonical_once(
+            await self._history(session), answers=["ROUND_1", "ROUND_2", "FINAL_ANSWER"],
+            calls=["read-1", "read-2"],
+        )
+        stored = await self._events(session)
+        returns = [row["payload"]["message"] for row in stored if row["event_type"] == "tool/results"]
+        self.assertEqual(len(returns), 2)
+        for envelope in returns:
+            self.assertTrue(all(envelope[key] is None for key in (
+                "timestamp", "instructions", "run_id", "conversation_id",
+            )))
+        stored_ids = {item["event_id"] for item in stored}
+        announced_ids = {
+            item["event"]["event_id"] for item in events
+            if item["type"] in {"session_event_appended", "session_event_updated"} and item.get("persisted")
+        }
+        self.assertEqual(announced_ids, stored_ids)
+
     async def test_completed_round_visible_over_http_before_second_model_returns(self):
         session = "facts-second-model"
         ready, release = asyncio.Event(), asyncio.Event()
@@ -179,6 +248,15 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([item for item in stored if item["event_type"] == "user/message"]), 1)
         self.assertFalse(any(item["event_type"].startswith("run/") for item in stored))
         self.assertFalse(any(item["event_type"] == "execution/error" for item in stored))
+        streamed_facts = {
+            event["event"]["event_id"]: event["event"] for event in events
+            if event["type"] in {"session_event_appended", "session_event_updated"} and event["persisted"]
+        }
+        self.assertEqual(streamed_facts.keys(), {item["event_id"] for item in stored})
+        for item in stored:
+            latest = streamed_facts[item["event_id"]]
+            for field in ("sequence", "event_type", "status", "payload"):
+                self.assertEqual(latest[field], item[field])
 
     async def test_fast_parallel_result_visible_while_sibling_tool_waits(self):
         session = "facts-parallel-tools"
@@ -279,7 +357,8 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
             return await original_save(*args, **kwargs)
 
         with patch.object(self.store, "append_message_parts", side_effect=fail_before_side_effect):
-            task, events = self._start(self._runner(stream, tools=[safe_read, side_effect]), session)
+            read = Tool(safe_read, metadata={READ_ONLY_TOOL: True})
+            task, events = self._start(self._runner(stream, tools=[read, side_effect]), session)
             await self._finish(task)
         self.assertTrue(rejected)
         self.assertEqual(executed, ["read"])
@@ -294,8 +373,17 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
         session = "facts-ui-preview"
         ready, release = asyncio.Event(), asyncio.Event()
         published_histories: list[dict] = []
+        requests = 0
+
+        async def read_source() -> str:
+            return "DATA_FOR_APPROVAL"
 
         async def stream(messages, info):
+            nonlocal requests
+            requests += 1
+            if requests == 1:
+                yield _call("read_source", "read-once")
+                return
             yield "PLEASE_CONFIRM"
             yield _call("builtin__confirm", "confirm-once", {"message": "Synthetic confirmation"})
             ready.set()
@@ -305,22 +393,28 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
             if event["type"] == "tool_call" and event.get("tool_call_id") == "confirm-once":
                 published_histories.append(await self._history(session))
 
-        task, events = self._start(self._runner(stream, ui=True), session, on_event=observe)
+        read = Tool(read_source, metadata={READ_ONLY_TOOL: True})
+        task, events = self._start(self._runner(stream, tools=[read], ui=True), session, on_event=observe)
         await self._ready(ready, task)
         history = await self._history(session)
         self.assertFalse(any(item["status"] == "awaiting_input" for item in history["items"]))
-        self.assertFalse(any(event["type"] == "tool_call" for event in events))
+        self.assertFalse(any(event["type"] == "tool_call" and event.get("tool_call_id") == "confirm-once"
+                             for event in events))
         await self._finish(task, release)
         self.assertEqual(events[-1]["status"], "pending")
         self.assertEqual(len(published_histories), 1)
         tools = _kind(published_histories[0], "tool")
-        self.assertEqual([(item["call_id"], item["status"]) for item in tools], [("confirm-once", "awaiting_input")])
-        self._canonical_once(await self._history(session), answers=["PLEASE_CONFIRM"], calls=["confirm-once"])
+        self.assertEqual(
+            [(item["call_id"], item["status"]) for item in tools],
+            [("read-once", "completed"), ("confirm-once", "awaiting_input")],
+        )
+        self.assertEqual(tools[0]["output"], "DATA_FOR_APPROVAL")
+        self._canonical_once(await self._history(session), answers=["PLEASE_CONFIRM"],
+                             calls=["read-once", "confirm-once"])
 
     async def test_http_cancel_preserves_completed_result_and_closes_waiting_tool(self):
         session = "facts-cancel"
-        ready, exited = asyncio.Event(), asyncio.Event()
-        requests = 0
+        ready, displayed, exited = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
         async def first_read() -> str:
             return "COMPLETED_BEFORE_STOP"
@@ -334,21 +428,29 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
             return "unreachable"
 
         async def stream(messages, info):
-            nonlocal requests
-            requests += 1
-            yield "STEP_ONE" if requests == 1 else "STEP_TWO"
-            yield _call("first_read" if requests == 1 else "waiting_read", "finished" if requests == 1 else "waiting")
+            yield "PARALLEL_READS"
+            yield {
+                0: DeltaToolCall(name="first_read", json_args="{}", tool_call_id="finished"),
+                1: DeltaToolCall(name="waiting_read", json_args="{}", tool_call_id="waiting"),
+            }
 
-        task, events = self._start(self._runner(stream, tools=[first_read, waiting_read]), session)
+        async def observe(event):
+            if event["type"] == "tool_result" and event.get("tool_call_id") == "finished":
+                displayed.set()
+
+        tools = [Tool(tool, metadata={READ_ONLY_TOOL: True}) for tool in [first_read, waiting_read]]
+        task, events = self._start(self._runner(stream, tools=tools), session, on_event=observe)
         await self._ready(ready, task)
+        await self._ready(displayed, task)
         during = await self._history(session)
-        self.assertEqual(next(item for item in _kind(during, "tool") if item["call_id"] == "finished")["output"], "COMPLETED_BEFORE_STOP")
+        self.assertEqual(_kind(during, "tool"), [])
         response = await self.http.post(f"/api/v1/sessions/{session}/cancel", params={"agent_id": self.agent_id})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["status"], "cancel_requested")
         await self._finish(task)
         self.assertTrue(exited.is_set())
         self.assertEqual(events[-1]["type"], "cancelled")
+        self.assertTrue(events[-1]["history_persisted"])
         stored = await self._events(session)
         self.assertFalse(any(row["event_type"].startswith("run/") or row["event_type"] == "execution/error" for row in stored))
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
@@ -490,7 +592,12 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
                              for row in await self._events("tool-retry-facts")))
 
     async def test_parallel_reverse_completion_keeps_both_results_and_model_group(self):
-        first_started, second_committed, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        for buffered in (False, True):
+            with self.subTest(buffered=buffered):
+                await self._assert_parallel_reverse_completion(buffered=buffered)
+
+    async def _assert_parallel_reverse_completion(self, *, buffered):
+        first_started, second_displayed, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
         requests = 0
 
         async def first() -> str:
@@ -517,15 +624,19 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
 
         async def observe(event):
             if event["type"] == "tool_result" and event.get("tool_call_id") == "second":
-                second_committed.set()
+                second_displayed.set()
 
-        session = "parallel-reverse-completion"
-        task, events = self._start(self._runner(stream, tools=[first, second]), session, on_event=observe)
-        await self._ready(second_committed, task)
+        session = f"parallel-reverse-completion-{buffered}"
+        tools = [Tool(tool, metadata={READ_ONLY_TOOL: buffered}) for tool in (first, second)]
+        task, events = self._start(self._runner(stream, tools=tools), session, on_event=observe)
+        await self._ready(second_displayed, task)
         before = await self._events(session)
         visible = {item["call_id"]: item for item in _kind(await self._history(session), "tool")}
-        self.assertEqual(visible["second"]["output"], "SECOND_RESULT")
-        self.assertIsNone(visible["first"]["output"])
+        if buffered:
+            self.assertEqual(visible, {})
+        else:
+            self.assertEqual(visible["second"]["output"], "SECOND_RESULT")
+            self.assertIsNone(visible["first"]["output"])
         await self._finish(task, release)
         self.assertEqual(events[-1]["type"], "final")
         final = {row["event_id"]: row for row in await self._events(session)}
@@ -554,7 +665,8 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
                 yield _call("read", "reused-provider-id")
 
         session = "identical-facts-distinct-rounds"
-        task, events = self._start(self._runner(stream, tools=[read]), session)
+        tool = Tool(read, metadata={READ_ONLY_TOOL: True})
+        task, events = self._start(self._runner(stream, tools=[tool]), session)
         await self._finish(task)
         self.assertEqual(events[-1]["type"], "final")
         self.assertEqual((requests, executions), (3, 2))
@@ -563,7 +675,12 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
                              calls=["reused-provider-id", "reused-provider-id"])
         self.assertEqual([item["output"] for item in _kind(history, "tool")], ["RESULT_1", "RESULT_2"])
 
-    async def test_nonstream_runner_commits_each_round_before_next_request(self):
+    async def test_nonstream_runner_preserves_immediate_and_buffered_results(self):
+        for buffered in (False, True):
+            with self.subTest(buffered=buffered):
+                await self._assert_nonstream_run(buffered=buffered)
+
+    async def _assert_nonstream_run(self, *, buffered):
         ready, release = asyncio.Event(), asyncio.Event()
         requests = 0
 
@@ -579,9 +696,10 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             return ModelResponse(parts=[TextPart("NONSTREAM_FINAL")])
 
-        session = "nonstream-round-boundary"
+        session = f"nonstream-round-boundary-{buffered}"
+        tool = Tool(read, metadata={READ_ONLY_TOOL: buffered})
         runner = AgentRunner(Agent(FunctionModel(function=answer), deps_type=AgentDeps,
-                                   toolsets=[FunctionToolset(tools=[read])]),
+                                   toolsets=[FunctionToolset(tools=[tool])]),
                              self.store, UsageLimits(request_limit=4), active_runs=self.ctx.active_runs)
         task = asyncio.create_task(runner.run(session, "synthetic nonstream verification", AgentDeps(
             session_id=session, user=TEST_USER_ID, agent_id=self.agent_id,
@@ -589,11 +707,16 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.tasks.append(task)
         await self._ready(ready, task)
         during = await self._history(session)
-        self._canonical_once(during, answers=["NONSTREAM_ROUND"], calls=["call"])
-        self.assertEqual(_kind(during, "tool")[0]["output"], "NONSTREAM_RESULT")
+        if buffered:
+            self._canonical_once(during, answers=[], calls=[])
+        else:
+            self._canonical_once(during, answers=["NONSTREAM_ROUND"], calls=["call"])
+            self.assertEqual(_kind(during, "tool")[0]["output"], "NONSTREAM_RESULT")
         self.assertFalse(task.done())
         await self._finish(task, release)
-        self._canonical_once(await self._history(session), answers=["NONSTREAM_ROUND", "NONSTREAM_FINAL"], calls=["call"])
+        history = await self._history(session)
+        self._canonical_once(history, answers=["NONSTREAM_ROUND", "NONSTREAM_FINAL"], calls=["call"])
+        self.assertEqual(_kind(history, "tool")[0]["output"], "NONSTREAM_RESULT")
         self.assertFalse(any(row["event_type"].startswith("run/") or row["event_type"] == "execution/error"
                              for row in await self._events(session)))
 

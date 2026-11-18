@@ -1046,7 +1046,7 @@ dialog#documentParsingSettingsDialog {
 .mcp-inspection-counts > button { border: 0; background: transparent; color: inherit; padding: 3px; cursor: pointer; border-radius: 4px; }
 .mcp-inspection-counts > button:hover { background: var(--accent-soft); color: var(--accent); }
 .mcp-inspection-counts svg { width: 13px; height: 13px; }
-.mcp-inspection-counts strong { font-weight: 600; }
+.mcp-inspection-counts strong { min-inline-size: 2ch; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
 .mcp-inspection-counts > button.mcp-resource-warning { color: var(--warning-text, #9a6700); }
 .mcp-description-text { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #configurationHost .mcp-list-table .badge.mcp-transport-http,

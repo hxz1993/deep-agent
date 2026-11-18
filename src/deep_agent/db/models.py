@@ -16,7 +16,7 @@ from sqlalchemy import (
     func,
     select,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, column_property, mapped_column, query_expression, relationship
 
 from deep_agent.db.ids import (
     AGENT_ID_LENGTH,
@@ -315,6 +315,8 @@ class ChatSession(Base):
         default=1,
         server_default="1",
     )
+    # Loaded only by message writers, in the same query that locks the session.
+    event_head_id: Mapped[str | None] = query_expression()
     created_at: Mapped[datetime] = mapped_column(UtcTimestamp(), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         UtcTimestamp(),

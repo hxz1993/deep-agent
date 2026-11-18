@@ -9,8 +9,25 @@ from pydantic_ai.messages import BinaryContent
 from deep_agent.agent.context.estimator import (
     MEDIA_CONTENT_TOKENS,
     TokenEstimator,
+    conservative_text_tokens,
     deepseek_image_tokens,
 )
+
+
+class ConservativeTextTokensTests(unittest.TestCase):
+    def test_preserves_ascii_runs_unicode_whitespace_and_other_code_points(self) -> None:
+        cases = {
+            "": 0,
+            "abcd abcde": 4,
+            "1234_!中🚀e\u0301": 7,
+            "\t\n\r\u0085\u00a0\u2003\u2028\u3000": 1,
+            "\t\n\r\u0085\u00a0\u2003\u2028\u3000 ": 2,
+            "a\u200bb": 3,
+            "café\u00a0数据_2026.json": 9,
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(conservative_text_tokens(text), expected)
 
 
 class ContextEstimatorImageTests(unittest.TestCase):

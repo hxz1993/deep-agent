@@ -35,6 +35,7 @@
 | Agent 展示信息 | `GET /agents/{agent_id}` |
 | 模型选择 | `GET /llm-models` |
 | 会话列表 | `GET /sessions?agent_id=...&has_messages=true&limit=...&offset=...&sort=updated_at` |
+| 当前运行与只读观察 | `GET /sessions/{session_id}/run-status`，取得运行 ID 后订阅 `GET /sessions/{session_id}/live?agent_id=…&run_id=…` |
 | 会话信息 | `GET /sessions/{session_id}?agent_id=...` |
 | 会话历史 | `GET /sessions/{session_id}/history?agent_id=...` |
 | 会话重命名 | `PATCH /sessions/{session_id}?agent_id=...`，Body `{"title":"..."}` |
@@ -143,12 +144,18 @@ HITL 续跑：
 - 当前页面不因 `cancelled` 立即重载 History；重新打开会话时以 `assistant.status=interrupted` 校准。模型尚未输出就被停止时，History 可以只有用户消息。
 - Pending UI Tool 没有活动 Run，表单取消继续通过 `deferred_tool_results`，不能调用 session cancel。
 
+## 打开正在回复的会话
+
+列表按需传 `include_active_runs=true`，当前实例上的运行项带 `active_run_id`。打开后用 `run-status` 确认当前 Run。发送页继续消费原 POST SSE；另一页面观察该 Run 时，先连只读 Live 并缓冲帧，再读取 History。按 `observation_sync.baseline_sequence` 保留基线历史和本轮用户输入，用回放还原本轮正文与工具。
+
+只读工具结果可能先出现在 SSE，到保存点才出现在 History。关闭观察页只释放订阅；关闭发送页时，服务端尝试取消并保存已收到的正文和已完成的工具。收到 `observation_end` 回读 History；发生 `observation_reset` 或原 Run 无法回放时也按原会话校准。恢复页面只读展示，由用户操作触发审批或业务写入。
+
 ## 会话与历史
 
 - 会话列表分页使用后端 `total/limit/offset`，不要把前端当前数组长度当成总数。
 - 标题异步生成时监听 `session_title`；人工重命名仍使用 Session PATCH，禁止标题轮询。
 - `/history` 校验 `schema_version=1`，读取 `ConversationHistoryResponse.items`，按 `sequence + part_offset + item_id` 排序。
-- History 全量替换当前历史消息视图；实时 SSE 与 History 归一化成同一种页面消息/segment 结构并复用 renderer。
+- 空闲会话用 History 全量替换历史消息视图，观察进行中的会话按上述基线衔接；实时 SSE 与 History 归一化成同一种页面消息/segment 结构并复用 renderer。
 - `user_message` 保存纯正文、附件和 `context_refs`；不要解析 XML envelope。
 - `structured_output`直接读取name/output，item_id=output_id；与直播同结果去重，平台身份不替代业务patch/提交身份，恢复只读不重发操作。
 - `assistant_message` 保存服务端投影的正文/思考；Tool 直接使用 `kind/status/mode/call_id/input/output/widget/metadata/artifacts`，不要前端配对历史 Call/Result。

@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 import copy
 import unittest
+from contextlib import asynccontextmanager
 from unittest.mock import patch
 
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, UserPromptPart
-from sqlalchemy import select
+from pydantic_ai.usage import RequestUsage
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from deep_agent.db.conversation import MessagePartWriteState
 from deep_agent.db.models import ChatSessionEvent
 from deep_agent.conversation.projector import project_session_events
 from tests.unit import test_session_event_store as fixture
@@ -66,6 +69,62 @@ class MessagePartStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([i.kind for i in items], ["assistant_message", "tool"])
         self.assertEqual(items[0].text, "working")
 
+    async def test_append_parts_checks_each_parent_once_and_preserves_session_owner(self):
+        response = ModelResponse(parts=[TextPart("first")])
+        await self.append_parts([response])
+        parent_reads = []
+
+        def track_reads(conn, cursor, statement, parameters, context, executemany):
+            sql = " ".join(statement.lower().split())
+            if sql.startswith("select "):
+                parent_reads.extend(table for table in ("agents", "chat_sessions")
+                                    if f" from {table} " in sql)
+
+        with patch.object(self.store._chat_sessions, "_get_owner",
+                          wraps=self.store._chat_sessions._get_owner) as owner:
+            event.listen(self.engine.sync_engine, "before_cursor_execute", track_reads)
+            try:
+                await self.append_parts([response, ModelRequest(parts=[UserPromptPart("later")])])
+            finally:
+                event.remove(self.engine.sync_engine, "before_cursor_execute", track_reads)
+            owner.assert_not_awaited()
+
+        self.assertEqual(parent_reads, ["agents", "chat_sessions"])
+        self.assertIsNone(await self.store.get_session_title("session", agent_id=self.agent_id))
+        with self.assertRaises(PermissionError):
+            await self.store.append_message_parts(
+                "session", agent_id=self.agent_id, user_id="other-user",
+                turn_id="turn", run_id="run", messages=[response],
+            )
+        self.assertEqual(len(await self.store.list_all_events("session")), 2)
+
+    async def test_append_messages_locks_each_parent_once_and_preserves_existing_title(self):
+        async def append(user, turn, message):
+            return await self.store.append(
+                "session", [ModelRequest(parts=[UserPromptPart(message)])],
+                agent_id=self.agent_id, user_id=user, turn_id=turn, run_id=turn,
+            )
+
+        await append("user-1", "first", "first title")
+        parent_reads = []
+
+        def track_reads(conn, cursor, statement, parameters, context, executemany):
+            sql = " ".join(statement.lower().split())
+            if sql.startswith("select "):
+                parent_reads.extend(table for table in ("agents", "chat_sessions")
+                                    if f" from {table} " in sql)
+
+        event.listen(self.engine.sync_engine, "before_cursor_execute", track_reads)
+        try:
+            await append("user-1", "second", "next question")
+        finally:
+            event.remove(self.engine.sync_engine, "before_cursor_execute", track_reads)
+        self.assertEqual(parent_reads, ["agents", "chat_sessions"])
+        self.assertEqual(await self.store.get_session_title("session", agent_id=self.agent_id), "first title")
+        with self.assertRaises(PermissionError):
+            await append("other-user", "third", "foreign input")
+        self.assertEqual(len(await self.store.list_all_events("session")), 2)
+
     async def test_parallel_results_are_committed_individually_and_deduplicate_by_call_id(self):
         response = ModelResponse(parts=[
             ToolCallPart("read", {}, "a"), ToolCallPart("read", {}, "b")])
@@ -84,6 +143,77 @@ class MessagePartStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored[1].parts, request.parts)
         self.assertEqual(await self.append_parts([response, request], terminal_status="completed"), [])
         self.assertEqual(await self.store.events.find_call_origin("session", ["a", "b"]), ("turn", "run"))
+
+    async def test_committed_parts_append_without_rereading_run_until_session_head_changes(self):
+        state = MessagePartWriteState()
+        a = ToolReturnPart("read", {"value": "a"}, "a")
+        b = ToolReturnPart("read", {"value": "b"}, "b")
+        first = await self.append_parts([ModelRequest(parts=[a])], write_state=state)
+        first[0].payload["message"]["parts"][0]["content"]["value"] = "edited snapshot"
+        operations = []
+
+        def track(conn, cursor, statement, parameters, context, executemany):
+            operations.append(" ".join(statement.lower().split()))
+
+        event.listen(self.engine.sync_engine, "before_cursor_execute", track)
+        try:
+            added = await self.append_parts([ModelRequest(parts=[a, b])], write_state=state)
+            self.assertEqual(len(added), 1)
+            self.assertFalse(any(sql.startswith("select chat_session_events.") for sql in operations))
+            operations.clear()
+            self.assertEqual(await self.append_parts([ModelRequest(parts=[a, b])], write_state=state), [])
+            self.assertFalse(any(sql.startswith(("select chat_session_events.", "update ")) for sql in operations))
+
+            # A replacement session has the same next_sequence but another event ID.
+            await self.store.delete("session", agent_id=self.agent_id)
+            await self.append_parts([ModelRequest(parts=[
+                ToolReturnPart("read", "replacement", "c"),
+                ToolReturnPart("read", "replacement", "d"),
+            ])])
+            operations.clear()
+            rebuilt = await self.append_parts([ModelRequest(parts=[a, b])], write_state=state)
+            self.assertEqual(len(rebuilt), 2)
+            self.assertTrue(any(sql.startswith("select chat_session_events.") for sql in operations))
+        finally:
+            event.remove(self.engine.sync_engine, "before_cursor_execute", track)
+        history = await self.store.get_raw_history("session", agent_id=self.agent_id)
+        self.assertCountEqual(
+            [part.content for message in history for part in message.parts],
+            ["replacement", "replacement", {"value": "a"}, {"value": "b"}],
+        )
+
+    async def test_usage_update_reloads_the_stored_row_before_merging(self):
+        state = MessagePartWriteState()
+        response = ModelResponse(parts=[TextPart("done")])
+        original = (await self.append_parts([response], write_state=state))[0]
+        other_call = {"request_id": "other", "state": "reported"}
+        await self.store.attach_usage(original.event_id, calls=[other_call])
+        response.usage = RequestUsage(input_tokens=11)
+        merged = (await self.append_parts([response], write_state=state))[0]
+        self.assertEqual(merged.event_id, original.event_id)
+        self.assertEqual(merged.updated_at, original.updated_at)
+        self.assertEqual({item["request_id"] for item in merged.usage["calls"]}, {"run:1", "other"})
+
+    async def test_retry_reads_database_after_commit_acknowledgement_is_lost(self):
+        state = MessagePartWriteState()
+        a = ToolReturnPart("read", "first", "a")
+        b = ToolReturnPart("read", "second", "b")
+        await self.append_parts([ModelRequest(parts=[a])], write_state=state)
+        write = self.store._write
+
+        @asynccontextmanager
+        async def lose_acknowledgement():
+            async with write() as db:
+                yield db
+            raise TimeoutError("commit acknowledgement lost")
+
+        with patch.object(self.store, "_write", lose_acknowledgement):
+            with self.assertRaises(TimeoutError):
+                await self.append_parts([ModelRequest(parts=[a, b])], write_state=state)
+
+        self.assertIsNone(state.head)
+        self.assertEqual(await self.append_parts([ModelRequest(parts=[a, b])], write_state=state), [])
+        self.assertEqual(len(await self.store.list_all_events("session")), 2)
 
     async def test_stable_ordinals_and_filtered_part_indices_are_not_persisted_as_metadata(self):
         response = ModelResponse(parts=[TextPart("done"), ToolCallPart("read", {}, "a")],

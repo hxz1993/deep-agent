@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Select, delete, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import with_expression
 
 from deep_agent.db.models import Agent, ChatSession, ChatSessionEvent, ChannelSessionBinding
 from deep_agent.db.reference_integrity import lock_reference, lock_optional
@@ -23,19 +24,24 @@ class ChatSessionStoreBase(SessionBoundMixin):
     async def _ensure(
         self, db: AsyncSession, session_id: str, *, agent_id: str, user_id: str,
         app_id: str | None = None, space_id: str | None = None,
-        title: str | None = None, now: datetime | None = None,
+        title: str | None = None, initial_title: str | None = None, now: datetime | None = None,
+        read_event_head: bool = False, touch: bool = True,
     ) -> ChatSession:
         await lock_reference(db, Agent, Agent.id, agent_id, "Agent")
         timestamp = now or datetime.now(timezone.utc)
-        row = (
-            await db.execute(
-                select(ChatSession).where(ChatSession.session_id == session_id).with_for_update()
-            )
-        ).scalar_one_or_none()
+        statement = select(ChatSession).where(ChatSession.session_id == session_id).with_for_update()
+        if read_event_head:
+            head_id = select(ChatSessionEvent.event_id).where(
+                ChatSessionEvent.session_id == ChatSession.session_id,
+                ChatSessionEvent.sequence == ChatSession.next_sequence - 1,
+            ).correlate(ChatSession).scalar_subquery()
+            statement = statement.options(with_expression(ChatSession.event_head_id, head_id))
+        row = (await db.execute(statement)).scalar_one_or_none()
         if row is None:
             row = ChatSession(
                 session_id=session_id, agent_id=agent_id, user_id=user_id,
-                app_id=app_id, space_id=space_id, title=title, next_sequence=1,
+                app_id=app_id, space_id=space_id,
+                title=title if title is not None else initial_title, next_sequence=1,
                 source_type="internal", source_id=None,
                 created_at=timestamp, updated_at=timestamp,
             )
@@ -46,7 +52,8 @@ class ChatSessionStoreBase(SessionBoundMixin):
             raise PermissionError("Session belongs to another Agent or user")
         if title is not None and row.title is None:
             row.title = title
-        row.updated_at = timestamp
+        if touch:
+            row.updated_at = timestamp
         return row
 
     async def list_sessions(self) -> list[tuple[str, str]]:

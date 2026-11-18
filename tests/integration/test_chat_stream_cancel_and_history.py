@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 from starlette.requests import Request
 
@@ -22,6 +23,8 @@ from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.db.event_codec import tool_part_references
+from deep_agent.diagnostics import runtime
+from deep_agent.diagnostics.query import query_logs
 from deep_agent.schemas.chat import StreamChatRequest
 from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
 from tests.helpers.sqlite_stores import (
@@ -108,7 +111,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def _stream_events(
         self,
         *,
-        model: TestModel,
+        model: TestModel | FunctionModel,
         json_body: dict,
     ) -> list[dict]:
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
@@ -141,6 +144,75 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "pending")
         tool_call_id = final["deferred"]["calls"][0]["tool_call_id"]
         return session_id, tool_call_id
+
+    async def test_stream_timeline_is_written_and_queryable_across_two_tool_rounds(self):
+        calls = iter(("timing-utc", "timing-shanghai"))
+
+        async def stream(messages, info):
+            call_id = next(calls, None)
+            if call_id is None:
+                yield "private model fixture"
+            else:
+                yield {0: DeltaThinkingPart(content="private thinking fixture")}
+                yield {1: DeltaToolCall(name="get_current_time", json_args='{"timezone":"UTC"}',
+                                        tool_call_id=call_id)}
+
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_timing_logs_") as temp:
+            config = runtime.DiagnosticConfig(Path(temp) / "logs")
+            writer = runtime.DiagnosticRuntime(config, "api")
+            with patch.object(runtime, "_runtime", writer), patch.object(runtime, "mirror_operational"):
+                writer.start()
+                try:
+                    events = await self._stream_events(
+                        model=FunctionModel(stream_function=stream),
+                        json_body={"message": "private user fixture", "session_title": "timing fixture"},
+                    )
+                finally:
+                    await asyncio.to_thread(writer.close)
+            self.assertEqual(writer.status()["dropped_records"], 0)
+            run_id = events[0]["run_id"]
+            logs = query_logs(config, run_id=run_id, limit=200)
+            self.assertFalse(logs["partial"])
+            self.assertIsNone(logs["next_cursor"])
+            records = [(row["event"], row) for row in logs["items"]]
+
+        self.assertEqual(events[-1]["type"], "final")
+        self.assertEqual(events[-1]["run_id"], run_id)
+        phases = {fields["phase"]: fields for name, fields in records if name == "agent_run_phase"}
+        for phase in ("stream_admission", "stream_route_prepare", "stream_run_lookup", "stream_app_context",
+                      "stream_runner_build", "sse_session", "runner_initialization", "wait_session_lock",
+                      "prepare_history", "prepare_request_budget", "prepare_model_input", "tool_validate",
+                      "model_context_budget", "model_context_protected_estimate",
+                      "sdk_first_thinking", "sse_first_thinking", "sdk_first_tool_call", "sse_first_tool_call",
+                      "sdk_first_text", "sse_first_text", "sdk_result_ready", "completion_optional_flush",
+                      "finish_run_event", "sse_first_final", "stream_cleanup_flush"):
+            self.assertGreaterEqual(phases[phase]["duration_ms"], 0)
+        self.assertIn("model_node_entered", phases)
+        self.assertIn("tool_node_entered", phases)
+        event_names = [name for name, _ in records]
+        self.assertEqual(event_names.count("model_request_started"), 3)
+        self.assertEqual(event_names.count("model_request_completed"), 3)
+        self.assertEqual(event_names.count("agent_tool_started"), 2)
+        self.assertEqual(event_names.count("agent_tool_completed"), 2)
+        self.assertNotIn("model_context_history_read", phases)
+        for phase in ("model_context_budget", "model_context_protected_estimate"):
+            measured = [row["request_index"] for name, row in records if name == "agent_run_phase"
+                        and row["phase"] == phase]
+            self.assertCountEqual(measured, [1, 2, 3])
+        self.assertIn("agent_stream_closed", event_names)
+        writes = [fields for name, fields in records if name == "message_persistence_timing"]
+        self.assertTrue(writes)
+        for row in writes:
+            self.assertGreaterEqual(row["lock_wait_ms"], 0)
+            self.assertGreaterEqual(row["assemble_ms"], 0)
+            if row["status"] == "completed":
+                self.assertGreaterEqual(row["transaction_ms"], 0)
+            self.assertIn("write_hook", row)
+        for call_id in ("timing-utc", "timing-shanghai"):
+            self.assertEqual({row["phase"] for row in writes if row.get("tool_call_id") == call_id},
+                             {"tool_call", "tool_result"})
+        self.assertTrue(any(row["write_hook"] == "stream_end" for row in writes))
+        self.assertNotIn("private", repr(records))
 
     async def _history(self, session_id: str) -> dict:
         await get_context().event_persister.flush(session_id, agent_id=self._agent_id)

@@ -481,7 +481,7 @@ textarea {
 #workspaceLegacyHost .session-item.active:hover .session-actions {
   background: var(--bg);
 }
-#workspaceLegacyHost .session-item.active:not(:hover) .session-actions { opacity: 0; }
+#workspaceLegacyHost .session-item.active:not(:hover):not(.is-generating) .session-actions { opacity: 0; }
 #workspaceLegacyHost .session-item.is-generating .session-actions { opacity: 1; }
 #workspaceLegacyHost .session-item.is-generating:not(:hover) .session-actions .rename-btn { visibility: hidden; }
 #workspaceLegacyHost .session-toolbar .icon-action { border: 0; border-radius: 8px; background: transparent; box-shadow: none; }
@@ -725,14 +725,24 @@ dialog.console-detail-dialog#llmModelModal { width: min(760px, calc(100vw - 32px
 
 .context-popover {
   position: fixed;
+  inset: auto;
+  margin: 0;
   z-index: 96;
   width: min(336px, calc(100vw - 24px));
   padding: 14px;
+  overflow: visible;
   border: 1px solid var(--console-card-border, var(--border));
   border-radius: var(--ui-radius-overlay);
+  color: var(--text);
   background: var(--console-surface, var(--bg-soft));
   box-shadow: 0 12px 34px color-mix(in srgb, #26354d 14%, transparent);
 }
+.context-popover:modal {
+  inset: 0;
+  margin: auto;
+  width: min(400px, calc(100vw - 24px));
+}
+.context-popover::backdrop { background: rgb(15 23 42 / 35%); }
 .context-popover header,
 .context-popover footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .context-popover header { margin-bottom: 13px; }
@@ -976,7 +986,7 @@ dialog.console-detail-dialog#llmModelModal { width: min(760px, calc(100vw - 32px
 #workspaceLegacyHost .agent-switcher .icon-action:disabled { cursor: wait; opacity: .48; }
 :is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action.active { color: var(--accent); background: var(--accent-soft); }
 
-:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action {
+:is(#workspaceLegacyHost, .diagnostic-session-detail, #panel-mcp) .workspace-header-action {
   height: 30px;
   display: inline-flex;
   align-items: center;
@@ -990,8 +1000,8 @@ dialog.console-detail-dialog#llmModelModal { width: min(760px, calc(100vw - 32px
   cursor: pointer;
   font: inherit;
 }
-:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 22%, var(--border)); background: var(--accent-soft); }
-:is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action svg { width: 14px; height: 14px; }
+:is(#workspaceLegacyHost, .diagnostic-session-detail, #panel-mcp) .workspace-header-action:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 22%, var(--border)); background: var(--accent-soft); }
+:is(#workspaceLegacyHost, .diagnostic-session-detail, #panel-mcp) .workspace-header-action svg { width: 14px; height: 14px; }
 :is(#workspaceLegacyHost, .diagnostic-session-detail) .workspace-header-action:not(:has(span)) { width: 30px; padding: 0; }
 
 .inspector-pane { padding-top: 48px; }
@@ -2761,10 +2771,10 @@ dialog.mcp-editor-page.console-detail-dialog { background: var(--console-surface
 #configurationHost .global-settings-group-row th { font-size: 12px; font-weight: 500; }
 
 /* Current test request context lives in the header; persisted scope stays in the inspector. */
-#workspaceLegacyHost .workspace-test-app { min-width: 0; max-width: 260px; padding: 0 8px; gap: 5px; font-size: 12px; flex: 0 1 auto; }
-#workspaceLegacyHost .workspace-test-app-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
-#workspaceLegacyHost .workspace-test-app-id.is-unassigned { color: var(--text-faint); font-style: normal; font-weight: 400; }
-#workspaceLegacyHost .workspace-test-app-label { flex: 0 0 auto; }
+:is(#workspaceLegacyHost, #panel-mcp) .workspace-test-app { min-width: 0; max-width: 260px; padding: 0 8px; gap: 5px; font-size: 12px; flex: 0 1 auto; }
+:is(#workspaceLegacyHost, #panel-mcp) .workspace-test-app-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
+:is(#workspaceLegacyHost, #panel-mcp) .workspace-test-app-id.is-unassigned { color: var(--text-faint); font-style: normal; font-weight: 400; }
+:is(#workspaceLegacyHost, #panel-mcp) .workspace-test-app-label { flex: 0 0 auto; }
 @media (max-width: 900px) {
   #workspaceLegacyHost .workspace-test-app { min-width: 80px; max-width: 150px; width: auto; padding: 0 8px; }
   #workspaceLegacyHost .workspace-test-app .workspace-test-app-id { display: inline; }

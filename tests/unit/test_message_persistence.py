@@ -87,7 +87,7 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         response = ModelResponse(parts=[TextPart("final")], usage=RequestUsage(), run_id="run")
         await cap.wrap_model_request(self.ctx, request_context=None, handler=AsyncMock(return_value=response))
         await cap.after_node_run(self.ctx, node=object(), result=object())
-        for hook in ("_prepare_model_node", "after_model_request", "wrap_run_event_stream", "stream_end"):
+        for hook in ("_prepare_model_node", "wrap_model_request", "wrap_run_event_stream", "stream_end"):
             await cap._flush(self.ctx, hook=hook)
         self.assertEqual(len(self.store.writes), 1)
 
@@ -116,7 +116,7 @@ class MessagePersistenceCapabilityTests(unittest.IsolatedAsyncioTestCase):
         cap = self.capability()
         call = ToolCallPart("read_alias", {}, "call")
         response = ModelResponse(parts=[call], run_id="run")
-        await cap.after_model_request(self.ctx, request_context=None, response=response)
+        await cap.wrap_model_request(self.ctx, request_context=None, handler=AsyncMock(return_value=response))
         self.ctx.messages.append(response)
         await cap.before_tool_execute(self.ctx, call=call, tool_def=None, args={})
         await cap._flush(self.ctx, hook="_prepare_model_node")

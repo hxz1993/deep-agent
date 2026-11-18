@@ -537,7 +537,7 @@ class StreamMessagePersistenceCapability(MessagePersistenceCapability):
     capture_execute_results = False
     # The pre-tool hook keeps its authoritative scope check before dispatch.
     _duplicate_flush_hooks = frozenset({
-        "_prepare_model_node", "after_model_request", "after_node_run",
+        "_prepare_model_node", "wrap_model_request", "after_node_run",
         "wrap_run_event_stream", "stream_end",
     })
 

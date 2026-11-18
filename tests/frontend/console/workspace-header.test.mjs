@@ -144,12 +144,12 @@ test("会话详情保留既有属性并用横向页签、键值列表与复合�
 });
 
 test("测试 App 使用锚定轻量浮层而不是抽屉", () => {
-  assert.match(consoleIndex, /id="contextPopover"[\s\S]*role="dialog"/);
-  assert.match(consoleIndex, /<strong>调试<\/strong>/);
+  assert.match(consoleIndex, /<dialog class="context-popover" id="contextPopover"/);
+  assert.match(consoleIndex, /<strong id="contextTitle">调试<\/strong>/);
   assert.match(consoleIndex, /id="saveContextBtn">确定<\/button>/);
   assert.match(consoleIndex, /id="contextAppInput"/);
   assert.doesNotMatch(consoleIndex, /contextDrawer|contextBackdrop|context-drawer|drawer-backdrop/);
-  assert.match(consoleCss, /\.context-popover\s*\{[\s\S]*position: fixed;[\s\S]*border-radius: 13px/);
+  assert.match(consoleCss, /\.context-popover\s*\{[^}]*position: fixed;[^}]*border-radius: var\(--ui-radius-overlay\)/);
   assert.match(consoleIndex, /id="resetContextBtn">不分应用<\/button>/);
   assert.match(contextSource, /appInput\?\.addEventListener\("input", \(\) => \{\s*previewContextFromInput\(\);/);
   assert.match(contextSource, /\["User ID", identity\?\.user \|\| "未认证"\]/);

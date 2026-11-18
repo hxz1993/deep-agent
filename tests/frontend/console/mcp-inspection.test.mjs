@@ -36,50 +36,46 @@ function loadInspectionUi(overrides = {}) {
   return window.__McpInspectionUI;
 }
 
-test("内部 MCP 缺少有效 App 时提示真实配置入口", () => {
-  const ui = loadInspectionUi();
-  const server = { request_context: { mode: "inherit" } };
-  assert.match(ui.missingInspectionAppHint(server, { app: null }), /未提供测试 App.*「对话测试」右上角「调试上下文」/);
-  assert.equal(ui.missingInspectionAppHint(server, { app: "platform001" }), "");
-  assert.equal(ui.missingInspectionAppHint({ ...server, config: { headers: { App: "static001" } } }, { app: null }), "");
-  assert.equal(ui.missingInspectionAppHint({ request_context: { mode: "isolated" } }, { app: null }), "");
-});
-
-test("失败提示查询后端有效 App 并保留原错误", async () => {
-  const requests = [];
-  const server = { request_context: { mode: "inherit" } };
-  const ui = loadInspectionUi({
-    window: { DeepAgentConsoleAPI: { requestContext: async () => { requests.push("context"); return { app: null }; } } },
-  });
-  const message = await ui.inspectionFailureMessage(server, "MCP 初始化失败（TimeoutError）");
-  assert.match(message, /^MCP 初始化失败（TimeoutError）。当前请求未提供测试 App/);
-  assert.equal(requests.length, 1);
-});
-
-test("API 鉴权或网络失败不会被改写成缺少测试 App", async () => {
-  const messages = [];
-  let contextRequests = 0;
-  const window = { DeepAgentConsoleAPI: { requestContext: async () => { contextRequests++; return { app: null }; } } };
+test("HTTP 会话应用缺少有效 App 时先打开共享选择器", async () => {
+  const chooser = [];
+  const button = {};
+  const window = { DeepAgentConsoleContext: {
+    effectiveContext: { app: null },
+    open: (trigger, options) => chooser.push([trigger, options.inspectMcp]),
+  } };
   loadInspectionUi({
     window,
-    apiFetch: async () => { throw new Error("权限不足"); },
-    showToast: (message) => messages.push(message),
+    apiFetch: async () => assert.fail("选择前不能发起检测"),
   });
-  const label = { textContent: "检测" };
-  const button = { querySelector: () => label, isConnected: true };
-  await window.mcpAdmin.inspect("deepfos", button, { request_context: { mode: "inherit" } });
-  assert.deepEqual(messages, ["权限不足"]);
-  assert.equal(contextRequests, 0);
-  assert.equal(button.disabled, false);
-  assert.equal(label.textContent, "检测");
+  await window.mcpAdmin.inspect("deepfos", button, { transport: "url", request_context: { mode: "inherit" } });
+  assert.deepEqual(chooser, [[button, "deepfos"]]);
 });
 
-test("App 已生效或上下文查询失败时不推断为 App 未配置", async () => {
-  for (const requestContext of [async () => ({ app: "inherited001" }), async () => { throw new Error("network"); }]) {
-    const ui = loadInspectionUi({
-      window: { DeepAgentConsoleAPI: { requestContext } },
+test("已有 App 或其它 MCP 模式直接检测，并保留实际失败信息", async () => {
+  for (const [transport, mode, app] of [
+    ["url", "inherit", "test001"],
+    ["url", "isolated", null],
+    ["url", "bound_app", null],
+    ["builtin", "inherit", null],
+  ]) {
+    const requests = [];
+    const messages = [];
+    const window = { DeepAgentConsoleContext: {
+      effectiveContext: { app },
+      open: () => assert.fail("这条检测无需选择应用"),
+    } };
+    loadInspectionUi({
+      window,
+      apiFetch: async (path, options) => { requests.push([path, options.method]); throw new Error("权限不足"); },
+      showToast: (message) => messages.push(message),
     });
-    assert.equal(await ui.inspectionFailureMessage({ request_context: { mode: "inherit" } }, "MCP Ping 失败"), "MCP Ping 失败");
+    const label = { textContent: "检测" };
+    const button = { querySelector: () => label, isConnected: true };
+    await window.mcpAdmin.inspect("target", button, { transport, request_context: { mode } });
+    assert.deepEqual(messages, ["权限不足"]);
+    assert.deepEqual(requests, [["/api/v1/mcp/target/inspect", "POST"]]);
+    assert.equal(button.disabled, false);
+    assert.equal(label.textContent, "检测");
   }
 });
 

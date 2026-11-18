@@ -48,27 +48,10 @@ function inspectionErrorMessage(error) {
   return error?.message || "";
 }
 
-function missingInspectionAppHint(server, context) {
-  if (!server || server.transport === "stdio") return "";
+function needsInspectionApp(server, context) {
+  if (server?.transport !== "url") return false;
   const mode = server?.request_context?.mode || server?.config?.request_context?.mode || "inherit";
-  if (mode !== "inherit") return "";
-  const staticApp = Object.entries(server?.config?.headers || {})
-    .find(([name]) => name.toLowerCase() === "app")?.[1];
-  if (String(context?.app || staticApp || "").trim()) return "";
-  return "当前请求未提供测试 App；请到「对话测试」右上角「调试上下文」配置后，再返回 MCP 检测。";
-}
-
-async function inspectionFailureMessage(server, message) {
-  // Only enrich a completed inspection. Context lookup failures preserve the
-  // original error without guessing whether the App was configured.
-  if (!missingInspectionAppHint(server, {}) || !window.DeepAgentConsoleAPI?.requestContext) return message;
-  try {
-    const context = await window.DeepAgentConsoleAPI.requestContext();
-    const hint = missingInspectionAppHint(server, context);
-    return hint ? `${message}。${hint}` : message;
-  } catch (_) {
-    return message;
-  }
+  return mode === "inherit" && !context?.app;
 }
 
 function inspectionFailureLabel(error) {
@@ -562,6 +545,11 @@ const mcpAdmin = {
   },
 
   async inspect(name, button, server) {
+    const context = window.DeepAgentConsoleContext;
+    if (context && needsInspectionApp(server, context.effectiveContext)) {
+      context.open(button, { inspectMcp: name });
+      return;
+    }
     const label = button?.querySelector("span");
     const originalText = label?.textContent || "检测";
     if (button) {
@@ -574,8 +562,7 @@ const mcpAdmin = {
         { method: "POST" }
       );
       const toast = inspectionToast(result);
-      const message = toast.error ? await inspectionFailureMessage(server, toast.message) : toast.message;
-      showToast(message, toast.error);
+      showToast(toast.message, toast.error);
       await refreshAfterSuccessfulMutation("MCP 检测已完成", () => this.refresh());
     } catch (err) {
       showToast(err.message, true);
@@ -895,8 +882,6 @@ window.__McpInspectionUI = {
   renderMcpCatalog,
   renderMcpContext,
   renderInspectionCounts,
-  missingInspectionAppHint,
-  inspectionFailureMessage,
   highlightJsonEditorSource: value => window.DeepAgentJsonInput.highlightJsonEditorSource(value),
   inspectionView,
   inspectionToast,

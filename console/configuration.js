@@ -11,7 +11,7 @@ if (typeof window !== "undefined") window.DeepAgentProviderCatalog = ProviderCat
 if (typeof window !== "undefined") window.DeepAgentSkillFrontmatter = SkillFrontmatter;
 if (typeof window !== "undefined") window.DeepAgentSchemaText = SchemaText;
 let loadingPromise = null;
-const CONFIGURATION_ASSET_VERSION = "0167-app-directory";
+const CONFIGURATION_ASSET_VERSION = "20261118-mcp-debug-app";
 const CONFIGURATION_TABS = new Set([
   "agents",
   "llm-providers",
@@ -36,12 +36,22 @@ export function currentConfigurationTab() {
 }
 
 export async function restoreConfigurationTab() {
+  const resume = window.history?.state?.debugContextResume;
+  if (resume) {
+    const { debugContextResume, ...previousState } = window.history.state;
+    window.history.replaceState(previousState, "");
+    rememberConfigurationTab(resume.tab);
+  }
   const tab = document.querySelector(`[data-tab="${activeConfigurationTab}"]`);
   if (tab && !tab.classList.contains("active")) {
     tab.click();
     await window.configurationTabsAdmin?.pending;
   } else {
     await refreshCurrentConfiguration();
+  }
+  if (resume?.inspectMcp && resume.app === window.DeepAgentConsoleAPI.loadContext().app) {
+    const actions = document.querySelectorAll("#panel-mcp.active [data-inspect-mcp]");
+    [...actions].find(button => button.dataset.inspectMcp === resume.inspectMcp)?.click();
   }
 }
 
@@ -147,6 +157,7 @@ async function loadAdminScripts() {
 }
 
 function decorateConfiguration() {
+  window.DeepAgentConsoleContext?.render();
   document.querySelectorAll(".resource-btn").forEach((button) => {
     const label = button.querySelector("span")?.textContent?.trim();
     if (label && !button.title) button.title = label;

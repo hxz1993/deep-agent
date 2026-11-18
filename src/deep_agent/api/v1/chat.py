@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.routing import APIRoute
 from loguru import logger
 from pydantic_ai import RunCancelled
+from pydantic_ai.exceptions import ModelHTTPError, ModelQuotaExceededError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from deep_agent.agent.deferred import (
@@ -34,6 +35,7 @@ from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFou
 from deep_agent.db.ids import normalize_agent_id
 from deep_agent.files.upload_settings import load_upload_settings
 from deep_agent.schemas.chat import ChatRequest, ChatResponse, StreamChatRequest
+from deep_agent.models.provider_errors import PROVIDER_QUOTA_CODE, PROVIDER_QUOTA_MESSAGE, is_provider_quota_error
 from deep_agent.models.provider_registry import ProviderRuntimeError
 from deep_agent.models.reasoning import DEFAULT_EFFORT, ReasoningEffortError
 from deep_agent.local_security import LOCAL_CURRENT_USERNAME_SCOPE_KEY
@@ -376,6 +378,13 @@ async def chat(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except (ModelHTTPError, ModelQuotaExceededError) as exc:
+        if not is_provider_quota_error(exc):
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={"code": PROVIDER_QUOTA_CODE, "message": PROVIDER_QUOTA_MESSAGE},
+        ) from None
     except RunCancelled as exc:
         result = {"output": "", "usage": usage_dict(exc.usage), "status": "cancelled"}
     finally:

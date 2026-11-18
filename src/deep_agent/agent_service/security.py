@@ -18,13 +18,13 @@ _CREDENTIALS = ("authorization", "token", "x-user-token", "x-deepfos-key")
 
 
 @contextmanager
-def observe_access(protocol: str, publication_id: str | None = None):
+def observe_access(protocol: str, publication_id: str | None = None, *, phase: str | None = None):
     started = monotonic()
     try:
         yield
     except HTTPException as exc:
         emit("published_agent_access_failed", level="WARNING", protocol=protocol,
-             publication_id=publication_id, http_status=exc.status_code,
+             publication_id=publication_id, http_status=exc.status_code, phase=phase,
              exception=exc if exc.status_code >= 500 else None,
              duration_ms=round((monotonic() - started) * 1000))
         raise

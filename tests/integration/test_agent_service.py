@@ -142,6 +142,27 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("result", response.json(), response.text)
         return response.json()["result"]
 
+    async def test_missing_public_address_records_one_diagnostic_per_a2a_request(self):
+        publication = (await self.client.get(f"{ROOT}/publications/budget-report", headers=self.admin)).json()
+        fixture_url = "https://fixture-user:fixture-secret@example.test"
+        with (
+            patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": fixture_url}),
+            patch("deep_agent.agent_service.security.emit") as logged,
+        ):
+            card = await self.client.get(f"{self.url}/agent-card.json", headers=HEADERS)
+            tasks = await self.rpc("ListTasks", {})
+        self.assertEqual(card.status_code, 503)
+        self.assertEqual(tasks.status_code, 503)
+        self.assertEqual(logged.call_count, 2)
+        for call in logged.call_args_list:
+            self.assertEqual(call.args, ("published_agent_access_failed",))
+            self.assertEqual(call.kwargs["protocol"], "a2a")
+            self.assertEqual(call.kwargs["publication_id"], publication["id"])
+            self.assertEqual(call.kwargs["phase"], "public_address")
+            self.assertEqual(call.kwargs["http_status"], 503)
+            self.assertIsNotNone(call.kwargs["exception"])
+            self.assertNotIn("fixture-secret", str(call))
+
     async def test_card_runner_history_scope_and_idempotency(self):
         card = await self.client.get(f"{self.url}/agent-card.json", headers=HEADERS)
         self.assertEqual(card.status_code, 200, card.text)

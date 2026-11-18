@@ -20,6 +20,9 @@ function setup(apiFetch) {
   element("agentTaskDetail").querySelector = () => ({ scrollTop: 0 });
   element("agentTaskApp").replaceChildren = (...options) => { element("agentTaskApp").options = options; };
   let tick;
+  const mcpTab = element("fixtureMcpTab");
+  mcpTab.dataset.serviceAccess = "mcp";
+  element("agentServiceTabs").querySelectorAll = () => [mcpTab];
   vm.runInNewContext(script, {
     window, document, apiFetch, AbortController, URLSearchParams, clearInterval,
     Option: class { constructor(label, value) { this.value = value; } },
@@ -47,6 +50,43 @@ test("both A2A card modes supply copyable headers for RPC", async () => {
   assert.match(card.innerHTML, /\/apps\/\{app_id\}\/card/);
   assert.match(card.innerHTML, /&quot;A2A-Version&quot;: &quot;1\.0&quot;/);
   assert.doesNotMatch(card.innerHTML, /&quot;app&quot;:/);
+});
+
+test("access panels distinguish missing deployment address from a failed configuration request", async () => {
+  let clientConfigFails = false;
+  const ui = setup(async path => {
+    if (path.endsWith("/publications")) return [{ ...publication, card_url: null }];
+    if (path.endsWith("/client-config")) {
+      if (clientConfigFails) throw new Error("Unavailable");
+      return { mcp_url: null };
+    }
+    if (path.includes("/tasks?")) return { items: [], total: 0 };
+    return [];
+  });
+  await ui.refresh();
+  const card = ui.element("agentServiceAccess");
+  assert.match(card.innerHTML, /未配置 A2A 接入地址.*DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL/);
+  ui.element("fixtureMcpTab").listeners.get("click")();
+  assert.match(card.innerHTML, /未配置 MCP 接入地址.*DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL/);
+  clientConfigFails = true;
+  await ui.refresh();
+  assert.match(card.innerHTML, /暂时无法读取 MCP 接入地址/);
+  assert.doesNotMatch(card.innerHTML, /DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL/);
+});
+
+test("MCP copy includes the app's space in the gateway headers", async () => {
+  const scope = { apps: { mode: "selected", items: [{ app_id: "budget001", space_id: "budget" }] } };
+  const ui = setup(async path => {
+    if (path.endsWith("/publications")) return [{ ...publication, scope }];
+    if (path.endsWith("/client-config")) return { mcp_url: "https://api.test/gateway/mcp" };
+    if (path.includes("/tasks?")) return { items: [], total: 0 };
+    return [];
+  });
+  await ui.refresh();
+  ui.element("fixtureMcpTab").listeners.get("click")();
+  const html = ui.element("agentServiceAccess").innerHTML;
+  assert.match(html, /&quot;app&quot;: &quot;budget001&quot;/);
+  assert.match(html, /&quot;space&quot;: &quot;budget&quot;/);
 });
 
 test("timer leaves slow list and detail requests in flight and resumes after delivery", async () => {

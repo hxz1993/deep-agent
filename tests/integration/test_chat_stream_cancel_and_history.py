@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.exceptions import ModelHTTPError, ModelQuotaExceededError
 from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 from starlette.requests import Request
@@ -144,6 +145,51 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final["status"], "pending")
         tool_call_id = final["deferred"]["calls"][0]["tool_call_id"]
         return session_id, tool_call_id
+
+    async def test_provider_quota_failure_is_reported_without_provider_details(self):
+        secret = "SYNTHETIC_PRIVATE_QUOTA_RESPONSE"
+        body = {**_CHAT_JSON, "agent_id": self._agent_id, "message": "检查额度错误"}
+        expected = "模型供应商额度不足。请补充额度或切换模型后重试。"
+
+        def fail_request(messages, info):
+            raise ModelQuotaExceededError("test", secret, body={"token": secret})
+
+        async def fail_stream(messages, info):
+            raise ModelHTTPError(402, "test", body={"token": secret})
+            yield "unreachable"
+
+        model = FunctionModel(function=fail_request, stream_function=fail_stream)
+        with patch("deep_agent.agent.factory._resolve_model", return_value=model):
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await client.post("/api/v1/chat", json=body)
+        self.assertEqual(response.status_code, 402)
+        self.assertEqual(response.json(), {"detail": {"code": "provider_quota_exceeded", "message": expected}})
+
+        with tempfile.TemporaryDirectory(prefix="TMP_to_delete_quota_logs_") as temp:
+            config = runtime.DiagnosticConfig(Path(temp) / "logs")
+            writer = runtime.DiagnosticRuntime(config, "api")
+            with patch.object(runtime, "_runtime", writer), patch.object(runtime, "mirror_operational"):
+                writer.start()
+                try:
+                    events = await self._stream_events(model=model, json_body={"message": body["message"]})
+                finally:
+                    await asyncio.to_thread(writer.close)
+            logs = query_logs(config, run_id=events[0]["run_id"], limit=200)["items"]
+        terminal_logs = [row for row in logs if row["event"] == "agent_run_failed"]
+        self.assertEqual(len(terminal_logs), 1)
+        self.assertIn("ModelHTTPError@", terminal_logs[0]["error_stack"])
+        self.assertNotIn(secret, json.dumps(logs))
+        self.assertEqual(events[-1]["type"], "error")
+        self.assertIn(expected, json.dumps(events[-1], ensure_ascii=False))
+        self.assertNotIn(secret, json.dumps(events))
+        session_id = next(event["session_id"] for event in events if event["type"] == "session")
+        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+            history = await client.get(f"/api/v1/sessions/{session_id}/events")
+            self.assertEqual(history.status_code, 200)
+        failures = [row["payload"] for row in history.json()["items"] if row["event_type"] == "execution/error"]
+        self.assertEqual(len(failures), 1)
+        self.assertEqual((failures[0]["code"], failures[0]["phase"], failures[0]["message"]),
+                         ("provider_quota_exceeded", "provider", expected))
 
     async def test_stream_timeline_is_written_and_queryable_across_two_tool_rounds(self):
         calls = iter(("timing-utc", "timing-shanghai"))

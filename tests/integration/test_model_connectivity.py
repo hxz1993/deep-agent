@@ -69,7 +69,7 @@ class ModelConnectivityTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("fixture-secret", response.text)
 
     async def test_failed_http_is_safe_and_not_retried(self):
-        for status, code in [(401, "authentication"), (403, "permission"), (404, "not_found"), (429, "rate_limit"), (503, "provider_error")]:
+        for status, code in [(401, "authentication"), (402, "provider_quota_exceeded"), (403, "permission"), (404, "not_found"), (429, "rate_limit"), (503, "provider_error")]:
             calls = []
             def handle(request):
                 calls.append(request)

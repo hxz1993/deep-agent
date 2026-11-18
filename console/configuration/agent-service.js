@@ -65,6 +65,7 @@
   const methods = { a2a: "A2A", mcp: "MCP", http: "HTTP" };
   const methodIcon = (method) => method === "http" ? icon("globe")
     : `<span class="agent-protocol-logo" data-protocol="${method}" aria-hidden="true"></span>`;
+  const missingPublicAddress = "请在部署中配置 <code>DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL</code>，填写客户端可达的服务基址，包含网关路径。";
 
   function accessToolbar(method, controls = "", publicationName = "") {
     const publication = publicationName
@@ -82,22 +83,29 @@
     const endpoint = clientConfig.mcp_url;
     const publication = rows.find((row) => row.agent_code === selected);
     if (!endpoint) {
-      card.innerHTML = `${inGuide ? "" : accessToolbar("mcp", "", publication?.name)}<p>当前环境暂未提供 MCP 接入地址。</p>`;
+      const message = endpoint === null
+        ? `当前环境未配置 MCP 接入地址。${missingPublicAddress}`
+        : "暂时无法读取 MCP 接入地址，请稍后重试。";
+      card.innerHTML = `${inGuide ? "" : accessToolbar("mcp", "", publication?.name)}<p>${message}</p>`;
       return;
     }
     const scope = publication?.scope.apps;
-    const app = scope?.mode === "selected" && scope.items.length === 1 ? scope.items[0].app_id : "<App ID>";
+    const target = scope?.mode === "selected" && scope.items.length === 1 ? scope.items[0] : null;
     const config = JSON.stringify({
       mcpServers: {
         "deepagent-agents": {
           type: "streamableHttp",
           url: endpoint,
-          headers: { app, "X-Deepfos-Key": "<API Key>" },
+          headers: {
+            app: target?.app_id || "<App ID>",
+            space: target?.space_id || "<Space ID>",
+            "X-Deepfos-Key": "<API Key>",
+          },
         },
       },
     }, null, 2);
     const setupGuide = [
-      "在 Agent 客户端的 MCP 设置中添加以下 Streamable HTTP 配置，将 app 填为目标应用 ID。",
+      "在 Agent 客户端添加以下 Streamable HTTP 配置。将 app 填为目标应用 ID，space 填为应用所属空间 ID。",
       config,
       "在客户端设置中填写一种凭据。有权访问该应用的 DeepFOS API Key 填入 X-Deepfos-Key。使用平台 Token 时，将 X-Deepfos-Key 换成 token 或 Authorization: Bearer <Token>。",
       "客户端须能访问配置中的 URL。localhost 和 127.0.0.1 仅供同机客户端使用。",
@@ -113,7 +121,7 @@
         <section>
           <div class="agent-service-card-heading"><h5>MCP 配置</h5>${copyButton(config, "复制配置")}</div>
           <pre class="agent-service-client-snippet">${escapeHtml(config)}</pre>
-          <p class="agent-service-access-help">填写应用 ID 和一种凭据。</p>
+          <p class="agent-service-access-help">填写应用 ID、所属空间 ID 和一种凭据。</p>
         </section>
       </div>`;
   }
@@ -134,7 +142,8 @@
       return;
     }
     if (!row.card_url) {
-      card.innerHTML = `${accessToolbar("a2a", "", row.name)}<p>${row.enabled ? "尚未配置接入地址。" : "该发布已停用。"}</p>`;
+      const message = row.enabled ? `当前环境未配置 A2A 接入地址。${missingPublicAddress}` : "该发布已停用。";
+      card.innerHTML = `${accessToolbar("a2a", "", row.name)}<p>${message}</p>`;
       return;
     }
     const appScoped = a2aCardMode === "app" && Boolean(row.app_card_url_template);

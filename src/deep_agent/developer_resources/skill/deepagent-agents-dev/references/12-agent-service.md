@@ -10,7 +10,7 @@ Console 管理员选择已有 Agent 并保存发布编码、名称和应用范�
 | --- | --- |
 | 通用 A2A | 从发布页复制完整 Agent Card URL，读取其中 `supportedInterfaces[].url` 作为 JSON-RPC 地址。携带 `app` 和一种凭据。 |
 | 指定应用 A2A | 从发布页复制指定应用卡片地址，把 `{app_id}` 替换为实际应用 ID。携带凭据，服务端根据路径中的应用 ID 推导空间。 |
-| MCP | 从发布页复制 MCP 地址和 Header 示例，使用 Streamable HTTP，填写 `app` 和一种凭据。 |
+| MCP | 从发布页复制 MCP 地址和 Header 示例，使用 Streamable HTTP，填写 `app`、所属 `space` 和一种凭据。 |
 
 A2A JSON-RPC 调用加 `A2A-Version: 1.0`，读取卡片时可以省略。回环地址仅供在同一台机器执行的客户端使用。地址通过网关时保留完整网关前缀。
 
@@ -29,7 +29,7 @@ A2A JSON-RPC 调用加 `A2A-Version: 1.0`，读取卡片时可以省略。回环
 ## 获取产物
 
 - **A2A** 从任务的 Artifact 读取文件 URL，沿用该任务的调用身份下载。通用链接携带原 `app` Header，指定应用链接使用 URL 中的应用。
-- **MCP** 从 `get_task` 的 `artifacts` 读完整 `download_url`，或调用 `get_artifact` 取得单个文件链接。对原链接发 HTTP GET，携带原 `app` 和同一凭据。目标环境未配置有效服务基址时，`get_task` 会省略链接，链接模式的 `get_artifact` 会返回配置错误。
+- **MCP** 从 `get_task` 的 `artifacts` 读完整 `download_url`，或调用 `get_artifact` 取得单个文件链接。对原链接发 HTTP GET，携带原 `app`、`space`（如有）和同一凭据。目标环境未配置有效服务基址时，`get_task` 会省略链接，链接模式的 `get_artifact` 会返回配置错误。
 - **无法附加 HTTP Header 的 MCP 客户端**可对不超过 20 MiB 的文件调用 `get_artifact`，传原 `task_id`、`artifact_id` 和 `format="base64"`。从同一次响应的 `content[].text` 解析 JSON，用程序解码 `data_base64`，按 `name` 保存并核对字节数。大于 20 MiB 时仍走鉴权 HTTP 下载。
 
 只在可信发布服务返回的预期地址上发送凭据。取件 URL 随任务记录过期而失效。交付时确认文件实际下载并可读，批量验收可另外核对 SHA-256。

@@ -36,7 +36,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.17.0`，数据库 Head 为 `016` |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.17.1`，数据库 Head 为 `016` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | 按影响面运行定向测试；可先用 `scripts/run_tests.py --suite affected --base HEAD --list` 查看选测范围 |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |

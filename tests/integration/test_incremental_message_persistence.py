@@ -732,6 +732,8 @@ class IncrementalMessagePersistenceTests(unittest.IsolatedAsyncioTestCase):
         task, events = self._start(self._runner(stream), session)
         await self._finish(task)
         self.assertEqual(events[-1]["type"], "error")
+        self.assertNotIn(secret, json.dumps(events[-1]))
+        self.assertNotIn("PRIVATE_PROMPT", json.dumps(events[-1]))
         rows = await self._events(session)
         failures = [row for row in rows if row["event_type"] == "execution/error"]
         self.assertEqual(len(failures), 1)

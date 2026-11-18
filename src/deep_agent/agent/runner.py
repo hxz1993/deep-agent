@@ -117,6 +117,7 @@ from deep_agent.db.serialization import StoredUserPromptPart, serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference
 from deep_agent.options import OPTION
+from deep_agent.models.provider_errors import PROVIDER_QUOTA_CODE, PROVIDER_QUOTA_MESSAGE, is_provider_quota_error
 
 _STREAM_OUTPUT_TYPE: list[Any] = [str, DeferredToolRequests]
 _TERMINAL_WRITE_TIMEOUT = 10.0
@@ -139,6 +140,8 @@ def _safe_run_failure(exc: Exception) -> dict[str, Any]:
     elif isinstance(exc, TimeoutError):
         diagnostic.update(code="execution_timeout", phase="execution",
                           message="执行等待超时，本轮已停止。")
+    elif is_provider_quota_error(exc):
+        diagnostic.update(code=PROVIDER_QUOTA_CODE, phase="provider", message=PROVIDER_QUOTA_MESSAGE)
     elif isinstance(exc, ModelHTTPError):
         diagnostic.update(code="provider_http_error", phase="provider",
                           message=f"模型服务返回 HTTP {exc.status_code}，本轮已停止。")
@@ -464,6 +467,7 @@ class AgentRunner:
                 agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
                 mode=run_event.mode, phase=phase, reason=reason, **metrics,
                 error_type=type(error).__name__ if error is not None else None,
+                exception=error if status == "failed" else None,
             )
         except Exception:
             pass
@@ -2654,8 +2658,9 @@ class AgentRunner:
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
                 await self._cancel_title_task(title_task)
-                logger.exception("Agent stream failed for session {}", session_id)
                 failure_diagnostic = _safe_run_failure(exc)
+                self._log_run_terminal(run_event, status="failed", started_at=started_at,
+                                       error=exc, phase=failure_diagnostic["phase"])
                 official_failed = stream_snapshot.new_messages
                 if progress is not None:
                     official_failed = (progress.canonical_messages(official_failed)
@@ -2710,17 +2715,6 @@ class AgentRunner:
                         "persisted": True,
                         "event": failed_run_event.public_dict(),
                     }
-                log_event(
-                    "agent_run_failed",
-                    conversation_id=deps.conversation_id,
-                    run_id=deps.run_id,
-                    agent_id=deps.agent_id, agent_name=deps.agent_name, model_name=self._model_name,
-                    session_id=session_id,
-                    model_id=self._model_id,
-                    status="failed",
-                    duration_ms=max(0, round((time.perf_counter() - started_at) * 1_000)),
-                    error_type=type(exc).__name__,
-                )
                 # Ordinary tools may have already been shown before execution
                 # failed. Close every unresolved live card as well as history;
                 # rejected UI calls remain buffered and are never published.

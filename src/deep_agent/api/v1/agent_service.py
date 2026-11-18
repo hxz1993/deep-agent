@@ -238,7 +238,9 @@ async def _get_card(ctx: AppContextDep, agent_code: AgentCode, request: Request,
     if not row.enabled:
         raise HTTPException(404, "发布不存在")
     config = await load_document_parsing_config(ctx.stores.global_setting)
-    card = agent_card(row, address_for(row.code, app_id), attachment_mimes=allowed_mimes(document_upload_mimes(config)))
+    with observe_access("a2a", row.id, phase="public_address"):
+        address = address_for(row.code, app_id)
+    card = agent_card(row, address, attachment_mimes=allowed_mimes(document_upload_mimes(config)))
     return JSONResponse(MessageToDict(card), headers={"Cache-Control": "no-store"})
 
 
@@ -254,10 +256,9 @@ async def _rpc(ctx: AppContextDep, agent_code: AgentCode, request: Request, app_
             return {"type": "http.request", "body": bytes(body), "more_body": False}
         return await request.receive()
 
-    handler = PublicationHandler(
-        ctx, task_store(ctx),
-        row.code, owner, headers, address_for(row.code, app_id),
-    )
+    with observe_access("a2a", row.id, phase="public_address"):
+        address = address_for(row.code, app_id)
+    handler = PublicationHandler(ctx, task_store(ctx), row.code, owner, headers, address)
     dispatcher = JsonRpcDispatcher(handler, enable_v0_3_compat=False)
     response = await dispatcher.handle_requests(Request(request.scope, receive))
     response.headers["Cache-Control"] = "no-store"

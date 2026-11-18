@@ -9,15 +9,15 @@ MCP_INSTRUCTIONS = (
     "question_id as reply_to, and a new message_id. Use submit_task with the same context_id after completion. "
     "Submit and reply accept attachments as name, media_type, and data_base64, with at most 8 MiB decoded per message. "
     "To save a selected file, send HTTP GET to the download_url from get_task or get_artifact using the connection's "
-    "app and authentication headers. If your client cannot send those headers, explicitly call get_artifact with "
+    "app, space when set, and authentication headers. If your client cannot send those headers, explicitly call get_artifact with "
     "format=base64 for a file up to 20 MiB. Decode data_base64 programmatically from the original text JSON and "
     "save the bytes under name. Files larger than 20 MiB always use the download URL."
 )
 
 MCP_GUIDE = """# 发布 Agent MCP 接入
 
-使用同一个 Streamable HTTP 连接调用已发布的 Agent。配置 `app` 为应用 ID，并提供一种凭据：
-`X-Deepfos-Key`、`Authorization: Bearer <Token>` 或 `token`。服务端从应用解析 Space。
+使用同一个 Streamable HTTP 连接调用已发布的 Agent。经 DeepFOS 网关时，配置 `app` 为应用 ID，`space` 为所属空间 ID。
+提供一种凭据，可用 `X-Deepfos-Key`、`Authorization: Bearer <Token>` 或 `token`。
 `list_agents` 展示已启用的发布，发起任务时核对应用权限和发布范围。
 
 ## 工具一览
@@ -56,7 +56,7 @@ MCP_GUIDE = """# 发布 Agent MCP 接入
 ## 获取用户选中的产物
 
 从 `get_task` 的 `artifacts` 选取文件，也可用 `get_artifact` 按 ID 查询单个文件。
-默认对完整 `download_url` 发 HTTP GET，携带 MCP 连接的原 `app` 和鉴权 Header。
+默认对完整 `download_url` 发 HTTP GET，携带 MCP 连接的原 `app`、`space`（如有）和鉴权 Header。
 客户端无法携带这些 Header 时，对至多 20 MiB 的文件显式传 `format="base64"`。
 从同一次响应的 `content[].text` 解析 JSON，解码 `data_base64` 并按 `name` 保存。
 超过 20 MiB 时始终返回 `delivery=http_download` 和完整下载地址。任务过期后下载链接失效。

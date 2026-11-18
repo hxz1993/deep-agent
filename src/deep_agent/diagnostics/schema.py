@@ -168,6 +168,7 @@ PERSISTENCE_NUMBER_FIELDS = frozenset({
 })
 PERSISTENCE_TIMING_FIELDS = frozenset({"lock_wait_ms", "assemble_ms", "transaction_ms", "publish_ms"})
 EXCEPTION_EVENTS = frozenset({
+    "agent_run_failed",
     "channel_registration_failed", "diagnostic_users_failed", "diagnostic_users_fallback",
     "published_agent_access_failed", "remote_agent_operation", "wecom_profile_failed",
     "webhook_bridge_failed", "webhook_failed",

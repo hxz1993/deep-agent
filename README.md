@@ -3,7 +3,7 @@
 DeepAgent 是基于 FastAPI、Pydantic AI 和 SQLAlchemy 的多用户 Agent 服务，并
 随服务发布一体化运维控制台。
 
-当前产品版本为 `0.17.0`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
+当前产品版本为 `0.17.1`。`deep_agent.__version__` 是唯一代码版本来源，FastAPI、
 `GET /info` 和 Console 顶部版本徽标均读取该值。后续正式发布默认递增
 `MAJOR.MINOR.PATCH` 的第三位，只有明确规划重大版本时才调整前两位。产品版本不通过
 环境变量或数据库覆盖，也不等同于 Alembic 数据库结构 revision。
@@ -182,7 +182,7 @@ PYTHONPATH=src python -m deep_agent.channels.gateway --host 0.0.0.0 --port 8010
 MySQL 的连接及业务文本字段应使用 `utf8mb4`，避免 Emoji 等字符损失引发保存失败；
 已有数据库需要检查实际字段。详见[字符集部署要求与排查](docs/guides/mysql-character-set.md)。
 
-新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `015`。生产基线 `001` 完整包含重整前的
+新数据库直接执行 `alembic upgrade head`。当前 Alembic head 为 `016`。生产基线 `001` 完整包含重整前的
 Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP、Skill、UI工具、模型目录、
 `chat_sessions + chat_session_events` Event Store 和 `global_settings`。全新初始化不生成 Web Search 配置行；
 旧 `native` 配置读取为未配置，需管理员明确选择搜索供应商，见[Web 工具设计](docs/design/21-web-tools/web-tools-design.md)。
@@ -194,7 +194,7 @@ Revision 001～012 的最终结构和默认数据：Provider/Model/Agent、MCP�
 
 增量 `006` 新增企微应用及成员缓存，见[企微应用说明](docs/guides/wecom-applications.md)。
 增量 `007` 为会话事件新增 `usage_model_id` 与逐请求 `usage` JSON，并建立日期／模型索引；管理员统计口径见[用量统计](docs/guides/diagnostic-usage.md)。
-增量 `008` 至 `011` 演进渠道来源与凭据。`012`、`013` 增加结构化输出及文本输出策略，`014` 增加模型和 Agent 的思考档位配置，`015` 增加应用配置及专用 Skill 作用域。迁移定义以 `migrations/versions/` 为准。
+增量 `008` 至 `011` 演进渠道来源与凭据。`012`、`013` 增加结构化输出及文本输出策略，`014` 增加模型和 Agent 的思考档位配置，`015` 增加应用配置及专用 Skill 作用域，`016` 新增 Agent 发布与远程连接配置表。迁移定义以 `migrations/versions/` 为准。
 
 已发布的迁移保持原样。涉及结构升级时，完整备份，停止旧 API/Gateway 写入，再升级并核验目标 Revision，最后启动新版并做业务冒烟。
 迁移预检发现孤儿数据会停止，MySQL 中断后保持维护状态并重跑。具体见

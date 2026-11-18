@@ -90,3 +90,38 @@ Pydantic AI **2.46.0**、Harness **0.32.0**、独立 Python／Skill 沙箱依赖
 额外核验项：本机 `pip check` 另提示 `deepfos 1.1.97` 与当前 requests／urllib3 的约束冲突，本轮没有改动这些包，也未将它们并入升级范围。请按目标镜像实际安装清单核对，具体版本见升级核验记录；不要把本机包清单直接作为生产镜像基线。
 
 回退必须配套恢复基线源码和旧版三个 Monty 包／原镜像；不能只回退源码或仅替换其中一个包。本次 Git 推送／Tag 不表示已部署到线上。
+
+## 0.17.0 发布交接
+
+比较基线为 `v0.16.15 / c594cafe`。API 和 Gateway 共用一套运行依赖。发布时配套更新固定运行基础镜像，保存新旧镜像的不可变 digest 及安装清单。
+
+| 包 | 旧版本或约束 → 新版本或约束 |
+| --- | --- |
+| `pydantic-ai-slim`、`pydantic-graph`（间接） | 2.46.0 → 2.70.0 |
+| `pydantic-ai-harness` | 0.32.0 → 0.70.0 |
+| `openai` | 3.8.0 → 3.51.0，新增 `aiohttp` extra |
+| `a2a-sdk` | 新增 1.3.0，启用 `http-server` extra |
+| `pydantic-monty`、`pydantic-monty-client`、`pydantic-monty-runtime` | 1.5.0 → 1.6.0，runtime 需匹配镜像架构与 Python ABI |
+| `anthropic` | 原随 Provider extra 解析，新增 `>=1.15,<2` 以兼容现有端点的 `x-api-key` |
+| `httpx2` | `>=2.7,<3` → `>=2.12,<3` |
+| `aiohttp` | `>=3.14.3,<4` → `>=3.14.4,<4` |
+
+独立沙箱和开发依赖清单无变更。运行镜像继续注入与目标 ABI 匹配的内部 DeepCube wheel。构建时按当前 `requirements.txt` 解析完整依赖，执行 `pip check`，核验 A2A SDK、OpenAI 异步传输和 Monty 原生运行时的导入。发版节点使用实际 Linux 镜像验证；本地 macOS 的解析结果仅用于源码回归。
+
+### 目标环境验收
+
+- 用既有会话验证历史回读、旧附件与上下文引用以及停止／恢复。检查 Console、渠道及保留的旧模型接入配置。
+- OpenAI 统一使用 Responses，包括该供应商自定义 Base URL。OpenAI Compatible 的 Chat Completions 和 Responses 按各模型配置验证。另核对 xAI Responses 及 Anthropic 兼容端点。
+- 核对 A2A 通用和指定应用的 Agent Card，以及 MCP 的初始化、应用授权、任务补答和产物下载。验证远程 Agent 附件、补答、续跑与文件交付。使用 Codex 或 CodeBuddy 时，核对目标执行环境中已有的 CLI、身份及工作目录权限。
+- 在无法访问外网的环境验证模型目录在线更新结束后可导入，并检查旧目录保留。核对开发资源清单与 ZIP 的产品版本及文件摘要。
+
+### Alembic 015 → 016
+
+本修订新增两张配置表，没有会话正文回填。确认目标库修订为 015 且两张表均不存在，留存数据库原生备份及恢复验证结果。在同一发布窗口核对实际 Jenkins Job 的构建触发，先由一个实例完成迁移并通过健康检查，再切换对应版本的 API 和 Gateway。
+
+| 表 | 用途和结构 |
+| --- | --- |
+| `agent_publications` | 发布编码、名称、说明、Agent ID、发布范围、启用状态、修订与时间戳。编码唯一，Agent ID 有索引。 |
+| `remote_agent_connections` | 连接名称、说明、配置、检测结果、修订与时间戳。名称唯一。 |
+
+MySQL 上若迁移中断，先查实际表和索引，再决定恢复或重试。回退前停止新版写入，保存发布和远程连接配置，并核对前滚后的数据保留要求。016 仅在两张新增表均为空时允许降级；表有记录时使用已验证的备份恢复方案，随后配套恢复 v0.16.15 源码和原基础镜像。Jenkins 回退镜像不会同步回退数据库。

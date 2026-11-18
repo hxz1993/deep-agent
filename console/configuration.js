@@ -154,7 +154,7 @@ async function loadAdminScripts() {
       // These scripts arrived after the browser's original DOMContentLoaded.
       // Replay once for their existing bindings; initialization makes no API calls.
       document.dispatchEvent(new Event("DOMContentLoaded"));
-      await import("./configuration/catalog.js?v=0160-picker");
+      await import("./configuration/catalog.js?v=20261118-catalog-stop");
     });
     await Promise.race([loaded, failedExecution]);
   } finally {

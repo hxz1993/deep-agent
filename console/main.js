@@ -32,7 +32,7 @@ const loadPage = createPageLoader({
     return module;
   },
   configuration: async () => {
-    const module = await import("./configuration.js?v=20261118-a2a-test-merge");
+    const module = await import("./configuration.js?v=20261119-release-0170");
     await module.initConfiguration();
     configurationModule = module;
     return module;

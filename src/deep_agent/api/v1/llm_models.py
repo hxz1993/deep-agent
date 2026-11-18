@@ -14,6 +14,7 @@ from deep_agent.models.catalog import (
     normalize_models_dev_bundle,
 )
 from deep_agent.models.models_dev import (
+    ModelsDevBundle,
     ModelsDevCatalogError,
     ModelsDevFetchError,
     fetch_models_dev_bundle,
@@ -48,6 +49,7 @@ from deep_agent.services.llm_configuration import (
 
 router = APIRouter()
 _catalog_refresh_lock = asyncio.Lock()
+_CATALOG_REFRESH_TIMEOUT_SECONDS = 30.0
 _MAX_CATALOG_IMPORT_BYTES = 16 * 1024 * 1024
 _model_test_slots = asyncio.Semaphore(2)
 
@@ -188,12 +190,42 @@ async def export_model_catalog(
     )
 
 
+async def _wait_for_catalog_client_disconnect(request: Request) -> None:
+    while (await request.receive())["type"] != "http.disconnect":
+        pass
+
+
+async def _download_model_catalog(request: Request) -> ModelsDevBundle:
+    download = asyncio.create_task(fetch_models_dev_bundle())
+    disconnected = asyncio.create_task(_wait_for_catalog_client_disconnect(request))
+    try:
+        done, _ = await asyncio.wait(
+            (download, disconnected),
+            timeout=_CATALOG_REFRESH_TIMEOUT_SECONDS,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if disconnected in done:
+            disconnected.result()
+            raise HTTPException(status_code=499, detail="在线更新已停止")
+        if download not in done:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="在线更新超时，已保留原目录。可以改用 JSON 导入。",
+            )
+        return download.result()
+    finally:
+        download.cancel()
+        disconnected.cancel()
+        await asyncio.gather(download, disconnected, return_exceptions=True)
+
+
 @router.post(
     "/llm-models/catalog/refresh",
     dependencies=CONSOLE_ADMIN_DEPENDENCIES,
     response_model=ModelCatalogRefreshResponse,
 )
 async def refresh_model_catalog(
+    request: Request,
     catalog_store: ModelCatalogStoreBase = Depends(get_model_catalog_store),
 ) -> ModelCatalogRefreshResponse:
     if _catalog_refresh_lock.locked():
@@ -204,12 +236,14 @@ async def refresh_model_catalog(
 
     async with _catalog_refresh_lock:
         try:
-            bundle = await fetch_models_dev_bundle()
+            bundle = await _download_model_catalog(request)
             rows, stats = normalize_models_dev_bundle(
                 bundle.models,
                 bundle.providers,
                 bundle.labs,
             )
+            if await request.is_disconnected():
+                raise HTTPException(status_code=499, detail="在线更新已停止")
             await catalog_store.replace_all(rows)
         except ModelsDevFetchError as exc:
             raise HTTPException(

@@ -3,6 +3,15 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.17.0
+
+- 支持通过 A2A 和 MCP 发布已有 Agent。两种入口共用应用授权、任务和会话，可在任务中补答、传附件和下载产物。Console 提供发布配置、接入示例及任务诊断。
+- Console 新增远程 Agent 连接，支持 A2A、Codex 和 CodeBuddy。主 Agent 可委派任务、续跑、补答，经授权传递本轮附件并回收结果文件。
+- OpenAI 供应商使用 Responses。OpenAI Compatible 可选择 Chat Completions 或 Responses，并支持保留原有模型参数。新增使用 Responses 的 xAI 供应商。
+- 模型目录在线更新支持停止和 30 秒超时。外网不可用时可继续使用已有目录或导入离线目录。跨组件日志补充脱敏异常堆栈，便于排查鉴权、远程调用和取件。
+- **依赖变更（运维）** 相对 v0.16.15，API／Gateway 需配套新版固定运行镜像。Pydantic AI 2.46.0 → 2.70.0、Harness 0.32.0 → 0.70.0、OpenAI SDK 3.8.0 → 3.51.0（含 aiohttp extra）、Monty 1.5.0 → 1.6.0，新增 A2A SDK 1.3.0（含 http-server extra）。其余约束及镜像验收项见[依赖镜像交接](deploy/dependency-images.md)。
+- Alembic 015 → 016 新增 `agent_publications` 和 `remote_agent_connections`。共享环境先确认目标库、备份和回退方式，再滚动或停机部署匹配的 API／Gateway。
+
 ## v0.17.0a16
 
 - OpenAI Compatible 模型编辑弹窗将 API 协议收为等宽的两个选项，说明另起一行。切换协议保留高级设置展开状态和原值，Responses 下禁用 Chat 专用开关。
@@ -82,7 +91,7 @@
 - 主 Agent 可直接用远程连接的显示名称派单，兼容历史会话里的连接标识。
 - 依赖变更：无。数据库保持 016。
 
-## v0.17.0
+## 远程 Agent 开发里程碑（内部构建）
 
 - Console 新增「远程 Agent」，支持 A2A、Codex 和 CodeBuddy。主 Agent 统一通过 Harness 委派，可发送附件、补答、接续远端会话，并把生成文件交付到当前会话。DeepAgent MCP 通过普通 MCP 工具包接入。内部迁移 016 同时创建发布表和远程连接表。
 - 升级 Pydantic AI 和 Harness，为远程 Agent 的官方子任务接口建立运行基线。兼容旧会话的附件和上下文引用、新版工具重试事件及程序编排接口，工具结果在最终执行钩子完成后再保存。数据库版本为 016。

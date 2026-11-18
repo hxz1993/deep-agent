@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -210,6 +211,76 @@ class LlmModelCatalogIntegrationTests(unittest.IsolatedAsyncioTestCase):
             for row in await self.stores.model_catalog.list_all()
         ]
         self.assertEqual(after, before)
+
+    async def test_refresh_timeout_cancels_download_and_allows_import(self) -> None:
+        await self._seed_catalog()
+        before = [row.refreshed_at for row in await self.stores.model_catalog.list_all()]
+        cancelled = asyncio.Event()
+
+        async def stalled_download():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        with patch("deep_agent.api.v1.llm_models.fetch_models_dev_bundle", stalled_download), \
+             patch("deep_agent.api.v1.llm_models._CATALOG_REFRESH_TIMEOUT_SECONDS", 0.02):
+            async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                response = await asyncio.wait_for(client.post("/api/v1/llm-models/catalog/refresh"), 2)
+                self.assertEqual(response.status_code, 504, response.text)
+                self.assertTrue(cancelled.is_set())
+                self.assertEqual(
+                    [row.refreshed_at for row in await self.stores.model_catalog.list_all()], before,
+                )
+                imported = await client.post(
+                    "/api/v1/llm-models/catalog/import",
+                    files={"file": ("catalog.json", json.dumps({"models": MODELS, "providers": PROVIDERS}))},
+                )
+                self.assertEqual(imported.status_code, 200, imported.text)
+
+    async def test_refresh_disconnect_cancels_download_and_releases_import_lock(self) -> None:
+        await self._seed_catalog()
+        before = [row.refreshed_at for row in await self.stores.model_catalog.list_all()]
+        started, disconnected, cancelled = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def stalled_download():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        async def app_with_disconnect(scope, receive, send):
+            if scope["path"] != "/api/v1/llm-models/catalog/refresh":
+                return await self._app(scope, receive, send)
+
+            async def receive_disconnect():
+                await disconnected.wait()
+                return {"type": "http.disconnect"}
+
+            await self._app(scope, receive_disconnect, send)
+
+        with patch("deep_agent.api.v1.llm_models.fetch_models_dev_bundle", stalled_download):
+            async with AsyncClient(
+                transport=ASGITransport(app=app_with_disconnect), base_url="http://test",
+            ) as client:
+                raw = json.dumps({"models": MODELS, "providers": PROVIDERS})
+                file = {"file": ("catalog.json", raw, "application/json")}
+                request = asyncio.create_task(client.post("/api/v1/llm-models/catalog/refresh"))
+                try:
+                    await asyncio.wait_for(started.wait(), 2)
+                    conflict = await client.post("/api/v1/llm-models/catalog/import", files=file)
+                    self.assertEqual(conflict.status_code, 409, conflict.text)
+                finally:
+                    disconnected.set()
+                    stopped = await asyncio.wait_for(request, 2)
+                self.assertEqual(stopped.status_code, 499, stopped.text)
+                self.assertTrue(cancelled.is_set())
+                self.assertEqual(
+                    [row.refreshed_at for row in await self.stores.model_catalog.list_all()], before,
+                )
+                imported = await client.post("/api/v1/llm-models/catalog/import", files=file)
+                self.assertEqual(imported.status_code, 200, imported.text)
 
     async def test_import_official_catalog_json_replaces_catalog(self) -> None:
         await self._seed_catalog()

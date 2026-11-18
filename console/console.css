@@ -644,6 +644,18 @@ textarea {
 .catalog-info:focus-within .catalog-info-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .catalog-feedback { margin: 0 0 10px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 6px; color: var(--text); background: var(--accent-soft); font-size: 12px; }
 .catalog-feedback.error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--bg-soft)); }
+.catalog-feedback .catalog-stop-refresh {
+  margin-inline-start: 10px;
+  padding: 0;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.catalog-stop-refresh:not(:disabled):hover { text-decoration: underline; }
+.catalog-stop-refresh:disabled { color: var(--text-faint); cursor: default; }
 .catalog-browser { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 14px; min-height: 320px; }
 .catalog-browser.catalog-provider-view { grid-template-columns: minmax(0, 1fr); }
 .catalog-lab-sidebar { display: flex; flex-direction: column; align-self: start; max-height: calc(100vh - 360px); overflow: auto; padding: 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-soft); }

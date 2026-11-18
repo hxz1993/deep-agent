@@ -5,6 +5,8 @@ import { catalogProviderIcon } from "../provider-icons.js?v=20261105-catalog-ico
 import { effortValues } from '../reasoning-ui.js?v=0160-picker';
 
 const PAGE_SIZE = 50;
+const REFRESH_RESPONSE_TIMEOUT_MS = 35000;
+const REFRESH_CHECK_TIMEOUT_MS = 3000;
 const MODALITY_LABELS = {
   text: "文本",
   image: "图像",
@@ -36,6 +38,7 @@ const catalogState = {
 let searchTimer = null;
 let loadGeneration = 0;
 let pendingLoad = false;
+let refreshController = null;
 
 function element(id) {
   return document.getElementById(id);
@@ -125,7 +128,7 @@ function queryString() {
 function setFeedback(message = "", isError = false) {
   const feedback = element("catalogFeedback");
   if (!feedback) return;
-  feedback.textContent = message;
+  element("catalogFeedbackText").textContent = message;
   feedback.classList.toggle("hidden", !message);
   feedback.classList.toggle("error", Boolean(isError));
 }
@@ -278,12 +281,12 @@ function renderPagination() {
   }
 }
 
-async function loadCatalog() {
+async function loadCatalog({ preserveFeedback = false, signal } = {}) {
   const generation = ++loadGeneration;
   if (catalogState.loading) { pendingLoad = true; return; }
   pendingLoad = false;
   catalogState.loading = true;
-  setFeedback();
+  if (!preserveFeedback) setFeedback();
   if (element("catalogStatusLine")) element("catalogStatusLine").textContent = "加载中…";
   if (element("catalogTableBody")) {
     element("catalogTableBody").innerHTML =
@@ -291,13 +294,13 @@ async function loadCatalog() {
   }
   renderPagination();
   try {
-    let response = await request(`/api/v1/llm-models/catalog?${queryString()}`);
+    let response = await request(`/api/v1/llm-models/catalog?${queryString()}`, { signal });
     if (generation !== loadGeneration) return;
     const providers = response.facets?.providers || [];
     if (providers.length && !providers.some((provider) => provider.id === catalogState.providerId)) {
       catalogState.providerId = providers[0].id;
       catalogState.offset = 0;
-      response = await request(`/api/v1/llm-models/catalog?${queryString()}`);
+      response = await request(`/api/v1/llm-models/catalog?${queryString()}`, { signal });
     }
     if (generation !== loadGeneration) return;
     catalogState.items = Array.isArray(response.items) ? response.items : [];
@@ -310,40 +313,77 @@ async function loadCatalog() {
       `${catalogState.total} 个模型 · 最近更新 ${formatDateTime(catalogState.refreshedAt)}`;
   } catch (error) {
     if (generation !== loadGeneration) return;
-    catalogState.items = [];
-    catalogState.total = 0;
-    setFeedback(`加载失败：${error.message}`, true);
-    element("catalogStatusLine").textContent = "模型目录加载失败";
+    if (!preserveFeedback) {
+      catalogState.items = [];
+      catalogState.total = 0;
+      setFeedback(`加载失败：${error.message}`, true);
+      element("catalogStatusLine").textContent = "模型目录加载失败";
+    } else {
+      element("catalogStatusLine").textContent =
+        `${catalogState.total} 个模型 · 最近更新 ${formatDateTime(catalogState.refreshedAt)}`;
+    }
     renderResults();
   } finally {
     catalogState.loading = false;
     renderPagination();
-    if (pendingLoad) await loadCatalog();
+    if (pendingLoad) await loadCatalog({ preserveFeedback, signal });
   }
 }
 
 async function refreshCatalog() {
   if (catalogState.loading) return;
+  const controller = refreshController = new AbortController();
+  const stop = element("catalogStopRefreshBtn");
+  const actions = document.querySelectorAll(
+    "#catalogRefreshBtn, #catalogImportBtn, #catalogExportBtn, [data-catalog-refresh]",
+  );
+  const previousRefresh = catalogState.refreshedAt;
   catalogState.loading = true;
   setFeedback("正在联网获取并校验 models.dev 完整目录，请稍候…");
-  element("catalogRefreshBtn").disabled = true;
+  for (const button of actions) button.disabled = true;
+  stop.disabled = false;
+  stop.hidden = false;
+  renderPagination();
+  const timeout = setTimeout(() => controller.abort("timeout"), REFRESH_RESPONSE_TIMEOUT_MS);
+  let recheck = false;
+  let updated = false;
   try {
-    const result = await request("/api/v1/llm-models/catalog/refresh", { method: "POST" });
+    const result = await request("/api/v1/llm-models/catalog/refresh", {
+      method: "POST", signal: controller.signal,
+    });
     setFeedback(
       `目录更新完成：${result.providers} 个供应商、${result.models} 个模型。`,
     );
+    updated = true;
   } catch (error) {
-    setFeedback(`目录更新失败，旧目录已保留：${error.message}`, true);
+    if (controller.signal.aborted) {
+      recheck = true;
+      const timedOut = controller.signal.reason === "timeout";
+      setFeedback(timedOut ? "在线更新响应超时，可导入 JSON。" : "已请求停止更新，可导入 JSON。", timedOut);
+    } else {
+      setFeedback(`目录更新失败：${error.message}`, true);
+    }
+  } finally {
+    clearTimeout(timeout);
+    refreshController = null;
+    stop.hidden = true;
     catalogState.loading = false;
     renderPagination();
-    element("catalogRefreshBtn").disabled = false;
-    if (pendingLoad) await loadCatalog();
-    return;
+    try {
+      if (updated) catalogState.offset = 0;
+      if (updated || recheck || pendingLoad) {
+        await loadCatalog({
+          preserveFeedback: true,
+          signal: AbortSignal.timeout(REFRESH_CHECK_TIMEOUT_MS),
+        });
+        if (recheck && catalogState.refreshedAt !== previousRefresh) {
+          setFeedback("目录已更新，可继续导入 JSON。");
+        }
+      }
+    } finally {
+      for (const button of actions) button.disabled = false;
+    }
   }
-  catalogState.loading = false;
-  element("catalogRefreshBtn").disabled = false;
-  catalogState.offset = 0;
-  await loadCatalog();
 }
 
 async function importCatalog(file) {
@@ -458,6 +498,11 @@ function initCatalog() {
     loadCatalog();
   });
   element("catalogRefreshBtn")?.addEventListener("click", refreshCatalog);
+  element("catalogStopRefreshBtn")?.addEventListener("click", (event) => {
+    event.currentTarget.disabled = true;
+    setFeedback("正在停止在线更新…");
+    refreshController?.abort("stopped");
+  });
   element("catalogExportBtn")?.addEventListener("click", exportCatalog);
   element("catalogImportBtn")?.addEventListener("click", () => {
     const input = element("catalogImportInput");

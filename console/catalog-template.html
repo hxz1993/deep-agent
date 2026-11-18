@@ -49,7 +49,10 @@
       <p class="models-status" id="catalogStatusLine">加载中…</p>
     </div>
 
-    <div class="catalog-feedback hidden" id="catalogFeedback" role="alert"></div>
+    <div class="catalog-feedback hidden" id="catalogFeedback">
+      <span id="catalogFeedbackText" role="status"></span>
+      <button type="button" class="btn-link catalog-stop-refresh" id="catalogStopRefreshBtn" hidden>停止更新</button>
+    </div>
 
     <div class="catalog-browser" id="catalogBrowser">
       <aside class="catalog-lab-sidebar" id="catalogSupplierSidebar" aria-label="供应商">

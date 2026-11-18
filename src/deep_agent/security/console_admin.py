@@ -11,7 +11,6 @@ from urllib.parse import urlsplit
 
 import aiohttp
 from fastapi import Request
-from loguru import logger
 
 from deepfos_platform.discovery import ServiceDiscovery
 from deepfos_platform.discovery.target import normalize_service_target
@@ -57,6 +56,8 @@ class PlatformApiKeyRejectedError(ConsoleAdminAuthenticationError):
 
 class ConsoleAdminUnavailableError(RuntimeError):
     """The platform could not complete an enterprise-admin check."""
+
+    http_status: int | None = None
 
 
 @dataclass(frozen=True)
@@ -301,13 +302,11 @@ class PlatformEnterpriseAdminChecker:
         if status_code == 401:
             raise ConsoleAdminAuthenticationError("platform login has expired")
         if not 200 <= status_code < 300:
-            logger.warning(
-                f"enterprise-admin verification returned HTTP {status_code}, "
-                f"url: [{url}]"
-            )
-            raise ConsoleAdminUnavailableError(
+            error = ConsoleAdminUnavailableError(
                 f"enterprise-admin verification returned HTTP {status_code}"
             )
+            error.http_status = status_code
+            raise error
         try:
             value = json.loads(body)
         except (TypeError, json.JSONDecodeError) as exc:

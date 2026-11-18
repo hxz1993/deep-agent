@@ -3,7 +3,7 @@ import atexit
 
 from typing import Optional
 
-from loguru import logger
+from ..log import safe_logger as logger
 
 from ..lib.utils import retry, Wait
 from ..lib.nacos import NacosAPI

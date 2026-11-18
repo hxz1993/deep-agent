@@ -126,9 +126,6 @@ class _BoundedPlatformFile(File):
         super().__init__(root)
         self.max_bytes = max_bytes
         self.sink = sink
-        # The generic SDK logger includes request headers. This new path never
-        # logs caller credentials or full file URLs.
-        self.log = lambda *_args, **_kwargs: None
 
     async def get(self, url, params=None, header=None):
         # Keep the component's standard header merge (including internal auth)

@@ -15,7 +15,7 @@ from deepfos_platform.errors.classes import ServerInstanceNotFound
 from deepfos_platform.options import OPTION as PLATFORM_OPTION
 
 from deep_agent.api.v1 import api_router
-from deep_agent.api.v1.admin import require_console_admin
+from deep_agent.api.v1.admin import require_console_admin, resolve_console_admin_access
 from deep_agent.api.v1.request_identity import require_request_user
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.security import (
@@ -358,30 +358,38 @@ class PlatformEnterpriseAdminCheckerTests(unittest.IsolatedAsyncioTestCase):
         on_failure.assert_called_once_with()
 
     async def test_http_failure_log_does_not_expose_identity_or_credentials(self) -> None:
-        response = _FakeResponse(503, "unavailable")
+        from types import SimpleNamespace
+        from fastapi import HTTPException, Request
+        from deepfos_platform.lib.context import gen_request_id
+
+        response = _FakeResponse(503, "NEVER_LOG_PRIVATE_BODY")
+        request = Request({"type": "http", "headers": [
+            (b"authorization", b"Bearer very-secret-token"),
+            (b"cookie", b"session=very-secret-cookie"),
+        ]})
+        ctx = SimpleNamespace(console_admin_authorizer=ConsoleAdminAuthorizer(self._direct_checker()))
         messages: list[str] = []
-        sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING", diagnose=True)
         try:
             with patch(
                 "deep_agent.security.console_admin.AioHttpCli.get",
                 new=AsyncMock(return_value=response),
-            ):
-                with self.assertRaises(ConsoleAdminUnavailableError):
-                    await self._direct_checker()(
-                        "sensitive-user",
-                        {
-                            "authorization": "Bearer very-secret-token",
-                            "cookie": "session=very-secret-cookie",
-                        },
-                    )
+            ), gen_request_id():
+                with self.assertRaises(HTTPException) as raised:
+                    await resolve_console_admin_access(request, "sensitive-user", ctx)
         finally:
             logger.remove(sink_id)
 
-        joined = "".join(messages)
-        self.assertIn("HTTP 503", joined)
-        self.assertNotIn("sensitive-user", joined)
-        self.assertNotIn("very-secret-token", joined)
-        self.assertNotIn("very-secret-cookie", joined)
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(raised.exception.detail, "暂时无法验证企业管理员权限，请稍后重试")
+        self.assertTrue(response.released)
+        message, = messages
+        self.assertEqual(message.count("error_stack="), 1)
+        self.assertIn("upstream_status=503", message)
+        self.assertIn("ConsoleAdminUnavailableError@", message)
+        self.assertIn("console_admin.py:", message)
+        for secret in ("sensitive-user", "very-secret-token", "very-secret-cookie", "NEVER_LOG_PRIVATE_BODY"):
+            self.assertNotIn(secret, message)
 
 
 class ConsoleAdminApiTests(unittest.TestCase):

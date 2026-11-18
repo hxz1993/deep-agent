@@ -100,14 +100,17 @@ def run_metrics(
     return metrics
 
 
-def log_event(event: str, **fields: Any) -> None:
+def log_event(event: str, *, level: str | None = None, exception: BaseException | None = None, **fields: Any) -> None:
     """The unified, allowlisted diagnostic writer is never a business dependency."""
     try:
         from deep_agent.diagnostics import emit
 
         if event == "agent_run_completed" and fields.get("status") == "pending":
             event = "agent_run_pending"
-        level = "ERROR" if event.endswith("_failed") else "WARNING" if event.endswith("_retrying") else "INFO"
+        if level is None:
+            level = "ERROR" if event.endswith("_failed") else "WARNING" if event.endswith("_retrying") else "INFO"
+        if exception is not None:
+            fields["exception"] = exception
         emit(event, level=level, **fields)
     except Exception:
         pass

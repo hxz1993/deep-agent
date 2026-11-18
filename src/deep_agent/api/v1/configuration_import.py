@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 
 from deep_agent.agent.headers import extract_forward_headers
 from deep_agent.agent_service.service import task_store
@@ -229,12 +229,8 @@ async def import_configuration(
                                 "Skill runtime requires retry after restart: "
                                 f"{payload.code}"
                             )
-                except Exception as exc:
-                    logger.warning(
-                        "Configuration import runtime reconciliation failed "
-                        "error_type={}",
-                        type(exc).__name__,
-                    )
+                except Exception:
+                    logger.opt(exception=True).warning("Configuration import runtime reconciliation failed")
                     for payload in result.plan.skills:
                         warnings.append(
                             f"Skill runtime requires retry after restart: {payload.code}"
@@ -260,10 +256,7 @@ async def import_configuration(
                 detail=str(exc),
             ) from exc
         except ConfigurationImportFileStoreError as exc:
-            logger.warning(
-                "Configuration import Skill upload failed error_type={}",
-                type(exc.__cause__).__name__ if exc.__cause__ else type(exc).__name__,
-            )
+            logger.opt(exception=True).warning("Configuration import Skill upload failed")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=str(exc),

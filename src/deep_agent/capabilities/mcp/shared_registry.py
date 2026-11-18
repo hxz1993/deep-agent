@@ -337,12 +337,6 @@ class McpSharedRegistry:
                 )
                 return str(new_record["url"])
         except Timeout:
-            logger.warning(
-                "MCP ensure_server {!r} timed out acquiring shared lock after {:.2f}s at {}",
-                server_name,
-                time.monotonic() - pre_lock_wait,
-                lock_path,
-            )
             raise TimeoutError(
                 f"Timed out acquiring MCP shared lock for {server_name!r} ({lock_path})"
             )

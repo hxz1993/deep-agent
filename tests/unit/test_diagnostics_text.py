@@ -46,6 +46,42 @@ class DiagnosticsTextTests(unittest.TestCase):
         self.assertIn("命名空间 test", record["message"])
         self.assertNotIn("target_origin", safe_fields({"target_origin": "https://u:secret@host/private?token=secret"}))
 
+    def test_stdlib_exception_bridge_never_formats_messages_or_locals(self):
+        import logging
+        from loguru import logger
+        from deepfos_platform.log import InterceptHandler
+
+        writer = logging.Logger("test.cross_component")
+        writer.addHandler(InterceptHandler())
+        messages = []
+        sink = logger.add(lambda message: messages.append(str(message)), diagnose=True, backtrace=True)
+        try:
+            credential = "NEVER_LOG_PRIVATE_LOCAL"
+            try:
+                raise ValueError("NEVER_LOG_PRIVATE_RESPONSE")
+            except ValueError:
+                try:
+                    raise OSError(f"NEVER_LOG_PRIVATE_MESSAGE {credential}") from None
+                except OSError as error:
+                    try:
+                        raise ExceptionGroup("NEVER_LOG_GROUP", [error]) from None
+                    except ExceptionGroup:
+                        writer.warning("Cross-component call failed", exc_info=True)
+        finally:
+            logger.remove(sink)
+        message, = messages
+        self.assertIn("error_stack=ExceptionGroup@", message)
+        self.assertIn("OSError@", message)
+        self.assertIn("ValueError@", message)
+        self.assertIn("test_diagnostics_text.py:", message)
+        self.assertNotIn("NEVER_LOG", message)
+
+    def test_exception_stack_is_validated_again_when_read(self):
+        for supplied in ("Bearer private-token", "ValueError\nprivate payload", "ValueError@" + "x" * 3000):
+            with self.subTest(supplied=supplied):
+                record = parse_record(format_record(self.payload("remote_agent_operation", error_stack=supplied)))
+                self.assertNotIn("error_stack", record)
+
     def test_special_characters_are_reversible_and_cannot_inject_columns(self):
         original = "中文 | key=a=b\nsecond\r\n\\pipe\\|"
         self.assertEqual(unescape(escape(original)), original)

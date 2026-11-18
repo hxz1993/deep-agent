@@ -122,14 +122,12 @@ def retry(
     if isinstance(wait, int):
         wait = Wait(wait, "fixed")
 
-    def record_retry(retried, at):
+    def record_retry(retried, at, error):
         if retried > 0 and fix is not None and callable(fix):
             fix()
         retried += 1
-        logger.exception(
-            f"Func: '{name or func.__qualname__}' failed. "
-            f"Start {retried} times retry in {at} secs."
-        )
+        logger.warning("Retrying {} after {} (retry {}/{}, wait={}s)",
+                       name or func.__qualname__, type(error).__name__, retried, retries, at)
         return retried
 
     if asyncio.iscoroutinefunction(func):
@@ -147,7 +145,7 @@ def retry(
                             on_error(*args, catches=e)
                         break
                     after = next(waits)
-                    retried = record_retry(retried, after)
+                    retried = record_retry(retried, after, e)
                     await asyncio.sleep(after)
     else:
         def run_func(*args, **kwargs):
@@ -164,7 +162,7 @@ def retry(
                             on_error(*args, catches=e)
                         break
                     after = next(waits)
-                    retried = record_retry(retried, after)
+                    retried = record_retry(retried, after, e)
                     time.sleep(after)
 
     return functools.wraps(func)(run_func)

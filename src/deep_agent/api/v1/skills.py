@@ -14,7 +14,7 @@ from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 from starlette.responses import Response
 
 from deep_agent.agent.headers import extract_forward_headers
@@ -238,12 +238,11 @@ async def _best_effort_delete(
 ) -> None:
     try:
         await store.delete(file_id, headers)
-    except Exception as exc:
-        logger.warning(
-            "Orphan platform Skill file cleanup failed context={} file_id={} error_type={}",
+    except Exception:
+        logger.opt(exception=True).warning(
+            "Orphan platform Skill file cleanup failed context={} file_id={}",
             context,
             file_id,
-            type(exc).__name__,
         )
 
 
@@ -461,12 +460,9 @@ async def replace_skill_package(
                     current,
                     request_headers=request_headers,
                 )
-            except Exception as exc:  # noqa: BLE001 - explicit replacement repairs a missing source file
-                logger.warning(
-                    "Skill same-hash replacement will repair platform source "
-                    "code={} error_type={}",
-                    code,
-                    type(exc).__name__,
+            except Exception:  # noqa: BLE001 - explicit replacement repairs a missing source file
+                logger.opt(exception=True).warning(
+                    "Skill same-hash replacement will repair platform source code={}", code,
                 )
             else:
                 current, _ = await _materialize_current(

@@ -147,7 +147,7 @@ async def check_connection(ctx: AppContextDep, connection_id: str, body: Connect
         raise HTTPException(409, "接口候选已变更，请重新检查")
     interface = None
     started = monotonic()
-    error_type = None
+    failure = None
     try:
         async with asyncio.timeout(30):
             inspection = await (await runtime.adapter(row)).inspect()
@@ -164,11 +164,11 @@ async def check_connection(ctx: AppContextDep, connection_id: str, body: Connect
             else:
                 inspection = {**inspection, "status": "approval_required", "proposed_interface": proposed}
     except (RemoteAgentError, TimeoutError) as error:
-        error_type = type(error).__name__
+        failure = error
         inspection = {"status": "failed", "message": str(error) if isinstance(error, RemoteAgentError) else "连接检查超时"}
-    emit("remote_agent_operation", level="WARNING" if error_type else "INFO",
+    emit("remote_agent_operation", level="WARNING" if failure is not None else "INFO",
          connection_id=row.id, protocol=row.config.get("protocol"), phase="inspect",
-         status=inspection["status"], error_type=error_type,
+         status=inspection["status"], exception=failure,
          duration_ms=round((monotonic() - started) * 1000))
     try:
         updated = await runtime.connections.inspection(row, inspection, interface)

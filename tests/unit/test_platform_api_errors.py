@@ -9,12 +9,14 @@ from unittest.mock import AsyncMock, patch
 from aiohttp import ClientResponse
 from aiohttp.client_reqrep import RequestInfo as HttpRequestInfo
 from aiohttp.helpers import TimerNoop
+from loguru import logger
 from multidict import CIMultiDict, CIMultiDictProxy
 from yarl import URL
 
 from deepfos_platform.client.base import BaseAPI, ContentType, RequestInfo, Route
 from deepfos_platform.errors.classes import (
     APIHttpCodeNotOK,
+    APICallError,
     APIResponseParseError,
     APIStatusCodeError,
     APIStatusNotTrue,
@@ -123,14 +125,58 @@ class PlatformAPIErrorTests(unittest.IsolatedAsyncioTestCase):
             (200, '{"status":false,"message":"private-native-message"}'),
             (200, "private-invalid-json"),
         ):
-            with self.subTest(status=status, body=body):
-                with patch("deepfos_platform.client.base.logger.warning") as warning:
+            with self.subTest(status=status):
+                messages = []
+                sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+                try:
                     try:
                         await self.check(self.response(status, body))
                     except (APIStatusCodeError, APIResponseParseError):
                         pass
-                self.assertTrue(warning.called)
-                self.assertNotIn("private-", str(warning.call_args_list))
+                finally:
+                    logger.remove(sink)
+                if body == "private-invalid-json":
+                    self.assertEqual(len(messages), 1)
+                    self.assertIn("error_stack=JSONDecodeError", messages[0])
+                    self.assertNotIn("private-", messages[0])
+                else:
+                    self.assertEqual(messages, [])
+
+    async def test_platform_retry_keeps_request_and_only_logs_safe_attempt_metadata(self):
+        route = Route("post")
+        route.wait = (0,)
+
+        @route("/api/file/upload", retries=1)
+        def upload(ins):
+            return {"body": {"data": "NEVER_LOG_BODY"}}
+
+        client = BaseAPI(header={"Authorization": "Bearer NEVER_LOG_TOKEN", "Content-Type": "application/json; charset=utf-8"})
+        client.get_base_url = AsyncMock(return_value=(None, None, "http://platform.invalid"))
+        messages = []
+        sink = logger.add(lambda message: messages.append(str(message)), level="INFO")
+        try:
+            for succeeds in (True, False):
+                messages.clear()
+                outcome = self.response(200, '{"status":true,"data":{"ok":true}}') if succeeds else OSError("NEVER_LOG_SECOND_ERROR")
+                with patch("deepfos_platform.client.base.ServiceDiscovery.instantiate"), patch(
+                    "deepfos_platform.client.base.AioHttpCli.post", AsyncMock(side_effect=[
+                        OSError("NEVER_LOG_FIRST_ERROR"), outcome,
+                    ])
+                ) as transport:
+                    if succeeds:
+                        self.assertEqual(await upload(client), {"ok": True})
+                    else:
+                        with self.assertRaises(APICallError):
+                            await upload(client)
+                    self.assertEqual(transport.await_count, 2)
+                    self.assertEqual(transport.await_args.kwargs["json"], {"data": "NEVER_LOG_BODY"})
+                    self.assertEqual(transport.await_args.kwargs["headers"]["Authorization"], "Bearer NEVER_LOG_TOKEN")
+                self.assertEqual(len(messages), 1)
+                self.assertIn("retry 1/1", messages[0])
+                self.assertNotIn("NEVER_LOG", messages[0])
+                self.assertNotIn("error_stack", messages[0])
+        finally:
+            logger.remove(sink)
 
     async def test_plain_text_http_error_keeps_bounded_native_message(self):
         for message in ("Unsupported file type: HTML", "x" * 5000):

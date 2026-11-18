@@ -118,11 +118,11 @@ async def channel_webhook(account_id: str, request: Request, ctx: AppContextDep)
         emit("webhook_rejected", error_code="message_or_configuration_conflict", http_status=409)
         response = JSONResponse({"code": "message_or_configuration_conflict", "request_id": request_id}, status_code=409)
     except (TimeoutError, ChannelGatewayUnavailableError) as exc:
-        emit("webhook_failed", error_code="receive_unavailable", error_type=type(exc).__name__)
+        emit("webhook_failed", error_code="receive_unavailable", exception=exc)
         response = JSONResponse({"code": "receive_unavailable", "request_id": request_id}, status_code=503)
     except Exception as exc:
         # Exception text can include request URLs, XML and credentials.
-        emit("webhook_failed", error_code="internal_error", error_type=type(exc).__name__)
+        emit("webhook_failed", error_code="internal_error", exception=exc)
         response = JSONResponse({"code": "internal_error", "request_id": request_id}, status_code=503)
     finally:
         if acquired:

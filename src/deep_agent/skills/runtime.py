@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 from pydantic_ai.capabilities import AbstractCapability, Capability, CombinedCapability
 from pydantic_ai.workspaces import LocalWorkspaceBackend
 from pydantic_ai_harness.skills import Skills
@@ -429,11 +429,10 @@ class SkillRuntimeLibrary:
                         status=RUNTIME_ERROR,
                         error_code=error_code,
                     )
-                logger.warning(
-                    "Skill runtime sync failed code={} error_code={} error_type={}",
+                logger.opt(exception=True).warning(
+                    "Skill runtime sync failed code={} error_code={}",
                     row.code,
                     error_code,
-                    type(exc).__name__,
                 )
                 return SkillRuntimeState(
                     code=row.code,

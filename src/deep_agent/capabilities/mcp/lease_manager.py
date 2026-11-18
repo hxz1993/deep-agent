@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 
 from deep_agent.capabilities.mcp.errors import is_recoverable_mcp_disconnect
 from deep_agent.capabilities.mcp.shared_registry import McpSharedRegistry
@@ -62,11 +62,10 @@ class McpLeaseManager:
                 factory,
                 connect_url=connect_url,
             )
-            logger.info(
-                "Connected MCP client for {!r} session {!r} at {}",
+            logger.debug(
+                "Connected MCP client for {!r} session {!r}",
                 server_name,
                 session_id,
-                connect_url,
             )
             yield toolset
         except Exception:
@@ -102,13 +101,9 @@ class McpLeaseManager:
             except TimeoutError:
                 elapsed = time.monotonic() - t0
                 if attempt >= max_retries:
-                    logger.warning(
-                        "MCP ensure_server exhausted retries for {!r} "
-                        "session={!r} attempts={} last_attempt={:.2f}s",
-                        server_name,
-                        session_id,
-                        max_retries + 1,
-                        elapsed,
+                    logger.debug(
+                        "MCP ensure_server exhausted retries for {!r} session={!r} attempts={} last_attempt={:.2f}s",
+                        server_name, session_id, max_retries + 1, elapsed,
                     )
                     raise
                 logger.warning(
@@ -127,13 +122,12 @@ class McpLeaseManager:
             elapsed = time.monotonic() - t0
             if elapsed >= _ENSURE_SERVER_SLOW_THRESHOLD_SECONDS or attempt > 0:
                 logger.info(
-                    "MCP ensure_server {!r} session={!r} attempt={}/{} took {:.2f}s url={}",
+                    "MCP ensure_server {!r} session={!r} attempt={}/{} took {:.2f}s",
                     server_name,
                     session_id,
                     attempt + 1,
                     max_retries + 1,
                     elapsed,
-                    url,
                 )
             return url
 
@@ -166,7 +160,7 @@ class McpLeaseManager:
                     session_id,
                     attempt + 1,
                     max_retries + 1,
-                    exc,
+                    type(exc).__name__,
                 )
                 await asyncio.sleep(_ACQUIRE_RETRY_DELAY_SECONDS)
                 continue
@@ -201,7 +195,7 @@ class McpLeaseManager:
                 session_id,
             )
         else:
-            logger.info(
+            logger.debug(
                 "Closed MCP client for {!r} session {!r}",
                 server_name,
                 session_id,

@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, MetaData, Table, func, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
@@ -735,12 +735,8 @@ async def _delete_uploaded_skills(
     for item in reversed(uploaded):
         try:
             await file_store.delete(item.stored.id, request_headers)
-        except Exception as exc:
-            logger.warning(
-                "Configuration import Skill cleanup failed code={} error_type={}",
-                item.code,
-                type(exc).__name__,
-            )
+        except Exception:
+            logger.opt(exception=True).warning("Configuration import Skill cleanup failed code={}", item.code)
             continue
 
 

@@ -8,7 +8,7 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
-from loguru import logger
+from deepfos_platform.log import safe_logger as logger
 
 from deep_agent.capabilities.mcp.toolset_builder import (
     build_raw_url_mcp_toolset,
@@ -253,11 +253,7 @@ async def _inspect_builtin_mcp_server(
                 resources=resources,
             )
     except Exception as exc:
-        logger.warning(
-            "Builtin MCP catalog refresh failed for {!r} ({})",
-            row.name,
-            type(exc).__name__,
-        )
+        logger.opt(exception=True).warning("Builtin MCP catalog refresh failed for {!r}", row.name)
         current = previous.model_copy(
             update={
                 "status": "not_applicable",
@@ -313,11 +309,7 @@ async def inspect_mcp_server(
     except Exception as exc:
         if http_client is not None:
             await http_client.aclose()
-        logger.warning(
-            "MCP inspection client build failed for {!r} ({})",
-            row.name,
-            type(exc).__name__,
-        )
+        logger.opt(exception=True).warning("MCP inspection client build failed for {!r}", row.name)
         current = McpInspection(
             status="unreachable",
             checked_at=_utcnow(),
@@ -418,11 +410,7 @@ async def inspect_mcp_server(
                     error=None,
                 )
         except Exception as exc:
-            logger.warning(
-                "MCP inspection failed for {!r} ({})",
-                row.name,
-                type(exc).__name__,
-            )
+            logger.opt(exception=True).warning("MCP inspection failed for {!r}", row.name)
             error = _safe_error("initialize", exc)
             return McpInspection(
                 status="unreachable",

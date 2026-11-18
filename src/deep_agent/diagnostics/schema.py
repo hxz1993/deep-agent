@@ -7,6 +7,8 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+from deepfos_platform.log import is_exception_stack
+
 from .messages import describe
 
 EVENTS = {
@@ -165,6 +167,14 @@ PERSISTENCE_NUMBER_FIELDS = frozenset({
     "message_identity_merges", "response_id_mismatches",
 })
 PERSISTENCE_TIMING_FIELDS = frozenset({"lock_wait_ms", "assemble_ms", "transaction_ms", "publish_ms"})
+EXCEPTION_EVENTS = frozenset({
+    "channel_registration_failed", "diagnostic_users_failed", "diagnostic_users_fallback",
+    "published_agent_access_failed", "remote_agent_operation", "wecom_profile_failed",
+    "webhook_bridge_failed", "webhook_failed",
+    "channel_adapter_start_failed", "channel_delivery_failed", "channel_identity_unavailable",
+    "channel_processing_failed",
+    "channel_preview_failed", "document_parse_failed", "title_generation_failed",
+})
 
 
 def _persistence_fields(fields: dict, result: dict) -> None:
@@ -286,6 +296,7 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     # record. Limit each specialized event's entire scalar set as well: adding
     # its fields to every base fact can exceed the wire limit before any prose
     # or tool names are included, and trimming those cannot recover the record.
+    stack = fields.get("error_stack")
     adapting = event == "document_adaptation_completed"
     layout = event in LAYOUT_EVENTS
     bundle = event in BUNDLE_EVENTS
@@ -300,6 +311,8 @@ def safe_fields(fields: dict, *, event: str | None = None) -> dict:
     elif bundle:
         fields = {key: value for key, value in fields.items() if key in BUNDLE_FIELDS}
     result = {}
+    if event in EXCEPTION_EVENTS and is_exception_stack(stack):
+        result["error_stack"] = stack
     for name in BOOLEAN_FIELDS:
         if type(fields.get(name)) is bool:
             result[name] = fields[name]

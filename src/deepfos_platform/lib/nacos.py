@@ -40,7 +40,6 @@ class JsonResponse(ResponseChecker):
         try:
             return json.loads(response)
         except (TypeError, ValueError):
-            logger.exception(f'Call Nacos api {endpoint} returned invalid JSON.')
             raise APIResponseParseError(endpoint) from None
 
 
@@ -92,12 +91,12 @@ class Route:
                             response.release()
                         url_cache.reward(base_url)
                         break
-                    except ClientError:
+                    except ClientError as error:
                         url_cache.punish(base_url)
                         if is_last_url:
-                            logger.warning('Request of all Nacos urls failed.')
                             raise
-                        logger.warning(f'Nacos connection failed, trying next url.')
+                        logger.warning("Trying next Nacos endpoint for {} after {} (attempt {}/{})",
+                                       func.__name__, type(error).__name__, index + 1, len(bases))
 
                 if response_checker is not None:
                     ok, result = response_checker.validate(text, endpoint)

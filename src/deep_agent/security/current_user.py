@@ -10,7 +10,6 @@ from urllib.parse import urlsplit
 
 import aiohttp
 from fastapi import Request
-from loguru import logger
 
 from deepfos_platform.discovery import ServiceDiscovery
 from deepfos_platform.discovery.target import normalize_service_target
@@ -40,6 +39,8 @@ class CurrentUserAuthenticationError(RuntimeError):
 
 class CurrentUserUnavailableError(RuntimeError):
     """The platform could not return a valid current-user profile."""
+
+    http_status: int | None = None
 
 
 @dataclass(frozen=True)
@@ -211,12 +212,11 @@ class PlatformCurrentUserFetcher:
         if status_code == 401:
             raise CurrentUserAuthenticationError("platform login has expired")
         if not 200 <= status_code < 300:
-            logger.warning(
-                f"current-user profile returned HTTP {status_code}, url: [{url}]"
-            )
-            raise CurrentUserUnavailableError(
+            error = CurrentUserUnavailableError(
                 f"current-user profile returned HTTP {status_code}"
             )
+            error.http_status = status_code
+            raise error
 
         try:
             payload = _profile_payload(json.loads(body))

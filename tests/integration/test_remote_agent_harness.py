@@ -5,7 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
@@ -109,7 +109,9 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
                 await release.wait()
                 raise RemoteAgentError("无法读取附件")
 
-            with patch.object(runtime, "_inputs", side_effect=input_error), patch("deep_agent.remote_agents.runtime.emit") as log:
+            with patch.object(runtime, "_inputs", side_effect=input_error), patch(
+                "deep_agent.diagnostics.runtime._runtime", Mock()
+            ) as log:
                 first = await client.post(url + "/debug", json={"file_ids": ["inaccessible"]})
                 self.assertEqual(first.status_code, 200, first.text)
                 self.assertEqual(first.json()["status"], "submitted")
@@ -128,9 +130,14 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
                 result = await client.post(url + "/debug", json={"action": "refresh", "invocation_id": invocation_id})
                 self.assertEqual((result.json()["status"], result.json()["text"]), ("failed", "无法读取附件"))
                 self.assertEqual((await client.get(api + "/recent")).json(), [])
-                failure = log.call_args.kwargs
+                failure, = [
+                    record.kwargs for record in log.emit.call_args_list
+                    if record.args == ("remote_agent_operation",) and record.kwargs.get("status") == "failed"
+                ]
                 self.assertEqual((failure["phase"], failure["status"], failure["reason"], failure["error_type"]),
                                  ("start", "failed", "preparation_failed", "RemoteAgentError"))
+                self.assertEqual(failure["task_id"], invocation_id)
+                self.assertIn("test_remote_agent_harness.py:", failure["error_stack"])
                 self.assertNotIn("无法读取附件", str(failure))
 
     async def test_recent_calls_list_all_apps_for_the_current_user(self):
@@ -214,7 +221,7 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(runtime.debug_entries[key].summary()["files"], first["files"] + updated["files"])
 
     async def test_harness_keeps_two_questions_and_exports_files_in_normal_chat(self):
-        diagnostic_log = self.enterContext(patch("deep_agent.remote_agents.runtime.emit"))
+        diagnostic_log = self.enterContext(patch("deep_agent.diagnostics.runtime._runtime", Mock()))
         temporary = self.enterContext(tempfile.TemporaryDirectory(prefix="TMP_to_delete_remote_harness_"))
         files = LocalFileStore(Path(temporary) / "files")
         await files.initialize()
@@ -496,7 +503,8 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
             lookup_page = project_session_events(lookup_events)
             visible = next(item for item in lookup_page.items if item.kind == "tool" and item.tool_name == "remote_task_result")
             self.assertIn(recovered_id, [file.file_id for file in visible.artifacts])
-            records = [event.kwargs for event in diagnostic_log.call_args_list]
+            records = [event.kwargs for event in diagnostic_log.emit.call_args_list
+                       if event.args == ("remote_agent_operation",)]
             self.assertTrue({("start", "completed"), ("answer", "input_required"), ("resume", "completed"),
                              ("cancel", "canceled")} <= {(event["phase"], event["status"]) for event in records})
             uploads = [event for event in records if event["phase"] == "artifact_upload"]
@@ -504,6 +512,7 @@ class HarnessRemoteAgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((uploads[0]["task_id"], uploads[0]["connection_id"], uploads[0]["reason"],
                               uploads[0]["error_type"], uploads[0]["artifact_count"]),
                              (partial.id, connection.id, "upload_failed", "FileStoreError", 1))
+            self.assertIn("FileStoreError@", uploads[0]["error_stack"])
             self.assertFalse(any(event["phase"] == "refresh" and event["status"] == "started" for event in records))
             self.assertNotIn("retry.csv", str(records))
             self.assertNotIn("simulated transient", str(records))

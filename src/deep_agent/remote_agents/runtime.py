@@ -57,12 +57,13 @@ class RequestScope:
         )
 
 
-def _log_operation(entry, request, phase, status, started, *, reason=None, error_type=None, artifact_count=None):
-    emit("remote_agent_operation", level="WARNING" if status in {"failed", "unknown"} else "INFO",
+def _log_operation(entry, request, phase, status, started, *, reason=None, exception=None, artifact_count=None):
+    level = {"failed": "WARNING", "unknown": "WARNING", "started": "DEBUG"}.get(status, "INFO")
+    emit("remote_agent_operation", level=level,
          task_id=entry.id, connection_id=entry.connection_id, protocol=entry.protocol,
          agent_id=request.agent_id, session_id=request.session_id, run_id=request.run_id,
          phase=phase, status=status, duration_ms=round((monotonic() - started) * 1000),
-         reason=reason, error_type=error_type, artifact_count=artifact_count)
+         reason=reason, exception=exception, artifact_count=artifact_count)
 
 
 @contextmanager
@@ -78,13 +79,13 @@ def _observe_operation(entry, request, phase):
         _log_operation(entry, request, phase, "interrupted", started)
         raise
     except Exception as error:
-        _log_operation(entry, request, phase, "failed", started, reason=failure["stage"], error_type=type(error).__name__)
+        _log_operation(entry, request, phase, "failed", started, reason=failure["stage"], exception=error)
         raise
     else:
         status = entry.state.status
-        if phase != "refresh" or status != previous or "error_type" in failure:
+        if phase != "refresh" or status != previous or "exception" in failure:
             _log_operation(entry, request, phase, status, started, artifact_count=len(entry.result_files()),
-                           reason=failure.get("reason"), error_type=failure.get("error_type"))
+                           reason=failure.get("reason"), exception=failure.get("exception"))
 
 
 class RecentInvocations:
@@ -217,7 +218,7 @@ class RemoteAgentRuntime:
         settings = await load_upload_settings(self.ctx.stores.global_setting) if result.files else None
         upload_started = monotonic()
         upload_failures = 0
-        upload_error_type = None
+        upload_error = None
         for output in result.files:
             if output.key in entry.files:
                 continue
@@ -229,7 +230,7 @@ class RemoteAgentRuntime:
                     file_name=output.name, mime=output.mime, data=output.data, request_headers=request.headers)
             except Exception as error:
                 upload_failures += 1
-                upload_error_type = type(error).__name__
+                upload_error = error
                 warnings.append("部分远程产物上传失败，可重新获取")
                 continue
             remaining -= len(output.data)
@@ -243,7 +244,7 @@ class RemoteAgentRuntime:
             current_files.append(file)
         if upload_failures:
             _log_operation(entry, request, "artifact_upload", "failed", upload_started, reason="upload_failed",
-                           error_type=upload_error_type, artifact_count=upload_failures)
+                           exception=upload_error, artifact_count=upload_failures)
         notices = tuple(dict.fromkeys(warnings))
         if (state, text, notices) != (entry.state, entry.text, entry.warnings):
             await self._save(entry, state=state, text=text, warnings=notices)
@@ -288,10 +289,10 @@ class RemoteAgentRuntime:
             try:
                 result = await adapter.run(previous, message, files, mode, checkpoint, message_id=message_id)
             except RemoteAgentError as error:
-                failure.update(reason="adapter_failed", error_type=type(error).__name__)
+                failure.update(reason="adapter_failed", exception=error)
                 result = RemoteResult(entry.state.model_copy(update={"status": error.status}), str(error))
-            except TimeoutError:
-                failure.update(reason="adapter_timeout", error_type="TimeoutError")
+            except TimeoutError as error:
+                failure.update(reason="adapter_timeout", exception=error)
                 result = RemoteResult(entry.state.model_copy(update={"status": "unknown"}), "远程调用超时，请查询原任务状态")
             failure["stage"] = "result_save_failed"
             return await self._complete(entry, request, result)
@@ -325,7 +326,7 @@ class RemoteAgentRuntime:
             try:
                 result = await adapter.refresh(entry.state, checkpoint)
             except RemoteTaskExpired as error:
-                failure.update(reason="task_expired", error_type=type(error).__name__)
+                failure.update(reason="task_expired", exception=error)
                 result = RemoteResult(entry.state.model_copy(update={"status": "failed", "question_id": None}), str(error))
             failure["stage"] = "result_save_failed"
             return await self._complete(entry, request, result)

@@ -24,6 +24,7 @@ from sqlalchemy import event as sql_event
 from deep_agent.agent.context.compaction import DeepAgentContextCompaction, summary_contents
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.agent.runner import AgentRunner
+from deep_agent.agent.title_generator import TitleGenerationResult
 from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.api.v1 import api_router
 from deep_agent.api.v1.sessions import observe_session_run
@@ -320,6 +321,7 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_deferred_ui_observer_waits_for_pending_and_explicit_resume(self):
         ready, release = asyncio.Event(), asyncio.Event()
         calls = 0
+        release_title = asyncio.Event()
 
         async def stream(messages, info):
             nonlocal calls
@@ -333,6 +335,10 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             else:
                 yield "RESUMED_ONCE"
 
+        async def generate_title(**kwargs):
+            await release_title.wait()
+            return TitleGenerationResult("Confirmation title", False)
+
         runner = AgentRunner(
             Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps,
                   toolsets=[build_external_toolset(builtin_ui_records())]),
@@ -340,7 +346,7 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             ui_tool_hints={"builtin__confirm": {"widget": "confirm"}},
         )
         with patch("deep_agent.api.v1.chat.build_runner_for_agent", new=AsyncMock(return_value=runner)) as build, \
-             patch.object(AgentRunner, "_generate_model_title", new_callable=AsyncMock):
+             patch("deep_agent.agent.title_generator.generate_title", side_effect=generate_title):
             producer = self._request("/api/v1/chat/stream", method="POST", body={
                 "agent_id": self.agent_id, "session_id": self.session, "message": "synthetic UI test"})
             self.assertEqual((await producer.started())["status"], 200)
@@ -355,6 +361,18 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(calls, 1)
             build.assert_awaited_once()
             release.set()
+            # Ensure the pending tool call is already persisted while the title
+            # is delayed. The producer must publish the title before the card.
+            try:
+                async with asyncio.timeout(5):
+                    while True:
+                        kind, data = await producer.frame()
+                        self.assertNotIn(kind, {"tool_call", "final"})
+                        if (kind == "session_event_appended" and data["event"]["event_type"] == "assistant/message"
+                                and data["event"]["status"] == "pending"):
+                            break
+            finally:
+                release_title.set()
             frames = await observer.until("observation_end")
             observed = [data for kind, data in frames if kind == "observation"]
             ui_calls = [data for data in observed if data["event"] == "tool_call"]
@@ -362,6 +380,8 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ui_calls[0]["data"]["tool_call_id"], "confirm-once")
             final = next(data for data in observed if data["event"] == "final")
             self.assertEqual(final["data"]["status"], "pending")
+            model_title = next(d for d in observed if d["event"] == "session_title" and d["data"]["source"] == "model")
+            self.assertLess(observed.index(model_title), observed.index(ui_calls[0]))
             self.assertLess(observed.index(ui_calls[0]), observed.index(final))
             self.assertEqual(frames[-1], ("observation_end", {"run_id": run_id}))
             await asyncio.wait_for(producer.task, 5)

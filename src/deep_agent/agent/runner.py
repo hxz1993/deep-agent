@@ -111,7 +111,7 @@ from deep_agent.capabilities.display_names import (
 )
 from loguru import logger
 
-from deep_agent.db.conversation import SessionStore, _common_message_suffix
+from deep_agent.db.conversation import AutomaticTitleFallback, SessionEventSnapshot, SessionStore, _common_message_suffix
 from deep_agent.time import utc_rfc3339
 from deep_agent.db.serialization import serialize_message
 from deep_agent.schemas.attachment import AttachmentRef
@@ -195,7 +195,7 @@ class _PreparedHistory:
     projected: list[ModelMessage]
     raw: list[ModelMessage]
     pre_persisted_user: bool
-    user_event_id: str | None = None
+    fallback_title: SessionEventSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -1003,13 +1003,22 @@ class AgentRunner:
             if repaired is not history:
                 history = repaired
         pre_persisted_user = False
-        user_event_id: str | None = None
+        title_fallback: SessionEventSnapshot | None = None
         if has_user_turn(message, attachments, context_refs):
             content = refs_from_attachments(message, attachments, context_refs)
             user_request = ModelRequest(
                 parts=[UserPromptPart(content=content)],
                 metadata={'reasoning_effort': self._reasoning_effort} if self._reasoning_effort else None,
             )
+            automatic_title = None
+            if session_title is None:
+                from deep_agent.agent.title_generator import fallback_title
+
+                automatic_title = AutomaticTitleFallback(
+                    fallback_title(message, context_refs, attachments),
+                    attachment_count=len(attachments or ()),
+                    context_count=len(context_refs or ()),
+                )
             rows = await self.store.append(
                 session_id,
                 [user_request],
@@ -1019,9 +1028,14 @@ class AgentRunner:
                 space_id=deps.space_id,
                 turn_id=deps.turn_id,
                 run_id=deps.run_id,
+                automatic_title=automatic_title,
             )
-            if session_event_queue is not None:
-                for row in rows:
+            for row in rows:
+                if row.event_type == "session/title":
+                    title_fallback = row
+                    if session_event_queue is not None:
+                        self._publish_title_events(session_event_queue, row)
+                elif session_event_queue is not None:
                     session_event_queue.put_nowait(
                         {
                             "type": "session_event_appended",
@@ -1029,12 +1043,10 @@ class AgentRunner:
                             "event": row.public_dict(),
                         }
                     )
-            if rows:
-                user_event_id = rows[0].event_id
-            if user_event_id is not None and session_title is not None:
+            if rows and session_title is not None:
                 title_event = await self.store.apply_initial_session_title(
                     session_id, agent_id=deps.agent_id, user_id=deps.user,
-                    title=session_title, source_event_id=user_event_id,
+                    title=session_title, source_event_id=rows[0].event_id,
                     turn_id=deps.turn_id, run_id=deps.run_id,
                 )
                 if title_event is not None and session_event_queue is not None:
@@ -1053,7 +1065,7 @@ class AgentRunner:
             projected=history,
             raw=raw_history,
             pre_persisted_user=pre_persisted_user,
-            user_event_id=user_event_id,
+            fallback_title=title_fallback,
         )
 
     def _context_status(
@@ -1661,7 +1673,7 @@ class AgentRunner:
         )
 
 
-    async def _start_title_generation(
+    def _start_title_generation(
         self,
         session_id: str,
         deps: AgentDeps,
@@ -1672,44 +1684,14 @@ class AgentRunner:
         context_refs: list[ContextReference] | None,
         session_event_queue: asyncio.Queue[dict[str, Any]] | None = None,
     ) -> asyncio.Task[None] | None:
-        """Persist the fallback once, then start one independent model request."""
-
-        if prepared.user_event_id is None:
+        """Run title generation alongside the main model request."""
+        if prepared.fallback_title is None:
             return None
-        from deep_agent.agent.title_generator import fallback_title
-
-        details = {
-            "context_count": len(context_refs or ()),
-            "attachment_count": len(attachments or ()),
-            "image_used": False,
-        }
-        try:
-            fallback = await self.store.ensure_title_fallback(
-                session_id,
-                agent_id=deps.agent_id,
-                user_id=deps.user,
-                title=fallback_title(message, context_refs, attachments),
-                source_event_id=prepared.user_event_id,
-                turn_id=deps.turn_id,
-                run_id=deps.run_id,
-                details=details,
-            )
-        except Exception as exc:  # noqa: BLE001 - title must never fail the chat run
-            logger.warning(
-                "Fallback title persistence failed for session {}: {}",
-                session_id,
-                type(exc).__name__,
-            )
-            return None
-        if fallback is None:
-            return None
-        if session_event_queue is not None:
-            self._publish_title_events(session_event_queue, fallback)
         return asyncio.create_task(
             self._generate_model_title(
                 session_id,
                 deps,
-                fallback_event=fallback,
+                fallback_event=prepared.fallback_title,
                 message=message,
                 attachments=attachments,
                 context_refs=context_refs,
@@ -1915,14 +1897,6 @@ class AgentRunner:
                     before_first_response=True,
                 )
                 raise
-            title_task = await self._start_title_generation(
-                session_id,
-                deps,
-                prepared,
-                message=message,
-                attachments=attachments,
-                context_refs=context_refs,
-            )
             self._bind_tool_output_store(deps, prepared.raw)
             try:
                 llm_history, user_prompt = await self._llm_inputs(
@@ -1949,7 +1923,6 @@ class AgentRunner:
                     error=type(exc).__name__, exception=exc,
                     before_first_response=True,
                 )
-                await self._cancel_title_task(title_task)
                 raise
             self._prepare_context_state(deps, prepared, model_history=llm_history)
             progress = (
@@ -1960,6 +1933,14 @@ class AgentRunner:
                 if callable(getattr(self.store, "append_message_parts", None)) else None
             )
             try:
+                title_task = self._start_title_generation(
+                    session_id,
+                    deps,
+                    prepared,
+                    message=message,
+                    attachments=attachments,
+                    context_refs=context_refs,
+                )
                 result = await self.agent.run(
                     user_prompt,
                     deps=deps,
@@ -2377,15 +2358,6 @@ class AgentRunner:
                     raise
                 yield events.error(format_stream_error(exc))
                 return
-            title_task = await self._start_title_generation(
-                session_id,
-                deps,
-                prepared,
-                message=message,
-                attachments=attachments,
-                context_refs=context_refs,
-                session_event_queue=session_events,
-            )
             self._bind_tool_output_store(deps, prepared.raw)
             try:
                 with observe_run_phase("prepare_model_input", **timing_ids):
@@ -2422,7 +2394,6 @@ class AgentRunner:
                     format_stream_error(exc),
                     history_persisted=prepared.pre_persisted_user,
                 )
-                await self._cancel_title_task(title_task)
                 return
             self._prepare_context_state(
                 deps,
@@ -2452,6 +2423,15 @@ class AgentRunner:
                         "Run cancelled before model start",
                         usage=RunUsage(),
                     )
+                title_task = self._start_title_generation(
+                    session_id,
+                    deps,
+                    prepared,
+                    message=message,
+                    attachments=attachments,
+                    context_refs=context_refs,
+                    session_event_queue=session_events,
+                )
                 model_history = llm_history
                 model_usage = RunUsage()
                 seen_sdk_phases: set[str] = set()
@@ -2565,6 +2545,12 @@ class AgentRunner:
                                     if event_type == "tool_result" and tool_call_id:
                                         buffered_call = buffered_ui_tool_calls.pop(tool_call_id, None)
                                         if buffered_call is not None:
+                                            if title_task is not None:
+                                                async with self._completion_step(deps, "title"):
+                                                    await title_task
+                                                title_task = None
+                                                while not session_events.empty():
+                                                    yield session_events.get_nowait()
                                             published_tool_calls[tool_call_id] = (
                                                 str(buffered_call.get("tool") or "tool"), buffered_call.get("source"),
                                             )
@@ -2657,6 +2643,7 @@ class AgentRunner:
                 await self._cancel_title_task(title_task)
                 raise
             except Exception as exc:  # noqa: BLE001 - surface as an SSE error event
+                await self._cancel_title_task(title_task)
                 logger.exception("Agent stream failed for session {}", session_id)
                 failure_diagnostic = _safe_run_failure(exc)
                 official_failed = stream_snapshot.new_messages
@@ -2742,7 +2729,6 @@ class AgentRunner:
                     format_stream_error(exc),
                     history_persisted=history_persisted,
                 )
-                await self._cancel_title_task(title_task)
                 return
             finally:
                 cancelled_run_event = None
@@ -2873,6 +2859,7 @@ class AgentRunner:
                 async with self._completion_step(deps, "optional_flush"):
                     await persister.flush(session_id, agent_id=deps.agent_id)
             except Exception as exc:
+                await self._cancel_title_task(title_task)
                 self._log_run_terminal(run_event, status="failed", started_at=started_at, error=exc, phase="persistence")
                 failed_run_event = await self._finish_run_event(
                     run_event,
@@ -2888,10 +2875,16 @@ class AgentRunner:
                         "event": failed_run_event.public_dict(),
                     }
                 yield events.error(f"会话事件持久化失败：{type(exc).__name__}")
-                await self._cancel_title_task(title_task)
                 return
             while not session_events.empty():
                 yield session_events.get_nowait()
+        if title_task is not None:
+            async with self._completion_step(deps, "title"):
+                await title_task
+            while not session_events.empty():
+                yield session_events.get_nowait()
+        # Actionable UI calls can be shown once the title and durable pending state are ready.
+        if result is not None:
             for buffered_call in buffered_ui_tool_calls.values():
                 tool_call_id = str(buffered_call.get("tool_call_id") or "")
                 tool_name = str(buffered_call.get("tool") or "tool")
@@ -2899,11 +2892,6 @@ class AgentRunner:
                     published_tool_calls[tool_call_id] = (tool_name, buffered_call.get("source"))
                 yield buffered_call
             buffered_ui_tool_calls.clear()
-        if title_task is not None:
-            async with self._completion_step(deps, "title"):
-                await title_task
-            while not session_events.empty():
-                yield session_events.get_nowait()
         committed_compaction = deps.context_state.committed_event if deps.context_state is not None else None
         compaction_event_saved: bool | None = (
             True if pre_saved_compaction_event is not None or committed_compaction is not None else None

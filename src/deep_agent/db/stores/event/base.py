@@ -162,8 +162,10 @@ class SessionEventStore(SessionBoundMixin):
         *, turn_id: str, run_id: str | None, first_message_ordinal: int = 0,
         now: datetime | None = None, terminal_status: str | None = None,
         usage_model_id: str | None = None, usage_provider_id: str | None = None,
+        session_locked: bool = False,
     ) -> list[ChatSessionEvent]:
-        session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
+        if not session_locked:
+            session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
         timestamp = now or datetime.now(timezone.utc)
         drafts = encode_messages(
             messages, session_id=session.session_id, run_id=run_id,
@@ -455,8 +457,10 @@ class SessionEventStore(SessionBoundMixin):
         now: datetime | None = None,
         usage: dict[str, Any] | None = None,
         usage_model_id: str | None = None,
+        session_locked: bool = False,
     ) -> ChatSessionEvent:
-        session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
+        if not session_locked:
+            session = await lock_reference(db, ChatSession, ChatSession.session_id, session.session_id, "Session")
         timestamp = now or datetime.now(timezone.utc)
         payload: dict[str, Any] = {
             "title": title,

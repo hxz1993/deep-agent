@@ -42,6 +42,13 @@ _MESSAGE_TERMINAL_STATUSES = {"completed", "pending", "cancelled", "failed", "in
 __all__ = ["SessionStore", "SqlConversationCoordinator", "SqlConversationStore"]
 
 
+@dataclass(frozen=True)
+class AutomaticTitleFallback:
+    title: str
+    attachment_count: int
+    context_count: int
+
+
 @dataclass
 class MessagePartWriteState:
     """Confirmed event rows belonging to one active Run."""
@@ -75,6 +82,7 @@ class SessionStore(Protocol):
         turn_id: str | None = None, run_id: str | None = None,
         first_message_ordinal: int = 0, terminal_status: str | None = None,
         usage_model_id: str | None = None, usage_provider_id: str | None = None,
+        automatic_title: AutomaticTitleFallback | None = None,
     ) -> list[SessionEventSnapshot]: ...
 
     async def append_message_parts(
@@ -225,6 +233,7 @@ class SqlConversationCoordinator:
         turn_id: str | None = None, run_id: str | None = None,
         first_message_ordinal: int = 0, terminal_status: str | None = None,
         usage_model_id: str | None = None, usage_provider_id: str | None = None,
+        automatic_title: AutomaticTitleFallback | None = None,
     ) -> list[SessionEventSnapshot]:
         if not messages and terminal_status is None:
             return []
@@ -232,11 +241,14 @@ class SqlConversationCoordinator:
             raise ValueError("Invalid Run terminal status")
         scope, user = self._required_identity(agent_id, user_id)
         async with self._write() as db:
-            existing_owner = await self._chat_sessions._get_owner(
-                db, scope, session_id, for_update=True
+            now = datetime.now(timezone.utc)
+            # _ensure locks the Agent and session and checks ownership before we
+            # read or append any message events in this transaction.
+            session = await self._chat_sessions._ensure(
+                db, session_id, agent_id=scope, user_id=user,
+                app_id=app_id, space_id=space_id,
+                initial_title=first_user_prompt(messages), now=now,
             )
-            if existing_owner.exists and existing_owner.user_id != user:
-                raise PermissionError("Session belongs to another user")
             creates_turn = any(
                 isinstance(message, ModelRequest)
                 and any(isinstance(part, UserPromptPart) for part in message.parts)
@@ -249,12 +261,7 @@ class SqlConversationCoordinator:
                 raise ValueError(
                     "Message Events require turn_id, or run_id for a new user turn"
                 )
-            now = datetime.now(timezone.utc)
-            title = first_user_prompt(messages) if not existing_owner.exists else None
-            session = await self._chat_sessions._ensure(
-                db, session_id, agent_id=scope, user_id=user,
-                app_id=app_id, space_id=space_id, title=title, now=now,
-            )
+            has_previous_events = int(session.next_sequence) > 1
             part_mode = any(
                 "deepagent_message_ordinal" in (getattr(message, "metadata", None) or {})
                 for message in messages
@@ -278,7 +285,21 @@ class SqlConversationCoordinator:
                     first_message_ordinal=first_message_ordinal,
                     terminal_status=terminal_status,
                     usage_model_id=usage_model_id, usage_provider_id=usage_provider_id,
+                    session_locked=True,
                 )
+            if automatic_title is not None and rows and rows[0].event_type == "user/message":
+                if not has_previous_events or await self._events._latest_title(db, session_id) is None:
+                    fallback = await self._events._append_title(
+                        db, session, title=automatic_title.title, source="fallback",
+                        source_event_id=rows[0].event_id, turn_id=resolved_turn_id, run_id=run_id,
+                        details={
+                            "context_count": automatic_title.context_count,
+                            "attachment_count": automatic_title.attachment_count,
+                            "image_used": False,
+                        },
+                        now=now, session_locked=True,
+                    )
+                    rows.append(fallback)
             return [SessionEventSnapshot.from_row(row) for row in rows]
 
     async def append_message_parts(

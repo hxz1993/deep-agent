@@ -525,7 +525,7 @@ class StructuredOutputPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 elif stage == "title":
                     async def bad_title():
                         raise injected
-                    failure = patch.object(runner, "_start_title_generation", new=AsyncMock(return_value=asyncio.create_task(bad_title())))
+                    failure = patch.object(runner, "_start_title_generation", side_effect=lambda *args, **kwargs: asyncio.create_task(bad_title()))
                 elif stage == "flush":
                     failure = patch.object(self.persister, "flush", new=AsyncMock(side_effect=injected))
                 else:

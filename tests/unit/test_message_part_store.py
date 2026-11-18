@@ -98,6 +98,33 @@ class MessagePartStoreTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(len(await self.store.list_all_events("session")), 2)
 
+    async def test_append_messages_locks_each_parent_once_and_preserves_existing_title(self):
+        async def append(user, turn, message):
+            return await self.store.append(
+                "session", [ModelRequest(parts=[UserPromptPart(message)])],
+                agent_id=self.agent_id, user_id=user, turn_id=turn, run_id=turn,
+            )
+
+        await append("user-1", "first", "first title")
+        parent_reads = []
+
+        def track_reads(conn, cursor, statement, parameters, context, executemany):
+            sql = " ".join(statement.lower().split())
+            if sql.startswith("select "):
+                parent_reads.extend(table for table in ("agents", "chat_sessions")
+                                    if f" from {table} " in sql)
+
+        event.listen(self.engine.sync_engine, "before_cursor_execute", track_reads)
+        try:
+            await append("user-1", "second", "next question")
+        finally:
+            event.remove(self.engine.sync_engine, "before_cursor_execute", track_reads)
+        self.assertEqual(parent_reads, ["agents", "chat_sessions"])
+        self.assertEqual(await self.store.get_session_title("session", agent_id=self.agent_id), "first title")
+        with self.assertRaises(PermissionError):
+            await append("other-user", "third", "foreign input")
+        self.assertEqual(len(await self.store.list_all_events("session")), 2)
+
     async def test_parallel_results_are_committed_individually_and_deduplicate_by_call_id(self):
         response = ModelResponse(parts=[
             ToolCallPart("read", {}, "a"), ToolCallPart("read", {}, "b")])

@@ -283,7 +283,7 @@ test("Agent 列表先展示，渠道晚到补充；过时请求不能覆盖新�
   admin.setChannelAccounts = accounts => channels.push(accounts);
   const first = admin.refresh();
   const second = admin.refresh();
-  const lists = requests.filter(request => request.path === "/api/v1/agents");
+  const lists = requests.filter(request => request.path === "/api/v1/agents?include_updater=true");
   const annotations = requests.filter(request => request.path === "/api/v1/channel-accounts");
   lists.at(-1).resolve([{ id: "new" }]);
   await second;

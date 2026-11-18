@@ -52,7 +52,7 @@ Console 中，说明与完整 JSON Schema 向下撑满并对齐底边；无结�
 
 `{}`、只有 text、只有合法 contract、contract 加 clarification 均可通过；`{"contract":{}}` 不合法。平台只检查定义中的静态规则，已有合同基线、版本/Hash、业务写入权限继续由客户端检查。
 
-`GET /api/v1/agents/{id}/output-config` 为管理员只读接口，返回 `structured_output_enabled`、`allow_text_output` 和完整 `output_config`（没有定义为 null）。普通 Agent 详情不带管理 Schema；列表不逐项加载定义。
+`GET /api/v1/agents/{id}/output-config` 为管理员只读接口，返回 `structured_output_enabled`、`allow_text_output` 和完整 `output_config`（没有定义为 null）。普通 Agent 详情不带管理 Schema；Agent 候选列表和管理摘要均不读取输出配置。
 
 创建及 PATCH 的 allow_text_output 必须是 JSON boolean，显式 null 拒绝。PATCH 省略字段保持原值；关掉开关不删除草稿。显式 `output_config:null` 仅在合并后的最终状态关闭时删除定义。开启但没有定义会拒绝整个事务。无效 Schema 的编辑内容保留在页面，页头保存前必须修正；详情无第二个独立保存动作。
 
@@ -101,7 +101,7 @@ Console 只提供通用正文/JSON，“完整 JSON／按结构分组”位于�
 
 ## 数据库 013
 
-两张表保持逻辑1:1：agents仅存structured_output_enabled总开关；agent_output_configs以agent_id为主键，name、description、allow_text_output各是独立列，字段定义仍整体放json_schema JSON列，不新增逐字段明细表，也不把整份输出配置再包装成config JSON。不存在配置记录时文本策略为false；没有合法定义时不能单独保存true。删除定义同时清除该策略，关闭总开关则保留完整配置草稿。对外API的allow_text_output仍为顶层字段，不改变Console或安装包格式。
+两张表保持逻辑1:1：agents仅存structured_output_enabled总开关；agent_output_configs以agent_id为主键，name、description、allow_text_output各是独立列，字段定义仍整体放json_schema JSON列，不新增逐字段明细表，也不把整份输出配置再包装成config JSON。不存在配置记录时文本策略为false；没有合法定义时不能单独保存true。删除定义同时清除该策略，关闭总开关则保留完整配置草稿。Agent 详情和输出配置的 `allow_text_output` 为顶层字段，安装包沿用原格式。
 
 
 保留012，新增013→012：agent_output_configs.allow_text_output Boolean NOT NULL，应用和数据库默认均为 false，现有 Agent 继续严格 JSON。与开关、定义、更新时间及可信更新人同事务保存。配置备份保留关闭草稿，仅同 Revision 恢复；历史011/012导出使用其真实物理字段，不能读取新列或改标冒充013。

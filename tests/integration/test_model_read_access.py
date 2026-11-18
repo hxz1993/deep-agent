@@ -68,6 +68,7 @@ class ModelReadAccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_trusted_identity_is_rejected(self):
         for path in ("/api/v1/llm-models", f"/api/v1/llm-models/{self.model.id}",
+                     "/api/v1/agents", "/api/v1/agents?q=agent",
                      f"/api/v1/agents/{self.agent_id}", "/api/v1/integrations/deeptable-assistant"):
             with self.subTest(path=path):
                 response = await self.client.get(path, headers={"user": "  "})
@@ -76,12 +77,37 @@ class ModelReadAccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_business_reads_do_not_depend_on_admin_service_availability(self):
         self.checker.side_effect = ConsoleAdminUnavailableError("offline")
-        for path in ("/api/v1/llm-models", f"/api/v1/llm-models/{self.model.id}"):
+        for path in ("/api/v1/llm-models", f"/api/v1/llm-models/{self.model.id}",
+                     "/api/v1/agents", "/api/v1/agents?q=agent"):
             response = await self.client.get(path)
             self.assertEqual(response.status_code, 200, response.text)
         self.checker.assert_not_called()
         full = await self.client.get("/api/v1/llm-models?selectable_only=false")
         self.assertEqual(full.status_code, 503, full.text)
+
+    async def test_ordinary_user_can_list_and_search_agent_summaries(self):
+        other_id = await seed_default_agent(self.stores, name="Quarter_1%")
+        default = {"id": self.agent_id, "name": "integration-agent"}
+        other = {"id": other_id, "name": "Quarter_1%"}
+        summary_keys = {
+            "id", "name", "model_id", "model", "reasoning_effort",
+            "reasoning_effort_bound", "capabilities", "skills", "updated_at",
+        }
+        for query, expected in (
+            ("", [default, other]), (" INTEGRATION ", [default]),
+            (other_id, [other]), ("_%", []), ("1%", [other]),
+            ("helpful integration-test assistant", []),
+        ):
+            with self.subTest(query=query):
+                response = await self.client.get("/api/v1/agents", params={"q": query})
+                self.assertEqual(response.status_code, 200, response.text)
+                rows = response.json()
+                self.assertCountEqual([{"id": row["id"], "name": row["name"]} for row in rows], expected)
+                for row in rows:
+                    self.assertEqual(row.keys(), summary_keys)
+                    self.assertEqual(row["model_id"], self.model.id)
+                    self.assertEqual(row["model"]["name"], self.model.name)
+        self.checker.assert_not_called()
 
     async def test_ordinary_user_cannot_access_management_or_full_inventory(self):
         mid = self.model.id
@@ -91,7 +117,9 @@ class ModelReadAccessTests(unittest.IsolatedAsyncioTestCase):
             ("DELETE", f"/llm-models/{mid}"), ("POST", f"/llm-models/{mid}/test"),
             ("GET", "/llm-models/catalog"), ("GET", "/llm-models/catalog/export"),
             ("POST", "/llm-models/catalog/import"), ("POST", "/llm-models/catalog/refresh"),
-            ("GET", "/agents"), ("GET", "/llm-providers"), ("GET", "/llm-provider-types"),
+            ("GET", "/agents?include_updater=true"), ("POST", "/agents"),
+            ("GET", f"/agents/{self.agent_id}/output-config"),
+            ("GET", "/llm-providers"), ("GET", "/llm-provider-types"),
             ("GET", "/integrations"), ("GET", "/skills"), ("GET", "/mcp"),
             ("GET", "/ui-tools"), ("GET", "/global-settings"),
         ]

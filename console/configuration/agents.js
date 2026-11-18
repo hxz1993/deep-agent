@@ -350,7 +350,7 @@ const agentsAdmin = {
     try {
       // Optional annotations are fetched alongside the directory, but never gate it.
       const accounts = apiFetch("/api/v1/channel-accounts").catch(() => null);
-      const agents = await apiFetch("/api/v1/agents");
+      const agents = await apiFetch("/api/v1/agents?include_updater=true");
       if (requestId !== agentsRefreshRequestId) return;
       showDbBanner(false);
       this.renderList(agents);

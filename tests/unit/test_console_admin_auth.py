@@ -409,7 +409,7 @@ class ConsoleAdminApiTests(unittest.TestCase):
 
     def test_access_endpoint_and_management_route_allow_enterprise_admin(self) -> None:
         access = self.client.get("/api/v1/admin/access")
-        agents = self.client.get("/api/v1/agents")
+        agents = self.client.get("/api/v1/agents?include_updater=true")
 
         self.assertEqual(access.status_code, 200, access.text)
         self.assertEqual(
@@ -432,7 +432,7 @@ class ConsoleAdminApiTests(unittest.TestCase):
 
         with TestClient(local_app) as client:
             access = client.get("/api/v1/admin/access")
-            agents = client.get("/api/v1/agents")
+            agents = client.get("/api/v1/agents?include_updater=true")
 
         self.assertEqual(
             access.json(),
@@ -444,7 +444,7 @@ class ConsoleAdminApiTests(unittest.TestCase):
     def test_normal_user_and_fixed_admin_are_denied(self) -> None:
         self.checker.return_value = False
         normal = self.client.get(
-            "/api/v1/agents",
+            "/api/v1/agents?include_updater=true",
             headers={"user": "normal-user", "authorization": "Bearer normal"},
         )
         fixed_admin_access = self.client.get(
@@ -452,7 +452,7 @@ class ConsoleAdminApiTests(unittest.TestCase):
             headers={"user": "admin", "authorization": "Bearer admin"},
         )
         fixed_admin_agents = self.client.get(
-            "/api/v1/agents",
+            "/api/v1/agents?include_updater=true",
             headers={"user": "admin", "authorization": "Bearer admin"},
         )
 
@@ -537,14 +537,14 @@ class ConsoleAdminRouteAuditTests(unittest.TestCase):
             should_be_protected = route.path in protected_exact or route.path.startswith(
                 protected_prefixes
             )
-            # Business reads require identity; full inventory is gated by the
-            # selectable_only=false branch, verified by API permission tests.
-            if route.path in {"/api/v1/llm-models", "/api/v1/llm-models/{model_id}"} and route.methods == {"GET"}:
+            if route.path in {
+                "/api/v1/agents", "/api/v1/llm-models", "/api/v1/llm-models/{model_id}",
+            } and route.methods == {"GET"}:
                 dependencies = {dependency.call for dependency in route.dependant.dependencies}
                 self.assertIn(require_request_user, dependencies)
                 self.assertNotIn(require_console_admin, dependencies)
                 continue
-            if route.path.startswith("/api/v1/agents/") and route.path != "/api/v1/agents/prompt-estimate":
+            if route.path.startswith("/api/v1/agents/") and route.path not in protected_exact:
                 should_be_protected = route.methods != {"GET"}
             if route.path.startswith("/api/v1/integrations/") and route.methods & {"PUT", "DELETE"}:
                 should_be_protected = True

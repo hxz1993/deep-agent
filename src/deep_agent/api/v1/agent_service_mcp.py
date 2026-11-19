@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 from base64 import b64encode
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
@@ -25,7 +24,7 @@ from deep_agent.agent_service.public import (
     HistoryLength, PublicInput, PublicTasks, ReplyInput, SubmitInput, TaskId, TaskQuery, artifact_reference, task_error,
 )
 from deep_agent.agent_service.publications import AgentCode
-from deep_agent.agent_service.security import observe_access, platform_caller, public_base_url
+from deep_agent.agent_service.security import observe_access, platform_caller, service_base_url
 from deep_agent.agent_service.service import bounded_body
 from deep_agent.api.v1.agent_service import admin
 from deep_agent.core.context import AppContextDep
@@ -38,16 +37,9 @@ current: ContextVar[PublicTasks] = ContextVar("agent_service_mcp")
 INLINE_ARTIFACT_LIMIT = 20 * 1024 * 1024
 
 
-def mcp_base_url() -> str | None:
-    try:
-        return public_base_url(os.getenv("DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL", ""))
-    except ValueError:
-        return None
-
-
 @router.get("/client-config", dependencies=admin)
-async def client_config():
-    base = mcp_base_url()
+async def client_config(request: Request):
+    base = service_base_url(request)
     return JSONResponse({"mcp_url": f"{base}/api/v1/agent-service/mcp" if base else None},
                         headers={"Cache-Control": "no-store"})
 
@@ -97,7 +89,7 @@ async def get_artifact(tasks: PublicTasks, args: ArtifactTool) -> dict:
     entry, artifact = await tasks.artifact(args.task_id, args.artifact_id)
     if args.format == "url" or artifact.size > INLINE_ARTIFACT_LIMIT:
         if not tasks.download_base_url:
-            raise HTTPException(503, "服务未配置有效的对外下载基址")
+            raise HTTPException(503, "无法从当前请求解析下载地址")
         reference = artifact_reference(args.task_id, args.artifact_id, artifact, tasks.download_base_url)
         return {**reference, "delivery": "http_download"}
 
@@ -122,7 +114,7 @@ TOOLS: dict[str, tuple[str, type[PublicInput], Callable[..., Awaitable[dict]]]] 
                     "and reuse the same message_id and payload on retry.",
                     SubmitTool, lambda tasks, a: tasks.submit(a.agent_code, a)),
     "get_task": ("Read task status, output, and file artifacts. Use question_id to reply. Download selected files via "
-                 "HTTP GET to download_url using the MCP connection's app and authentication headers.",
+                 "HTTP GET to download_url using the MCP connection's app, space when set, and authentication headers.",
                  GetTool, lambda tasks, a: tasks.get(a.task_id, a.history_length)),
     "list_tasks": ("List recent tasks for a published Agent in the configured App. Filter by state or context_id "
                    "and pass next_cursor as cursor to continue.",
@@ -133,7 +125,7 @@ TOOLS: dict[str, tuple[str, type[PublicInput], Callable[..., Awaitable[dict]]]] 
     "cancel_task": ("Request cancellation of an unfinished task by task_id and read the returned state.",
                     TaskTool, lambda tasks, a: tasks.cancel(a.task_id)),
     "get_artifact": ("Get a file's complete download_url by task_id and artifact_id (format=url by default). "
-                     "Download with the connection's app and authentication headers. If your client cannot send those "
+                     "Download with the connection's app, space when set, and authentication headers. If your client cannot send those "
                      "headers, request format=base64 for a file up to 20 MiB. Decode data_base64 from the original "
                      "text JSON and save the bytes under name. Larger files always return the download URL.",
                      ArtifactTool, get_artifact),
@@ -233,15 +225,13 @@ class MCPResponse(Response):
 @router.api_route("/mcp", methods=["GET", "POST", "DELETE"], include_in_schema=False)
 async def mcp(request: Request, ctx: AppContextDep):
     origin = request.headers.get("origin")
-    allowed_origins = set()
-    base = mcp_base_url()
+    allowed_origin = None
+    base = service_base_url(request)
     if base:
         public = urlsplit(base)
-        allowed_origins.add(f"{public.scheme}://{public.netloc}")
-    if request.url.hostname in {"localhost", "127.0.0.1", "::1"}:
-        allowed_origins.add(f"{request.url.scheme}://{request.url.netloc}")
+        allowed_origin = f"{public.scheme}://{public.netloc}"
     with observe_access("mcp"):
-        if origin and origin not in allowed_origins:
+        if origin and origin != allowed_origin:
             raise HTTPException(403, "MCP Origin 不受信任")
         headers = await platform_caller(request, require_app=False)
     body = await bounded_body(request) if request.method == "POST" else b""

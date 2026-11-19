@@ -5,16 +5,17 @@ import vm from "node:vm";
 import { trajectoryDomHarness } from "./trajectory-dom-harness.mjs";
 
 const script = readFileSync(new URL("../../../console/configuration/agent-service.js", import.meta.url), "utf8");
+const prefix = "https://gateway.example.test/deepfos-server/deep-agent-server1-0/";
 const publication = {
   agent_code: "reports", name: "Reports", enabled: true,
-  scope: { apps: { mode: "all" } }, card_url: "https://api.test/card",
-  app_card_url_template: "https://api.test/apps/{app_id}/card",
+  scope: { apps: { mode: "all" } },
 };
 function setup(apiFetch) {
   const { window, document, element } = trajectoryDomHarness();
   document.addEventListener = (_, ready) => { document.ready = ready; };
   document.body = { dataset: { consolePage: "configuration" } };
   window.bindConsolePaneResize = () => {};
+  window.serviceUrl = path => new URL(path.replace(/^\/+/, ""), prefix).href;
   element("panel-agent-service").className = "active";
   element("agentTaskRows").contains = element("agentTaskDetail").contains = () => false;
   element("agentTaskDetail").querySelector = () => ({ scrollTop: 0 });
@@ -41,44 +42,38 @@ test("both A2A card modes supply copyable headers for RPC", async () => {
   });
   await ui.refresh();
   const card = ui.element("agentServiceAccess");
+  assert.match(card.innerHTML, /https:\/\/gateway\.example\.test\/deepfos-server\/deep-agent-server1-0\/api\/v1\/agent-service\/a2a\/reports\/agent-card\.json/);
   assert.match(card.innerHTML, /<h4 class="agent-service-access-title"[^>]*><span class="agent-protocol-logo" data-protocol="a2a"/);
   assert.match(card.innerHTML, /&quot;A2A-Version&quot;: &quot;1\.0&quot;/);
   card.querySelector = () => ({ focus() {} });
   card.listeners.get("click")({ target: { closest: () => ({
     dataset: { a2aCardMode: "app" }, getAttribute: () => "false",
   }) } });
-  assert.match(card.innerHTML, /\/apps\/\{app_id\}\/card/);
+  assert.match(card.innerHTML, /\/apps\/\{app_id\}\/agent-card\.json/);
   assert.match(card.innerHTML, /&quot;A2A-Version&quot;: &quot;1\.0&quot;/);
   assert.doesNotMatch(card.innerHTML, /&quot;app&quot;:/);
 });
 
-test("access panels distinguish missing deployment address from a failed configuration request", async () => {
-  let clientConfigFails = false;
+test("disabled publication hides the Card but leaves the environment MCP address available", async () => {
   const ui = setup(async path => {
-    if (path.endsWith("/publications")) return [{ ...publication, card_url: null }];
-    if (path.endsWith("/client-config")) {
-      if (clientConfigFails) throw new Error("Unavailable");
-      return { mcp_url: null };
-    }
-    if (path.includes("/tasks?")) return { items: [], total: 0 };
-    return [];
+    if (path.endsWith("/publications")) return [{ ...publication, enabled: false }];
+    if (path === "/api/v1/agents") return [];
+    assert.match(path, /\/tasks\?/);
+    return { items: [], total: 0 };
   });
   await ui.refresh();
   const card = ui.element("agentServiceAccess");
-  assert.match(card.innerHTML, /未配置 A2A 接入地址.*DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL/);
+  assert.match(card.innerHTML, /该发布已停用/);
+  assert.doesNotMatch(card.innerHTML, /agent-card\.json/);
   ui.element("fixtureMcpTab").listeners.get("click")();
-  assert.match(card.innerHTML, /未配置 MCP 接入地址.*DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL/);
-  clientConfigFails = true;
-  await ui.refresh();
-  assert.match(card.innerHTML, /暂时无法读取 MCP 接入地址/);
-  assert.doesNotMatch(card.innerHTML, /DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL/);
+  assert.ok(card.innerHTML.includes(`${prefix}api/v1/agent-service/mcp`));
 });
 
-test("MCP copy includes the app's space in the gateway headers", async () => {
+test("MCP copy and open help use the selected publication's app and space", async () => {
   const scope = { apps: { mode: "selected", items: [{ app_id: "budget001", space_id: "budget" }] } };
+  let current = { ...publication, scope };
   const ui = setup(async path => {
-    if (path.endsWith("/publications")) return [{ ...publication, scope }];
-    if (path.endsWith("/client-config")) return { mcp_url: "https://api.test/gateway/mcp" };
+    if (path.endsWith("/publications")) return [current];
     if (path.includes("/tasks?")) return { items: [], total: 0 };
     return [];
   });
@@ -87,6 +82,15 @@ test("MCP copy includes the app's space in the gateway headers", async () => {
   const html = ui.element("agentServiceAccess").innerHTML;
   assert.match(html, /&quot;app&quot;: &quot;budget001&quot;/);
   assert.match(html, /&quot;space&quot;: &quot;budget&quot;/);
+
+  ui.element("agentServiceProtocol").open = true;
+  current = { ...publication, agent_code: "recon", scope: {
+    apps: { mode: "selected", items: [{ app_id: "recon001", space_id: "recon" }] },
+  } };
+  await ui.refresh();
+  const guide = ui.element("agentServiceMcpGuideSetup").innerHTML;
+  assert.match(guide, /recon001/);
+  assert.doesNotMatch(guide, /budget001/);
 });
 
 test("timer leaves slow list and detail requests in flight and resumes after delivery", async () => {

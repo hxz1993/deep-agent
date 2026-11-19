@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from contextlib import contextmanager
+from ipaddress import ip_address
 from time import monotonic
 from urllib.parse import urlsplit
 
@@ -15,6 +16,9 @@ from deep_agent.services.integration_app_access import (
 )
 
 _CREDENTIALS = ("authorization", "token", "x-user-token", "x-deepfos-key")
+_SERVICE_PREFIX = "/deep-agent-server1-0"
+_PLATFORM_GATEWAY = "/deepfos-server"
+_PLATFORM_PREFIX = _PLATFORM_GATEWAY + _SERVICE_PREFIX
 
 
 @contextmanager
@@ -30,14 +34,53 @@ def observe_access(protocol: str, publication_id: str | None = None, *, phase: s
         raise
 
 
-def public_base_url(value: str) -> str:
-    parsed = urlsplit(value)
-    loopback = parsed.hostname in {"127.0.0.1", "::1", "localhost"}
-    if (parsed.scheme not in {"https", "http"} or (parsed.scheme == "http" and not loopback)
-            or not parsed.hostname or parsed.username or parsed.password
-            or parsed.query or parsed.fragment or any(ch.isspace() for ch in value)):
-        raise ValueError("Agent Service public URL must use HTTPS or loopback HTTP")
-    return value.rstrip("/")
+def _gateway_values(request: Request, name: str) -> list[str]:
+    # Use the metadata appended by the last gateway hop. The ingress must
+    # discard client-supplied forwarding headers before proxying a request.
+    return [value.strip() for header in request.headers.getlist(name) for value in header.split(",")]
+
+
+def service_base_url(request: Request) -> str | None:
+    prefix = request.scope.get("root_path", "").rstrip("/")
+    scheme = request.scope["scheme"]
+    hosts = request.headers.getlist("host")
+    if len(hosts) != 1:
+        return None
+    authority = hosts[0]
+
+    prefixes = [value.rstrip("/") for value in _gateway_values(request, "x-forwarded-prefix")]
+    if prefixes and prefixes[-1] in {_SERVICE_PREFIX, _PLATFORM_GATEWAY, _PLATFORM_PREFIX}:
+        forwarded_prefix = prefixes[-1]
+        if forwarded_prefix == _PLATFORM_GATEWAY or prefixes[-2:] == [_PLATFORM_GATEWAY, _SERVICE_PREFIX]:
+            forwarded_prefix = _PLATFORM_PREFIX
+        if not prefix or prefix == forwarded_prefix:
+            prefix = forwarded_prefix
+            scheme = (_gateway_values(request, "x-forwarded-proto") or [scheme])[-1]
+            authority = (_gateway_values(request, "x-forwarded-host") or [authority])[-1]
+
+    if scheme not in {"http", "https"} or not re.fullmatch(r"(?:/[A-Za-z0-9_.~-]+)*", prefix):
+        return None
+    if any(segment in {".", ".."} for segment in prefix.split("/")):
+        return None
+    if not re.fullmatch(r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?", authority):
+        return None
+    try:
+        address = urlsplit(f"{scheme}://{authority}")
+        port = address.port
+        host = address.hostname
+        private = host == "localhost"
+        if scheme == "http" and not private:
+            private = ip_address(host).is_private
+    except ValueError:
+        return None
+    if scheme == "http" and not private:
+        return None
+    if port == 0:
+        return None
+    host = f"[{host}]" if ":" in host else host
+    if port and port != (443 if scheme == "https" else 80):
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}{prefix}"
 
 
 async def platform_caller(request: Request, *, path_app: str | None = None, require_app: bool = True) -> dict[str, str]:

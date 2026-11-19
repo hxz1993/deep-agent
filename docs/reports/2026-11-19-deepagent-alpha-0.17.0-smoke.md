@@ -24,16 +24,16 @@
 
 三项 MCP 任务及其会话均保留。诊断日志能按发布 ID 或任务 ID 查到排队、运行、完成及耗时，并可关联会话和运行。发布任务列表由进程保留 24 小时，重启后由会话诊断链接回看已保存轨迹。本次未在 Alpha 配置出站远程委派或 CLI 执行器。
 
-## 部署问题与本地修复
+## 0.17.0 部署问题
 
-1. Alpha 发布列表返回空的 Card URL，`client-config` 返回 `mcp_url: null`，MCP 默认链接模式明确报告缺少有效对外下载基址。请核对 Alpha API 部署中的 `DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL`，按现有入口应为 `https://alpha.deepfos.com/deepfos-server/deep-agent-server1-0`。配置生效后复验 Card、A2A 任务及 MCP 的默认下载链接。Cloud 的实际配置须在其环境独立核对。 [部署变量说明](../guides/agent-service.md#部署与本地启动)
-2. Alpha 当前实例可按任务定位 MCP 日志，但 A2A 地址校验抛出的 503 未进入发布诊断。工作区已在 Card 与 RPC 入口补上单条结构化失败记录，包含协议、发布 ID、`phase=public_address` 和 HTTP 状态，复用现有异常脱敏。Console 在确认没有对外地址时展示对应部署变量，MCP 配置读取失败单独提示。局部修改通过 28 项 Agent Service 集成测试及 4 项 Console 测试，等待后续发布。
+1. Alpha 发布列表返回空的 Card URL，`client-config` 返回 `mcp_url: null`，MCP 默认链接模式报告缺少有效对外下载基址。`0.17.0` 依赖 `DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL`，当时的 Alpha 部署未提供有效值。
+2. Alpha 实例可按任务定位 MCP 日志，A2A 地址校验抛出的 503 缺少发布诊断。`0.17.1` 的 Card 和 RPC 在地址解析失败时各记录一条脱敏诊断，包含协议、发布 ID、`phase=public_address` 和 HTTP 状态。
 
 ## 0.17.1 复测和发版配置
 
 - Alpha DeepSeek Flash 额度恢复后，流式首轮与非流式续聊均完成。首轮结构化候选自动纠错一次后通过，第二轮首试通过。[复测会话](https://alpha.deepfos.com/deepfos-server/deep-agent-server1-0/console/#/diagnostics/sessions/99f9732b195448449b088dd7957f3c24?view=conversation)
 - Test 线上为 `0.17.0`，库为 `016`。在独立测试发布 `test-v0171-release-smoke` 上复现缺基址时的 A2A Card 和 RPC 503。MCP 只传 `app` 时，Test 网关返回「应用不可用」。同时传正确的 `app` 与 `space` 后，MCP 发现、提交、查询和结果回读均通过，任务 `0d4dbdc5efda4e7c8a33d4e499e33a5f`。[Test 复测会话](https://test.deepfos.com/deepfos-server/deep-agent-server1-0/console/#/diagnostics/sessions/75b1f37e4cfe4895b3e57cb01b9aa182?view=conversation)
 - Test 用 DeepSeek Flash 执行独立的非流式合成回归，HTTP 200 并返回预期正文。[DeepSeek 复测会话](https://test.deepfos.com/deepfos-server/deep-agent-server1-0/console/#/diagnostics/sessions/fd402cb371c245b7b37bd7c7b54f7b95?view=conversation)
-- 通过 `0.17.1` 只读代理连接 Test 数据库，使用真实测试凭据及显式回环基址，官方 SDK 成功读取该发布的 A2A 1.0 Card。另在隔离实例用真实 HTTP 和带网关前缀的地址验证 SDK 发现、发送和查询。Test 线上 A2A 与 MCP 默认下载 URL 仍需部署时设置基址后验收。[部署步骤](../guides/agent-service.md#部署与本地启动)
+- 在 `0.17.1` 隔离实例中，使用 Test 真实账号及应用权限、真实 DeepSeek Flash 和带网关前缀的 HTTP 入口，验证两种 A2A Card、SDK 发起与查询、MCP 提交与查询、默认链接下载和匿名拒绝。新版按请求生成服务基址，无需设置发布地址环境变量。Test 线上仍需在部署新版后复验实际网关转发。[部署说明](../guides/agent-service.md#部署与本地启动)
 - 用合成 402 复验流式、非流式、模型连通性测试和事件回读。非流式返回 `provider_quota_exceeded`，SSE 返回额度提示，单条 Run 失败日志含安全堆栈，供应商响应正文与凭据不进入这条日志。
-- 定向 Python 回归 160 项通过，Console 全量 1,193 项通过。开发 Skill 包与 `0.17.1` 一致，相对 `0.17.0` 依赖与数据库结构无变更。Test 所需对外基址为 `https://test.deepfos.com/deepfos-server/deep-agent-server1-0`。Alpha 使用同路径及 Alpha 入口域名。
+- 开发 Skill 包与 `0.17.1` 一致，相对 `0.17.0` 依赖与数据库结构无变更。Test 和 Alpha 的平台路由使用各自域名和 `/deepfos-server/deep-agent-server1-0` 前缀。

@@ -90,7 +90,7 @@ HTTP 路径均相对于 `/api/v1/agent-service`。CLI 示例省略 `deepfos-agen
 | Python SDK | 「复制安装命令」、最低 Python 版本、快速开始 | 在业务项目虚拟环境中安装 Python 包并导入 SDK |
 | A2A | 当前发布的两条 Card URL 各自的应用传法和复制入口 | 客户端选择通用 Card 或带 App 的 Card |
 
-MCP、CLI、SDK 的内容随环境变化。A2A 两条地址随当前选中的发布变化。CLI 和 SDK 用同一个外部分发包 `deepfos-agent-client`，提供 `deepfos-agent` 命令和 `deepfos_agent_client` Python 模块。CLI 用 `uv tool install` 独立安装，SDK 用项目虚拟环境的 `python -m pip install`。Console 的安装命令指向部署方配置的带版本 wheel 地址。离线部署可提供同版本 wheel。 [uv 工具安装](https://docs.astral.sh/uv/concepts/tools/)
+MCP 地址从当前服务入口生成。A2A 两条地址还随当前选中的发布变化。CLI 和 SDK 草稿使用同一个包 `deepfos-agent-client`，提供 `deepfos-agent` 命令和 `deepfos_agent_client` Python 模块，版本由 `clients/python/pyproject.toml` 定义。CLI 可用 `uv tool install` 独立安装，SDK 可用项目虚拟环境的 `python -m pip install`。wheel 发布位置和分发方式留待正式发布时确定。 [uv 工具安装](https://docs.astral.sh/uv/concepts/tools/)
 
 ### CLI 给人使用
 

@@ -29,7 +29,7 @@ A2A JSON-RPC 调用加 `A2A-Version: 1.0`，读取卡片时可以省略。回环
 ## 获取产物
 
 - **A2A** 从任务的 Artifact 读取文件 URL，沿用该任务的调用身份下载。通用链接携带原 `app` Header，指定应用链接使用 URL 中的应用。
-- **MCP** 从 `get_task` 的 `artifacts` 读完整 `download_url`，或调用 `get_artifact` 取得单个文件链接。对原链接发 HTTP GET，携带原 `app`、`space`（如有）和同一凭据。目标环境未配置有效服务基址时，`get_task` 会省略链接，链接模式的 `get_artifact` 会返回配置错误。
+- **MCP** 从 `get_task` 的 `artifacts` 读完整 `download_url`，或调用 `get_artifact` 取得单个文件链接。对原链接发 HTTP GET，携带原 `app`、`space`（如有）和同一凭据。服务按 MCP 请求的入口生成地址。请求地址无法解析时，`get_task` 省略链接，链接模式的 `get_artifact` 返回地址错误。
 - **无法附加 HTTP Header 的 MCP 客户端**可对不超过 20 MiB 的文件调用 `get_artifact`，传原 `task_id`、`artifact_id` 和 `format="base64"`。从同一次响应的 `content[].text` 解析 JSON，用程序解码 `data_base64`，按 `name` 保存并核对字节数。大于 20 MiB 时仍走鉴权 HTTP 下载。
 
 只在可信发布服务返回的预期地址上发送凭据。取件 URL 随任务记录过期而失效。交付时确认文件实际下载并可读，批量验收可另外核对 SHA-256。

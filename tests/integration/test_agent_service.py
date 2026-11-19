@@ -39,6 +39,8 @@ from deep_agent.services.scope_names import ScopeDirectory
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 
 ROOT = "/api/v1/agent-service"
+DIRECT_BASE = "http://127.0.0.1:8002"
+GATEWAY_PREFIX = "/deepfos-server/deep-agent-server1-0"
 HEADERS = {"authorization": "Bearer fixture-owner", "app": "budget001", "space": "budget", "A2A-Version": "1.0"}
 
 
@@ -61,11 +63,8 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         app = FastAPI()
         app.include_router(api_router)
         self.app = app
-        self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+        self.client = AsyncClient(transport=ASGITransport(app=app), base_url=DIRECT_BASE)
         self.addAsyncCleanup(self.client.aclose)
-        self.enterContext(patch.dict("os.environ", {
-            "DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": "http://127.0.0.1:8002",
-        }))
         self.revoked = False
 
         async def platform(client, _service, path, **_kwargs):
@@ -142,15 +141,12 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("result", response.json(), response.text)
         return response.json()["result"]
 
-    async def test_missing_public_address_records_one_diagnostic_per_a2a_request(self):
+    async def test_invalid_request_address_records_one_diagnostic_per_a2a_request(self):
         publication = (await self.client.get(f"{ROOT}/publications/budget-report", headers=self.admin)).json()
-        fixture_url = "https://fixture-user:fixture-secret@example.test"
-        with (
-            patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": fixture_url}),
-            patch("deep_agent.agent_service.security.emit") as logged,
-        ):
-            card = await self.client.get(f"{self.url}/agent-card.json", headers=HEADERS)
-            tasks = await self.rpc("ListTasks", {})
+        headers = {**HEADERS, "host": "fixture-user:fixture-secret@example.test"}
+        with patch("deep_agent.agent_service.security.emit") as logged:
+            card = await self.client.get(f"{self.url}/agent-card.json", headers=headers)
+            tasks = await self.rpc("ListTasks", {}, headers=headers)
         self.assertEqual(card.status_code, 503)
         self.assertEqual(tasks.status_code, 503)
         self.assertEqual(logged.call_count, 2)
@@ -468,7 +464,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("extra.txt", str(events[2].payload))
 
             self.client.headers.update(HEADERS)
-            async with streamable_http_client(f"http://test{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+            async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
                 async with ClientSession(rx, tx) as session:
                     await session.initialize()
 
@@ -620,17 +616,16 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("error", (await self.rpc("SendMessage", {
                 "message": self.message("disabled", "再算一次"),
             }, headers=key_headers)).json())
-        with patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": ""}):
-            response = await self.client.get(f"{ROOT}/publications", headers=self.admin)
-            self.assertEqual(response.status_code, 200, response.text)
-            self.assertEqual({row["agent_code"] for row in response.json()}, {"budget-report", "recon"})
-            self.assertIsNone(response.json()[0]["card_url"])
-            response = await self.client.patch(f"{ROOT}/publications/recon", headers=self.admin, json={
-                "revision": 2, "enabled": True,
-            })
-            self.assertEqual(response.status_code, 200, response.text)
-            self.assertTrue(response.json()["enabled"])
-            self.assertIsNone(response.json()["card_url"])
+        response = await self.client.get(f"{ROOT}/publications", headers=self.admin)
+        self.assertEqual(response.status_code, 200, response.text)
+        cards = {row["agent_code"]: row["card_url"] for row in response.json()}
+        self.assertEqual(cards, {"budget-report": f"{DIRECT_BASE}{ROOT}/a2a/budget-report/agent-card.json", "recon": None})
+        response = await self.client.patch(f"{ROOT}/publications/recon", headers=self.admin, json={
+            "revision": 2, "enabled": True,
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["enabled"])
+        self.assertEqual(response.json()["card_url"], f"{DIRECT_BASE}{ROOT}/a2a/recon/agent-card.json")
 
     async def test_app_routes_share_card_scope_and_task_ownership(self):
         app_url = f"{self.url}/apps/budget001"
@@ -640,11 +635,13 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(missing_app.status_code, 400)
         self.assertIn("app Header", missing_app.json()["detail"])
 
-        with patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": "https://example.test/gateway"}):
-            publication = (await self.client.get(f"{ROOT}/publications/budget-report", headers=self.admin)).json()
+        mounted = FastAPI()
+        mounted.mount("/gateway", self.app)
+        async with AsyncClient(transport=ASGITransport(app=mounted), base_url="https://example.test/gateway") as gateway:
+            publication = (await gateway.get(f"{ROOT}/publications/budget-report", headers=self.admin)).json()
             self.assertEqual(publication["app_card_url_template"], f"https://example.test/gateway{self.url}/apps/{{app_id}}{card_path}")
-            generic = await self.client.get(f"{self.url}{card_path}", headers=HEADERS)
-            scoped = await self.client.get(f"{app_url}{card_path}", headers=[
+            generic = await gateway.get(f"{self.url}{card_path}", headers=HEADERS)
+            scoped = await gateway.get(f"{app_url}{card_path}", headers=[
                 *token.items(), ("app", "budget002"), ("app", "budget003"), ("space", "unrelated"),
             ])
             self.assertEqual(generic.status_code, 200, generic.text)
@@ -655,7 +652,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             generic_card["supportedInterfaces"][0]["url"] = scoped_card["supportedInterfaces"][0]["url"]
             self.assertEqual(generic_card, scoped_card)
             for url, headers, expected in ((self.url, HEADERS, generic.json()), (app_url, token, scoped_card)):
-                discovery = await self.client.get(f"{url}/.well-known/agent-card.json", headers=headers)
+                discovery = await gateway.get(f"{url}/.well-known/agent-card.json", headers=headers)
                 self.assertEqual(discovery.json(), expected)
 
         no_credentials = await self.client.get(f"{app_url}{card_path}")
@@ -895,7 +892,7 @@ w.save(publish_path("预算.xlsx"))
         self.assertEqual(book.active["C2"].value, 20)
         artifact_id = next(item["artifactId"] for item in task["artifacts"] if artifact in item["parts"])
         self.client.headers.update(HEADERS)
-        async with streamable_http_client(f"http://test{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+        async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
             async with ClientSession(rx, tx) as session:
                 await session.initialize()
                 tool = await session.call_tool("get_task", {"task_id": task["id"]})
@@ -947,7 +944,7 @@ w.save(publish_path("预算.xlsx"))
                 "message": self.message("artifact-boundaries", "生成文件"),
             }))["task"]["id"]
         self.client.headers.update(HEADERS)
-        async with streamable_http_client(f"http://test{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+        async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
             async with ClientSession(rx, tx) as session:
                 await session.initialize()
 
@@ -1000,19 +997,31 @@ w.save(publish_path("预算.xlsx"))
                 self.assertEqual(explicit_url.structuredContent["download_url"], download_urls["empty"])
                 self.assertEqual((await fetch_artifact("empty", format="invalid")).structuredContent["status"], 422)
 
-                with patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": "https://example.test/gateway"}):
+                gateway_headers = {
+                    "x-forwarded-host": "ignored.invalid, gateway.example.test",
+                    "x-forwarded-proto": "http, https", "x-forwarded-prefix": GATEWAY_PREFIX,
+                }
+                self.client.headers.update(gateway_headers)
+                try:
                     result = await fetch()
                     over_limit = await fetch_artifact("large", format="base64")
+                finally:
+                    for name in gateway_headers:
+                        del self.client.headers[name]
                 self.assertEqual({file["download_url"] for file in result.structuredContent["artifacts"]}, {
-                    f"https://example.test/gateway{ROOT}/tasks/{task_id}/artifacts/{key}/download" for key in files
+                    f"https://gateway.example.test{GATEWAY_PREFIX}{ROOT}/tasks/{task_id}/artifacts/{key}/download"
+                    for key in files
                 })
                 self.assertEqual(over_limit.structuredContent["download_url"],
-                                 f"https://example.test/gateway{ROOT}/tasks/{task_id}/artifacts/large/download")
-                with patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": ""}):
+                                 f"https://gateway.example.test{GATEWAY_PREFIX}{ROOT}/tasks/{task_id}/artifacts/large/download")
+                self.client.headers["host"] = "invalid-host.test"
+                try:
                     result = await fetch()
                     self.assertEqual((await fetch_artifact("empty")).structuredContent["status"], 503)
                     self.assertEqual((await fetch_artifact("large", format="base64")).structuredContent["status"], 503)
                     self.assertFalse((await fetch_artifact("empty", format="base64")).isError)
+                finally:
+                    del self.client.headers["host"]
                 self.assertEqual(result.structuredContent["state"], "completed")
                 self.assertTrue(all("download_url" not in file for file in result.structuredContent["artifacts"]))
 
@@ -1214,10 +1223,9 @@ w.save(publish_path("预算.xlsx"))
         config = await self.client.get(f"{ROOT}/client-config", headers=self.admin)
         self.assertEqual(config.json(), {"mcp_url": f"http://127.0.0.1:8002{ROOT}/mcp"})
         self.assertIn((await self.client.get(f"{ROOT}/client-config")).status_code, (401, 403))
-        with patch.dict("os.environ", {"DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL": "http://["}):
-            self.assertEqual((await self.client.get(f"{ROOT}/client-config", headers=self.admin)).json(),
-                             {"mcp_url": None})
-            self.assertEqual((await self.client.post(f"{ROOT}/mcp", headers={"Origin": "http://test"})).status_code, 403)
+        self.assertEqual((await self.client.get(f"{ROOT}/client-config", headers={
+            **self.admin, "Host": "invalid-host.test",
+        })).json(), {"mcp_url": None})
         for method, path in (
             ("GET", "/agents"), ("POST", "/agents/budget-report/tasks"),
             ("GET", "/agents/budget-report/tasks"), ("GET", "/tasks/" + "a" * 32),
@@ -1228,6 +1236,34 @@ w.save(publish_path("预算.xlsx"))
             self.assertEqual((response.status_code, response.json()), (404, {"detail": "Not Found"}), path)
         artifact = f"{ROOT}/tasks/{'a' * 32}/artifacts/{'b' * 32}/download"
         self.assertEqual((await self.client.get(artifact)).status_code, 400)
+
+    async def test_gateway_returns_public_card_and_mcp_urls_and_checks_origin(self):
+        gateway = {
+            "X-Forwarded-Prefix": f"/elsewhere, {GATEWAY_PREFIX}",
+            "X-Forwarded-Host": "ignored.invalid, gateway.example.test:443",
+            "X-Forwarded-Proto": "http, https",
+        }
+        base = f"https://gateway.example.test{GATEWAY_PREFIX}"
+        config = await self.client.get(f"{ROOT}/client-config", headers={**self.admin, **gateway})
+        self.assertEqual(config.json(), {"mcp_url": f"{base}{ROOT}/mcp"})
+        card = await self.client.get(f"{self.url}/agent-card.json", headers={**HEADERS, **gateway})
+        self.assertEqual(card.json()["supportedInterfaces"][0]["url"], f"{base}{self.url}")
+        for prefix in ("/deepfos-server", "/deepfos-server, /deep-agent-server1-0"):
+            config = await self.client.get(f"{ROOT}/client-config", headers={
+                **self.admin, **gateway, "X-Forwarded-Prefix": prefix,
+            })
+            self.assertEqual(config.json(), {"mcp_url": f"{base}{ROOT}/mcp"})
+        for origin, status in (("https://gateway.example.test", 200), ("https://ignored.invalid", 403)):
+            response = await self.client.post(f"{ROOT}/mcp", headers={
+                **HEADERS, **gateway, "Origin": origin, "Accept": "application/json, text/event-stream",
+            }, json={"jsonrpc": "2.0", "id": 1, "method": "resources/list"})
+            self.assertEqual(response.status_code, status, response.text)
+        unrecognized = {**gateway, "X-Forwarded-Prefix": "/elsewhere"}
+        config = await self.client.get(f"{ROOT}/client-config", headers={**self.admin, **unrecognized})
+        self.assertEqual(config.json(), {"mcp_url": f"{DIRECT_BASE}{ROOT}/mcp"})
+        async with AsyncClient(transport=ASGITransport(app=self.app), base_url="http://[fd00::42]:8010") as direct:
+            config = await direct.get(f"{ROOT}/client-config", headers=self.admin)
+            self.assertEqual(config.json(), {"mcp_url": f"http://[fd00::42]:8010{ROOT}/mcp"})
 
     async def test_public_task_visibility_and_cross_transport_mcp(self):
         from mcp import ClientSession
@@ -1274,7 +1310,7 @@ w.save(publish_path("预算.xlsx"))
         self.assertEqual(unauthenticated.status_code, 401)
         self.client.headers.update(HEADERS)
 
-        async with streamable_http_client(f"http://test{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+        async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
             async with ClientSession(rx, tx) as session:
                 hello = await session.initialize()
                 self.assertIsNotNone(hello.capabilities.resources)

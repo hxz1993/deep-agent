@@ -7,7 +7,6 @@
   };
   let rows = [], agents = [], apps = new Map(), tasks = [];
   let selected = "", selectedTask = "", access = "a2a", a2aCardMode = "general", page = 1;
-  let clientConfig = {};
   let draft, detailRequest, taskRequest, timer, searchTimer;
   let directoryGeneration = 0;
   let taskRowsMarkup = "", taskDetailSnapshot = "", shownTask = "";
@@ -60,12 +59,12 @@
         <button type="button" class="row-action icon-only danger" data-service-action="delete" aria-label="删除${attr(row.name)}" title="删除">${icon("trash-2")}</button></div></td></tr>`;
     }).join("") : `<tr><td colspan="5" class="empty-cell">${escapeHtml(message || "暂无发布")}</td></tr>`;
     renderAccess();
+    if (el("agentServiceProtocol").open) renderMcpAccess(el("agentServiceMcpGuideSetup"), true);
   }
 
   const methods = { a2a: "A2A", mcp: "MCP", http: "HTTP" };
   const methodIcon = (method) => method === "http" ? icon("globe")
     : `<span class="agent-protocol-logo" data-protocol="${method}" aria-hidden="true"></span>`;
-  const missingPublicAddress = "请在部署中配置 <code>DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL</code>，填写客户端可达的服务基址，包含网关路径。";
 
   function accessToolbar(method, controls = "", publicationName = "") {
     const publication = publicationName
@@ -80,15 +79,8 @@
   }
 
   function renderMcpAccess(card, inGuide = false) {
-    const endpoint = clientConfig.mcp_url;
+    const endpoint = window.serviceUrl(`${root}/mcp`);
     const publication = rows.find((row) => row.agent_code === selected);
-    if (!endpoint) {
-      const message = endpoint === null
-        ? `当前环境未配置 MCP 接入地址。${missingPublicAddress}`
-        : "暂时无法读取 MCP 接入地址，请稍后重试。";
-      card.innerHTML = `${inGuide ? "" : accessToolbar("mcp", "", publication?.name)}<p>${message}</p>`;
-      return;
-    }
     const scope = publication?.scope.apps;
     const target = scope?.mode === "selected" && scope.items.length === 1 ? scope.items[0] : null;
     const config = JSON.stringify({
@@ -141,20 +133,20 @@
       card.innerHTML = `${accessToolbar("a2a")}<p>请选择一项发布</p>`;
       return;
     }
-    if (!row.card_url) {
-      const message = row.enabled ? `当前环境未配置 A2A 接入地址。${missingPublicAddress}` : "该发布已停用。";
-      card.innerHTML = `${accessToolbar("a2a", "", row.name)}<p>${message}</p>`;
+    if (!row.enabled) {
+      card.innerHTML = `${accessToolbar("a2a", "", row.name)}<p>该发布已停用。</p>`;
       return;
     }
-    const appScoped = a2aCardMode === "app" && Boolean(row.app_card_url_template);
-    const url = appScoped ? row.app_card_url_template : row.card_url;
+    const appScoped = a2aCardMode === "app";
+    const address = window.serviceUrl(`${root}/a2a/${encodeURIComponent(row.agent_code)}`);
+    const url = `${address}${appScoped ? "/apps/{app_id}" : ""}/agent-card.json`;
     const headers = a2aHeaderExample({ appScoped });
     const help = appScoped
       ? "将地址中的 <code>{app_id}</code> 替换为应用 ID。"
       : "在 <code>app</code> 中填写应用 ID。读取 Agent Card 时可省略 <code>A2A-Version</code>。";
     const cardModes = `<div class="console-segmented" role="group" aria-label="Agent Card 地址类型">
           <button type="button" data-a2a-card-mode="general" aria-pressed="${!appScoped}">通用卡片</button>
-          <button type="button" data-a2a-card-mode="app" aria-pressed="${appScoped}"${row.app_card_url_template ? "" : " disabled"}>指定应用卡片</button>
+          <button type="button" data-a2a-card-mode="app" aria-pressed="${appScoped}">指定应用卡片</button>
         </div>`;
     card.innerHTML = `${accessToolbar("a2a", cardModes, row.name)}
       <div class="agent-service-card-option agent-service-card-options">
@@ -201,19 +193,13 @@
   async function refresh() {
     const generation = ++directoryGeneration;
     try {
-      const [publications, agentList, distribution] = await Promise.all([
+      const [publications, agentList] = await Promise.all([
         apiFetch(`${root}/publications`),
         apiFetch("/api/v1/agents").catch(() => []),
-        apiFetch(`${root}/client-config`).catch(() => ({})),
       ]);
       if (generation !== directoryGeneration) return;
       rows = publications;
       agents = agentList;
-      const mcpAddressChanged = clientConfig.mcp_url !== distribution.mcp_url;
-      clientConfig = distribution;
-      if (mcpAddressChanged && el("agentServiceProtocol").open) {
-        renderMcpAccess(el("agentServiceMcpGuideSetup"), true);
-      }
       el("newAgentPublication").disabled = false;
       if (!rows.some((row) => row.agent_code === selected)) {
         selectPublication(rows[0]?.agent_code || "");

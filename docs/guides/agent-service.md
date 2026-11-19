@@ -7,8 +7,8 @@ Console 的「服务发布 → 发布 Agent」可以为现有 Agent 新建发布
 ## 部署与本地启动
 
 - 发布管理沿用 Console 管理权限。选择现有 Agent 后即可保存，模型、Skill 和工具沿用 Agent 自身配置，由公共 Runner 在调用时装配。
-- `DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL` 填调用方可达的 HTTPS 基址。开发机可使用 `http://127.0.0.1:8002`。部署在网关子路径下时，填带该路径的基址。
-- 在 API 容器的部署环境中按目标环境设置变量，例如 `https://example.com/deepfos-server/deep-agent-server1-0`。如果使用网关启动版，在同一容器设置即可。地址取自部署配置，包含外部网关前缀。
+- Console 根据当前访问地址生成 A2A 和 MCP 配置。平台入口形如 `https://example.com/deepfos-server/deep-agent-server1-0`，本地直连形如 `http://127.0.0.1:8002`。两者都拼接固定的 Agent Service 接口路径，无需另设环境变量。
+- A2A Card 和文件链接随本次请求生成。反向代理应将外部协议、主机、端口和完整服务前缀交给应用。平台网关重写路径时，由网关清理客户端提交的代理头，再转发 `X-Forwarded-Proto`、`X-Forwarded-Host` 和 `X-Forwarded-Prefix`。ASGI 挂载也可通过 `root_path` 提供路径前缀。公网使用 HTTPS，HTTP 仅适用于本机和私网 IP 直连。
 - Task 和 Context 由当前 API 进程管理。首期使用单 API 进程、单实例。重启会清空近期任务和旧 Task、Context，现有会话及其文件沿用原保留策略。
 - 从仓库根目录使用独立的本地 SQLite、FileStore、渠道令牌和 Profile。该 Profile 的渠道端口用 8012，并停用复制过来的渠道账号，以免重复收消息。
 
@@ -18,7 +18,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
   --api-port 8002
 ```
 
-服务就绪后，通过有权访问测试应用的凭据读取 A2A Card，核对 `supportedInterfaces[].url` 包含正确网关前缀，再发起一次任务。Console 的 `GET /api/v1/agent-service/client-config` 应返回完整 `mcp_url`，已交付的文件用 MCP `get_artifact` 默认模式核对下载地址和字节。缺少有效基址时，A2A 卡片与任务接口返回 503、MCP 的默认下载地址不可用，小文件可用 `format="base64"` 取件。A2A 的地址校验失败可在日志中按发布 ID 和 `phase=public_address` 定位。
+服务就绪后，通过有权访问测试应用的凭据读取 A2A Card，核对 `supportedInterfaces[].url` 包含访问时使用的主机和网关前缀，再发起一次任务。管理员接口 `GET /api/v1/agent-service/client-config` 返回完整 `mcp_url`，已交付的文件用 MCP `get_artifact` 默认模式核对下载地址和字节。请求地址无法解析时，A2A 卡片与任务接口返回 503、MCP 的默认下载地址不可用，小文件可用 `format="base64"` 取件。A2A 的地址校验失败可在日志中按发布 ID 和 `phase=public_address` 定位。
 
 ## 接入与取件
 
@@ -75,11 +75,11 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 `submit_task` 和 `reply_task` 可以附带文件，每项传 `name`、`media_type` 和 `data_base64`，解码后的附件总量最多 8 MiB。重试同一次提交时沿用原消息 ID 和内容。同一凭据主体和应用可以在 A2A 与 MCP 间继续同一个任务。
 
-从 `get_task` 的 `artifacts` 选择文件，或按 ID 调用 `get_artifact`。默认返回完整 `download_url`，客户端携带 MCP 连接的原 `app`、`space`（如有）和鉴权 Header 发 HTTP GET。客户端无法携带这些 Header 时，可对至多 20 MiB 的文件显式传 `format="base64"`。从同一次响应的 `content[].text` 解析 JSON，解码 `data_base64` 后按 `name` 保存原件。超过 20 MiB 时始终返回 `delivery=http_download` 和完整下载地址。服务基址取 `DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL`。基址缺失或无效时，`get_task` 省略下载地址，`get_artifact` 的链接模式返回配置错误。
+从 `get_task` 的 `artifacts` 选择文件，或按 ID 调用 `get_artifact`。默认按本次 MCP 请求的服务地址返回完整 `download_url`，客户端携带 MCP 连接的原 `app`、`space`（如有）和鉴权 Header 发 HTTP GET。客户端无法携带这些 Header 时，可对至多 20 MiB 的文件显式传 `format="base64"`。从同一次响应的 `content[].text` 解析 JSON，解码 `data_base64` 后按 `name` 保存原件。超过 20 MiB 时始终返回 `delivery=http_download` 和完整下载地址。请求地址无效时，`get_task` 省略下载地址，`get_artifact` 的链接模式返回地址错误。
 
 支持 MCP Resources 的客户端可用 `resources/list` 发现统一指南 `deepagent://guides/mcp`，通过 `resources/read` 查看七个工具、附件、补答、续跑和取件示例。
 
-CLI、Python SDK 和通用 HTTP 调用是待评审草案，本版仅在 Console 保留入口占位。草案可能改写或移除，当前服务仅注册 A2A、MCP 及必要的鉴权取件接口。
+CLI、Python SDK 和通用 HTTP 调用是待评审草案。`clients/python/pyproject.toml` 记录 Python 客户端包 `deepfos-agent-client` 的版本。当前服务仅注册 A2A、MCP 及必要的鉴权取件接口，暂无 wheel 下载入口。
 
 ## 将远程 Agent 作为工具
 

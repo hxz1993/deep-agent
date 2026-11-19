@@ -202,10 +202,10 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
                                  ui_tool_hints={"builtin__confirm": {"widget": "confirm"}})
             deps = AgentDeps(session_id="terminal-fixture", agent_id=agent_id, user="fixture-user")
 
-            def capture(event, **fields):
+            def capture(data, _level):
                 if broken_sink:
                     raise RuntimeError("diagnostic failure")
-                rows.append((event, fields))
+                rows.append(data.decode().rstrip("\n"))
 
             async def execute():
                 try:
@@ -220,7 +220,8 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
                         self.assertIs(exc, failure)
 
             with ExitStack() as stack:
-                stack.enter_context(patch("deep_agent.diagnostics.emit", side_effect=capture))
+                stack.enter_context(patch.object(runtime, "_runtime", None))
+                stack.enter_context(patch.object(runtime, "mirror_operational", side_effect=capture))
                 stack.enter_context(patch.object(AgentRunner, "_generate_model_title", return_value=None))
                 stack.enter_context(patch("deep_agent.agent.runner.logger.exception"))
                 stack.enter_context(patch("deep_agent.agent.runner.logger.warning"))
@@ -246,12 +247,17 @@ class DiagnosticRunnerEquivalenceTests(unittest.IsolatedAsyncioTestCase):
                 history = await stores.coordinator.get_raw_history(deps.session_id, agent_id=agent_id)
             expected = "agent_run_pending" if case == "pending" else "agent_run_cancelled" if case == "cancel" else "agent_run_failed"
             if not broken_sink:
-                terminals = [(name, fields) for name, fields in rows
-                             if name in {"agent_run_completed", "agent_run_pending", "agent_run_cancelled", "agent_run_failed"}]
-                self.assertEqual([name for name, _ in terminals], [expected])
-                self.assertNotIn("agent_tool_event", [name for name, _ in rows])
-                self.assertNotIn("do-not-log-this-body", repr(rows))
-                self.assertEqual(terminals[0][1]["run_id"], deps.run_id)
+                self.assertNotIn("do-not-log-this-body", "\n".join(rows))
+                records = [parse_record(line) for line in rows]
+                self.assertTrue(all(record is not None for record in records))
+                terminals = [record for record in records if record["event"] in {
+                    "agent_run_completed", "agent_run_pending", "agent_run_cancelled", "agent_run_failed",
+                }]
+                self.assertEqual([record["event"] for record in terminals], [expected])
+                self.assertNotIn("agent_tool_event", [record["event"] for record in records])
+                self.assertEqual(terminals[0]["run_id"], deps.run_id)
+                if case == "provider":
+                    self.assertIn("ModelHTTPError@", terminals[0]["error_stack"])
             if case == "cancel":
                 self.assertEqual(calls, ["slow"])
                 if streaming:

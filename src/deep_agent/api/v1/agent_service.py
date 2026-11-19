@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import asdict
 
 from a2a import types as wire
@@ -16,7 +15,7 @@ from deep_agent.agent.media_pipeline import allowed_mimes
 from deep_agent.agent_service.download import ArtifactDownloadResponse
 from deep_agent.agent_service.protocol import PublicationHandler, agent_card
 from deep_agent.agent_service.publications import AgentCode, PublicationCreate, PublicationPatch, PublicationStore, ScopeId
-from deep_agent.agent_service.security import observe_access, platform_caller, public_base_url
+from deep_agent.agent_service.security import observe_access, platform_caller, service_base_url
 from deep_agent.agent_service.service import AgentService, bounded_body, task_store
 from deep_agent.agent_service.tasks import TERMINAL
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
@@ -33,11 +32,7 @@ router = APIRouter(prefix="/agent-service")
 tag = "agent-service"
 
 
-def address_for(agent_code: str, app_id: str | None = None) -> str:
-    try:
-        base = public_base_url(os.environ.get("DEEP_AGENT_AGENT_SERVICE_PUBLIC_BASE_URL", ""))
-    except ValueError as exc:
-        raise HTTPException(503, "请配置 Agent Service 对外地址") from exc
+def address_for(base: str, agent_code: str, app_id: str | None = None) -> str:
     address = f"{base}/api/v1/agent-service/a2a/{agent_code}"
     return f"{address}/apps/{app_id}" if app_id is not None else address
 
@@ -49,15 +44,11 @@ async def publication(ctx, agent_code: str):
     return await AgentService(ctx).publication(agent_code)
 
 
-def serialize_publication(row) -> dict:
+def serialize_publication(row, base: str | None) -> dict:
     card_url = app_card_url_template = None
-    if row.enabled:
-        try:
-            card_url = address_for(row.code) + "/agent-card.json"
-            app_card_url_template = address_for(row.code, "{app_id}") + "/agent-card.json"
-        except HTTPException as exc:
-            if exc.status_code != 503:
-                raise
+    if row.enabled and base:
+        card_url = address_for(base, row.code) + "/agent-card.json"
+        app_card_url_template = address_for(base, row.code, "{app_id}") + "/agent-card.json"
     return {
         **{key: getattr(row, key) for key in (
             "id", "name", "description", "agent_id", "scope", "enabled",
@@ -70,8 +61,9 @@ def serialize_publication(row) -> dict:
 
 
 @router.get("/publications", dependencies=admin)
-async def list_publications(ctx: AppContextDep):
-    return [serialize_publication(row) for row in await PublicationStore(ctx.db_session_factory).list()]
+async def list_publications(ctx: AppContextDep, request: Request):
+    base = service_base_url(request)
+    return [serialize_publication(row, base) for row in await PublicationStore(ctx.db_session_factory).list()]
 
 
 @router.get("/applications", dependencies=admin)
@@ -83,21 +75,22 @@ async def list_apps(request: Request, user: RequestUserDep):
 
 
 @router.get("/publications/{agent_code}", dependencies=admin)
-async def get_publication(ctx: AppContextDep, agent_code: AgentCode):
-    return serialize_publication(await publication(ctx, agent_code))
+async def get_publication(ctx: AppContextDep, agent_code: AgentCode, request: Request):
+    return serialize_publication(await publication(ctx, agent_code), service_base_url(request))
 
 
 @router.post("/publications", status_code=201, dependencies=admin)
-async def create_publication(ctx: AppContextDep, body: PublicationCreate):
+async def create_publication(ctx: AppContextDep, body: PublicationCreate, request: Request):
     try:
         async with task_store(ctx).admission:
-            return serialize_publication(await PublicationStore(ctx.db_session_factory).create(body))
+            row = await PublicationStore(ctx.db_session_factory).create(body)
+            return serialize_publication(row, service_base_url(request))
     except ReferenceConflict as exc:
         raise HTTPException(409, str(exc)) from exc
 
 
 @router.patch("/publications/{agent_code}", dependencies=admin)
-async def edit_publication(ctx: AppContextDep, agent_code: AgentCode, body: PublicationPatch):
+async def edit_publication(ctx: AppContextDep, agent_code: AgentCode, body: PublicationPatch, request: Request):
     async with task_store(ctx).admission:
         try:
             row = await PublicationStore(ctx.db_session_factory).update(agent_code, body)
@@ -105,7 +98,7 @@ async def edit_publication(ctx: AppContextDep, agent_code: AgentCode, body: Publ
             raise HTTPException(409, str(exc)) from exc
     if row is None:
         raise HTTPException(404, "发布不存在")
-    return serialize_publication(row)
+    return serialize_publication(row, service_base_url(request))
 
 
 @router.delete("/publications/{agent_code}", status_code=204, dependencies=admin)
@@ -233,13 +226,20 @@ async def authorized_publication(ctx, agent_code: str, request: Request, app_id:
         return row, AgentService.owner(row, headers), headers
 
 
+def a2a_address(request: Request, row, app_id: str | None) -> str:
+    with observe_access("a2a", row.id, phase="public_address"):
+        base = service_base_url(request)
+        if base is None:
+            raise HTTPException(503, "无法从当前请求解析 Agent 接入地址")
+        return address_for(base, row.code, app_id)
+
+
 async def _get_card(ctx: AppContextDep, agent_code: AgentCode, request: Request, app_id: str | None = None):
     row, _, _ = await authorized_publication(ctx, agent_code, request, app_id)
     if not row.enabled:
         raise HTTPException(404, "发布不存在")
     config = await load_document_parsing_config(ctx.stores.global_setting)
-    with observe_access("a2a", row.id, phase="public_address"):
-        address = address_for(row.code, app_id)
+    address = a2a_address(request, row, app_id)
     card = agent_card(row, address, attachment_mimes=allowed_mimes(document_upload_mimes(config)))
     return JSONResponse(MessageToDict(card), headers={"Cache-Control": "no-store"})
 
@@ -256,8 +256,7 @@ async def _rpc(ctx: AppContextDep, agent_code: AgentCode, request: Request, app_
             return {"type": "http.request", "body": bytes(body), "more_body": False}
         return await request.receive()
 
-    with observe_access("a2a", row.id, phase="public_address"):
-        address = address_for(row.code, app_id)
+    address = a2a_address(request, row, app_id)
     handler = PublicationHandler(ctx, task_store(ctx), row.code, owner, headers, address)
     dispatcher = JsonRpcDispatcher(handler, enable_v0_3_compat=False)
     response = await dispatcher.handle_requests(Request(request.scope, receive))

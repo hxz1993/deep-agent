@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from deep_agent.agent.event_persister import EventPersister
 from deep_agent.agent.active_runs import ActiveRunRegistry
+from deep_agent.agent_service.security import AgentServiceAddress
 from deep_agent.core.session_live import SessionLiveHub
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
@@ -76,6 +77,7 @@ class AppContext:
     sandbox_profile: ResolvedSandboxProfile | None = None
     session_live: SessionLiveHub = field(default_factory=SessionLiveHub)
     agent_tasks: object | None = None
+    agent_service_address: AgentServiceAddress = field(default_factory=AgentServiceAddress)
     remote_agents: object | None = None
     wecom_profiles: object | None = None
     wecom_import_lock: asyncio.Lock = field(default_factory=asyncio.Lock)

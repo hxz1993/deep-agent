@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import re
+from collections.abc import Mapping
 from contextlib import contextmanager
 from ipaddress import ip_address
 from time import monotonic
@@ -10,7 +12,10 @@ from fastapi import HTTPException, Request
 
 from deep_agent.agent.request_context import DEFAULT_LANGUAGE
 from deep_agent.diagnostics import emit
-from deep_agent.security.console_admin import ConsoleAdminAuthenticationError, ConsoleAdminUnavailableError, PlatformEnterpriseAdminChecker
+from deep_agent.security.console_admin import (
+    ConsoleAdminAuthenticationError, ConsoleAdminUnavailableError, PlatformEnterpriseAdminChecker,
+    forwarded_platform_auth_headers,
+)
 from deep_agent.services.integration_app_access import (
     IntegrationAppAccessError, PlatformAppAccessClient, app_space,
 )
@@ -19,6 +24,7 @@ _CREDENTIALS = ("authorization", "token", "x-user-token", "x-deepfos-key")
 _SERVICE_PREFIX = "/deep-agent-server1-0"
 _PLATFORM_GATEWAY = "/deepfos-server"
 _PLATFORM_PREFIX = _PLATFORM_GATEWAY + _SERVICE_PREFIX
+_PLATFORM_ADDRESS_TTL = 300
 
 
 @contextmanager
@@ -58,6 +64,10 @@ def service_base_url(request: Request) -> str | None:
             scheme = (_gateway_values(request, "x-forwarded-proto") or [scheme])[-1]
             authority = (_gateway_values(request, "x-forwarded-host") or [authority])[-1]
 
+    return _safe_service_address(scheme, authority, prefix)
+
+
+def _safe_service_address(scheme: str, authority: str, prefix: str) -> str | None:
     if scheme not in {"http", "https"} or not re.fullmatch(r"(?:/[A-Za-z0-9_.~-]+)*", prefix):
         return None
     if any(segment in {".", ".."} for segment in prefix.split("/")):
@@ -81,6 +91,65 @@ def service_base_url(request: Request) -> str | None:
     if port and port != (443 if scheme == "https" else 80):
         host = f"{host}:{port}"
     return f"{scheme}://{host}{prefix}"
+
+
+def needs_platform_address(request: Request, base: str | None) -> bool:
+    if base is None or request.scope.get("root_path"):
+        return False
+    parsed = urlsplit(base)
+    if parsed.scheme != "http" or parsed.hostname == "localhost":
+        return False
+    # The normalized URL only permits IP literals (or localhost) over HTTP.
+    return not ip_address(parsed.hostname).is_loopback
+
+
+def _platform_service_address(value: object) -> str | None:
+    if not isinstance(value, str) or not value or any(ch.isspace() for ch in value.strip()):
+        return None
+    try:
+        parsed = urlsplit(value.strip())
+    except ValueError:
+        return None
+    if parsed.query or parsed.fragment or parsed.path.rstrip("/") not in {"", _PLATFORM_GATEWAY}:
+        return None
+    return _safe_service_address(parsed.scheme, parsed.netloc, _PLATFORM_PREFIX)
+
+
+class AgentServiceAddress:
+    """Cache the canonical platform route when the gateway rewrites Host."""
+
+    def __init__(self):
+        self._base: str | None = None
+        self._expires = 0.0
+        self._lock = asyncio.Lock()
+
+    async def resolve(self, request: Request, base: str | None, headers: Mapping[str, str]) -> str | None:
+        if not needs_platform_address(request, base):
+            return base
+        if self._expires > monotonic():
+            return self._base
+        async with self._lock:
+            if self._expires > monotonic():
+                return self._base
+            try:
+                result = await PlatformAppAccessClient(headers)._get("system", "server-config-params")
+            except IntegrationAppAccessError:
+                return None
+            address = _platform_service_address(result.get("EXPORT_ENV_REALM_NAME")) if isinstance(result, Mapping) else None
+            if address:
+                self._base = address
+                self._expires = monotonic() + _PLATFORM_ADDRESS_TTL
+            return address
+
+    async def for_admin(self, request: Request, user: str) -> str | None:
+        base = service_base_url(request)
+        if not needs_platform_address(request, base):
+            return base
+        try:
+            headers = forwarded_platform_auth_headers(request, user)
+        except ConsoleAdminAuthenticationError:
+            return None
+        return await self.resolve(request, base, headers)
 
 
 async def platform_caller(request: Request, *, path_app: str | None = None, require_app: bool = True) -> dict[str, str]:

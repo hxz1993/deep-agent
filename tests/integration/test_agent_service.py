@@ -41,6 +41,7 @@ from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
 ROOT = "/api/v1/agent-service"
 DIRECT_BASE = "http://127.0.0.1:8002"
 GATEWAY_PREFIX = "/deepfos-server/deep-agent-server1-0"
+BACKEND_AUTHORITY = "10.77.0.12:8080"
 HEADERS = {"authorization": "Bearer fixture-owner", "app": "budget001", "space": "budget", "A2A-Version": "1.0"}
 
 
@@ -66,6 +67,8 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.client = AsyncClient(transport=ASGITransport(app=app), base_url=DIRECT_BASE)
         self.addAsyncCleanup(self.client.aclose)
         self.revoked = False
+        self.platform_realm = "https://gateway.example.test/"
+        self.realm_queries = 0
 
         async def platform(client, _service, path, **_kwargs):
             auth = client._headers.get("token")
@@ -76,6 +79,10 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                 return {"id": auth.split("-")[-1]}
             if path == "check-permission-by-space-app":
                 return {"app": not self.revoked, "space": not self.revoked}
+            if path == "server-config-params":
+                self.realm_queries += 1
+                self.assertEqual(_service, "system")
+                return {"EXPORT_ENV_REALM_NAME": self.platform_realm}
             self.fail(f"Unexpected platform request {path}")
 
         self.enterContext(patch(
@@ -997,10 +1004,7 @@ w.save(publish_path("预算.xlsx"))
                 self.assertEqual(explicit_url.structuredContent["download_url"], download_urls["empty"])
                 self.assertEqual((await fetch_artifact("empty", format="invalid")).structuredContent["status"], 422)
 
-                gateway_headers = {
-                    "x-forwarded-host": "ignored.invalid, gateway.example.test",
-                    "x-forwarded-proto": "http, https", "x-forwarded-prefix": GATEWAY_PREFIX,
-                }
+                gateway_headers = {"host": BACKEND_AUTHORITY}
                 self.client.headers.update(gateway_headers)
                 try:
                     result = await fetch()
@@ -1014,6 +1018,7 @@ w.save(publish_path("预算.xlsx"))
                 })
                 self.assertEqual(over_limit.structuredContent["download_url"],
                                  f"https://gateway.example.test{GATEWAY_PREFIX}{ROOT}/tasks/{task_id}/artifacts/large/download")
+                self.assertEqual(self.realm_queries, 1)
                 self.client.headers["host"] = "invalid-host.test"
                 try:
                     result = await fetch()
@@ -1261,9 +1266,42 @@ w.save(publish_path("预算.xlsx"))
         unrecognized = {**gateway, "X-Forwarded-Prefix": "/elsewhere"}
         config = await self.client.get(f"{ROOT}/client-config", headers={**self.admin, **unrecognized})
         self.assertEqual(config.json(), {"mcp_url": f"{DIRECT_BASE}{ROOT}/mcp"})
-        async with AsyncClient(transport=ASGITransport(app=self.app), base_url="http://[fd00::42]:8010") as direct:
+        async with AsyncClient(transport=ASGITransport(app=self.app), base_url="https://[fd00::42]:8010") as direct:
             config = await direct.get(f"{ROOT}/client-config", headers=self.admin)
-            self.assertEqual(config.json(), {"mcp_url": f"http://[fd00::42]:8010{ROOT}/mcp"})
+            self.assertEqual(config.json(), {"mcp_url": f"https://[fd00::42]:8010{ROOT}/mcp"})
+        self.assertEqual(self.realm_queries, 0)
+
+    async def test_rewritten_gateway_host_uses_system_realm_and_rejects_different_origin(self):
+        internal = {"Host": BACKEND_AUTHORITY}
+        public = "https://gateway.example.test"
+        base = f"{public}{GATEWAY_PREFIX}"
+        config, views = await asyncio.gather(
+            self.client.get(f"{ROOT}/client-config", headers={**self.admin, **internal}),
+            self.client.get(f"{ROOT}/publications", headers={**self.admin, **internal}),
+        )
+        self.assertEqual(config.json(), {"mcp_url": f"{base}{ROOT}/mcp"})
+        self.assertEqual(views.json()[0]["card_url"], f"{base}{self.url}/agent-card.json")
+        for path in (self.url, f"{self.url}/apps/budget001"):
+            card = await self.client.get(f"{path}/agent-card.json", headers={**HEADERS, **internal})
+            self.assertEqual(card.json()["supportedInterfaces"][0]["url"], f"{base}{path}")
+        for origin, expected in ((public, 200), (f"http://{BACKEND_AUTHORITY}", 403)):
+            response = await self.client.post(f"{ROOT}/mcp", headers={
+                **HEADERS, **internal, "Origin": origin, "Accept": "application/json, text/event-stream",
+            }, json={"jsonrpc": "2.0", "id": 1, "method": "resources/list"})
+            self.assertEqual(response.status_code, expected)
+        self.assertEqual(self.realm_queries, 1)
+
+    async def test_invalid_system_realm_does_not_advertise_internal_service(self):
+        self.platform_realm = "https://user:secret@gateway.example.test"
+        internal = {"Host": BACKEND_AUTHORITY}
+        config = await self.client.get(f"{ROOT}/client-config", headers={**self.admin, **internal})
+        self.assertEqual(config.json(), {"mcp_url": None})
+        card = await self.client.get(f"{self.url}/agent-card.json", headers={**HEADERS, **internal})
+        self.assertEqual(card.status_code, 503)
+        self.assertNotIn("secret", card.text)
+        self.platform_realm = "https://gateway.example.test"
+        config = await self.client.get(f"{ROOT}/client-config", headers={**self.admin, **internal})
+        self.assertEqual(config.json(), {"mcp_url": f"https://gateway.example.test{GATEWAY_PREFIX}{ROOT}/mcp"})
 
     async def test_public_task_visibility_and_cross_transport_mcp(self):
         from mcp import ClientSession

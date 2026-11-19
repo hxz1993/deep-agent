@@ -24,9 +24,10 @@ from deep_agent.agent_service.public import (
     HistoryLength, PublicInput, PublicTasks, ReplyInput, SubmitInput, TaskId, TaskQuery, artifact_reference, task_error,
 )
 from deep_agent.agent_service.publications import AgentCode
-from deep_agent.agent_service.security import observe_access, platform_caller, service_base_url
+from deep_agent.agent_service.security import needs_platform_address, observe_access, platform_caller, service_base_url
 from deep_agent.agent_service.service import bounded_body
 from deep_agent.api.v1.agent_service import admin
+from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
 from deep_agent.files.storage import FileStoreError, FileStoreIntegrityError
 
@@ -38,8 +39,8 @@ INLINE_ARTIFACT_LIMIT = 20 * 1024 * 1024
 
 
 @router.get("/client-config", dependencies=admin)
-async def client_config(request: Request):
-    base = service_base_url(request)
+async def client_config(request: Request, ctx: AppContextDep, user: RequestUserDep):
+    base = await ctx.agent_service_address.for_admin(request, user)
     return JSONResponse({"mcp_url": f"{base}/api/v1/agent-service/mcp" if base else None},
                         headers={"Cache-Control": "no-store"})
 
@@ -222,17 +223,25 @@ class MCPResponse(Response):
             current.reset(token)
 
 
+def _validate_mcp_origin(origin: str | None, base: str | None) -> None:
+    if not origin:
+        return
+    public = urlsplit(base or "")
+    if not base or origin != f"{public.scheme}://{public.netloc}":
+        raise HTTPException(403, "MCP Origin 不受信任")
+
+
 @router.api_route("/mcp", methods=["GET", "POST", "DELETE"], include_in_schema=False)
 async def mcp(request: Request, ctx: AppContextDep):
     origin = request.headers.get("origin")
-    allowed_origin = None
     base = service_base_url(request)
-    if base:
-        public = urlsplit(base)
-        allowed_origin = f"{public.scheme}://{public.netloc}"
+    use_platform_address = needs_platform_address(request, base)
     with observe_access("mcp"):
-        if origin and origin != allowed_origin:
-            raise HTTPException(403, "MCP Origin 不受信任")
+        if not use_platform_address:
+            _validate_mcp_origin(origin, base)
         headers = await platform_caller(request, require_app=False)
+        if use_platform_address:
+            base = await ctx.agent_service_address.resolve(request, base, headers)
+            _validate_mcp_origin(origin, base)
     body = await bounded_body(request) if request.method == "POST" else b""
     return MCPResponse(PublicTasks(ctx, headers, "mcp", download_base_url=base), body)

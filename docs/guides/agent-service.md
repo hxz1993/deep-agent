@@ -8,7 +8,8 @@ Console 的「服务发布 → 发布 Agent」可以为现有 Agent 新建发布
 
 - 发布管理沿用 Console 管理权限。选择现有 Agent 后即可保存，模型、Skill 和工具沿用 Agent 自身配置，由公共 Runner 在调用时装配。
 - Console 根据当前访问地址生成 A2A 和 MCP 配置。平台入口形如 `https://example.com/deepfos-server/deep-agent-server1-0`，本地直连形如 `http://127.0.0.1:8002`。两者都拼接固定的 Agent Service 接口路径，无需另设环境变量。
-- A2A Card 和文件链接随本次请求生成。反向代理应将外部协议、主机、端口和完整服务前缀交给应用。平台网关重写路径时，由网关清理客户端提交的代理头，再转发 `X-Forwarded-Proto`、`X-Forwarded-Host` 和 `X-Forwarded-Prefix`。ASGI 挂载也可通过 `root_path` 提供路径前缀。公网使用 HTTPS，HTTP 仅适用于本机和私网 IP 直连。
+- A2A Card 和文件链接按本次请求生成。有完整入口信息时，保留原主机和前缀。网关只传来后端的内网 HTTP 地址时，DeepAgent 通过服务发现查询平台 System 的当前环境入口，再拼 `/deepfos-server/deep-agent-server1-0`，进程内缓存 5 分钟。此查询只读取构建地址所需的域名字段，无需另配环境变量。
+- 反向代理可清理客户端提交的代理头，再转发 `X-Forwarded-Proto`、`X-Forwarded-Host` 和 `X-Forwarded-Prefix`。ASGI 挂载可通过 `root_path` 提供路径前缀。公网入口使用 HTTPS，本机回环仍可直连 HTTP。
 - Task 和 Context 由当前 API 进程管理。首期使用单 API 进程、单实例。重启会清空近期任务和旧 Task、Context，现有会话及其文件沿用原保留策略。
 - 从仓库根目录使用独立的本地 SQLite、FileStore、渠道令牌和 Profile。该 Profile 的渠道端口用 8012，并停用复制过来的渠道账号，以免重复收消息。
 

@@ -412,12 +412,12 @@
           <div id="agentServiceTopSplitter" class="workspace-resizer agent-service-splitter" role="separator" aria-label="调整发布列表宽度" aria-controls="agentServicePublications" aria-orientation="vertical" aria-valuemin="55" aria-valuemax="72" aria-valuenow="62" tabindex="0"></div>
           <section class="console-section agent-service-access" aria-label="接入配置">
             <div id="agentServiceTabs" class="console-segmented agent-service-tabs" role="tablist" aria-label="接入方式">
-              <button id="agentServiceTabA2a" class="active" type="button" role="tab" data-service-access="a2a" aria-selected="true" aria-controls="agentServiceAccess"><span class="agent-protocol-logo" data-protocol="a2a" aria-hidden="true"></span>A2A</button>
-              <button id="agentServiceTabMcp" type="button" role="tab" data-service-access="mcp" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><span class="agent-protocol-logo" data-protocol="mcp" aria-hidden="true"></span>MCP</button>
+              <button id="agentServiceTabMcp" class="active" type="button" role="tab" data-service-access="mcp" aria-selected="true" aria-controls="agentServiceAccess"><span class="agent-protocol-logo" data-protocol="mcp" aria-hidden="true"></span>MCP</button>
+              <button id="agentServiceTabA2a" type="button" role="tab" data-service-access="a2a" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><span class="agent-protocol-logo" data-protocol="a2a" aria-hidden="true"></span>A2A</button>
               <button id="agentServiceTabCli" type="button" role="tab" data-service-access="cli" aria-selected="false" aria-controls="agentServiceAccess" tabindex="-1"><i data-lucide="terminal" aria-hidden="true"></i>CLI</button>
               <button id="agentServiceTabSdk" type="button" role="tab" data-service-access="sdk" aria-selected="false" aria-controls="agentServiceAccess" aria-label="Python SDK" tabindex="-1"><i data-lucide="code-xml" aria-hidden="true"></i>SDK</button>
             </div>
-            <div id="agentServiceAccess" class="agent-service-access-body" role="tabpanel" aria-labelledby="agentServiceTabA2a"></div>
+            <div id="agentServiceAccess" class="agent-service-access-body" role="tabpanel" aria-labelledby="agentServiceTabMcp"></div>
           </section>
         </div>
         <div id="agentServiceRowSplitter" class="workspace-resizer workspace-row-resizer agent-service-row-resizer" role="separator" aria-label="调整 Agent 发布区域高度" aria-controls="agentServiceTop" aria-orientation="horizontal" title="上下拖动调整高度，双击恢复默认" tabindex="0"></div>

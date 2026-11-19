@@ -60,6 +60,11 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     return driver ? `<span class="remote-agent-driver">${showLogo ? driverLogo(protocol) : ""}${driver.badge || driver.label}</span>` : "—";
   }
 
+  function listDriver(protocol) {
+    if (!drivers[protocol]) return "—";
+    return `<span class="remote-agent-list-driver">${driverLogo(protocol)}${driverBadge(protocol, false)}</span>`;
+  }
+
   function status(value, label = labels[value], dotOnly = false) {
     const name = label || "未知";
     const state = attr(value);
@@ -79,7 +84,7 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
   }
 
   function updater(row) {
-    const name = row.updated_by_username || row.updated_by || "—";
+    const name = row.updated_by_username || row.updated_by || "未记录";
     return `<span class="agent-updater" title="更新人：${attr(name)}">${icon("user-round")}<span class="agent-updater-name">${escapeHtml(name)}</span></span>`;
   }
 
@@ -119,7 +124,7 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
       </article>`;
     }).join("");
     el("remoteConnectionRows").innerHTML = shown.map(row => `
-      <tr><td>${open(row)}</td><td>${driverBadge(protocolOf(row))}</td>
+      <tr><td>${open(row)}</td><td>${listDriver(protocolOf(row))}</td>
         <td title="${attr(row.description || "")}">${escapeHtml(row.description || "—")}</td>
         <td>${inspectionState(row.inspection)}</td><td>${updater(row)}</td><td>${updatedTime(row)}</td>
         <td><div class="row-actions agent-row-actions">${remove(row)}</div></td></tr>`).join("");
@@ -493,11 +498,11 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
     const config = editor.config;
     if (config.protocol === "a2a") {
       return `${field("Agent Card 地址", "card_url", { type: "url", required: true, placeholder: "https://example.com/.well-known/agent-card.json" })}
-        <div class="remote-agent-header-fields"><h3>请求头（可选）</h3>
+        <div class="remote-agent-header-fields"><h3>请求头</h3>
           ${editor.headers.map(([key, value], index) => `
             <div class="remote-agent-header-row">
               <input class="console-input" data-header-key="${index}" value="${attr(key)}" aria-label="Header 名称" placeholder="Header 名称" autocomplete="off">
-              <input class="console-input" type="password" data-header-value="${index}" value="${attr(value)}" aria-label="Header 值" placeholder="${value === null ? "•••••• 保留原值" : "Header 值"}" autocomplete="new-password">
+              <input class="console-input" type="text" data-header-value="${index}" value="${attr(value)}" aria-label="Header 值" placeholder="${value === null ? "留空保留原值" : "Header 值"}" autocomplete="off" autocapitalize="off" spellcheck="false">
               <div class="row-actions agent-row-actions"><button type="button" class="row-action icon-only" data-header-remove="${index}" aria-label="删除 Header" title="删除 Header">${icon("trash-2")}</button></div>
             </div>`).join("")}
           <button type="button" class="btn" id="addRemoteHeader">${icon("plus")}添加请求头</button></div>`;

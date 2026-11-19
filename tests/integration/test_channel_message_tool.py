@@ -228,7 +228,7 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "unknown")
         gateway.send_message.assert_awaited_once()
 
-    async def test_trusted_runner_can_query_current_channel_and_cannot_call_ui_tools(self):
+    async def test_trusted_runner_can_query_current_channel_and_keeps_configured_ui_tools(self):
         from deep_agent.api.v1.deps import build_runner_for_agent
         from deep_agent.capabilities import build_registry
         from deep_agent.core.context import AppContext
@@ -243,9 +243,9 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
             self.assertIn("channel_message", tools)
             self.assertIn("channel_doc", tools)
             self.assertFalse(any(tool.name.startswith("builtin__") for tool in info.output_tools))
-            self.assertFalse(any(name.startswith("builtin__") for name in tools))
+            self.assertIn("builtin__confirm", tools)
             self.assertIn("企业微信机器人", info.instructions)
-            self.assertIn("禁止调用 UI 工具", info.instructions)
+            self.assertNotIn("禁止调用 UI 工具", info.instructions)
             self.assertNotIn("/new", info.instructions)
             self.assertIn("参照 channel_message 的工具说明", info.instructions)
             self.assertNotIn("媒体使用会话file_id", info.instructions)
@@ -284,7 +284,7 @@ class ChannelMessageIntegration(unittest.IsolatedAsyncioTestCase):
                     names = {tool.name for tool in (*info.function_tools, *info.output_tools)}
                     self.assertNotIn("channel_message", names)
                     self.assertNotIn("channel_doc", names)
-                    self.assertEqual("builtin__confirm" in names, channel_type is None)
+                    self.assertIn("builtin__confirm", names)
                     return ModelResponse(parts=[TextPart("普通回复")])
 
                 with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(ordinary_response)):

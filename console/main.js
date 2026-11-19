@@ -186,6 +186,11 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   if (next !== "diagnostics") setDiagnosticsActive(false);
   developerModule?.closeDeveloper();
   if (!consoleAllowed) return false;
+  const diagnosticsLoading = next === "diagnostics" ? document.getElementById("diagnosticsLoading") : null;
+  if (diagnosticsLoading && !diagnosticsModule) {
+    diagnosticsLoading.innerHTML = '<span class="loading-spinner"></span><span>正在加载诊断中心…</span>';
+    diagnosticsLoading.classList.remove("hidden");
+  }
   const workspaceWasReady = Boolean(workspaceModule);
   try {
     await loadPage(next);
@@ -211,7 +216,7 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
     return false;
   }
   if (generation !== navigationGeneration || !consoleAllowed) return false;
-  document.getElementById("diagnosticsLoading")?.classList.toggle("hidden", true);
+  diagnosticsLoading?.classList.add("hidden");
   window.lucide?.createIcons();
   return true;
 }

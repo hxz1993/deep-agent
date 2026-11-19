@@ -111,6 +111,8 @@
 .remote-agent-connection-list table { min-width: 760px; }
 .remote-agent-connection-list td:not(:last-child) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .remote-agent-connection-list .agent-update-time { font-size: inherit; }
+.remote-agent-list-driver { display: inline-flex; align-items: center; gap: 6px; vertical-align: middle; }
+.remote-agent-list-driver > .remote-agent-driver-logo { width: 18px; height: 18px; }
 .remote-agent-calls-table table, .remote-agent-connection-list table { table-layout: fixed; }
 .remote-agent-recent-list .remote-agent-calls-table th:nth-child(2) { width: 26%; }
 .remote-agent-recent-list .remote-agent-calls-table th:nth-child(3) { width: 88px; }
@@ -118,7 +120,7 @@
 .remote-agent-recent-list .remote-agent-calls-table th:nth-child(5) { width: 86px; }
 .remote-agent-calls-table :is(th, td):last-child { text-align: center; }
 .remote-agent-connection-list th:first-child { width: 18%; }
-.remote-agent-connection-list th:nth-child(2) { width: 120px; }
+.remote-agent-connection-list th:nth-child(2) { width: 132px; }
 .remote-agent-connection-list th:nth-child(4) { width: 80px; }
 .remote-agent-connection-list th:nth-child(5) { width: 15%; }
 .remote-agent-connection-list th:nth-child(6) { width: 160px; }

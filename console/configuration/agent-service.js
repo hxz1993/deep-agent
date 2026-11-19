@@ -6,7 +6,7 @@
     CANCELED: "已取消", REJECTED: "已拒绝", INPUT_REQUIRED: "待补材料", AUTH_REQUIRED: "待鉴权",
   };
   let rows = [], agents = [], apps = new Map(), tasks = [];
-  let selected = "", selectedTask = "", access = "a2a", a2aCardMode = "general", page = 1;
+  let selected = "", selectedTask = "", access = "mcp", a2aCardMode = "general", page = 1;
   let draft, detailRequest, taskRequest, timer, searchTimer;
   let directoryGeneration = 0;
   let taskRowsMarkup = "", taskDetailSnapshot = "", shownTask = "";
@@ -31,7 +31,7 @@
   const copyButton = (value, label, variant = "text compact") => `<button type="button" class="btn ${variant}" data-client-copy="${attr(value)}">${label}</button>`;
 
   function publicationUpdate(row) {
-    const operator = row.updated_by_user?.username || row.updated_by || "—";
+    const operator = row.updated_by_user?.username || row.updated_by || "未记录";
     const time = formatDate(row.updated_at);
     return `<div class="agent-update-cell">
       <span class="agent-updater" title="更新人：${attr(operator)}">${icon("user-round")}<span class="agent-updater-name">${escapeHtml(operator)}</span></span>
@@ -81,16 +81,14 @@
   function renderMcpAccess(card, inGuide = false) {
     const endpoint = window.serviceUrl(`${root}/mcp`);
     const publication = rows.find((row) => row.agent_code === selected);
-    const scope = publication?.scope.apps;
-    const target = scope?.mode === "selected" && scope.items.length === 1 ? scope.items[0] : null;
     const config = JSON.stringify({
       mcpServers: {
         "deepagent-agents": {
           type: "streamableHttp",
           url: endpoint,
           headers: {
-            app: target?.app_id || "<App ID>",
-            space: target?.space_id || "<Space ID>",
+            app: "<App ID>",
+            space: "<Space ID>",
             "X-Deepfos-Key": "<API Key>",
           },
         },
@@ -120,8 +118,8 @@
 
   function a2aHeaderExample({ appScoped = false, useToken = false } = {}) {
     const context = appScoped ? {} : {
-      app: "budget001",
-      space: "budget",
+      app: "<App ID>",
+      space: "<Space ID>",
       language: "zh-cn",
     };
     const credential = useToken ? { token: "<Token>" } : { "X-Deepfos-Key": "<API Key>" };
@@ -143,7 +141,7 @@
     const headers = a2aHeaderExample({ appScoped });
     const help = appScoped
       ? "将地址中的 <code>{app_id}</code> 替换为应用 ID。"
-      : "在 <code>app</code> 中填写应用 ID。读取 Agent Card 时可省略 <code>A2A-Version</code>。";
+      : "填写应用 ID 和所属空间 ID。读取 Agent Card 时可省略 <code>A2A-Version</code>。";
     const cardModes = `<div class="console-segmented" role="group" aria-label="Agent Card 地址类型">
           <button type="button" data-a2a-card-mode="general" aria-pressed="${!appScoped}">通用卡片</button>
           <button type="button" data-a2a-card-mode="app" aria-pressed="${appScoped}">指定应用卡片</button>

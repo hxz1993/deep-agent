@@ -46,6 +46,7 @@
 | `42` | [企业集成与鉴权适配器](42-enterprise-auth-adapters/README.md) | 2026-11-12 | MCP 绑定应用已实现，固定目标 App 和 Space 并继承本轮用户。统一账号映射与换票待评审 |
 | `43` | [中间产物管理与报告流水线](43-budget-report-pipeline/README.md) | 2026-11-06 | 11-09 补充财务场景和工作台映射。已有 Dot 交接、可选模块与财务交付规范，具体实施及 DDL 尚未批准 |
 | `44` | [智能输出与 Agent 对外调用](44-agent-invocation/README.md) | 2026-11-09 | Python 传提示词生成、调用已配置 Agent、内网 MCP 发布的设计建议，待评审 |
+| `46` | [Agent 运行护栏](46-agent-guardrails/README.md) | 2026-11-20 | 已记录框架对比和产品配置边界；渠道 UI 工具的执行前兜底待评审 |
 
 ## 文档命名
 

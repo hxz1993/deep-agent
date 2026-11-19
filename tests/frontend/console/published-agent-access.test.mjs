@@ -21,9 +21,11 @@ function setup(apiFetch) {
   element("agentTaskDetail").querySelector = () => ({ scrollTop: 0 });
   element("agentTaskApp").replaceChildren = (...options) => { element("agentTaskApp").options = options; };
   let tick;
-  const mcpTab = element("fixtureMcpTab");
+  const mcpTab = element("agentServiceTabMcp");
+  const a2aTab = element("agentServiceTabA2a");
   mcpTab.dataset.serviceAccess = "mcp";
-  element("agentServiceTabs").querySelectorAll = () => [mcpTab];
+  a2aTab.dataset.serviceAccess = "a2a";
+  element("agentServiceTabs").querySelectorAll = () => [mcpTab, a2aTab];
   vm.runInNewContext(script, {
     window, document, apiFetch, AbortController, URLSearchParams, clearInterval,
     Option: class { constructor(label, value) { this.value = value; } },
@@ -41,10 +43,13 @@ test("both A2A card modes supply copyable headers for RPC", async () => {
     return [];
   });
   await ui.refresh();
+  ui.element("agentServiceTabA2a").listeners.get("click")();
   const card = ui.element("agentServiceAccess");
   assert.match(card.innerHTML, /https:\/\/gateway\.example\.test\/deepfos-server\/deep-agent-server1-0\/api\/v1\/agent-service\/a2a\/reports\/agent-card\.json/);
   assert.match(card.innerHTML, /<h4 class="agent-service-access-title"[^>]*><span class="agent-protocol-logo" data-protocol="a2a"/);
   assert.match(card.innerHTML, /&quot;A2A-Version&quot;: &quot;1\.0&quot;/);
+  assert.match(card.innerHTML, /&quot;app&quot;: &quot;<App ID>&quot;/);
+  assert.match(card.innerHTML, /&quot;space&quot;: &quot;<Space ID>&quot;/);
   card.querySelector = () => ({ focus() {} });
   card.listeners.get("click")({ target: { closest: () => ({
     dataset: { a2aCardMode: "app" }, getAttribute: () => "false",
@@ -63,13 +68,16 @@ test("disabled publication hides the Card but leaves the environment MCP address
   });
   await ui.refresh();
   const card = ui.element("agentServiceAccess");
+  assert.equal(ui.element("agentServiceTabMcp").getAttribute("aria-selected"), "true");
+  assert.ok(card.innerHTML.includes(`${prefix}api/v1/agent-service/mcp`));
+  ui.element("agentServiceTabA2a").listeners.get("click")();
   assert.match(card.innerHTML, /该发布已停用/);
   assert.doesNotMatch(card.innerHTML, /agent-card\.json/);
-  ui.element("fixtureMcpTab").listeners.get("click")();
+  ui.element("agentServiceTabMcp").listeners.get("click")();
   assert.ok(card.innerHTML.includes(`${prefix}api/v1/agent-service/mcp`));
 });
 
-test("MCP copy and open help use the selected publication's app and space", async () => {
+test("MCP config and guide keep placeholders across publication changes", async () => {
   const scope = { apps: { mode: "selected", items: [{ app_id: "budget001", space_id: "budget" }] } };
   let current = { ...publication, scope };
   const ui = setup(async path => {
@@ -78,10 +86,11 @@ test("MCP copy and open help use the selected publication's app and space", asyn
     return [];
   });
   await ui.refresh();
-  ui.element("fixtureMcpTab").listeners.get("click")();
   const html = ui.element("agentServiceAccess").innerHTML;
-  assert.match(html, /&quot;app&quot;: &quot;budget001&quot;/);
-  assert.match(html, /&quot;space&quot;: &quot;budget&quot;/);
+  assert.match(html, /&quot;app&quot;: &quot;<App ID>&quot;/);
+  assert.match(html, /&quot;space&quot;: &quot;<Space ID>&quot;/);
+  assert.match(html, /&quot;X-Deepfos-Key&quot;: &quot;<API Key>&quot;/);
+  assert.doesNotMatch(html, /budget001/);
 
   ui.element("agentServiceProtocol").open = true;
   current = { ...publication, agent_code: "recon", scope: {
@@ -89,8 +98,10 @@ test("MCP copy and open help use the selected publication's app and space", asyn
   } };
   await ui.refresh();
   const guide = ui.element("agentServiceMcpGuideSetup").innerHTML;
-  assert.match(guide, /recon001/);
-  assert.doesNotMatch(guide, /budget001/);
+  assert.match(guide, /"app": "<App ID>"/);
+  assert.match(guide, /"space": "<Space ID>"/);
+  assert.doesNotMatch(guide, /budget001|recon001/);
+  assert.match(ui.element("agentServiceAccess").innerHTML, /&quot;app&quot;: &quot;<App ID>&quot;/);
 });
 
 test("timer leaves slow list and detail requests in flight and resumes after delivery", async () => {

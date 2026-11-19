@@ -178,8 +178,6 @@ async def build_runner_for_agent(
         spec = replace(spec, instructions=f"{spec.instructions}\n\n{entry_instructions}")
     if capabilities is not None:
         spec.capabilities = canonical_tool_package_codes(capabilities)
-    if channel_type or channel_context is not None:
-        spec.capabilities = [code for code in spec.capabilities if not code.startswith("ui:")]
     if app_context is not None:
         instructions = (
             f"{spec.instructions}\n\n"

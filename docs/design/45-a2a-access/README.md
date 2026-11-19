@@ -38,6 +38,7 @@ Revision `016` 创建 `agent_publications` 和 `remote_agent_connections`。连�
 
 ## 实施与待确认
 
+- [下一轮开发：最终产物与 MCP 回复](next-iteration-deliverables-and-mcp.md)记录最终文件的明确选择、MCP 追问和输出格式的待确认契约。
 - [服务端与客户端实施方案](service-and-client-design.md)涵盖协议选型、现有 Runner 复用、Task 与会话映射、去重、流式订阅、取消、重启边界、产物和分期验收。
 - [鉴权与数据访问设计](access-control-design.md)涵盖发布授权、调用身份、下游授权、文件、出站连接和安全验收。
 - 补材料续跑纳入阶段 1；独立人审按首个业务确认。其余待决项汇总在[总案](server-implementation-plan.md)。

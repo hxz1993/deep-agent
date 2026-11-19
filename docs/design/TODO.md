@@ -2,6 +2,19 @@
 
 本文件只保留尚未完成或需要外部条件的事项。已交付能力不再重复拆成待办，历史决策从Git记录恢复。
 
+## 发布 Agent 下一轮（2026-11-20）
+
+| ID | 事项 | 状态与下一步 |
+| --- | --- | --- |
+| `AGENT-PUBLICATION-DELIVERY-001` | [明确选择最终交付的文件](45-a2a-access/next-iteration-deliverables-and-mcp.md#a2a-产物交付) | 待评审。用五份中间文件只交一份的场景确定声明方式与验收。 |
+| `AGENT-PUBLICATION-MCP-001` | [MCP 追问与返回格式](45-a2a-access/next-iteration-deliverables-and-mcp.md#mcp-追问与返回格式) | 待评审。优先让主控 Agent 把追问作为普通结果处理，并核对现有客户端的续聊和 JSON 兼容。 |
+
+## Agent 运行护栏（2026-11-20）
+
+| ID | 事项 | 状态与下一步 |
+| --- | --- | --- |
+| `GUARDRAIL-UI-001` | [渠道 UI 工具的执行前兜底](46-agent-guardrails/README.md#渠道-ui-工具的兜底) | 待评审，当前沿用提示到控制台继续。确有需要时，在实际 UI 调用交给客户端前检查入口是否能回传结果。缺少承载时给模型明确结果；沿用现有工具装配和审批协议。 |
+
 ## 原生搜索与原生生图（2026-11-19）
 
 暂缓产品接入。已记录 DeepSeek 搜索、URL 读取与 OpenAI 搜索的直连结果，并保留只读能力展示原型。后续扩大供应商和模型覆盖后，再决定轨迹细节、实际能力维护方式和生图产物链路。详见 [21 课题](21-web-tools/native-search-and-image-generation-research.md)。

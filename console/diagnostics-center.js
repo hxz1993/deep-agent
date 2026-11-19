@@ -47,7 +47,14 @@ export function initDiagnostics() {
   }
   center = {
     setActive(value) {
-      if (!value) { if (active) navigation.remember(); active = false; logs.deactivate(); sessions.deactivate(); channels.deactivate(); usage.deactivate(); route = null; currentHash = ""; currentEntryKey = null; return; }
+      if (!value) {
+        if (active) navigation.remember();
+        active = false;
+        logs.deactivate(); sessions.deactivate(); channels.deactivate(); usage.deactivate();
+        for (const page of [logPage, sessionPage, channelPage, usagePage]) page.classList.add("hidden");
+        route = null; currentHash = ""; currentEntryKey = null;
+        return;
+      }
       active = true; showRoute();
     },
     async open(kind) {

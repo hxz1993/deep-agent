@@ -59,6 +59,31 @@ test('unauthenticated or non-admin deep links never initialize any business page
 test('late configuration initialization does not restore a tab over a newer route',async()=>{
  const gate=deferred();const h=harness({pending:{configuration:gate}});const first=h.context.boot();while(!h.calls.includes('init:configuration'))await Promise.resolve();await h.context.showPage('diagnostics');gate.resolve();await first;assert.equal(h.panels.find(p=>p.active).dataset.pagePanel,'diagnostics');assert.equal(h.calls.includes('refresh:configuration'),false);assert.ok(h.calls.includes('diagnostics:true'));
 });
+test('a cold diagnostic session link keeps its destination while the module loads', async () => {
+  const gate = deferred();
+  const h = harness();
+  const { document, importPage, location } = h.context;
+  const classes = new Set(['hidden']);
+  const loading = { classList: { add: value => classes.add(value), remove: value => classes.delete(value) } };
+  const getElementById = document.getElementById;
+  document.getElementById = id => id === 'diagnosticsLoading' ? loading : getElementById(id);
+  h.context.importPage = async path => {
+    if (path.startsWith('./diagnostics-center.js')) await gate.promise;
+    return importPage(path);
+  };
+  await h.context.boot();
+  const target = '#/diagnostics/sessions/session-id?view=conversation&event_id=question-event';
+  location.hash = target;
+  const opening = h.context.showPage('diagnostics', { updateHash: false });
+  assert.equal(classes.has('hidden'), false);
+  assert.match(loading.innerHTML, /正在加载诊断中心/);
+  assert.equal(h.calls.includes('diagnostics:true'), false);
+  gate.resolve();
+  assert.equal(await opening, true);
+  assert.equal(location.hash, target);
+  assert.equal(classes.has('hidden'), true);
+  assert.ok(h.calls.includes('diagnostics:true'));
+});
 test('each dirty configuration guard reports rejected navigation to cross-page callers',async()=>{
  for(const [name,guard] of [
   ['agentsAdmin',{isEditorOpen:()=>true,requestCloseEditor:async()=>false}],

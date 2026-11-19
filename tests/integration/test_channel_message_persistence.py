@@ -17,7 +17,6 @@ from httpx import ASGITransport, AsyncClient
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from sqlalchemy import select
 
-from deep_agent.agent.history import is_tool_retry
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.core.context import AppContext, init_context, reset_context
@@ -254,22 +253,15 @@ class ChannelMessagePersistenceIntegrationTests(unittest.IsolatedAsyncioTestCase
     async def test_provider_failure_ends_channel_loading_and_preserves_completed_tool(self):
         await self._interrupted_after_tool(cancel=False)
 
-    async def test_channel_does_not_defer_when_model_attempts_an_unavailable_ui_tool(self):
+    async def test_channel_delivers_console_hint_when_configured_ui_tool_awaits_input(self):
         account, service, adapter, handler, requests = await self._create_ingress(stream_interval=0)
         await self.ctx.stores.agent.update_unique(self._agent_id, AgentUpdate(capabilities=["ui:builtin"]))
         delivered_histories = []
-        model_calls = 0
 
         async def answer(messages, info):
-            nonlocal model_calls
-            model_calls += 1
-            self.assertNotIn("builtin__confirm", {tool.name for tool in (*info.function_tools, *info.output_tools)})
-            if model_calls == 1:
-                yield {1: DeltaToolCall(name="builtin__confirm", json_args='{"message":"Synthetic confirmation"}',
-                                        tool_call_id="unavailable-confirm")}
-            else:
-                self.assertTrue(any(is_tool_retry(part) for part in messages[-1].parts))
-                yield "请直接在聊天里确认。"
+            self.assertIn("builtin__confirm", {tool.name for tool in info.function_tools})
+            yield {1: DeltaToolCall(name="builtin__confirm", json_args='{"message":"Synthetic confirmation"}',
+                                    tool_call_id="channel-confirm")}
 
         async def deliver(_frame, _stream_id, _text, finish):
             if finish:
@@ -277,14 +269,14 @@ class ChannelMessagePersistenceIntegrationTests(unittest.IsolatedAsyncioTestCase
 
         adapter.client.reply_stream.side_effect = deliver
         with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(stream_function=answer)), mock_request_disconnect():
-            await self._send(handler, adapter, message_id="blocked-channel-ui")
+            await self._send(handler, adapter, message_id="channel-ui-pending")
             await self._drain(service)
-        self.assertEqual(model_calls, 2)
         self.assertEqual(len(delivered_histories), 1)
-        self._assert_items(delivered_histories[0], texts=["请直接在聊天里确认。"], tool_count=0)
+        tool, = self._assert_items(delivered_histories[0], texts=[], tool_count=1)
+        self.assertEqual(tool["status"], "awaiting_input")
         final = adapter.client.reply_stream.await_args.args
-        self.assertEqual(final[2:], ("请直接在聊天里确认。", True))
-        record = await self._run_record(account.id, "blocked-channel-ui")
+        self.assertEqual(final[2:], ("此操作需要在 DeepAgent 控制台继续完成。", True))
+        record = await self._run_record(account.id, "channel-ui-pending")
         self.assertEqual((record.processing_status, record.delivery_status), ("completed", "sent"))
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
         await self._assert_fact_events(requests[0]["session_id"], status="completed")

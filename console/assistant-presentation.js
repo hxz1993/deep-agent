@@ -66,6 +66,13 @@ function toolCallFromConversationItem(item = {}) {
   };
 }
 
+function structuredAction(name, output, outputId, publicationProtocol) {
+  return {
+    type: ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT, name, output, outputId,
+    ...(publicationProtocol ? { publicationProtocol } : {}),
+  };
+}
+
 export function assistantActionsFromHistoryItems(items = []) {
   const actions = [];
   let interrupted = false;
@@ -93,7 +100,7 @@ export function assistantActionsFromHistoryItems(items = []) {
     }
 
     if (item?.kind === "structured_output" && item.status === "completed") {
-      actions.push({ type: ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT, name: item.name, output: item.output, outputId: item.item_id });
+      actions.push(structuredAction(item.name, item.output, item.item_id, item.publication_protocol));
       continue;
     }
     if (item?.kind !== "tool" || item.status === "removed") continue;
@@ -155,11 +162,11 @@ export function assistantActionsFromSse(type, data = {}) {
       return [{ type: ASSISTANT_PRESENTATION_ACTIONS.TOOL_REMOVE, call: data }];
     case "output":
       return data.accepted === true && data.status === "completed" && Object.hasOwn(data, "output")
-        ? [{ type: ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT, name: data.name, output: data.output, outputId: data.output_id }]
+        ? [structuredAction(data.name, data.output, data.output_id, data.publication_protocol)]
         : [];
     case "final":
       return [
-        ...(data.output_info && Object.hasOwn(data, "output") ? [{ type: ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT, name: data.output_info.name, output: data.output, outputId: data.output_info.output_id }] : []),
+        ...(data.output_info && Object.hasOwn(data, "output") ? [structuredAction(data.output_info.name, data.output, data.output_info.output_id, data.output_info.publication_protocol)] : []),
         { type: ASSISTANT_PRESENTATION_ACTIONS.COMPLETE, output: data.output_info ? undefined : data.output },
         ...(data.status === "completed" && data.output_files?.length
           ? [{ type: ASSISTANT_PRESENTATION_ACTIONS.OUTPUT_FILES, files: data.output_files }] : []),
@@ -225,7 +232,10 @@ export function applyAssistantPresentationActions(
         presenter.attachHitlWidget(prepareDeferredCall(action.call || {}));
         break;
       case ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT:
-        presenter.setStructuredOutput?.({ name: action.name, output: action.output, id: action.outputId });
+        presenter.setStructuredOutput?.({
+          name: action.name, output: action.output, id: action.outputId,
+          ...(action.publicationProtocol ? { publicationProtocol: action.publicationProtocol } : {}),
+        });
         break;
       case ASSISTANT_PRESENTATION_ACTIONS.OUTPUT_FILES:
         presenter.setOutputFiles(action.files);

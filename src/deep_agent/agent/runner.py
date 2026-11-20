@@ -336,10 +336,8 @@ class AgentRunner:
     async def _prepare_output_contract(self, session_id, deps):
         deps.output_state = None
         deps.output_store = self.store
-        if self._output_config_loader is None:
-            return
-        config = await self._output_config_loader()
-        if config is None:
+        config = await self._output_config_loader() if self._output_config_loader is not None else None
+        if config is None and not deps.publication_protocol:
             return
         rejected = []
         attempts = 0
@@ -358,17 +356,15 @@ class AgentRunner:
                 if len(page) < 500:
                     break
                 after = page[-1].sequence
-        deps.output_state = StructuredOutputState(config, rejected_keys=rejected, attempts=attempts)
+        deps.output_state = StructuredOutputState(
+            config, rejected_keys=rejected, attempts=attempts, publication_protocol=deps.publication_protocol,
+        )
         identity = deps.output_state.tool_name
         deps.tool_names[identity.wire] = identity
 
     @staticmethod
     def _output_types(deps):
-        types = deps.output_state.output_types if deps.output_state is not None else _STREAM_OUTPUT_TYPE
-        if deps.a2a:
-            from deep_agent.agent_service.output import question_output
-            return [*types, question_output()]
-        return types
+        return deps.output_state.output_types if deps.output_state is not None else _STREAM_OUTPUT_TYPE
 
     def _bind_tool_output_store(
         self,
@@ -2056,10 +2052,6 @@ class AgentRunner:
             self.tool_display_names,
             deps.tool_names,
         )
-        if deps.a2a:
-            from deep_agent.agent_service.output import A2AQuestion
-            if isinstance(result.output, A2AQuestion):
-                response["a2a_question"] = result.output.question
         response["conversation_id"] = result.conversation_id or deps.conversation_id
         response["run_id"] = result.run_id or deps.run_id
         if deps.output_state is not None and deps.output_state.accepted is not None:

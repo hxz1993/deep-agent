@@ -193,6 +193,7 @@ async def recent_task(ctx: AppContextDep, request: Request, user: RequestUserDep
     # once the session exists, and only show turns persisted for this task.
     statement = select(
         ChatSession.session_id, ChatSession.title, ChatSessionEvent.turn_id, ChatSessionEvent.event_id,
+        ChatSessionEvent.created_at, ChatSessionEvent.payload,
     ).outerjoin(
         ChatSessionEvent,
         and_(
@@ -210,7 +211,15 @@ async def recent_task(ctx: AppContextDep, request: Request, user: RequestUserDep
     turns = {}
     for link in links:
         if link.turn_id:
-            turns.setdefault(link.turn_id, {"id": link.turn_id, "event_id": link.event_id})
+            parts = (link.payload or {}).get("message", {}).get("parts", [])
+            content = next((part.get("content") for part in parts if part.get("part_kind") == "user-prompt"), None)
+            text = content if isinstance(content, str) else " ".join(
+                item for item in (content or []) if isinstance(item, str)
+            )
+            turns.setdefault(link.turn_id, {
+                "id": link.turn_id, "event_id": link.event_id,
+                "created_at": link.created_at, "summary": " ".join(text.split())[:140],
+            })
     profiles, names = await asyncio.gather(
         caller_profiles(request, user, {scope.owner.user}),
         resolve_scope_directory(request, user),

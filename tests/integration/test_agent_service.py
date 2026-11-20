@@ -16,9 +16,10 @@ from unittest.mock import AsyncMock, Mock, patch
 from a2a import types as wire
 from a2a.client.card_resolver import parse_agent_card
 from fastapi import FastAPI
+from google.protobuf.timestamp_pb2 import Timestamp
 from httpx import ASGITransport, AsyncClient
 from PIL import Image
-from pydantic_ai.messages import BinaryContent, ModelResponse, TextPart, ToolCallPart, UserPromptPart
+from pydantic_ai.messages import BinaryContent, ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
 
 from deep_agent.agent_service.download import ArtifactDownloadResponse
@@ -43,6 +44,34 @@ DIRECT_BASE = "http://127.0.0.1:8002"
 GATEWAY_PREFIX = "/deepfos-server/deep-agent-server1-0"
 BACKEND_AUTHORITY = "10.77.0.12:8080"
 HEADERS = {"authorization": "Bearer fixture-owner", "app": "budget001", "space": "budget", "A2A-Version": "1.0"}
+
+
+PUBLICATION_OUTPUT = "output__publication_result"
+
+
+def publication_result(status="completed", *, message=None, **reply):
+    return ModelResponse(parts=[ToolCallPart(PUBLICATION_OUTPUT, {
+        "status": status, **({"message": message} if message else {}), "reply": reply,
+    })])
+
+
+def text_result(info, text):
+    if PUBLICATION_OUTPUT in {tool.name for tool in info.output_tools}:
+        return publication_result(text=text)
+    return ModelResponse(parts=[TextPart(text)])
+
+
+def latest_tool_result(messages, name):
+    return next((part for message in reversed(messages) for part in reversed(message.parts)
+                 if isinstance(part, ToolReturnPart) and part.tool_name == name), None)
+
+
+def mcp_message(key, text, *, files=(), **bindings):
+    parts = [{"text": text}, *[
+        {"filename": name, "mediaType": mime, "raw": base64.b64encode(content).decode()}
+        for name, mime, content in files
+    ]]
+    return {"messageId": key, "role": "ROLE_USER", "parts": parts, **bindings}
 
 
 class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -174,7 +203,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed_card.security_schemes["platformKey"].api_key_security_scheme.name, "X-Deepfos-Key")
         self.assertEqual(parsed_card.security_schemes["platformBearer"].http_auth_security_scheme.scheme, "bearer")
         self.assertEqual(len(parsed_card.security_requirements), 2)
-        model = FunctionModel(lambda _messages, _info: ModelResponse(parts=[TextPart("预算差异 20")]))
+        model = FunctionModel(lambda _messages, info: text_result(info, "预算差异 20"))
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             params = {"message": self.message("m1", "计算预算差异")}
             task = self.result(await self.rpc("SendMessage", params))["task"]
@@ -205,6 +234,46 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         })).status_code, 400)
         self.revoked = True
         self.assertEqual((await self.rpc("GetTask", {"id": task["id"]})).status_code, 403)
+
+    async def test_list_tasks_time_cutoff_is_inclusive_and_metadata_is_stable(self):
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+            lambda _, info: text_result(info, "核对完毕"),
+        )):
+            tasks = [
+                self.result(await self.rpc("SendMessage", {
+                    "message": self.message(f"cutoff-{name}", f"{name}的预算核对"),
+                }))["task"]
+                for name in ("较早", "等于", "较晚")
+            ]
+        entries = [self.ctx.agent_tasks.entries[task["id"]] for task in tasks]
+        cutoff = entries[1].changed
+        for offset, entry in zip((-1, 0, 1), entries):
+            entry.changed = cutoff + timedelta(seconds=offset)
+            entry.task.status.timestamp.FromDatetime(entry.changed)
+        filters = {"statusTimestampAfter": cutoff.isoformat(), "historyLength": 1, "includeArtifacts": True}
+        expected = [tasks[2]["id"], tasks[1]["id"]]
+        a2a = self.result(await self.rpc("ListTasks", filters))
+        self.assertEqual([task["id"] for task in a2a["tasks"]], expected)
+        next_nanosecond = Timestamp()
+        next_nanosecond.FromNanoseconds(entries[1].task.status.timestamp.ToNanoseconds() + 1)
+        later_filters = {**filters, "statusTimestampAfter": next_nanosecond.ToJsonString()}
+        later = self.result(await self.rpc("ListTasks", later_filters))
+        self.assertEqual([task["id"] for task in later["tasks"]], [tasks[2]["id"]])
+        self.client.headers.update(HEADERS)
+        async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+            async with ClientSession(rx, tx) as client:
+                await client.initialize()
+                listed = await client.call_tool("ListTasks", {"agentCode": "budget-report", **filters})
+                self.assertFalse(listed.isError, listed)
+                self.assertEqual(listed.structuredContent, a2a)
+                after = await client.call_tool("ListTasks", {"agentCode": "budget-report", **later_filters})
+                self.assertFalse(after.isError, after)
+                self.assertEqual(after.structuredContent, later)
+                self.assertEqual(a2a["tasks"][0]["metadata"]["description"], "较晚的预算核对")
+                self.assertTrue(all(len(task["history"]) == 1 for task in a2a["tasks"]))
 
     async def test_rpc_envelope_and_error_compatibility(self):
         for body, expected in (
@@ -284,9 +353,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(snapshot(entry)["question_id"])
 
     async def test_question_and_continuation(self):
-        from deep_agent.agent_service.output import QUESTION_NAME
 
-        output_name = "output__budget_result"
         await self.ctx.stores.agent.update_unique(self.agent, AgentUpdate(
             structured_output_enabled=True,
             output_config={
@@ -299,8 +366,8 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             if not info.output_tools:
                 return ModelResponse(parts=[TextPart("预算分析")])
             names = {tool.name for tool in info.output_tools}
-            self.assertTrue({QUESTION_NAME, output_name} <= names)
-            return ModelResponse(parts=[ToolCallPart(QUESTION_NAME, {"question": "请提供预算月份"})])
+            self.assertEqual(names, {PUBLICATION_OUTPUT})
+            return publication_result("input_required", message="请提供预算月份", text="已准备预算数据")
 
         app_url = f"{self.url}/apps/budget001"
         token = {key: HEADERS[key] for key in ("authorization", "A2A-Version")}
@@ -319,18 +386,16 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.ctx.console_admin_authorizer, "access_for", return_value=ConsoleAdminAccess(allowed=False)):
             self.assertEqual((await self.client.get(detail_url, headers=ordinary_user)).status_code, 403)
         bindings = {"taskId": task["id"], "contextId": task["contextId"]}
-        wrong = self.message("wrong", "十月", **bindings, metadata={"replyTo": "stale"})
-        self.assertIn("error", (await self.rpc("SendMessage", {"message": wrong})).json())
         with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
-            lambda *_: ModelResponse(parts=[ToolCallPart(output_name, {"month": "十月"})]),
+            lambda *_: publication_result(data={"month": "十月"}),
         )):
-            answer = self.message("answer", "十月", **bindings)
+            answer = self.message("answer", "十月", **bindings, metadata={"replyTo": "unused"})
             task2 = self.result(await self.rpc("SendMessage", {"message": answer}))["task"]
         self.assertEqual(task2["id"], task["id"])
         self.assertEqual(task2["status"]["state"], "TASK_STATE_COMPLETED", task2)
         self.assertEqual(task2["artifacts"][0]["parts"][0]["data"], {"month": "十月"})
         with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
-            lambda *_: ModelResponse(parts=[ToolCallPart(output_name, {"month": "十一月"})]),
+            lambda *_: publication_result(data={"month": "十一月"}),
         )):
             next_task = self.result(await self.rpc("SendMessage", {
                 "message": self.message("next", "十一月", contextId=task["contextId"]),
@@ -349,9 +414,11 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(finished.status_code, 200, finished.text)
         detail = finished.json()
         self.assertEqual(detail["session_id"], session_id)
-        self.assertEqual(detail["turns"], [
-            {"id": event.turn_id, "event_id": event.event_id} for event in persisted_turns[:2]
+        self.assertEqual([(row["id"], row["event_id"]) for row in detail["turns"]], [
+            (event.turn_id, event.event_id) for event in persisted_turns[:2]
         ])
+        self.assertEqual([row["summary"] for row in detail["turns"]], ["预算分析", "十月"])
+        self.assertTrue(all(row["created_at"] for row in detail["turns"]))
         self.assertEqual((detail["caller_username"], detail["app_name"], detail["space_name"]),
                          ("budget-user", "预算应用", "预算空间"))
         self.assertEqual(task_list.json()["items"][0]["caller_username"], "budget-user")
@@ -360,13 +427,135 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostic.json()["source_type"], "a2a")
         self.assertEqual(detail["session_title"], diagnostic.json()["title"])
 
+    async def test_publication_retries_text_outside_result(self):
+        calls = 0
+
+        def respond(_messages, info):
+            nonlocal calls
+            if not info.output_tools:
+                return ModelResponse(parts=[TextPart("预算说明")])
+            calls += 1
+            if calls == 1:
+                result = publication_result(text="见正文")
+                result.parts.insert(0, TextPart("本月实际 92 万元，低于预算 8 万元。"))
+                return result
+            return publication_result(text="本月实际 92 万元，低于预算 8 万元。")
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+            task = self.result(await self.rpc("SendMessage", {
+                "message": self.message("reply-only", "请解释差额"),
+            }))["task"]
+        self.assertEqual(calls, 2)
+        self.assertEqual(task["status"]["state"], "TASK_STATE_COMPLETED")
+        self.assertEqual(task["artifacts"][0]["parts"][0]["text"], "本月实际 92 万元，低于预算 8 万元。")
+        entry = self.ctx.agent_tasks.entries[task["id"]]
+        events = await self.ctx.store.list_events(entry.context.session_id, event_type="output/attempt")
+        self.assertEqual([event.payload["accepted"] for event in events], [False, True])
+
+    async def test_publication_retries_a_business_number_that_would_lose_precision(self):
+        await self.ctx.stores.agent.update_unique(self.agent, AgentUpdate(
+            structured_output_enabled=True,
+            output_config={"name": "budget", "json_schema": {
+                "type": "object", "required": ["record"],
+                "properties": {"record": {"anyOf": [{"type": "integer"}, {"type": "string"}]}},
+            }},
+        ))
+        record = 2 ** 53 + 1
+        calls = 0
+
+        def respond(_messages, info):
+            nonlocal calls
+            if not info.output_tools:
+                return ModelResponse(parts=[TextPart("预算记录编号")])
+            calls += 1
+            return publication_result(data={"record": record if calls == 1 else str(record)})
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+            task = self.result(await self.rpc("SendMessage", {
+                "message": self.message("exact-record", "返回预算记录编号"),
+            }))["task"]
+        self.assertEqual(calls, 2)
+        self.assertEqual(task["status"]["state"], "TASK_STATE_COMPLETED")
+        self.assertEqual(task["artifacts"][0]["parts"][0]["data"], {"record": str(record)})
+
+    async def test_publication_pending_file_and_mixed_result_across_transports(self):
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
+        await self.ctx.stores.agent.update_unique(self.agent, AgentUpdate(
+            structured_output_enabled=True, allow_text_output=True,
+            output_config={"name": "budget", "json_schema": {
+                "type": "object", "required": ["total"],
+                "properties": {"total": {"type": "number"}}, "additionalProperties": False,
+            }},
+        ))
+        data = b"month,total\nNovember,20\n"
+        selected_id = None
+
+        def respond(messages, info):
+            nonlocal selected_id
+            if not info.output_tools:
+                return ModelResponse(parts=[TextPart("两轮预算验收")])
+            self.assertEqual([tool.name for tool in info.output_tools], [PUBLICATION_OUTPUT])
+            if latest_tool_result(messages, "present"):
+                if any(part.content == "十一月" for message in messages for part in message.parts
+                       if isinstance(part, UserPromptPart)):
+                    return publication_result(text="十一月差额 20", data={"total": 20})
+                return publication_result("input_required", message="核对哪个月？", text="已附上原始数据。")
+            if selected_id is None:
+                selected_id = re.search(r"local_[0-9a-f]{32}", str(messages))[0]
+            return ModelResponse(parts=[ToolCallPart("present", {"file_ids": [selected_id]})])
+
+        initial = mcp_message("start-mixed", "请先确认月份", files=[("budget.csv", "text/csv", data)])
+        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+            first = self.result(await self.rpc("SendMessage", {"message": initial}))["task"]
+            self.assertEqual(first["status"]["state"], "TASK_STATE_INPUT_REQUIRED", first)
+            self.assertEqual([part["text"] for part in first["status"]["message"]["parts"]],
+                             ["核对哪个月？", "已附上原始数据。"])
+            file, = first["artifacts"]
+            self.assertEqual((await self.client.get(file["parts"][0]["url"], headers=HEADERS)).content, data)
+            self.client.headers.update(HEADERS)
+            async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+                async with ClientSession(rx, tx) as client:
+                    await client.initialize()
+                    ack = await client.call_tool("SendMessage", {
+                        "message": mcp_message("answer-mixed", "十一月", taskId=first["id"]),
+                    })
+                    self.assertFalse(ack.isError, ack)
+                    await self.ctx.agent_tasks.wait(self.ctx.agent_tasks.entries[first["id"]])
+                    checked = await client.call_tool("GetTask", {"id": first["id"], "historyLength": 0})
+                    task = checked.structuredContent
+                    self.assertEqual(json.loads(checked.content[0].text), task)
+                    self.assertEqual(task["status"]["state"], "TASK_STATE_COMPLETED", task)
+                    self.assertEqual(task["contextId"], first["contextId"])
+                    self.assertFalse(task.get("history"))
+                    self.assertEqual(task["metadata"], first["metadata"])
+                    parts = [part for artifact in task["artifacts"] for part in artifact["parts"]]
+                    delivered, = [part for part in parts if "url" in part]
+                    self.assertEqual((await self.client.get(delivered["url"])).content, data)
+                    self.assertIn({"text": "十一月差额 20", "mediaType": "text/plain"}, parts)
+                    self.assertIn({"data": {"total": 20}, "mediaType": "application/json"}, parts)
+                    page = (await client.call_tool("ListTasks", {"agentCode": "budget-report",
+                        "statusTimestampAfter": task["status"]["timestamp"]})).structuredContent
+                    self.assertEqual(page["tasks"][0]["id"], first["id"])
+                    self.assertEqual(page["nextPageToken"], "")
+                    self.assertNotIn("artifacts", page["tasks"][0])
+
+        detail = (await self.client.get(f"{ROOT}/publications/budget-report/tasks/{first['id']}", headers=self.admin)).json()
+        history_url = f"/api/v1/diagnostics/sessions/{detail['session_id']}/history"
+        history = await self.client.get(history_url, headers=self.admin)
+        self.assertEqual(history.status_code, 200, history.text)
+        outputs = [row for row in history.json()["items"] if row["kind"] == "structured_output"]
+        self.assertEqual([row["publication_protocol"] for row in outputs], ["a2a", "mcp"])
+        self.assertEqual([row["output"]["status"] for row in outputs], ["input_required", "completed"])
+        self.assertEqual([len(row["output_files"]) for row in outputs], [1, 1])
+
     async def test_outbound_clients_use_same_task_for_two_replies_and_retrieve_artifacts(self):
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
-        from deep_agent.agent_service.output import QUESTION_NAME
         from deep_agent.remote_agents import network
-        from deep_agent.remote_agents.contracts import A2AConfig, InputFile, RemoteAgentError, RemoteState
+        from deep_agent.remote_agents.contracts import A2AConfig, InputFile, RemoteState
 
         backend = SubprocessBackend(python_executable=sandbox_test_python(), max_concurrency=1)
         self.ctx.sandbox_backend = backend
@@ -379,7 +568,8 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         script = (
             "from deepagent_files import publish_path\n"
             f"open(publish_path('result.csv'), 'wb').write({result_csv!r})\n"
-            f"open(publish_path('evidence.txt'), 'wb').write(b'e' * {len(evidence)})"
+            f"open(publish_path('evidence.txt'), 'wb').write(b'e' * {len(evidence)})\n"
+            "for n in range(3): open(publish_path(f'draft-{n}.txt'), 'w').write('draft')"
         )
         http_client = network._http_client
         def client_factory(headers):
@@ -388,19 +578,23 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             return client
 
         def respond(messages, info):
-            if QUESTION_NAME not in {tool.name for tool in info.output_tools}:
+            if PUBLICATION_OUTPUT not in {tool.name for tool in info.output_tools}:
                 return ModelResponse(parts=[TextPart("预算核对")])
             latest = next(part.content for message in reversed(messages) for part in reversed(message.parts)
                           if isinstance(part, UserPromptPart))
             text = latest if isinstance(latest, str) else "\n".join(part for part in latest if isinstance(part, str))
             if "开始核对" in text:
-                return ModelResponse(parts=[ToolCallPart(QUESTION_NAME, {"question": "哪个月份？"})])
+                return publication_result("input_required", message="哪个月份？")
             if "用十一月" in text:
-                return ModelResponse(parts=[ToolCallPart(QUESTION_NAME, {"question": "哪个地区？"})])
+                return publication_result("input_required", message="哪个地区？")
             if "继续解释" in text:
-                return ModelResponse(parts=[TextPart("仍然使用十一月和华东地区")])
-            if getattr(messages[-1].parts[-1], "tool_name", None) == "execute_python":
-                return ModelResponse(parts=[TextPart("预算差额 20")])
+                return publication_result(text="仍然使用十一月和华东地区")
+            if latest_tool_result(messages, "present"):
+                return publication_result(text="预算差额 20")
+            if generated := latest_tool_result(messages, "execute_python"):
+                return ModelResponse(parts=[ToolCallPart("present", {"file_ids": [
+                    item["file_id"] for item in generated.metadata["generated_files"] if item["file_name"] == "result.csv"
+                ]})])
             self.assertIn("用华东", text)
             return ModelResponse(parts=[ToolCallPart("execute_python", {"code": script})])
 
@@ -439,11 +633,6 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(second.state.question_id, first.state.question_id)
             resumed = await adapter.refresh(second.state, checkpoint)
             self.assertEqual(resumed.state, second.state)
-            with self.assertRaises(RemoteAgentError):
-                await adapter.run(
-                    second.state.model_copy(update={"question_id": first.state.question_id}),
-                    "旧问题", [], "answer", checkpoint, message_id="a2a-stale",
-                )
             completed = await adapter.run(
                 resumed.state, "用华东", [InputFile("extra.txt", "text/plain", extra)],
                 "answer", checkpoint, message_id="a2a-third",
@@ -453,7 +642,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(completed.state.context_id, first.state.context_id)
             self.assertEqual(completed.warnings, ())
             self.assertEqual({file.name: file.data for file in completed.files},
-                             {"result.csv": result_csv, "evidence.txt": evidence})
+                             {"result.csv": result_csv})
             retrieved = await adapter.refresh(completed.state, checkpoint)
             self.assertEqual(retrieved.files, completed.files)
             continued = await adapter.run(
@@ -480,57 +669,43 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse(response.isError, response)
                         return response.structuredContent
 
-                    async def advance(tool, args):
-                        submitted = await call(tool, args)
+                    async def advance(message, **extra):
+                        submitted = await call("SendMessage", {"message": message, **extra})
                         task_id = submitted["id"]
                         await self.ctx.agent_tasks.wait(self.ctx.agent_tasks.entries[task_id])
-                        return await call("get_task", {"task_id": task_id})
+                        return await call("GetTask", {"id": task_id})
 
                     publication = (await call("list_agents"))["agents"][0]["agent_code"]
-                    first = await advance("submit_task", {
-                        "agent_code": publication, "message_id": "mcp-first", "text": "开始核对",
-                        "attachments": [{"name": "budget.csv", "media_type": "text/csv",
-                                         "data_base64": base64.b64encode(csv).decode()}],
-                    })
-                    self.assertEqual((first["state"], first["message"]), ("input_required", "哪个月份？"))
-                    self.assertEqual(first["source"], "mcp")
+                    first = await advance(mcp_message("mcp-first", "开始核对",
+                        files=[("budget.csv", "text/csv", csv)]), agentCode=publication)
+                    self.assertEqual(first["status"]["state"], "TASK_STATE_INPUT_REQUIRED")
+                    self.assertEqual(first["status"]["message"]["parts"][0]["text"], "哪个月份？")
 
-                    second = await advance("reply_task", {
-                        "task_id": first["id"], "reply_to": first["question_id"],
-                        "message_id": "mcp-second", "text": "用十一月",
-                    })
-                    self.assertEqual((second["state"], second["message"]), ("input_required", "哪个地区？"))
+                    second = await advance(mcp_message("mcp-second", "用十一月", taskId=first["id"]))
+                    self.assertEqual(second["status"]["state"], "TASK_STATE_INPUT_REQUIRED")
+                    self.assertEqual(second["status"]["message"]["parts"][0]["text"], "哪个地区？")
                     self.assertEqual(second["id"], first["id"])
-                    self.assertNotEqual(second["question_id"], first["question_id"])
 
-                    completed = await advance("reply_task", {
-                        "task_id": second["id"], "reply_to": second["question_id"],
-                        "message_id": "mcp-third", "text": "用华东",
-                        "attachments": [{"name": "extra.txt", "media_type": "text/plain",
-                                         "data_base64": base64.b64encode(extra).decode()}],
-                    })
-                    self.assertEqual(completed["state"], "completed")
+                    completed = await advance(mcp_message("mcp-third", "用华东", taskId=second["id"],
+                        files=[("extra.txt", "text/plain", extra)]))
+                    self.assertEqual(completed["status"]["state"], "TASK_STATE_COMPLETED")
                     self.assertEqual(completed["id"], first["id"])
-                    self.assertEqual(completed["context_id"], first["context_id"])
+                    self.assertEqual(completed["contextId"], first["contextId"])
                     self.assertTrue(any(part.get("text") == "预算差额 20"
-                                        for artifact in completed["artifacts"] for part in artifact.get("parts", ())))
+                                        for artifact in completed["artifacts"] for part in artifact["parts"]))
 
-                    artifacts = {item["name"]: item for item in completed["artifacts"] if "download_url" in item}
-                    for file_name, data in (("result.csv", result_csv), ("evidence.txt", evidence)):
-                        artifact = artifacts[file_name]
-                        self.assertEqual(artifact["size"], len(data))
-                        download = await self.client.get(artifact["download_url"])
-                        self.assertEqual(download.status_code, 200)
-                        self.assertEqual(download.content, data)
+                    file, = [part for artifact in completed["artifacts"] for part in artifact["parts"] if part.get("url")]
+                    self.assertEqual(file["filename"], "result.csv")
+                    download = await self.client.get(file["url"])
+                    self.assertEqual(download.status_code, 200)
+                    self.assertEqual(download.content, result_csv)
 
-                    continued = await advance("submit_task", {
-                        "agent_code": publication, "context_id": completed["context_id"],
-                        "message_id": "mcp-continued", "text": "继续解释",
-                    })
-                    self.assertEqual(continued["context_id"], completed["context_id"])
+                    continued = await advance(mcp_message("mcp-continued", "继续解释", contextId=completed["contextId"]),
+                                              agentCode=publication)
+                    self.assertEqual(continued["contextId"], completed["contextId"])
                     self.assertNotEqual(continued["id"], completed["id"])
                     self.assertTrue(any(part.get("text") == "仍然使用十一月和华东地区"
-                                        for artifact in continued["artifacts"] for part in artifact.get("parts", ())))
+                                        for artifact in continued["artifacts"] for part in artifact["parts"]))
 
                     entry = self.ctx.agent_tasks.entries[first["id"]]
                     events = await self.ctx.store.list_events(entry.context.session_id, event_type="user/message")
@@ -542,7 +717,6 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((recent.status_code, recent.json()), (200, []))
 
     async def test_inline_image_reaches_model_in_original_task(self):
-        from deep_agent.agent_service.output import QUESTION_NAME
 
         card = await self.client.get(f"{self.url}/agent-card.json", headers=HEADERS)
         self.assertIn("image/png", card.json()["defaultInputModes"])
@@ -552,12 +726,12 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         def respond(messages, _info):
             latest = next(part for part in reversed(messages[-1].parts) if isinstance(part, UserPromptPart))
             if isinstance(latest.content, str):
-                return ModelResponse(parts=[ToolCallPart(QUESTION_NAME, {"question": "请上传图片"})])
+                return publication_result("input_required", message="请上传图片")
             images = [part for part in latest.content if isinstance(part, BinaryContent)]
             self.assertEqual([image.media_type for image in images], ["image/png"])
             with Image.open(io.BytesIO(images[0].data)) as image:
                 self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 0, 0))
-            return ModelResponse(parts=[TextPart("红色")])
+            return publication_result(text="红色")
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
             paused = self.result(await self.rpc("SendMessage", {
@@ -604,9 +778,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.get(f"{self.url}/agent-card.json", headers={
                 **key_headers, "authorization": HEADERS["authorization"],
             })).status_code, 401)
-            model = FunctionModel(lambda _, info: ModelResponse(parts=[
-                TextPart("对账" if "RECON" in (info.instructions or "") else "预算"),
-            ]))
+            model = FunctionModel(lambda _, info: text_result(info, "对账" if "RECON" in (info.instructions or "") else "预算"))
             with patch("deep_agent.agent.factory._resolve_model", return_value=model):
                 task = self.result(await self.rpc("SendMessage", {
                     "message": self.message("route", "开始"),
@@ -673,7 +845,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rejected_scope.status_code, 422)
 
         with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
-            lambda *_: ModelResponse(parts=[TextPart("预算差异 20")]),
+            lambda _, info: text_result(info, "预算差异 20"),
         )):
             task = self.result(await self.rpc("SendMessage", {
                 "message": self.message("app-route", "开始"),
@@ -726,7 +898,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(card_url, headers=outside)).status_code, 403)
         self.revoked = False
 
-        model = FunctionModel(lambda *_: ModelResponse(parts=[TextPart("预算差异 20")]))
+        model = FunctionModel(lambda _, info: text_result(info, "预算差异 20"))
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             for app_id in ("budget001", "budget002"):
                 self.result(await self.rpc("SendMessage", {
@@ -817,11 +989,12 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         def respond(messages, info):
             if any(tool.name == "parse_document" for tool in info.function_tools):
-                for message in messages:
-                    for part in message.parts:
-                        if part.part_kind == "tool-return" and part.tool_name == "parse_document":
-                            exported_files.append(part.content["export"]["file"])
-                            return ModelResponse(parts=[TextPart("证据已导出")])
+                if latest_tool_result(messages, "present"):
+                    return publication_result(text="证据已导出")
+                if parsed := latest_tool_result(messages, "parse_document"):
+                    file = parsed.content["export"]["file"]
+                    exported_files.append(file)
+                    return ModelResponse(parts=[ToolCallPart("present", {"file_ids": [file["file_id"]]})])
                 file_id = re.search(r"local_[0-9a-f]{32}", str(messages))[0]
                 return ModelResponse(parts=[ToolCallPart("parse_document", {
                     "resource": {"type": "attachment", "file_id": file_id}, "export_file": True,
@@ -837,10 +1010,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             patch("deep_agent.documents.toolset.parse_with_provider", AsyncMock(return_value=original())),
         ):
             task = self.result(await self.rpc("SendMessage", {"message": message}))["task"]
-            with (
-                patch("deep_agent.agent_service.execution.MAX_ARTIFACTS", 1),
-                patch("deep_agent.agent_service.tasks.MAX_ARTIFACTS", 1),
-            ):
+            with patch("deep_agent.agent_service.tasks.MAX_ARTIFACTS", 1):
                 over_limit = self.result(await self.rpc("SendMessage", {
                     "message": {**message, "messageId": "parse-limit"},
                 }))["task"]
@@ -875,9 +1045,12 @@ w.save(publish_path("预算.xlsx"))
         def respond(messages, info):
             if not any(tool.name == "execute_python" for tool in info.function_tools):
                 return ModelResponse(parts=[TextPart("预算差异报告")])
-            if any(getattr(part, "tool_name", None) == "execute_python"
-                   and part.part_kind == "tool-return" for message in messages for part in message.parts):
-                return ModelResponse(parts=[TextPart("差异 20")])
+            if latest_tool_result(messages, "present"):
+                return publication_result(text="差异 20")
+            if generated := latest_tool_result(messages, "execute_python"):
+                return ModelResponse(parts=[ToolCallPart("present", {"file_ids": [
+                    item["file_id"] for item in generated.metadata["generated_files"]
+                ]})])
             return ModelResponse(parts=[ToolCallPart("execute_python", {"code": script})])
 
         app_url = f"{self.url}/apps/budget001"
@@ -902,11 +1075,11 @@ w.save(publish_path("预算.xlsx"))
         async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
             async with ClientSession(rx, tx) as session:
                 await session.initialize()
-                tool = await session.call_tool("get_task", {"task_id": task["id"]})
+                tool = await session.call_tool("GetTask", {"id": task["id"]})
                 self.assertFalse(tool.isError)
-                file = next(item for item in tool.structuredContent["artifacts"] if item["artifact_id"] == artifact_id)
-                self.assertEqual(file["media_type"], artifact["mediaType"])
-        download_url = file["download_url"]
+                file = next(item for item in tool.structuredContent["artifacts"] if item["artifactId"] == artifact_id)["parts"][0]
+                self.assertEqual(file["mediaType"], artifact["mediaType"])
+        download_url = file["url"]
         self.assertEqual((await self.client.get(download_url)).content, response.content)
         self.assertEqual((await self.client.get(download_url, headers={
             **HEADERS, "authorization": "Bearer fixture-other",
@@ -956,7 +1129,7 @@ w.save(publish_path("预算.xlsx"))
                 await session.initialize()
 
                 async def fetch():
-                    return await session.call_tool("get_task", {"task_id": task_id})
+                    return await session.call_tool("GetTask", {"id": task_id})
 
                 async def fetch_artifact(key, **options):
                     return await session.call_tool("get_artifact", {
@@ -969,13 +1142,10 @@ w.save(publish_path("预算.xlsx"))
                 self.assertEqual(json.loads(result.content[0].text), result.structuredContent)
                 download_urls = {}
                 for file in result.structuredContent["artifacts"]:
-                    key = file["artifact_id"]
+                    key = file["artifactId"]
                     url = f"http://127.0.0.1:8002{ROOT}/tasks/{task_id}/artifacts/{key}/download"
                     download_urls[key] = url
-                    self.assertEqual(file, {
-                        "artifact_id": key, "name": f"{key}.txt", "media_type": "text/plain",
-                        "size": len(files[key]), "download_url": url,
-                    })
+                    self.assertEqual(file["parts"], [{"filename": f"{key}.txt", "url": url}])
                     download = await self.client.get(url)
                     self.assertEqual(download.status_code, 200)
                     self.assertEqual(download.content, files[key])
@@ -1012,7 +1182,7 @@ w.save(publish_path("预算.xlsx"))
                 finally:
                     for name in gateway_headers:
                         del self.client.headers[name]
-                self.assertEqual({file["download_url"] for file in result.structuredContent["artifacts"]}, {
+                self.assertEqual({file["parts"][0]["url"] for file in result.structuredContent["artifacts"]}, {
                     f"https://gateway.example.test{GATEWAY_PREFIX}{ROOT}/tasks/{task_id}/artifacts/{key}/download"
                     for key in files
                 })
@@ -1027,8 +1197,8 @@ w.save(publish_path("预算.xlsx"))
                     self.assertFalse((await fetch_artifact("empty", format="base64")).isError)
                 finally:
                     del self.client.headers["host"]
-                self.assertEqual(result.structuredContent["state"], "completed")
-                self.assertTrue(all("download_url" not in file for file in result.structuredContent["artifacts"]))
+                self.assertEqual(result.structuredContent["status"]["state"], "TASK_STATE_COMPLETED")
+                self.assertTrue(all("url" not in file["parts"][0] for file in result.structuredContent["artifacts"]))
 
                 for wrong in ({"app": "budget002"}, {"authorization": "Bearer fixture-other"}):
                     try:
@@ -1215,7 +1385,7 @@ w.save(publish_path("预算.xlsx"))
                 self.assertEqual(events(response)[-1]["result"]["statusUpdate"]["status"]["state"], "TASK_STATE_CANCELED")
             self.assertEqual(self.result(await self.rpc("CancelTask", {"id": task["id"]}))["id"], task["id"])
         with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
-            lambda *_: ModelResponse(parts=[TextPart("流式报告")]),
+            lambda _, info: text_result(info, "流式报告"),
         )):
             response = await self.rpc("SendStreamingMessage", {"message": self.message("stream", "生成报告")})
         self.assertIn("text/event-stream", response.headers.get("content-type", ""), response.text)
@@ -1354,10 +1524,8 @@ w.save(publish_path("预算.xlsx"))
                 self.assertIsNotNone(hello.capabilities.resources)
                 descriptions = {tool.name: tool.description for tool in (await session.list_tools()).tools}
                 names = set(descriptions)
-                self.assertEqual(names, {"list_agents", "submit_task", "get_task", "list_tasks",
-                                         "reply_task", "cancel_task", "get_artifact"})
-                self.assertIn("download_url", descriptions["get_task"])
-                self.assertIn("HTTP GET", descriptions["get_task"])
+                self.assertEqual(names, {"list_agents", "SendMessage", "GetTask", "ListTasks", "CancelTask", "get_artifact"})
+                self.assertIn("HTTP GET", descriptions["GetTask"])
                 for field in ("data_base64", "format=url by default", "format=base64"):
                     self.assertIn(field, descriptions["get_artifact"])
                 guides = {str(resource.uri): resource.mimeType for resource in (await session.list_resources()).resources}
@@ -1365,31 +1533,33 @@ w.save(publish_path("预算.xlsx"))
                 self.assertEqual(guides, {guide_uri: "text/markdown"})
                 resource = (await session.read_resource(guide_uri)).contents[0]
                 self.assertEqual(resource.mimeType, "text/markdown")
-                for example in names | {"context_id", "data_base64", "download_url", "HTTP GET"}:
+                for example in names | {"contextId", "data_base64", "download_url", "HTTP GET"}:
                     self.assertIn(example, resource.text)
-                for example in ("reply_to", "download_url", "HTTP GET", "authentication headers", "format=base64"):
+                for example in ("taskId", "download_url", "HTTP GET", "authentication headers", "format=base64"):
                     self.assertIn(example, hello.instructions)
                 listed = await session.call_tool("list_agents")
                 self.assertEqual(listed.structuredContent, response.json())
                 del self.client.headers["app"]
                 del self.client.headers["space"]
                 self.assertEqual((await session.call_tool("list_agents")).structuredContent, response.json())
-                missing = await session.call_tool("get_task", {"task_id": "unknown"})
+                missing = await session.call_tool("GetTask", {"id": "unknown"})
                 self.assertTrue(missing.isError)
                 self.assertEqual(missing.structuredContent["status"], 400)
                 self.client.headers.update(HEADERS)
                 with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
-                    lambda *_: ModelResponse(parts=[TextPart("20")]),
+                    lambda _, info: text_result(info, "20"),
                 )):
-                    result = await session.call_tool("submit_task", {"agent_code": "budget-report", **request})
+                    result = await session.call_tool("SendMessage", {
+                        "agentCode": "budget-report", "message": mcp_message(request["message_id"], request["text"]),
+                    })
                     self.assertFalse(result.isError, result)
                     initial = result.structuredContent
-                    self.assertEqual(initial["source"], "mcp")
+                    self.assertEqual(initial["status"]["state"], "TASK_STATE_SUBMITTED")
                     task_id = initial["id"]
                     await self.ctx.agent_tasks.wait(self.ctx.agent_tasks.entries[task_id])
                 self.assertEqual(self.result(await self.rpc("GetTask", {"id": task_id}))["id"], task_id)
-                self.assertEqual((await session.call_tool("list_tasks", {"agent_code": "budget-report"}))
-                                 .structuredContent["items"][0]["id"], task_id)
+                self.assertEqual((await session.call_tool("ListTasks", {"agentCode": "budget-report"}))
+                                 .structuredContent["tasks"][0]["id"], task_id)
                 repeated = await self.client.post(target, json=request)
                 self.assertEqual(repeated.status_code, 202, repeated.text)
                 self.assertEqual(repeated.json()["id"], task_id)
@@ -1409,7 +1579,7 @@ w.save(publish_path("预算.xlsx"))
                 self.revoked = False
                 self.ctx.agent_tasks.entries[task_id].changed -= RETENTION + timedelta(seconds=1)
                 self.assertEqual((await self.client.get(f"{ROOT}/tasks/{task_id}")).status_code, 404)
-                self.assertEqual((await session.call_tool("get_task", {"task_id": task_id})).structuredContent["status"], 404)
+                self.assertEqual((await session.call_tool("GetTask", {"id": task_id})).structuredContent["status"], 404)
 
 
 class IndependentA2ASdkTests(unittest.IsolatedAsyncioTestCase):

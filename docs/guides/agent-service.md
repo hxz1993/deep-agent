@@ -41,7 +41,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 | 操作 | 行为 |
 |---|---|
-| `SendMessage` | 默认等待结果。设 `returnImmediately` 可先取得 Task ID。向待补充任务发送消息时，沿用 Task ID 和 Context ID，并为新消息生成不同的 Message ID。 |
+| `SendMessage` | 默认等待结果。设 `returnImmediately` 可先取得 Task ID。向待补充任务发送消息时，在新消息里带原 Task ID，并为新消息生成不同的 Message ID。Context ID 可随消息一起提交。 |
 | `SendStreamingMessage` | 先发任务快照，再发状态及 Artifact 事件。断开连接后可重新订阅。 |
 | `GetTask` | 读取状态、历史和 Artifact。 |
 | `ListTasks` | 按同一发布、身份、App 和 Space 查询，可分页和筛选。 |
@@ -50,7 +50,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 文本和结构化数据在 Artifact 中返回。Agent 已发布的文件会返回 Artifact URL，地址沿用本次请求选择应用的方式。下载时使用原任务的调用身份，通用 URL 需要 `app` Header，带应用的 URL 使用路径。DeepAgent 会重新校验权限。临时任务记录到期后，A2A 下载地址随记录失效。
 
-输入附件用 `message.parts[]` 的 `raw`（Base64）、`mediaType` 和 `filename`。Card 的 `defaultInputModes` 包含当前接收的附件类型。单次内联附件合计上限为 8 MiB，仍受平台配置的单文件大小和数量限制。补交附件时，带上待补材料的 `taskId`、`contextId`，可通过 `metadata.replyTo` 指定待回答的问题。任务完成后的普通追问只带 `contextId`，会创建同一会话下的新 Task。
+输入附件用 `message.parts[]` 的 `raw`（Base64）、`mediaType` 和 `filename`。Card 的 `defaultInputModes` 包含当前接收的附件类型。单次内联附件合计上限为 8 MiB，仍受平台配置的单文件大小和数量限制。补交附件或普通文字时，在新消息中带上原 `taskId`。任务完成后的普通追问只带 `contextId`，会创建同一会话下的新 Task。
 
 ## Task、Context 和会话
 
@@ -58,7 +58,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 
 排查接入、执行或取件失败时，在「诊断 → 日志」按请求 ID 或任务 ID 检索。远程委派使用工具返回的任务 ID，连接检查使用连接 ID。[发布和远程 Agent 日志](diagnostic-logs.md#排查发布和远程-agent)
 
-首次请求不带这两个 ID，服务端创建 Context 和 Task。已有任务完成后，客户端带上 `contextId` 继续追问，服务端在同一会话创建新 Task。任务仍待补材料时，客户端带上原来的两个 ID 继续该 Task。同一 Context 同时只处理一个活动 Task。
+首次请求不带这两个 ID，服务端创建 Context 和 Task。已有任务完成后，客户端带上 `contextId` 继续追问，服务端在同一会话创建新 Task。任务仍待补材料时，客户端使用原 Task ID 继续该 Task。同一 Context 同时只处理一个活动 Task。
 
 ## MCP 接入
 
@@ -67,24 +67,25 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 | 工具 | 用途 |
 | --- | --- |
 | `list_agents` | 查找已启用的发布及 Agent 编码 |
-| `submit_task` | 发起任务，或用原 `context_id` 在已完成的会话中继续 |
-| `get_task` | 查询状态、正文、待答问题和文件的完整下载 URL |
-| `list_tasks` | 查询指定发布在当前应用下的近期任务，支持按状态或会话筛选和续页 |
-| `reply_task` | 用原 `task_id`、`question_id` 作为 `reply_to`、新 `message_id` 回复待答问题 |
-| `cancel_task` | 请求停止未结束的任务，根据返回状态确认 |
-| `get_artifact` | 按 `task_id` 和 `artifact_id` 返回单份文件的下载地址，可显式请求 Base64 |
+| `SendMessage` | 带发布 `agentCode` 和标准 `message` 发起任务，立即返回 Task。向现有任务补答时使用原 `message.taskId` |
+| `GetTask` | 按 `id` 查询 Task，使用 `historyLength` 控制历史条数 |
+| `ListTasks` | 按 `agentCode` 查询，筛选可用 `contextId`、`status`、`statusTimestampAfter`，分页使用 `pageSize`、`pageToken`，可用 `historyLength`、`includeArtifacts` 扩展返回 |
+| `CancelTask` | 按 `id` 请求停止任务，并查询返回的状态 |
+| `get_artifact` | 按 `task_id` 和 `artifact_id` 取单份文件，可显式请求 Base64 |
 
-`submit_task` 和 `reply_task` 可以附带文件，每项传 `name`、`media_type` 和 `data_base64`，解码后的附件总量最多 8 MiB。重试同一次提交时沿用原消息 ID 和内容。同一凭据主体和应用可以在 A2A 与 MCP 间继续同一个任务。
+MCP 的 `message` 使用 `messageId`、`role: "ROLE_USER"`、`parts`。文字用 `text`，业务 JSON 用 `data`，输入文件用 `raw`（Base64）、`filename` 和 `mediaType`，单次附件合计最多 8 MiB。重试沿用消息 ID 和内容。收到 `TASK_STATE_INPUT_REQUIRED` 时读 `status.message.parts`，有信息即可用原 Task ID 和新消息 ID 续接。同一凭据主体和应用可以在 A2A 和 MCP 两端继续同一任务。
 
-从 `get_task` 的 `artifacts` 选择文件，或按 ID 调用 `get_artifact`。默认按本次 MCP 请求的服务地址返回完整 `download_url`，客户端携带 MCP 连接的原 `app`、`space`（如有）和鉴权 Header 发 HTTP GET。客户端无法携带这些 Header 时，可对至多 20 MiB 的文件显式传 `format="base64"`。从同一次响应的 `content[].text` 解析 JSON，解码 `data_base64` 后按 `name` 保存原件。超过 20 MiB 时始终返回 `delivery=http_download` 和完整下载地址。请求地址无效时，`get_task` 省略下载地址，`get_artifact` 的链接模式返回地址错误。
+`ListTasks` 的 `statusTimestampAfter` 接受带时区的 RFC 3339 时间戳，包含更新时间等于阈值的任务。发布结果中的业务 JSON 按 A2A Part 的数值精度传输。对需要逐位保真的长编号，建议在业务 Schema 中声明为字符串。
 
-支持 MCP Resources 的客户端可用 `resources/list` 发现统一指南 `deepagent://guides/mcp`，通过 `resources/read` 查看七个工具、附件、补答、续跑和取件示例。
+MCP 的任务在 `structuredContent` 和 `content[].text` 中采用相同的 A2A Task 字段。任务标题和简介见 `metadata.title` 和 `metadata.description`。完成的正文及业务 JSON 分别在 `artifacts[].parts[].text` 和 `.data`。Agent 使用 `present(file_ids)` 明确要交付的文件，引用在文件产物的 `parts[].url`。调用方用原 App、Space 和鉴权 Header 执行 HTTPS GET。也可用 `get_artifact` 获得下载地址，或传 `format="base64"` 内联至多 20 MiB。从内联响应的 `content[].text` 解析 `data_base64`。
+
+支持 MCP Resources 的客户端可用 `resources/list` 和 `resources/read` 读取 `deepagent://guides/mcp` 中的完整示例。
 
 CLI、Python SDK 和通用 HTTP 调用是待评审草案。`clients/python/pyproject.toml` 记录 Python 客户端包 `deepfos-agent-client` 的版本。当前服务仅注册 A2A、MCP 及必要的鉴权取件接口，暂无 wheel 下载入口。
 
 ## 将远程 Agent 作为工具
 
-管理员在 Console「远程 Agent」保存、检查和直连调试 A2A、Codex 或 CodeBuddy。通过 MCP 调用另一套 DeepAgent 时，在「MCP」登记对方的 Streamable HTTP 地址和所需 Header，再在本地 Agent 的「MCP」资源中启用该工具包。用 `list_agents` 取得发布编码，再用 `submit_task` 等工具调用。
+管理员在 Console「远程 Agent」保存、检查和直连调试 A2A、Codex 或 CodeBuddy。通过 MCP 调用另一套 DeepAgent 时，在「MCP」登记对方的 Streamable HTTP 地址和所需 Header，再在本地 Agent 的「MCP」资源中启用该工具包。用 `list_agents` 取得发布编码，再用 `SendMessage` 发起任务。
 
 在本地 Agent 的资源配置开启指定远程连接。会话中的派单、补答、续接和取消走 Harness。每轮附件按权限由客户端发送，生成文件落到调用方 FileStore，可在原会话下载。待补答时在原会话回复，多个待答任务时通过工具卡指定任务。已保存结果和产物引用在调用方重启后仍从会话读取。已知远端任务 ID 可用于查询和恢复，远端过期或连接撤权时需要重新发起。
 

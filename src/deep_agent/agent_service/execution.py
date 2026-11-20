@@ -12,10 +12,11 @@ from google.protobuf import json_format
 from google.protobuf.struct_pb2 import Value
 from pydantic_ai.exceptions import RunCancelled
 
+from deep_agent.agent.file_delivery import RunFileDelivery
 from deep_agent.agent.headers import filter_verified_mcp_headers
 from deep_agent.agent.input_capabilities import document_upload_mimes
 from deep_agent.agent.media_pipeline import MediaPipelineError, process_upload
-from deep_agent.agent.tool_output_limits import artifacts_from_metadata
+from deep_agent.conversation.models import ConversationOutputFile
 from deep_agent.core.exceptions import AgentModelNotConfiguredError, LlmModelNotFoundError
 from deep_agent.db.models import Agent, ChatSession
 from deep_agent.db.reference_integrity import lock_reference
@@ -28,12 +29,12 @@ from deep_agent.services.integration_app_runtime import RunAppContext
 from deep_agent.integrations.app_scope import app_skill_scope
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
+from .output import PublicationProtocol, PublicationResult
 from .publications import PublicationScope, PublicationStore
-from .tasks import AUTH_REQUIRED, CANCELED, FAILED, INPUT_REQUIRED, MAX_ARTIFACTS, ArtifactFile, Entry, Result
+from .tasks import AUTH_REQUIRED, CANCELED, FAILED, INPUT_REQUIRED, ArtifactFile, Entry, Result
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
 MAX_TEXT_BYTES = 128 * 1024
-MAX_OUTPUT_BYTES = 256 * 1024
 
 
 async def prepare_input(ctx, message: wire.Message):
@@ -86,37 +87,24 @@ async def _ensure_session(ctx, entry: Entry):
             raise RuntimeError("A2A session binding changed")
 
 
-def _file_artifacts(entry: Entry, events, result: Result):
-    by_file = {file.id for file in (*entry.files.values(), *result.files.values())}
-    for event in events:
-        payload = event.payload.get("message") or {}
-        parts = payload.get("parts") or []
-        for part in parts:
-            if part.get("part_kind") != "tool-return" or part.get("tool_name") not in {
-                "execute_python", "execute_skill_script", "run_code", "export_file_to_download_center", "parse_document",
-                "delegate_task", "answer_task", "remote_task_result",
-            }:
-                continue
-            metadata = part.get("metadata") or {}
-            for item in artifacts_from_metadata(metadata):
-                if len(entry.task.artifacts) + len(result.artifacts) > MAX_ARTIFACTS:
-                    return
-                if item.get("role") != "generated_file":
-                    continue
-                file_id = item.get("file_id")
-                size = item.get("byte_size")
-                if not isinstance(file_id, str) or not file_id or file_id in by_file or type(size) is not int or size < 0:
-                    continue
-                name = PurePath(str(item.get("file_name") or "artifact").replace("\\", "/")).name[:240] or "artifact"
-                mime = item.get("mime") or "application/octet-stream"
-                if not isinstance(mime, str) or not re.fullmatch(r"[\w.+-]+/[\w.+-]+", mime):
-                    mime = "application/octet-stream"
-                artifact_id = uuid4().hex
-                result.files[artifact_id] = ArtifactFile(file_id, name, mime, size)
-                result.artifacts.append(wire.Artifact(artifact_id=artifact_id, name=name, parts=[
-                    wire.Part(filename=name, media_type=mime),
-                ]))
-                by_file.add(file_id)
+def _file_artifacts(entry: Entry, files: list[dict], result: Result) -> None:
+    registered = {file.id for file in entry.files.values()}
+    for item in files:
+        file = ConversationOutputFile.model_validate(item)
+        if file.id in registered:
+            continue
+        if type(file.byte_size) is not int or file.byte_size < 0:
+            raise ValueError("Presented file has no verified size")
+        name = PurePath((file.name or "artifact").replace("\\", "/")).name[:240] or "artifact"
+        mime = file.mime or "application/octet-stream"
+        if not re.fullmatch(r"[\w.+-]+/[\w.+-]+", mime):
+            mime = "application/octet-stream"
+        artifact_id = uuid4().hex
+        result.files[artifact_id] = ArtifactFile(file.id, name, mime, file.byte_size)
+        result.artifacts.append(wire.Artifact(artifact_id=artifact_id, name=name, parts=[
+            wire.Part(filename=name, media_type=mime),
+        ]))
+        registered.add(file.id)
 
 
 @dataclass
@@ -126,6 +114,7 @@ class RunnerExecution:
     publication_code: str
     text: str
     uploads: list
+    protocol: PublicationProtocol
 
     async def __call__(self, entry: Entry, _message: wire.Message, continuing: bool) -> Result:
         ctx, headers = self.ctx, self.headers
@@ -159,7 +148,7 @@ class RunnerExecution:
 
         try:
             runner = await build_runner_for_agent(
-                ctx, scope.agent_id, app_context=app_context, request_headers=mcp_headers, a2a=True,
+                ctx, scope.agent_id, app_context=app_context, request_headers=mcp_headers,
             )
         except AgentModelNotConfiguredError as exc:
             return Result(state=FAILED, question=str(exc), reason="model_not_configured", error_type=type(exc).__name__)
@@ -167,7 +156,8 @@ class RunnerExecution:
             return Result(state=FAILED, question="Agent 配置的模型不存在", reason="model_not_found", error_type=type(exc).__name__)
         deps = _agent_deps(ctx, session_id=scope.session_id, user=scope.owner.user, agent_id=scope.agent_id,
                            request_headers=mcp_headers, execution_request_headers=headers, app_context=app_context)
-        deps.a2a = True
+        deps.publication_protocol = self.protocol
+        deps.file_delivery = RunFileDelivery()
         if entry.cancellation_requested:
             return Result(state=CANCELED)
         active = ctx.active_runs.register(agent_id=scope.agent_id, session_id=scope.session_id, user_id=scope.owner.user,
@@ -201,26 +191,22 @@ class RunnerExecution:
                                          return_exceptions=True)
             finally:
                 ctx.active_runs.unregister(active)
-        result = Result()
-        if output.get("a2a_question"):
-            result.state = INPUT_REQUIRED
-            result.question = output["a2a_question"]
-        elif output.get("status") != "completed":
+        if output.get("status") != "completed":
             return Result(state=FAILED, question="Agent 需要本入口未提供的交互", reason="unsupported_interaction")
-        else:
-            value = output.get("output")
-            encoded = json.dumps(value, ensure_ascii=False).encode()
-            if len(encoded) > MAX_OUTPUT_BYTES:
-                return Result(state=FAILED, question="Agent 输出超过 A2A 交付上限", reason="output_limit")
-            if isinstance(value, str) and not output.get("output_info"):
-                part = wire.Part(text=value, media_type="text/plain")
-            else:
-                part = wire.Part(data=json_format.ParseDict(value, Value()), media_type="application/json")
-            result.artifacts.append(wire.Artifact(artifact_id=uuid4().hex, name="结果", parts=[part]))
-        sequence = 0
-        while events := await ctx.store.list_events(
-            scope.session_id, run_id=deps.run_id, event_type="tool/results", after_sequence=sequence, limit=100,
-        ):
-            _file_artifacts(entry, events, result)
-            sequence = events[-1].sequence
+        value = PublicationResult.model_validate(output["output"])
+        result = Result(question=value.message)
+        reply = value.reply
+        if value.status == "input_required":
+            result.state = INPUT_REQUIRED
+            result.status_detail = reply.text if reply else None
+        elif reply is not None:
+            parts = []
+            if reply.text:
+                parts.append(wire.Part(text=reply.text, media_type="text/plain"))
+            if "data" in reply.model_fields_set:
+                parts.append(wire.Part(
+                    data=json_format.ParseDict(reply.data, Value()), media_type="application/json",
+                ))
+            result.artifacts.append(wire.Artifact(artifact_id=uuid4().hex, name="结果", parts=parts))
+        _file_artifacts(entry, output.get("output_files", []), result)
         return result

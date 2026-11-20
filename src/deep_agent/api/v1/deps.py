@@ -148,7 +148,6 @@ async def build_runner_for_agent(
     channel_context: ChannelRunContext | None = None,
     reasoning_effort: str | None = None,
     expected_provider_id: str | None = None,
-    a2a: bool = False,
     app_context: RunAppContext | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
@@ -191,8 +190,6 @@ async def build_runner_for_agent(
             if app_context.prompt_append:
                 instructions += f"\n\n当前应用追加提示词：\n{app_context.prompt_append}"
         spec = replace(spec, instructions=instructions)
-    if a2a:
-        spec = replace(spec, instructions=spec.instructions + "\n\n远程任务缺少必填信息时，使用请求补充的结构化结束方式。")
     runner = await _build_runner_from_spec(
         spec, ctx, request_headers=request_headers, channel_context=channel_context, app_context=app_context,
     )

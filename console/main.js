@@ -138,7 +138,7 @@ function syncNavigation() {
     : PAGE_LABELS[page];
 }
 
-async function showPage(page, { updateHash = true, restoreTab = true, diagnosticTarget = null } = {}) {
+async function showPage(page, { updateHash = true, restoreTab = true, diagnosticTarget = null, configurationReturn = null } = {}) {
   if (page === "developer") {
     if (!consoleAllowed) return false;
     // A legacy deep link opens the dialog over the ordinary workspace.
@@ -179,8 +179,12 @@ async function showPage(page, { updateHash = true, restoreTab = true, diagnostic
   if (updateHash) {
     const target = next === "diagnostics" ? diagnosticTarget || (location.hash.startsWith("#/diagnostics/") ? location.hash : "#/diagnostics/logs") : `#/${next}`;
     if (location.hash !== target) {
-      if (["diagnostics", "developer"].includes(next) || ["diagnostics", "developer"].includes(current)) history.pushState(null, "", target);
-      else history.replaceState(null, "", target);
+      if (current === "configuration" && next === "diagnostics" && configurationReturn) {
+        history.replaceState({ ...history.state, configurationReturn }, "");
+        history.pushState({ diagnosticsFromConfiguration: true }, "", target);
+      } else if (["diagnostics", "developer"].includes(next) || ["diagnostics", "developer"].includes(current)) {
+        history.pushState(null, "", target);
+      } else history.replaceState(null, "", target);
     }
   }
   if (next !== "diagnostics") setDiagnosticsActive(false);

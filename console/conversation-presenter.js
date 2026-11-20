@@ -1,5 +1,5 @@
 import { createRenderBatch, renderIconsWithin } from "./render-scheduler.js?v=20261105-v01510";
-import { mountStructuredOutput, serializeStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
+import { mountStructuredOutput, serializeStructuredOutput } from "./structured-output.js?v=20261121-publication";
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20261103-view-image1";

@@ -1,5 +1,5 @@
 import { renderIconsWithin } from "./render-scheduler.js?v=20261105-v01510";
-import { mountStructuredOutput } from "./structured-output.js?v=20261022-output-inspector3";
+import { mountStructuredOutput } from "./structured-output.js?v=20261121-publication";
 import { cacheMessageSummary } from "./cache-usage.js?v=20260923-usage-tab-2";
 import { tokenValue } from "./context-budget-presentation.js?v=20260923-c02";
 import { renderPlanSnapshot } from "./plan-view.js?v=20261103-view-image1";
@@ -62,7 +62,7 @@ function eventLabel(kind, part = {}) {
   if (kind === "assistant") return "Assistant message";
   if (kind === "title") return "Session title";
   if (kind === "error") return "异常";
-  if (kind === "output") return part.name || "输出";
+  if (kind === "output") return part.publication_protocol ? "发布结果" : part.name || "输出";
   if (kind === "compaction") return "Compaction";
   if (kind === "planning") return part.tool || "任务计划";
   if (kind === "deferred") return part.tool || "等待用户操作";
@@ -74,7 +74,13 @@ function eventSummary(kind, source = {}) {
   if (kind === "input") return valuePreview(source.content) || "仅包含附件或上下文引用";
   if (["thinking", "assistant"].includes(kind)) return valuePreview(source.content);
   if (kind === "title") return valuePreview(source.title) || "Session title";
-  if (kind === "output") return source.accepted ? "已接受结构化输出" : valuePreview(source.errors) || "输出未被接受";
+  if (kind === "output") {
+    if (!source.accepted) return valuePreview(source.errors) || "输出未被接受";
+    if (source.publication_protocol) {
+      return valuePreview(source.output?.message ?? source.output?.reply?.text);
+    }
+    return "已接受结构化输出";
+  }
   if (kind === "error") return valuePreview(source.message) || "执行异常";
   if (kind === "compaction") {
     const before = source.budget?.estimated_tokens_before ?? source.budget?.estimated_before;
@@ -512,7 +518,11 @@ export function buildTrajectory(history = {}) {
       parts.forEach((part, offset) => {
         group.parts.set(Number.isInteger(source?.part_index) ? source.part_index + offset : offset, part);
       });
-      const assistantParts = [...group.parts.entries()].sort(([left], [right]) => left - right).map(([, part]) => {
+      const output = message.metadata?.deepagent_output;
+      const publication = output?.publication_protocol;
+      const assistantParts = [...group.parts.entries()].sort(([left], [right]) => left - right).map(([index, part]) => {
+        if (publication && output.part_indices?.includes(index)) return null;
+        if (publication && message.metadata.deepagent_dispatch?.rejected && part?.part_kind === "text") return null;
         if (part?.part_kind === "thinking") return { type: "thinking", content: part.content || "" };
         if (part?.part_kind === "text") return { type: "text", content: part.content || "" };
         if (toolRole(part) === "call") return {
@@ -526,35 +536,38 @@ export function buildTrajectory(history = {}) {
         };
         return null;
       }).filter(Boolean);
-      const assistantPayload = assistantLoopPayload(assistantParts);
-      // A tool-only response is still a persisted assistant decision. Keep one
-      // row per SDK message, including empty thinking, rather than hiding facts.
-      const assistant = newEvent({
-        id: group.event.event_id,
-        kind: "assistant",
-        inputSequence: Math.max(inputSequence, 1),
-        runId: event.run_id || message.run_id || null,
-        timestamp: group.event.created_at || message.timestamp || null,
-        status: event.status || message.state || "completed",
-        part: { content: assistantPayload.content },
-        payload: assistantPayload,
-        native: { ...messageMeta(message), event_ids: [...group.eventIds] },
-      });
-      assistant.summary = assistantLoopSummary(assistantPayload, assistant.status);
-      assistant.sequence = Number(group.event.sequence || 0);
-      assistant.turn_id = event.turn_id || null;
-      assistant.event_type = event.event_type;
-      // Writes happen after generation; updated_at can change again at Run
-      // finalization. Neither timestamp measures a model request.
-      assistant.timestamp_end = null;
-      if (!applyExecutionTiming(assistant, message.metadata?.deepagent_timing, "model_request")) {
-        applyLegacyInterval(assistant, message.timestamp, group.event.created_at,
-          "旧记录估算：供应商响应时间戳至首次入库，可能缺少首字节前等待并包含入库等待，不是精确模型请求耗时。未使用更新时间。");
-      }
-      if (group.row) Object.assign(group.row, assistant);
-      else {
-        group.row = assistant;
-        projected.push(assistant);
+      // The accepted publication result already has its own Output row.
+      if (assistantParts.length || !publication) {
+        const assistantPayload = assistantLoopPayload(assistantParts);
+        // A tool-only response is still a persisted assistant decision. Keep one
+        // row per SDK message, including empty thinking, rather than hiding facts.
+        const assistant = newEvent({
+          id: group.event.event_id,
+          kind: "assistant",
+          inputSequence: Math.max(inputSequence, 1),
+          runId: event.run_id || message.run_id || null,
+          timestamp: group.event.created_at || message.timestamp || null,
+          status: event.status || message.state || "completed",
+          part: { content: assistantPayload.content },
+          payload: assistantPayload,
+          native: { ...messageMeta(message), event_ids: [...group.eventIds] },
+        });
+        assistant.summary = assistantLoopSummary(assistantPayload, assistant.status);
+        assistant.sequence = Number(group.event.sequence || 0);
+        assistant.turn_id = event.turn_id || null;
+        assistant.event_type = event.event_type;
+        // Writes happen after generation; updated_at can change again at Run
+        // finalization. Neither timestamp measures a model request.
+        assistant.timestamp_end = null;
+        if (!applyExecutionTiming(assistant, message.metadata?.deepagent_timing, "model_request")) {
+          applyLegacyInterval(assistant, message.timestamp, group.event.created_at,
+            "旧记录估算：供应商响应时间戳至首次入库，可能缺少首字节前等待并包含入库等待，不是精确模型请求耗时。未使用更新时间。");
+        }
+        if (group.row) Object.assign(group.row, assistant);
+        else {
+          group.row = assistant;
+          projected.push(assistant);
+        }
       }
     }
 
@@ -816,6 +829,15 @@ function statusLabel(status) {
     interrupted: "Interrupted",
     failed: "Failed",
   }[status] || status;
+}
+
+function renderEventStatus(event) {
+  if (event.kind === "output" && event.payload?.publication_protocol && event.payload.accepted) {
+    if (event.payload.output?.status === "input_required") return '<em class="pending">待补充</em>';
+    if (event.payload.output?.status === "completed") return '<em class="completed">已完成</em>';
+  }
+  const label = event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status);
+  return `<em class="${escapeHtml(event.status)}">${escapeHtml(label)}</em>`;
 }
 
 function renderFact(label, value, { mono = false } = {}) {
@@ -1364,8 +1386,11 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl =
     content = renderJsonBlock(event.result);
     if (event.kind === "tool") content += renderToolResultFiles(event, attachmentUrl);
   }
-  if (activeTab === "output" && event.kind === "output") content = event.candidate_found
-    ? '<div data-structured-output-detail></div>' : '<p class="trajectory-summary-empty">Original candidate unavailable.</p>';
+  if (activeTab === "output" && event.kind === "output") {
+    content = event.candidate_found
+      ? '<div data-structured-output-detail></div>' : '<p class="trajectory-summary-empty">Original candidate unavailable.</p>';
+    content += renderReplyFileCards(files, { attachmentUrl });
+  }
   if (activeTab === "preview") content = renderPreview(event, previewText);
   if (event.kind === "assistant" && ["summary", "preview"].includes(activeTab)) {
     content += renderReplyFileCards(files, { attachmentUrl });
@@ -1382,7 +1407,7 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl =
     : activeTab === "execution" ? "trajectory-detail-body is-ptc" : "trajectory-detail-body";
   return `
     <header class="trajectory-detail-head">
-      <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}<em class="${escapeHtml(event.status)}">${escapeHtml(event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status))}</em></div>
+      <div><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${headerLabel ? `<strong>${escapeHtml(headerLabel)}</strong>` : ""}${renderEventStatus(event)}</div>
     </header>
     <nav class="trajectory-detail-tabs" role="tablist">${tabs.map(([id, label]) => `<button type="button" class="${activeTab === id ? "active" : ""}" data-trajectory-detail-tab="${id}">${label}</button>`).join("")}</nav>
     <div class="${detailBodyClass}">${content}</div>`;
@@ -1529,9 +1554,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     list.querySelector?.(".trajectory-empty")?.remove();
     for (const [index, event] of events.entries()) {
       const showToolName = TOOL_KINDS.has(event.kind) || event.kind === "output";
-      const summary = event.summary || "No content";
+      const summary = event.summary || (event.payload?.publication_protocol ? "" : "No content");
       const html = `<span class="trajectory-row-copy"><span class="trajectory-kind ${escapeHtml(eventKindClass(event))}">${escapeHtml(eventKindBadge(event))}</span>${showToolName ? `<strong>${escapeHtml(event.label)}</strong>` : ""}<span class="trajectory-row-summary">${escapeHtml(summary)}</span></span>
-        <span class="trajectory-row-meta">${renderRowTime(event, clockMode)}<em class="${escapeHtml(event.status)}">${escapeHtml(event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status))}</em></span>`;
+        <span class="trajectory-row-meta">${renderRowTime(event, clockMode)}${renderEventStatus(event)}</span>`;
       let entry = rowElements.get(event.id);
       if (!entry) {
         const node = document.createElement("button");
@@ -1573,11 +1598,14 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     return lastReply === event ? live : undefined;
   }
 
-  function assistantOutputFiles(event, events) {
-    if (event?.kind !== "assistant") return undefined;
+  function replyOutputFiles(event, events) {
+    if (!event?.run_id) return undefined;
     const files = savedFilesByRun.get(event.run_id) || liveFilesByRun.get(event.run_id);
     if (!files) return undefined;
-    return events.findLast(row => row.kind === "assistant" && row.run_id === event.run_id) === event
+    const publication = events.findLast(row => row.kind === "output" && row.run_id === event.run_id
+      && row.payload?.accepted && row.payload?.publication_protocol);
+    if (publication) return event === publication ? files : undefined;
+    return event.kind === "assistant" && events.findLast(row => row.kind === "assistant" && row.run_id === event.run_id) === event
       ? files : undefined;
   }
 
@@ -1604,7 +1632,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     selectedId = selected?.id || null;
     renderRows(visible);
     const previewText = ["summary", "preview"].includes(detailTab) ? assistantPreviewText(selected, events) : undefined;
-    const files = ["summary", "preview"].includes(detailTab) ? assistantOutputFiles(selected, events) : undefined;
+    const files = ["summary", "preview", "output"].includes(detailTab) ? replyOutputFiles(selected, events) : undefined;
     const detailState = [selected, selected ? eventVersions.get(selected) : 0, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, detailContext(selected, events), previewText, files];
     if (!renderedDetail || detailState.some((value, index) => value !== renderedDetail[index])) {
       renderedDetail = detailState;
@@ -1615,7 +1643,10 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab }, previewText, files);
       for (const item of detail.querySelectorAll?.("details[data-trajectory-context]") || []) item.open = openContexts.has(item.dataset.trajectoryContext);
       const outputHost = detail.querySelector?.("[data-structured-output-detail]");
-      if (outputHost && selected?.candidate_found) mountStructuredOutput(outputHost, { id: selected.id, name: selected.payload.name, output: selected.candidate, failed: !selected.payload.accepted });
+      if (outputHost && selected?.candidate_found) mountStructuredOutput(outputHost, {
+        id: selected.id, name: selected.payload.name, output: selected.candidate, failed: !selected.payload.accepted,
+        publicationProtocol: selected.payload.publication_protocol,
+      });
       globalThis.DeepAgentMarkdown?.restoreCodeState?.(detail, codeState);
       globalThis.DeepAgentMarkdown?.renderDiagrams?.(detail);
       renderIconsWithin(detail, window.lucide);

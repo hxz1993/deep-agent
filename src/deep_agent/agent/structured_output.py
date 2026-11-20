@@ -1,6 +1,7 @@
 """Run-local output configuration. Final JSON is a result, never a UI approval."""
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 from functools import lru_cache
@@ -13,6 +14,9 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart
 from deep_agent.agent.tool_names import ToolName
+from deep_agent.agent_service.output import (
+    OUTPUT_NAME, PublicationProtocol, publication_instructions, publication_schema, validate_publication,
+)
 from deep_agent.structured_output.feedback import (
     OutputArgumentsError, correction_feedback, decode_output_arguments, protocol_error,
 )
@@ -42,19 +46,29 @@ def _output_type(serialized: str):
 
 
 class StructuredOutputState(AbstractCapability):
-    def __init__(self, contract: dict[str, Any], *, rejected_keys: list[str] | None = None, attempts: int = 0):
+    def __init__(self, contract: dict[str, Any] | None, *, rejected_keys: list[str] | None = None, attempts: int = 0,
+                 publication_protocol: PublicationProtocol | None = None):
         from deep_agent.structured_output.schema import normalize_schema, schema_digest, validate_output_name
-        schema = normalize_schema(contract["json_schema"])
-        validate_output_name(contract["name"])
-        self.tool_name = ToolName("output", contract["name"])
-        allow_text = contract.get("allow_text_output", False)
-        if type(allow_text) is not bool:
-            raise ValueError("Output contract allow_text_output must be a boolean")
-        self.contract = {"name": contract["name"], "description": contract.get("description"),
-                         "json_schema": schema, "schema_digest": schema_digest(schema)}
-        # Policy is read once from Agent configuration for this Run.
-        if allow_text:
-            self.contract["allow_text_output"] = True
+        self.publication_protocol = publication_protocol
+        self.business_contract = contract
+        if publication_protocol:
+            schema = publication_schema(contract["json_schema"] if contract is not None else None)
+            self.contract = {
+                "name": OUTPUT_NAME, "description": publication_instructions(contract),
+                "json_schema": schema, "schema_digest": hashlib.sha256(_json(schema).encode()).hexdigest(),
+            }
+        else:
+            assert contract is not None
+            schema = normalize_schema(contract["json_schema"])
+            validate_output_name(contract["name"])
+            allow_text = contract.get("allow_text_output", False)
+            if type(allow_text) is not bool:
+                raise ValueError("Output contract allow_text_output must be a boolean")
+            self.contract = {"name": contract["name"], "description": contract.get("description"),
+                             "json_schema": schema, "schema_digest": schema_digest(schema)}
+            if allow_text:
+                self.contract["allow_text_output"] = True
+        self.tool_name = ToolName("output", self.contract["name"])
         self.rejected_keys = list(dict.fromkeys(rejected_keys or []))
         self.attempt = attempts
         self.progress = None
@@ -111,6 +125,7 @@ class StructuredOutputState(AbstractCapability):
             response.metadata = {**(response.metadata or {}), "deepagent_output": {
                 "name": self.contract["name"], "part_indices": [i for i, _ in outputs],
                 "schema_digest": self.contract["schema_digest"],
+                **({"publication_protocol": self.publication_protocol} if self.publication_protocol else {}),
                 **({"allow_text_output": True} if self.allow_text_output else {}),
             }}
         native = [i for i, part in enumerate(response.parts)
@@ -118,21 +133,17 @@ class StructuredOutputState(AbstractCapability):
         reason = None
         errors = []
         value = None
-        if getattr(ctx.deps, "a2a", False):
-            from deep_agent.agent_service.output import QUESTION_NAME
-            questions = [part for _, part in calls if part.tool_name == QUESTION_NAME]
-            if questions and len(calls) == 1 and not native:
-                self.result_kind = "question"
-                if progress is not None:
-                    progress._record(response)
-                    await progress._save(ctx, hook="a2a_question")
-                return
-            if questions:
-                raise ModelRetry("Return the A2A question by itself, without other tool calls.")
         if len(outputs) > 1:
             reason = "multiple_output_calls"
         elif outputs and (len(calls) != 1 or native):
             reason = "mixed_output_calls"
+        elif (outputs and self.publication_protocol
+              and any(isinstance(part, TextPart) and part.content.strip() for part in response.parts)):
+            reason = "publication_text_outside_schema"
+            errors = [{
+                "path": "/reply/text", "constraint": "publicationOutput",
+                "message": "Return the whole answer inside the publication result, with no separate prose.",
+            }]
         elif not calls and not native and not (
             self.allow_text_output and any(isinstance(part, TextPart) and part.content for part in response.parts)
         ):
@@ -142,7 +153,10 @@ class StructuredOutputState(AbstractCapability):
                 value = decode_output_arguments(outputs[0][1].args, self.contract["json_schema"])
                 from deep_agent.structured_output.validation import validate_output, OutputValidationServiceError
                 try:
-                    errors = await validate_output(self.contract["json_schema"], value)
+                    errors = (
+                        await validate_publication(value, self.business_contract) if self.publication_protocol
+                        else await validate_output(self.contract["json_schema"], value)
+                    )
                 except OutputValidationServiceError:
                     if progress is not None:
                         progress._record(response)
@@ -162,6 +176,7 @@ class StructuredOutputState(AbstractCapability):
             response.metadata = {**(response.metadata or {}), "deepagent_output": {
                 "name": self.contract["name"], "part_indices": [i for i, _ in outputs],
                 "schema_digest": self.contract["schema_digest"],
+                **({"publication_protocol": self.publication_protocol} if self.publication_protocol else {}),
                 **({"allow_text_output": True} if self.allow_text_output else {}),
             }}
         if reason:
@@ -218,10 +233,6 @@ class StructuredOutputState(AbstractCapability):
         if ctx.partial_output:
             return output
         call = output_context.tool_call
-        if self.result_kind == "question":
-            from deep_agent.agent_service.output import A2AQuestion, QUESTION_NAME
-            if call is not None and call.tool_name == QUESTION_NAME and isinstance(output, A2AQuestion):
-                return output
         if call is None:
             if not self.allow_text_output:
                 raise UnexpectedModelBehavior("Text output is not allowed by the output configuration")
@@ -239,6 +250,8 @@ class StructuredOutputState(AbstractCapability):
         if self.pending is None:
             raise RuntimeError("Output has no complete model response")
         payload = {**self.pending, "accepted": accepted}
+        if self.publication_protocol:
+            payload["publication_protocol"] = self.publication_protocol
         row = await deps.output_store.append_output_attempt(
             deps.session_id, agent_id=deps.agent_id, user_id=deps.user,
             turn_id=deps.turn_id, run_id=deps.run_id, payload=payload,
@@ -251,6 +264,8 @@ class StructuredOutputState(AbstractCapability):
             self.accepted = {"name": payload["name"], "output_id": row.event_id,
                              "tool_call_id": payload["tool_call_id"], "attempt": payload["attempt"],
                              "turn_id": deps.turn_id}
+            if self.publication_protocol:
+                self.accepted["publication_protocol"] = self.publication_protocol
         public = row.public_dict()
         if self.queue is not None:
             try:
@@ -266,6 +281,6 @@ class StructuredOutputState(AbstractCapability):
         return row
 
     async def accept(self, deps):
-        if self.result_kind in {"text", "question"}:
+        if self.result_kind == "text":
             return None
         return await self._append_attempt(deps, accepted=True)

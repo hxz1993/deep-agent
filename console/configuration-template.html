@@ -407,7 +407,7 @@
       <div class="agent-service-layout" id="agentServiceLayout">
         <div id="agentServiceTop" class="agent-service-top">
           <section id="agentServicePublications" class="console-section agent-service-publications" aria-label="发布列表">
-            <div class="table-wrap console-list-a agent-service-scroll"><table class="data-table agent-service-table"><thead><tr><th scope="col">发布名称</th><th scope="col">关联 Agent</th><th scope="col">应用范围</th><th scope="col">最近更新</th><th scope="col">操作</th></tr></thead><tbody id="agentPublicationRows"></tbody></table></div>
+            <div class="table-wrap console-list-a agent-service-scroll"><table class="data-table agent-service-table"><thead><tr><th scope="col">发布名称</th><th scope="col">关联 Agent</th><th scope="col">应用范围</th><th scope="col">最近更新</th><th scope="col" class="agent-service-task-count">最近任务数</th><th scope="col">操作</th></tr></thead><tbody id="agentPublicationRows"></tbody></table></div>
           </section>
           <div id="agentServiceTopSplitter" class="workspace-resizer agent-service-splitter" role="separator" aria-label="调整发布列表宽度" aria-controls="agentServicePublications" aria-orientation="vertical" aria-valuemin="55" aria-valuemax="72" aria-valuenow="62" tabindex="0"></div>
           <section class="console-section agent-service-access" aria-label="接入配置">
@@ -422,7 +422,7 @@
         </div>
         <div id="agentServiceRowSplitter" class="workspace-resizer workspace-row-resizer agent-service-row-resizer" role="separator" aria-label="调整 Agent 发布区域高度" aria-controls="agentServiceTop" aria-orientation="horizontal" title="上下拖动调整高度，双击恢复默认" tabindex="0"></div>
         <section class="console-section agent-service-recent">
-          <div class="console-section-heading"><div class="field-label-row"><h3 class="console-section-title">近期任务</h3><span class="field-help" tabindex="0" aria-label="近期任务保留说明" aria-describedby="agentTaskRetentionHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="agentTaskRetentionHelp" role="tooltip">任务受理后出现在列表中。结束后最多保留 24 小时，实例最多保留 500 条已结束任务。服务重启后清空列表。</span></span></div><div class="agent-service-filters">
+          <div class="console-section-heading"><div class="agent-service-recent-heading"><div class="field-label-row"><h3 class="console-section-title">近期任务</h3><span class="field-help" tabindex="0" aria-label="近期任务保留说明" aria-describedby="agentTaskRetentionHelp"><i data-lucide="circle-help" aria-hidden="true"></i><span class="field-help-tooltip" id="agentTaskRetentionHelp" role="tooltip">任务受理后出现在列表中。结束后最多保留 24 小时，实例最多保留 500 条已结束任务。服务重启后清空列表。</span></span></div><div class="agent-service-recent-caption" id="agentTaskPublication" hidden><i data-lucide="radio-tower" aria-hidden="true"></i><span id="agentTaskPublicationName"></span></div></div><div class="agent-service-filters">
             <label class="console-search"><i data-lucide="search"></i><input type="search" id="agentTaskSearch" aria-label="搜索任务" placeholder="搜索任务名称或 ID"></label>
             <select id="agentTaskApp" aria-label="调用应用"><option value="">全部调用应用</option></select>
             <select id="agentTaskState" aria-label="任务状态"><option value="">全部状态</option><option value="TASK_STATE_COMPLETED">已完成</option><option value="TASK_STATE_WORKING">进行中</option><option value="TASK_STATE_SUBMITTED">排队中</option><option value="TASK_STATE_INPUT_REQUIRED">待补材料</option><option value="TASK_STATE_AUTH_REQUIRED">待鉴权</option><option value="TASK_STATE_FAILED">失败</option><option value="TASK_STATE_CANCELED">已取消</option><option value="TASK_STATE_REJECTED">已拒绝</option></select>
@@ -511,12 +511,12 @@
                 <thead><tr><th scope="col">能力</th><th scope="col">A2A</th><th scope="col">MCP</th><th scope="col">CLI（计划中）</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">发现 Agent</th><td>读取已知地址的 Agent Card</td><td><code>list_agents</code></td><td>列出已发布 Agent</td></tr>
-                  <tr><th scope="row">发起任务</th><td><code>SendMessage</code></td><td><code>submit_task</code></td><td>提交任务</td></tr>
-                  <tr><th scope="row">补材料 / 追问</th><td>带原 Task ID 或 Context ID 继续发送</td><td><code>reply_task</code>，或带 Context ID 提交</td><td>继续任务或会话</td></tr>
-                  <tr><th scope="row">查询结果 / 取消</th><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td><code>get_task</code>、<code>list_tasks</code>、<code>cancel_task</code></td><td>查询、等待及取消</td></tr>
-                  <tr><th scope="row">获取进度</th><td><code>SendStreamingMessage</code>、<code>SubscribeToTask</code></td><td>轮询 <code>get_task</code></td><td>等待及查询状态</td></tr>
-                  <tr><th scope="row">发送附件</th><td>消息 Part 传 Base64 字节</td><td><code>attachments</code> 传 Base64 字节</td><td>读取本地文件后随任务发送</td></tr>
-                  <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>get_task</code> 或 <code>get_artifact</code> 返回鉴权下载链接</td><td>读取结果并下载文件</td></tr>
+                  <tr><th scope="row">发起任务</th><td><code>SendMessage</code></td><td><code>SendMessage</code>，立即返回 Task</td><td>提交任务</td></tr>
+                  <tr><th scope="row">补材料 / 追问</th><td><code>SendMessage</code> 带原 <code>message.taskId</code></td><td><code>SendMessage</code> 带原 <code>message.taskId</code></td><td>继续任务或会话</td></tr>
+                  <tr><th scope="row">查询结果 / 取消</th><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td>查询、等待及取消</td></tr>
+                  <tr><th scope="row">获取进度</th><td><code>SendStreamingMessage</code>、<code>SubscribeToTask</code></td><td>轮询 <code>GetTask</code></td><td>等待及查询状态</td></tr>
+                  <tr><th scope="row">发送附件</th><td><code>message.parts[].raw</code> 传 Base64 字节</td><td><code>message.parts[].raw</code> 传 Base64 字节</td><td>读取本地文件后随任务发送</td></tr>
+                  <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>GetTask</code> 或 <code>get_artifact</code> 返回鉴权下载链接</td><td>读取结果并下载文件</td></tr>
                 </tbody>
               </table>
             </div>
@@ -582,11 +582,10 @@
                   <thead><tr><th scope="col">工具</th><th scope="col">用途</th></tr></thead>
                   <tbody>
                     <tr><th scope="row"><code>list_agents</code></th><td>查找已启用的发布及 Agent 编码</td></tr>
-                    <tr><th scope="row"><code>submit_task</code></th><td>发起任务或沿已完成的会话继续，支持附件</td></tr>
-                    <tr><th scope="row"><code>get_task</code></th><td>查看任务状态、正文、待答问题和产物</td></tr>
-                    <tr><th scope="row"><code>list_tasks</code></th><td>按发布、状态或会话查看当前应用下的近期任务</td></tr>
-                    <tr><th scope="row"><code>reply_task</code></th><td>回答原任务的待答问题，支持附件</td></tr>
-                    <tr><th scope="row"><code>cancel_task</code></th><td>请求停止未结束的任务</td></tr>
+                    <tr><th scope="row"><code>SendMessage</code></th><td>发起任务或回复待补充的任务，支持附件</td></tr>
+                    <tr><th scope="row"><code>GetTask</code></th><td>查看任务状态、正文、待答问题和产物</td></tr>
+                    <tr><th scope="row"><code>ListTasks</code></th><td>按发布、状态、Context ID 或更新时间筛选近期任务</td></tr>
+                    <tr><th scope="row"><code>CancelTask</code></th><td>请求停止未结束的任务</td></tr>
                     <tr><th scope="row"><code>get_artifact</code></th><td>获取指定产物</td></tr>
                   </tbody>
                 </table>
@@ -600,7 +599,14 @@
                 </table>
               </div>
             </div>
-            <p class="agent-service-guide-client-links"><a href="https://www.codebuddy.ai/docs/cli/mcp" target="_blank" rel="noopener noreferrer">CodeBuddy 配置文档</a><a href="https://www.codebuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/MCP-Guide" target="_blank" rel="noopener noreferrer">WorkBuddy 配置文档</a></p>
+            <section class="agent-service-guide-block agent-service-guide-clients">
+              <h4>常用接入工具</h4>
+              <ul class="agent-service-links">
+                <li><a class="btn-link" href="https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Connector" target="_blank" rel="noopener noreferrer">WorkBuddy<i data-lucide="external-link" aria-hidden="true"></i></a><p>在桌面端的「连接器」中添加自定义连接器，使用上方的 Streamable HTTP 配置。</p></li>
+                <li><a class="btn-link" href="https://www.doubao.com/work/docs/zh-cn/articles/705018132598-plugins" target="_blank" rel="noopener noreferrer">豆包工作<i data-lucide="external-link" aria-hidden="true"></i></a><p>在桌面端的「插件」中新增自定义连接器，传输类型选 HTTP，填写服务地址和上方的请求头。</p></li>
+                <li><a class="btn-link" href="https://docs.qwenwork.cn/features/connectors" target="_blank" rel="noopener noreferrer">千问办公<i data-lucide="external-link" aria-hidden="true"></i></a><p>在桌面端的「连接器」中选择手动填写配置，类型选 Streamable HTTP，填写服务地址和上方的请求头。</p></li>
+              </ul>
+            </section>
           </section>
         </div>
         <footer class="modal-footer"><button type="button" class="btn" data-service-close>关闭</button></footer>

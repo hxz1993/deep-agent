@@ -1,7 +1,7 @@
 """Declare which files the current chat run will deliver."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Annotated
 
 from pydantic import Field, TypeAdapter, ValidationError
@@ -17,6 +17,7 @@ from deep_agent.agent.tool_names import PRESENT, without_present_history
 from deep_agent.agent.tool_output_limits import session_file_metadata_from_history
 from deep_agent.conversation.models import ConversationAttachment, ConversationOutputFile
 from deep_agent.files.storage import FileStoreError, LocalFileStore
+from deep_agent.files.upload_settings import MAX_ATTACHMENT_BYTES
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 MAX_PRESENT_FILES = 10
@@ -80,7 +81,7 @@ async def _resolve_delivery_file(
         raise ModelRetry(unavailable)
     if isinstance(deps.file_store, LocalFileStore):
         try:
-            file = await deps.file_store.describe_available(file_id, deps.request_headers)
+            file = await deps.file_store.describe_available(file_id, deps.execution_request_headers or deps.request_headers)
         except FileStoreError:
             raise ModelRetry(unavailable) from None
         if file.file_type != FILE_TYPE_ATTACHMENT:
@@ -99,7 +100,15 @@ def build_file_delivery_toolset() -> FunctionToolset[AgentDeps]:
     toolset = FunctionToolset[AgentDeps]()
 
     async def prepare(ctx: RunContext[AgentDeps], tool: ToolDefinition) -> ToolDefinition | None:
-        return tool if ctx.deps.file_delivery is not None else None
+        if ctx.deps.file_delivery is None:
+            return None
+        if ctx.deps.publication_protocol:
+            return replace(tool, description=(
+                "Select up to 10 exact File IDs from this conversation to deliver with the current publication result. "
+                "Use only files already checked and ready for the caller, never intermediate drafts. This works even "
+                "when you also need to ask a follow-up question. Call present separately before the final result."
+            ))
+        return tool
 
     @toolset.tool(prepare=prepare, name=PRESENT)
     async def present(
@@ -118,7 +127,8 @@ def build_file_delivery_toolset() -> FunctionToolset[AgentDeps]:
         deliverable. Call present separately from any final structured output.
         Markdown links and inline images may accompany the file cards.
         """
-        delivery = ctx.deps.file_delivery
+        deps = ctx.deps
+        delivery = deps.file_delivery
         if delivery is None:
             raise ModelRetry("File delivery is unavailable in this context.")
         requested = dict.fromkeys(file_ids)
@@ -129,9 +139,17 @@ def build_file_delivery_toolset() -> FunctionToolset[AgentDeps]:
             artifacts = {**artifacts, **session_file_metadata_from_history(current)}
         files = {}
         for file_id in requested:
-            files[file_id] = delivery.selected.get(file_id) or await _resolve_delivery_file(
-                ctx.deps, file_id, artifacts.get(file_id),
-            )
+            file = delivery.selected.get(file_id) or await _resolve_delivery_file(deps, file_id, artifacts.get(file_id))
+            if deps.publication_protocol and file.byte_size is None:
+                try:
+                    contents = await deps.file_store.download_bounded(
+                        file_id, deps.execution_request_headers or deps.request_headers, max_bytes=MAX_ATTACHMENT_BYTES,
+                    )
+                except FileStoreError:
+                    raise ModelRetry("The selected file is unavailable for delivery.") from None
+                file.byte_size = len(contents)
+                del contents
+            files[file_id] = file
         if len(delivery.selected.keys() | files.keys()) > MAX_PRESENT_FILES:
             raise ModelRetry(f"The current run can deliver at most {MAX_PRESENT_FILES} distinct files.")
         delivery.selected.update(files)

@@ -20,10 +20,8 @@ from pydantic import ValidationError
 
 from deep_agent.agent_service.download import ArtifactDownloadResponse, artifact_chunks
 from deep_agent.agent_service.mcp_guides import MCP_GUIDE, MCP_GUIDE_URI, MCP_INSTRUCTIONS
-from deep_agent.agent_service.public import (
-    HistoryLength, PublicInput, PublicTasks, ReplyInput, SubmitInput, TaskId, TaskQuery, artifact_reference, task_error,
-)
-from deep_agent.agent_service.publications import AgentCode
+from deep_agent.agent_service.mcp_tasks import CancelTool, GetTool, ListTool, McpTasks, SendTool
+from deep_agent.agent_service.public import PublicInput, TaskId, artifact_reference, task_error
 from deep_agent.agent_service.security import needs_platform_address, observe_access, platform_caller, service_base_url
 from deep_agent.agent_service.service import bounded_body
 from deep_agent.api.v1.agent_service import admin
@@ -34,7 +32,7 @@ from deep_agent.files.storage import FileStoreError, FileStoreIntegrityError
 router = APIRouter(prefix="/agent-service")
 tag = "agent-service"
 server = Server("deepagent-agents", instructions=MCP_INSTRUCTIONS)
-current: ContextVar[PublicTasks] = ContextVar("agent_service_mcp")
+current: ContextVar[McpTasks] = ContextVar("agent_service_mcp")
 INLINE_ARTIFACT_LIMIT = 20 * 1024 * 1024
 
 
@@ -49,7 +47,7 @@ async def client_config(request: Request, ctx: AppContextDep, user: RequestUserD
 async def download(ctx: AppContextDep, request: Request, task_id: TaskId, artifact_id: TaskId):
     with observe_access("mcp"):
         headers = await platform_caller(request)
-    tasks = PublicTasks(ctx, headers, "mcp")
+    tasks = McpTasks(ctx, headers)
     try:
         entry, artifact = await tasks.artifact(task_id, artifact_id)
     except Exception as exc:
@@ -61,23 +59,7 @@ async def download(ctx: AppContextDep, request: Request, task_id: TaskId, artifa
     return ArtifactDownloadResponse(entry, artifact, handle, protocol="mcp")
 
 
-class SubmitTool(SubmitInput):
-    agent_code: AgentCode
-
-
-class ListTool(TaskQuery):
-    agent_code: AgentCode
-
-
 class TaskTool(PublicInput):
-    task_id: TaskId
-
-
-class GetTool(TaskTool):
-    history_length: HistoryLength | None = None
-
-
-class ReplyTool(ReplyInput):
     task_id: TaskId
 
 
@@ -86,7 +68,7 @@ class ArtifactTool(TaskTool):
     format: Literal["url", "base64"] = "url"
 
 
-async def get_artifact(tasks: PublicTasks, args: ArtifactTool) -> dict:
+async def get_artifact(tasks: McpTasks, args: ArtifactTool) -> dict:
     entry, artifact = await tasks.artifact(args.task_id, args.artifact_id)
     if args.format == "url" or artifact.size > INLINE_ARTIFACT_LIMIT:
         if not tasks.download_base_url:
@@ -111,20 +93,18 @@ async def get_artifact(tasks: PublicTasks, args: ArtifactTool) -> dict:
 TOOLS: dict[str, tuple[str, type[PublicInput], Callable[..., Awaitable[dict]]]] = {
     "list_agents": ("Discover enabled published Agents and their agent_code values.",
                     PublicInput, lambda tasks, _: tasks.list_agents()),
-    "submit_task": ("Start a task with text, data or attachments. Use context_id to continue a completed conversation, "
-                    "and reuse the same message_id and payload on retry.",
-                    SubmitTool, lambda tasks, a: tasks.submit(a.agent_code, a)),
-    "get_task": ("Read task status, output, and file artifacts. Use question_id to reply. Download selected files via "
-                 "HTTP GET to download_url using the MCP connection's app, space when set, and authentication headers.",
-                 GetTool, lambda tasks, a: tasks.get(a.task_id, a.history_length)),
-    "list_tasks": ("List recent tasks for a published Agent in the configured App. Filter by state or context_id "
-                   "and pass next_cursor as cursor to continue.",
-                   ListTool, lambda tasks, a: tasks.list_tasks(a.agent_code, a)),
-    "reply_task": ("Answer a task in input_required, using its task_id, question_id as reply_to, "
-                   "and a new message_id. Attachments can accompany the answer.",
-                   ReplyTool, lambda tasks, a: tasks.reply(a.task_id, a)),
-    "cancel_task": ("Request cancellation of an unfinished task by task_id and read the returned state.",
-                    TaskTool, lambda tasks, a: tasks.cancel(a.task_id)),
+    "SendMessage": ("Start a task with agentCode and an A2A message. To continue an input-required task, "
+                    "send a new message containing the original taskId and a new messageId. "
+                    "Use contextId alone to start a new task in the same conversation. Returns immediately.",
+                    SendTool, lambda tasks, a: tasks.send(a)),
+    "GetTask": ("Read an A2A Task by id. Check status.state, status.message for questions, and artifacts for results. "
+                "Download file parts with HTTP GET to parts[].url using the same App/Space and authentication headers.",
+                GetTool, lambda tasks, a: tasks.get(a.id, a.historyLength)),
+    "ListTasks": ("List tasks for agentCode in this App with A2A filters and paging. "
+                  "Use nextPageToken as pageToken and includeArtifacts to include results.",
+                  ListTool, lambda tasks, a: tasks.page(a)),
+    "CancelTask": ("Cancel a task by id and return its current task state.",
+                   CancelTool, lambda tasks, a: tasks.cancel(a.id)),
     "get_artifact": ("Get a file's complete download_url by task_id and artifact_id (format=url by default). "
                      "Download with the connection's app, space when set, and authentication headers. If your client cannot send those "
                      "headers, request format=base64 for a file up to 20 MiB. Decode data_base64 from the original "
@@ -189,7 +169,7 @@ async def read_resource(uri):
 
 
 class MCPResponse(Response):
-    def __init__(self, tasks: PublicTasks, body: bytes):
+    def __init__(self, tasks: McpTasks, body: bytes):
         super().__init__()
         self.tasks = tasks
         self.request_body = body
@@ -244,4 +224,4 @@ async def mcp(request: Request, ctx: AppContextDep):
             base = await ctx.agent_service_address.resolve(request, base, headers)
             _validate_mcp_origin(origin, base)
     body = await bounded_body(request) if request.method == "POST" else b""
-    return MCPResponse(PublicTasks(ctx, headers, "mcp", download_base_url=base), body)
+    return MCPResponse(McpTasks(ctx, headers, download_base_url=base), body)

@@ -2,12 +2,22 @@
 
 本文件只保留尚未完成或需要外部条件的事项。已交付能力不再重复拆成待办，历史决策从Git记录恢复。
 
-## 发布 Agent 下一轮（2026-11-20）
+## 下一轮开发 · 发布 Agent（2026-11-20）
 
-| ID | 事项 | 状态与下一步 |
-| --- | --- | --- |
-| `AGENT-PUBLICATION-DELIVERY-001` | [明确选择最终交付的文件](45-a2a-access/next-iteration-deliverables-and-mcp.md#a2a-产物交付) | 待评审。用五份中间文件只交一份的场景确定声明方式与验收。 |
-| `AGENT-PUBLICATION-MCP-001` | [MCP 追问与返回格式](45-a2a-access/next-iteration-deliverables-and-mcp.md#mcp-追问与返回格式) | 待评审。优先让主控 Agent 把追问作为普通结果处理，并核对现有客户端的续聊和 JSON 兼容。 |
+已有协议规范的接口按对应版本的规范实现和验收。发现明确差异时，补齐实现并覆盖相关边界用例。
+
+1. **仅发布入口统一封装输出**（`AGENT-PUBLICATION-OUTPUT-001`，最高优先级）。A2A 和 MCP 共用发布专用 `output_type`，移除独立追问 `deepagent_a2a_request_input`。统一 Schema 包含状态、状态消息和业务回复，回复分别承载正文和业务 JSON，支持纯正文、纯结构化、结构化加正文三种配置。Harness 负责 Task 状态、ID、协议回包和下载地址。将来发布 Agent 的 Python SDK、CLI 接入可复用。普通 Console、普通客户端、企微和飞书走现有输出链路。Deferred／UI 工具另议。 [输出结构与范围](45-a2a-access/next-iteration-deliverables-and-mcp.md#发布-agent-输出封装)
+2. **待补充时用普通消息接续原任务**（`AGENT-PUBLICATION-MCP-001`）。MCP 将发起和补答统一为 `SendMessage`，消息参数按 A2A 对齐。省略 `message.taskId` 时创建任务，带原 ID 时可向待补充任务发消息。`INPUT_REQUIRED` 表示任务在等资料，调用方可自行决定是否继续。回复走标准 `message.parts`，无需追问 ID。MCP 继续异步受理并立即返回，保留必要的发布编码参数。客户端刷新工具目录后直接使用新的工具名和参数。
+3. **对齐任务查询和列表，补上标题和简介**（`AGENT-PUBLICATION-LIST-001`）。共用同一任务结构，状态和追问放在 `status` 下。MCP `ListTasks` 对齐筛选和分页参数，包括 `statusTimestampAfter`、`historyLength` 和 `includeArtifacts`，保留按发布编码选择 Agent。列表回包使用 `tasks`、`nextPageToken`、`pageSize` 和 `totalSize`。两端都在 Task `metadata` 中返回任务标题和简短说明。
+4. **修正任务列表时间边界**（`AGENT-PUBLICATION-A2A-001`）。`statusTimestampAfter` 按 [A2A 1.0.1](https://a2a-protocol.org/v1.0.1/specification/#314-list-tasks) 包含状态更新时间等于阈值的任务。验收覆盖早于、等于、晚于阈值，后两种应返回。
+5. **只交付明确登记的文件**（`AGENT-PUBLICATION-DELIVERY-001`）。用成功 Run 经 `present(file_ids)` 登记的 `output_files` 生成发布任务文件产物，任务查询、列表和单独取件共用清单，复用下载鉴权。生成五份、登记一份，两端只能取到这一份。零登记时文件产物为空。 [产物交付](45-a2a-access/next-iteration-deliverables-and-mcp.md#a2a-产物交付)
+6. **在轨迹里按输出展示发布回复**。沿用结构化输出的展示方式，归类为「发布 Agent 输出」，追问显示「待补充」及实际问题。会话和 Console 测试页按 Run 标记 A2A Output 或 MCP Output，复用折叠 JSON 和文件卡。
+7. **展示 Task 与多个 Turn 的关系**（`AGENT-PUBLICATION-TURNS-001`）。一个 `Task ID` 可关联多个内部 `Turn ID`，如首次执行与补答后执行。`Context ID` 对应内部 `Session ID`。采用轮次时间线，展示 Turn ID、消息摘要和时间。
+8. **按入口组合验收**。验证三种输出、待补充后自然语言续跑、状态与回包字段、列表边界和文件取件。保留普通 Console／客户端和消息渠道输出回归。 [前置模型对照](<../reports/Report [DeepAgent 发布输出状态对照]/README.md>)
+
+本地实现和回归已完成。CodeBuddy MCP、WorkBuddy MCP、本机 8002 调 8000 A2A 已完成附件补答和取件。CodeBuddy A2A 经本机验收适配器完成同 Task 补答和下载，直连跨轮补答和客户端业务 JSON 展示仍待验证。 [实施验收记录](<../reports/Report [DeepAgent 发布 Agent 实施验收]/README.md>)
+
+A2A 暂不接入 `acceptedOutputModes` 的处理，MCP `SendMessage` 入参不添加该字段。Agent 的发现方式和 MCP 单文件取件沿用现有入口。
 
 ## Agent 运行护栏（2026-11-20）
 
@@ -55,6 +65,8 @@ D2本地沙盒并入下方既有`SANDBOX-001`，补充Smol/Bubblewrap/SSH候选�
 | --- | --- | --- |
 | 1 / `CREDENTIAL-ENCRYPTION-001` | [敏感凭据数据库加密存储](31-credential-encryption/README.md) | 尚未实施。统一覆盖 API Key、OAuth Token、机器人及应用 Secret；先确认密钥部署、旧数据迁移、轮换和备份恢复。只需服务端与部署配合，无业务客户端升级要求 |
 | 2 / `UI-INLINE-WAIT-001` | [UI 工具同 Run 等待与执行连续性](30-ui-tool-inline-wait/README.md) | 已有设计及 SDK/PTC 隔离验证，尚未实施。保留 UI 工具和 Agent 安装定义，改等待/答案回传/取消链路；Console 与业务客户端需同步适配。兼容与协调升级方案仍由用户决策，不默认双模式 |
+
+2026-11-20 补充待评审。复现 UI 工具嵌入工作流时，返回值格式过严、回传缺失或不符合要求导致流程无法继续的场景。核对结果校验、等待状态和客户端回传分别怎样影响流程，再评估普通结果可放宽到什么程度，以及无法回传或结果无效时如何向工作流返回明确结果。真实审批仍须收到合法确认。此项留待后续评审。
 
 飞书代码与本地受控验收已完成，真实租户验收待办，个人微信暂不开发，见下方渠道回顾；会话级沙盒与平台自动化任务保留原课题，尚未自动纳入近期实施。D01 已交付，不再列为待开发。
 

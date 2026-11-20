@@ -117,6 +117,7 @@ class StructuredOutputConversationItem(ConversationItemBase):
     tool_call_id: str
     attempt: int
     output: Any
+    publication_protocol: Literal["a2a", "mcp", "http"] | None = Field(default=None, exclude_if=lambda value: value is None)
     output_files: list[ConversationOutputFile] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 

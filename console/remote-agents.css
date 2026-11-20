@@ -62,6 +62,8 @@
 .remote-agent-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 11px; }
 .remote-agent-open { display: block; justify-self: start; min-width: 0; max-width: 100%; background: transparent; border: 0; padding: 1px 0; text-align: left; font: inherit; font-weight: 650; color: var(--text); }
 .remote-agent-open:hover { color: var(--accent); }
+#remoteConnectionRows tr[data-remote-connection-row] { cursor: pointer; }
+#remoteConnectionRows tr:hover .remote-agent-open { color: var(--accent); }
 .remote-agent-open, .remote-agent-call-name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .remote-agent-card .remote-agent-open {
   display: -webkit-box;

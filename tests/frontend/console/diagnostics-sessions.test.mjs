@@ -290,6 +290,18 @@ test("navigation does not collide with a history key preserved across reload", (
   assert.equal(h.restored.scroll, 321);
 });
 
+test("session opened from configuration keeps its source entry when changing views and going back", () => {
+  const origin = { configurationReturn: { tab: "agent-service", state: { publication: "reports", task: "task-1" } } };
+  const h = navigationHarness("#/configuration", origin);
+  h.history.pushState({ diagnosticsFromConfiguration: true }, "", diagnosticHash("detail", { view: "conversation" }, "session-1"));
+  h.pop();
+  h.nav.replaceCurrent(diagnosticTarget("detail", { view: "trajectory" }, "session-1"));
+  assert.equal(h.history.state.diagnosticsFromConfiguration, true);
+  h.nav.back(diagnosticTarget("overview"));
+  assert.equal(h.hash, "#/configuration");
+  assert.deepEqual(h.history.state, origin);
+});
+
 test("external return addresses are rejected and direct detail fallback remains inside Console", () => {
   const h = navigationHarness(diagnosticTarget("detail", {}, "session-full-id"), { diagnosticsFrom: "https://evil.example" }); h.nav.enter();
   assert.equal(h.nav.navigate("https://evil.example"), false);

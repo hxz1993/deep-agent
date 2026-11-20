@@ -56,6 +56,7 @@ class Result:
     artifacts: list[wire.Artifact] = field(default_factory=list)
     files: dict[str, ArtifactFile] = field(default_factory=dict)
     question: str | None = None
+    status_detail: str | None = None
     state: int = COMPLETED
     reason: str | None = None
     error_type: str | None = None
@@ -88,7 +89,6 @@ class Entry:
     subscribers: set[asyncio.Queue] = field(default_factory=set, repr=False)
     worker: asyncio.Task | None = field(default=None, repr=False)
     stop: Callable[[], None] | None = field(default=None, repr=False)
-    question_id: str | None = None
     cancellation_requested: bool = False
     retry_input: tuple[str, list] | None = field(default=None, repr=False)
 
@@ -116,18 +116,19 @@ class Entry:
         )
 
     def status(self, state: int, message: str | None = None, *,
-               reason: str | None = None, error_type: str | None = None) -> None:
+               detail: str | None = None, reason: str | None = None, error_type: str | None = None) -> None:
         previous = self.state
         self.changed = datetime.now(UTC)
-        self.question_id = uuid4().hex if state == INPUT_REQUIRED else None
         timestamp = Timestamp()
         timestamp.FromDatetime(self.changed)
         status = wire.TaskStatus(state=state, timestamp=timestamp)
         if message:
             status.message.CopyFrom(wire.Message(
-                message_id=self.question_id or uuid4().hex, role=wire.Role.ROLE_AGENT,
+                message_id=uuid4().hex, role=wire.Role.ROLE_AGENT,
                 task_id=self.task.id, context_id=self.context.id, parts=[wire.Part(text=message)],
             ))
+            if detail:
+                status.message.parts.add(text=detail)
         self.task.status.CopyFrom(status)
         self.progress.append((state, self.changed))
         del self.progress[:-12]
@@ -215,7 +216,7 @@ class TaskStore:
     def submit(
         self, owner: Owner, agent_id: str, message: wire.Message, *,
         enabled: bool, execute: Execute, input_size: int = 0,
-        source: str = "a2a", require_question: bool = False, client: str | None = None,
+        source: str = "a2a", client: str | None = None,
     ) -> Entry:
         self.prune()
         if self._closed:
@@ -243,10 +244,6 @@ class TaskStore:
                 raise wire.UnsupportedOperationError(message="此任务当前不能补答")
             if sum(task_id == entry.task.id for task_id, _ in self.messages.values()) >= MAX_MESSAGES:
                 raise wire.UnsupportedOperationError(message="此任务已达到补答次数上限")
-            if entry.state == INPUT_REQUIRED:
-                reply_to = message.metadata.fields.get("replyTo")
-                if (reply_to is None and require_question) or (reply_to is not None and reply_to.string_value != entry.question_id):
-                    raise wire.InvalidParamsError(message="补答对应的问题已失效")
         else:
             if not enabled:
                 raise wire.UnsupportedOperationError(message="发布已停用")
@@ -261,7 +258,11 @@ class TaskStore:
             else:
                 context = Conversation(uuid4().hex, uuid4().hex, owner, agent_id, source=source)
             task = wire.Task(id=uuid4().hex, context_id=context.id)
-            title = next((part.text.strip()[:100] for part in message.parts if part.text.strip()), "Agent 任务")
+            description = next((" ".join(part.text.split())[:240] for part in message.parts if part.text.strip()),
+                               "已提交附件或结构化输入")
+            title = description[:100]
+            task.metadata.fields["title"].string_value = title
+            task.metadata.fields["description"].string_value = description
             entry = Entry(context, task, title, datetime.now(UTC), datetime.now(UTC), source=source, client=client)
             self.contexts[context.id] = context
             self.entries[task.id] = entry
@@ -303,13 +304,16 @@ class TaskStore:
                 if len(entry.task.artifacts) + len(result.artifacts) > MAX_ARTIFACTS:
                     entry.status(FAILED, "任务产物超过交付上限", reason="artifact_limit")
                     return
+                entry.files.update(result.files)
                 for artifact in result.artifacts:
                     entry.task.artifacts.append(artifact)
                     entry.broadcast(wire.TaskArtifactUpdateEvent(
                         task_id=entry.task.id, context_id=entry.context.id, artifact=artifact, last_chunk=True,
                     ))
-                entry.files.update(result.files)
-                entry.status(result.state, result.question, reason=result.reason, error_type=result.error_type)
+                entry.status(
+                    result.state, result.question, detail=result.status_detail,
+                    reason=result.reason, error_type=result.error_type,
+                )
                 if result.state in PAUSED and result.question:
                     entry.append_history(entry.task.status.message)
         except asyncio.CancelledError:
@@ -384,7 +388,7 @@ class TaskStore:
         size = params.page_size if params.HasField("page_size") else 50
         if not 1 <= size <= 100:
             raise wire.InvalidParamsError(message="pageSize 必须在 1 到 100 之间")
-        cutoff = params.status_timestamp_after.ToDatetime(tzinfo=UTC) if params.HasField("status_timestamp_after") else None
+        cutoff = params.status_timestamp_after.ToNanoseconds() if params.HasField("status_timestamp_after") else None
         binding = (owner, params.context_id, params.status, cutoff, params.include_artifacts,
                    params.history_length if params.HasField("history_length") else None)
         rows = sorted((
@@ -392,7 +396,7 @@ class TaskStore:
             if entry.context.owner == owner
             and (not params.context_id or entry.context.id == params.context_id)
             and (not params.status or entry.state == params.status)
-            and (cutoff is None or entry.changed > cutoff)
+            and (cutoff is None or entry.task.status.timestamp.ToNanoseconds() >= cutoff)
         ), key=lambda entry: (entry.changed, entry.task.id), reverse=True)
         total = len(rows)
         if params.page_token:

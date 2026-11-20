@@ -73,6 +73,7 @@ def project_session_events(
                 items.append(StructuredOutputConversationItem(
                     item_id=event_id, name=payload["name"], tool_call_id=payload["tool_call_id"],
                     attempt=payload["attempt"], output=payload["output"], status="completed",
+                    publication_protocol=payload.get("publication_protocol"),
                     turn_id=_get(event, "turn_id"), run_id=_get(event, "run_id"),
                     order=ConversationOrder(sequence=int(_get(event, "sequence"))),
                     source_event_ids=[event_id, *(payload.get("source", {}).get("event_ids") or [])],

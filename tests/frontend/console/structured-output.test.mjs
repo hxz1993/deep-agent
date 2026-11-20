@@ -245,3 +245,25 @@ test("display preference stores only the mode and restores across output identit
   assert.equal(readOutputViewPreference({ getItem() { throw new Error("denied"); } }), "full");
   assert.doesNotThrow(() => writeOutputViewPreference({ setItem() { throw new Error("denied"); } }, "full"));
 });
+
+test("publication output keeps its protocol and waiting status in chat and replay", () => {
+  const output = { status: "input_required", message: "核对哪个月？", reply: { text: "已整理文件。" } };
+  const history = assistantActionsFromHistoryItems([{
+    kind: "structured_output", status: "completed", name: "publication_result", item_id: "accepted-1",
+    publication_protocol: "a2a", output, output_files: [{ id: "presented", name: "report.csv" }],
+  }]);
+  const accepted = history.find(action => action.type === "structured_output");
+  assert.equal(accepted.publicationProtocol, "a2a");
+  assert.equal(history.at(-1).files[0].id, "presented");
+  const live = assistantActionsFromSse("output", {
+    accepted: true, status: "completed", publication_protocol: "mcp", output,
+  })[0];
+  assert.equal(live.publicationProtocol, "mcp");
+  for (const protocol of [accepted.publicationProtocol, live.publicationProtocol]) {
+    const html = renderStructuredOutput({ name: "publication_result", output, mode: "grouped", publicationProtocol: protocol });
+    assert.match(html, new RegExp(protocol.toUpperCase() + " Output[\\s\\S]*待补充"));
+    assert.doesNotMatch(html, /data-output-mode|按结构分组|structured-output-text/);
+    assert.match(html, /markdown-code-toggle" aria-expanded="false"/);
+    assert.match(html, /data-output-copy[\s\S]*data-output-download/);
+  }
+});

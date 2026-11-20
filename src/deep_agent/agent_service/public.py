@@ -112,7 +112,8 @@ def snapshot(entry, task=None, *, history_length=None, download_base_url: str | 
     return {
         "id": task.id, "context_id": task.context_id,
         "state": wire.TaskState.Name(task.status.state).removeprefix("TASK_STATE_").lower(),
-        "source": entry.source, "question_id": entry.question_id,
+        "source": entry.source,
+        "question_id": task.status.message.message_id if task.status.state == wire.TaskState.TASK_STATE_INPUT_REQUIRED else None,
         "message": "\n".join(part.text for part in task.status.message.parts if part.HasField("text")),
         "artifacts": artifacts,
         "history": [MessageToDict(message, preserving_proto_field_name=True) for message in task.history],
@@ -170,7 +171,7 @@ class PublicTasks:
         if body.reply_to:
             message.metadata.fields["replyTo"].string_value = body.reply_to
         entry = await self.service.submit(
-            row.code, entry.context.owner, self.headers, message, source=self.source, require_question=True,
+            row.code, entry.context.owner, self.headers, message, source=self.source,
         )
         return self._snapshot(entry)
 

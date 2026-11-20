@@ -3,8 +3,11 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
-## 未发布
+## v0.17.4
 
+- 发布 Agent 的 A2A 和 MCP 共用状态、回复和产物格式。待补材料时用原 Task ID 继续，调用方可同时收到追问、正文和已登记的附件。
+- MCP 工具改为 `SendMessage`、`GetTask`、`ListTasks` 和 `CancelTask`。已有客户端需刷新工具目录并更新参数。详见[发布 Agent 接入指南](docs/guides/agent-service.md)。
+- Console 支持查看发布任务轮次、最终回复和附件数量，从会话诊断返回可恢复任务及筛选状态。A2A 和 MCP 的输出在聊天和轨迹里显示为可折叠的 JSON。
 - 普通聊天可用 `present` 选择本轮要交付的文件。成功回复和会话历史会返回文件清单，Console 在回复底部及助手轨迹详情显示文件卡片。
 - **依赖变更（运维）** 相对 0.17.3，新增随 Console 源码分发的 Bootstrap Icons 1.13.1 SVG（MIT），由新版 CSS 同源加载。运行、沙箱和 CI 安装依赖无变更，无需更新基础镜像。数据库版本为 `016`。[图标来源](console/assets/file-types/SOURCES.md)
 

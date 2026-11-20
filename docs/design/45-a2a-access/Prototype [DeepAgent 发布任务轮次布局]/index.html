@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DeepAgent · 发布任务详情布局</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fa;
+      --surface: #fff;
+      --subtle: #f7f8fb;
+      --border: #dbe3eb;
+      --text: #19222d;
+      --muted: #586474;
+      --accent: #4f46e5;
+      --accent-subtle: #f0efff;
+      --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font: 13px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    main { max-width: 1320px; margin-inline: auto; padding: 32px clamp(16px, 3vw, 40px); }
+    .page-heading { margin-bottom: 24px; }
+    .path { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 5px; color: var(--muted); font-size: 12px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    h2 { margin: 0 0 9px; font-size: 14px; font-weight: 650; }
+    h3, h4, p, dl, ol { margin: 0; }
+    h3 { font-size: 14px; font-weight: 650; }
+    h4 { font-size: 12px; font-weight: 650; }
+    .variants { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+    .variant, .panel { min-width: 0; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; }
+    .panel-header, .panel-section { padding: 12px 14px; }
+    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border); }
+    .status { flex: none; display: inline-flex; align-items: center; gap: 5px; color: #22634e; background: #eaf6ef; border-radius: 4px; padding: 2px 6px; font-size: 12px; }
+    .status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #29815f; }
+    .panel-section + .panel-section { border-top: 1px solid var(--border); }
+    .facts { display: grid; gap: 7px; }
+    .facts > div { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: baseline; gap: 6px; }
+    dt { font-size: 12px; color: var(--muted); }
+    dd { min-width: 0; margin: 0; }
+    .copy-id { display: inline-flex; align-items: center; gap: 4px; padding: 1px 3px; margin: 0; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; font: 12px/1.5 var(--mono); }
+    .copy-id:hover, .copy-id:focus-visible { background: var(--accent-subtle); color: var(--accent); }
+    .turn-id { color: var(--accent); }
+    .copy-id span { font-family: system-ui, sans-serif; font-size: 11px; color: #687487; }
+    .relations { display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; row-gap: 1px; margin-top: 2px; color: var(--muted); font-size: 12px; }
+    .turn-list-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+    .count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; font-size: 12px; }
+    th, td { text-align: left; padding: 6px 7px; overflow-wrap: anywhere; }
+    th { background: var(--subtle); color: var(--muted); font-weight: 500; }
+    td { border-top: 1px solid var(--border); }
+    td:first-child, th:first-child { width: 95px; }
+    td:last-child, th:last-child { text-align: right; white-space: nowrap; }
+    time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+    .timeline { position: relative; margin: 9px 0 0 9px; padding: 0 0 0 15px; border-left: 1px solid var(--border); list-style: none; }
+    .timeline li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 6px; padding: 0 0 8px; }
+    .timeline li:last-child { padding-bottom: 0; }
+    .timeline li::before { content: ""; position: absolute; left: -19px; top: 6px; width: 7px; height: 7px; border: 1px solid var(--accent); border-radius: 50%; background: var(--surface); }
+    .timeline li:last-child::before { background: var(--accent); }
+    .timeline p { grid-column: 1 / -1; font-size: 12px; }
+    .timeline .copy-id { margin-inline-start: -3px; }
+    .id-label { color: var(--muted); font-size: 12px; }
+    .notice { position: fixed; inset: auto 18px 18px auto; margin: 0; padding: 8px 12px; background: var(--text); color: var(--surface); border-radius: 6px; }
+    @media (max-width: 1020px) { .variants { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 650px) { .variants { grid-template-columns: minmax(0, 1fr); } }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="page-heading">
+      <p class="path"><span>发布 Agent</span><span aria-hidden="true">/</span><span>近期任务</span><span aria-hidden="true">/</span><span>任务详情</span></p>
+      <h1>一个 Task 对应多个 Turn</h1>
+    </header>
+    <div class="variants" id="variants"></div>
+  </main>
+  <p class="notice" role="status" hidden></p>
+  <script>
+    const task = {
+      title: "核对 11 月预算差额",
+      id: "6db7a4f211ec45e0a13ca25b96ef43cc",
+      contextId: "c8ad319e63644843b3be1041a64c710f",
+      sessionId: "b83d51f449684d9daf487b53551df789",
+      turns: [
+        { id: "4a80fa5bff604f4e9a1c511541786c40", text: "核对预算差额", time: "10:06" },
+        { id: "897ca1626fa044a3ae048fb350036846", text: "查 11 月", time: "10:08" },
+        { id: "e6bd41c0da214d939d55f80c99d6cb52", text: "仅核对华东", time: "10:09" },
+      ],
+    };
+
+    function idButton(label, id) {
+      const turnClass = label === "Turn ID" ? " turn-id" : "";
+      return `<button type="button" class="copy-id${turnClass}" data-id="${id}" aria-label="复制 ${label} ${id}" title="${label} ${id}">${id.slice(0, 8)}<span aria-hidden="true">⧉</span></button>`;
+    }
+
+    function fact(label, html) {
+      return `<div><dt>${label}</dt><dd>${html}</dd></div>`;
+    }
+
+    const taskId = idButton("Task ID", task.id);
+    const contextId = idButton("Context ID", task.contextId);
+    const sessionId = idButton("Session ID", task.sessionId);
+    const turnCount = `${task.turns.length} 轮`;
+    const turnButtons = task.turns.map(turn => idButton("Turn ID", turn.id)).join("");
+    const contextFacts = fact("Context ID", contextId) + fact("Session ID", sessionId);
+
+    const compact = `<section class="panel-section">
+      <dl class="facts">
+        ${fact("Task ID", `${taskId}<div class="relations"><span>（Turn ID</span>${turnButtons}<span>）</span></div>`)}
+        ${fact("Context ID", `${contextId}<div class="relations"><span>（Session ID</span>${sessionId}<span>）</span></div>`)}
+      </dl>
+    </section>`;
+
+    const turnTable = `<section class="panel-section">
+      <dl class="facts">${fact("Task ID", taskId)}${contextFacts}</dl>
+    </section>
+    <section class="panel-section">
+      <header class="turn-list-head"><h4>任务轮次</h4><span class="count">${turnCount}</span></header>
+      <table aria-label="任务轮次">
+        <thead><tr><th scope="col">Turn ID</th><th scope="col">请求内容</th><th scope="col">时间</th></tr></thead>
+        <tbody>${task.turns.map(turn => `<tr><td>${idButton("Turn ID", turn.id)}</td><td>${turn.text}</td><td><time>${turn.time}</time></td></tr>`).join("")}</tbody>
+      </table>
+    </section>`;
+
+    const timeline = `<section class="panel-section">
+      <header class="turn-list-head"><h4>Task ID ${taskId}</h4><span class="count">${turnCount}</span></header>
+      <ol class="timeline" aria-label="任务轮次">
+        ${task.turns.map(turn => `<li><div><span class="id-label">Turn ID</span> ${idButton("Turn ID", turn.id)}</div><time>${turn.time}</time><p>${turn.text}</p></li>`).join("")}
+      </ol>
+    </section>
+    <section class="panel-section"><dl class="facts">${contextFacts}</dl></section>`;
+
+    const layouts = [
+      { name: "括号内联", content: compact },
+      { name: "轮次表格", content: turnTable },
+      { name: "轮次时间线", content: timeline },
+    ];
+    document.querySelector("#variants").innerHTML = layouts.map((layout, index) => `<section class="variant" aria-labelledby="layout-${index}">
+      <h2 id="layout-${index}">${layout.name}</h2>
+      <div class="panel">
+        <header class="panel-header"><h3>${task.title}</h3><span class="status">已完成</span></header>
+        ${layout.content}
+      </div>
+    </section>`).join("");
+
+    const notice = document.querySelector(".notice");
+    let noticeTimer;
+    document.querySelector("#variants").addEventListener("click", async event => {
+      const button = event.target.closest("button[data-id]");
+      if (!button) return;
+      try {
+        await navigator.clipboard.writeText(button.dataset.id);
+        notice.textContent = "已复制完整 ID";
+      } catch {
+        notice.textContent = button.dataset.id;
+      }
+      notice.hidden = false;
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => { notice.hidden = true; }, 2000);
+    });
+  </script>
+</body>
+</html>

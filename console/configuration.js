@@ -38,11 +38,14 @@ export function currentConfigurationTab() {
 }
 
 export async function restoreConfigurationTab() {
-  const resume = window.history?.state?.debugContextResume;
-  if (resume) {
-    const { debugContextResume, ...previousState } = window.history.state;
-    window.history.replaceState(previousState, "");
-    rememberConfigurationTab(resume.tab);
+  const { debugContextResume: resume, configurationReturn, ...previousState } = window.history?.state || {};
+  if (resume || configurationReturn) window.history.replaceState(previousState, "");
+  if (resume) rememberConfigurationTab(resume.tab);
+  if (configurationReturn) {
+    rememberConfigurationTab(configurationReturn.tab);
+    if (configurationReturn.tab === "agent-service" && configurationReturn.state) {
+      window.agentServiceAdmin?.restoreNavigation(configurationReturn.state);
+    }
   }
   const tab = document.querySelector(`[data-tab="${activeConfigurationTab}"]`);
   if (tab && !tab.classList.contains("active")) {
@@ -178,6 +181,21 @@ function decorateConfiguration() {
     const link = event.target.closest("a[href]");
     if (!link) return;
     const url = new URL(link.href, location.href);
+    const callDetail = link.closest("#agentTaskDetail, #remoteCallDetail");
+    if (callDetail && url.origin === location.origin && url.pathname === location.pathname
+      && url.hash.startsWith("#/diagnostics/sessions/") && event.button === 0
+      && !event.defaultPrevented && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+      const fromPublication = callDetail.id === "agentTaskDetail";
+      event.preventDefault();
+      await window.DeepAgentConsole?.showPage("diagnostics", {
+        diagnosticTarget: url.hash,
+        configurationReturn: {
+          tab: fromPublication ? "agent-service" : "remote-agents",
+          state: fromPublication ? window.agentServiceAdmin?.navigationState() : null,
+        },
+      });
+      return;
+    }
     const agentId = url.searchParams.get("agent_id");
     if (agentId && link.matches("[data-agent-chat]")) {
       event.preventDefault();

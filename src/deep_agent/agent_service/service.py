@@ -8,6 +8,7 @@ from fastapi import HTTPException, Request
 
 from deep_agent.files.storage import FileStoreError, FileStoreNotFoundError, FileStorePermissionError
 
+from .output import PublicationProtocol
 from .execution import MAX_INPUT_BYTES, RunnerExecution, prepare_input
 from .publications import PublicationScope, PublicationStore
 from .tasks import Owner, TaskStore
@@ -69,7 +70,7 @@ class AgentService:
 
     async def submit(
         self, code: str, owner: Owner, headers: dict[str, str], message: wire.Message, *,
-        source: str = "a2a", require_question: bool = False, client: str | None = None, executor=RunnerExecution,
+        source: PublicationProtocol = "a2a", client: str | None = None, executor=RunnerExecution,
     ):
         text, uploads = await prepare_input(self.ctx, message)
         async with self.tasks.admission:
@@ -79,9 +80,9 @@ class AgentService:
             self.owner(row, headers)
             return self.tasks.submit(
                 owner, row.agent_id, message, enabled=row.enabled,
-                execute=executor(self.ctx, headers, code, text, uploads),
+                execute=executor(self.ctx, headers, code, text, uploads, source),
                 input_size=len(text.encode()) + sum(len(upload.data) for upload in uploads),
-                source=source, require_question=require_question, client=client,
+                source=source, client=client,
             )
 
     @staticmethod

@@ -8,7 +8,8 @@
   let rows = [], agents = [], apps = new Map(), tasks = [];
   let selected = "", selectedTask = "", access = "mcp", a2aCardMode = "general", page = 1;
   let draft, detailRequest, taskRequest, timer, searchTimer;
-  let directoryGeneration = 0;
+  let directoryGeneration = 0, nextTaskCountRefresh = 0, returnScroll;
+  const taskCounts = new Map();
   let taskRowsMarkup = "", taskDetailSnapshot = "", shownTask = "";
   const icon = (name) => `<i data-lucide="${name}"></i>`;
   const attr = (value) => escapeHtml(value).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -28,7 +29,8 @@
     return navigator.clipboard.writeText(value).then(() => showToast("已复制"), () => showToast("复制失败", true));
   }
 
-  const copyButton = (value, label, variant = "text compact") => `<button type="button" class="btn ${variant}" data-client-copy="${attr(value)}">${label}</button>`;
+  const copyButton = (value, { label = "复制", accessibleLabel = label, variant = "text compact" } = {}) =>
+    `<button type="button" class="btn ${variant}" data-client-copy="${attr(value)}" aria-label="${attr(accessibleLabel)}">${label}</button>`;
 
   function publicationUpdate(row) {
     const operator = row.updated_by_user?.username || row.updated_by || "未记录";
@@ -48,6 +50,7 @@
       const name = escapeHtml(row.name);
       const target = agents.find((item) => item.id === row.agent_id)?.name || row.agent_id;
       const scope = row.scope.apps;
+      const total = taskCounts.get(row.agent_code);
       const scopeText = scope.mode === "all" ? "全部应用" :
         scope.items.map((item) => apps.get(item.app_id)?.app_name || item.app_id).join("、");
       return `<tr data-publication="${attr(row.agent_code)}" class="${selected === row.agent_code ? "selected" : ""}">
@@ -55,9 +58,15 @@
         <button type="button" class="btn text agent-service-select" aria-controls="agentServiceAccess agentTaskList" aria-pressed="${selected === row.agent_code}"><span title="${attr(row.name)}">${name}</span><code title="${attr(row.agent_code)}">${escapeHtml(row.agent_code)}</code></button></div></td>
         <td title="${attr(target)}">${escapeHtml(target)}</td><td title="${attr(scopeText)}">${escapeHtml(scopeText)}</td>
         <td>${publicationUpdate(row)}</td>
+        <td class="agent-service-task-count" id="agentPublicationTaskCount-${attr(row.agent_code)}" data-empty="${!total}">${total || "—"}</td>
         <td><div class="row-actions agent-row-actions"><button type="button" class="row-action icon-only" data-service-action="edit" aria-label="编辑${attr(row.name)}" title="编辑">${icon("pencil")}</button>
         <button type="button" class="row-action icon-only danger" data-service-action="delete" aria-label="删除${attr(row.name)}" title="删除">${icon("trash-2")}</button></div></td></tr>`;
-    }).join("") : `<tr><td colspan="5" class="empty-cell">${escapeHtml(message || "暂无发布")}</td></tr>`;
+    }).join("") : `<tr><td colspan="6" class="empty-cell">${escapeHtml(message || "暂无发布")}</td></tr>`;
+    const publicationName = rows.find(row => row.agent_code === selected)?.name || "";
+    el("agentTaskPublication").hidden = !publicationName;
+    const caption = el("agentTaskPublicationName");
+    caption.textContent = publicationName;
+    caption.title = publicationName;
     renderAccess();
     if (el("agentServiceProtocol").open) renderMcpAccess(el("agentServiceMcpGuideSetup"), true);
   }
@@ -80,7 +89,6 @@
 
   function renderMcpAccess(card, inGuide = false) {
     const endpoint = window.serviceUrl(`${root}/mcp`);
-    const publication = rows.find((row) => row.agent_code === selected);
     const config = JSON.stringify({
       mcpServers: {
         "deepagent-agents": {
@@ -100,16 +108,16 @@
       "在客户端设置中填写一种凭据。有权访问该应用的 DeepFOS API Key 填入 X-Deepfos-Key。使用平台 Token 时，将 X-Deepfos-Key 换成 token 或 Authorization: Bearer <Token>。",
       "客户端须能访问配置中的 URL。localhost 和 127.0.0.1 仅供同机客户端使用。",
     ].join("\n\n");
-    const guideButton = copyButton(setupGuide, "复制 Agent 接入指引", "compact");
+    const guideButton = copyButton(setupGuide, { label: "复制 Agent 接入指引", variant: "compact" });
     if (inGuide) {
       card.innerHTML = `<div class="agent-service-guide-heading"><h4>Agent 接入指引</h4>${guideButton}</div>
         <pre class="agent-service-guide-preview">${escapeHtml(setupGuide)}</pre>`;
       return;
     }
-    card.innerHTML = `${accessToolbar("mcp", guideButton, publication?.name)}
+    card.innerHTML = `${accessToolbar("mcp", guideButton)}
       <div class="agent-service-card-option agent-service-card-options">
         <section>
-          <div class="agent-service-card-heading"><h5>MCP 配置</h5>${copyButton(config, "复制配置")}</div>
+          <div class="agent-service-card-heading"><h5>配置示例</h5>${copyButton(config, { accessibleLabel: "复制配置" })}</div>
           <pre class="agent-service-client-snippet">${escapeHtml(config)}</pre>
           <p class="agent-service-access-help">填写应用 ID、所属空间 ID 和一种凭据。</p>
         </section>
@@ -149,12 +157,12 @@
     card.innerHTML = `${accessToolbar("a2a", cardModes, row.name)}
       <div class="agent-service-card-option agent-service-card-options">
         <section>
-          <div class="agent-service-card-heading"><h5>Agent Card 地址</h5>${copyButton(url, "复制地址")}</div>
+          <div class="agent-service-card-heading"><h5>Agent Card 地址</h5>${copyButton(url, { accessibleLabel: "复制地址" })}</div>
           <div class="agent-service-card-url"><code title="${attr(url)}">${escapeHtml(url)}</code></div>
           <p class="agent-service-access-help">${help}</p>
         </section>
         <section>
-          <div class="agent-service-card-heading"><h5>Header 示例</h5>${copyButton(headers, "复制示例")}</div>
+          <div class="agent-service-card-heading"><h5>Header 示例</h5>${copyButton(headers, { accessibleLabel: "复制 Header 示例" })}</div>
           <pre class="agent-service-client-snippet">${escapeHtml(headers)}</pre>
         </section>
       </div>`;
@@ -175,7 +183,33 @@
     refreshIcons();
   }
 
+  function navigationState() {
+    return {
+      publication: selected, task: selectedTask, page, access, a2aCardMode,
+      query: el("agentTaskSearch").value, app: el("agentTaskApp").value, status: el("agentTaskState").value,
+      listScroll: el("agentTaskList").querySelector(".agent-service-scroll")?.scrollTop || 0,
+      detailScroll: el("agentTaskDetail").querySelector(".inspector-tab-panel")?.scrollTop || 0,
+    };
+  }
+
+  function restoreNavigation(saved) {
+    selected = saved.publication;
+    selectedTask = saved.task;
+    page = saved.page;
+    access = saved.access;
+    a2aCardMode = saved.a2aCardMode;
+    el("agentTaskSearch").value = saved.query;
+    el("agentTaskState").value = saved.status;
+    const appFilter = el("agentTaskApp");
+    if (saved.app && !Array.from(appFilter.options).some(option => option.value === saved.app)) {
+      appFilter.append(new Option(saved.app, saved.app));
+    }
+    appFilter.value = saved.app;
+    returnScroll = { list: saved.listScroll, detail: saved.detailScroll };
+  }
+
   function selectPublication(code) {
+    returnScroll = undefined;
     selected = code;
     selectedTask = "";
     shownTask = "";
@@ -198,11 +232,15 @@
       if (generation !== directoryGeneration) return;
       rows = publications;
       agents = agentList;
+      for (const code of taskCounts.keys()) {
+        if (!rows.some(row => row.agent_code === code)) taskCounts.delete(code);
+      }
       el("newAgentPublication").disabled = false;
       if (!rows.some((row) => row.agent_code === selected)) {
         selectPublication(rows[0]?.agent_code || "");
       }
       renderPublications();
+      void loadPublicationTaskCounts();
       await loadTasks();
     } catch (error) {
       if (generation !== directoryGeneration) return;
@@ -214,16 +252,50 @@
     }
   }
 
+  function setTaskCount(code, total) {
+    if (!Number.isInteger(total) || taskCounts.get(code) === total) return;
+    taskCounts.set(code, total);
+    const cell = el(`agentPublicationTaskCount-${code}`);
+    if (cell) {
+      cell.textContent = total ? String(total) : "—";
+      cell.dataset.empty = String(total === 0);
+    }
+  }
+
+  function tasksFiltered() {
+    return Boolean(el("agentTaskApp").value || el("agentTaskState").value || el("agentTaskSearch").value.trim());
+  }
+
+  async function loadPublicationTaskCounts() {
+    const generation = directoryGeneration;
+    nextTaskCountRefresh = Date.now() + 30000;
+    const background = rows.filter(row => row.agent_code !== selected || tasksFiltered());
+    await Promise.all(background.map(async row => {
+      const code = row.agent_code;
+      try {
+        const { total } = await apiFetch(`${root}/publications/${code}/tasks`, { reportStatus: false });
+        if (generation === directoryGeneration && (code !== selected || tasksFiltered())) {
+          setTaskCount(code, total);
+        }
+      } catch {
+        // A failed lookup is not an empty task list.
+      }
+    }));
+  }
+
   async function loadTasks() {
     taskRequest?.abort();
     if (!selected) { tasks = []; renderTasks(0); return; }
     const request = taskRequest = new AbortController();
+    const code = selected;
+    const filtered = tasksFiltered();
     const appFilter = el("agentTaskApp");
     const params = new URLSearchParams({ page, q: el("agentTaskSearch").value, state: el("agentTaskState").value });
     if (appFilter.value) params.set("app_id", appFilter.value);
     try {
-      const result = await apiFetch(`${root}/publications/${selected}/tasks?${params}`, { signal: request.signal, reportStatus: false });
+      const result = await apiFetch(`${root}/publications/${code}/tasks?${params}`, { signal: request.signal, reportStatus: false });
       if (request.signal.aborted) return;
+      if (!filtered) setTaskCount(code, result.total);
       const appIds = result.app_ids || [];
       const currentApp = appFilter.value;
       const options = [...new Set([...appIds, ...(result.app_ids && currentApp ? [currentApp] : [])])];
@@ -237,7 +309,15 @@
       }
       tasks = result.items;
       renderTasks(result.total);
-      void loadDetail();
+      const scroll = returnScroll;
+      returnScroll = undefined;
+      if (scroll) {
+        const list = el("agentTaskList").querySelector(".agent-service-scroll");
+        if (list) list.scrollTop = scroll.list;
+        await loadDetail(scroll.detail);
+      } else {
+        void loadDetail();
+      }
     } catch (error) {
       if (request.signal.aborted) return;
       tasks = [];
@@ -247,11 +327,15 @@
     }
   }
 
+  function taskFileCount(count) {
+    if (!Number.isInteger(count) || count < 1) return "";
+    return `<span class="agent-task-file-count" role="img" aria-label="${count} 个文件" title="${count} 个文件"><i data-lucide="file-text" aria-hidden="true"></i>${count}</span>`;
+  }
+
   function renderTasks(total, message = "") {
     if (!tasks.some((row) => row.id === selectedTask)) selectedTask = "";
     const body = el("agentTaskRows");
-    const filtering = el("agentTaskSearch").value.trim() || el("agentTaskState").value || el("agentTaskApp").value;
-    const emptyLabel = message || (filtering ? "没有符合条件的任务" : "暂无任务");
+    const emptyLabel = message || (tasksFiltered() ? "没有符合条件的任务" : "暂无任务");
     const markup = tasks.length ? tasks.map((row) => `
       <tr data-agent-task="${attr(row.id)}" class="${row.id === selectedTask ? "selected" : ""}">
         <td><button type="button" class="btn text agent-service-select" aria-controls="agentTaskDetail" aria-pressed="${row.id === selectedTask}"><span title="${attr(row.title)}">${escapeHtml(row.title)}</span><code title="${attr(row.id)}">${escapeHtml(row.id.slice(0, 8))}</code></button></td>
@@ -259,7 +343,7 @@
         <td class="agent-task-wide" title="${attr(row.caller_username ? `${row.caller_username} · ${row.caller}` : row.caller)}">${escapeHtml(row.caller_username || row.caller?.slice(0, 8) || "—")}</td>
         <td class="agent-task-wide">${escapeHtml(formatDate(row.created_at))}</td>
         <td class="agent-task-wide">${duration(row)}</td>
-        <td>${row.artifact_count ? `<span class="agent-task-file-count" role="img" aria-label="${row.artifact_count} 个文件" title="${row.artifact_count} 个文件"><i data-lucide="file-text" aria-hidden="true"></i>${row.artifact_count}</span>` : "—"}</td>
+        <td>${taskFileCount(row.artifact_count) || "—"}</td>
       </tr>`).join("") :
       `<tr><td colspan="7" class="empty-cell agent-task-wide">${escapeHtml(emptyLabel)}</td>
         <td colspan="4" class="empty-cell agent-task-compact">${escapeHtml(emptyLabel)}</td></tr>`;
@@ -283,30 +367,41 @@
   }
 
   function renderDetailPlaceholder(message) {
-    const markup = `<div class="agent-service-detail-heading"><h3>任务详情</h3></div>
+    const markup = `<div class="agent-service-detail-heading agent-service-detail-placeholder"><h3>任务详情</h3></div>
       <div class="inspector-tab-empty" role="status"><span>${escapeHtml(message)}</span></div>`;
     if (taskDetailSnapshot === markup) return;
     taskDetailSnapshot = markup;
     el("agentTaskDetail").innerHTML = markup;
   }
 
-  function taskIdValue(id, label, url = "") {
+  function taskIdValue(id, label, { url = "", copyControl = "copy" } = {}) {
     if (!id) return "—";
     const code = `<code title="${attr(id)}">${escapeHtml(id.slice(0, 8))}</code>`;
     const value = url ? `<a class="agent-service-session-link" href="${attr(url)}" data-detail-control="${attr(`open:${label}:${id}`)}" aria-label="${attr(`查看 ${label} ${id.slice(0, 8)}`)}">${code}</a>` : code;
     return `<span class="agent-service-id-value">${value}
-      <button type="button" class="console-inline-id-copy" data-task-copy="${attr(id)}" data-copy-label="${attr(label)}" data-detail-control="${attr(`copy:${label}:${id}`)}" title="复制 ${attr(label)}" aria-label="复制 ${attr(label)}">${icon("copy")}</button></span>`;
+      <button type="button" class="console-inline-id-copy" data-task-copy="${attr(id)}" data-copy-label="${attr(label)}" data-detail-control="${attr(`${copyControl}:${label}:${id}`)}" title="复制 ${attr(label)}" aria-label="复制 ${attr(label)}">${icon("copy")}</button></span>`;
+  }
+
+  function truncateText(text, limit) {
+    const shortened = Array.from(text).slice(0, limit).join("");
+    return shortened.length < text.length ? `${shortened}…` : shortened;
   }
 
   function taskDetailFacts(row) {
     const callerName = row.caller_username ? `<strong class="agent-service-fact-name" title="${attr(row.caller_username)}">${escapeHtml(row.caller_username)}</strong>` : "";
-    const relatedIds = (label, ids) => ids.length
-      ? `<span class="agent-service-related-ids">${label} ${ids.join(" ")}</span>` : "";
     const sessionUrl = row.session_id ? `#/diagnostics/sessions/${encodeURIComponent(row.session_id)}?view=conversation` : "";
-    const turns = (row.turns || []).filter((turn) => turn.id).map((turn) =>
-      taskIdValue(turn.id, "提问 ID", turn.event_id && sessionUrl ? `${sessionUrl}&event_id=${encodeURIComponent(turn.event_id)}` : ""),
-    );
-    const sessions = row.session_id ? [taskIdValue(row.session_id, "会话 ID", sessionUrl)] : [];
+    const turns = (row.turns || []).filter((turn) => turn.id);
+    const timeline = turns.length ? `<ol class="agent-service-turns" aria-label="任务轮次">${turns.map((turn) => {
+      const url = turn.event_id && sessionUrl ? `${sessionUrl}&event_id=${encodeURIComponent(turn.event_id)}` : "";
+      const date = turn.created_at && window.DeepAgentTime?.parseServerTimestamp?.(turn.created_at);
+      const time = date ? date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+        : turn.created_at ? formatDate(turn.created_at) : "";
+      return `<li><dl class="agent-service-facts agent-service-turn-facts">
+        <div><dt>Turn ID</dt><dd>${taskIdValue(turn.id, "Turn ID", { url })}</dd></div>
+        </dl>
+        ${time ? `<time datetime="${attr(turn.created_at)}" title="${attr(formatDate(turn.created_at))}">${escapeHtml(time)}</time>` : ""}
+        ${turn.summary ? `<p>${escapeHtml(truncateText(turn.summary, 96))}</p>` : ""}</li>`;
+    }).join("")}</ol>` : "";
     const appName = row.app_name || (row.app_id ? "名称未获取" : "未关联应用");
     const spaceName = row.space_name || (row.space_id ? "名称未获取" : "未关联空间");
     const method = Object.hasOwn(methods, row.source) ? row.source : "a2a";
@@ -323,16 +418,77 @@
       </dl>
     </section>
     <section class="inspector-section agent-service-task-facts">
-      <h4 class="channel-extension-heading">任务与会话</h4>
+      <h4 class="channel-extension-heading">任务轮次</h4>
       <dl class="agent-service-facts">
-        <div><dt>Task ID</dt><dd class="agent-service-id-pair">${taskIdValue(row.id, "Task ID")}${relatedIds("提问 ID", turns)}</dd></div>
-        <div><dt>Context ID</dt><dd class="agent-service-id-pair">${taskIdValue(row.context_id, "Context ID")}${relatedIds("会话 ID", sessions)}</dd></div>
-        <div><dt>会话名称</dt><dd>${escapeHtml(row.session_title || "—")}</dd></div>
+        <div><dt>Task ID</dt><dd>${taskIdValue(row.id, "Task ID")}
+          ${turns.length ? `<span class="agent-service-turn-count">${turns.length} 轮</span>` : ""}</dd></div>
+      </dl>
+      ${timeline}
+      <dl class="agent-service-facts">
+        <div><dt>Context ID</dt><dd>${taskIdValue(row.context_id, "Context ID")}</dd></div>
+        ${row.session_id ? `<div class="agent-service-session-fact"><dt>Session ID</dt><dd>${taskIdValue(row.session_id, "Session ID", { url: sessionUrl })}</dd>
+          ${row.session_title ? `<dd class="agent-service-session-summary">${escapeHtml(row.session_title)}</dd>` : ""}</div>` : ""}
       </dl>
     </section>`;
   }
 
-  async function loadDetail() {
+  function taskProgressTime(timestamp, createdAt) {
+    if (!timestamp) return "";
+    const date = window.DeepAgentTime?.parseServerTimestamp(timestamp);
+    const created = window.DeepAgentTime?.parseServerTimestamp(createdAt);
+    const full = formatDate(timestamp);
+    const time = date?.toLocaleTimeString("zh-CN", {
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    });
+    const day = date && created && date.toDateString() !== created.toDateString()
+      ? `${date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })} ` : "";
+    return `<time datetime="${attr(timestamp)}" title="${attr(full)}">${escapeHtml(time ? day + time : full)}</time>`;
+  }
+
+  async function taskReplyText(row, signal) {
+    const statusText = (row.message || []).join(" ");
+    const turn = row.turns?.at(-1);
+    if (!row.session_id || !turn?.id || /(?:^|_)(SUBMITTED|WORKING)$/.test(row.status)) return statusText;
+    const params = new URLSearchParams({ turn_id: turn.id, event_type: "output/attempt" });
+    const result = await apiFetch(`/api/v1/diagnostics/sessions/${encodeURIComponent(row.session_id)}/events?${params}`, {
+      signal, reportStatus: false,
+    });
+    const output = result.items?.findLast(event => event.turn_id === turn.id && event.status === "completed"
+      && event.payload?.accepted === true && event.payload.name === "publication_result")?.payload.output;
+    if (!output) return statusText;
+    if (output.status === "input_required") return [output.message, output.reply?.text].filter(Boolean).join(" ") || statusText;
+    return typeof output.reply?.text === "string" ? output.reply.text : "";
+  }
+
+  function taskProgress(row, reply) {
+    const progress = row.progress || [];
+    const last = progress.at(-1);
+    const milestones = progress.slice(0, -1).filter(step =>
+      ["INPUT_REQUIRED", "AUTH_REQUIRED"].includes(step.status?.replace("TASK_STATE_", "")));
+    milestones.push({ status: row.status, timestamp: last?.status === row.status ? last.timestamp : row.updated_at || row.created_at });
+    const preview = truncateText((reply || "").replace(/\s+/g, " ").trim(), 180);
+    const fileCount = taskFileCount(row.artifact_count ?? row.files?.length);
+    return `<section class="inspector-section agent-service-task-progress">
+      <h4 class="channel-extension-heading">任务结果</h4>
+      <div class="agent-service-result-body">
+        <ol class="agent-service-progress">${milestones.map((step, index) => `<li>
+          <div class="agent-service-progress-row">
+            ${index === milestones.length - 1
+              ? `<span class="agent-service-status" data-state="${attr(step.status)}">${statusLabel(step.status)}</span>`
+              : `<span>${statusLabel(step.status)}</span>`}
+            ${taskProgressTime(step.timestamp, row.created_at)}
+          </div>
+        </li>`).join("")}</ol>
+        <div class="agent-service-result-preview">
+          ${preview ? `<p>${escapeHtml(preview)}</p>`
+            : `<p class="agent-service-result-empty">${reply === null ? "暂无法读取回复" : "无回复内容"}</p>`}
+          ${fileCount}
+        </div>
+      </div>
+    </section>`;
+  }
+
+  async function loadDetail(restoredScroll) {
     detailRequest?.abort();
     if (!selectedTask) return;
     const request = detailRequest = new AbortController();
@@ -345,22 +501,22 @@
       const row = await apiFetch(`${root}/publications/${selected}/tasks/${selectedTask}`, { signal: request.signal, reportStatus: false });
       if (request.signal.aborted) return;
       const snapshot = JSON.stringify(row);
-      if (taskDetailSnapshot === snapshot) return;
+      if (taskDetailSnapshot === snapshot && restoredScroll === undefined) return;
+      const reply = await taskReplyText(row, request.signal).catch(() => null);
+      if (request.signal.aborted) return;
       const focusedControl = target.contains(document.activeElement) ? document.activeElement.dataset.detailControl : "";
-      const previousScroll = target.querySelector(".inspector-tab-panel")?.scrollTop || 0;
+      const previousScroll = restoredScroll ?? target.querySelector(".inspector-tab-panel")?.scrollTop ?? 0;
       target.innerHTML = `<div class="agent-service-detail-heading">
-        <div class="agent-service-detail-title"><h3 title="${attr(row.title)}">${escapeHtml(row.title)}</h3>
-          <div class="session-subtitle-row"><code class="session-badge" title="${attr(row.id)}">${escapeHtml(row.id.slice(0, 8))}</code>
-          <button type="button" class="console-inline-id-copy" data-task-copy="${attr(row.id)}" data-copy-label="Task ID" data-detail-control="copy:task" aria-label="复制 Task ID" title="复制 Task ID">${icon("copy")}</button></div></div>
+        <div class="agent-service-detail-title">
+          <h3 title="${attr(row.title)}">${escapeHtml(row.title)}</h3>
+          <div class="session-subtitle-row">${taskIdValue(row.id, "Task ID", { copyControl: "copy-heading" })}</div>
+        </div>
         <span class="status-badge inspector-tab-status agent-service-detail-status" data-state="${attr(row.status)}">${statusLabel(row.status)}</span></div>
         <div class="inspector-tab-panel">
           ${taskDetailFacts(row)}
-          ${row.progress?.length ? `<section class="inspector-section"><h4 class="channel-extension-heading">任务进度</h4><ol class="agent-service-progress">${row.progress.map((step) =>
-            `<li><span>${statusLabel(step.status)}</span><time>${escapeHtml(formatDate(step.timestamp))}</time></li>`).join("")}</ol></section>` : ""}
-          ${row.message.length ? `<section class="inspector-section"><header><strong>${statusLabel(row.status)}</strong></header><p>${escapeHtml(row.message.join("\n"))}</p></section>` : ""}
-          ${row.files.length ? `<section class="inspector-section"><header><strong>交付产物</strong></header><ul>${row.files.map((file) => `<li>${escapeHtml(file.name)}</li>`).join("")}</ul></section>` : ""}
+          ${taskProgress(row, reply)}
         </div>`;
-      taskDetailSnapshot = snapshot;
+      taskDetailSnapshot = reply === null ? "" : snapshot;
       target.querySelector(".inspector-tab-panel").scrollTop = previousScroll;
       if (focusedControl) {
         const control = Array.from(target.querySelectorAll("[data-detail-control]"))
@@ -504,7 +660,7 @@
     });
   }
 
-  window.agentServiceAdmin = { refresh };
+  window.agentServiceAdmin = { refresh, navigationState, restoreNavigation };
   document.addEventListener("DOMContentLoaded", () => {
     const panel = el("panel-agent-service");
     if (!panel || panel.dataset.bound) return;
@@ -633,7 +789,10 @@
     clearInterval(timer);
     timer = setInterval(() => {
       if (!taskRequest && !detailRequest && panel.classList.contains("active")
-        && document.body.dataset.consolePage === "configuration" && !document.hidden) void loadTasks();
+        && document.body.dataset.consolePage === "configuration" && !document.hidden) {
+        void loadTasks();
+        if (Date.now() >= nextTaskCountRefresh) void loadPublicationTaskCounts();
+      }
     }, 5000);
   });
 })();

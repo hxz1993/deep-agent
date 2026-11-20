@@ -124,7 +124,7 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
       </article>`;
     }).join("");
     el("remoteConnectionRows").innerHTML = shown.map(row => `
-      <tr><td>${open(row)}</td><td>${listDriver(protocolOf(row))}</td>
+      <tr data-remote-connection-row="${attr(row.id)}"><td>${open(row)}</td><td>${listDriver(protocolOf(row))}</td>
         <td title="${attr(row.description || "")}">${escapeHtml(row.description || "—")}</td>
         <td>${inspectionState(row.inspection)}</td><td>${updater(row)}</td><td>${updatedTime(row)}</td>
         <td><div class="row-actions agent-row-actions">${remove(row)}</div></td></tr>`).join("");
@@ -297,7 +297,7 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
       const message = recentError ? "暂时无法查看调用详情" : recentPending ? "正在加载…"
         : visibleCount ? "请选择一条调用查看详情" : "暂无调用可查看";
       delete detail.dataset.invocation;
-      replaceMarkup(detail, `<div class="agent-service-detail-heading"><h3>调用详情</h3></div>
+      replaceMarkup(detail, `<div class="agent-service-detail-heading agent-service-detail-placeholder"><h3>调用详情</h3></div>
         <div class="inspector-tab-empty" role="status"><span>${message}</span></div>`);
       return;
     }
@@ -977,8 +977,8 @@ import { bindComposerAttachments, bindComposerInput, resizeComposerInput } from 
       if (!button) {
         const call = event.target.closest("[data-remote-call-row]");
         if (call) { selectedRecent = call.dataset.remoteCallRow; renderRecent(); return; }
-        const card = event.target.closest("[data-remote-card]");
-        if (card) await loadEditor(card.dataset.remoteCard);
+        const connection = event.target.closest("[data-remote-card], [data-remote-connection-row]");
+        if (connection) await loadEditor(connection.dataset.remoteCard || connection.dataset.remoteConnectionRow);
         return;
       }
       const data = button.dataset;

@@ -275,6 +275,7 @@ class AppContext:
             await self.wecom_profiles.close()
         self.session_live.close()
         self.active_runs.cancel_all()
+        await self.active_runs.drain_background()
         await self.mcp_lease_manager.close_all()
         if self.sandbox_backend is not None:
             await self.sandbox_backend.aclose()

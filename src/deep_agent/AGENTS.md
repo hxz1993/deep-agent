@@ -48,8 +48,8 @@ Agent 开关默认关闭；配置由 `agent_output_configs` 保存，`structured
 取消诊断按 Session/Run 关联停止接口入口、活动执行首次取消来源和发送连接结束记录。
 `http_disconnect` 只在实际收到 ASGI 断连消息时使用，不能由 `CancelledError` 推断；
 后者无明确证据时为 `task_cancelled_unknown`，更外层的服务退出记录可能晚于执行终态。
-`api/v1/stream_diagnostics.py` 仅包装现有 ASGI 收发，不额外读消息、不改取消及心跳策略；
-观察流 `/live` 不接入发送连接的取消观察。回归见 `test_cancel_diagnostics.py` 和 `test_session_live_api.py`。
+`api/v1/stream_diagnostics.py` 包装现有 ASGI 收发，不额外读消息；普通聊天断开的原因仅记到连接日志。
+渠道发送流仍关联执行取消来源。回归见 `test_cancel_diagnostics.py` 和 `test_session_live_api.py`。
 
 OpenAI 兼容协议的 HTTP 日志在 `agent/model_api_diagnostics.py`；只记录安全地址、状态与工具名清单。
 原 HTTP 字节流透明包装额外记录首字节、累计传输量、最近字节年龄与消费状态，响应头后30秒、之后60秒
@@ -270,8 +270,9 @@ ExpectedError 的 HTTP 200 包装状态分开；不从附件格式清单推断�
 PTC 执行错误用官方 `ToolFailedError + ToolReturnPart(outcome=failed)` 保留脱敏嵌套调用审计，
 不转为消耗重试预算的 `ModelRetry`。取消与系统异常仍传播给 Runner 收尾，不能吞掉。
 
-页面关闭或网络断开触发 Token 清理无人消费的 Run，不是正常停止入口。API 与 Runner 必须显式
-关闭内层异步流，SDK 上下文退出前后捕获官方消息，并保存已有部分历史为中断；不拼接假消息。
+普通聊天由进程持有已接收的 Run，发起页关闭或网络断开仅释放发送流。渠道发送流断开仍触发
+Token 清理。API 与 Runner 必须显式关闭内层异步流，SDK 上下文退出前后捕获官方消息，并保存
+已取消 Run 的部分历史为中断；不拼接假消息。
 EventPersister 写入失败需保留有界失败回执，使后续 flush 明确报错。进程强杀或数据库不可写
 不在历史完整性保证范围内。UI Deferred 已经
 Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处理。当前注册表只在单进程

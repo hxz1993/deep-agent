@@ -516,12 +516,8 @@ async def chat_stream(
 
     stream_run = None
 
-    async def event_generator():
+    async def run_events():
         nonlocal stream_run
-        files = ReplyFiles(
-            request, ctx.file_store, session_id, request_headers,
-            load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
-        )
         try:
             active_run = ctx.active_runs.register(
                 agent_id=deps.agent_id,
@@ -534,7 +530,7 @@ async def chat_stream(
                 request_owned=True,
             )
         except RuntimeError as exc:
-            yield {"event": "error", "data": json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False)}
+            yield "error", {"type": "error", "message": str(exc)}
             return
         stream_run = active_run
         live_key = (deps.agent_id, session_id, deps.user)
@@ -542,9 +538,7 @@ async def chat_stream(
             try:
                 await ensure_scoped_run_session(ctx, app_context, agent_id, session_id)
             except HTTPException as exc:
-                yield {"event": "error", "data": json.dumps(
-                    {"type": "error", "code": "session_app_changed", "message": exc.detail}, ensure_ascii=False,
-                )}
+                yield "error", {"type": "error", "code": "session_app_changed", "message": exc.detail}
                 return
             # A rejected duplicate request must never replace the active source
             # run's identity. Bind only after exclusive run admission succeeds.
@@ -565,10 +559,9 @@ async def chat_stream(
             # asynchronous history/input preparation and incorrectly return 404.
             ctx.session_live.publish(live_key, deps.run_id, "session", session_data)
             log_run_phase("sse_session", request_started_at, **timing_ids)
-            yield {"event": "session", "data": json.dumps(session_data)}
+            yield "session", session_data
             await _adopt_channel_session_scope(ctx, channel_account, deps)
             await _current_channel_context(ctx, body, channel_account)
-            seen_sse_phases: set[str] = set()
             async with aclosing(runner.run_stream(
                 session_id,
                 message,
@@ -583,20 +576,11 @@ async def chat_stream(
             )) as stream:
                 async for ev in stream:
                     ctx.session_live.publish(live_key, deps.run_id, ev["type"], ev)
-                    async for projected in files.event(ev):
-                        kind = projected["type"]
-                        if kind not in seen_sse_phases and (
-                            kind in {"tool_call", "final", "error", "cancelled"}
-                            or (kind in {"text", "thinking"} and str(projected.get("delta") or "").strip())
-                        ):
-                            seen_sse_phases.add(kind)
-                            log_run_phase(f"sse_first_{kind}", request_started_at, **timing_ids)
-                        yield {"event": kind, "data": json.dumps(projected, ensure_ascii=False)}
+                    yield ev["type"], ev
         except DeferredResultConflict as exc:
             # A concurrent resume can pass HTTP preflight before the first completes.
             # Reject only this request; do not persist an execution/error or final.
-            yield {"event": "error", "data": json.dumps(
-                {"type": "error", "code": exc.code, "message": str(exc)}, ensure_ascii=False)}
+            yield "error", {"type": "error", "code": exc.code, "message": str(exc)}
         except asyncio.CancelledError:
             active_run.observe_cancellation(transport_cancel_reason())
             raise
@@ -619,8 +603,58 @@ async def chat_stream(
                 ctx.session_live.end(live_key, deps.run_id)
                 ctx.active_runs.unregister(active_run)
 
+    async def project_events(source):
+        files = ReplyFiles(
+            request, ctx.file_store, session_id, request_headers,
+            load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
+        )
+        seen_sse_phases: set[str] = set()
+        async with aclosing(source):
+            async for event_type, data in source:
+                async for projected in files.event(data, event_type=event_type):
+                    kind = projected.get("type", event_type)
+                    if kind not in seen_sse_phases and (
+                        kind in {"tool_call", "final", "error", "cancelled"}
+                        or (kind in {"text", "thinking"} and str(projected.get("delta") or "").strip())
+                    ):
+                        seen_sse_phases.add(kind)
+                        log_run_phase(f"sse_first_{kind}", request_started_at, **timing_ids)
+                    yield {"event": kind, "data": json.dumps(projected, ensure_ascii=False)}
+
+    fields = {**session_data, "agent_name": getattr(runner, "agent_name", None)}
+    if channel_account is None:
+        sending, receiving = anyio.create_memory_object_stream(1)
+
+        async def produce():
+            connected = True
+            with sending:
+                try:
+                    async with aclosing(run_events()) as source:
+                        async for event in source:
+                            if connected:
+                                try:
+                                    await sending.send(event)
+                                except anyio.BrokenResourceError:
+                                    connected = False
+                except Exception as exc:
+                    logger.error("Chat stream execution failed run_id={} error_type={}", deps.run_id, type(exc).__name__)
+                    try:
+                        await sending.send(("error", {"type": "error", "message": "执行失败，请查看 DeepAgent 诊断"}))
+                    except anyio.BrokenResourceError:
+                        pass
+
+        async def observe():
+            with receiving:
+                ctx.active_runs.start_background(produce())
+                async for event in receiving:
+                    yield event
+
+        return DiagnosticEventSourceResponse(
+            project_events(observe()), fields=fields, on_close=receiving.close,
+        )
+
     return DiagnosticEventSourceResponse(
-        event_generator(), fields={**session_data, "agent_name": getattr(runner, "agent_name", None)},
+        project_events(run_events()), fields=fields,
         active_run=lambda: stream_run if ctx.active_runs.get(
             agent_id=deps.agent_id, session_id=session_id,
         ) is stream_run else None,

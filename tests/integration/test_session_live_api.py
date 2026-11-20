@@ -221,7 +221,7 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("new-private-prefix", str(frames))
         self.assertEqual(hub._subscribers, {})
 
-    async def _terminal_runner(self, *, cancel):
+    async def _terminal_runner(self, *, cancel, disconnect=False):
         ready, release = asyncio.Event(), asyncio.Event()
         calls = 0
 
@@ -243,6 +243,8 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await producer.started())["status"], 200)
             run_id = (await producer.frame())[1]["run_id"]
             await asyncio.wait_for(ready.wait(), 5)
+            if disconnect:
+                await producer.close()
             observer = self._request(query={"agent_id": self.agent_id, "run_id": run_id})
             self.assertEqual((await observer.started())["status"], 200)
             self.assertEqual((await observer.frame())[0], "observation_sync")
@@ -279,18 +281,87 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(matches[0]["run_id"])
 
     async def test_sending_connection_disconnect_logs_source_and_preserves_history(self):
-        await self._diagnostic_interruption("http_disconnect")
+        await self._detached_execution("http_disconnect")
+
+    async def test_cancel_original_run_after_sending_connection_disconnects(self):
+        rows = []
+        with patch("deep_agent.diagnostics.emit", side_effect=lambda event, **kw: rows.append((event, kw))):
+            await self._terminal_runner(cancel=True, disconnect=True)
+        self.assertEqual([fields["reason"] for event, fields in rows if event == "agent_cancel_observed"], ["cancel_api"])
 
     async def test_shutdown_cancellation_logs_source_and_preserves_history(self):
         await self._diagnostic_interruption("server_shutdown")
 
     async def test_unattributed_task_cancellation_is_not_a_client_stop(self):
-        await self._diagnostic_interruption("task_cancelled_unknown")
+        await self._detached_execution("task_cancelled_unknown")
 
     async def test_disconnect_with_broken_diagnostics_preserves_history(self):
-        await self._diagnostic_interruption("http_disconnect", broken_sink=True)
+        await self._detached_execution("http_disconnect", broken_sink=True)
 
-    async def _diagnostic_interruption(self, reason, *, broken_sink=False):
+    async def _detached_execution(self, reason, *, broken_sink=False):
+        ready, release = asyncio.Event(), asyncio.Event()
+        calls = 0
+
+        async def stream(messages, info):
+            nonlocal calls
+            calls += 1
+            yield "SYNTHETIC_PREFIX"
+            yield "_BEFORE"
+            ready.set()
+            await release.wait()
+            yield "_AFTER"
+
+        runner = AgentRunner(Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps), self.ctx.store,
+                             UsageLimits(request_limit=3), active_runs=self.ctx.active_runs)
+        rows = []
+
+        def emit(event, **fields):
+            if broken_sink:
+                raise RuntimeError("synthetic diagnostic failure")
+            rows.append((event, fields))
+
+        path = f"/api/v1/sessions/{self.session}"
+        params = {"agent_id": self.agent_id}
+        with patch("deep_agent.api.v1.chat.build_runner_for_agent", new=AsyncMock(return_value=runner)), \
+             patch.object(AgentRunner, "_generate_model_title", new_callable=AsyncMock), \
+             patch("deep_agent.diagnostics.emit", side_effect=emit):
+            producer = self._request("/api/v1/chat/stream", method="POST", body={
+                **params, "session_id": self.session, "message": "synthetic disconnect"})
+            self.assertEqual((await producer.started())["status"], 200)
+            run_id = (await producer.frame())[1]["run_id"]
+            await asyncio.wait_for(ready.wait(), 5)
+            await producer.until("text")
+            if reason == "task_cancelled_unknown":
+                producer.task.cancel()
+                await asyncio.wait_for(asyncio.gather(producer.task, return_exceptions=True), 5)
+                self.requests.remove(producer)
+            else:
+                await producer.close()
+            current = (await self.http.get(path + "/run-status", params=params)).json()
+            self.assertEqual((current["status"], current["run_id"]), ("running", run_id))
+            observer = self._request(query={**params, "run_id": run_id})
+            self.assertEqual((await observer.started())["status"], 200)
+            self.assertEqual((await observer.frame())[0], "observation_sync")
+            release.set()
+            frames = await observer.until("observation_end")
+            await observer.close()
+            final, = [data["data"] for kind, data in frames if kind == "observation" and data["event"] == "final"]
+            self.assertEqual((final["run_id"], final["status"], final["output"]),
+                             (run_id, "completed", "SYNTHETIC_PREFIX_BEFORE_AFTER"))
+        self.assertEqual(calls, 1)
+        if not broken_sink:
+            closed, = [fields for event, fields in rows if event == "agent_stream_closed"]
+            self.assertEqual((closed["reason"], closed["run_id"]), (reason, run_id))
+            self.assertFalse(any(event in {"agent_cancel_observed", "agent_run_cancelled"} for event, _ in rows))
+        self.assertEqual((await self.http.get(path + "/run-status", params=params)).json()["status"], "idle")
+        items = (await self.http.get(path + "/history", params=params)).json()["items"]
+        prompts = [item for item in items if item["kind"] == "user_message" and item["text"] == "synthetic disconnect"]
+        self.assertEqual(len(prompts), 1)
+        answer, = [item for item in items if item["kind"] == "assistant_message"]
+        self.assertEqual((answer["run_id"], answer["status"], answer["text"]),
+                         (run_id, "completed", final["output"]))
+
+    async def _diagnostic_interruption(self, reason):
         ready = asyncio.Event()
 
         async def stream(messages, info):
@@ -302,9 +373,8 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(Agent(FunctionModel(stream_function=stream), deps_type=AgentDeps), self.ctx.store,
                              UsageLimits(request_limit=3), active_runs=self.ctx.active_runs)
         rows = []
+
         def emit(event, **fields):
-            if broken_sink:
-                raise RuntimeError("synthetic diagnostic failure")
             rows.append((event, fields))
 
         with patch("deep_agent.api.v1.chat.build_runner_for_agent", new=AsyncMock(return_value=runner)), \
@@ -315,21 +385,12 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await producer.started())["status"], 200)
             run_id = (await producer.frame())[1]["run_id"]
             await asyncio.wait_for(ready.wait(), 5)
-            if reason == "server_shutdown":
-                self.ctx.active_runs.cancel_all()
-                await asyncio.wait_for(producer.task, 5)
-            elif reason == "task_cancelled_unknown":
-                producer.task.cancel()
-                await asyncio.wait_for(asyncio.gather(producer.task, return_exceptions=True), 5)
-                # Mark the already-closed transport for fixture teardown, which
-                # otherwise re-raises the expected CancelledError.
-                self.requests.remove(producer)
-            else:
-                await producer.close()
-        for name in (() if broken_sink else ("agent_cancel_observed", "agent_run_cancelled", "agent_stream_closed")):
+            self.ctx.active_runs.cancel_all()
+            await asyncio.wait_for(producer.task, 5)
+        for name in ("agent_cancel_observed", "agent_run_cancelled", "agent_stream_closed"):
             matches = [fields for event, fields in rows if event == name]
             self.assertEqual(len(matches), 1, name)
-            expected = "stream_completed" if reason == "server_shutdown" and name == "agent_stream_closed" else reason
+            expected = "stream_completed" if name == "agent_stream_closed" else reason
             self.assertEqual(matches[0]["reason"], expected)
             self.assertEqual(matches[0]["run_id"], run_id)
         self.assertFalse(any(event == "agent_cancel_api_received" for event, _ in rows))
@@ -516,7 +577,7 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(any(row["event_type"].startswith(("run/", "observation")) for row in rows))
 
     async def test_producer_disconnect_keeps_buffered_read_result_in_history(self):
-        ready = asyncio.Event()
+        ready, release = asyncio.Event(), asyncio.Event()
 
         async def read_value() -> str:
             return "SAVED_ON_DISCONNECT"
@@ -529,7 +590,8 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
                 yield {0: DeltaToolCall(name="read_value", json_args="{}", tool_call_id="read-once")}
                 return
             ready.set()
-            await asyncio.Event().wait()
+            await release.wait()
+            yield "已复核"
 
         agent = Agent(
             FunctionModel(stream_function=stream), deps_type=AgentDeps,
@@ -547,9 +609,15 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
             params = {"agent_id": self.agent_id}
             during = (await self.http.get(history_url, params=params)).json()["items"]
             self.assertFalse(any(item["kind"] == "tool" for item in during))
+            active = self.ctx.active_runs.get(agent_id=self.agent_id, session_id=self.session)
+            self.assertIsNotNone(active)
             await producer.close()
+            self.assertFalse(active.cancellation_token.cancelled)
+            release.set()
+            await asyncio.wait_for(active.finished.wait(), 5)
         after = (await self.http.get(history_url, params=params)).json()["items"]
         self.assertEqual([item["output"] for item in after if item["kind"] == "tool"], ["SAVED_ON_DISCONNECT"])
+        self.assertEqual([item["text"] for item in after if item["kind"] == "assistant_message"], ["已复核"])
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
 
     async def test_stop_after_compaction_persists_buffered_results(self):
@@ -615,6 +683,9 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
                 yield "正在复核"
                 ready.set()
                 await release.wait()
+                if ending == "disconnect":
+                    yield "完成。"
+                    return
                 raise RuntimeError("synthetic provider interruption")
             if ending == "approval":
                 self.assertEqual(returns["approval"], {"confirmed": True})
@@ -646,7 +717,12 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(ready.wait(), 5)
                 await producer.until("text")
                 if ending == "disconnect":
+                    active = self.ctx.active_runs.get(agent_id=self.agent_id, session_id=self.session)
+                    self.assertIsNotNone(active)
                     await producer.close()
+                    self.assertFalse(active.cancellation_token.cancelled)
+                    release.set()
+                    await asyncio.wait_for(active.finished.wait(), 5)
                 elif ending == "stop":
                     stop = await self.http.post(path + "/cancel", params=params)
                     self.assertEqual(stop.json()["status"], "cancel_requested")
@@ -667,8 +743,9 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([(t["call_id"], t["status"]) for t in tools[2:]], [("approval", "awaiting_input")])
             else:
                 self.assertEqual(len(tools), 2)
+                expected_text = "正在复核完成。" if ending == "disconnect" else "正在复核"
                 partial = [item for item in reopened.json()["items"]
-                           if item["kind"] == "assistant_message" and item["text"] == "正在复核"]
+                           if item["kind"] == "assistant_message" and item["text"] == expected_text]
                 self.assertEqual(len(partial), 1)
             events = await self.ctx.store.list_all_events(self.session)
             self.assertEqual([e.status for e in events if e.event_type == "compaction"], ["completed"])

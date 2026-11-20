@@ -471,11 +471,8 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             capabilities=[],
         )
 
-        with patch(
-            "deep_agent.api.v1.chat.build_runner_for_agent",
-            new_callable=AsyncMock,
-        ) as build:
-            build.return_value = object()
+        model, _tracker = build_slow_stream_model(chunks=["too late"], delay_s=1.0)
+        with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             response = await chat_stream(
                 request,
                 get_context(),
@@ -511,6 +508,7 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(cancel.status_code, 200)
             self.assertEqual(cancel.json()["status"], "cancel_requested")
             await iterator.aclose()
+            await asyncio.wait_for(active.finished.wait(), 5)
 
         self.assertIsNone(
             get_context().active_runs.get(agent_id=self._agent_id, session_id=session_id)

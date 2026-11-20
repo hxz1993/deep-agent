@@ -926,10 +926,12 @@ function toggleNewChatMenu(anchor) {
   el.newChatMenu.querySelector(".new-chat-menu-item")?.focus();
 }
 
-// The POST connection owns execution. Keep consuming it when leaving the view;
-// aborting it here would cancel the server Run. Its callbacks lose UI ownership.
+// Keep consuming the POST when leaving the view so its final status can update
+// the session list. Release the message presenter for the new view.
 function detachChatView() {
   state.navigationRevision = (state.navigationRevision || 0) + 1;
+  state.sessionActivity?.stop();
+  state.sessionActivity = null;
   state.backgroundStreams?.get(state.abortController)?.releasePresenter();
   state.abortController = null;
   state.stopController?.abort();
@@ -1252,7 +1254,65 @@ async function loadSessionHistory(session, { signal, isCurrent = () => true } = 
     signal?.removeEventListener("abort", abort);
     await prepareSessionRender();
     if (state.historyController === controller && (state.historyReady || controller.signal.aborted)) globalThis.DeepAgentConsoleWorkspace?.setHistoryLoading?.(false);
+    if (current() && state.historyReady) watchSessionActivity(normalized);
   }
+}
+
+function watchSessionActivity(session) {
+  const key = sessionLookupKey(session);
+  const source = session.source_type || state.sessions.find((item) => sessionLookupKey(item) === key)?.source_type;
+  if (state.sessionActivity?.key === key || (source && source !== "internal")) return;
+  state.sessionActivity?.stop();
+  const controller = new AbortController();
+  let retry = null;
+  let pending = false;
+  let syncing = false;
+  const current = () => !controller.signal.aborted && state.sessionId === session.id && state.agentId === session.agentId;
+
+  async function reconcile() {
+    if (!current() || !pending || syncing || state.streaming || state.historyLoading || state.abortController) return;
+    pending = false;
+    syncing = true;
+    stopHistoryObservation();
+    const history = state.historyController = new AbortController();
+    const stillCurrent = () => current() && state.historyController === history && !history.signal.aborted && !state.abortController;
+    state.historyLoading = true;
+    updateHitlInputState();
+    try {
+      await observeSessionHistory(session, history, stillCurrent);
+    } finally {
+      syncing = false;
+      if (stillCurrent()) {
+        state.historyLoading = false;
+        updateHitlInputState();
+        refresh();
+      }
+    }
+  }
+
+  function refresh() {
+    queueMicrotask(() => { void reconcile().catch(() => {}); });
+  }
+
+  async function subscribe() {
+    try {
+      const response = await daFetch(sessionApiUrl(session, "/activity"), {
+        signal: controller.signal, headers: { Accept: "text/event-stream" }, reportStatus: false,
+      });
+      if ([401, 403, 404].includes(response.status)) return;
+      if (response.ok && response.body) await readSse(response.body, ({ event, data }) => {
+        if (!current() || event !== "session_activity" || !data) return;
+        // The current observer or sender reconciles a Run it already rendered.
+        if (data.run_id && (data.run_id === state.observedRunId || data.run_id === state.lastRunMetrics?.run_id)) return;
+        pending = true;
+        refresh();
+      });
+    } catch { /* A reconnected activity stream starts with the current state. */ }
+    if (current()) retry = setTimeout(() => { void subscribe(); }, 2000);
+  }
+
+  state.sessionActivity = { key, refresh, stop() { controller.abort(); clearTimeout(retry); } };
+  void subscribe();
 }
 
 function stopHistoryObservation() {
@@ -1263,6 +1323,7 @@ function stopHistoryObservation() {
   state.historyController = null;
   state.historyLoading = false;
   state.historyObservationPending = false;
+  state.observedRunId = null;
   if (state.observingRun) {
     state.stopController?.abort();
     state.stopController = null;
@@ -1297,6 +1358,7 @@ async function observeSessionHistory(session, controller, current) {
     });
   }
   const runId = status.run_id;
+  state.observedRunId = runId;
   let baselineSequence = null;
   let assistant = null;
   let fallback = null;
@@ -2702,6 +2764,7 @@ async function runChatStream(payload, assistant) {
         && state.sessionId === session.id && state.agentId === session.agentId);
     }
     if (state.sessionId) await syncSessionsFromBackend();
+    if (viewingSourceSession() && sourceSession.runId) watchSessionActivity(sourceSession);
     void refreshSessionFilterOptions({ force: true });
   }
 }
@@ -2728,6 +2791,7 @@ async function stopStream() {
   const agentId = state.agentId;
   const streamController = state.abortController;
   if (!sessionId || !streamController) return;
+  const runId = state.backgroundStreams?.get(streamController)?.runId;
   const current = () => state.abortController === streamController
     && state.sessionId === sessionId && state.agentId === agentId
     && state.streaming && state.refreshHistoryAfterStream;
@@ -2742,8 +2806,10 @@ async function stopStream() {
   const result = await verifyStreamStop({
     signal: stopController.signal,
     isCurrent: current,
+    runId,
     request: (kind, signal) => daFetch(
-      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status"),
+      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status",
+        kind === "cancel" ? { run_id: runId } : {}),
       { method: kind === "cancel" ? "POST" : "GET", signal },
     ),
     onAccepted: () => showConsoleToast("正在停止当前生成并核验运行状态…"),
@@ -2767,6 +2833,7 @@ async function stopStream() {
 async function stopObservedRun() {
   const sessionId = state.sessionId;
   const agentId = state.agentId;
+  const runId = state.observedRunId;
   const historyController = state.historyController;
   const stopController = new AbortController();
   const current = () => state.historyController === historyController
@@ -2778,9 +2845,10 @@ async function stopObservedRun() {
   el.stopBtn.disabled = true;
   el.stopBtn.title = "正在停止…";
   const result = await verifyStreamStop({
-    signal: stopController.signal, isCurrent: current,
+    signal: stopController.signal, isCurrent: current, runId,
     request: (kind, signal) => daFetch(
-      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status"),
+      sessionApiUrl({ id: sessionId, agentId }, kind === "cancel" ? "/cancel" : "/run-status",
+        kind === "cancel" ? { run_id: runId } : {}),
       { method: kind === "cancel" ? "POST" : "GET", signal },
     ),
     onAccepted: () => showConsoleToast("正在停止当前生成并同步已保存内容…"),
@@ -2821,6 +2889,7 @@ function setStreaming(v) {
   updateAgentSelectState();
   updateHitlInputState();
   updateComposerContextControls();
+  if (!v) state.sessionActivity?.refresh();
   if (!v && directoryDeletionDeferred) queueMicrotask(() => { void refreshConfiguration(); });
 }
 

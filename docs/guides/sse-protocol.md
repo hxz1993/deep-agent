@@ -108,14 +108,14 @@ Usage基准加新增内容估算；`estimated`表示保守估算。基准失效�
 
 `GET /api/v1/sessions/{session_id}/live?agent_id=…&run_id=…` 是只读 SSE，
 沿用 History 的用户与 Agent 归属校验。客户端打开会话时从 `run-status` 获取当前 Run，
-只观察这个 ID；空闲时不连接，也不自动跟随下一轮。原页面 POST SSE 不重复订阅。
+该接口只观察指定的 Run。原页面 POST SSE 不重复订阅该 Run。
 Console 查询会话列表时传 `include_active_runs=true`，当前 API 实例可见的运行项会附带 `active_run_id`。默认列表返回原有字段，点开时以运行状态接口为准。
 
 | 事件 | 内容与用途 |
 | --- | --- |
 | `observation_sync` | `session_id, agent_id, run_id, replay_available, baseline_sequence`；历史与当前回放衔接边界 |
 | `observation` | `run_id, event, data`；内部 `event/data` 原样复用现有聊天 SSE |
-| `observation_end` | `run_id`；该轮源请求已收尾，回读历史后解除运行状态，连接结束 |
+| `observation_end` | `run_id`；该轮执行已收尾，回读历史后解除运行状态，连接结束 |
 | `observation_reset` | 有界原因；观察连接不可继续，重新校准历史，不取消或重跑 Agent |
 
 上述包装是瞬时传输控制，不写入事件表、模型历史或轨迹行。`baseline_sequence` 只读取该轮开始前
@@ -131,6 +131,13 @@ Console 查询会话列表时传 `include_active_runs=true`，当前 API 实例�
 Run 结束释放回放，连接断开释放队列。普通聊天的 Run 由服务进程管理，关闭发起请求或只读观察都只断开相应连接。
 重新打开会话时可查询并跟随仍活跃的同一个 Run，或回读已保存的结果。明确停止仍调用现有取消接口。
 渠道发送流沿用原请求生命周期，进程重启不恢复尚未完成的 Run。
+
+普通聊天的 Console 打开会话后，以 `GET /api/v1/sessions/{session_id}/activity?agent_id=…`
+监听同一会话的新一轮。初次连接和 Run 开始、结束时发出 `session_activity`，只包含
+`status`（`running` 或 `idle`）和 `run_id`。连接保持到切换会话或关闭页面，
+每个进程最多 128 条会话活动连接，独立于 Run 流的订阅上限。
+多个变化可以合并为最新通知。客户端用状态、历史和指定 Run 的 SSE 校准，不重发消息。
+同一会话同时仅允许一轮。控制台停止时带 `run_id`，避免迟到的停止命令取消下一轮。
 
 工具生命周期帧继续使用稳定调用字段 `tool`，并额外返回展示字段 `display_name`：
 

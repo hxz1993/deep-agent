@@ -273,6 +273,7 @@ const presenterSource = readFileSync(new URL("../../../console/conversation-pres
 test("Console checks the selected session identity after asynchronous UI tool loading", async () => {
   const gates = { a: deferred(), b: deferred() };
   const observed = [];
+  const watched = [];
   const loading = [];
   const state = { sessionId: "a", agentId: "agent", historyController: null };
   const context = {
@@ -284,10 +285,11 @@ test("Console checks the selected session identity after asynchronous UI tool lo
     trajectory: { setHistory() {} },
     loadUiTools: async () => gates[state.sessionId].promise,
     observeSessionHistory: async (session) => { observed.push(session.id); state.historyReady = true; },
+    watchSessionActivity: (session) => { watched.push(session.id); },
     loadContextStatus() {}, addSystemNote() {},
   };
   vm.createContext(context);
-  const fn = source.slice(source.indexOf("async function loadSessionHistory("), source.indexOf("\nfunction stopHistoryObservation("));
+  const fn = source.slice(source.indexOf("async function loadSessionHistory("), source.indexOf("\nfunction watchSessionActivity("));
   vm.runInContext(`${fn}\nthis.load = loadSessionHistory;`, context);
   const first = context.load({ id: "a", agentId: "agent" });
   await turn();
@@ -298,6 +300,7 @@ test("Console checks the selected session identity after asynchronous UI tool lo
   gates.a.resolve();
   await first;
   assert.deepEqual(observed, ["b"]);
+  assert.deepEqual(watched, ["b"]);
   assert.deepEqual(loading, [["a", true], ["b", true], ["b", false]], "late old requests never unlock another session");
 });
 

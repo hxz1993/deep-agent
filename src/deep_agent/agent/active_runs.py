@@ -135,11 +135,12 @@ class ActiveRunRegistry:
         session_id: str,
         user_id: str | None,
         reason: str = "cancel_api",
+        run_id: str | None = None,
     ) -> bool:
         key = (agent_id, session_id)
         with self._lock:
             entry = self._runs.get(key)
-            if entry is None or entry.user_id != user_id:
+            if entry is None or entry.user_id != user_id or (run_id is not None and entry.run_id != run_id):
                 return False
             entry.status = "cancel_requested"
             entry.observe_cancellation(reason)

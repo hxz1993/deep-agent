@@ -308,6 +308,7 @@ async def cancel_session_run(
     channel_account: ChannelControlAccountDep,
     session_id: str,
     agent_id: str | None = None,
+    run_id: str | None = Query(default=None, min_length=1, max_length=128),
 ) -> SessionCancelResponse:
     normalized_agent_id = agent_id
     if agent_id is not None:
@@ -325,7 +326,8 @@ async def cancel_session_run(
     cancel_reason = "channel_cancel_api" if channel_account is not None else "cancel_api"
     entry = ctx.active_runs.get(agent_id=normalized_agent_id, session_id=session_id)
     # Do not attribute another user's active Run to an unauthorized request.
-    owned_entry = entry if entry is not None and entry.user_id == user_id else None
+    owned_entry = entry if (entry is not None and entry.user_id == user_id
+                            and (run_id is None or entry.run_id == run_id)) else None
     log_event("agent_cancel_api_received", session_id=session_id,
               agent_id=normalized_agent_id, reason=cancel_reason,
               run_id=owned_entry.run_id if owned_entry else None,
@@ -338,6 +340,7 @@ async def cancel_session_run(
         session_id=session_id,
         user_id=user_id,
         reason=cancel_reason,
+        run_id=run_id,
     ):
         return SessionCancelResponse(
             status="cancel_requested",
@@ -362,6 +365,7 @@ async def cancel_session_run(
         session_id=resolved_session_id,
         user_id=user_id,
         reason=cancel_reason,
+        run_id=run_id,
     )
     return SessionCancelResponse(
         status="cancel_requested" if requested else "not_running",
@@ -396,6 +400,35 @@ async def get_session_run_status(
     if active is not None and active.user_id == user_id:
         return SessionRunStatusResponse(status=active.status, session_id=session_id, agent_id=agent_id, run_id=active.run_id, started_at=active.started_at)
     return SessionRunStatusResponse(status="idle", session_id=session_id, agent_id=agent_id)
+
+
+@router.get("/sessions/{session_id}/activity")
+async def observe_session_activity(
+    ctx: AppContextDep, user_id: RequestUserDep, session_id: str, agent_id: str | None = None,
+) -> EventSourceResponse:
+    """Notify an open chat when a Run becomes observable or finishes."""
+    from deep_agent.db.session_scope import agent_scope_to_api
+
+    resolved = await resolve_session(ctx.store, session_id, agent_id=agent_id, user_id=user_id)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    key = (agent_scope_to_api(resolved[0]), resolved[1], user_id)
+    if not ctx.session_live.has_activity_capacity():
+        raise HTTPException(status_code=503, detail="Session activity capacity unavailable")
+
+    async def stream():
+        try:
+            queue = ctx.session_live.watch_activity(key)
+        except RuntimeError:
+            return
+        try:
+            while (frame := await queue.get()) is not None:
+                yield frame.sse()
+        finally:
+            ctx.session_live.unwatch_activity(key, queue)
+
+    return EventSourceResponse(stream(), ping=15, send_timeout=15,
+                               headers={"Cache-Control": "no-store"})
 
 
 @router.get("/sessions/{session_id}/live")

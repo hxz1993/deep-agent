@@ -54,6 +54,13 @@ test('old Run responses cannot recover the current Run', async () => {
   assert.equal(result.status, 'stale');
 });
 
+test('a newer Run confirms the specified stop target has ended', async () => {
+  const result = await verifyStreamStop({ ...options(async (kind) => response(
+    kind === 'cancel' ? { status: 'not_running' } : { status: 'running', run_id: 'next' },
+  )), runId: 'previous' });
+  assert.equal(result.status, 'idle');
+});
+
 test('real terminal or teardown aborts pending verification', async () => {
   const controller = new AbortController();
   const resultPromise = verifyStreamStop({ ...options(async () => new Promise(() => {})), signal: controller.signal });

@@ -141,6 +141,53 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
         self.ctx.session_live.max_subscribers = 0
         self.assertEqual((await self.http.get(path, params={"run_id": "active"})).status_code, 503)
 
+    async def test_activity_stream_survives_two_runs_and_is_owner_scoped(self):
+        path = f"/api/v1/sessions/{self.session}/activity"
+        self.assertEqual((await self.http.get(path, headers={"user": "different-owner"})).status_code, 404)
+        clients = [self._request(path, query={"agent_id": self.agent_id}) for _ in range(2)]
+        for client in clients:
+            self.assertEqual((await client.started())["status"], 200)
+            self.assertEqual(await client.frame(), ("session_activity", {"status": "idle", "run_id": None}))
+        for run_id in ("first", "second"):
+            self.ctx.session_live.begin(self.key, run_id)
+            for client in clients:
+                self.assertEqual(await client.frame(), ("session_activity", {"status": "running", "run_id": run_id}))
+            self.ctx.session_live.end(self.key, run_id)
+            for client in clients:
+                self.assertEqual(await client.frame(), ("session_activity", {"status": "idle", "run_id": run_id}))
+        for client in clients:
+            await client.close()
+        self.assertFalse(self.ctx.session_live._activity)
+
+    async def test_idle_activity_capacity_does_not_block_run_observation(self):
+        self.ctx.session_live.max_subscribers = 1
+        path = f"/api/v1/sessions/{self.session}/activity"
+        activity = self._request(path)
+        self.assertEqual((await activity.started())["status"], 200)
+        self.assertEqual((await activity.frame())[1]["status"], "idle")
+        self.assertEqual((await self.http.get(path)).status_code, 503)
+        self.ctx.session_live.begin(self.key, "active")
+        observer = self._request(query={"run_id": "active"})
+        self.assertEqual((await observer.started())["status"], 200)
+        self.assertEqual((await observer.frame())[0], "observation_sync")
+        await observer.close()
+        await activity.close()
+
+    async def test_stop_for_old_run_does_not_cancel_new_run(self):
+        entry = self.ctx.active_runs.register(agent_id=self.agent_id, session_id=self.session,
+                                              user_id=TEST_USER_ID, run_id="current")
+        try:
+            path = f"/api/v1/sessions/{self.session}/cancel"
+            params = {"agent_id": self.agent_id}
+            response = await self.http.post(path, params={**params, "run_id": "previous"})
+            self.assertEqual(response.json()["status"], "not_running")
+            self.assertFalse(entry.cancellation_token.cancelled)
+            response = await self.http.post(path, params={**params, "run_id": "current"})
+            self.assertEqual(response.json()["status"], "cancel_requested")
+            self.assertTrue(entry.cancellation_token.cancelled)
+        finally:
+            self.ctx.active_runs.unregister(entry)
+
     async def test_unavailable_replay_returns_409_instead_of_partial_prefix(self):
         self.ctx.session_live.max_replay_frames = 1
         self.ctx.session_live.begin(self.key, "active")

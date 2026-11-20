@@ -2,6 +2,7 @@ import { readPresentationSource } from "./shared-presentation-source.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { renderReplyFileCards } from "../../../console/reply-files.js";
 
 import {
   applyAssistantPresentationActions,
@@ -33,12 +34,46 @@ function recordingPresenter() {
     "removeToolCall",
     "attachHitlWidget",
     "complete",
+    "setOutputFiles",
     "markInterrupted",
   ]) {
     presenter[method] = (...args) => calls.push([method, ...args]);
   }
   return { presenter, calls };
 }
+
+test("交付文件在成功的正文或结构化输出之后呈现，等待 UI 时不显示", () => {
+  const files = [{ id: "csv", name: "result.csv" }];
+  const { presenter, calls } = recordingPresenter();
+  applyAssistantPresentationActions(presenter, assistantActionsFromSse("final", {
+    status: "completed", output: "**正文**", output_files: files,
+  }));
+  assert.deepEqual(calls, [["complete", "**正文**"], ["setOutputFiles", files]]);
+  assert.equal(assistantActionsFromSse("final", { status: "pending", output_files: files }).length, 1);
+  const history = assistantActionsFromHistoryItems([{
+    kind: "structured_output", status: "completed", name: "Report", output: { value: 4 }, output_files: files,
+  }]);
+  assert.equal(history[0].type, "structured_output");
+  assert.deepEqual(history.at(-1), { type: "output_files", files });
+});
+
+test("交付卡片对文件名转义，去重并使用既有授权下载地址", () => {
+  const base = "https://test.example/console/";
+  const file = { id: "local_123", name: "<报告>.csv", byte_size: 1024, preview_url: "/element-preview/?id=abc" };
+  const html = renderReplyFileCards([file, file, {
+    id: "second", name: "report.html", preview_url: "https://external.example/report",
+  }], { base });
+  assert.equal((html.match(/class="reply-file-card"/g) || []).length, 2);
+  assert.equal((html.match(/target="_blank"/g) || []).length, 1);
+  assert.match(html, /&lt;报告&gt;\.csv/);
+  assert.match(html, /data-file-type="csv"/);
+  assert.match(html, /data-file-type="html"/);
+  assert.match(html, /1\.0 KiB/);
+  assert.match(html, /\/api\/v1\/local-files\/local_123\/download/);
+  assert.doesNotMatch(html, /external\.example|<报告>|交付文件/);
+  assert.match(renderReplyFileCards([{ id: "other", name: "no-extension" }], { base }), /data-file-type="file"/);
+  assert.equal(renderReplyFileCards([]), "");
+});
 
 const chatSource = await readPresentationSource("chat.js");
 const workspaceCss = await readFile(

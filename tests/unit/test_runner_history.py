@@ -77,7 +77,8 @@ class AgentRunnerHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("messages", sent[0])
         self.assertNotIn("input", sent[0])
         self.assertEqual(output[-1]["type"], "error")
-        self.assertIn("fixture request rejected", output[-1]["message"])
+        self.assertIn("HTTP 400", output[-1]["message"])
+        self.assertNotIn("fixture request rejected", output[-1]["message"])
         self.assertNotIn("final", [event["type"] for event in output])
 
     async def asyncSetUp(self) -> None:

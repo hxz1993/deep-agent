@@ -20,6 +20,7 @@ from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from deep_agent.agent.history import first_user_prompt
+from deep_agent.agent.tool_names import WIRE_NAMES
 from deep_agent.db.event_codec import (
     MESSAGE_EVENT_TYPES,
     attachment_part_references,
@@ -27,6 +28,7 @@ from deep_agent.db.event_codec import (
     group_message_events,
     event_contains_call,
     message_parts,
+    message_payload,
     tool_part_references,
 )
 from deep_agent.db.session_list import SessionFilterOptions, SessionListFilters, SessionSummaryRow
@@ -1262,6 +1264,7 @@ def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
         metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         factual_content = metadata.get("inline_fallback", content)
         artifact_id = _find_artifact_id(metadata) or _find_artifact_id(result_part)
+        aliases = ((message_payload(call or result) or {}).get("metadata") or {}).get(WIRE_NAMES) or {}
         outcome = ("failed" if result_part.get("part_kind") == "retry-prompt" or metadata.get("error")
                    else (result_part.get("outcome") or "success") if result else "pending")
         item = project_tool_evidence(
@@ -1275,6 +1278,7 @@ def _tool_evidence(rows: list[ChatSessionEvent]) -> list[dict[str, Any]]:
                 ),
                 "call_id": call_id,
                 "tool_name": (call_ref or result_ref or {}).get("tool_name"),
+                "wire_name": aliases.get(str((call_ref or result_ref)["part_offset"])),
                 "call_event_id": call.event_id if call else None,
                 "call_part_offset": call_ref.get("part_offset") if call_ref else None,
                 "result_event_id": result.event_id if result else None,

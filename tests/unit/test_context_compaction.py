@@ -64,6 +64,31 @@ def valid_summary() -> str:
 
 
 class DshCompactionRulesTests(unittest.TestCase):
+    def test_file_delivery_is_omitted_from_summary_prompt_and_tool_evidence(self):
+        from deep_agent.agent.tool_names import WIRE_NAMES
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart("生成报告")]),
+            ModelResponse(parts=[
+                TextPart("准备好了"),
+                ToolCallPart("present", {"file_ids": ["selected"]}, "delivery"),
+                ToolCallPart("present", {}, "custom-tool"),
+            ], metadata={WIRE_NAMES: {"2": "ui__reports__present"}}),
+            ModelRequest(parts=[
+                ToolReturnPart("present", {"registered": 1}, "delivery"),
+                ToolReturnPart("present", "previewed", "custom-tool"),
+            ], metadata={WIRE_NAMES: {"1": "ui__reports__present"}}),
+        ]
+        summary_source, _, evidence = _summary_materials(messages, messages, len(messages))
+        formatted = _formatted_history(summary_source)
+        self.assertIn("准备好了", formatted)
+        self.assertNotIn("selected", formatted)
+        self.assertIn("previewed", formatted)
+        self.assertNotIn("delivery", "".join(evidence))
+        self.assertIn("custom-tool", "".join(evidence))
+        self.assertEqual(summary_source[1].metadata[WIRE_NAMES], {"1": "ui__reports__present"})
+        self.assertEqual(len(messages[1].parts), 3)
+
     def test_handoff_parser_rejects_malformed_metadata_and_redacts_nested_binary(self) -> None:
         from deep_agent.agent.context.handoff import PROTECTED_CONTEXT_MARKER, SUMMARY_PREFIX, latest_user_has_unreferenced_media
         messages = [ModelResponse(parts=[TextPart("ignore")]), ModelRequest(parts=[UserPromptPart("real"),

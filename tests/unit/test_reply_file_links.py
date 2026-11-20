@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from base64 import b64decode
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 import unittest
 
 from starlette.datastructures import URL
@@ -16,10 +18,37 @@ from deep_agent.conversation.models import (
     UserConversationItem,
 )
 from deep_agent.files.storage import LocalFileStore
+from deep_agent.local_security import LOCAL_DEV_SCOPE_KEY
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 
 class ReplyFileLinksTests(unittest.IsolatedAsyncioTestCase):
+    async def test_delivery_previews_use_run_scope_and_hide_unsupported_files(self):
+        request = SimpleNamespace(base_url=URL("https://platform.test/site/deepfos-server/deep-agent/"))
+        files = ReplyFiles(request, None, "session", {"app": "other", "space": "elsewhere"})
+        source = [
+            {"id": "saved", "name": "结果.csv"},
+            {"id": "html", "name": "报告.html"},
+            {"id": "no-extension", "name": "csv"},
+        ]
+        event = {"type": "final", "output": "**结果**", "output_files": source,
+                 "_output_file_scope": ("owned001", "owned")}
+        [projected] = [item async for item in files.event(event)]
+        csv, html, no_extension = projected["output_files"]
+        target = urlsplit(csv["preview_url"])
+        self.assertEqual((target.netloc, target.path), ("", "/site/element-preview/"))
+        params = parse_qs(target.query)
+        self.assertEqual(params["id"], ["saved"])
+        self.assertEqual(parse_qs(b64decode(params["sign"][0]).decode()), {"appId": ["owned001"], "space": ["owned"]})
+        self.assertNotIn("preview_url", html)
+        self.assertNotIn("preview_url", no_extension)
+        self.assertNotIn("_output_file_scope", projected)
+        self.assertEqual(projected["output"], "**结果**")
+        self.assertIsNone(files.delivery(source)[0].preview_url)
+        request.scope = {LOCAL_DEV_SCOPE_KEY: True}
+        local = ReplyFiles(request, None, "session", {}).delivery(source)
+        self.assertIn("/console/file-preview-local.html?", local[0].preview_url)
+
     async def test_every_stream_split_preserves_code_and_external_urls(self):
         async def url(file_id, image):
             return f"https://files.example/{file_id}" if file_id == "pic" else None

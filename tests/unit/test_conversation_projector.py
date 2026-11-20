@@ -53,6 +53,25 @@ def event(
 
 
 class ConversationProjectorTests(unittest.TestCase):
+    def test_delivery_waits_for_completed_assistant_even_without_prose(self):
+        declared = event(1, "tool/results", message=ModelRequest(parts=[
+            ToolReturnPart("present", {"file_ids": ["file-a"]}, "delivery", metadata={
+                "deepagent_presented_files": [{"id": "file-a", "name": "result.csv"}],
+            }),
+        ]))
+        for status in (None, "interrupted", "failed", "pending", "completed"):
+            with self.subTest(status=status):
+                last = event(2, "assistant/message", status=status, message=ModelResponse(parts=[TextPart("")]))
+                files = [item for item in project_session_events([declared, last]).items
+                         if getattr(item, "output_files", None)]
+                if status == "completed":
+                    self.assertEqual(len(files), 1)
+                    self.assertEqual(files[0].source_event_ids, ["event-2"])
+                    self.assertEqual(files[0].output_files[0].id, "file-a")
+                    self.assertIsNone(files[0].text)
+                else:
+                    self.assertEqual(files, [])
+
     def test_remote_lookup_before_original_result_keeps_each_tool_output(self) -> None:
         file = {"file_id": "saved-report", "file_name": "report.txt"}
         metadata = {"remote_agent": {"id": "task"}, "generated_files": [file]}

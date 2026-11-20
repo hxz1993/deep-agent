@@ -26,6 +26,8 @@ History 的用户消息、助手回复、工具、Plan、附件和 Context 均�
 压缩提交后，后续只读轮次沿用内存中的摘要和增量。输出预留从入场历史采样一次，此后每个模型响应只计入一次。
 正常完成、主动停止或发送连接断开时，会保存可恢复的已接收内容，终态按实际保存结果返回。
 
+普通聊天从首个模型请求起提供 `present`。模型可用它选择会话附件和可信工具返回的文件，直接交付原附件时无需重新生成。成功的 `final` 和同步 `ChatResponse` 可带 `output_files`，每项含 File ID、文件名、MIME、已知大小及可用时的 `preview_url`。History 在对应的最终 `assistant_message` 或 `structured_output` 上返回同样的列表。空列表、取消、失败和等待 UI 回传时省略该字段，正文及业务 JSON 仍在原有 `output` 中。
+
 ## 结构化输出（0.14.0，默认关闭）
 
 Agent 显式开启后，输出尝试使用独立 `type:"output"`；它不是 UI Deferred 工具，也不是顶层运行 error。

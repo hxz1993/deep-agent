@@ -27,6 +27,7 @@ export const ASSISTANT_PRESENTATION_ACTIONS = Object.freeze({
   DEFERRED: "deferred",
   COMPLETE: "complete",
   STRUCTURED_OUTPUT: "structured_output",
+  OUTPUT_FILES: "output_files",
   INTERRUPT: "interrupt",
 });
 
@@ -123,6 +124,8 @@ export function assistantActionsFromHistoryItems(items = []) {
     { type: ASSISTANT_PRESENTATION_ACTIONS.FINALIZE_THINKING },
     { type: ASSISTANT_PRESENTATION_ACTIONS.FINALIZE_TEXT },
   );
+  const delivery = items.findLast((item) => item.status === "completed" && item.output_files?.length);
+  if (delivery) actions.push({ type: ASSISTANT_PRESENTATION_ACTIONS.OUTPUT_FILES, files: delivery.output_files });
   if (interrupted) actions.push({ type: ASSISTANT_PRESENTATION_ACTIONS.INTERRUPT });
   return actions;
 }
@@ -158,6 +161,8 @@ export function assistantActionsFromSse(type, data = {}) {
       return [
         ...(data.output_info && Object.hasOwn(data, "output") ? [{ type: ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT, name: data.output_info.name, output: data.output, outputId: data.output_info.output_id }] : []),
         { type: ASSISTANT_PRESENTATION_ACTIONS.COMPLETE, output: data.output_info ? undefined : data.output },
+        ...(data.status === "completed" && data.output_files?.length
+          ? [{ type: ASSISTANT_PRESENTATION_ACTIONS.OUTPUT_FILES, files: data.output_files }] : []),
       ];
     case "error":
       return [
@@ -221,6 +226,9 @@ export function applyAssistantPresentationActions(
         break;
       case ASSISTANT_PRESENTATION_ACTIONS.STRUCTURED_OUTPUT:
         presenter.setStructuredOutput?.({ name: action.name, output: action.output, id: action.outputId });
+        break;
+      case ASSISTANT_PRESENTATION_ACTIONS.OUTPUT_FILES:
+        presenter.setOutputFiles(action.files);
         break;
       case ASSISTANT_PRESENTATION_ACTIONS.COMPLETE:
         presenter.complete(action.output);

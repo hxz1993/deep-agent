@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from base64 import b64encode
 from collections.abc import Awaitable, Callable, Mapping
 from urllib.parse import quote, urlencode
 
@@ -10,14 +11,19 @@ from loguru import logger
 
 from deep_agent.agent.attachments import index_attachment_refs
 from deep_agent.agent.tool_output_limits import session_file_metadata_from_history
-from deep_agent.conversation.models import AssistantConversationItem, ToolConversationItem, UserConversationItem
+from deep_agent.conversation.models import (
+    AssistantConversationItem, ConversationOutputFile, StructuredOutputConversationItem,
+    ToolConversationItem, UserConversationItem,
+)
 from deep_agent.files.storage import LOCAL_FILE_PREFIX, FileStoreError, LocalFileStore
+from deep_agent.local_security import LOCAL_DEV_SCOPE_KEY
 from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
 
 _SCHEME = "attachment://"
 _DESTINATION = re.compile(r"[ \t]*(?:<attachment://([^<>\s]+)>|attachment://([^()\s]+))[ \t]*\)")
 _FENCE = re.compile(r"^(?: {0,3}>[ \t]?)*(?: {0,3})(\x60{3,}|~{3,})(.*)$")
 _MAX_PENDING = 8192
+_PREVIEW_EXTENSIONS = frozenset({"pdf", "docx", "xlsx", "csv", "png", "jpg", "jpeg", "gif", "svg", "txt"})
 
 
 class MarkdownFileLinks:
@@ -164,6 +170,7 @@ class ReplyFiles:
     def __init__(self, request, file_store, session_id, headers, *, diagnostic=False, load_history=None):
         self.base = request.base_url
         self.file_store = file_store
+        self.local_preview = getattr(request, "scope", {}).get(LOCAL_DEV_SCOPE_KEY) is True
         self.session_id = session_id
         self.headers = headers
         self.diagnostic = diagnostic
@@ -226,6 +233,35 @@ class ReplyFiles:
             return text
         return await MarkdownFileLinks(self.url).feed(text, finish=True)
 
+    def delivery(self, files, scope=None) -> list[ConversationOutputFile] | None:
+        if not files:
+            return None
+        output = []
+        for value in files:
+            file = value if isinstance(value, ConversationOutputFile) else ConversationOutputFile.model_validate(value)
+            preview_url = self._delivery_preview(file, file.preview_scope or scope)
+            output.append(file.model_copy(update={"preview_url": preview_url}))
+        return output
+
+    def _delivery_preview(self, file: ConversationOutputFile, scope) -> str | None:
+        _, separator, extension = (file.name or "").rpartition(".")
+        if not separator or extension.lower() not in _PREVIEW_EXTENSIONS:
+            return None
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", file.id):
+            return None
+        if self.local_preview or (file.id.startswith(LOCAL_FILE_PREFIX) and isinstance(self.file_store, LocalFileStore)):
+            path = self.base.path.rstrip("/") + "/console/file-preview-local.html"
+            query = urlencode({"fileName": file.name})
+        else:
+            if file.id.startswith(LOCAL_FILE_PREFIX) or not scope or not all(scope):
+                return None
+            app_id, space_id = scope
+            prefix, separator, _ = self.base.path.partition("/deepfos-server/")
+            path = (prefix if separator else "") + "/element-preview/"
+            sign = b64encode(urlencode({"appId": app_id, "space": space_id}).encode()).decode("ascii")
+            query = urlencode({"id": file.id, "sign": sign})
+        return f"{path}?{query}"
+
     async def history(self, history):
         items = []
         for item in history.items:
@@ -237,6 +273,8 @@ class ReplyFiles:
                     self.add_artifact(artifact.model_dump())
             elif isinstance(item, AssistantConversationItem) and item.text and _SCHEME in item.text:
                 item = item.model_copy(update={"text": await self.text(item.text)})
+            if isinstance(item, (AssistantConversationItem, StructuredOutputConversationItem)) and item.output_files:
+                item = item.model_copy(update={"output_files": self.delivery(item.output_files)})
             items.append(item)
         return history.model_copy(update={"items": items})
 
@@ -262,4 +300,8 @@ class ReplyFiles:
             text = await self.text(event["output"])
             if text != event["output"]:
                 event = {**event, "output": text}
+        if kind == "final" and event.get("output_files"):
+            event = dict(event)
+            files = self.delivery(event["output_files"], event.pop("_output_file_scope", None))
+            event["output_files"] = [file.model_dump() for file in files or ()]
         yield event

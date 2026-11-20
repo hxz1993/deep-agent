@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import json
 import unittest
+from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai import FunctionToolset, ToolReturn
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.mcp.lease_manager import McpLeaseManager
+from deep_agent.capabilities.registry import ToolPackage
 from deep_agent.core.context import AppContext, get_context, init_context, reset_context
-from tests.helpers.request_identity import install_test_user_header
+from deep_agent.files.storage import LocalFileStore
+from deep_agent.schemas.agent import AgentUpdate
+from deepfos_platform.client.platform import FILE_TYPE_ATTACHMENT
+from tests.helpers.request_identity import TEST_USER_ID, install_test_user_header
 from tests.helpers.sqlite_stores import (
     make_sqlite_stores,
     seed_default_agent,
@@ -148,6 +157,230 @@ class ChatHistoryPersistenceTests(unittest.IsolatedAsyncioTestCase):
         data = await self._history(body["session_id"])
         self.assertGreaterEqual(len(_message_items(data)), 2)
         self.assertEqual(_assistant_texts(data), [reply])
+
+    async def _local_file_store(self):
+        ctx = get_context()
+        directory = TemporaryDirectory(prefix="TMP_to_delete_present_files_")
+        self.addCleanup(directory.cleanup)
+        ctx.file_store = LocalFileStore(directory.name)
+        await ctx.file_store.initialize()
+        return ctx.file_store
+
+    async def _register_file_fixture(self):
+        store = await self._local_file_store()
+        tools = FunctionToolset()
+        files = []
+
+        @tools.tool_plain
+        async def generate_reports() -> ToolReturn:
+            for index in range(12):
+                name = f"report-{index}.csv"
+                data = b"total\n42\n"
+                file = await store.upload(
+                    file_type=FILE_TYPE_ATTACHMENT, file_name=name, mime="text/csv",
+                    data=data, request_headers={"user": TEST_USER_ID},
+                )
+                files.append({"file_id": file.id, "file_name": name, "mime": "text/csv", "byte_size": len(data)})
+            return ToolReturn(files, metadata={"generated_files": files})
+
+        get_context().registry.register(ToolPackage("builtin:present-fixture", "builtin", tools))
+        return files
+
+    async def test_present_is_injected_before_any_files_and_preserves_direct_chat_outputs(self):
+        files = await self._register_file_fixture()
+        for mode in ("plain", "structured", "allowed_text"):
+            with self.subTest(mode=mode):
+                if mode != "plain":
+                    await get_context().stores.agent.update_unique(self._agent_id, AgentUpdate(
+                        structured_output_enabled=True,
+                        allow_text_output=mode == "allowed_text",
+                        output_config={"name": "report", "json_schema": {
+                            "type": "object", "properties": {"number": {"type": "integer"}},
+                            "required": ["number"], "additionalProperties": False,
+                        }},
+                    ), user_id=TEST_USER_ID)
+                calls = 0
+                offset = len(files)
+
+                def respond(_messages, info):
+                    nonlocal calls
+                    calls += 1
+                    names = {tool.name for tool in info.function_tools}
+                    self.assertIn("present", names)
+                    if calls == 1:
+                        part = ToolCallPart("present", {"file_ids": ["invented-file-id"]}, "reject-id")
+                    elif calls == 2:
+                        part = ToolCallPart("generate_reports", {}, "generate")
+                    elif calls == 3:
+                        file_id = files[offset + 4]["file_id"]
+                        part = ToolCallPart("present", {"file_ids": [file_id, file_id]}, "publish")
+                    elif calls == 4:
+                        part = (ToolCallPart(info.output_tools[0].name, {"number": 42}, "business")
+                                if mode == "structured" else TextPart("完整报告已交付。"))
+                    else:
+                        self.fail("Unexpected model request")
+                    return ModelResponse(parts=[part])
+
+                async def stream(messages, info):
+                    part = respond(messages, info).parts[0]
+                    if isinstance(part, TextPart):
+                        yield part.content
+                    else:
+                        yield {0: DeltaToolCall(name=part.tool_name, json_args=json.dumps(part.args),
+                                                tool_call_id=part.tool_call_id)}
+
+                model = FunctionModel(respond, stream_function=stream)
+                prompt = {"message": "生成报告，交付正式的一份", "capabilities": ["builtin:present-fixture"]}
+                if mode == "structured":
+                    with patch("deep_agent.agent.factory._resolve_model", return_value=model), mock_request_disconnect():
+                        async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                            response = await client.post("/api/v1/chat", json={**prompt, "agent_id": self._agent_id})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    reply = response.json()
+                    self.assertEqual(reply["output"], {"number": 42})
+                    self.assertEqual(reply["output_info"]["name"], "report")
+                    session_id = reply["session_id"]
+                    kind = "structured_output"
+                else:
+                    events = await self._stream_events(model=model, json_body=prompt)
+                    reply = next(event for event in events if event.get("type") == "final")
+                    self.assertEqual(_streamed_text(events), "完整报告已交付。")
+                    self.assertTrue(all("output_files" not in event for event in events if event is not reply))
+                    session_id = events[0]["session_id"]
+                    kind = "assistant_message"
+                self.assertEqual(reply["status"], "completed")
+                self.assertEqual([file["id"] for file in reply["output_files"]], [files[offset + 4]["file_id"]])
+                self.assertEqual(reply["output_files"][0]["name"], "report-4.csv")
+                self.assertIn("/console/file-preview-local.html?", reply["output_files"][0]["preview_url"])
+                self.assertNotIn("_output_file_scope", reply)
+                async with AsyncClient(transport=self._transport, base_url="http://test") as client:
+                    download = await client.get(f'/api/v1/local-files/{files[offset + 4]["file_id"]}/download')
+                self.assertEqual(download.status_code, 200)
+                self.assertEqual(download.content, b"total\n42\n")
+                history = await self._history(session_id)
+                deliveries = [item for item in history["items"] if item.get("output_files")]
+                self.assertEqual([item["kind"] for item in deliveries], [kind])
+                self.assertEqual(deliveries[0]["output_files"], reply["output_files"])
+                if mode == "plain":
+                    async def use_saved_file(messages, _info):
+                        if any(getattr(part, "tool_call_id", None) == "reuse"
+                               for message in messages for part in message.parts):
+                            yield "再次交付这份报告。"
+                        else:
+                            yield {0: DeltaToolCall(
+                                name="present", json_args=json.dumps({"file_ids": [files[offset + 4]["file_id"]]}),
+                                tool_call_id="reuse",
+                            )}
+
+                    followup = await self._stream_events(
+                        model=FunctionModel(stream_function=use_saved_file),
+                        json_body={"session_id": session_id, "message": "再给我同一份报告"},
+                    )
+                    reused = next(event for event in followup if event.get("type") == "final")
+                    self.assertEqual(reused["output_files"], reply["output_files"])
+
+    async def test_present_can_deliver_user_attachment_without_a_file_generation_tool(self):
+        store = await self._local_file_store()
+        original = b"total\n42\n"
+        owned = await store.upload(
+            file_type=FILE_TYPE_ATTACHMENT, file_name="input.csv", mime="text/csv",
+            data=original, request_headers={"user": TEST_USER_ID},
+        )
+        private = await store.upload(
+            file_type=FILE_TYPE_ATTACHMENT, file_name="private.csv", mime="text/csv",
+            data=b"private", request_headers={"user": "another-user"},
+        )
+        calls = 0
+
+        async def stream(_messages, info):
+            nonlocal calls
+            calls += 1
+            self.assertIn("present", {tool.name for tool in info.function_tools})
+            if calls <= 2:
+                file_ids = [owned.id, private.id] if calls == 1 else [owned.id]
+                yield {0: DeltaToolCall(name="present", json_args=json.dumps({"file_ids": file_ids}),
+                                        tool_call_id=f"present-{calls}")}
+            else:
+                yield "原文件在下面。"
+
+        events = await self._stream_events(model=FunctionModel(stream_function=stream), json_body={
+            "message": "把上传的 CSV 原样给我看",
+            "attachments": [{"id": file.id, "name": file.file_name, "mime": file.mime} for file in (owned, private)],
+        })
+        final = next(event for event in events if event.get("type") == "final")
+        self.assertEqual([file["id"] for file in final["output_files"]], [owned.id])
+        self.assertEqual(final["output_files"][0]["byte_size"], len(original))
+        session_id = events[0]["session_id"]
+        history = await self._history(session_id)
+        self.assertEqual(
+            [item["status"] for item in history["items"] if item.get("tool_name") == "present"],
+            ["removed", "completed"],
+        )
+
+        async def followup_stream(messages, info):
+            self.assertIn("present", {tool.name for tool in info.function_tools})
+            if not any(getattr(part, "tool_name", None) == "present" for m in messages for part in m.parts):
+                yield {0: DeltaToolCall(name="present", json_args=json.dumps({"file_ids": [owned.id]}),
+                                        tool_call_id="present-again")}
+            else:
+                yield "这次继续交付原文件。"
+
+        followup = await self._stream_events(
+            model=FunctionModel(stream_function=followup_stream),
+            json_body={"session_id": session_id, "message": "把上面那份原文件再给我看"},
+        )
+        next_final = next(event for event in followup if event.get("type") == "final")
+        self.assertEqual(next_final["output_files"], final["output_files"])
+
+    async def test_present_limits_run_total_and_drops_pending_delivery_on_ui_resume(self):
+        files = await self._register_file_fixture()
+        calls = 0
+
+        async def stream(_messages, info):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                name, args = "generate_reports", {}
+            elif calls in (2, 3):
+                name = "present"
+                subset = files[:10] if calls == 2 else files[10:]
+                args = {"file_ids": [file["file_id"] for file in subset]}
+            elif calls == 4:
+                name = next(tool.name for tool in info.function_tools if tool.name.endswith("__confirm"))
+                args = {"message": "继续？"}
+            else:
+                self.fail("Unexpected model request")
+            yield {0: DeltaToolCall(name=name, json_args=json.dumps(args), tool_call_id=f"step-{calls}")}
+
+        capabilities = ["builtin:present-fixture", *_CONFIRM_CAPABILITIES]
+        events = await self._stream_events(
+            model=FunctionModel(stream_function=stream), json_body={"message": "生成后确认", "capabilities": capabilities},
+        )
+        final = next(event for event in events if event.get("type") == "final")
+        self.assertEqual(final["status"], "pending")
+        self.assertNotIn("output_files", final)
+        session = events[0]["session_id"]
+        pending_history = await self._history(session)
+        present_results = [item for item in pending_history["items"] if item.get("tool_name") == "present"]
+        self.assertEqual([item["status"] for item in present_results], ["completed", "removed"])
+        self.assertTrue(all("output_files" not in item for item in pending_history["items"]))
+
+        async def resume_stream(messages, info):
+            self.assertIn("present", {tool.name for tool in info.function_tools})
+            names = [getattr(part, "tool_name", None) for message in messages for part in message.parts]
+            self.assertNotIn("present", names)
+            self.assertIn("generate_reports", names)
+            yield "已确认。"
+
+        resumed = await self._stream_events(model=FunctionModel(stream_function=resume_stream), json_body={
+            "session_id": session, "capabilities": capabilities, "deferred_tool_results": [
+                {"tool_call_id": final["deferred"]["calls"][0]["tool_call_id"], "result": {"confirmed": True}},
+            ],
+        })
+        complete = next(event for event in resumed if event.get("type") == "final")
+        self.assertEqual(complete["status"], "completed")
+        self.assertNotIn("output_files", complete)
+        self.assertTrue(all("output_files" not in item for item in (await self._history(session))["items"]))
 
     async def test_http_stream_multi_turn_retains_all_assistant_messages(self) -> None:
         session_id: str | None = None

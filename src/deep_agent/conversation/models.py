@@ -31,6 +31,11 @@ class ConversationAttachment(BaseModel):
     content_hash: str | None = None
 
 
+class ConversationOutputFile(ConversationAttachment):
+    preview_url: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    preview_scope: tuple[str | None, str | None] | None = Field(default=None, exclude=True)
+
+
 class ConversationArtifact(BaseModel):
     artifact_id: str
     file_id: str | None = None
@@ -70,6 +75,7 @@ class AssistantConversationItem(ConversationItemBase):
     phase: Literal["process", "final"] = "process"
     thinking: str | None = None
     text: str | None = None
+    output_files: list[ConversationOutputFile] | None = Field(default=None, exclude_if=lambda value: value is None)
     conversation_id: str | None = None
     model_name: str | None = None
     provider_name: str | None = None
@@ -111,6 +117,7 @@ class StructuredOutputConversationItem(ConversationItemBase):
     tool_call_id: str
     attempt: int
     output: Any
+    output_files: list[ConversationOutputFile] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 ConversationItem = (

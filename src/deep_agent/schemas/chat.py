@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_serializer
 
+from deep_agent.conversation.models import ConversationOutputFile
 from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.schemas.context_reference import ContextReference, validate_context_references
 from deep_agent.time import UtcDatetime
@@ -109,6 +110,7 @@ class ChatResponse(BaseModel):
     run_id: str | None = None
     output: Any
     output_info: dict[str, Any] | None = None
+    output_files: list[ConversationOutputFile] | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_serializer(mode="wrap")
     def _omit_disabled_output_info(self, handler):

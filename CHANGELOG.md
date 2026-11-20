@@ -3,6 +3,11 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## 未发布
+
+- 普通聊天可用 `present` 选择本轮要交付的文件。成功回复和会话历史会返回文件清单，Console 在回复底部及助手轨迹详情显示文件卡片。
+- **依赖变更（运维）** 相对 0.17.3，新增随 Console 源码分发的 Bootstrap Icons 1.13.1 SVG（MIT），由新版 CSS 同源加载。运行、沙箱和 CI 安装依赖无变更，无需更新基础镜像。数据库版本为 `016`。[图标来源](console/assets/file-types/SOURCES.md)
+
 ## v0.17.3
 
 - 发布 Agent 默认打开 MCP 接入，MCP 与 A2A 示例使用应用和空间占位符。远程 Agent 列表调整接入图标、请求头编辑和更新人展示。

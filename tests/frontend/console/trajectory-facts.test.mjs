@@ -102,6 +102,25 @@ test("live final Markdown upgrades only the latest assistant reply in its run", 
   });
 });
 
+test("交付卡片只放进最终助手的详情，不改变轨迹行", () => {
+  withController((controller, elements) => {
+    const detail = () => elements.get("inspectorContent").innerHTML;
+    controller.setHistory({ session_id: "one", items: [
+      fact("earlier", 1, 0, 0, { part_kind: "text", content: "正在生成" }),
+      fact("final", 2, 1, 0, { part_kind: "text", content: "完成" }),
+    ] });
+    controller.setConversationHistory([{
+      kind: "structured_output", status: "completed", run_id: "run-1",
+      output_files: [{ id: "final-csv", name: "交付.csv" }],
+    }]);
+    controller.restore({ selectedId: "final" });
+    assert.match(detail(), /reply-file-card.*[\s\S]*交付\.csv/);
+    controller.restore({ selectedId: "earlier" });
+    assert.doesNotMatch(detail(), /reply-file-card/);
+    assert.equal(controller.events().length, 2);
+  });
+});
+
 const contextReferences = [
   { key: "budget.range", type: "deeptable.selection", schema_version: "1.0", label: "预算选区",
     payload: { range: "B2:D4", amount: 0, enabled: false, missing: null, notes: "<script>unsafe</script>" },

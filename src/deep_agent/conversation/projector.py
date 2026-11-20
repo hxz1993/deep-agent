@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
-from deep_agent.agent.tool_names import WIRE_NAMES, is_output_call
+from deep_agent.agent.tool_names import WIRE_NAMES, is_output_call, is_present_tool
 from deep_agent.agent.observability import token_usage_available
 from deep_agent.agent.planning import is_planning_tool
 from deep_agent.agent.tool_output_limits import artifacts_from_metadata
@@ -15,6 +15,7 @@ from deep_agent.conversation.models import (
     AssistantConversationItem,
     ConversationArtifact,
     ConversationAttachment,
+    ConversationOutputFile,
     ConversationHistoryResponse,
     ConversationItem,
     ConversationOrder,
@@ -44,6 +45,7 @@ def project_session_events(
     session_id: str | None = None,
 ) -> ConversationHistoryResponse:
     """Project the append-only Event Store into the public chat rendering model."""
+    from deep_agent.agent.file_delivery import presented_files
 
     ordered = sorted(events, key=lambda event: int(_get(event, "sequence", 0)))
     resolved_session_id = session_id or (
@@ -54,6 +56,8 @@ def project_session_events(
     remote_results: dict[tuple[str, str], Any] = {}
     terminal_by_run: dict[str, str] = {}
     output_calls: set[tuple[str | None, str, str]] = set()
+    deliveries: dict[str, dict[str, ConversationOutputFile]] = {}
+    completed_assistants: dict[str, tuple[Any, dict[str, Any]]] = {}
 
     for event in group_message_events(ordered):
         event_type = str(_get(event, "event_type", ""))
@@ -101,6 +105,8 @@ def project_session_events(
             assistant_terminal = _assistant_terminal_status(event, message)
             if run_id and assistant_terminal:
                 terminal_by_run[run_id] = assistant_terminal
+            if run_id and _get(event, "status") == "completed":
+                completed_assistants[run_id] = (event, message)
             output_metadata = metadata.get("deepagent_output") or {}
             if not rejected_dispatch and (not output_metadata or output_metadata.get("allow_text_output") is True):
                 items.extend(_assistant_items(event, message))
@@ -135,6 +141,7 @@ def project_session_events(
                     _apply_result(existing, event, part)
             continue
         if event_type in {"tool/results", "model/request"}:
+            run_id = _optional_str(_get(event, "run_id") or message.get("run_id"))
             for part_offset, part in enumerate(_parts(message)):
                 if metadata.get("deepagent_output_budget") and part.get("part_kind") == "retry-prompt":
                     continue
@@ -148,6 +155,11 @@ def project_session_events(
                     continue
                 if not wire_name and (_get(event, "run_id"), call_id, part.get("tool_name")) in output_calls:
                     continue
+                if (run_id and part.get("part_kind") == "tool-return" and is_present_tool(part.get("tool_name"), wire_name)
+                        and part.get("outcome", "success") == "success"):
+                    files = presented_files(part.get("metadata"))
+                    if files:
+                        deliveries.setdefault(run_id, {}).update((file.id, file) for file in files)
                 existing = tool_by_call.get(call_id)
                 if existing is None:
                     existing = _orphan_tool_result_item(event, part, part_offset)
@@ -200,6 +212,34 @@ def project_session_events(
             item.status = terminal  # type: ignore[assignment]
 
     _mark_final_assistant_items(items)
+    for item in reversed(items):
+        run_id = item.run_id
+        if run_id not in deliveries or run_id in terminal_by_run or run_id not in completed_assistants:
+            continue
+        if isinstance(item, StructuredOutputConversationItem):
+            item.output_files = list(deliveries.pop(run_id).values())
+        elif isinstance(item, AssistantConversationItem):
+            source_event, _ = completed_assistants[run_id]
+            if str(_get(source_event, "event_id")) in item.source_event_ids:
+                item.phase = "final"
+                item.output_files = list(deliveries.pop(run_id).values())
+
+    # An empty text reply can still deliver files. Reuse its completed message
+    # in the presentation without writing another Event or fabricating prose.
+    for run_id, files in deliveries.items():
+        if run_id in terminal_by_run or run_id not in completed_assistants:
+            continue
+        event, message = completed_assistants[run_id]
+        metadata = message.get("metadata") or {}
+        output_metadata = metadata.get("deepagent_output") or {}
+        if ((output_metadata and not output_metadata.get("allow_text_output"))
+                or (metadata.get("deepagent_dispatch") or {}).get("rejected")):
+            continue
+        item = _assistant_item(event, message, allow_empty=True)
+        if item is not None:
+            item.phase = "final"
+            item.output_files = list(files.values())
+            items.append(item)
 
     items.sort(key=lambda item: (item.order.sequence, item.order.part_offset, item.item_id))
     return ConversationHistoryResponse(
@@ -339,6 +379,7 @@ def _assistant_item(
     message: Mapping[str, Any],
     *,
     part_start: int = 0,
+    allow_empty: bool = False,
 ) -> AssistantConversationItem | None:
     thinking: list[str] = []
     texts: list[str] = []
@@ -351,7 +392,7 @@ def _assistant_item(
         elif kind == "text" and part.get("content"):
             texts.append(str(part["content"]))
             offsets.append(part_start + offset)
-    if not offsets:
+    if not offsets and not allow_empty:
         return None
     event_id = str(_get(event, "event_id"))
     state = str(message.get("state") or "")
@@ -363,7 +404,7 @@ def _assistant_item(
         run_id=_optional_str(_get(event, "run_id") or message.get("run_id")),
         order=ConversationOrder(
             sequence=int(_get(event, "sequence", 0)),
-            part_offset=min(offsets),
+            part_offset=min(offsets, default=part_start),
         ),
         source_event_ids=list(_get(event, "source_event_ids", [event_id])),
         created_at=_datetime(message.get("timestamp")) or _event_datetime(event, "created_at"),

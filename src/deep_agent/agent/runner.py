@@ -1482,11 +1482,13 @@ class AgentRunner:
         deferred_tool_results: DeferredToolResults | None = None,
     ) -> tuple[list[ModelMessage], str | list[UserContent] | None]:
         current_user_index = len(history) - 1 if pre_persisted_user else None
+        include_native_file_id = deps.file_delivery is not None
         llm_history = await resolve_history_for_llm(
             history,
             current_user_index=current_user_index,
             request_headers=deps.request_headers,
             file_store=deps.file_store,
+            include_native_file_id=include_native_file_id,
         )
         llm_history = model_tool_history(
             llm_history,
@@ -1505,6 +1507,7 @@ class AgentRunner:
                 deps.request_headers,
                 context_refs=context_refs,
                 file_store=deps.file_store,
+                include_native_file_id=include_native_file_id,
             )
         return llm_history, message or None
 
@@ -2061,6 +2064,8 @@ class AgentRunner:
         response["run_id"] = result.run_id or deps.run_id
         if deps.output_state is not None and deps.output_state.accepted is not None:
             response["output_info"] = deps.output_state.accepted
+        if deps.file_delivery is not None:
+            deps.file_delivery.publish(response, result.new_messages())
         response["run_metrics"] = self._completion_metrics(deps,
             status=response["status"],
             started_at=started_at,
@@ -2985,6 +2990,8 @@ class AgentRunner:
         )
         if deps.output_state is not None and deps.output_state.accepted is not None:
             final_event["output_info"] = deps.output_state.accepted
+        if deps.file_delivery is not None:
+            deps.file_delivery.publish(final_event, result.new_messages())
         yield final_event
 
 

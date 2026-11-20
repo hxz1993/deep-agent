@@ -80,6 +80,7 @@
     "tests/integration/test_chat_attachment_tools.py",
     "tests/integration/test_chat_file_export.py",
     "tests/integration/test_chat_image_attachments.py",
+    "tests/integration/test_chat_history_persistence.py",
     "tests/integration/test_chat_python_sandbox.py",
     "tests/integration/test_configuration_import_api.py",
     "tests/integration/test_configuration_import_databases.py",

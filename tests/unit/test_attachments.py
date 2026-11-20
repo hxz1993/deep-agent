@@ -51,6 +51,19 @@ class TestAttachments(unittest.IsolatedAsyncioTestCase):
         )
 
     @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
+    async def test_ordinary_chat_can_select_a_native_image_by_its_file_id(self, download):
+        download.return_value = b"img-bytes"
+        ref = AttachmentRef(id="image-1", name="a.jpg", mime="image/jpeg")
+        prompt = await resolve_user_prompt("", [ref], {}, include_native_file_id=True)
+        raw = ModelRequest(parts=[StoredUserPromptPart(content=refs_from_attachments("", [ref]))])
+        history = await resolve_history_for_llm(
+            [raw], current_user_index=0, request_headers={}, include_native_file_id=True,
+        )
+        for parts in (prompt, history[0].parts[0].content):
+            self.assertIn("file_id: image-1", parts[0].content)
+            self.assertEqual(parts[1].data, b"img-bytes")
+
+    @patch("deep_agent.agent.attachments._download_file", new_callable=AsyncMock)
     async def test_image_is_forwarded_without_local_model_gate(self, mock_download: AsyncMock) -> None:
         mock_download.return_value = b"img-bytes"
         parts = await resolve_user_prompt(

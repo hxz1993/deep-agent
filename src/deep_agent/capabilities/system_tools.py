@@ -115,6 +115,13 @@ _SYSTEM_TOOL_DOMAINS = (
                 description="查看授权图片或PDF物理页，支持多来源、多图比较；公网来源需Web授权。通过主模型原生视觉核验，不进入PTC。",
             ),
             SystemToolDescription(
+                name="present",
+                display_name="交付文件",
+                source="DeepAgent",
+                injection_condition="普通聊天固定注入",
+                description="完成工作后、最终回复前，选择要交付的附件或会话文件。每次完成的 Run 最多交付 10 份文件。",
+            ),
+            SystemToolDescription(
                 name="export_file_to_download_center",
                 display_name="发布到下载中心",
                 source="DeepAgent",

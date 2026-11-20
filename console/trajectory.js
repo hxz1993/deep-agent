@@ -9,6 +9,7 @@ import { parseServerTimestamp } from "./time.js?v=20260912-21";
 import { renderWebImagePreview } from "./web-image.js?v=20260912-21";
 import { findViewImageResult, renderViewImageResult } from "./view-image.js?v=20261103-view-image3";
 import { attachmentPreviewAttributes, attachmentDownloadUrl } from "./attachment-preview.js?v=20261103-view-image1";
+import { renderReplyFileCards } from "./reply-files.js";
 import { isRemoteAgentToolEvent, toolResultPresentation } from "./assistant-presentation.js?v=remote-agents-1";
 import { renderPtcExecution } from "./ptc-execution.js?v=20260924-5";
 import { mountTrajectoryExport } from "./trajectory-export.js?v=20261106-trajectory-export";
@@ -1344,7 +1345,7 @@ function renderPreview(event, previewText) {
   return `<section class="trajectory-preview">${renderMarkdown(event.payload?.content, "No text in this user message.")}</section>`;
 }
 
-function renderDetail(event, activeTab = "summary", events = [], attachmentUrl = attachmentDownloadUrl, ptcState = {}, previewText) {
+function renderDetail(event, activeTab = "summary", events = [], attachmentUrl = attachmentDownloadUrl, ptcState = {}, previewText, files) {
   if (!event) return `<div class="trajectory-detail-empty">${icon("scan-search")}<p>Select an event to inspect</p></div>`;
   const tabs = detailTabs(event);
   const allowedTabs = new Set(tabs.map(([id]) => id));
@@ -1366,6 +1367,9 @@ function renderDetail(event, activeTab = "summary", events = [], attachmentUrl =
   if (activeTab === "output" && event.kind === "output") content = event.candidate_found
     ? '<div data-structured-output-detail></div>' : '<p class="trajectory-summary-empty">Original candidate unavailable.</p>';
   if (activeTab === "preview") content = renderPreview(event, previewText);
+  if (event.kind === "assistant" && ["summary", "preview"].includes(activeTab)) {
+    content += renderReplyFileCards(files, { attachmentUrl });
+  }
   if (activeTab === "raw") content = renderRaw(event);
   if (activeTab === "usage") content = renderTrajectoryUsage(event);
   if (activeTab === "code") content = renderRunCode(event);
@@ -1420,6 +1424,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
   let liveEvents = [];
   let replyTextByEvent = new Map();
   const liveRepliesByRun = new Map();
+  const liveFilesByRun = new Map();
+  let savedFilesByRun = new Map();
   let currentRunId = null;
   const runTurns = new Map();
   let pendingResults = [];
@@ -1567,6 +1573,14 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     return lastReply === event ? live : undefined;
   }
 
+  function assistantOutputFiles(event, events) {
+    if (event?.kind !== "assistant") return undefined;
+    const files = savedFilesByRun.get(event.run_id) || liveFilesByRun.get(event.run_id);
+    if (!files) return undefined;
+    return events.findLast(row => row.kind === "assistant" && row.run_id === event.run_id) === event
+      ? files : undefined;
+  }
+
   function render() {
     if (disposed || activeView !== "trajectory") return;
     const listScrollTop = list.scrollTop;
@@ -1590,14 +1604,15 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     selectedId = selected?.id || null;
     renderRows(visible);
     const previewText = ["summary", "preview"].includes(detailTab) ? assistantPreviewText(selected, events) : undefined;
-    const detailState = [selected, selected ? eventVersions.get(selected) : 0, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, detailContext(selected, events), previewText];
+    const files = ["summary", "preview"].includes(detailTab) ? assistantOutputFiles(selected, events) : undefined;
+    const detailState = [selected, selected ? eventVersions.get(selected) : 0, detailTab, ptcVisible, ptcExpanded, ptcDetailTab, detailContext(selected, events), previewText, files];
     if (!renderedDetail || detailState.some((value, index) => value !== renderedDetail[index])) {
       renderedDetail = detailState;
       const codeState = selectedId === renderedSelectedId && detailTab === renderedDetailTab ? globalThis.DeepAgentMarkdown?.captureCodeState?.(detail) : [];
       const openContexts = selectedId === renderedSelectedId && detailTab === renderedDetailTab
         ? new Set(Array.from(detail.querySelectorAll?.("details[data-trajectory-context]") || []).filter(item => item.open).map(item => item.dataset.trajectoryContext)) : new Set();
       detail.innerHTML = renderDetail(selected, detailTab, events, attachmentUrl,
-        { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab }, previewText);
+        { visible: ptcVisible, expanded: ptcExpanded, detailTab: ptcDetailTab }, previewText, files);
       for (const item of detail.querySelectorAll?.("details[data-trajectory-context]") || []) item.open = openContexts.has(item.dataset.trajectoryContext);
       const outputHost = detail.querySelector?.("[data-structured-output-detail]");
       if (outputHost && selected?.candidate_found) mountStructuredOutput(outputHost, { id: selected.id, name: selected.payload.name, output: selected.candidate, failed: !selected.payload.accepted });
@@ -1650,6 +1665,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       exportUI?.close();
       replyTextByEvent.clear();
       liveRepliesByRun.clear();
+      liveFilesByRun.clear();
+      savedFilesByRun.clear();
       clearRenderedTrajectory();
     }
     history = nextHistory || { items: [] };
@@ -1674,7 +1691,11 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
 
   function setConversationHistory(items) {
     const segments = new Map();
+    savedFilesByRun = new Map();
     for (const item of items) {
+      if (item.run_id && item.status === "completed" && item.output_files?.length) {
+        savedFilesByRun.set(item.run_id, item.output_files);
+      }
       const sourceId = item.source_event_ids?.[0];
       if (item.kind !== "assistant_message" || !sourceId || typeof item.text !== "string") continue;
       const texts = segments.get(sourceId) || [];
@@ -1689,6 +1710,8 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     exportUI?.close();
     replyTextByEvent.clear();
     liveRepliesByRun.clear();
+    liveFilesByRun.clear();
+    savedFilesByRun.clear();
     setHistory({ items: [] });
     selectView("conversation");
     clearRenderedTrajectory();
@@ -1972,6 +1995,9 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
           const runId = payload.run_id || currentRunId;
           if (runId && !payload.output_info && typeof payload.output === "string") {
             liveRepliesByRun.set(runId, payload.output);
+          }
+          if (runId && payload.status === "completed" && payload.output_files?.length) {
+            liveFilesByRun.set(runId, payload.output_files);
           }
           liveEvents.filter((item) => item.run_id === currentRunId && item.status === "running")
             .forEach((item) => {

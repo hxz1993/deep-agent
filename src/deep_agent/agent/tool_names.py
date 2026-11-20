@@ -15,6 +15,7 @@ from pydantic_ai.toolsets import WrapperToolset
 MCP_IDENTITY = "deepagent_mcp_identity"
 WIRE_NAMES = "deepagent_wire_names"
 READ_ONLY_TOOL = "deepagent_read_only_tool"
+PRESENT = "present"
 _READABLE_SCOPE = re.compile(r"[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)*")
 _READABLE_NAME = re.compile(r"[A-Za-z0-9]+(?:(?:__?|-)[A-Za-z0-9]+)*")
 _NAMED_PARTS = (ToolCallPart, ToolReturnPart, RetryPromptPart)
@@ -153,6 +154,35 @@ def model_tool_history(
         else:
             result.append(replace(message, parts=parts) if parts != message.parts else message)
     return result
+
+
+def is_present_tool(name: str | None, wire_name: str | None = None) -> bool:
+    return (wire_name or name) == PRESENT
+
+
+def without_present_history(messages: Sequence[ModelMessage], *, current_run: str | None = None) -> list[ModelMessage]:
+    """Keep delivery facts for the UI without replaying them to a model."""
+    projected = []
+    for message in messages:
+        if current_run is not None and message.run_id == current_run:
+            projected.append(message)
+            continue
+        aliases = (message.metadata or {}).get(WIRE_NAMES) or {}
+        kept = [
+            (index, part) for index, part in enumerate(message.parts)
+            if not (isinstance(part, _NAMED_PARTS) and is_present_tool(part.tool_name, aliases.get(str(index))))
+        ]
+        if len(kept) == len(message.parts):
+            projected.append(message)
+        elif kept:
+            metadata = message.metadata
+            if aliases:
+                metadata = {**metadata, WIRE_NAMES: {
+                    str(new_index): aliases[str(index)] for new_index, (index, _) in enumerate(kept)
+                    if str(index) in aliases
+                }}
+            projected.append(replace(message, parts=[part for _, part in kept], metadata=metadata))
+    return projected
 
 
 def is_output_call(metadata, part, index: int) -> bool:

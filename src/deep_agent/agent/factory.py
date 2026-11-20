@@ -15,6 +15,7 @@ from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.file_delivery import FileDeliveryHistory, build_file_delivery_toolset
 from deep_agent.sandbox.context import ExecutionContextLifecycle
 from deep_agent.agent.context_references import context_reference_instructions
 from deep_agent.models import OpenAICompatibleVideoChatModel
@@ -206,7 +207,7 @@ def _toolsets_for_spec(
     image_view_toolset: Any | None = None,
 ) -> list[Any]:
     """Resolve selected product tool packages into Pydantic AI toolsets."""
-    toolsets: list[Any] = [build_environment_toolset()]
+    toolsets: list[Any] = [build_environment_toolset(), build_file_delivery_toolset()]
     ptc_enabled = is_ptc_selected(spec.capabilities)
 
     def builtin_ptc(toolset: Any, *names: str) -> Any:
@@ -369,6 +370,7 @@ def build_agent(
             )
         )
     capabilities.append(build_planning_capability())
+    capabilities.append(FileDeliveryHistory())
     instructions: list[Any] = []
     if spec.instructions:
         instructions.append(spec.instructions)

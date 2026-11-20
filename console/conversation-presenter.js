@@ -3,6 +3,7 @@ import { mountStructuredOutput, serializeStructuredOutput } from "./structured-o
 import { copyTextToClipboard } from "./message-actions.js?v=20260912-21";
 import { parseServerTimestamp, serverTimestampMilliseconds } from "./time.js?v=20260912-21";
 import { attachmentDownloadUrl, isImageAttachment } from "./attachment-preview.js?v=20261103-view-image1";
+import { renderReplyFileCards } from "./reply-files.js";
 import { isPlanningToolEvent, isRemoteAgentToolEvent, processDisclosureLabel, toolResultPresentation } from "./assistant-presentation.js?v=remote-agents-1";
 
 // No controller imports or initialization: each host owns its DOM and capabilities.
@@ -434,8 +435,19 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   let acceptedOutputId = null;
+  let replyFiles = null;
   const presenter = {
     row,
+    setOutputFiles(files) {
+      replyFiles?.remove();
+      replyFiles = null;
+      const markup = renderReplyFileCards(files, { base: document.baseURI, attachmentUrl });
+      if (!markup) return;
+      replyFiles = document.createElement("div");
+      replyFiles.innerHTML = markup;
+      wrap.insertBefore(replyFiles, finalActions);
+      refreshLucideIcons(replyFiles);
+    },
     setStructuredOutput(value) {
       streamRender.flush();
       if (acceptedOutputId === value.id && finalContent?.dataset.structuredOutputId === value.id) return;

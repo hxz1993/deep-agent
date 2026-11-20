@@ -31,6 +31,7 @@ from pydantic_ai.tools import RunContext
 from pydantic_core import to_jsonable_python
 from loguru import logger
 
+from deep_agent.agent.tool_names import WIRE_NAMES, without_present_history
 from deep_agent.agent.context.budget import (
     ContextBudget,
     OutputTokenSample,
@@ -316,7 +317,8 @@ def _deterministic_evidence_text(messages: list[ModelMessage]) -> str:
     calls: dict[str, BaseToolCallPart] = {}
     evidence: list[dict[str, Any]] = []
     for message in messages:
-        for part in message.parts:
+        aliases = (message.metadata or {}).get(WIRE_NAMES) or {}
+        for index, part in enumerate(message.parts):
             if isinstance(part, BaseToolCallPart) and part.tool_call_id:
                 calls[part.tool_call_id] = part
             elif isinstance(part, (BaseToolReturnPart, RetryPromptPart)) and part.tool_call_id:
@@ -327,6 +329,7 @@ def _deterministic_evidence_text(messages: list[ModelMessage]) -> str:
                 item = project_tool_evidence({
                     "call_id": part.tool_call_id,
                     "tool_name": part.tool_name or (call.tool_name if call else None),
+                    "wire_name": aliases.get(str(index)),
                     "args_preview": safe_tool_args_preview(call.args_as_dict(), 384) if call is not None else None,
                     "outcome": outcome,
                     "result_complete": bool(metadata.get("inline_fallback") is not None
@@ -678,7 +681,7 @@ def _summary_materials(
         cutoff,
     )
     previous_evidence = _anchor_evidence_contents(summary_source)
-    to_summarize = _strip_summary_and_system(summary_source)
+    to_summarize = _strip_summary_and_system(without_present_history(summary_source))
     pruned: list[dict[str, Any]] = []
     generated_evidence = tuple(
         item

@@ -10,6 +10,7 @@ from deep_agent.schemas.attachment import AttachmentRef
 from deep_agent.files.upload_settings import DefaultUploadSettingsStore
 
 if TYPE_CHECKING:
+    from deep_agent.agent.file_delivery import RunFileDelivery
     from deep_agent.agent.tool_names import ToolName
     from deep_agent.sandbox.context import ExecutionContextState
     from deep_agent.agent.request_budget import TurnRequestBudget
@@ -55,6 +56,7 @@ class AgentDeps:
     local_username: str | None = field(default=None, repr=False)
     execution_context_state: "ExecutionContextState | None" = field(default=None, repr=False)
     file_store: "FileStore | None" = field(default=None, repr=False)
+    file_delivery: "RunFileDelivery | None" = field(default=None, repr=False)
     upload_settings_store: Any = field(default_factory=DefaultUploadSettingsStore, repr=False)
     context_state: "ContextRunState | None" = None
     request_budget: "TurnRequestBudget | None" = None

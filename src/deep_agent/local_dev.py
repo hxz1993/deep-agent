@@ -11,6 +11,7 @@ from typing import Any
 from deep_agent.local_security import (
     LOCAL_CONSOLE_ADMIN_SCOPE_KEY,
     LOCAL_CURRENT_USERNAME_SCOPE_KEY,
+    LOCAL_DEV_SCOPE_KEY,
     enable_local_runtime,
 )
 
@@ -175,6 +176,7 @@ class LocalIdentityAdapter:
         ]
         headers.extend(self.identity.request_headers())
         forwarded_scope["headers"] = headers
+        forwarded_scope[LOCAL_DEV_SCOPE_KEY] = True
         if self.identity.console_admin_bypass:
             forwarded_scope[LOCAL_CONSOLE_ADMIN_SCOPE_KEY] = True
         local_username = self.identity.username or (

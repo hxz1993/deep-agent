@@ -20,6 +20,7 @@ from deep_agent.agent.deferred import (
     DeferredResultConflict, build_deferred_tool_results, validate_deferred_results,
 )
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.file_delivery import RunFileDelivery
 from deep_agent.agent.observability import log_run_phase, observe_run_phase, usage_dict
 from deep_agent.agent.context.compaction import ContextWindowExceededError
 from deep_agent.agent.headers import extract_execution_context_headers, extract_forward_headers
@@ -346,6 +347,8 @@ async def chat(
         local_username=_local_execution_username(request, user),
         app_context=app_context,
     )
+    if channel_account is None:
+        deps.file_delivery = RunFileDelivery()
     await _prepare_remote_reply(ctx, deps, body)
     try:
         active_run = ctx.active_runs.register(
@@ -390,11 +393,11 @@ async def chat(
     finally:
         ctx.active_runs.unregister(active_run)
     output = result["output"]
+    files = ReplyFiles(
+        request, ctx.file_store, session_id, request_headers,
+        load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
+    )
     if isinstance(output, str) and not result.get("output_info"):
-        files = ReplyFiles(
-            request, ctx.file_store, session_id, request_headers,
-            load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
-        )
         output = await files.text(output)
     return ChatResponse(
         session_id=session_id,
@@ -402,6 +405,7 @@ async def chat(
         run_id=deps.run_id,
         output=output,
         output_info=result.get("output_info"),
+        output_files=files.delivery(result.get("output_files"), result.get("_output_file_scope")),
         usage=result["usage"],
         status=result.get("status", "completed"),
         deferred=result.get("deferred"),
@@ -491,6 +495,8 @@ async def chat_stream(
         local_username=_local_execution_username(request, user),
         app_context=app_context,
     )
+    if channel_account is None:
+        deps.file_delivery = RunFileDelivery()
     await _prepare_remote_reply(ctx, deps, body)
     session_data = {
         "session_id": session_id,

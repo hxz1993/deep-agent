@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>本地文件预览</title>
+  <link rel="stylesheet" href="./themes.css">
+  <style>
+    body { max-width: 600px; margin: 12vh auto; padding: 24px; font: 16px/1.6 system-ui, sans-serif; }
+    h1 { font-size: 22px; }
+    #fileName { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body data-theme="light">
+  <main>
+    <h1>本地文件预览示意</h1>
+    <p id="fileName"></p>
+    <p>本地开发环境使用示意页。请返回对话下载文件，或在平台环境中打开正式预览。</p>
+  </main>
+  <script>
+    const fileName = new URLSearchParams(location.search).get("fileName");
+    document.getElementById("fileName").textContent = fileName || "";
+  </script>
+</body>
+</html>

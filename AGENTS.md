@@ -36,7 +36,7 @@
 | 项 | 内容 |
 | --- | --- |
 | **是什么** | 通用 AI Agent 全栈：FastAPI 后端 + Pydantic AI 运行时 + 静态前端 |
-| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.17.4`，数据库 Head 为 `016` |
+| **产品版本** | `deep_agent.__version__` 为唯一来源；当前为 `0.17.5`，数据库 Head 为 `016` |
 | **启动** | 本地 Test 联调固定使用下方命令；部署入口才使用 `deep_agent.main:app` |
 | **测试** | 按影响面运行定向测试；可先用 `scripts/run_tests.py --suite affected --base HEAD --list` 查看选测范围 |
 | **配置** | 仓库根 `.env`（`DEEP_AGENT_*` / `DEEP_AGENT_DBMS_*` / `DEEP_AGENT_SQLITE_PATH`） |
@@ -108,6 +108,8 @@ PYTHONPATH=src python3.12 -m deep_agent.local_dev \
   `platform`。文件正文保存为私有Blob，独立`metadata.sqlite3`只存索引；业务API与线上保持一致。
 
 ### 稳定 SQLite 本地开发基线
+
+本地普通聊天、断线续跑和双端同步的真模型验收统一使用 GPT 订阅 Provider（`openai_codex`）。
 
 本机 8002 新建联调 Agent 时，默认从订阅 Provider（`openai_codex`）选用 `gpt-6.1-sol`，备选 `gpt-6.1-terra`。按 Provider 类型核对同名模型。
 

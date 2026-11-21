@@ -1,6 +1,6 @@
-# 发布 Agent 下一轮开发 · 输出、续接与产物
+# 发布 Agent · 输出、续接与产物
 
-2026-11-20 · [下一轮开发清单](../TODO.md#下一轮开发--发布-agent2026-11-20)。优先实施发布 Agent 专用输出封装。
+本轮实现随 0.17.4 交付。接入以 [发布 Agent 指南](../../guides/agent-service.md) 为准，验证见 [实施验收记录](<../../reports/Report [DeepAgent 发布 Agent 实施验收]/README.md>)，剩余互通事项见 [研发台账](../TODO.md#近期发布验收)。
 
 ## 发布 Agent 输出封装
 
@@ -29,7 +29,7 @@ A2A 和 MCP 请求使用同一个发布专用 `output_type`。原来的 `deepage
 
 **交付声明**：普通聊天固定注入 `present(file_ids)`。模型在完成准备和检查后、最终答复前，一次选出本会话中要交付的附件或工具文件。单次 Run 累计最多 10 个不同 ID。声明保存于现有工具结果，成功完成时才发布这份清单。UI 工具等待及其续跑按不同 Run 处理，续跑从新的清单开始。
 
-普通聊天继续使用原有 Markdown 流和业务输出，成功的最终回包额外提供可选的 `output_files`，History 从同一 Run 的工具结果恢复。Console 把文件卡放在回复底部，轨迹只在对应的助手详情里显示卡片。发布 Agent 共用这份显式交付记录。模型提交待补充时也可以声明已准备好的文件。 [文件卡片初版布局原型](<Prototype [DeepAgent 回复产物卡片]/index.html>)
+普通聊天继续使用原有 Markdown 流和业务输出，成功的最终回包额外提供可选的 `output_files`，History 从同一 Run 的工具结果恢复。Console 把文件卡放在回复底部，轨迹只在对应的助手详情里显示卡片。发布 Agent 共用这份显式交付记录。模型提交待补充时也可以声明已准备好的文件。
 
 ## MCP 追问与返回格式
 
@@ -49,7 +49,7 @@ MCP 合并 `submit_task` 和 `reply_task` 为 `SendMessage`，沿用异步受理
 
 当前 MCP 工具把同一个结果对象写进 `structuredContent`，也把序列化 JSON 放进 `content` 的文本块。对齐时核对现有调用方对工具名和旧回包字段的依赖。 [现有返回组装](../../../src/deep_agent/api/v1/agent_service_mcp.py#L144) · [MCP 工具结果规范](https://modelcontextprotocol.io/specification/latest/server/tools#structured-content)
 
-## 下一轮验收
+## 实施验收范围
 
 - 生成五个文件并明确交付一份。A2A 与 MCP 都应只交该份。补测未选、重复引用及无权限文件。
 - 发布 Agent 覆盖普通正文、纯业务 JSON、业务 JSON 加正文三种完成结果。严格结构化配置也能返回一句追问，补答后同一 Task 再交付正确的结构化结果。

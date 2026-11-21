@@ -74,7 +74,7 @@ class WebFetchOverflowTests(unittest.IsolatedAsyncioTestCase):
         upload.assert_awaited_once()
         self.assertEqual(json.loads(upload.call_args.kwargs["data"])["content"], body)
         files.download.assert_not_awaited()
-        self.assertEqual(download.call_args.kwargs["max_bytes"], 5 * 1024 * 1024)
+        self.assertEqual(download.call_args.kwargs["max_bytes"], 50 * 1024 * 1024)
         self.assertFalse(download.call_args.kwargs["allow_local"])
 
     async def test_small_page_remains_inline_with_source_and_untrusted_marker(self) -> None:
@@ -97,7 +97,7 @@ class WebFetchOverflowTests(unittest.IsolatedAsyncioTestCase):
                 return ModelResponse(parts=[ToolCallPart("web_fetch", {"url": url}, "fetch")])
             result = next(p for p in messages[-1].parts if isinstance(p, ToolReturnPart))
             self.assertEqual(result.content["content"], "small body")
-            self.assertTrue(result.content["untrusted_external_content"])
+            self.assertTrue(result.metadata["web_content_untrusted"])
             self.assertEqual(result.metadata["sources"][0]["url"], url)
             self.assertNotIn("overflow_handle", result.metadata)
             return ModelResponse(parts=[TextPart("complete")])
@@ -108,7 +108,7 @@ class WebFetchOverflowTests(unittest.IsolatedAsyncioTestCase):
         upload.assert_not_awaited()
 
     async def test_download_safety_failure_is_not_retried_or_converted_to_content(self) -> None:
-        response = httpx2.Response(200, content=b"x" * (5 * 1024 * 1024 + 1))
+        response = httpx2.Response(200, content=b"x" * (50 * 1024 * 1024 + 1))
 
         async def capped_download(url, **kwargs):
             # Exercise the installed SDK's actual byte limiter and exception
@@ -122,7 +122,7 @@ class WebFetchOverflowTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ToolFailed, "maximum size"):
                 await _web_fetch_tool().function("https://example.com/too-large")
         download.assert_awaited_once()
-        self.assertEqual(download.call_args.kwargs["max_bytes"], 5 * 1024 * 1024)
+        self.assertEqual(download.call_args.kwargs["max_bytes"], 50 * 1024 * 1024)
 
     async def test_unrelated_download_value_error_remains_correctable(self) -> None:
         with patch(

@@ -106,7 +106,7 @@ test("实时处理过程展开计时并在最终结果后折叠", () => {
   assert.equal(formatProcessElapsed(72), "1分12秒");
   assert.equal(processDisclosureLabel({ running: true, elapsedSeconds: 72 }), "处理中 · 1分12秒");
   assert.equal(processDisclosureLabel({ elapsedSeconds: 72 }), "已处理 · 用时 1分12秒");
-  assert.match(chatSource, /let isLive = !readOnly && !timestamp/);
+  assert.match(chatSource, /let isLive = observesLive \|\| \(!readOnly && !timestamp\)/);
   assert.match(chatSource, /processElapsedSecondsBetween\([\s\S]*processTiming\.startedAt[\s\S]*processTiming\.completedAt/);
   assert.match(chatSource, /processDisclosureLabel\(\{[\s\S]*elapsedSeconds: processElapsedSeconds/);
   assert.match(chatSource, /window\.setInterval\(updateProcessTimer, 1000\)/);
@@ -339,6 +339,18 @@ test("原生搜索实时文本和工具交错后仍由 final 输出完成正文"
   assert.equal(recorder.calls.filter(([method]) => method === "addToolResult").length, 1);
   assert.equal(recorder.calls.find(([method]) => method === "addToolCall")[1].execution, "native");
   assert.deepEqual(recorder.calls.at(-1), ["complete", "最后的完整回答。"]);
+});
+
+test("跳过的交互显示终态，且不停止整条助手消息或重建表单", () => {
+  const { presenter, calls } = recordingPresenter();
+  applyAssistantPresentationActions(presenter, assistantActionsFromHistoryItems([{
+    kind: "tool", call_id: "skipped-form", tool_name: "builtin__confirm",
+    mode: "deferred", status: "interrupted", outcome: "skipped", output: null,
+  }]));
+  const result = calls.find(([method]) => method === "addToolResult")?.[1];
+  assert.equal(toolResultPresentation(result).label, "已跳过");
+  assert.equal(result.tool_call_id, "skipped-form");
+  assert.ok(!calls.some(([method]) => ["attachHitlWidget", "markInterrupted"].includes(method)));
 });
 
 test("展示动作覆盖多工具、撤回、失败、中断与 Deferred", () => {

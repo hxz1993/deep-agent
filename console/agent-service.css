@@ -189,10 +189,11 @@ dialog.console-detail-dialog.modal.agent-service-dialog[open] { display:flex; fl
 .agent-service-fields { margin-bottom:0; }
 .agent-service-fields .field-label-row { color:var(--text-dim); font-size:var(--ui-font-body); }
 .agent-service-description.field textarea { min-height:0; resize:none; }
+.agent-service-scope-content { display:grid; align-items:center; min-block-size:32px; }
 .agent-service-scope-hint { margin:0; color:var(--text-dim); font-size:var(--ui-font-helper); }
-.agent-service-app-choices:not([hidden]),#agentPublicationAppTags:not(:empty) { display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; }
+.agent-service-app-choices:not([hidden]),#agentPublicationAppTags:not(:empty) { display:flex; align-items:center; gap:6px; min-width:0; }
 #agentPublicationAppTags:empty { display:none; }
-#agentPublicationAppTags { max-width:100%; max-height:74px; overflow:auto; padding:2px; margin:-2px; }
+#agentPublicationAppTags { flex-wrap:wrap; max-width:100%; max-height:74px; overflow:auto; padding:2px; margin:-2px; }
 .agent-service-app-tag { display:inline-flex; align-items:center; gap:4px; min-width:0; max-width:100%; padding:0 4px 0 8px; border-radius:var(--ui-radius-inner); background:var(--console-readonly-surface); color:var(--text-dim); font-size:var(--ui-font-helper); }
 .agent-service-app-tag-value { display:inline-flex; align-items:baseline; gap:4px; min-width:0; white-space:nowrap; overflow:hidden; }
 .agent-service-app-tag-name,.agent-service-app-tag-id { min-width:0; overflow:hidden; text-overflow:ellipsis; }
@@ -202,7 +203,7 @@ dialog.console-detail-dialog.modal.agent-service-dialog[open] { display:flex; fl
 @media (hover:hover) and (pointer:fine) {
   .agent-service-app-tag:not(:hover):not(:focus-within) .icon-btn { opacity:0; }
 }
-.agent-service-add-app.btn { gap:4px; padding-inline:4px; }
+.agent-service-add-app.btn { flex:none; gap:4px; padding-inline:4px; }
 .agent-service-auth-summary { display:grid; grid-template-columns:minmax(0,1fr) minmax(230px,.65fr); gap:12px; padding:12px; border-radius:var(--ui-radius); background:var(--console-readonly-surface); font-size:var(--ui-font-helper); }
 .agent-service-header-table { width:100%; border-collapse:collapse; line-height:1.4; }
 .agent-service-header-table :is(th,td) { padding:3px 0; vertical-align:top; text-align:left; }

@@ -197,7 +197,7 @@ test("incremental summaries keep exact whitespace, UTF-16 and ellipsis behavior 
       const normalized = content.replace(/\s+/g, " ").trim();
       const expected = normalized.length > 180 ? `${normalized.slice(0, 180)}…` : normalized;
       const assistant = c.events().find(event => event.kind === "assistant");
-      assert.equal(assistant.summary, content ? expected : "模型响应");
+      assert.equal(assistant.summary, content ? expected : "Model response");
       assert.equal(assistant.payload.content, content || null);
     }
     send(c, "cancelled", {});

@@ -290,17 +290,16 @@ Pending 时没有活动 Run，其表单取消仍通过 `DeferredToolResults` 处
 
 DeepAgent 自研 `capabilities.registry.ToolPackage` 是产品配置单位，包含分类、展示元数据、工具目录和恰好一个 Toolset；Pydantic AI 的 `AbstractCapability` 才是可介入模型请求、消息历史、工具准备和事件生命周期的原生扩展点。当前上下文压缩使用这一层；DeepSeek V4 已交由 Pydantic AI 官方 Provider/Profile，不再注册项目自定义重试能力。
 
-2026-09-19 独立搜索改版本地已实现，尚未发布。Web 统一披露普通 `web_search(query)`，不再向主会话
-注入原生搜索 Capability，不按主会话模型选择搜索实现，也不切换 DeepSeek 主会话协议。
-DeepSeek 搜索在 `web/deepseek.py` 中异步直调 Anthropic Messages，默认 `deepseek-flash`，
-声明 `web_search_20250305`，只解析结构化结果和引用片段，不创建辅助 Agent。
-Kimi 在 `web/kimi.py` 直接调用 `/v1/tools/search`，无 model、无辅助 Chat、Formula 或 Responses 后备。
-DuckDuckGo/Tavily 复用 Common Tools，Exa/You.com 复用 Harness。运行时不限制模型名称，不自动降级或换供应商。
+Web 披露普通函数工具 `web_search`，按全局选中的搜索供应商装配参数，与主会话模型独立。
+DeepSeek 在 `web/deepseek.py` 直接调用 `/v1/tools/search`。模型可选择条数、正文、原始问题和本地化 IP，
+收到供应商 JSON 对象，轨迹和来源授权从工具元数据读取。参数和示例见[网络搜索指南](../../docs/guides/web-tools.md)。
+Tavily、Exa、You.com 直调原生 Search API，DuckDuckGo 使用 DDGS 的 DuckDuckGo 后端。
+各家请求参数与回包独立。运行时不限制模型名称，不自动降级或换供应商。
 
 `web/settings.py` 将空配置、无记录和旧 native 归一为 `unconfigured`，读取不写库；坏引用、缺 Key、
 无效 Provider 地址携带 `configuration_error`。不在装配阶段因这些配置问题拒绝 Run；实际搜索时使用
 `ToolFailed` 生成同 ID 的失败 Tool Result，模型可继续回答，SSE/History/事件协议不变。
-管理保存仅接受 `mode=provider`；三个 Console 入口不增加存储层级。Kimi 旧 model 读取忽略、保存移除；
+管理保存支持当前供应商及清空配置。旧搜索 `model` 读取忽略、保存移除；
 复用 Provider 只存引用不复制 Key。GET 回显 `configuration_error`；旧 `/test-model` 返回410。
 新库最终无默认搜索行：已发布001不改，`initialize_current_defaults()` 仅在空库初始化时清掉native种子；
 历史升级不删除记录，旧备份恢复仍按未配置解释。不得引入新的隐式搜索默认供应商。
@@ -309,7 +308,8 @@ DuckDuckGo/Tavily 复用 Common Tools，Exa/You.com 复用 Harness。运行时�
 该限制针对工具协议，不限制模型型号；旧原生工具消息仍保持历史回读。协议历史探测结论见
 `../../docs/design/21-web-tools/web-tools-research.md`，不能用旧单句探针声称完整主会话原生搜索已接通。
 回归入口包括 `test_web_search_settings.py`、`test_global_settings.py`、`test_web_search_probe.py`、
-`test_kimi_web_search.py`、`test_web_search_failure_events.py`；测试搜索必须验证真实来源，HTTP200或回答文本不算成功。
+`test_deepseek_web_search.py`、`test_web_tools.py`、`test_web_search_failure_events.py`；
+线上搜索验收需验证真实来源、结果字段和内容。
 2026-09-19管理草稿沿用已有Provider Key实测：Kimi 1510 ms、DeepSeek Flash 3894 ms、Pro 15388 ms；
 不保存配置，耗时为单次观测；DuckDuckGo真实草稿测试约11.36秒通过。Tavily/Exa/You.com真实Key联调仍待补。
 

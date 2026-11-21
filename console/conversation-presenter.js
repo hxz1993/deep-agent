@@ -186,7 +186,8 @@ function processElapsedSecondsBetween(startedAt, completedAt) {
 function createAssistantMessage(timestamp, branchPoint, beforeNode = null, processTiming = {}) {
   const allowDeferred = !readOnly && processTiming.allowDeferred !== false;
   const autoAttachDeferred = allowDeferred && processTiming.autoAttachDeferred !== false;
-  let isLive = !readOnly && !timestamp;
+  const observesLive = processTiming.live === true;
+  let isLive = observesLive || (!readOnly && !timestamp);
   const messageTimestamp = timestamp || (readOnly ? null : new Date().toISOString());
   const suppliedStartMs = serverTimestampMilliseconds(processTiming.startedAt);
   let processStartedAt = suppliedStartMs || Date.now();
@@ -194,7 +195,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   let processElapsedSeconds = processElapsedSecondsBetween(
     processTiming.startedAt,
     processTiming.completedAt,
-  ) ?? (readOnly ? null : 0);
+  ) ?? (readOnly && !isLive ? null : 0);
   let processTimer = null;
   const row = document.createElement("div");
   row.className = "msg-row assistant assistant-answer";
@@ -282,7 +283,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
   }
 
   function startProcess() {
-    if (readOnly) return;
+    if (readOnly && !observesLive) return;
     isLive = true;
     processFinished = false;
     if (processTimer) window.clearInterval(processTimer);
@@ -571,7 +572,7 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
         <button type="button" class="tool-head" aria-expanded="false">
           <span class="tool-icon">${lucideIcon(isToolSearch ? "search" : isSkillLoad ? "book-open-check" : isRemoteAgent ? "bot" : "wrench")}</span>
           <span class="tool-name">${escapeHtml(defaultTitle)}</span>
-          <span class="tool-status">${readOnly ? '<span class="tool-status-pending">尚无已保存结果</span>' : '<span class="spinner" role="status" aria-label="运行中"></span>'}</span>
+          <span class="tool-status">${readOnly && !isLive ? '<span class="tool-status-pending">尚无已保存结果</span>' : '<span class="spinner" role="status" aria-label="运行中"></span>'}</span>
           <span class="chevron">${lucideIcon("chevron-right")}</span>
         </button>
         <div class="tool-body">
@@ -620,6 +621,11 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       const previousResult = body.querySelector("[data-tool-result]");
       const codeState = window.DeepAgentMarkdown?.captureCodeState?.(previousResult);
       previousResult?.remove();
+      if (data.outcome === "skipped") {
+        setToolBlockExpanded(block, false);
+        updateProcessDisclosure();
+        return;
+      }
       const res = document.createElement("div");
       res.dataset.toolResult = "1";
       const remote = data.metadata?.remote_agent;
@@ -653,6 +659,13 @@ function createAssistantMessage(timestamp, branchPoint, beforeNode = null, proce
       if (block.classList.contains("open")) hydrateToolDetails(block);
       refreshLucideIcons(row);
       updateProcessDisclosure();
+    },
+    skipPendingTools() {
+      for (const [toolCallId, block] of toolBlocks) {
+        if (block.classList.contains("hitl-pending") && !block.dataset.done) {
+          this.addToolResult({ tool_call_id: toolCallId, outcome: "skipped" });
+        }
+      }
     },
     removeToolCall(data) {
       streamRender.flush();

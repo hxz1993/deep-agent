@@ -5,12 +5,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
 from deep_agent.api.v1.admin import CONSOLE_ADMIN_DEPENDENCIES
 from deep_agent.api.v1.diagnostic_routes import NoStoreRoute
 from deep_agent.api.v1.request_identity import RequestUserDep
-from deep_agent.api.v1.sessions import SessionEventsResponse, SessionEventResponse, _build_context_data, context_status_from_data
+from deep_agent.api.v1.sessions import (
+    SessionEventResponse, SessionEventsResponse, _build_context_data, context_status_from_data, session_run_response,
+)
 from deep_agent.api.v1.local_files import local_attachment_response
 from deep_agent.agent.attachments import index_attachment_refs
 from deep_agent.agent.tool_output_limits import session_file_metadata_from_history
@@ -179,6 +182,16 @@ async def get_diagnostic_session(request: Request, ctx: AppContextDep, caller_us
                 result["context_error"] = "当前配置无法估算上下文；会话正文和轨迹仍可查看"
     result["channel"] = (await ChannelProfileService(ctx).enrich_origins({session_id: result.get("channel")})).get(session_id)
     return await with_users(request, caller_user_id, result, [result["user_id"]])
+
+
+@router.get("/{session_id}/live")
+async def observe_diagnostic_run(request: Request, ctx: AppContextDep, session_id: str,
+                                 run_id: str = Query(min_length=1, max_length=128)) -> EventSourceResponse:
+    async with query_budget():
+        session = await service(ctx).identity(session_id)
+    return session_run_response(
+        request, ctx, session["agent_id"], session["session_id"], session["user_id"], run_id, diagnostic=True,
+    )
 
 
 @router.get("/{session_id}/history", response_model=ConversationHistoryResponse)

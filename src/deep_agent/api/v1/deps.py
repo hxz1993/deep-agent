@@ -13,6 +13,7 @@ from deep_agent.agent.runner import AgentRunner
 from deep_agent.agent.tool_output_limits import build_tool_output_limits
 from deep_agent.agent.history_tools import build_history_toolset
 from deep_agent.agent.spec import DEFAULT_INSTRUCTIONS, AgentSpec
+from deep_agent.agent_service.output import PUBLICATION_UI_INSTRUCTIONS, PublicationProtocol
 from deep_agent.models.context_window import ContextWindowModel
 from deep_agent.models.reasoning import (
     DEFAULT_EFFORT,
@@ -149,6 +150,7 @@ async def build_runner_for_agent(
     reasoning_effort: str | None = None,
     expected_provider_id: str | None = None,
     app_context: RunAppContext | None = None,
+    publication_protocol: PublicationProtocol | None = None,
 ) -> AgentRunner:
     """Assemble a per-request AgentRunner from a database agent configuration."""
     row = await ctx.stores.agent.get_by_id(agent_id)
@@ -190,6 +192,12 @@ async def build_runner_for_agent(
             if app_context.prompt_append:
                 instructions += f"\n\n当前应用追加提示词：\n{app_context.prompt_append}"
         spec = replace(spec, instructions=instructions)
+    if publication_protocol in ("a2a", "mcp"):
+        spec = replace(
+            spec,
+            capabilities=[code for code in spec.capabilities if not code.startswith("ui:")],
+            instructions=f"{spec.instructions}\n\n{PUBLICATION_UI_INSTRUCTIONS}",
+        )
     runner = await _build_runner_from_spec(
         spec, ctx, request_headers=request_headers, channel_context=channel_context, app_context=app_context,
     )

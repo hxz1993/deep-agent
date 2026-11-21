@@ -100,8 +100,8 @@ DeepAgent PTC rules:
   next tool. Never inspect, measure, print, or return the `content` value.
 - Return only what the task needs. For diagnostics prefer counts to serializing
   intermediate data. Do not print file payloads, Base64, or large values.
-- For HTML/text pages, web_fetch returns an object with url, title and content.
-  Extract relevant lines or links from its Markdown here without refetching.
+- For HTML/text pages, web_fetch returns Markdown in content.
+  Extract relevant lines or links here without refetching.
   For visual inspection, return the File ID or URL and call outer view_image.
 - Authorized MCP, web_search, web_fetch, execute_python, execute_skill_script and
   export_file_to_download_center retain their ordinary native entry points. Only

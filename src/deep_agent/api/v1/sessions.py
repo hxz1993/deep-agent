@@ -446,22 +446,33 @@ async def observe_session_run(
         raise HTTPException(status_code=404, detail="Session not found")
     from deep_agent.db.session_scope import agent_scope_to_api
 
-    key = (agent_scope_to_api(resolved[0]), resolved[1], user_id)
+    return session_run_response(request, ctx, agent_scope_to_api(resolved[0]), resolved[1], user_id, run_id)
+
+
+def session_run_response(request: Request, ctx, agent_id: str | None, session_id: str,
+                         user_id: str | None, run_id: str, *, diagnostic: bool = False) -> EventSourceResponse:
+    """Project the same Run stream for a session already authorized by the caller."""
+    key = (agent_id, session_id, user_id)
 
     # Check before sending headers, then acquire the actual subscription inside
     # the generator so cancellation before its first iteration leaks no queue.
     try:
         probe = ctx.session_live.subscribe(key, run_id)
-    except (LookupError, BufferError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LookupError as exc:
+        active = ctx.active_runs.get(agent_id=agent_id, session_id=session_id) if diagnostic else None
+        if active is not None and active.user_id == user_id and active.run_id == run_id:
+            raise HTTPException(503, "Run live stream is not ready") from exc
+        raise HTTPException(409, str(exc)) from exc
+    except BufferError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(503, str(exc)) from exc
     ctx.session_live.unsubscribe(probe)
 
     async def stream():
         files = ReplyFiles(
-            request, ctx.file_store, resolved[1], {"user": user_id},
-            load_history=lambda: ctx.store.get_raw_history(resolved[1], agent_id=key[0]),
+            request, ctx.file_store, session_id, {"user": user_id}, diagnostic=diagnostic,
+            load_history=lambda: ctx.store.get_raw_history(session_id, agent_id=agent_id),
         )
 
         async def project_frame(frame):

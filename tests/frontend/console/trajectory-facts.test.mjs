@@ -187,6 +187,40 @@ const resultFrame = (controller, callId = "confirm-id") => controller.ingest({ e
   tool: "builtin__confirm", tool_call_id: callId, result: { confirmed: true },
 } });
 
+test("a persisted new turn closes old Deferred calls without a result in live and reopened trajectories", () => {
+  withController((controller, elements) => {
+    const answered = deferredCall("answered", 1, "old-run", "old-turn", "answered");
+    const skipped = deferredCall("skipped", 2, "old-run", "old-turn");
+    const result = deferredResult("answer", 3, "resume-run", "old-turn", "answered");
+    const next = {
+      event_id: "next-input", sequence: 4, event_type: "user/message", run_id: "new-run", turn_id: "new-turn",
+      payload: { message: { kind: "request", parts: [{ part_kind: "user-prompt", content: "换个问题" }] } },
+    };
+    const current = deferredCall("current", 5, "new-run", "new-turn");
+    controller.setHistory({ items: [answered, skipped, result] });
+    controller.ingest({ event: "session", data: { run_id: "new-run", turn_id: "new-turn" } });
+    assert.equal(controller.events().find(row => row.native?.call_event_id === "skipped").status, "pending");
+    appendFact(controller, next);
+    appendFact(controller, current);
+    const verify = () => {
+      const rows = controller.events();
+      const oldTool = rows.find(row => row.native?.call_event_id === "skipped");
+      assert.equal(oldTool.status, "interrupted");
+      assert.equal(oldTool.outcome, "skipped");
+      assert.equal(oldTool.result, null);
+      assert.equal(oldTool.native.result_event_id, null);
+      assert.equal(rows.find(row => row.kind === "assistant" && row.native.event_ids.includes("skipped")).status, "interrupted");
+      assert.equal(rows.find(row => row.native?.call_event_id === "answered").status, "completed");
+      assert.equal(rows.find(row => row.native?.call_event_id === "current").status, "pending");
+      controller.restore({ selectedId: oldTool.id });
+      assert.match(elements.get("inspectorContent").innerHTML, />Skipped<\/em>/);
+    };
+    verify();
+    controller.setHistory({ items: [answered, skipped, result, next, current] });
+    verify();
+  });
+});
+
 test("real Deferred cross-Run fact order merges result SSE and keeps selection, count and refresh identity", () => {
   for (const factsFirst of [true, false]) withController((controller, elements) => {
     const call = deferredCall("confirm-call", 5), result = deferredResult("confirm-result", 6);
@@ -555,17 +589,18 @@ test("late failed assistant facts replace closed live content before the next su
 });
 
 test("thinking-only assistant summaries reflect the same terminal state live and after refresh", () => {
-  for (const [terminal, status, summary] of [["error", "failed", "模型响应失败"], ["cancelled", "interrupted", "已停止"], ["final", "completed", "模型思考"]]) {
-    withController(controller => {
+  for (const [terminal, status, summary] of [["error", "failed", "Model response failed"], ["cancelled", "interrupted", "Interrupted"], ["final", "completed", "Model reasoning"]]) {
+    withController((controller, elements) => {
       controller.ingest({ event: "session", data: { run_id: "run-1" } });
       controller.ingest({ event: "thinking", data: { delta: "保留思考正文" } });
-      assert.equal(controller.events()[0].summary, "模型处理中");
+      assert.equal(controller.events()[0].summary, "Model processing");
       controller.ingest({ event: terminal, data: {} });
       assert.equal(controller.events()[0].summary, summary);
       assert.equal(controller.events()[0].status, status);
       controller.setHistory({ items: [{ ...fact("thinking-only", 1, 1, 0, { part_kind: "thinking", content: "保留思考正文" }), status }] });
       assert.equal(controller.events()[0].summary, summary);
       assert.equal(controller.events()[0].payload.thinking, "保留思考正文");
+      assert.match(elements.get("inspectorContent").innerHTML, /class="thinking-heading">思考过程<\/span>/);
     });
   }
 });
@@ -650,7 +685,8 @@ test("tool-only assistant responses remain visible and exportable without invent
   for (const row of assistants) {
     assert.equal(row.payload.content, null);
     assert.equal(row.payload.thinking, null);
-    assert.equal(row.summary, `调用 ${row.payload.tool_calls.length} 个工具`);
+    const count = row.payload.tool_calls.length;
+    assert.equal(row.summary, `${count} tool call${count === 1 ? "" : "s"}`);
   }
   assert.equal(JSON.parse(JSON.stringify(rows)).filter(row => row.kind === "assistant").length, 4);
 });

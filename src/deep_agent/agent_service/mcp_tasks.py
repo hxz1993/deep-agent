@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import base64
-from typing import Literal
+from typing import Annotated, Literal
 
 from a2a import types as wire
 from a2a.server.routes.common import serialize_list_tasks_response
@@ -13,6 +13,11 @@ from pydantic import Field, JsonValue
 from .execution import MAX_INPUT_BYTES
 from .public import HistoryLength, PublicInput, PublicTasks, TaskId, artifact_path
 from .publications import AgentCode
+
+DEFAULT_WAIT_SECONDS = 120
+WaitSeconds = Annotated[float, Field(
+    ge=0, allow_inf_nan=False, description="Maximum seconds to wait for the task. Use 0 for an immediate snapshot.",
+)]
 
 
 class MessagePart(PublicInput):
@@ -53,6 +58,7 @@ class Message(PublicInput):
 
 class SendConfiguration(PublicInput):
     historyLength: HistoryLength | None = None
+    waitSeconds: WaitSeconds = DEFAULT_WAIT_SECONDS
 
 
 class SendTool(PublicInput):
@@ -64,6 +70,7 @@ class SendTool(PublicInput):
 class GetTool(PublicInput):
     id: TaskId
     historyLength: HistoryLength | None = None
+    waitSeconds: WaitSeconds = DEFAULT_WAIT_SECONDS
 
 
 class CancelTool(PublicInput):
@@ -119,8 +126,16 @@ class McpTasks(PublicTasks):
             row = await self.service.publication(args.agentCode)
             owner = self.service.owner(row, self.headers)
         entry = await self.service.submit(row.code, owner, self.headers, message, source="mcp")
-        size = args.configuration.historyLength if args.configuration else None
-        return self._snapshot(entry, history_length=size)
+        configuration = args.configuration or SendConfiguration()
+        task = await self.service.tasks.wait(
+            entry, timeout=configuration.waitSeconds, history_length=configuration.historyLength,
+        )
+        return self._snapshot(entry, task)
+
+    async def get_task(self, args: GetTool) -> dict:
+        _, entry = await self.service.find_task(args.id, self.headers)
+        task = await self.service.tasks.wait(entry, timeout=args.waitSeconds, history_length=args.historyLength)
+        return self._snapshot(entry, task)
 
     async def page(self, args: ListTool) -> dict:
         row = await self.service.publication(args.agentCode)

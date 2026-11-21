@@ -95,11 +95,14 @@ TOOLS: dict[str, tuple[str, type[PublicInput], Callable[..., Awaitable[dict]]]] 
                     PublicInput, lambda tasks, _: tasks.list_agents()),
     "SendMessage": ("Start a task with agentCode and an A2A message. To continue an input-required task, "
                     "send a new message containing the original taskId and a new messageId. "
-                    "Use contextId alone to start a new task in the same conversation. Returns immediately.",
+                    "Use contextId alone to start a new task in the same conversation. Waits up to "
+                    "configuration.waitSeconds (default 120, 0 for immediate return). If still running when "
+                    "the wait expires, returns the current task with its original id and contextId.",
                     SendTool, lambda tasks, a: tasks.send(a)),
-    "GetTask": ("Read an A2A Task by id. Check status.state, status.message for questions, and artifacts for results. "
+    "GetTask": ("Read an A2A Task by id. Waits up to waitSeconds (default 120, 0 for immediate return). "
+                "Check status.state, status.message for questions, and artifacts for results. "
                 "Download file parts with HTTP GET to parts[].url using the same App/Space and authentication headers.",
-                GetTool, lambda tasks, a: tasks.get(a.id, a.historyLength)),
+                GetTool, lambda tasks, a: tasks.get_task(a)),
     "ListTasks": ("List tasks for agentCode in this App with A2A filters and paging. "
                   "Use nextPageToken as pageToken and includeArtifacts to include results.",
                   ListTool, lambda tasks, a: tasks.page(a)),

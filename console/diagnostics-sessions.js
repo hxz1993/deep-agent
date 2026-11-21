@@ -6,7 +6,9 @@ import { diagnosticTime } from "./diagnostics.js?v=20261019-release0138";
 import { diagnosticTarget, channelEntryFilters, sessionRange, sessionDrilldown, overviewFilters } from "./diagnostics-navigation.js?v=20261019-release0138";
 import { bindDiagnosticColumns, COLUMN_BOUNDS } from "./diagnostic-columns.js?v=session-source-column";
 import { buildSessionQuery, sessionQueryError, createSessionReader } from "./diagnostics-session-query.js?v=20261112-busy-retry";
-import { createReadonlySessionView } from "./diagnostic-detail.js?v=session-source-rows";
+import { createReadonlySessionView } from "./diagnostic-detail.js?v=diagnostic-run-observer";
+import { createSessionObserver, historyThroughRun } from "./session-observer.js?v=20260912-21";
+import { createHistoryFollower } from "./history-follower.js?v=20260912-21";
 import { ensureSessionViewTemplate } from "./session-view-shell.js?v=20261025-readonly-load2";
 
 export const SESSION_STATUSES = { running: "进行中", pending: "待操作", waiting: "待操作", completed: "已完成", stopped: "已停止", error: "异常", failed: "异常", unknown: "未确认", not_started: "未开始" };
@@ -41,6 +43,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
   const state = { active: false, route: null, filters: {}, data: null, listTotal: null, busy: false, error: "", users: {}, agents: new Map(), channelAgents: new Set(), showUsers: false, showAgents: false, overviewStatus: {}, overviewErrors: {} };
   let detail = null, detailData = null, selectBinding = null, scrollToUsers = false, eventsLoading = false, trendObserver = null;
   let detailMountGeneration = 0;
+  let liveObservation = null;
   let releaseColumns = () => {}, columnWidths = null, listFilters = {};
   const disconnectTrend = () => { trendObserver?.disconnect(); trendObserver = null; };
   function observeTrend() {
@@ -59,7 +62,7 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     resize();
     if (typeof ResizeObserver !== "undefined") { trendObserver = new ResizeObserver(resize); trendObserver.observe(host); }
   }
-  const cancelReaders = () => { clearTimeout(userTimer); userReader.cancel(); releaseColumns(); disconnectTrend(); reader.cancel(); contextReader.cancel(); eventsReader.cancel(); eventsLoading = false; };
+  const cancelReaders = () => { stopObservation(); clearTimeout(userTimer); userReader.cancel(); releaseColumns(); disconnectTrend(); reader.cancel(); contextReader.cancel(); eventsReader.cancel(); eventsLoading = false; };
   const publishFilters = () => replace(diagnosticTarget(state.route.view, state.filters));
   const scrollRegions = { scroll: ".diagnostic-session-scroll", tableScroll: ".diagnostic-session-table-scroll", questionsScroll: ".diagnostic-question-list", errorsScroll: ".diagnostic-dashboard-side > section:first-child", usersScroll: "#diagnosticActiveUsers", agentsScroll: ".diagnostic-agent-bars" };
   const captureScroll = () => Object.fromEntries(Object.entries(scrollRegions).map(([key, selector]) => [key, root.querySelector(selector)?.scrollTop || 0]));
@@ -278,19 +281,128 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       view.load(detailData); view.restore?.(saved.detailSnapshot);
       await view.prepareRender?.();
       if (!state.active || detail !== view) return;
+      const id = state.route.id, scope = reader.begin();
+      const session = await scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}`);
+      if (!scope.current() || !state.active || detail !== view) return;
+      const savedSession = detailData.session;
+      if (session.active_run || savedSession.active_run || session.run_id !== savedSession.run_id
+        || session.last_activity_at !== savedSession.last_activity_at) {
+        await loadDetail(session);
+        return;
+      }
       if (state.route.filters.view === "trajectory" || (detailData.focus.runId && !detailData.focus.eventId)) void loadEvents();
       if (!detailData.historyError && !detailData.contextComplete) void loadContext();
     } catch (error) { if (state.active && detail === view) view.setError?.(sessionQueryError(error)); }
     finally { if (state.active && detail === view) view.setLoading?.(false); }
   }
-  async function loadDetail() {
+  function stopObservation() {
+    const previous = liveObservation;
+    liveObservation = null;
+    previous?.observer.stop();
+    previous?.fallback?.stop();
+  }
+
+  function followCurrentRun(scope, id) {
+    const model = detailData, view = detail;
+    const runId = model.session.active_run?.run_id;
+    if (!runId) return false;
+    const base = `api/v1/diagnostics/sessions/${encodeURIComponent(id)}`;
+    const live = { runId, baselineSequence: null, fallback: null, observer: null };
+    const current = () => liveObservation === live && scope.current() && state.active && detail === view;
+    const readHistory = signal => diagnosticRequest(`${base}/history`, signal);
+    function showHistory(history, replay) {
+      model.history = historyThroughRun(history, runId, { replay, baselineSequence: live.baselineSequence });
+      model.historyError = null;
+      model.focus.view = state.route.filters.view || "conversation";
+      view.load(model);
+    }
+    function finish(session, history) {
+      stopObservation();
+      eventsReader.cancel();
+      eventsLoading = false;
+      model.session = session;
+      model.contextComplete = false;
+      model.eventsComplete = false;
+      model.eventsError = null;
+      model.preserveLive = false;
+      showHistory(history, false);
+      if (model.focus.view === "trajectory" || model.events.length) void loadEvents();
+      void loadContext();
+    }
+
+    live.observer = createSessionObserver({
+      runId,
+      isCurrent: current,
+      connect: signal => window.daFetch(
+        window.serviceUrl(`${base}/live?run_id=${encodeURIComponent(runId)}`),
+        { signal, headers: { Accept: "text/event-stream" }, includeContext: false, reportStatus: false },
+      ),
+      async onSync(frame, signal) {
+        live.baselineSequence = frame.baseline_sequence;
+        live.fallback?.stop();
+        live.fallback = null;
+        const history = await readHistory(signal);
+        if (!current() || signal.aborted) return;
+        model.events = historyThroughRun({ items: model.events }, runId, {
+          replay: true, baselineSequence: live.baselineSequence,
+        }).items;
+        model.preserveLive = false;
+        showHistory(history, true);
+        model.preserveLive = true;
+      },
+      async onEvent(frame, signal) {
+        if (frame.event === "session_event_appended" && frame.data?.event?.event_type === "user/message") {
+          const history = await readHistory(signal);
+          if (!current() || signal.aborted) return;
+          showHistory(history, true);
+        }
+        view.ingestLiveFrame(frame);
+      },
+      async onEnd(_frame, signal) {
+        const [session, history] = await Promise.all([diagnosticRequest(base, signal), readHistory(signal)]);
+        if (current() && !signal.aborted) finish(session, history);
+      },
+      onFallback(error) {
+        if (!current() || live.fallback || [401, 403, 404].includes(error?.status)) {
+          if (current() && [401, 403, 404].includes(error?.status)) stopObservation();
+          return;
+        }
+        model.preserveLive = false;
+        live.fallback = createHistoryFollower({
+          isCurrent: current,
+          intervalMs: 2000,
+          historyIntervalMs: 3000,
+          async readStatus(signal) {
+            const session = await diagnosticRequest(base, signal);
+            const active = session.active_run;
+            return { status: active?.run_id === runId ? active.status : "idle", run_id: active?.run_id, session };
+          },
+          readHistory,
+          onHistory(history, status) {
+            if (status.status === "idle") finish(status.session, history);
+            else showHistory(history, false);
+          },
+          onError(failure) {
+            if ([401, 403, 404].includes(failure?.status)) stopObservation();
+          },
+        });
+        void live.fallback.start();
+      },
+    });
+    liveObservation = live;
+    void live.observer.start();
+    return true;
+  }
+
+  async function loadDetail(initialSession = null) {
+    stopObservation();
     contextReader.cancel(); eventsReader.cancel(); eventsLoading = false;
     const scope = reader.begin(), id = state.route.id;
     const { view, event_id, run_id, turn_id } = state.route.filters;
     const focus = { view: view || "conversation", eventId: event_id, runId: run_id, turnId: turn_id };
     detailData = null; detail.setLoading?.(true);
     try {
-      const session = await scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}`);
+      const session = initialSession || await scope.get(`api/v1/diagnostics/sessions/${encodeURIComponent(id)}`);
       if (!scope.current() || state.route.id !== id || !state.active) return;
       rememberProfiles(session);
       detailData = { session, history: null, events: [], eventsComplete: false, users: session.users || {}, focus };
@@ -306,7 +418,8 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
       if (!scope.current() || state.route.id !== id || !state.active) return;
       if (detailData.historyError || detailData.eventsError) detail.setError?.({ history: detailData.historyError, events: detailData.eventsError });
       if (state.route.filters.view === "trajectory" || (focus.runId && !focus.eventId && !focus.turnId)) void loadEvents();
-      if (!detailData.historyError) void loadContext();
+      const following = followCurrentRun(scope, id);
+      if (!following && !detailData.historyError) void loadContext();
     } catch (error) { if (scope.current() && state.active) detail.setError?.(sessionQueryError(error)); }
     finally { if (scope.current() && state.active) detail.setLoading?.(false); }
   }
@@ -317,7 +430,13 @@ export function initDiagnosticSessions({ root, navigate, replace, onBack }) {
     try {
       const events = await eventsReader.readEvents(scope, id, (count, complete) => { if (scope.current() && !complete) detail.setLoading?.(`已读取 ${count} 条轨迹，继续读取…`, { section: "events" }); });
       if (!scope.current() || !state.active || state.route.id !== id || !detailData) return;
-      Object.assign(detailData, { events, eventsComplete: true, eventsError: null }); detailData.focus.view = state.route.filters.view || "conversation"; detail.load(detailData);
+      const live = liveObservation;
+      const visibleEvents = live && detailData.preserveLive
+        ? historyThroughRun({ items: events }, live.runId, { replay: true, baselineSequence: live.baselineSequence }).items
+        : events;
+      Object.assign(detailData, { events: visibleEvents, eventsComplete: true, eventsError: null });
+      detailData.focus.view = state.route.filters.view || "conversation";
+      detail.load(detailData);
     } catch (error) { if (scope.current() && state.active && detailData) { detailData.eventsError = sessionQueryError(error); detail.setError?.(detailData.eventsError, { section: "events" }); } }
     finally { if (scope.current()) eventsLoading = false; }
   }

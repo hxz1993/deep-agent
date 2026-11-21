@@ -44,17 +44,24 @@ async def publication(ctx, agent_code: str):
     return await AgentService(ctx).publication(agent_code)
 
 
-def serialize_publication(row, base: str | None) -> dict:
+def serialize_publication(row, base: str | None, updated_by: str | None, profiles: dict) -> dict:
     card_url = app_card_url_template = None
     if row.enabled and base:
         card_url = address_for(base, row.code) + "/agent-card.json"
         app_card_url_template = address_for(base, row.code, "{app_id}") + "/agent-card.json"
+    profile = profiles.get(updated_by, {})
     return {
         **{key: getattr(row, key) for key in (
             "id", "name", "description", "agent_id", "scope", "enabled",
             "revision", "created_at", "updated_at",
         )},
         "agent_code": row.code,
+        "updated_by": updated_by,
+        "updated_by_user": {
+            "id": updated_by,
+            "username": profile.get("username"),
+            "display_name": profile.get("display_name") or profile.get("username"),
+        } if updated_by else None,
         "card_url": card_url,
         "app_card_url_template": app_card_url_template,
     }
@@ -62,9 +69,11 @@ def serialize_publication(row, base: str | None) -> dict:
 
 @router.get("/publications", dependencies=admin)
 async def list_publications(ctx: AppContextDep, request: Request, user: RequestUserDep):
-    rows = await PublicationStore(ctx.db_session_factory).list()
-    base = await ctx.agent_service_address.for_admin(request, user) if any(row.enabled for row in rows) else None
-    return [serialize_publication(row, base) for row in rows]
+    rows = await PublicationStore(ctx.db_session_factory).list_with_updaters()
+    base = await ctx.agent_service_address.for_admin(request, user) if any(row.enabled for row, _ in rows) else None
+    actors = {actor for _, actor in rows if actor}
+    profiles = await caller_profiles(request, user, actors) if actors else {}
+    return [serialize_publication(row, base, actor, profiles) for row, actor in rows]
 
 
 @router.get("/applications", dependencies=admin)
@@ -77,35 +86,39 @@ async def list_apps(request: Request, user: RequestUserDep):
 
 @router.get("/publications/{agent_code}", dependencies=admin)
 async def get_publication(ctx: AppContextDep, agent_code: AgentCode, request: Request, user: RequestUserDep):
-    row = await publication(ctx, agent_code)
-    return await publication_response(ctx, row, request, user)
+    record = await PublicationStore(ctx.db_session_factory).get_with_updater(agent_code)
+    if record is None:
+        raise HTTPException(404, "发布不存在")
+    row, actor = record
+    return await publication_response(ctx, row, request, user, actor)
 
 
-async def publication_response(ctx, row, request: Request, user: str) -> dict:
+async def publication_response(ctx, row, request: Request, user: str, actor: str | None) -> dict:
     base = await ctx.agent_service_address.for_admin(request, user) if row.enabled else None
-    return serialize_publication(row, base)
+    profiles = await caller_profiles(request, user, {actor}) if actor else {}
+    return serialize_publication(row, base, actor, profiles)
 
 
 @router.post("/publications", status_code=201, dependencies=admin)
 async def create_publication(ctx: AppContextDep, body: PublicationCreate, request: Request, user: RequestUserDep):
     try:
         async with task_store(ctx).admission:
-            row = await PublicationStore(ctx.db_session_factory).create(body)
+            row = await PublicationStore(ctx.db_session_factory).create(body, updated_by=user)
     except ReferenceConflict as exc:
         raise HTTPException(409, str(exc)) from exc
-    return await publication_response(ctx, row, request, user)
+    return await publication_response(ctx, row, request, user, user)
 
 
 @router.patch("/publications/{agent_code}", dependencies=admin)
 async def edit_publication(ctx: AppContextDep, agent_code: AgentCode, body: PublicationPatch, request: Request, user: RequestUserDep):
     async with task_store(ctx).admission:
         try:
-            row = await PublicationStore(ctx.db_session_factory).update(agent_code, body)
+            row = await PublicationStore(ctx.db_session_factory).update(agent_code, body, updated_by=user)
         except ReferenceConflict as exc:
             raise HTTPException(409, str(exc)) from exc
     if row is None:
         raise HTTPException(404, "发布不存在")
-    return await publication_response(ctx, row, request, user)
+    return await publication_response(ctx, row, request, user, user)
 
 
 @router.delete("/publications/{agent_code}", status_code=204, dependencies=admin)

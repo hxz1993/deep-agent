@@ -24,6 +24,7 @@ Sandbox Worker 仍只使用受控的 `src`，禁止继承宿主的任意 `PYTHON
 全量保留为手动 `--suite all`；脚本无参数仍默认 all，包含 Python 与 Console，调用时明确选择；
 `--suite quick` 仅为显式纯逻辑清单加 Console 全量，不能替代完整验收。
 `--list` 只显示选测原因，`--durations` 默认 20，可选 JSON 写忽略的 `output/TMP to delete.../`。
+跨版本 Agent 包 HTTP 矩阵用当前解释器启动新服务。旧 Git 快照应通过已有的 `DEEP_AGENT_TEST_LEGACY_PYTHON` 指向符合其依赖的解释器，避免用当前 SDK 启动旧服务。
 显式领域清单在 `helpers/test_groups.json`；新增／移动相关测试需同步清单，未知生产路径、
 共享入口、数据库、依赖、删除或无法确定消费者的 helper 一律全量，不按目录名猜成本。
 
@@ -90,7 +91,7 @@ tests/
 | `test_ptc_stream_failures.py` | 真实 SDK/Monty + 隔离 SQLite：PTC 连续失败后原生恢复、嵌套等待取消、Provider异常及普通工具重试耗尽的 SSE/History/Registry 闭环 |
 | `test_event_persister.py`、`test_runner_history.py` | 写入失败回执与超时释放、显式关闭 SDK 流后部分历史保存、终态写入失败不覆盖原始错误 |
 | `test_sandbox_*.py` | Python公网及内网HTTP可达性、FileStore输入、`deepagent_files`产物发布、回滚、依赖探针与子进程清理 |
-| `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、六Provider校验、Key掩码/保留和草稿测试 |
+| `test_global_settings.py` | 运行设置安全白名单、Web Search唯一配置、供应商校验、Key掩码/保留和草稿测试 |
 | `test_web_tools.py`、`test_web_proxy_compat.py` | `builtin:web`目录、视觉模型条件注入、HTML图片位置与URL规范化、固定Provider无降级、SSRF-safe Fetch/Image边界及HTTP代理fake-IP/SNI兼容 |
 | `test_console_admin_auth.py` | 企业管理员放行、普通用户与固定admin拒绝、401/503、凭证缓存、管理路由审计和运行接口开放边界 |
 | `test_builtin_mcp_config.py` | builtin MCP 配置规范化 |

@@ -1,8 +1,8 @@
 import { sessionLoadingHtml, prepareSessionRender, setSessionLoading } from "./session-loading.js?v=20260918-release01012";
 import { savedRunPresentation, sessionStatusLabels as statusLabels, renderContextReferenceContent as contextReferenceContent } from "./session-presentation.js?v=20261106-ptc-source";
-import { createConversationPresenter } from "./conversation-presenter.js?v=remote-tool-card-labels";
+import { createConversationPresenter } from "./conversation-presenter.js?v=diagnostic-run-observer";
 import { projectConversationItems, sortConversationItems } from "./conversation-items.js?v=20261103-view-image1";
-import { applyAssistantPresentationActions } from "./assistant-presentation.js?v=20261103-view-image1";
+import { applyAssistantPresentationActions, assistantActionsFromSse } from "./assistant-presentation.js?v=20261103-view-image1";
 import { createTrajectoryController } from "./trajectory.js?v=20261106-ptc-source";
 import { centerInScrollContainer } from "./scroll.js?v=20260915-scroll-focus";
 import { eventEffort, historyEffort } from "./reasoning-ui.js?v=0160";
@@ -58,6 +58,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   const state = { sessionId: null, conversationId: null };
   let data = { session: {}, history: { items: [] }, events: [], users: {} };
   let presenters = [];
+  let liveAssistant = null;
   let renderedRows = [];
   let selectedReference = null;
   let inspectorTab = "session";
@@ -132,7 +133,34 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     button.title = visible ? "隐藏详情" : "显示详情";
   }
 
+  function clearLiveAssistant() {
+    liveAssistant?.dispose();
+    liveAssistant?.row.remove();
+    liveAssistant = null;
+  }
+
+  function ingestLiveFrame(frame) {
+    if (disposed) return;
+    trajectory.ingest(frame);
+    const actions = assistantActionsFromSse(frame.event, frame.data);
+    if (!actions.length) return;
+    const atEnd = messages.scrollHeight - messages.clientHeight - messages.scrollTop < 48;
+    if (!liveAssistant) {
+      messages.querySelector(".empty-state")?.remove();
+      liveAssistant = conversation.createAssistantMessage(null, null, null, {
+        live: true,
+        startedAt: data.session.active_run?.started_at,
+        allowDeferred: false,
+        autoAttachDeferred: false,
+      });
+      liveAssistant.row.dataset.diagnosticLiveRun = frame.run_id;
+    }
+    applyAssistantPresentationActions(liveAssistant, actions);
+    if (atEnd && currentView === "conversation") messages.scrollTop = messages.scrollHeight;
+  }
+
   function renderConversation() {
+    clearLiveAssistant();
     presenters.forEach((presenter) => presenter.dispose()); presenters = []; renderedRows = [];
     messages.replaceChildren();
     let day = "";
@@ -254,12 +282,14 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     if (!sameSession) { inspectorTab = "session"; selectedRunId = null; selectedReference = null; lastFocusKey = null; }
     role("chatTitle").textContent = data.session.title || data.session.name || "未命名会话";
     role("sessionBadge").textContent = formatSessionIdSubtitle(state.sessionId);
-    find("[data-detail-refresh]").title = ["running", "pending", "waiting", "awaiting_input"].includes(data.session.latest_status) ? "仅展示已保存内容，点击刷新更新" : "刷新会话";
+    find("[data-detail-refresh]").title = "刷新会话";
     showNotice();
     // Context/profile refreshes reuse the same history: keep existing message DOM
     // and disclosure state instead of parsing every long reply again.
     if (historyChanged) renderConversation();
-    if (eventsChanged) trajectory.setHistory({ session_id: state.sessionId, items: data.events }, { preserveView: Boolean(previous) });
+    if (eventsChanged) trajectory.setHistory({ session_id: state.sessionId, items: [...data.events] }, {
+      preserveView: Boolean(previous), preserveLive: next.preserveLive === true && sameSession,
+    });
     if (historyChanged) trajectory.setConversationHistory(data.history.items || []);
     trajectory.setExportReady(next.eventsComplete === true && !next.eventsError);
     if (previous) restore(previous); else { currentView = "conversation"; trajectory.selectView("conversation", { notify: false }); renderInspector(); }
@@ -386,6 +416,7 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
   function destroy() {
     if (disposed) return; disposed = true;
     clearTimeout(copyFeedbackTimer);
+    clearLiveAssistant();
     presenters.forEach((presenter) => presenter.dispose()); presenters = []; renderedRows = [];
     trajectory.destroy(); disposeImagePreviews(); disposeViewImagePreviews(); listeners.splice(0).forEach((remove) => remove());
     if (imageDialog.open) imageDialog.close();
@@ -395,5 +426,5 @@ export function createReadonlySessionView({ root, onBack = () => {}, onRefresh =
     root.replaceChildren(); root.classList.remove("diagnostic-session-detail");
   }
   renderInspector(); refreshIcons();
-  return { load, focus, snapshot, restore, setLoading, prepareRender, setError, destroy };
+  return { load, focus, snapshot, restore, setLoading, prepareRender, setError, ingestLiveFrame, destroy };
 }

@@ -1,6 +1,5 @@
 const WEB_SEARCH_PROVIDERS = {
   deepseek: { label: "DeepSeek", requiresKey: true, llmProviderType: "deepseek" },
-  kimi: { label: "Kimi", requiresKey: true, llmProviderType: "moonshotai" },
   tavily: { label: "Tavily", requiresKey: true },
   exa: { label: "Exa", requiresKey: true },
   you: { label: "You.com", requiresKey: true },
@@ -208,12 +207,12 @@ function renderWebSearchLlmProviderOptions(provider, selectedId = "") {
 }
 
 function webSearchFetchMode(provider, requestedMode) {
-  return ["deepseek", "kimi"].includes(provider) && requestedMode === "follow_search" ? "follow_search" : "system";
+  return provider === "deepseek" && requestedMode === "follow_search" ? "follow_search" : "system";
 }
 
 function updateWebFetchMode() {
   const provider = selectedWebSearchProvider();
-  const supportsFollow = ["deepseek", "kimi"].includes(provider);
+  const supportsFollow = provider === "deepseek";
   document.getElementById("webFetchFollowOption")?.classList.toggle("hidden", !supportsFollow);
   const requested = document.querySelector('input[name="webFetchMode"]:checked')?.value;
   const mode = webSearchFetchMode(provider, requested);
@@ -358,7 +357,7 @@ function resetWebSearchApiKey(provider) {
 function renderWebSearchSettings(settings) {
   const value = settings?.value || {};
   const provider = value.mode === "provider" && WEB_SEARCH_PROVIDERS[value.provider] ? value.provider : "";
-  const category = provider ? (["deepseek", "kimi"].includes(provider) ? provider : "third-party") : "unconfigured";
+  const category = provider ? (provider === "deepseek" ? provider : "third-party") : "unconfigured";
   document.querySelectorAll('input[name="webSearchCategory"]').forEach(input => { input.checked = input.value === category; });
   const providerInput = document.getElementById("webSearchProvider");
   if (providerInput) providerInput.value = category === "third-party" ? provider : "tavily";

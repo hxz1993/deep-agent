@@ -36,6 +36,24 @@ function setup(apiFetch) {
   return { refresh: window.agentServiceAdmin.refresh, element, poll: () => tick() };
 }
 
+test("最近更新优先显示操作人的平台名称，查不到时显示账号 ID", async () => {
+  const ui = setup(async path => {
+    if (path.endsWith("/publications")) return [
+      publication,
+      { ...publication, agent_code: "named", updated_by: "actor-1",
+        updated_by_user: { username: "operator", display_name: "平台操作人" } },
+      { ...publication, agent_code: "id-only", updated_by: "actor-2" },
+    ];
+    if (path.includes("/tasks?")) return { items: [], total: 0 };
+    return [];
+  });
+  await ui.refresh();
+  const rows = ui.element("agentPublicationRows").innerHTML;
+  assert.match(rows, /更新人：平台操作人/);
+  assert.match(rows, /更新人：actor-2/);
+  assert.match(rows, /更新人：未记录/);
+});
+
 test("both A2A card modes supply copyable headers for RPC", async () => {
   const ui = setup(async path => {
     if (path.endsWith("/publications")) return [publication];

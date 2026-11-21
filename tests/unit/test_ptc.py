@@ -651,7 +651,7 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("independent small lookup/action", descriptions[0])
         self.assertIn("fresh model interpretation or semantic judgment", descriptions[0])
         self.assertIn("Python syntax alone does not require execute_python", descriptions[0])
-        self.assertIn("web_fetch returns an object with url, title and content", descriptions[0])
+        self.assertIn("web_fetch returns Markdown in content", descriptions[0])
         self.assertIn("`search_tools` is native-only", descriptions[0])
         self.assertIn("Tool discovery and schema inspection", descriptions[0])
         self.assertNotIn("one tool's result feeds another", descriptions[0])

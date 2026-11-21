@@ -13,6 +13,12 @@ from deep_agent.structured_output.validation import validate_output
 OUTPUT_NAME = "publication_result"
 MAX_OUTPUT_BYTES = 256 * 1024
 PublicationProtocol = Literal["a2a", "mcp", "http"]
+PUBLICATION_UI_INSTRUCTIONS = (
+    "In this A2A or MCP published run, interactive UI tools are unavailable. "
+    "If essential information or confirmation is missing, return publication_result with "
+    "status=input_required and ask for it in message. Use this path even when other instructions "
+    "tell you to use a UI tool. Continue with the user's answer when it arrives in a new message."
+)
 
 
 class PublicationReply(BaseModel):

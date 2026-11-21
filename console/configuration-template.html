@@ -460,10 +460,12 @@
                   <button type="button" data-service-app-scope="selected" aria-pressed="false">指定应用</button>
                 </div>
               </div>
-              <p class="agent-service-scope-hint" id="agentPublicationAllAppsHint">调用方可使用其有权访问的应用，每次请求仍须指定一个应用。</p>
-              <div class="agent-service-app-choices" id="agentPublicationAppControls" role="group" aria-label="允许的应用" hidden>
-                <div id="agentPublicationAppTags"></div>
-                <button type="button" class="btn text compact agent-service-add-app" id="addAgentPublicationApp"><i data-lucide="plus" aria-hidden="true"></i>添加允许的应用</button>
+              <div class="agent-service-scope-content">
+                <p class="agent-service-scope-hint" id="agentPublicationAllAppsHint">调用方可使用其有权访问的应用，每次请求仍须指定一个应用。</p>
+                <div class="agent-service-app-choices" id="agentPublicationAppControls" role="group" aria-label="允许的应用" hidden>
+                  <div id="agentPublicationAppTags"></div>
+                  <button type="button" class="btn text compact agent-service-add-app" id="addAgentPublicationApp"><i data-lucide="plus" aria-hidden="true"></i>添加允许的应用</button>
+                </div>
               </div>
             </section>
             <section class="agent-service-auth" aria-labelledby="agentPublicationAuthTitle">
@@ -511,10 +513,10 @@
                 <thead><tr><th scope="col">能力</th><th scope="col">A2A</th><th scope="col">MCP</th><th scope="col">CLI（计划中）</th></tr></thead>
                 <tbody>
                   <tr><th scope="row">发现 Agent</th><td>读取已知地址的 Agent Card</td><td><code>list_agents</code></td><td>列出已发布 Agent</td></tr>
-                  <tr><th scope="row">发起任务</th><td><code>SendMessage</code></td><td><code>SendMessage</code>，立即返回 Task</td><td>提交任务</td></tr>
+                  <tr><th scope="row">发起任务</th><td><code>SendMessage</code></td><td><code>SendMessage</code>，默认等待 120 秒</td><td>提交任务</td></tr>
                   <tr><th scope="row">补材料 / 追问</th><td><code>SendMessage</code> 带原 <code>message.taskId</code></td><td><code>SendMessage</code> 带原 <code>message.taskId</code></td><td>继续任务或会话</td></tr>
                   <tr><th scope="row">查询结果 / 取消</th><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td>查询、等待及取消</td></tr>
-                  <tr><th scope="row">获取进度</th><td><code>SendStreamingMessage</code>、<code>SubscribeToTask</code></td><td>轮询 <code>GetTask</code></td><td>等待及查询状态</td></tr>
+                  <tr><th scope="row">获取进度</th><td><code>SendStreamingMessage</code>、<code>SubscribeToTask</code></td><td><code>GetTask</code> 可限时等待</td><td>等待及查询状态</td></tr>
                   <tr><th scope="row">发送附件</th><td><code>message.parts[].raw</code> 传 Base64 字节</td><td><code>message.parts[].raw</code> 传 Base64 字节</td><td>读取本地文件后随任务发送</td></tr>
                   <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>GetTask</code> 或 <code>get_artifact</code> 返回鉴权下载链接</td><td>读取结果并下载文件</td></tr>
                 </tbody>
@@ -582,8 +584,8 @@
                   <thead><tr><th scope="col">工具</th><th scope="col">用途</th></tr></thead>
                   <tbody>
                     <tr><th scope="row"><code>list_agents</code></th><td>查找已启用的发布及 Agent 编码</td></tr>
-                    <tr><th scope="row"><code>SendMessage</code></th><td>发起任务或回复待补充的任务，支持附件</td></tr>
-                    <tr><th scope="row"><code>GetTask</code></th><td>查看任务状态、正文、待答问题和产物</td></tr>
+                    <tr><th scope="row"><code>SendMessage</code></th><td>发起或补答任务。<code>configuration.waitSeconds</code> 默认 120 秒，传 0 立即返回。</td></tr>
+                    <tr><th scope="row"><code>GetTask</code></th><td>查看状态、回复和产物。<code>waitSeconds</code> 默认 120 秒，传 0 立即返回。超时后可用原 Task ID 继续查询。</td></tr>
                     <tr><th scope="row"><code>ListTasks</code></th><td>按发布、状态、Context ID 或更新时间筛选近期任务</td></tr>
                     <tr><th scope="row"><code>CancelTask</code></th><td>请求停止未结束的任务</td></tr>
                     <tr><th scope="row"><code>get_artifact</code></th><td>获取指定产物</td></tr>
@@ -783,10 +785,6 @@
             <label class="web-search-mode-option">
               <input type="radio" name="webSearchCategory" value="deepseek" />
               <span><img src="./assets/provider-logos/deepseek.ico" alt="" />DeepSeek</span>
-            </label>
-            <label class="web-search-mode-option">
-              <input type="radio" name="webSearchCategory" value="kimi" />
-              <span><img src="./assets/provider-logos/kimi.ico" alt="" />Kimi</span>
             </label>
             <label class="web-search-mode-option">
               <input type="radio" name="webSearchCategory" value="third-party" />

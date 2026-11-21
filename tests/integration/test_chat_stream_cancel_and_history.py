@@ -816,15 +816,19 @@ class ChatStreamCancelAndHistoryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("user_branch_point", cancelled)
 
     async def test_e7_old_deferred_invalid_after_new_message(self) -> None:
-        # repair injects ToolDenied in-memory; DB still shows pending tool_call for display.
-        # Submitting deferred_tool_results for the abandoned call must not succeed.
         session_id, tool_call_id = await self._run_hitl_pending()
 
         test_model = text_only_model("skipped")
-        await self._stream_events(
+        events = await self._stream_events(
             model=test_model,
             json_body={"session_id": session_id, "message": "放弃旧确认"},
         )
+        self.assertTrue(any(event["type"] == "session_event_appended" and event.get("persisted") is True
+                            and event.get("event", {}).get("event_type") == "user/message" for event in events))
+        history = await self._history(session_id)
+        tool = next(item for item in history["items"] if item.get("call_id") == tool_call_id)
+        self.assertEqual((tool["status"], tool["outcome"]), ("interrupted", "skipped"))
+        self.assertIsNone(tool.get("output"))
 
         await self._assert_deferred_conflict_unchanged(session_id, tool_call_id)
 

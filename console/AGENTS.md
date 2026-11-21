@@ -451,7 +451,7 @@ Console会话渲染模块边界：
 
 会话概览的 App / Space 只展示会话主表创建时保存的 `app_id / space_id`，缺失显示横杠“—”，不得用当前测试上下文兜底。当前请求的 App、Space、Language、User ID 集中在顶部“调试”按钮及其浮层中；普通会话列表和详情接口均返回原始归属。
 
-轨迹类型和详情页签仅做中文展示映射；执行状态保留原来的英文 Completed、Running、Pending、Interrupted、Failed，内部 kind、协议和原始数据保持不变；计划显示“计划”，run_code 标签保留 PTC。上下文引用保留在用户输入详情中，不再额外生成独立 CONTEXT 轨迹行。
+轨迹列表状态和状态说明使用英文，时刻和耗时右对齐，状态统一左对齐。右侧详情正文沿用原有中英文文案，包括「Token 用量」「缓存统计」和「思考过程」。类型徽标沿用中文，run_code 保留 PTC，业务正文与原始字段保持原文。上下文引用保留在用户输入详情中，不再额外生成独立 CONTEXT 轨迹行。
 
 空值按字段保留既有中文或横杠及原有字体颜色，不统一替换为 `No`，数值 0 保留。会话概览只显示 Agent 名称，隐藏内部 Agent ID；不展示后台 Token 估算方式。聊天正文统一 12px。
 
@@ -689,7 +689,7 @@ Agent 更新人由服务端批量返回 `updated_by_user.username`，缺失时�
 
 ### 失败 Run 的实时轨迹一致性（2026-10-22）
 
-持久化助手按 `run_id + source.message_ordinal` 标识响应；首个事实替换同 Run 最早未替换的直播助手，即使 error/cancelled 已关闭其 active 指针。该响应后续 Part 或状态更新只更新原行，不能删除下一 Loop。失败、停止及完成的纯思考响应分别显示“模型响应失败／已停止／模型思考”，仅运行中显示“模型处理中”；原思考与状态事实保持。行为回归见 `trajectory-facts.test.mjs`。
+持久化助手按 `run_id + source.message_ordinal` 标识响应；首个事实替换同 Run 最早未替换的直播助手，即使 error/cancelled 已关闭其 active 指针。该响应后续 Part 或状态更新只更新原行，不能删除下一 Loop。失败、停止、完成与运行中的纯思考响应分别显示 Model response failed、Interrupted、Model reasoning、Model processing。行为回归见 `trajectory-facts.test.mjs`。
 
 ### UI 续跑工具配对（2026-10-23）
 

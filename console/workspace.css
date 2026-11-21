@@ -634,7 +634,17 @@ html, body {
 .trajectory-kind.planning { background: #e7f7f4; color: #078573; }
 .trajectory-kind.deferred { background: #fff5df; color: #b45309; }
 .trajectory-kind.error { background: var(--danger-soft); color: var(--danger-text); }
-.trajectory-row-meta { font-size: 12px; line-height: 18px; display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding-left: 8px; white-space: nowrap; }
+.trajectory-row-meta {
+  font-size: 12px;
+  line-height: 18px;
+  display: grid;
+  grid-template-columns: max-content 7.25em;
+  align-items: center;
+  gap: 7px;
+  padding-left: 8px;
+  white-space: nowrap;
+}
+.trajectory-row-meta > :is(time, .trajectory-duration) { justify-self: end; }
 .trajectory-row-meta time { display: block; line-height: 18px; color: var(--text-faint); font-family: var(--mono); font-size: 12px; }
 .trajectory-duration { display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; min-width: 78px; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 .trajectory-duration i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
@@ -643,7 +653,7 @@ html, body {
 .trajectory-duration.elevated { color: var(--duration-elevated); }
 .trajectory-duration.slow { color: var(--duration-slow); }
 .trajectory-duration.unknown { color: var(--text-faint); }
-.trajectory-row-meta em { display: block; line-height: 18px; font-size: 12px; font-style: normal; color: var(--text-faint); }
+.trajectory-row-meta em { display: block; line-height: 18px; font-size: 12px; font-style: normal; color: var(--text-faint); text-align: left; }
 .trajectory-row-meta em.failed { color: var(--danger); }
 .trajectory-row-meta em.running,
 .trajectory-row-meta em.pending { color: #b45309; }
@@ -2504,7 +2514,7 @@ html, body {
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  font: 12px/1 var(--font);
+  font: 12px/16px var(--font);
 }
 .composer-model-trigger:hover:not(:disabled),
 .composer-model-picker.open .composer-model-trigger { background: var(--bg-hover); box-shadow: none; color: var(--text); }

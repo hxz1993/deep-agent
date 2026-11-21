@@ -26,6 +26,10 @@ function renderHarness() {
       if (this.parentNode) this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1);
       this.parentNode = null;
     }
+    matches(selector) {
+      const selectors = { date: ".date-separator", user: ".msg-row.user", assistant: ".assistant-answer" };
+      return selector.split(", ").includes(selectors[this.kind]);
+    }
     get lastElementChild() { return this.children.at(-1); }
   }
   const messages = new Element("messages");
@@ -51,7 +55,7 @@ function renderHarness() {
   vm.createContext(context);
   const fn = source.slice(source.indexOf("function renderHistory("), source.indexOf("\nfunction restoreHistoryDisclosure("));
   vm.runInContext(`${fn}\nthis.render = renderHistory;`, context);
-  return { ...context, messages, calls };
+  return { ...context, Element, messages, calls };
 }
 
 test("History structural comparison preserves full values without serialized copies or key-order churn", () => {
@@ -78,6 +82,28 @@ test("unchanged history preserves exact rows, disclosure and pending form DOM", 
   assert.equal(h.messages.children.at(-1).draft, "not submitted");
   assert.equal(h.state.assistantPresenter.options.allowDeferred, false);
   assert.equal(h.state.historyRendered.some(record => "signature" in record), false);
+});
+
+test("authoritative history replaces the live copy of a turn without removing system notices", () => {
+  const h = renderHarness();
+  h.render(history());
+  const existing = [...h.messages.children];
+  const liveNodes = ["date", "user", "assistant"].map(kind => new h.Element(kind));
+  const notice = new h.Element("system");
+  [...liveNodes, notice].forEach(node => h.messages.appendChild(node));
+  const liveReply = liveNodes.at(-1);
+  const ended = [...history(),
+    { item_id: "next-user", kind: "user_message", text: "下一轮", created_at: "2026-09-08T00:00:02Z", order: { sequence: 3 } },
+    { item_id: "next-assistant", kind: "assistant_message", text: "完成", phase: "final",
+      status: "completed", created_at: "2026-09-08T00:00:03Z", order: { sequence: 4 } },
+  ];
+  h.state.assistantPresenter = { row: liveReply, dispose() { liveReply.disposed = true; } };
+  h.render(ended, { updating: true });
+  assert.deepEqual(h.messages.children.map(node => node.kind), ["date", "user", "assistant", "user", "assistant", "system"]);
+  assert.deepEqual(h.messages.children.slice(0, 3), existing);
+  assert.equal(h.messages.children.at(-1), notice);
+  assert.ok(liveNodes.every(node => !node.parentNode));
+  assert.equal(liveReply.disposed, true);
 });
 
 test("a changed assistant projection preserves scroll and draft outside it", () => {

@@ -33,8 +33,8 @@ def event(
     *,
     message: object | None = None,
     status: str | None = None,
-    run_id: str = "run-1",
-    turn_id: str = "run-1",
+    run_id: str | None = "run-1",
+    turn_id: str | None = "run-1",
 ) -> dict[str, object]:
     payload = {"message": serialize_message(message)} if message is not None else {}
     return {
@@ -235,6 +235,24 @@ class ConversationProjectorTests(unittest.TestCase):
         self.assertEqual(tool.kind, "tool")
         self.assertEqual(tool.mode, "deferred")
         self.assertEqual(tool.status, "interrupted")
+
+    def test_new_input_closes_legacy_pending_tool_without_turn_or_run_id(self) -> None:
+        pending = event(
+            1, "assistant/message", status="pending", run_id=None, turn_id=None,
+            message=ModelResponse(parts=[
+                ToolCallPart(tool_name="builtin__confirm", args={"message": "继续？"}, tool_call_id="old-call"),
+            ]),
+        )
+        next_input = event(
+            2, "user/message", run_id=None, turn_id=None,
+            message=ModelRequest(parts=[StoredUserPromptPart(content="换个问题")]),
+        )
+
+        tool = next(item for item in project_session_events([pending, next_input]).items if item.kind == "tool")
+
+        self.assertEqual(tool.status, "interrupted")
+        self.assertEqual(tool.outcome, "skipped")
+        self.assertIsNone(tool.widget)
 
     def test_interrupted_assistant_closes_unfinished_tool_in_same_run(self) -> None:
         interrupted = event(

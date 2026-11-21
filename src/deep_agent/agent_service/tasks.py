@@ -378,10 +378,13 @@ class TaskStore:
         finally:
             entry.subscribers.discard(queue)
 
-    async def wait(self, entry: Entry) -> wire.Task:
-        if entry.worker is not None:
-            await asyncio.shield(asyncio.gather(entry.worker, return_exceptions=True))
-        return entry.snapshot()
+    async def wait(self, entry: Entry, *, timeout: float | None = None,
+                   history_length: int | None = None) -> wire.Task:
+        worker = entry.worker
+        if worker is not None and timeout != 0:
+            # The request observes the worker. Its timeout or cancellation does not stop the task.
+            await asyncio.wait((worker,), timeout=timeout)
+        return entry.snapshot(history_length)
 
     def page(self, owner: Owner, params: wire.ListTasksRequest) -> wire.ListTasksResponse:
         self.prune()

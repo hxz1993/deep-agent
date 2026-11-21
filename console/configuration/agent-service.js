@@ -33,7 +33,7 @@
     `<button type="button" class="btn ${variant}" data-client-copy="${attr(value)}" aria-label="${attr(accessibleLabel)}">${label}</button>`;
 
   function publicationUpdate(row) {
-    const operator = row.updated_by_user?.username || row.updated_by || "未记录";
+    const operator = row.updated_by_user?.display_name || row.updated_by_user?.username || row.updated_by || "未记录";
     const time = formatDate(row.updated_at);
     return `<div class="agent-update-cell">
       <span class="agent-updater" title="更新人：${attr(operator)}">${icon("user-round")}<span class="agent-updater-name">${escapeHtml(operator)}</span></span>

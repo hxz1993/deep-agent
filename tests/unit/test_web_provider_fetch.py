@@ -21,29 +21,31 @@ class ProviderFetchTests(unittest.IsolatedAsyncioTestCase):
         return WebSearchRuntimeConfig(mode='provider', provider=provider,
                                      api_key='fixture-secret', fetch_mode='follow_search', **kw)
 
-    async def test_both_supplier_shapes_keep_full_markdown_and_metadata(self):
+    async def test_native_response_keeps_full_markdown_and_metadata(self):
         original = httpx2.AsyncClient
         content = '# 中文\n![image1](https://example.org/img.png)\n' + '😀尾部' * 30000
-        for provider, field in [('deepseek', 'content'), ('kimi', 'markdown')]:
-            requests = []
-            def respond(request):
-                requests.append(request)
-                self.assertEqual(request.url.path, '/gateway/v1/tools/fetch')
-                self.assertEqual(json.loads(request.content), {'url': 'https://example.org/page'})
-                self.assertEqual(request.headers['authorization'], 'Bearer fixture-secret')
-                return httpx2.Response(200, json={'title': '网页标题', field: content})
-            with patch('deep_agent.web.runtime.validate_and_resolve_url', new=AsyncMock()) as validate, patch(
-                'deep_agent.web.provider_api.httpx2.AsyncClient',
-                side_effect=lambda **kw: original(**kw, transport=httpx2.MockTransport(respond)),
-            ):
-                result = await _provider_web_fetch_tool(self.config(provider, base_url='https://gateway.invalid/gateway/v1')).function('https://example.org/page')
-            self.assertEqual(len(requests), 1)
-            validate.assert_awaited_once_with('https://example.org/page', allow_local=False)
-            self.assertEqual(result.return_value['content'], content)
-            self.assertEqual(result.metadata['sources'][0]['url'], 'https://example.org/page')
-            self.assertEqual(result.metadata['web_fetch']['provider'], provider)
-            self.assertFalse(result.metadata['web_fetch']['truncated'])
-            self.assertTrue(result.return_value['untrusted_external_content'])
+        provider, field = "deepseek", "content"
+        requests = []
+        payload = {'title': '网页标题', field: content, 'vendor_field': 42}
+
+        def respond(request):
+            requests.append(request)
+            self.assertEqual(request.url.path, '/gateway/v1/tools/fetch')
+            self.assertEqual(json.loads(request.content), {'url': 'https://example.org/page'})
+            self.assertEqual(request.headers['authorization'], 'Bearer fixture-secret')
+            return httpx2.Response(200, json=payload)
+        with patch('deep_agent.web.runtime.validate_and_resolve_url', new=AsyncMock()) as validate, patch(
+            'deep_agent.web.provider_api.httpx2.AsyncClient',
+            side_effect=lambda **kw: original(**kw, transport=httpx2.MockTransport(respond)),
+        ):
+            result = await _provider_web_fetch_tool(self.config(provider, base_url='https://gateway.invalid/gateway/v1')).function('https://example.org/page')
+        self.assertEqual(len(requests), 1)
+        validate.assert_awaited_once_with('https://example.org/page', allow_local=False)
+        self.assertEqual(result.return_value, payload)
+        self.assertEqual(result.metadata['sources'][0]['url'], 'https://example.org/page')
+        self.assertEqual(result.metadata['web_fetch']['provider'], provider)
+        self.assertFalse(result.metadata['web_fetch']['truncated'])
+        self.assertTrue(result.metadata['web_content_untrusted'])
 
     async def test_rejects_private_credentialed_or_invalid_url_before_supplier_call(self):
         for url in ['http://127.0.0.1/', 'http://169.254.169.254/latest/meta-data',
@@ -144,29 +146,29 @@ class ProviderFetchTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ToolFailed):
                     await _provider_web_fetch_tool(self.config()).function('https://example.org/page')
 
-    async def test_same_agent_tool_names_and_both_supplier_search_then_fetch(self):
-        for provider in ('deepseek', 'kimi'):
-            calls=[]
-            def model(messages, info):
-                self.assertIn('web_fetch',[tool.name for tool in info.function_tools])
-                calls.append(True)
-                if len(calls)==1:
-                    return ModelResponse(parts=[ToolCallPart('web_search', {'query':'docs'}, 'search')])
-                if len(calls)==2:
-                    return ModelResponse(parts=[ToolCallPart('web_fetch', {'url':'https://example.org/page'}, 'fetch')])
-                results=[p for m in messages for p in m.parts if isinstance(p,ToolReturnPart)]
-                self.assertTrue(any('source body' in str(p.content) for p in results))
-                return ModelResponse(parts=[TextPart('[来源](https://example.org/page)')])
-            from pydantic_ai.messages import ToolReturn
-            with patch('deep_agent.web.runtime.execute_provider_search', new=AsyncMock(return_value=ToolReturn(return_value={'url':'https://example.org/page'}))), patch(
-                'deep_agent.web.runtime.validate_and_resolve_url', new=AsyncMock()), patch(
-                f'deep_agent.web.runtime.execute_{provider}_fetch', new=AsyncMock(return_value={'title':'Docs','content':'source body'})):
-                result=await Agent(FunctionModel(model), toolsets=[build_web_runtime(self.config(provider)).toolset]).run('search then fetch')
-                self.assertIn('来源',result.output)
-            self.assertEqual(len(calls),3)
+    async def test_same_agent_can_search_then_fetch(self):
+        calls=[]
+        fetch_result = {'title': 'Docs', 'content': 'source body'}
+        def model(messages, info):
+            self.assertIn('web_fetch',[tool.name for tool in info.function_tools])
+            calls.append(True)
+            if len(calls)==1:
+                return ModelResponse(parts=[ToolCallPart('web_search', {'query': 'docs'}, 'search')])
+            if len(calls)==2:
+                return ModelResponse(parts=[ToolCallPart('web_fetch', {'url':'https://example.org/page'}, 'fetch')])
+            results=[p for m in messages for p in m.parts if isinstance(p,ToolReturnPart)]
+            self.assertEqual(next(p.content for p in results if p.tool_name == 'web_fetch'), fetch_result)
+            return ModelResponse(parts=[TextPart('[来源](https://example.org/page)')])
+        from pydantic_ai.messages import ToolReturn
+        with patch('deep_agent.web.runtime.execute_provider_search', new=AsyncMock(return_value=ToolReturn(return_value={'url':'https://example.org/page'}))), patch(
+            'deep_agent.web.runtime.validate_and_resolve_url', new=AsyncMock()), patch(
+            'deep_agent.web.runtime.execute_deepseek_fetch', new=AsyncMock(return_value=fetch_result)):
+            result=await Agent(FunctionModel(model), toolsets=[build_web_runtime(self.config()).toolset]).run('search then fetch')
+            self.assertIn('来源',result.output)
+        self.assertEqual(len(calls),3)
 
     def test_gateway_and_official_paths(self):
-        for base, expected in [(None,'https://api.moonshot.cn/v1/tools/fetch'),
+        for base, expected in [(None,'https://api.deepseek.com/v1/tools/fetch'),
                                ('https://gateway.example/prefix/v1','https://gateway.example/prefix/v1/tools/fetch'),
                                ('https://gateway.example/prefix/v1/tools/search','https://gateway.example/prefix/v1/tools/fetch')]:
-            self.assertEqual(tool_endpoint(base, default='https://api.moonshot.cn/v1', tool='fetch'),expected)
+            self.assertEqual(tool_endpoint(base, default='https://api.deepseek.com/v1', tool='fetch'),expected)

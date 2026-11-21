@@ -436,7 +436,7 @@ test("General 刷新仅更新摘要，不重绘已开编辑草稿和保存中的
   h.get("documentParsingSettingsDialog").open = true;
   h.get("webSearchApiKey").value = "unsaved search key";
   h.get("documentParsingApiKey").value = "unsaved document key";
-  const savedSearch = { value: { mode: "provider", provider: "kimi" } };
+  const savedSearch = { value: { mode: "provider", provider: "deepseek" } };
   const savedDocument = { value: { mode: "provider", provider: "paddle" }, providers: [] };
   admin.webSearch = savedSearch;
   admin.documentParsing = savedDocument;

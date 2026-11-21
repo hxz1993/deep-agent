@@ -32,6 +32,7 @@ from deep_agent.capabilities import build_registry
 from deep_agent.capabilities.ui.builtin import builtin_ui_records
 from deep_agent.capabilities.ui.registry import build_external_toolset
 from deep_agent.core.context import AppContext, init_context, reset_context
+from deep_agent.security import ConsoleAdminAccess
 from deep_agent.skills.runtime import SkillRuntimeLibrary
 from tests.helpers.request_identity import TEST_USER_ID
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
@@ -39,7 +40,7 @@ from tests.unit.test_context_compaction import valid_summary
 
 
 class _StreamingRequest:
-    def __init__(self, app, path, *, method="GET", query=None, body=None):
+    def __init__(self, app, path, *, method="GET", query=None, body=None, user=TEST_USER_ID):
         self.incoming, self.outgoing = asyncio.Queue(), asyncio.Queue()
         self.buffer = ""
         raw = json.dumps(body).encode() if body is not None else b""
@@ -47,7 +48,7 @@ class _StreamingRequest:
         scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
                  "http_version": "1.1", "method": method, "scheme": "http", "path": path,
                  "raw_path": path.encode(), "root_path": "", "query_string": urlencode(query or {}).encode(),
-                 "headers": [(b"user", TEST_USER_ID.encode()), (b"content-type", b"application/json")],
+                 "headers": [(b"user", user.encode()), (b"content-type", b"application/json")],
                  "server": ("test", 80), "client": ("127.0.0.1", 12345)}
         self.task = asyncio.create_task(app(scope, self.incoming.get, self.outgoing.put))
 
@@ -120,6 +121,40 @@ class SessionLiveApiTests(unittest.IsolatedAsyncioTestCase):
         request = _StreamingRequest(self.app, path or f"/api/v1/sessions/{self.session}/live", **kwargs)
         self.requests.append(request)
         return request
+
+    async def test_diagnostic_live_read_requires_admin_and_keeps_original_owner(self):
+        path = f"/api/v1/diagnostics/sessions/{self.session}/live"
+        self.ctx.session_live.begin(self.key, "diagnostic-run", baseline_sequence=1)
+        self.ctx.session_live.publish(self.key, "diagnostic-run", "text", {"delta": "observed text"})
+        with patch.object(
+            self.ctx.console_admin_authorizer, "access_for", return_value=ConsoleAdminAccess(allowed=False),
+        ):
+            forbidden = await self.http.get(path, params={"run_id": "diagnostic-run"})
+            self.assertEqual(forbidden.status_code, 403)
+        with patch.object(
+            self.ctx.console_admin_authorizer, "access_for", return_value=ConsoleAdminAccess(allowed=True),
+        ):
+            stale = await self.http.get(path, params={"run_id": "different-run"})
+            self.assertEqual(stale.status_code, 409)
+            before_stream = self.ctx.active_runs.register(
+                agent_id=self.agent_id, session_id=self.session, user_id=TEST_USER_ID,
+                conversation_id="diagnostic-conversation", run_id="setting-up",
+            )
+            try:
+                preparing = await self.http.get(path, params={"run_id": "setting-up"})
+                self.assertEqual(preparing.status_code, 503)
+            finally:
+                self.ctx.active_runs.unregister(before_stream)
+            observer = self._request(path, query={"run_id": "diagnostic-run"}, user="different-admin")
+            self.assertEqual((await observer.started())["status"], 200)
+            event, sync = await observer.frame()
+            self.assertEqual((event, sync["session_id"], sync["baseline_sequence"]),
+                             ("observation_sync", self.session, 1))
+            event, frame = await observer.frame()
+            self.assertEqual((event, frame["event"], frame["data"]["delta"]),
+                             ("observation", "text", "observed text"))
+            self.ctx.session_live.end(self.key, "diagnostic-run")
+            self.assertEqual((await observer.frame())[0], "observation_end")
 
     async def test_auth_missing_nonowner_wrong_agent_and_unknown_session(self):
         self.ctx.session_live.begin(self.key, "active")

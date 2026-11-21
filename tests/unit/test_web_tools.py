@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import ssl
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx2
-from pydantic_ai import ModelRetry, Tool, ToolFailed
-from pydantic_ai.messages import ToolReturn
+from pydantic_ai import Agent, ModelRetry, Tool, ToolFailed
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturn, ToolReturnPart
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.toolsets import CombinedToolset, FunctionToolset
 
 from deep_agent.ptc.file_payload import CODE_MODE_METADATA_KEY
 from deep_agent.web.package import build_web_tool_package
 from deep_agent.web.runtime import (
-    _search_duckduckgo,
-    _search_tavily,
     _html_to_markdown,
     _web_fetch_tool,
     build_web_runtime,
@@ -167,15 +167,23 @@ class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(ModelRetry, message):
                     await fetch(url)
 
-    def test_uses_pydantic_ssrf_safe_bounded_fetcher(self) -> None:
-        fetch = _web_fetch_tool().function
-        upstream = fetch.__closure__[0].cell_contents
-
-        self.assertFalse(upstream.function.__self__.allow_local_urls)
-        self.assertEqual(upstream.function.__self__.timeout, 30)
-        self.assertIsNone(upstream.function.__self__.max_content_length)
-        self.assertEqual(upstream.function.__self__.max_download_bytes, 5 * 1024 * 1024)
-        self.assertIsNone(upstream.function.__self__.headers)
+    async def test_fetch_keeps_json_and_lets_the_model_limit_preview_length(self) -> None:
+        url = "https://example.com/data"
+        body = '{\n  "example": [ 1, 2, 3 ]\n\n}\n'
+        response = httpx2.Response(200, headers={"content-type": "application/problem+json; charset=utf-8"},
+                                   text=body, request=httpx2.Request("GET", url))
+        tool = _web_fetch_tool()
+        self.assertIn("max_content_length", tool.tool_def.parameters_json_schema["properties"])
+        with patch("deep_agent.web.runtime.safe_download", new=AsyncMock(return_value=response)) as download:
+            result = await tool.function(url)
+            preview = await tool.function(url, max_content_length=12)
+        self.assertEqual(result.return_value["content"], body)
+        self.assertFalse(result.metadata["web_fetch"]["truncated"])
+        self.assertEqual(preview.return_value["content"], body[:12] + "\n\n[Content truncated]")
+        self.assertTrue(preview.metadata["web_fetch"]["truncated"])
+        self.assertFalse(download.call_args.kwargs["allow_local"])
+        self.assertEqual(download.call_args.kwargs["timeout"], 30)
+        self.assertEqual(download.call_args.kwargs["max_bytes"], 50 * 1024 * 1024)
 
     async def test_success_marks_content_untrusted_and_records_fetch_audit(self) -> None:
         async def fake_fetch(url: str):
@@ -192,7 +200,7 @@ class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):
             result = await _web_fetch_tool().function("https://example.com/page")
 
         self.assertIsInstance(result, ToolReturn)
-        self.assertTrue(result.return_value["untrusted_external_content"])
+        self.assertTrue(result.metadata["web_content_untrusted"])
         self.assertTrue(result.metadata["web_content_untrusted"])
         self.assertTrue(result.metadata["web_fetch"]["truncated"])
         self.assertEqual(result.metadata["web_fetch"]["attempts"], 1)
@@ -439,38 +447,67 @@ class WebFetchSafetyTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProviderSearchRoutingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_pydantic_search_rows_are_normalized_from_typed_dicts(self) -> None:
-        async def fake_duck(query: str):
-            return [{"title": "Duck", "href": "https://duck.example", "body": query}]
+    async def test_duckduckgo_returns_library_rows_and_uses_selected_engine(self) -> None:
+        rows = [{"title": "Duck", "href": "https://duck.example", "body": "source", "extra": 4}]
+        config = WebSearchRuntimeConfig(mode="provider", provider="duckduckgo")
+        search = build_web_runtime(config).toolset.toolsets[0].tools["web_search"]
+        self.assertIn("region", search.tool_def.parameters_json_schema["properties"])
+        with patch("ddgs.DDGS") as client:
+            client.return_value.text.return_value = rows
+            result = await search.function("fixture", max_results=8, region="uk-en", page=2)
+        client.return_value.text.assert_called_once_with(
+            "fixture", max_results=8, backend="duckduckgo", region="uk-en", page=2,
+            timelimit=None, safesearch="moderate",
+        )
+        self.assertEqual(result.return_value, rows)
+        self.assertEqual(result.metadata["sources"], [{"url": "https://duck.example", "title": "Duck"}])
 
-        async def fake_tavily(query: str):
-            return [{
-                "title": "Tavily",
-                "url": "https://tavily.example",
-                "content": query,
-                "score": 1.0,
-            }]
+    async def test_http_suppliers_use_native_schema_and_return_unmodified_payloads(self) -> None:
+        original = httpx2.AsyncClient
+        url = "https://example.org/docs"
+        row = {"title": "Fixture", "url": url, "snippet": "source"}
+        cases = [
+            ("tavily", "https://api.tavily.com/search", "authorization", "Bearer fixture",
+             {"max_results": 7, "include_raw_content": "text", "topic": "news"},
+             {"results": [{**row, "raw_content": "article", "score": 0.99}], "answer": "Answer"}),
+            ("exa", "https://api.exa.ai/search", "x-api-key", "fixture",
+             {"numResults": 7, "contents": {"text": True, "highlights": True}, "includeDomains": ["example.org"]},
+             {"results": [{**row, "text": "article", "highlights": ["Line"]}], "requestId": "exa-1"}),
+            ("you", "https://ydc-index.io/v1/search", "x-api-key", "fixture",
+             {"count": 7, "extraction": {"extraction_mode": "full_page"}, "freshness": "month"},
+             {"results": {"news": [{**row, "contents": {"markdown": "article"}}]}, "metadata": {"search_uuid": "you-1"}}),
+        ]
+        for provider, endpoint, header, credential, options, payload in cases:
+            with self.subTest(provider=provider):
+                args = {"query": "search terms", **options}
+                requests = []
 
-        with patch(
-            "deep_agent.web.runtime.duckduckgo_search_tool",
-            return_value=Tool(fake_duck),
-        ):
-            duck = await _search_duckduckgo("query")
-        with patch(
-            "deep_agent.web.runtime.tavily_search_tool",
-            return_value=Tool(fake_tavily),
-        ):
-            tavily = await _search_tavily(
-                WebSearchRuntimeConfig(
-                    mode="provider",
-                    provider="tavily",
-                    api_key="secret",
-                ),
-                "query",
-            )
+                def respond(request):
+                    self.assertEqual(str(request.url), endpoint)
+                    self.assertEqual(request.method, "POST")
+                    self.assertEqual(request.headers[header], credential)
+                    requests.append(json.loads(request.content))
+                    return httpx2.Response(200, json=payload)
 
-        self.assertEqual(duck.metadata["sources"][0]["url"], "https://duck.example")
-        self.assertEqual(tavily.metadata["sources"][0]["url"], "https://tavily.example")
+                def model(messages, info):
+                    search = next(tool for tool in info.function_tools if tool.name == "web_search")
+                    schema = search.parameters_json_schema
+                    self.assertEqual(schema["required"], ["query"])
+                    self.assertTrue(set(args) <= set(schema["properties"]))
+                    returns = [part for message in messages for part in message.parts
+                               if isinstance(part, ToolReturnPart)]
+                    if not returns:
+                        return ModelResponse(parts=[ToolCallPart("web_search", args, "search")])
+                    self.assertEqual(returns[0].content, payload)
+                    self.assertEqual(returns[0].metadata["sources"], [{"title": "Fixture", "url": url}])
+                    return ModelResponse(parts=[TextPart("done")])
+
+                config = WebSearchRuntimeConfig(mode="provider", provider=provider, api_key="fixture")
+                agent = Agent(FunctionModel(model), toolsets=[build_web_runtime(config).toolset])
+                with patch("deep_agent.web.provider_api.httpx2.AsyncClient",
+                           side_effect=lambda **kw: original(**kw, transport=httpx2.MockTransport(respond))):
+                    self.assertEqual((await agent.run("search")).output, "done")
+                self.assertEqual(requests, [args])
 
     async def test_provider_failure_never_falls_back(self) -> None:
         config = WebSearchRuntimeConfig(

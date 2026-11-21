@@ -4,9 +4,12 @@ Console 的「服务发布 → 发布 Agent」可以为现有 Agent 新建发布
 
 发布时，从 `GET /api/v1/agents` 返回的摘要中选择名称和 ID，并将 ID 作为发布配置的 `agent_id`。`agent_code` 是对外发布编码，创建后固定。
 
+创建、编辑或切换启用状态时，服务端记录当前登录管理员的账号 ID。管理列表用平台账号资料显示名称，账号资料暂不可用时显示 ID。没有保存操作人记录的历史发布显示「未记录」，再次保存后即记录本次操作者。
+
 ## 部署与本地启动
 
-- 发布管理沿用 Console 管理权限。选择现有 Agent 后即可保存，模型、Skill 和工具沿用 Agent 自身配置，由公共 Runner 在调用时装配。
+- 发布管理沿用 Console 管理权限。选择现有 Agent 后即可保存，模型、Skill 和工具由公共 Runner 按 Agent 配置装配。
+- A2A 和 MCP 发布调用隐藏交互式 UI 工具。缺少必要信息时，Agent 以 `TASK_STATE_INPUT_REQUIRED` 返回问题。调用方从 `status.message.parts` 读取问题，带原 `taskId` 和新 `messageId` 提交文字或附件。
 - Console 根据当前访问地址生成 A2A 和 MCP 配置。平台入口形如 `https://example.com/deepfos-server/deep-agent-server1-0`，本地直连形如 `http://127.0.0.1:8002`。两者都拼接固定的 Agent Service 接口路径，无需另设环境变量。
 - A2A Card 和文件链接按本次请求生成。有完整入口信息时，保留原主机和前缀。网关只传来后端的内网 HTTP 地址时，DeepAgent 通过服务发现查询平台 System 的当前环境入口，再拼 `/deepfos-server/deep-agent-server1-0`，进程内缓存 5 分钟。此查询只读取构建地址所需的域名字段，无需另配环境变量。
 - 反向代理可清理客户端提交的代理头，再转发 `X-Forwarded-Proto`、`X-Forwarded-Host` 和 `X-Forwarded-Prefix`。ASGI 挂载可通过 `root_path` 提供路径前缀。公网入口使用 HTTPS，本机回环仍可直连 HTTP。
@@ -67,11 +70,13 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 | 工具 | 用途 |
 | --- | --- |
 | `list_agents` | 查找已启用的发布及 Agent 编码 |
-| `SendMessage` | 带发布 `agentCode` 和标准 `message` 发起任务，立即返回 Task。向现有任务补答时使用原 `message.taskId` |
-| `GetTask` | 按 `id` 查询 Task，使用 `historyLength` 控制历史条数 |
+| `SendMessage` | 带发布 `agentCode` 和标准 `message` 发起任务。用 `configuration.waitSeconds` 控制等待。补答时使用原 `message.taskId` |
+| `GetTask` | 按 `id` 查询 Task。用 `waitSeconds` 控制等待，`historyLength` 控制历史条数 |
 | `ListTasks` | 按 `agentCode` 查询，筛选可用 `contextId`、`status`、`statusTimestampAfter`，分页使用 `pageSize`、`pageToken`，可用 `historyLength`、`includeArtifacts` 扩展返回 |
 | `CancelTask` | 按 `id` 请求停止任务，并查询返回的状态 |
 | `get_artifact` | 按 `task_id` 和 `artifact_id` 取单份文件，可显式请求 Base64 |
+
+两个工具默认等待 120 秒，传 `0` 立即返回。完成、失败或需要补答时直接返回相应状态。到时仍未结束，则返回带原 `id` 和 `contextId` 的任务快照，后台继续执行。调用方可立即用相同的 `id` 调用 `GetTask` 再等一轮。客户端和网关的请求超时需覆盖等待时间及请求开销。
 
 MCP 的 `message` 使用 `messageId`、`role: "ROLE_USER"`、`parts`。文字用 `text`，业务 JSON 用 `data`，输入文件用 `raw`（Base64）、`filename` 和 `mediaType`，单次附件合计最多 8 MiB。重试沿用消息 ID 和内容。收到 `TASK_STATE_INPUT_REQUIRED` 时读 `status.message.parts`，有信息即可用原 Task ID 和新消息 ID 续接。同一凭据主体和应用可以在 A2A 和 MCP 两端继续同一任务。
 

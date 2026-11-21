@@ -4,7 +4,7 @@
 
 ## 发布与鉴权
 
-Console 管理员选择已有 Agent 并保存发布编码、名称和应用范围。运行时沿用 Agent 的模型、Skill 与工具配置。调用凭据放在客户端私有配置中，使用 `Authorization: Bearer <Token>`、`token` 或 `X-Deepfos-Key` 中的一种。
+Console 管理员选择已有 Agent 并保存发布编码、名称和应用范围。运行时沿用 Agent 的模型、Skill 与非 UI 工具配置。遇到必要信息缺失时，发布 Agent 用 `INPUT_REQUIRED` 返回澄清问题。调用凭据放在客户端私有配置中，使用 `Authorization: Bearer <Token>`、`token` 或 `X-Deepfos-Key` 中的一种。
 
 | 入口 | 地址与请求头 |
 | --- | --- |
@@ -23,6 +23,8 @@ A2A JSON-RPC 调用加 `A2A-Version: 1.0`，读取卡片时可以省略。回环
 | 回复待答问题 | 在新消息里带原 Task ID | 同样用 `SendMessage`，在消息里带原 `taskId` 和新 `messageId` |
 | 完成后追问 | 带原 Context ID 发送新消息，获得新的 Task ID | 用原 `contextId` 和新 `messageId` 再调用 `SendMessage` |
 | 停止 | `CancelTask` | `CancelTask`，根据返回状态确认是否停止 |
+
+MCP 的 `SendMessage` 和 `GetTask` 默认最多等待 120 秒。调用方分别用 `configuration.waitSeconds` 和顶层 `waitSeconds` 指定等待时长，传 `0` 立即取得当前状态。超时仍返回原 `id` 和 `contextId`，任务继续执行，可立即再用原 `id` 调用 `GetTask`。
 
 同一次提交重试时保留消息 ID 和原内容。A2A 附件用 Message Part 的 `raw`、`mediaType`、`filename`，MCP 附件用 `attachments` 中的 `data_base64`、`media_type`、`name`。每条消息内联文件的解码总量最多 8 MiB，并受目标环境的上传限制。MCP 完整调用示例可通过 `resources/read` 读取 `deepagent://guides/mcp`。SDK 和 CLI 发布入口以目标环境实际提供的能力为准，当前只注册 A2A 和 MCP。
 

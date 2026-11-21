@@ -58,6 +58,7 @@ def project_session_events(
     output_calls: set[tuple[str | None, str, str]] = set()
     deliveries: dict[str, dict[str, ConversationOutputFile]] = {}
     completed_assistants: dict[str, tuple[Any, dict[str, Any]]] = {}
+    latest_user: UserConversationItem | None = None
 
     for event in group_message_events(ordered):
         event_type = str(_get(event, "event_type", ""))
@@ -100,6 +101,7 @@ def project_session_events(
             item = _user_item(event, message)
             if item is not None:
                 items.append(item)
+                latest_user = item
             continue
         if event_type == "assistant/message":
             run_id = _optional_str(_get(event, "run_id") or message.get("run_id"))
@@ -211,6 +213,17 @@ def project_session_events(
         terminal = terminal_by_run.get(item.run_id or "")
         if terminal:
             item.status = terminal  # type: ignore[assignment]
+        elif (
+            isinstance(item, ToolConversationItem)
+            and item.status == "awaiting_input"
+            and latest_user is not None
+            and latest_user.order.sequence > item.order.sequence
+        ):
+            # A new user turn supersedes unanswered UI calls. Preserve any real
+            # tool result already matched above, including a later resume result.
+            item.status = "interrupted"
+            item.outcome = "skipped"
+            item.widget = None
 
     _mark_final_assistant_items(items)
     for item in reversed(items):

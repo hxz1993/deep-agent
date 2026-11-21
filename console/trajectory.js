@@ -61,34 +61,34 @@ function eventLabel(kind, part = {}) {
   if (kind === "thinking") return "Thinking";
   if (kind === "assistant") return "Assistant message";
   if (kind === "title") return "Session title";
-  if (kind === "error") return "异常";
-  if (kind === "output") return part.publication_protocol ? "发布结果" : part.name || "输出";
+  if (kind === "error") return "Error";
+  if (kind === "output") return part.publication_protocol ? "Publication Output" : part.name || "Output";
   if (kind === "compaction") return "Compaction";
-  if (kind === "planning") return part.tool || "任务计划";
-  if (kind === "deferred") return part.tool || "等待用户操作";
-  if (kind === "tool") return part.tool || "工具调用";
-  return part.event_type || "会话事件";
+  if (kind === "planning") return part.tool || "Plan";
+  if (kind === "deferred") return part.tool || "Interaction";
+  if (kind === "tool") return part.tool || "Tool Call";
+  return part.event_type || "Session Event";
 }
 
 function eventSummary(kind, source = {}) {
-  if (kind === "input") return valuePreview(source.content) || "仅包含附件或上下文引用";
+  if (kind === "input") return valuePreview(source.content) || "Attachments or context references only";
   if (["thinking", "assistant"].includes(kind)) return valuePreview(source.content);
   if (kind === "title") return valuePreview(source.title) || "Session title";
   if (kind === "output") {
-    if (!source.accepted) return valuePreview(source.errors) || "输出未被接受";
+    if (!source.accepted) return valuePreview(source.errors) || "Output not accepted";
     if (source.publication_protocol) {
       return valuePreview(source.output?.message ?? source.output?.reply?.text);
     }
-    return "已接受结构化输出";
+    return "Structured output accepted";
   }
-  if (kind === "error") return valuePreview(source.message) || "执行异常";
+  if (kind === "error") return valuePreview(source.message) || "Execution failed";
   if (kind === "compaction") {
     const before = source.budget?.estimated_tokens_before ?? source.budget?.estimated_before;
     const after = source.budget?.estimated_tokens_after ?? source.budget?.estimated_after;
-    return before != null && after != null ? `${before} → ${after} Token` : "上下文压缩事件";
+    return before != null && after != null ? `${before} → ${after} Token` : "Context compaction";
   }
-  if (source.type === "tool_result") return valuePreview(redactTrajectoryValue(source.result ?? source.content)) || "工具已返回";
-  return valuePreview(redactTrajectoryValue(source.args)) || "等待参数或结果";
+  if (source.type === "tool_result") return valuePreview(redactTrajectoryValue(source.result ?? source.content)) || "Tool returned";
+  return valuePreview(redactTrajectoryValue(source.args)) || "Waiting for arguments or result";
 }
 
 function newEvent({
@@ -155,12 +155,15 @@ function assistantLoopPayload(parts = []) {
 
 function assistantLoopSummary(payload = {}, status = "running") {
   if (payload.content) return valuePreview(payload.content);
-  if (payload.tool_calls?.length) return `调用 ${payload.tool_calls.length} 个工具`;
-  if (!payload.thinking) return "模型响应";
-  if (status === "failed") return "模型响应失败";
-  if (status === "interrupted") return "已停止";
-  if (status === "completed") return "模型思考";
-  return "模型处理中";
+  if (payload.tool_calls?.length) {
+    const count = payload.tool_calls.length;
+    return `${count} tool call${count === 1 ? "" : "s"}`;
+  }
+  if (!payload.thinking) return "Model response";
+  if (status === "failed") return "Model response failed";
+  if (status === "interrupted") return "Interrupted";
+  if (status === "completed") return "Model reasoning";
+  return "Model processing";
 }
 
 function appendTextPreview(preview, delta, limit = 180) {
@@ -255,8 +258,8 @@ function applyExecutionTiming(row, timing, kind) {
   row.duration_ms = timing.duration_ms;
   row.duration_source = "execution";
   row.duration_description = kind === "model_request"
-    ? "模型请求耗时：包含等待响应和完整流式生成，不含工具执行；采用服务端单调时钟。"
-    : "工具执行耗时：服务端实际执行区间，不含模型生成参数、人工等待及事件入库。并行工具耗时不能直接相加。";
+    ? "Server-measured model request time, including response wait and streaming."
+    : "Server-measured tool execution time. Parallel calls can overlap.";
   return true;
 }
 
@@ -441,6 +444,7 @@ export function buildTrajectory(history = {}) {
   const assistantMessages = new Map();
   const automaticTitles = new Map();
   const outputFacts = items.filter(event => event.event_type === "output/attempt");
+  let latestUser = null;
   for (const event of items) {
     if (event.event_type === "remote_agent/invocation") {
       const { tool_call_id, run_id } = event.payload || {};
@@ -504,6 +508,7 @@ export function buildTrajectory(history = {}) {
       input.event_type = event.event_type;
       input.timestamp_end = event.updated_at || input.timestamp;
       projected.push(input);
+      if (prompt) latestUser = input;
     }
 
     if (event.event_type === "assistant/message") {
@@ -561,7 +566,7 @@ export function buildTrajectory(history = {}) {
         assistant.timestamp_end = null;
         if (!applyExecutionTiming(assistant, message.metadata?.deepagent_timing, "model_request")) {
           applyLegacyInterval(assistant, message.timestamp, group.event.created_at,
-            "旧记录估算：供应商响应时间戳至首次入库，可能缺少首字节前等待并包含入库等待，不是精确模型请求耗时。未使用更新时间。");
+            "Estimate from the provider response timestamp to the first saved event.");
         }
         if (group.row) Object.assign(group.row, assistant);
         else {
@@ -622,7 +627,7 @@ export function buildTrajectory(history = {}) {
         const dispatch = message.metadata?.deepagent_dispatch;
         const partIndex = Number(event.payload?.source?.part_index || 0) + offset;
         tool.dispatched = !(dispatch?.rejected === true && (dispatch.not_dispatched_part_indices || []).includes(partIndex));
-        if (!tool.dispatched) { tool.status = "failed"; tool.summary = "未分发：模型响应被拒绝"; }
+        if (!tool.dispatched) { tool.status = "failed"; tool.summary = "Not dispatched because the model response was rejected"; }
         tool.timestamp_end = event.updated_at || tool.timestamp;
         sameId.push(tool);
         tools.set(callId, sameId);
@@ -649,9 +654,11 @@ export function buildTrajectory(history = {}) {
         if (!applyExecutionTiming(tool, metadata.deepagent_timing, "tool_execution")
           && tool.kind !== "deferred" && !isDeferredResume) {
           applyLegacyInterval(tool, tool.timestamp, part.timestamp,
-            "旧记录估算：工具调用入库至结果产生，包含调度等待，不是精确执行耗时。未使用更新时间。");
+            "Estimate from the saved tool call to its result, including scheduling time.");
         }
-        tool.summary = tool.dispatched === false ? "未分发：模型响应被拒绝" : eventSummary(tool.kind, { type: "tool_result", result: part.content });
+        tool.summary = tool.dispatched === false
+          ? "Not dispatched because the model response was rejected"
+          : eventSummary(tool.kind, { type: "tool_result", result: part.content });
       }
     });
   }
@@ -683,6 +690,12 @@ export function buildTrajectory(history = {}) {
   for (const tool of projected.filter((row) => TOOL_KINDS.has(row.kind))) {
     const id = tool.native?.call_event_id;
     if (!id) continue;
+    if (tool.status === "pending" && !tool.native.result_event_id && deferredSources.has(id)
+      && latestUser && latestUser.sequence > tool.sequence) {
+      tool.status = "interrupted";
+      tool.outcome = "skipped";
+      tool.timestamp_end = null;
+    }
     const group = toolsByCallEvent.get(id) || [];
     group.push(tool);
     toolsByCallEvent.set(id, group);
@@ -690,8 +703,15 @@ export function buildTrajectory(history = {}) {
   for (const row of projected) {
     if (row.kind !== "assistant" || row.status !== "pending" || !row.payload?.tool_calls?.length) continue;
     const matching = (row.native?.event_ids || [row.id]).flatMap((id) => toolsByCallEvent.get(id) || []);
-    if (row.payload.tool_calls.every((call) => matching.some((tool) => tool.tool_call_id === call.tool_call_id && tool.native?.result_event_id))) {
-      row.status = "completed";
+    if (row.payload.tool_calls.every((call) => matching.some((tool) =>
+      tool.tool_call_id === call.tool_call_id && (tool.native?.result_event_id || tool.outcome === "skipped")
+    ))) {
+      if (matching.some((tool) => tool.outcome === "skipped")) {
+        row.status = "interrupted";
+        row.outcome = "skipped";
+      } else {
+        row.status = "completed";
+      }
     }
   }
   return projected.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
@@ -748,8 +768,8 @@ function liveLabel(type, data) {
 
 function liveSummary(type, data) {
   if (["thinking", "text"].includes(type)) return valuePreview(data?.delta);
-  if (type === "tool_result") return valuePreview(redactTrajectoryValue(data?.result)) || "工具已返回";
-  if (type === "tool_call_removed") return data?.reason || "调用已撤回";
+  if (type === "tool_result") return valuePreview(redactTrajectoryValue(data?.result)) || "Tool returned";
+  if (type === "tool_call_removed") return data?.reason || "Tool call withdrawn";
   return valuePreview(redactTrajectoryValue(data?.message || data?.args)) || type;
 }
 
@@ -832,9 +852,9 @@ function statusLabel(status) {
 }
 
 function renderEventStatus(event) {
+  if (event.outcome === "skipped") return '<em class="interrupted">Skipped</em>';
   if (event.kind === "output" && event.payload?.publication_protocol && event.payload.accepted) {
-    if (event.payload.output?.status === "input_required") return '<em class="pending">待补充</em>';
-    if (event.payload.output?.status === "completed") return '<em class="completed">已完成</em>';
+    if (event.payload.output?.status === "input_required") return '<em class="pending">Input Required</em>';
   }
   const label = event.kind === "output" && event.status === "failed" ? "Error" : statusLabel(event.status);
   return `<em class="${escapeHtml(event.status)}">${escapeHtml(label)}</em>`;
@@ -870,11 +890,11 @@ function durationLabel(value) {
 function renderRowTime(event, clockMode) {
   if (clockMode !== "duration") return `<time>${escapeHtml(formatTime(event.timestamp))}</time>`;
   const duration = eventDuration(event);
-  if (duration == null) return '<span class="trajectory-duration unknown" title="没有可确认的执行耗时；瞬时事件和人工等待不计为0秒">—</span>';
+  if (duration == null) return '<span class="trajectory-duration unknown" title="Execution duration unavailable">—</span>';
   const band = duration <= 5000 ? "fast" : duration <= 10000 ? "steady" : duration <= 20000 ? "elevated" : "slow";
-  const range = {fast:"≤5秒",steady:"5–10秒",elevated:"10–20秒",slow:">20秒"}[band];
+  const range = {fast:"≤5 s",steady:"5–10 s",elevated:"10–20 s",slow:">20 s"}[band];
   const label = durationLabel(duration);
-  return `<span class="trajectory-duration ${band}" title="${escapeHtml(`${range}；${event.duration_description || "服务端记录的耗时"}`)}"><i aria-hidden="true"></i>${escapeHtml(label)}</span>`;
+  return `<span class="trajectory-duration ${band}" title="${escapeHtml(`${range} · ${event.duration_description || "Server-measured duration"}`)}"><i aria-hidden="true"></i>${escapeHtml(label)}</span>`;
 }
 
 function renderMarkdown(content, emptyMessage = "No content in this event.") {
@@ -1689,7 +1709,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
     renderedPtcSourceKey = "";
   }
 
-  function setHistory(nextHistory, { preserveView = false } = {}) {
+  function setHistory(nextHistory, { preserveView = false, preserveLive = false } = {}) {
     const sessionChanged = nextHistory?.session_id && history.session_id
       && nextHistory.session_id !== history.session_id;
     if (sessionChanged) {
@@ -1700,17 +1720,23 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
       savedFilesByRun.clear();
       clearRenderedTrajectory();
     }
-    history = nextHistory || { items: [] };
+    if (preserveLive && !sessionChanged) {
+      const merged = new Map((nextHistory.items || []).map(event => [event.event_id, event]));
+      for (const event of history.items || []) merged.set(event.event_id, event);
+      history = { ...nextHistory, items: [...merged.values()].sort((a, b) => a.sequence - b.sequence) };
+    } else {
+      history = nextHistory || { items: [] };
+      liveEvents = [];
+      pendingResults = [];
+      liveCalls = new WeakMap();
+      liveTextPreviews = new WeakMap();
+      runTurns.clear();
+      currentRunId = null;
+      activeAssistantLoop = null;
+    }
     historyEvents = buildTrajectory(history);
-    liveEvents = [];
     inputCount = null;
-    pendingResults = [];
-    liveCalls = new WeakMap();
-    liveTextPreviews = new WeakMap();
-    runTurns.clear();
     for (const event of history.items || []) if (event.run_id && event.turn_id) runTurns.set(event.run_id, event.turn_id);
-    currentRunId = null;
-    activeAssistantLoop = null;
     if (!preserveView || sessionChanged || !historyEvents.some((event) => event.id === selectedId)) {
       selectedId = historyEvents.at(-1)?.id || null;
       selectionPinned = false;
@@ -1951,7 +1977,7 @@ export function createTrajectoryController({ state = {}, host = null, readOnly =
         timestamp_end: new Date().toISOString(),
         status: "running",
         label: "Compaction",
-        summary: payload.phase || "正在处理上下文",
+        summary: payload.phase || "Compacting context",
         tool_call_id: null,
         source: "sse",
         payload: redactTrajectoryValue(jsonClone(payload)),

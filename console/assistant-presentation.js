@@ -44,6 +44,9 @@ export function isPlanningToolEvent(event = {}) {
 }
 
 export function toolResultPresentation(result = {}) {
+  if (result.outcome === "skipped") {
+    return { status: "interrupted", label: "已跳过", className: "tool-status-complete" };
+  }
   const values = [result.outcome, result.status];
   if (values.some((value) => ['interrupted', 'cancelled', 'canceled'].includes(value))) {
     return { status: 'interrupted', label: '已中断', className: 'tool-status-interrupted' };
@@ -124,7 +127,7 @@ export function assistantActionsFromHistoryItems(items = []) {
     } else if (item.status === "awaiting_input") {
       actions.push({ type: ASSISTANT_PRESENTATION_ACTIONS.DEFERRED, call });
     }
-    interrupted ||= item.status === "interrupted";
+    interrupted ||= item.status === "interrupted" && item.outcome !== "skipped";
   }
 
   actions.push(

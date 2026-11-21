@@ -5,10 +5,11 @@ from typing import Annotated, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
-from sqlalchemy import select
+from sqlalchemy import literal, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from deep_agent.db.models import Agent, AgentPublication
+from deep_agent.db.models import Agent, AgentPublication, GlobalSetting
 from deep_agent.db.reference_integrity import ReferenceConflict, is_unique_conflict, lock_optional, lock_reference
 from deep_agent.db.stores._session import SessionBoundMixin
 
@@ -16,6 +17,7 @@ AgentCode = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*
 ScopeId = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
 Description = Annotated[str, StringConstraints(strip_whitespace=True, max_length=240)]
+_UPDATER_KEY_PREFIX = "agent_publication_updater:"
 
 
 class AppScopeItem(BaseModel):
@@ -75,9 +77,43 @@ class PublicationPatch(BaseModel):
 
 
 class PublicationStore(SessionBoundMixin):
-    async def list(self) -> list[AgentPublication]:
+    @staticmethod
+    def _with_updaters():
+        return select(AgentPublication, GlobalSetting.value).outerjoin(
+            GlobalSetting, GlobalSetting.key == literal(_UPDATER_KEY_PREFIX) + AgentPublication.id
+        )
+
+    async def list_with_updaters(self) -> list[tuple[AgentPublication, str | None]]:
         async with self._read() as db:
-            return list((await db.scalars(select(AgentPublication).order_by(AgentPublication.created_at, AgentPublication.code))).all())
+            query = self._with_updaters().order_by(AgentPublication.created_at, AgentPublication.code)
+            return [(row, self._current_updater(row, value)) for row, value in await db.execute(query)]
+
+    async def get_with_updater(self, code: str) -> tuple[AgentPublication, str | None] | None:
+        async with self._read() as db:
+            result = await db.execute(self._with_updaters().where(AgentPublication.code == code))
+            record = result.one_or_none()
+            if record is None:
+                return None
+            row, value = record
+            return row, self._current_updater(row, value)
+
+    @staticmethod
+    def _current_updater(row: AgentPublication, value: object) -> str | None:
+        # Earlier versions can still edit publications without recording an actor.
+        if not isinstance(value, dict) or value.get("revision") != row.revision:
+            return None
+        actor = value.get("updated_by")
+        return actor if isinstance(actor, str) and actor else None
+
+    @staticmethod
+    async def _record_updater(db: AsyncSession, row: AgentPublication, actor: str) -> None:
+        key = _UPDATER_KEY_PREFIX + row.id
+        entry = await db.get(GlobalSetting, key)
+        value = {"updated_by": actor, "revision": row.revision}
+        if entry is None:
+            db.add(GlobalSetting(key=key, value=value, version=1))
+        else:
+            entry.value = value
 
     async def list_enabled(self) -> list[AgentPublication]:
         async with self._read() as db:
@@ -92,7 +128,7 @@ class PublicationStore(SessionBoundMixin):
         async with self._read() as db:
             return await db.scalar(select(AgentPublication).where(AgentPublication.code == code))
 
-    async def create(self, body: PublicationCreate) -> AgentPublication:
+    async def create(self, body: PublicationCreate, *, updated_by: str | None = None) -> AgentPublication:
         try:
             async with self._write() as db:
                 await lock_reference(db, Agent, Agent.id, body.agent_id, "Agent")
@@ -102,6 +138,8 @@ class PublicationStore(SessionBoundMixin):
                 )
                 db.add(row)
                 await db.flush()
+                if updated_by:
+                    await self._record_updater(db, row, updated_by)
                 await db.refresh(row)
                 return row
         except IntegrityError as exc:
@@ -109,7 +147,7 @@ class PublicationStore(SessionBoundMixin):
                 raise
             raise ReferenceConflict("Agent 编码已存在") from exc
 
-    async def update(self, code: str, body: PublicationPatch) -> AgentPublication | None:
+    async def update(self, code: str, body: PublicationPatch, *, updated_by: str | None = None) -> AgentPublication | None:
         async with self._write() as db:
             current = await db.scalar(select(AgentPublication).where(AgentPublication.code == code))
             if current is None:
@@ -125,6 +163,8 @@ class PublicationStore(SessionBoundMixin):
                 setattr(row, name, value)
             row.revision += 1
             row.updated_at = datetime.now(UTC)
+            if updated_by:
+                await self._record_updater(db, row, updated_by)
             await db.flush()
             return row
 
@@ -135,5 +175,8 @@ class PublicationStore(SessionBoundMixin):
                 return False
             if row.revision != revision:
                 raise ReferenceConflict("发布配置已更新，请刷新后重试")
+            entry = await db.get(GlobalSetting, _UPDATER_KEY_PREFIX + row.id)
+            if entry is not None:
+                await db.delete(entry)
             await db.delete(row)
             return True

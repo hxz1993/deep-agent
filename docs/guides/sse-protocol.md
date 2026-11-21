@@ -132,6 +132,11 @@ Run 结束释放回放，连接断开释放队列。普通聊天的 Run 由服�
 重新打开会话时可查询并跟随仍活跃的同一个 Run，或回读已保存的结果。明确停止仍调用现有取消接口。
 渠道发送流沿用原请求生命周期，进程重启不恢复尚未完成的 Run。
 
+诊断会话详情（含发布 Agent 和远程 Agent 跳入）打开时，如果已经有活动 Run，使用管理员只读
+`GET /api/v1/diagnostics/sessions/{session_id}/live?run_id=…` 接入同一事件流。读取历史和文件仍走
+诊断权限，页面关闭只断开观察。A2A 和 MCP 发布任务执行时也产生运行事件；结构化回复在校验后展示。
+详情页观察打开时发现的那一轮，结束后以历史校准。
+
 普通聊天的 Console 打开会话后，以 `GET /api/v1/sessions/{session_id}/activity?agent_id=…`
 监听同一会话的新一轮。初次连接和 Run 开始、结束时发出 `session_activity`，只包含
 `status`（`running` 或 `idle`）和 `run_id`。连接保持到切换会话或关闭页面，

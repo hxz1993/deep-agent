@@ -1683,7 +1683,7 @@ function updateComposerContextControls() {
     }
   }
 
-  if (el.attachBtn) el.attachBtn.disabled = state.streaming || state.awaitingHitl;
+  if (el.attachBtn) el.attachBtn.disabled = state.streaming;
 }
 
 function createContextCompactionRow(beforeNode = null) {
@@ -1842,6 +1842,7 @@ async function refreshCurrentHistory(options = {}) {
 function renderHistory(items, { updating = false, running = false } = {}) {
   state.modelMessageCount = items.filter((item) => ["user_message", "assistant_message"].includes(item.kind)).length;
   let lastDayKey = null;
+  const livePresenter = state.assistantPresenter;
   state.assistantPresenter = null;
   const presentationNodes = projectConversationItems(items);
   const previous = state.historyRendered;
@@ -1918,6 +1919,14 @@ function renderHistory(items, { updating = false, running = false } = {}) {
     if (retained.has(old)) continue;
     old.presenter?.dispose?.();
     old.elements.forEach((element) => element.remove());
+  }
+  // A history read can follow a completed POST stream. Its live rows are
+  // outside historyRendered; replace them while keeping system notices.
+  const historyRows = new Set(desired);
+  for (const element of Array.from(el.messages.children)) {
+    if (historyRows.has(element) || !element.matches(".date-separator, .msg-row.user, .assistant-answer")) continue;
+    if (element === livePresenter?.row) livePresenter.dispose?.();
+    element.remove();
   }
   desired.forEach((element, index) => {
     const existing = el.messages.children[index];
@@ -2544,10 +2553,6 @@ async function onSend() {
   const text = el.input.value.trim();
   const attachments = state.pendingAttachments.slice();
   if ((!text && attachments.length === 0) || state.streaming || state.historyLoading || currentSessionHasProducer()) return;
-  if (state.awaitingHitl) {
-    addSystemNote("请先完成上方待处理的交互。");
-    return;
-  }
   if (!ensureAgentSelected()) {
     addSystemNote("请先选择 Agent。");
     return;
@@ -2569,6 +2574,7 @@ async function onSend() {
   addMessage("user", text, turnStartedAt, null, attachments);
   trajectory?.addUser({ content: text, attachments });
 
+  const pendingInteraction = state.awaitingHitl ? state.assistantPresenter : null;
   const assistant = createAssistantMessage(null, null, null, { startedAt: turnStartedAt });
   state.assistantPresenter = assistant;
   setStreaming(true);
@@ -2599,7 +2605,7 @@ async function onSend() {
     }));
   }
   state.modelMessageCount += 1;
-  await runChatStream(payload, assistant);
+  await runChatStream(payload, assistant, pendingInteraction);
 }
 
 function resumeDeferred(deferredResults) {
@@ -2633,7 +2639,7 @@ function resumeDeferred(deferredResults) {
   return runChatStream(payload, assistant);
 }
 
-async function runChatStream(payload, assistant) {
+async function runChatStream(payload, assistant, pendingInteraction = null) {
   state.completedAutomaticCompactionEvents = new Set();
   state.historyFollower?.stop();
   state.historyController?.abort();
@@ -2694,6 +2700,13 @@ async function runChatStream(payload, assistant) {
         sourceSession.runId = evt.data.run_id || null;
       }
       if (current()) {
+        if (pendingInteraction && type === "session_event_appended" && evt.data?.persisted === true
+          && evt.data.event?.event_type === "user/message") {
+          pendingInteraction.skipPendingTools();
+          pendingInteraction = null;
+          state.awaitingHitl = false;
+          updateHitlInputState();
+        }
         handleEvent(evt, assistant);
       }
       else if (type === "session") {
@@ -2746,6 +2759,9 @@ async function runChatStream(payload, assistant) {
       }
     }
     if (!current()) return;
+    if (state.awaitingHitl && pendingInteraction?.row.isConnected) {
+      state.assistantPresenter = pendingInteraction;
+    }
     if (state.streamRecoveryNote) addSystemNote(state.streamRecoveryNote);
     state.streamRecoveryNote = null;
     state.abortController = null;
@@ -2771,16 +2787,13 @@ async function runChatStream(payload, assistant) {
 
 function updateHitlInputState() {
   const modelUnavailable = selectedModelUnavailable();
-  const locked = state.awaitingHitl || modelUnavailable;
   if (el.input) {
-    el.input.placeholder = state.awaitingHitl
-      ? "请先完成上方交互…"
-      : modelUnavailable
-        ? "当前 Agent 模型不可用，请先切换模型…"
-        : "输入消息…";
-    el.input.disabled = locked;
+    el.input.placeholder = modelUnavailable
+      ? "当前 Agent 模型不可用，请先切换模型…"
+      : "输入消息…";
+    el.input.disabled = modelUnavailable;
   }
-  if (el.sendBtn) el.sendBtn.disabled = locked || state.historyLoading || currentSessionHasProducer();
+  if (el.sendBtn) el.sendBtn.disabled = modelUnavailable || state.historyLoading || currentSessionHasProducer();
   updateComposerContextControls();
 }
 

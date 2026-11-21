@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from contextlib import aclosing
 from dataclasses import dataclass
 from pathlib import PurePath
 from uuid import uuid4
@@ -10,6 +11,7 @@ from uuid import uuid4
 from a2a import types as wire
 from google.protobuf import json_format
 from google.protobuf.struct_pb2 import Value
+from loguru import logger
 from pydantic_ai.exceptions import RunCancelled
 
 from deep_agent.agent.file_delivery import RunFileDelivery
@@ -149,6 +151,7 @@ class RunnerExecution:
         try:
             runner = await build_runner_for_agent(
                 ctx, scope.agent_id, app_context=app_context, request_headers=mcp_headers,
+                publication_protocol=self.protocol,
             )
         except AgentModelNotConfiguredError as exc:
             return Result(state=FAILED, question=str(exc), reason="model_not_configured", error_type=type(exc).__name__)
@@ -165,7 +168,9 @@ class RunnerExecution:
         deps.cancellation_token = active.cancellation_token
         entry.stop = active.cancellation_token.cancel
         attachments = []
+        live_key = (scope.agent_id, scope.session_id, scope.owner.user)
         started = False
+        output = None
         try:
             await _ensure_session(ctx, entry)
             for upload in uploads:
@@ -180,7 +185,26 @@ class RunnerExecution:
             if deps.run_id:
                 entry.segment_run_id = deps.run_id
                 entry.run_ids.append(deps.run_id)
-            output = await runner.run(scope.session_id, text, deps, attachments=attachments, run_id=deps.run_id)
+            try:
+                baseline = await ctx.store.get_event_head(scope.session_id, agent_id=scope.agent_id)
+            except Exception as exc:
+                logger.warning("Live publication observation unavailable error_type={}", type(exc).__name__)
+            else:
+                ctx.session_live.begin(live_key, deps.run_id, baseline_sequence=baseline)
+            async with aclosing(runner.run_stream(
+                scope.session_id, text, deps, attachments=attachments,
+                persister=ctx.event_persister, active_run=active,
+            )) as stream:
+                async for event in stream:
+                    ctx.session_live.publish(live_key, deps.run_id, event["type"], event)
+                    if event["type"] == "final":
+                        output = event
+                    elif event["type"] == "cancelled":
+                        return Result(state=CANCELED if entry.cancellation_requested else FAILED,
+                                      reason="execution_canceled", error_type="RunCancelled")
+                    elif event["type"] == "error":
+                        return Result(state=FAILED, question="执行失败，请查看 DeepAgent 诊断",
+                                      reason="execution_failed")
         except RunCancelled:
             return Result(state=CANCELED if entry.cancellation_requested else FAILED,
                           reason="execution_canceled", error_type="RunCancelled")
@@ -190,8 +214,11 @@ class RunnerExecution:
                     await asyncio.gather(*(ctx.file_store.delete(item.id, headers) for item in attachments),
                                          return_exceptions=True)
             finally:
+                ctx.session_live.end(live_key, deps.run_id)
                 ctx.active_runs.unregister(active)
-        if output.get("status") != "completed":
+        if output is None:
+            return Result(state=FAILED, question="执行失败，请查看 DeepAgent 诊断", reason="execution_failed")
+        if output["status"] != "completed":
             return Result(state=FAILED, question="Agent 需要本入口未提供的交互", reason="unsupported_interaction")
         value = PublicationResult.model_validate(output["output"])
         result = Result(question=value.message)

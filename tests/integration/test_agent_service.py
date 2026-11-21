@@ -10,6 +10,7 @@ import re
 import tempfile
 import unittest
 from datetime import timedelta
+from inspect import isawaitable
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -20,10 +21,10 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from httpx import ASGITransport, AsyncClient
 from PIL import Image
 from pydantic_ai.messages import BinaryContent, ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
 from deep_agent.agent_service.download import ArtifactDownloadResponse
-from deep_agent.agent_service.publications import PublicationCreate, PublicationStore
+from deep_agent.agent_service.publications import PublicationCreate, PublicationPatch, PublicationStore
 from deep_agent.agent_service.tasks import RETENTION, ArtifactFile, Result
 from deep_agent.api.v1 import api_router
 from deep_agent.capabilities import build_registry
@@ -47,6 +48,22 @@ HEADERS = {"authorization": "Bearer fixture-owner", "app": "budget001", "space":
 
 
 PUBLICATION_OUTPUT = "output__publication_result"
+
+
+def publication_model(respond):
+    async def stream(messages, info):
+        response = respond(messages, info)
+        if isawaitable(response):
+            response = await response
+        for index, part in enumerate(response.parts):
+            if isinstance(part, TextPart):
+                yield part.content
+            else:
+                assert isinstance(part, ToolCallPart), part
+                yield {index: DeltaToolCall(
+                    name=part.tool_name, json_args=part.args_as_json_str(), tool_call_id=part.tool_call_id,
+                )}
+    return FunctionModel(respond, stream_function=stream)
 
 
 def publication_result(status="completed", *, message=None, **reply):
@@ -88,6 +105,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             console_admin_authorizer=ConsoleAdminAuthorizer(AsyncMock(return_value=True)),
         )
         init_context(self.ctx)
+        await self.ctx.event_persister.start()
         self.addCleanup(reset_context)
         self.addAsyncCleanup(self.ctx.aclose)
         app = FastAPI()
@@ -118,6 +136,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             "deep_agent.services.integration_app_access.PlatformAppAccessClient._get",
             autospec=True, side_effect=platform,
         ))
+        self.enterContext(patch("deep_agent.api.v1.agent_service.resolve_diagnostic_users", return_value={}))
         self.admin = {"user": "fixture-admin", "authorization": "Bearer fixture-admin"}
         await PublicationStore(factory).create(PublicationCreate.model_validate({
             "agent_code": "budget-report", "name": "预算报告", "agent_id": self.agent,
@@ -131,6 +150,61 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         return await self.client.post(url or self.url, headers=headers, json={
             "jsonrpc": "2.0", "id": 1, "method": method, "params": params,
         })
+
+    async def test_publication_updater_tracks_authenticated_admin_and_current_revision(self):
+        collection = f"{ROOT}/publications"
+        url = f"{collection}/operator-audit"
+        scope = {"apps": {"mode": "all", "items": []}}
+        editor = {"user": "second-admin", "authorization": "Bearer fixture-second-admin"}
+        body = {"agent_code": "operator-audit", "name": "更新人测试", "agent_id": self.agent, "scope": scope}
+
+        create = await self.client.post(collection, headers=self.admin, json=body)
+        self.assertEqual(create.status_code, 201, create.text)
+        created = create.json()
+        self.assertEqual(created["updated_by"], "fixture-admin")
+        self.assertEqual(created["scope"], scope)
+
+        edit = await self.client.patch(url, headers=editor, json={"revision": 1, "enabled": False})
+        self.assertEqual(edit.status_code, 200, edit.text)
+        self.assertEqual(edit.json()["updated_by"], "second-admin")
+        stale = await self.client.patch(url, headers=self.admin, json={"revision": 1, "name": "过期修改"})
+        self.assertEqual(stale.status_code, 409, stale.text)
+
+        profile = {"username": "operator", "display_name": "更新人"}
+        with patch("deep_agent.api.v1.agent_service.resolve_diagnostic_users",
+                   return_value={"second-admin": profile}) as users:
+            response = await self.client.get(collection, headers=self.admin)
+        self.assertEqual(response.status_code, 200, response.text)
+        users.assert_awaited_once()
+        self.assertEqual(users.call_args.args[1:], ("fixture-admin", {"second-admin"}))
+        rows = {row["agent_code"]: row for row in response.json()}
+        self.assertIsNone(rows["budget-report"]["updated_by"])
+        self.assertEqual(rows["operator-audit"]["updated_by_user"], {"id": "second-admin", **profile})
+
+        detail = await self.client.get(url, headers=self.admin)
+        self.assertEqual(detail.json()["updated_by"], "second-admin")
+        self.assertIsNone(detail.json()["updated_by_user"]["display_name"])
+        self.assertEqual(detail.json()["scope"], scope)
+
+        store = PublicationStore(self.ctx.db_session_factory)
+        await store.update("operator-audit", PublicationPatch(revision=2, name="旧版更新"))
+        detail = await self.client.get(url, headers=self.admin)
+        self.assertEqual(detail.json()["revision"], 3)
+        self.assertIsNone(detail.json()["updated_by"])
+        updater_key = f"agent_publication_updater:{created['id']}"
+        await self.ctx.stores.global_setting.upsert(updater_key, value=["invalid updater"], version=1)
+        for endpoint in (collection, url):
+            with self.subTest(endpoint=endpoint):
+                response = await self.client.get(endpoint, headers=self.admin)
+                self.assertEqual(response.status_code, 200, response.text)
+                row = response.json() if endpoint == url else next(
+                    item for item in response.json() if item["agent_code"] == "operator-audit"
+                )
+                self.assertIsNone(row["updated_by"])
+
+        deleted = await self.client.delete(url, headers=self.admin, params={"revision": 3})
+        self.assertEqual(deleted.status_code, 204, deleted.text)
+        self.assertIsNone(await self.ctx.stores.global_setting.get(updater_key))
 
     async def test_documented_a2a_and_mcp_auth_headers(self):
         app = {"app": "budget001"}
@@ -203,7 +277,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed_card.security_schemes["platformKey"].api_key_security_scheme.name, "X-Deepfos-Key")
         self.assertEqual(parsed_card.security_schemes["platformBearer"].http_auth_security_scheme.scheme, "bearer")
         self.assertEqual(len(parsed_card.security_requirements), 2)
-        model = FunctionModel(lambda _messages, info: text_result(info, "预算差异 20"))
+        model = publication_model(lambda _messages, info: text_result(info, "预算差异 20"))
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             params = {"message": self.message("m1", "计算预算差异")}
             task = self.result(await self.rpc("SendMessage", params))["task"]
@@ -239,7 +313,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(
             lambda _, info: text_result(info, "核对完毕"),
         )):
             tasks = [
@@ -352,6 +426,172 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotEqual(entry.task.status.message.message_id, question)
                 self.assertIsNone(snapshot(entry)["question_id"])
 
+    async def test_published_runs_hide_ui_tools_and_ask_for_input(self):
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
+        from deep_agent.api.v1.deps import build_runner_for_agent
+        from deep_agent.schemas.ui_tools import UiToolCreate, UiToolPackageCreate
+
+        await self.ctx.stores.ui_tool_package.create_manual(UiToolPackageCreate(code="ui:budget", label="预算"))
+        await self.ctx.stores.ui_tool.create_manual(UiToolCreate(
+            name="budget__clarify", package_code="ui:budget", description="Ask for the budget month.",
+            parameters_json_schema={"type": "object"},
+        ))
+        prompt = "Always use a UI tool when the month is missing."
+        capabilities = ["ui:builtin", "ui:budget"]
+        await self.ctx.stores.agent.update_unique(self.agent, AgentUpdate(prompt=prompt, capabilities=capabilities))
+
+        published_requests = []
+
+        def respond(_messages, info):
+            if not info.output_tools:
+                return ModelResponse(parts=[TextPart("预算核对")])
+            published_requests.append(info)
+            return publication_result("input_required", message="请提供预算月份")
+
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)):
+            runner = await build_runner_for_agent(self.ctx, self.agent)
+            self.assertEqual(set(runner.ui_tool_hints), {"builtin__choice", "builtin__confirm", "budget__clarify"})
+
+            a2a_task = self.result(await self.rpc("SendMessage", {
+                "message": self.message("a2a-no-ui", "核对预算"),
+            }))["task"]
+            self.client.headers.update(HEADERS)
+            async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+                async with ClientSession(rx, tx) as session:
+                    await session.initialize()
+                    result = await session.call_tool("SendMessage", {
+                        "agentCode": "budget-report", "message": mcp_message("mcp-no-ui", "核对预算"),
+                    })
+                    self.assertFalse(result.isError, result)
+                    mcp_task = result.structuredContent
+
+        for task in (a2a_task, mcp_task):
+            self.assertEqual(task["status"]["state"], "TASK_STATE_INPUT_REQUIRED", task)
+            self.assertEqual(task["status"]["message"]["parts"][0]["text"], "请提供预算月份")
+        self.assertEqual(len(published_requests), 2)
+        for info in published_requests:
+            names = {tool.name for tool in info.function_tools}
+            self.assertTrue(names.isdisjoint({"builtin__choice", "builtin__confirm", "budget__clarify"}))
+            self.assertFalse(any(name.startswith("ui__") for name in names), names)
+            self.assertIn(prompt, info.instructions)
+            self.assertIn("status=input_required", info.instructions)
+        row = await self.ctx.stores.agent.get_by_id(self.agent)
+        self.assertEqual(row.capabilities, capabilities)
+
+    async def test_published_run_is_observable_before_completion(self):
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
+        self.client.headers.update(HEADERS)
+        async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+            async with ClientSession(rx, tx) as mcp:
+                await mcp.initialize()
+                for protocol in ("a2a", "mcp"):
+                    with self.subTest(protocol=protocol):
+                        entered = asyncio.Event()
+                        complete = asyncio.Event()
+
+                        async def respond(_messages, info):
+                            if not info.output_tools:
+                                return ModelResponse(parts=[TextPart("预算验收")])
+                            entered.set()
+                            await complete.wait()
+                            return publication_result(text=f"完成 {protocol}")
+
+                        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)):
+                            if protocol == "a2a":
+                                task = self.result(await self.rpc("SendMessage", {
+                                    "message": self.message("live-a2a", "核对预算"),
+                                    "configuration": {"returnImmediately": True},
+                                }))["task"]
+                            else:
+                                result = await mcp.call_tool("SendMessage", {
+                                    "agentCode": "budget-report",
+                                    "message": mcp_message("live-mcp", "核对预算"),
+                                    "configuration": {"waitSeconds": 0},
+                                })
+                                self.assertFalse(result.isError, result)
+                                task = result.structuredContent
+                            entry = self.ctx.agent_tasks.entries[task["id"]]
+                            observer = None
+                            try:
+                                await asyncio.wait_for(entered.wait(), 4)
+                                key = (self.agent, entry.context.session_id, "owner")
+                                observer = self.ctx.session_live.subscribe(key, entry.segment_run_id)
+                                self.assertEqual(observer.initial[0].event, "observation_sync")
+                                self.assertTrue(any(
+                                    json.loads(frame.data).get("data", {}).get("event", {}).get("event_type")
+                                    == "user/message" for frame in observer.initial[1:]
+                                ))
+                                complete.set()
+                                observed = []
+                                while (frame := await asyncio.wait_for(observer.get(), 4)).event != "observation_end":
+                                    observed.append(json.loads(frame.data))
+                                output = next(frame["data"] for frame in observed if frame["event"] == "final")
+                                self.assertEqual(output["output"]["reply"]["text"], f"完成 {protocol}")
+                            finally:
+                                complete.set()
+                                if observer is not None:
+                                    self.ctx.session_live.unsubscribe(observer)
+                            await self.ctx.agent_tasks.wait(entry)
+                            self.assertEqual(entry.state, wire.TaskState.TASK_STATE_COMPLETED)
+
+    async def test_mcp_wait_expiry_leaves_original_task_running(self):
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
+        from deep_agent.agent_service.execution import RunnerExecution
+
+        release = asyncio.Event()
+
+        async def execute(_runner, _entry, _message, _continuing):
+            await release.wait()
+            return Result(artifacts=[wire.Artifact(artifact_id="answer", parts=[wire.Part(text="完成")])])
+
+        self.client.headers.update(HEADERS)
+        with patch.object(RunnerExecution, "__call__", autospec=True, side_effect=execute):
+            async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+                async with ClientSession(rx, tx, read_timeout_seconds=timedelta(seconds=4)) as session:
+                    await session.initialize()
+
+                    async def call(tool, arguments):
+                        response = await session.call_tool(tool, arguments)
+                        self.assertFalse(response.isError, response)
+                        return response.structuredContent
+
+                    message = {"agentCode": "budget-report", "message": mcp_message("wait-budget", "核对预算")}
+                    active = await call("SendMessage", {**message, "configuration": {"waitSeconds": 0.05}})
+                    self.assertEqual(active["status"]["state"], "TASK_STATE_WORKING")
+                    ids = {"id": active["id"], "contextId": active["contextId"]}
+                    repeated = await call("SendMessage", {**message, "configuration": {"waitSeconds": 0}})
+                    immediate = await call("GetTask", {"id": active["id"], "waitSeconds": 0})
+                    timed = await call("GetTask", {"id": active["id"], "waitSeconds": 0.05})
+                    for snapshot in (repeated, immediate, timed):
+                        self.assertEqual({key: snapshot[key] for key in ids}, ids)
+                        self.assertEqual(snapshot["status"]["state"], "TASK_STATE_WORKING")
+                    for tool, params in (
+                        ("SendMessage", {**message, "configuration": {"waitSeconds": -1}}),
+                        ("GetTask", {"id": active["id"], "waitSeconds": -1}),
+                    ):
+                        invalid = await session.call_tool(tool, params)
+                        self.assertTrue(invalid.isError)
+                        self.assertEqual(invalid.structuredContent["status"], 422)
+
+                    async with asyncio.TaskGroup() as group:
+                        get = group.create_task(call("GetTask", {"id": active["id"], "historyLength": 0}))
+                        try:
+                            done, _ = await asyncio.wait([get], timeout=0.05)
+                            self.assertFalse(done)
+                        finally:
+                            release.set()
+                    final = get.result()
+                    self.assertEqual({key: final[key] for key in ids}, ids)
+                    self.assertEqual(final["status"]["state"], "TASK_STATE_COMPLETED")
+                    self.assertEqual(final["artifacts"][0]["parts"][0]["text"], "完成")
+                    self.assertFalse(final.get("history"))
+
     async def test_question_and_continuation(self):
 
         await self.ctx.stores.agent.update_unique(self.agent, AgentUpdate(
@@ -371,7 +611,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         app_url = f"{self.url}/apps/budget001"
         token = {key: HEADERS[key] for key in ("authorization", "A2A-Version")}
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)):
             task = self.result(await self.rpc("SendMessage", {"message": self.message("q", "预算分析")}))["task"]
         self.assertEqual(task["status"]["state"], "TASK_STATE_INPUT_REQUIRED", task)
         self.assertEqual(task["status"]["message"]["parts"][0]["text"], "请提供预算月份")
@@ -386,7 +626,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.ctx.console_admin_authorizer, "access_for", return_value=ConsoleAdminAccess(allowed=False)):
             self.assertEqual((await self.client.get(detail_url, headers=ordinary_user)).status_code, 403)
         bindings = {"taskId": task["id"], "contextId": task["contextId"]}
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(
             lambda *_: publication_result(data={"month": "十月"}),
         )):
             answer = self.message("answer", "十月", **bindings, metadata={"replyTo": "unused"})
@@ -394,7 +634,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task2["id"], task["id"])
         self.assertEqual(task2["status"]["state"], "TASK_STATE_COMPLETED", task2)
         self.assertEqual(task2["artifacts"][0]["parts"][0]["data"], {"month": "十月"})
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(
             lambda *_: publication_result(data={"month": "十一月"}),
         )):
             next_task = self.result(await self.rpc("SendMessage", {
@@ -441,7 +681,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                 return result
             return publication_result(text="本月实际 92 万元，低于预算 8 万元。")
 
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)):
             task = self.result(await self.rpc("SendMessage", {
                 "message": self.message("reply-only", "请解释差额"),
             }))["task"]
@@ -470,7 +710,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             calls += 1
             return publication_result(data={"record": record if calls == 1 else str(record)})
 
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)):
             task = self.result(await self.rpc("SendMessage", {
                 "message": self.message("exact-record", "返回预算记录编号"),
             }))["task"]
@@ -507,7 +747,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             return ModelResponse(parts=[ToolCallPart("present", {"file_ids": [selected_id]})])
 
         initial = mcp_message("start-mixed", "请先确认月份", files=[("budget.csv", "text/csv", data)])
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)):
             first = self.result(await self.rpc("SendMessage", {"message": initial}))["task"]
             self.assertEqual(first["status"]["state"], "TASK_STATE_INPUT_REQUIRED", first)
             self.assertEqual([part["text"] for part in first["status"]["message"]["parts"]],
@@ -600,7 +840,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(network, "_http_client", side_effect=client_factory),
-            patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)),
+            patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)),
         ):
             a2a_config = A2AConfig(card_url=f"http://127.0.0.1:8002{self.url}/agent-card.json", headers=HEADERS)
             inspection = await network.A2AAdapter(a2a_config).inspect()
@@ -733,7 +973,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(image.convert("RGB").getpixel((0, 0)), (255, 0, 0))
             return publication_result(text="红色")
 
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)):
             paused = self.result(await self.rpc("SendMessage", {
                 "message": self.message("need-image", "图片是什么颜色？"),
             }))["task"]
@@ -778,7 +1018,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.get(f"{self.url}/agent-card.json", headers={
                 **key_headers, "authorization": HEADERS["authorization"],
             })).status_code, 401)
-            model = FunctionModel(lambda _, info: text_result(info, "对账" if "RECON" in (info.instructions or "") else "预算"))
+            model = publication_model(lambda _, info: text_result(info, "对账" if "RECON" in (info.instructions or "") else "预算"))
             with patch("deep_agent.agent.factory._resolve_model", return_value=model):
                 task = self.result(await self.rpc("SendMessage", {
                     "message": self.message("route", "开始"),
@@ -844,7 +1084,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(rejected_scope.status_code, 422)
 
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(
             lambda _, info: text_result(info, "预算差异 20"),
         )):
             task = self.result(await self.rpc("SendMessage", {
@@ -898,7 +1138,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(card_url, headers=outside)).status_code, 403)
         self.revoked = False
 
-        model = FunctionModel(lambda _, info: text_result(info, "预算差异 20"))
+        model = publication_model(lambda _, info: text_result(info, "预算差异 20"))
         with patch("deep_agent.agent.factory._resolve_model", return_value=model):
             for app_id in ("budget001", "budget002"):
                 self.result(await self.rpc("SendMessage", {
@@ -1006,7 +1246,7 @@ class AgentServiceTests(unittest.IsolatedAsyncioTestCase):
             "raw": base64.b64encode(pdf(4)).decode(), "mediaType": "application/pdf", "filename": "sample.pdf",
         })
         with (
-            patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)),
+            patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)),
             patch("deep_agent.documents.toolset.parse_with_provider", AsyncMock(return_value=original())),
         ):
             task = self.result(await self.rpc("SendMessage", {"message": message}))["task"]
@@ -1055,7 +1295,7 @@ w.save(publish_path("预算.xlsx"))
 
         app_url = f"{self.url}/apps/budget001"
         token = {key: HEADERS[key] for key in ("authorization", "A2A-Version")}
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(respond)):
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(respond)):
             task = self.result(await self.rpc("SendMessage", {
                 "message": self.message("xlsx", "输出预算报告 Excel"),
             }, headers=token, url=app_url))["task"]
@@ -1384,7 +1624,7 @@ w.save(publish_path("预算.xlsx"))
                 self.assertEqual(events(response)[0]["result"]["task"]["id"], task["id"])
                 self.assertEqual(events(response)[-1]["result"]["statusUpdate"]["status"]["state"], "TASK_STATE_CANCELED")
             self.assertEqual(self.result(await self.rpc("CancelTask", {"id": task["id"]}))["id"], task["id"])
-        with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+        with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(
             lambda _, info: text_result(info, "流式报告"),
         )):
             response = await self.rpc("SendStreamingMessage", {"message": self.message("stream", "生成报告")})
@@ -1522,7 +1762,11 @@ w.save(publish_path("预算.xlsx"))
             async with ClientSession(rx, tx) as session:
                 hello = await session.initialize()
                 self.assertIsNotNone(hello.capabilities.resources)
-                descriptions = {tool.name: tool.description for tool in (await session.list_tools()).tools}
+                tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+                descriptions = {name: tool.description for name, tool in tools.items()}
+                get_wait = tools["GetTask"].inputSchema["properties"]["waitSeconds"]
+                send_wait = tools["SendMessage"].inputSchema["$defs"]["SendConfiguration"]["properties"]["waitSeconds"]
+                self.assertEqual((get_wait["default"], send_wait["default"]), (120, 120))
                 names = set(descriptions)
                 self.assertEqual(names, {"list_agents", "SendMessage", "GetTask", "ListTasks", "CancelTask", "get_artifact"})
                 self.assertIn("HTTP GET", descriptions["GetTask"])
@@ -1546,7 +1790,7 @@ w.save(publish_path("预算.xlsx"))
                 self.assertTrue(missing.isError)
                 self.assertEqual(missing.structuredContent["status"], 400)
                 self.client.headers.update(HEADERS)
-                with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(
+                with patch("deep_agent.agent.factory._resolve_model", return_value=publication_model(
                     lambda _, info: text_result(info, "20"),
                 )):
                     result = await session.call_tool("SendMessage", {
@@ -1554,9 +1798,8 @@ w.save(publish_path("预算.xlsx"))
                     })
                     self.assertFalse(result.isError, result)
                     initial = result.structuredContent
-                    self.assertEqual(initial["status"]["state"], "TASK_STATE_SUBMITTED")
+                    self.assertEqual(initial["status"]["state"], "TASK_STATE_COMPLETED")
                     task_id = initial["id"]
-                    await self.ctx.agent_tasks.wait(self.ctx.agent_tasks.entries[task_id])
                 self.assertEqual(self.result(await self.rpc("GetTask", {"id": task_id}))["id"], task_id)
                 self.assertEqual((await session.call_tool("ListTasks", {"agentCode": "budget-report"}))
                                  .structuredContent["tasks"][0]["id"], task_id)

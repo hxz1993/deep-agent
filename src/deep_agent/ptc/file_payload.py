@@ -14,6 +14,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 
 from deep_agent.agent.attachments import _download_file
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.ptc.diagnostics import current_collector
 from deep_agent.agent.tool_errors import observe_tool_operation, tool_error_message
 from deep_agent.capabilities.codes import PTC_PACKAGE_CODE
@@ -28,6 +29,7 @@ CODE_MODE_ORIGINAL_NAME_KEY = "deepagent_original_name"
 CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY = "deepagent_trusted_return_schema"
 CODE_MODE_HYBRID = "hybrid"
 CODE_MODE_CODE_ONLY = "code_only"
+CUBE_MEMBER_SEARCH_TOOL = "cube_search_members"
 
 FILE_DATA_TOKEN_PREFIX = "deepagent-file-data://"
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -510,8 +512,11 @@ class FilePayloadResolvingToolset(WrapperToolset[AgentDeps]):
             metadata[CODE_MODE_ORIGINAL_NAME_KEY] = identity.public if identity else name
             _, original_name = mcp_definition_identity(tool.tool_def, self.server_names)
             metadata[CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY] = bool(
-                original_name in MCP_RETURN_SCHEMA_TOOLS
-                and tool.tool_def.return_schema
+                tool.tool_def.return_schema
+                and (
+                    original_name in MCP_RETURN_SCHEMA_TOOLS
+                    or (original_name == CUBE_MEMBER_SEARCH_TOOL and metadata.get(READ_ONLY_TOOL) is True)
+                )
             )
             tool_def = replace(tool.tool_def, metadata=metadata)
             result[name] = _ResolvingTool(

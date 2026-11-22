@@ -223,8 +223,8 @@ class Collector:
                     step.output = summary(returned.content, sensitive_values=self.sensitive_values)
                 if step.status in {"denied", "failed", "interrupted"} and step.error is None:
                     step.error = summary(returned.content, sensitive_values=self.sensitive_values)
-            elif step.status == "unknown":
-                step.status = "interrupted" if self.final_status == "interrupted" else "failed"
+            elif step.status == "unknown" and self.final_status == "interrupted":
+                step.status = "interrupted"
 
     def finish(self, status: str) -> None:
         self.final_status = status

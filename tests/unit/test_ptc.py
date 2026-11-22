@@ -17,7 +17,7 @@ from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai.usage import RunUsage
 from pydantic_core import SchemaValidator
 
-from deep_agent.agent.tool_names import ScopedToolset
+from deep_agent.agent.tool_names import READ_ONLY_TOOL, ScopedToolset
 from deep_agent.agent.deps import AgentDeps
 from deep_agent.capabilities import build_registry
 from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode
@@ -245,6 +245,64 @@ class CodeModeTests(unittest.IsolatedAsyncioTestCase):
                          if isinstance(part, ToolReturnPart) and part.tool_call_id == "ptc-2")
         self.assertEqual(persisted.outcome, "failed")
         self.assertEqual(persisted.metadata, failed.metadata)
+
+    async def test_parallel_failure_reports_completed_failed_and_interrupted_calls(self) -> None:
+        for read_only in (True, False):
+            with self.subTest(read_only=read_only):
+                started = asyncio.Event()
+                completed = asyncio.Event()
+                tools = FunctionToolset()
+
+                @tools.tool_plain(metadata={READ_ONLY_TOOL: read_only})
+                async def slow() -> int:
+                    started.set()
+                    await asyncio.Future()
+                    return 0
+
+                @tools.tool_plain(metadata={READ_ONLY_TOOL: True})
+                async def lookup() -> int:
+                    completed.set()
+                    return 5
+
+                @tools.tool_plain(metadata={READ_ONLY_TOOL: True})
+                async def invalid_lookup() -> int:
+                    await started.wait()
+                    await completed.wait()
+                    raise ModelRetry("invalid member expression")
+
+                snippets = iter(("1", "import asyncio\nawait asyncio.gather("
+                                 "demo_slow(), demo_lookup(), demo_invalid_lookup())"))
+
+                def respond(messages, _info: AgentInfo) -> ModelResponse:
+                    code = next(snippets, None)
+                    if code is None:
+                        return ModelResponse(parts=[TextPart("done")])
+                    return ModelResponse(parts=[ToolCallPart(
+                        "run_code", {"code": code}, "warmup" if code == "1" else "parallel-read",
+                    )])
+
+                agent = Agent(
+                    FunctionModel(respond), deps_type=AgentDeps,
+                    toolsets=[
+                        build_code_mode_tool_package().toolset,
+                        FilePayloadResolvingToolset(tools.prefixed("demo")),
+                    ],
+                    capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+                )
+                result = await agent.run("read data", deps=AgentDeps(session_id="isolated"))
+                failed = next(part for message in result.new_messages() for part in message.parts
+                              if isinstance(part, ToolReturnPart) and part.tool_call_id == "parallel-read")
+                self.assertEqual(failed.outcome, "failed")
+                report = failed.content["nested_calls"]
+                self.assertIn("demo_slow({}) was interrupted before a result was received", report)
+                self.assertIn("demo_lookup({}) completed and returned 5", report)
+                self.assertIn("demo_invalid_lookup({}) failed", report)
+                self.assertEqual("may have applied a partial change" in report, not read_only)
+                self.assertEqual("Earlier nested writes" in failed.content["guidance"], not read_only)
+                audit = failed.metadata["ptc_diagnostics"]["steps"]
+                self.assertEqual({step["tool_name"]: step["status"] for step in audit}, {
+                    "demo_slow": "interrupted", "demo_lookup": "completed", "demo_invalid_lookup": "failed",
+                })
 
     def test_registry_exposes_explicit_default_off_package(self) -> None:
         registry = build_registry()

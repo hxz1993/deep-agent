@@ -9,12 +9,15 @@ from typing import Any
 from loguru import logger
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.exceptions import ToolFailedError
+from pydantic_ai.function_signature import FunctionSignature
 from pydantic_ai.messages import ToolReturn, ToolReturnPart
 from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai_harness.code_mode import CodeModeToolset
+from pydantic_ai_harness.code_mode._toolset import RunCodeExecution, _RETRY_SUMMARY_MAX_CHARS, _preview
 from pydantic_monty import MontyRuntimeError
 
 from deep_agent.agent.deps import AgentDeps
+from deep_agent.agent.tool_names import READ_ONLY_TOOL
 from deep_agent.ptc.diagnostics import Collector, current_collector
 from deep_agent.ptc.limits import PTC_WALL_TIMEOUT_SECONDS
 from deep_agent.ptc.file_payload import (
@@ -23,6 +26,7 @@ from deep_agent.ptc.file_payload import (
     CODE_MODE_METADATA_KEY,
     CODE_MODE_ORIGINAL_NAME_KEY,
     CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY,
+    CUBE_MEMBER_SEARCH_TOOL,
     FILE_DATA_TOKEN_PREFIX,
     payload_secrets,
     safe_audit_value,
@@ -32,6 +36,63 @@ from deep_agent.ptc.file_payload import (
 _RUN_CODE_NAME = "run_code"
 _INVALID_IDENTIFIER = re.compile(r"\W")
 _LONG_BASE64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{256,}={0,2}(?![A-Za-z0-9+/])")
+
+
+def _cube_member_search_ptc_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    properties = schema.get("properties")
+    results = properties.get("results") if isinstance(properties, dict) else None
+    values = results.get("additionalProperties") if isinstance(results, dict) else None
+    if not isinstance(values, dict) or not isinstance(values.get("items"), dict):
+        return schema
+    if values.get("type") not in (["null", "array"], ["array", "null"]):
+        return schema
+    # Harness preserves the item type for anyOf, but loses it for a type array.
+    normalized = {"anyOf": [{**values, "type": "array"}, {"type": "null"}]}
+    return {
+        **schema,
+        "properties": {**properties, "results": {**results, "additionalProperties": normalized}},
+    }
+
+
+def _describe_nested_failure(
+    execution: RunCodeExecution, wrapped_tools: dict[str, ToolsetTool[AgentDeps]],
+) -> tuple[str, bool]:
+    """Summarize settled callbacks with the same size cap as the SDK."""
+    lines: list[str] = []
+    used = 0
+    possible_writes = False
+    count = len(execution.nested_calls)
+    for call_id, call in execution.nested_calls.items():
+        result = execution.nested_returns.get(call_id)
+        status = result.outcome if result else "unknown"
+        source = wrapped_tools.get(call.tool_name)
+        read_only = source is not None and (source.tool_def.metadata or {}).get(READ_ONLY_TOOL) is True
+        possible_writes |= not read_only and status != "denied"
+        if used >= _RETRY_SUMMARY_MAX_CHARS:
+            continue
+        if status == "success":
+            detail = f"completed and returned {_preview(result.content)}"
+        elif status == "failed":
+            detail = f"failed: {_preview(result.content)}"
+        elif status == "denied":
+            detail = "was denied and did not run"
+        elif status == "interrupted":
+            detail = "was interrupted before a result was received"
+        else:
+            detail = "has an unknown outcome; no result was received"
+        if not read_only and status not in {"success", "denied"}:
+            detail += "; it may have applied a partial change"
+        line = f"- {call.tool_name}({_preview(call.args)}) {detail}"
+        if used + len(line) > _RETRY_SUMMARY_MAX_CHARS:
+            used = _RETRY_SUMMARY_MAX_CHARS
+            continue
+        lines.append(line)
+        used += len(line)
+    if count > len(lines):
+        lines.append(f"- ... and {count - len(lines)} more not shown")
+    return "\n".join([f"{count} nested tool calls started before execution stopped:", *lines]), possible_writes
+
+
 _DISCOVERY_HINT = (
     "Discovered tools are directly callable with their native schemas; "
     "discovery does not require run_code. For dependent calls or bulk result "
@@ -322,7 +383,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
             # while preserving the SDK's exact authorized callable definitions.
             description = "\n".join((
                 _ROUTING_GUIDANCE, _EXECUTION_GUIDANCE,
-                self._render_catalog(run_code.callable_defs), _USAGE_RULES,
+                self._render_catalog(run_code.callable_defs, include_return_types=True), _USAGE_RULES,
             ))
             result[_RUN_CODE_NAME] = replace(
                 run_code,
@@ -334,7 +395,9 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         return result
 
     @staticmethod
-    def _render_catalog(callable_defs: dict[str, Any]) -> str:
+    def _render_catalog(callable_defs: dict[str, Any], *, include_return_types: bool = False) -> str:
+        from deep_agent.agent.tool_discovery import mcp_definition_identity
+
         if not callable_defs:
             return ""
         rows = [
@@ -342,6 +405,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
             "for async functions; call synchronous functions directly. Read each "
             "ordinary tool schema for parameters and semantics:"
         ]
+        typed_functions = []
         for alias, tool_def in sorted(callable_defs.items()):
             metadata = tool_def.metadata or {}
             original = metadata.get(CODE_MODE_ORIGINAL_NAME_KEY)
@@ -359,6 +423,23 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
                 rows.append(f"- `{original}` -> Python `{call_prefix}{alias}(...)`")
             else:
                 rows.append(f"- `{call_prefix}{alias}(...)`")
+            if (
+                include_return_types
+                and metadata.get(CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY)
+                and mcp_definition_identity(tool_def, ())[1] == CUBE_MEMBER_SEARCH_TOOL
+            ):
+                typed_functions.append(tool_def)
+        if typed_functions:
+            signatures = [definition.function_signature for definition in typed_functions]
+            conflicts = FunctionSignature.get_conflicting_type_names(signatures)
+            rows.extend(("", "Member-search return types:", "```python"))
+            rows.extend(FunctionSignature.render_type_definitions(signatures, conflicts))
+            for definition in typed_functions:
+                signature = definition.render_signature(
+                    "...", is_async=not definition.sequential, conflicting_type_names=conflicts,
+                )
+                rows.append(f"{signature.splitlines()[0]} ...")
+            rows.append("```")
         return "\n".join(rows)
 
     def _partition_callable_tools(
@@ -378,17 +459,21 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
             name: wire for name in callable_defs
             if (wire := public_to_wire[aliases.get(name, name)]) != name
         }
-        # MCP output schemas are third-party input. Only the existing evidence-backed
+        from deep_agent.agent.tool_discovery import mcp_definition_identity
+
+        # MCP output schemas are third-party input. Only the evidence-backed
         # allowlist may shape Monty's generated return types; everything else remains
         # canonical JSON/Any rather than inventing a structure from a tool name.
         for alias, tool_def in list(callable_defs.items()):
             metadata = tool_def.metadata or {}
-            if (
-                metadata.get(CODE_MODE_METADATA_KEY) == CODE_MODE_HYBRID
-                and not metadata.get(CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY)
-                and tool_def.return_schema is not None
-            ):
+            if metadata.get(CODE_MODE_METADATA_KEY) != CODE_MODE_HYBRID or tool_def.return_schema is None:
+                continue
+            if not metadata.get(CODE_MODE_TRUSTED_RETURN_SCHEMA_KEY):
                 callable_defs[alias] = replace(tool_def, return_schema=None)
+            elif mcp_definition_identity(tool_def, ())[1] == CUBE_MEMBER_SEARCH_TOOL:
+                callable_defs[alias] = replace(
+                    tool_def, return_schema=_cube_member_search_ptc_schema(tool_def.return_schema),
+                )
         return callable_defs, aliases
 
     async def call_tool(
@@ -416,22 +501,34 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
         except (ModelRetry, TimeoutError) as exc:
             collector.finish("failed")
             metadata = self._return_metadata(ctx, collector)
-            safe_message = _scrub_error_text(
-                (f"PTC exceeded its {PTC_WALL_TIMEOUT_SECONDS}-second total time limit"
-                 if isinstance(exc, TimeoutError) else str(exc)),
-                sensitive_values=secrets,
-            )
+            message = (f"PTC exceeded its {PTC_WALL_TIMEOUT_SECONDS}-second total time limit"
+                       if isinstance(exc, TimeoutError) else str(exc))
+            content = {
+                "error": safe_audit_value(
+                    _scrub_error_text(message, sensitive_values=secrets), sensitive_values=secrets,
+                ),
+            }
+            execution = collector.execution
+            possible_writes = False
+            if execution is not None and execution.nested_calls:
+                run_code_tool = self._as_run_code_tool(tool)
+                detail, possible_writes = _describe_nested_failure(
+                    execution, run_code_tool.wrapped_tools if run_code_tool else {},
+                )
+                content["nested_calls"] = safe_audit_value(
+                    _scrub_error_text(detail, sensitive_values=secrets), sensitive_values=secrets,
+                )
             guidance = (
-                "PTC execution failed. Inspect the error and completed calls before continuing. "
-                "Correct read-only code only after identifying the cause; "
+                "PTC execution failed. Check the error and each call's outcome before retrying. "
+                "Reuse a result only when its call completed and the result is available. "
                 "search_tools and schema discovery must stay native. "
-                "Earlier nested writes may have succeeded: inspect target state "
-                "before retrying; do not repeat the same failed snippet or switch "
-                "paths to repeat an uncertain write."
             )
+            if possible_writes:
+                guidance += ("Earlier nested writes may have succeeded. Inspect target state "
+                             "before retrying; do not repeat an uncertain write through either path.")
             guidance += _monty_compatibility_guidance(exc)
-            if collector.execution is not None and any(
-                call.tool_name == "channel_message" for call in collector.execution.nested_calls.values()
+            if execution is not None and any(
+                call.tool_name == "channel_message" for call in execution.nested_calls.values()
             ):
                 guidance += (" If channel delivery reached the gateway, its outcome may be unknown. "
                              "Do not resend through either native tools or PTC without confirming delivery.")
@@ -442,10 +539,7 @@ class HybridCodeModeToolset(CodeModeToolset[AgentDeps]):
             raise ToolFailedError(ToolReturnPart(
                 tool_name=name,
                 tool_call_id=ctx.tool_call_id or "",
-                content={
-                    "error": safe_audit_value(safe_message, sensitive_values=secrets),
-                    "guidance": guidance,
-                },
+                content={**content, "guidance": guidance},
                 outcome="failed",
                 metadata=metadata,
             )) from exc

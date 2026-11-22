@@ -43,6 +43,8 @@ from deep_agent.capabilities.mcp.toolset_builder import (
 from deep_agent.options import OPTION
 from deep_agent.capabilities.mcp.run_scoped import RunScopedMcpToolset
 from deep_agent.capabilities.mcp.snapshot_toolset import _default_tls_context
+from deep_agent.ptc import FilePayloadResolvingToolset, HybridCodeMode, build_code_mode_tool_package
+from deep_agent.ptc.toolset import HybridCodeModeToolset
 
 
 class McpTlsContextTests(unittest.TestCase):
@@ -292,6 +294,71 @@ class BuildUrlMcpToolsetTests(unittest.IsolatedAsyncioTestCase):
                                        inspection=inspection)
             tools = await toolset.get_tools(ctx)
         self.assertNotIn(READ_ONLY_TOOL, tools["mcp__external__query"].tool_def.metadata)
+
+    async def test_platform_cube_member_search_has_a_typed_ptc_catalog(self):
+        ctx = RunContext(deps=AgentDeps(session_id="session-a"), model=TestModel(), usage=RunUsage())
+        gateway = "https://platform.example/deepfos-server"
+        platform = SimpleNamespace(server=SimpleNamespace(base=gateway))
+        item_schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "description": {"type": "string"}},
+            "required": ["name"],
+        }
+        schema = {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "object",
+                    "additionalProperties": {"type": ["null", "array"], "items": item_schema},
+                },
+                "query_statuses": {"type": "object", "additionalProperties": {"type": "string"}},
+            },
+            "required": ["results", "query_statuses"],
+        }
+        inspection = self._inspection()
+        item = inspection["tools"]["snapshot"]["definitions"][0]
+        item.update(name="cube_search_members", output_schema=schema,
+                    annotations={"readOnlyHint": True}, task_support=None)
+        with patch("deep_agent.services.mcp_bound_app.PLATFORM_OPTION", platform):
+            for url, trusted in (
+                (f"{gateway}/deepfos-mcp/mcp", True),
+                ("https://third-party.example/mcp", False),
+            ):
+                with self.subTest(url=url):
+                    native = build_mcp_toolset("biz", "url", {"url": url}, inspection=inspection)
+                    wrapped = FilePayloadResolvingToolset(native, server_names=("biz",))
+                    tools = await wrapped.get_tools(ctx)
+                    definition = tools["mcp__biz__cube_search_members"].tool_def
+                    hybrid = HybridCodeModeToolset(wrapped=wrapped)
+                    callable_defs, _ = hybrid._partition_callable_tools(tools)
+                    stubs = hybrid._build_type_check_stubs(callable_defs)
+                    self.assertEqual(definition.return_schema, schema)
+                    self.assertEqual(
+                        definition.return_schema["properties"]["results"]["additionalProperties"]["type"],
+                        ["null", "array"],
+                    )
+                    descriptions = []
+
+                    def respond(_messages, info):
+                        descriptions.extend(tool.description or "" for tool in info.function_tools
+                                            if tool.name == "run_code")
+                        return ModelResponse(parts=[TextPart("done")])
+
+                    agent = Agent(
+                        FunctionModel(respond), deps_type=AgentDeps,
+                        toolsets=[build_code_mode_tool_package().toolset, wrapped],
+                        capabilities=[HybridCodeMode(tools=[], dynamic_catalog=True)],
+                    )
+                    await agent.run("Inspect the PTC catalog.", deps=AgentDeps(session_id="catalog"))
+                    self.assertEqual(len(descriptions), 1)
+                    if trusted:
+                        for rendered in (stubs, descriptions[0]):
+                            self.assertRegex(rendered, r"results: dict\[str, list\[\w+\] \| None\]")
+                            self.assertIn("description: NotRequired[str]", rendered)
+                            self.assertIn("query_statuses: dict[str, str]", rendered)
+                    else:
+                        self.assertIsNone(callable_defs["biz_cube_search_members"].return_schema)
+                        self.assertNotIn("Member-search return types:", descriptions[0])
 
     async def test_uses_snapshot_without_connecting(self) -> None:
         ctx = RunContext(

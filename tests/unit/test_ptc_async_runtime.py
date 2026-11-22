@@ -335,7 +335,7 @@ class AsyncCodeModeRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     self.assertNotIn('JSON encoder', parts[1].content['guidance'])
                     self.assertNotIn('decoder hook', parts[1].content['guidance'])
-                self.assertIn('repeat an uncertain write', parts[1].content['guidance'])
+                self.assertIn("Check the error and each call's outcome", parts[1].content['guidance'])
                 diagnostic = parts[1].metadata['ptc_diagnostics']
                 self.assertEqual(diagnostic['summary']['call_count'], 0)
                 self.assertEqual(called, [7, 2])

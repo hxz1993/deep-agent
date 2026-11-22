@@ -11,11 +11,11 @@ from deep_agent.skills.runtime import ResolvedSkill
 
 
 def build_skill_resource_toolset(
-    resources: dict[str, ResolvedSkill],
+    skills: dict[str, ResolvedSkill],
 ) -> FunctionToolset[AgentDeps] | None:
-    if not resources:
+    if not skills:
         return None
-    names = ", ".join(sorted(resources))
+    names = ", ".join(sorted(skills))
     toolset = FunctionToolset[AgentDeps](
         id="skill-resources",
         instructions=(
@@ -24,12 +24,12 @@ def build_skill_resource_toolset(
             "with type=skill to read only the pages needed for the task. "
             "Text script source and helper modules can also be read with read_file; "
             "reading source does not grant script execution permissions. "
-            f"Authorized Skills with resources: {names}."
+            f"Authorized Skills: {names}. A Skill can have an empty resource list."
         ),
     )
 
     def _item(skill_code: str) -> ResolvedSkill:
-        item = resources.get(skill_code)
+        item = skills.get(skill_code)
         if item is None:
             raise ModelRetry(
                 f"Skill {skill_code!r} is not associated with this Agent. Choose one of: {names}."

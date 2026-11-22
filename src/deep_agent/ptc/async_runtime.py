@@ -30,7 +30,6 @@ from pydantic_ai_harness._monty_exec import is_sandbox_panic
 # Reuse its conversion and generated signatures rather than redefining either.
 from pydantic_ai_harness.code_mode._toolset import (
     _TOOL_RETURN_CONTENT_TA,
-    _describe_started_calls,
     _is_duration_exhausted,
     _jsonable_for_sandbox,
     _resolve_resource_limits,
@@ -277,20 +276,15 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
             raise host_cancellation
         state.has_executed_feed = True
         message = f"Runtime error:\n{execution.capture.prepend_to(exc.display())}"
-        if execution.nested_calls:
-            message += "\n\n" + _describe_started_calls(execution.nested_calls, execution.nested_returns)
         if _is_duration_exhausted(exc) or exc.display(format="msg").startswith("memory limit exceeded:"):
             # Monty 1.5 warns that a resource trip can leave a half-mutated heap.
             # Discard it instead of feeding further code into uncertain state.
             await reset_runtime(toolset)
-            message += ("\n\nThe sandbox exceeded its execution or memory limit and its REPL state "
-                        "was reset. Inspect completed side effects before recreating state; "
-                        "do not blindly repeat writes.")
+            message += "\n\nThe sandbox exceeded its execution or memory limit and its REPL state was reset."
         raise ModelRetry(message) from exc
     except MontyCrashedError as exc:
         await reset_runtime(toolset)
-        raise ModelRetry("The sandbox worker stopped and its REPL state was reset. "
-                         "Inspect earlier tool side effects before continuing.") from exc
+        raise ModelRetry("The sandbox worker stopped and its REPL state was reset.") from exc
     except asyncio.CancelledError:
         await reset_runtime(toolset)
         raise
@@ -300,8 +294,7 @@ async def execute_code(toolset: Any, code: str, ctx: Any, tool: Any, execution: 
     except BaseException as exc:
         await reset_runtime(toolset)
         if is_sandbox_panic(exc):
-            raise ModelRetry("The sandbox aborted and its REPL state was reset. "
-                             "Inspect earlier tool side effects before continuing.") from exc
+            raise ModelRetry("The sandbox aborted and its REPL state was reset.") from exc
         raise
     finally:
         await runtime.cancel_callbacks()

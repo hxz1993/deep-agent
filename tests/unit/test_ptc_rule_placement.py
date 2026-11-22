@@ -92,8 +92,8 @@ class PTCRulePlacementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["native_calls"], ["alpha", "beta", "beta", "alpha"])
         self.assertEqual([part["outcome"] for part in captured["ptc"]], ["success", "failed"])
         self.assertEqual(captured["ptc"][0]["content"], 6)
-        self.assertIn("Inspect the error and completed calls", str(captured["ptc"][1]["content"]))
-        self.assertIn("repeat an uncertain write", str(captured["ptc"][1]["content"]))
+        self.assertIn("Check the error and each call's outcome", str(captured["ptc"][1]["content"]))
+        self.assertNotIn("Earlier nested writes", str(captured["ptc"][1]["content"]))
         self.assertEqual(captured["notices"], ["New tool schemas are available: `demo_alpha`.",
                                               "New tool schemas are available: `demo_beta`."])
         for request in captured["requests"]:

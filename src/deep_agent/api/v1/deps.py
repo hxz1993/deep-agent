@@ -293,7 +293,7 @@ async def _build_runner_from_spec(
         ctx,
         resolved_skills,
     )
-    skill_resource_toolset = build_skill_resource_toolset(resolved_skills.resources)
+    skill_resource_toolset = build_skill_resource_toolset({skill.code: skill for skill in resolved_skills.items})
     file_export_toolset = build_file_export_toolset()
     skill_script_toolset = (
         build_skill_script_toolset(

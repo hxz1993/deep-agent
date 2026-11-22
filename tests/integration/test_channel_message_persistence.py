@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic_ai.messages import UserPromptPart
 from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from sqlalchemy import select
 
@@ -22,6 +23,7 @@ from deep_agent.capabilities import build_registry
 from deep_agent.core.context import AppContext, init_context, reset_context
 from deep_agent.db.models import ChannelMessageRun
 from deep_agent.schemas.agent import AgentUpdate
+from deep_agent.schemas.ui_tools import UiToolCreate, UiToolPackageCreate
 from deep_agent.skills.runtime import SkillRuntimeLibrary
 from tests.helpers.request_identity import install_test_user_header
 from tests.helpers.sqlite_stores import make_sqlite_stores, seed_default_agent
@@ -90,9 +92,10 @@ class ChannelMessagePersistenceIntegrationTests(unittest.IsolatedAsyncioTestCase
             while any(peer.active or peer.pending or peer.worker for peer in service.peers.values()):
                 await asyncio.sleep(0.01)
 
-    async def _send(self, handler, adapter, *, message_id, peer_type="single"):
+    async def _send(self, handler, adapter, *, message_id, peer_type="single",
+                    message="Synthetic read-only channel verification"):
         handler.handle_frame(frame(
-            payload={"content": "Synthetic read-only channel verification"},
+            payload={"content": message},
             msgid=message_id, chattype=peer_type, chatid="isolated-synthetic-group",
         ), adapter.client)
         await adapter.client.flush()
@@ -253,30 +256,64 @@ class ChannelMessagePersistenceIntegrationTests(unittest.IsolatedAsyncioTestCase
     async def test_provider_failure_ends_channel_loading_and_preserves_completed_tool(self):
         await self._interrupted_after_tool(cancel=False)
 
-    async def test_channel_delivers_console_hint_when_configured_ui_tool_awaits_input(self):
+    async def test_channel_hides_configured_ui_tools_and_continues_after_text_clarification(self):
         account, service, adapter, handler, requests = await self._create_ingress(stream_interval=0)
-        await self.ctx.stores.agent.update_unique(self._agent_id, AgentUpdate(capabilities=["ui:builtin"]))
+        await self.ctx.stores.ui_tool_package.create_manual(UiToolPackageCreate(code="ui:budget", label="预算"))
+        await self.ctx.stores.ui_tool.create_manual(UiToolCreate(
+            name="budget__clarify", package_code="ui:budget", description="Ask for the budget month.",
+            parameters_json_schema={"type": "object"},
+        ))
+        prompt = "缺少预算月份时必须调用 UI 工具。"
+        capabilities = ["ui:builtin", "ui:budget"]
+        await self.ctx.stores.agent.update_unique(
+            self._agent_id, AgentUpdate(prompt=prompt, capabilities=capabilities),
+        )
+        clarification = "请提供要核对的预算月份。"
+        followup = "2026 年 11 月。"
+        final_answer = "收到，按 2026 年 11 月核对。"
         delivered_histories = []
 
         async def answer(messages, info):
-            self.assertIn("builtin__confirm", {tool.name for tool in info.function_tools})
-            yield {1: DeltaToolCall(name="builtin__confirm", json_args='{"message":"Synthetic confirmation"}',
-                                    tool_call_id="channel-confirm")}
+            tools = {tool.name for tool in (*info.function_tools, *info.output_tools)}
+            self.assertTrue(tools.isdisjoint({"builtin__confirm", "builtin__choice", "budget__clarify"}))
+            self.assertFalse(any(name.startswith("ui__") for name in tools))
+            self.assertIn("channel_message", tools)
+            self.assertIn(prompt, info.instructions)
+            self.assertGreater(info.instructions.index("直接在当前渠道的回复正文"), info.instructions.index(prompt))
+            user_parts = [p for m in messages for p in m.parts if isinstance(p, UserPromptPart)]
+            if followup in str(user_parts[-1].content):
+                self.assertTrue(any(clarification in str(message.parts) for message in messages))
+                yield final_answer
+            else:
+                yield clarification
 
         async def deliver(_frame, _stream_id, _text, finish):
             if finish:
-                delivered_histories.append(await self._history(requests[0]["session_id"]))
+                delivered_histories.append(await self._history(requests[-1]["session_id"]))
 
         adapter.client.reply_stream.side_effect = deliver
         with patch("deep_agent.agent.factory._resolve_model", return_value=FunctionModel(stream_function=answer)), mock_request_disconnect():
-            await self._send(handler, adapter, message_id="channel-ui-pending")
+            await self._send(handler, adapter, message_id="channel-ui-clarify", message="请核对预算。")
             await self._drain(service)
-        self.assertEqual(len(delivered_histories), 1)
-        tool, = self._assert_items(delivered_histories[0], texts=[], tool_count=1)
-        self.assertEqual(tool["status"], "awaiting_input")
-        final = adapter.client.reply_stream.await_args.args
-        self.assertEqual(final[2:], ("此操作需要在 DeepAgent 控制台继续完成。", True))
-        record = await self._run_record(account.id, "channel-ui-pending")
-        self.assertEqual((record.processing_status, record.delivery_status), ("completed", "sent"))
+            self.assertEqual(adapter.client.reply_stream.await_args.args[2:], (clarification, True))
+            self.assertEqual(len(delivered_histories), 1)
+            self._assert_items(delivered_histories[0], texts=[clarification], tool_count=0)
+
+            await self._send(handler, adapter, message_id="channel-ui-clarify-reply", message=followup)
+            await self._drain(service)
+            self.assertEqual(adapter.client.reply_stream.await_args.args[2:], (final_answer, True))
+
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0]["session_id"], requests[1]["session_id"])
+        self.assertEqual(len(delivered_histories), 2)
+        items = delivered_histories[1]["items"]
+        self.assertEqual([item["text"] for item in items if item["kind"] == "assistant_message" and item["text"]],
+                         [clarification, final_answer])
+        self.assertFalse(any(item["kind"] == "tool" or item["status"] in {"pending", "awaiting_input"} for item in items))
+        for message_id in ("channel-ui-clarify", "channel-ui-clarify-reply"):
+            record = await self._run_record(account.id, message_id)
+            self.assertEqual((record.processing_status, record.delivery_status), ("completed", "sent"))
+        row = await self.ctx.stores.agent.get_by_id(self._agent_id)
+        self.assertEqual(row.capabilities, capabilities)
         self.assertEqual(self.ctx.active_runs.active_count(), 0)
         await self._assert_fact_events(requests[0]["session_id"], status="completed")

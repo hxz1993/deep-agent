@@ -25,8 +25,8 @@
 - CLI 支持 `--json`，stdout 输出一个 JSON 对象，状态和诊断走 stderr。参数错误、鉴权失败、等待超时及业务失败使用不同退出码。需要补答时带回 Task ID、问题标识和可执行的下一步。响应丢失时输出可供恢复的 `message_id`。下载先写临时文件，按返回长度和可用摘要校验后原子保存，默认保留同名文件。
 - 同步适配由 CLI 进程自行组织，Python SDK 首版提供 async 客户端。SDK 核心采用轻量 HTTP 依赖，安装包无需 DeepAgent 服务、模型运行时或 A2A SDK。
 - MCP 使用 [输入 Schema](mcp-tool-inputs.json)，`tools/list` 返回稳定的一组工具，`list_agents()` 返回所有已启用发布。任务业务失败由任务状态表达，参数和访问错误使用 MCP 工具错误。工具结果以 `structuredContent` 为主，同时提供兼容只读取文本的宿主的 JSON 文本。
-- 输入文件采用 `attachments[]` 内联字节表示，由 CLI 或 SDK 本地读取。共用文件类型、数量和总量校验。三种服务端入口统一限制附件总量为 8 MiB，并在请求体读取阶段限制 JSON 至 11,446,954 字节。部署代理需容纳 Base64 和 JSON 包装，建议请求体上限至少 11 MiB。MCP 宿主未提供附件字节时，可通过 CLI 或 SDK 上传并完成同一 Task。
-- 文件产物来自可信的执行事件。MCP 默认返回完整鉴权下载 URL，至多 20 MiB 可用 `get_artifact(format="base64")` 从文本 JSON 取得原字节。验收区分「看到了文件名」「客户端拿到文件字节」「保存并打开成功」。
+- CLI 和 SDK 读取本地文件后用 `attachments[]` 提交。MCP 输入文件使用 `message.parts[].raw`。共用文件类型、数量和总量校验。三种服务端入口统一限制附件总量为 8 MiB，并在请求体读取阶段限制 JSON 至 11,446,954 字节。部署代理需容纳 Base64 和 JSON 包装，建议请求体上限至少 11 MiB。MCP 宿主未提供附件字节时，可通过 CLI 或 SDK 上传并完成同一 Task。
+- 文件产物来自可信的执行事件。MCP 的 `SendMessage` 和 `GetTask` 返回鉴权下载 URL。报告可登记到 DeepFOS 下载中心。鉴权 HTTP 下载和报告交付的操作说明见 `deepagent://guides/mcp`。验收区分「看到了文件名」「客户端拿到文件字节」「保存并打开成功」。
 
 ## 客户端验收
 
@@ -77,7 +77,7 @@
 | CodeBuddy Code 2.183.0 原生 MCP | 在 8002 连续调用 `list_agents`、`submit_task`、`get_task`。任务 `ebe5ec2305974c0ca2b005575ec9fd07` 返回差额 20。 |
 | CodeBuddy CLI 与 Skill | 在独立项目安装同一个 wheel 和项目级 Skill。新会话加载 Skill 后执行 CLI，任务 `babfbeb1a53a4e7b86f196f31592aa96` 返回差额 20。 |
 | Python SDK，Python 3.10.20 | 8002 任务 `8236b0e59a914e5c91591da3904b0090` 接收文本附件，停在待补材料。同一 Task 续跑后下载 XLSX，并核对 `C2=20`。 |
-| 跨入口 | A2A 提交后由 MCP 回查。MCP 提交任务 `5208fcb1e0784de7b8bf539383aa9af1`，由 SDK 补答和下载 XLSX。另用 MCP `resources/read` 取件，验证字节与 SDK 下载一致。在 Console 验证任务关联至诊断会话和具体提问。 |
+| 跨入口 | A2A 提交后由 MCP 回查。MCP 提交任务 `5208fcb1e0784de7b8bf539383aa9af1`，由 SDK 补答和下载 XLSX。当时另用实验性 MCP 文件资源取件，验证字节与 SDK 下载一致。在 Console 验证任务关联至诊断会话和具体提问。 |
 | 一期兼容 | 8002 官方 SDK 复验六个方法，订阅及取消任务 `5d923737af17437b8530e894c40adce5`。Inspector 用带 App 的 Card 流式返回 20。Langflow 通过现有本地适配器复验图片、同 Task 补材料、同 Context 追问及 XLSX 下载，文件任务 `2414519333ae45e49796ee2ab8d63791`。CodeBuddy A2A 通过本地适配器返回 20。在线 A²D Playground 用隔离样例通过普通发送和流式发送，临时 HTTPS 入口已关闭。 |
 | WorkBuddy 5.11.3 | 确认桌面自定义连接器入口，未取得连接和任务执行证据。原生 MCP 任务通过 CodeBuddy 验收。 |
 | 重启与过期 | 隔离实例重启，旧 Task 返回 404，两份会话仍保留。集成测试覆盖终态过期后 HTTP 和 MCP 查询。 |

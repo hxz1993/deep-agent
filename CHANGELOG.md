@@ -3,6 +3,12 @@
 本文件记录 DeepAgent 的产品版本变化，按新版本到旧版本排列。当前代码版本以
 `deep_agent.__version__` 为准；数据库结构版本以 Alembic head 为准，两者互不替代。
 
+## v0.17.7
+
+- 发布 Agent 的 MCP 移除 `get_artifact`。`SendMessage` 和 `GetTask` 返回产物引用和需鉴权的下载链接。报告可登记到 DeepFOS 下载中心，接入说明见 MCP 资源 `deepagent://guides/mcp`。
+- 消息渠道在运行时过滤内置和自定义交互式 UI 工具。允许文本输出的 Agent 在原渠道直接发出澄清问题，用户可用新消息补答。
+- 依赖变更：无（相对 `0.17.6`）。数据库版本为 `016`。
+
 ## v0.17.6
 
 - A2A 和 MCP 发布的 Agent 隐藏交互式 UI 工具。模型缺少信息时返回 `INPUT_REQUIRED` 和澄清内容，客户端可用原 Task ID 补答。

@@ -44,7 +44,7 @@ from deep_agent.files.image_view.runtime import build_view_image_runtime
 from deep_agent.documents.runtime import build_document_runtime
 from deep_agent.documents.settings import DOCUMENT_PACKAGE_CODE, load_document_parsing_config
 from deep_agent.core.context import AppContext
-from deep_agent.channels.instructions import channel_instructions
+from deep_agent.channels.instructions import CHANNEL_UI_INSTRUCTIONS, channel_instructions
 from deep_agent.channels.outbound import ChannelRunContext
 from deep_agent.core.exceptions import AgentModelNotConfiguredError, AgentNotFoundError, LlmModelNotFoundError
 from deep_agent.options import OPTION
@@ -192,11 +192,13 @@ async def build_runner_for_agent(
             if app_context.prompt_append:
                 instructions += f"\n\n当前应用追加提示词：\n{app_context.prompt_append}"
         spec = replace(spec, instructions=instructions)
-    if publication_protocol in ("a2a", "mcp"):
+    published_run = publication_protocol in ("a2a", "mcp")
+    if published_run or channel_type or channel_context is not None:
+        clarification = PUBLICATION_UI_INSTRUCTIONS if published_run else CHANNEL_UI_INSTRUCTIONS
         spec = replace(
             spec,
             capabilities=[code for code in spec.capabilities if not code.startswith("ui:")],
-            instructions=f"{spec.instructions}\n\n{PUBLICATION_UI_INSTRUCTIONS}",
+            instructions=f"{spec.instructions}\n\n{clarification}",
         )
     runner = await _build_runner_from_spec(
         spec, ctx, request_headers=request_headers, channel_context=channel_context, app_context=app_context,

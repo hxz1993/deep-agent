@@ -518,7 +518,7 @@
                   <tr><th scope="row">查询结果 / 取消</th><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td><code>GetTask</code>、<code>ListTasks</code>、<code>CancelTask</code></td><td>查询、等待及取消</td></tr>
                   <tr><th scope="row">获取进度</th><td><code>SendStreamingMessage</code>、<code>SubscribeToTask</code></td><td><code>GetTask</code> 可限时等待</td><td>等待及查询状态</td></tr>
                   <tr><th scope="row">发送附件</th><td><code>message.parts[].raw</code> 传 Base64 字节</td><td><code>message.parts[].raw</code> 传 Base64 字节</td><td>读取本地文件后随任务发送</td></tr>
-                  <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>GetTask</code> 或 <code>get_artifact</code> 返回鉴权下载链接</td><td>读取结果并下载文件</td></tr>
+                  <tr><th scope="row">获取产物</th><td>结果中的 Artifact 和鉴权下载链接</td><td><code>SendMessage</code> 和 <code>GetTask</code> 返回鉴权下载链接</td><td>读取结果并下载文件</td></tr>
                 </tbody>
               </table>
             </div>
@@ -588,7 +588,6 @@
                     <tr><th scope="row"><code>GetTask</code></th><td>查看状态、回复和产物。<code>waitSeconds</code> 默认 120 秒，传 0 立即返回。超时后可用原 Task ID 继续查询。</td></tr>
                     <tr><th scope="row"><code>ListTasks</code></th><td>按发布、状态、Context ID 或更新时间筛选近期任务</td></tr>
                     <tr><th scope="row"><code>CancelTask</code></th><td>请求停止未结束的任务</td></tr>
-                    <tr><th scope="row"><code>get_artifact</code></th><td>获取指定产物</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -597,6 +596,7 @@
                   <thead><tr><th scope="col">资源</th><th scope="col">URI / 读取方式</th></tr></thead>
                   <tbody>
                     <tr><th scope="row">发布 Agent MCP 接入指南</th><td>用 <code>resources/read</code> 读取 <code>deepagent://guides/mcp</code></td></tr>
+                    <tr><th scope="row">任务文件</th><td>报告可登记到 DeepFOS 下载中心。程序可带原凭据请求返回的下载链接。见上方接入指南。</td></tr>
                   </tbody>
                 </table>
               </div>

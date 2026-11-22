@@ -79,9 +79,10 @@ class ChannelSessionControlTests(ChannelAccountsFixture, unittest.IsolatedAsynci
                             self.assertEqual(response.json()["status"], "completed")
                         info = requests.pop()
                         tools = {tool.name for tool in (*info.function_tools, *info.output_tools)}
-                        self.assertTrue({"channel_message", "channel_doc", "builtin__confirm"} <= tools)
-                        self.assertNotIn("present", tools)
+                        self.assertTrue({"channel_message", "channel_doc"} <= tools)
+                        self.assertTrue({"present", "builtin__confirm", "builtin__choice"}.isdisjoint(tools))
                         self.assertIn("本轮消息来自企业微信机器人", info.instructions)
+                        self.assertIn("直接在当前渠道的回复正文", info.instructions)
                         denied = await client.post(endpoint, json=body, headers={
                             "user": "session-user", "X-Deep-Agent-Channel-Run": claim.run.id,
                         })

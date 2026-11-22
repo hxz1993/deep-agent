@@ -22,7 +22,7 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
   --api-port 8002
 ```
 
-服务就绪后，通过有权访问测试应用的凭据读取 A2A Card，核对 `supportedInterfaces[].url` 包含访问时使用的主机和网关前缀，再发起一次任务。管理员接口 `GET /api/v1/agent-service/client-config` 返回完整 `mcp_url`，已交付的文件用 MCP `get_artifact` 默认模式核对下载地址和字节。请求地址无法解析时，A2A 卡片与任务接口返回 503、MCP 的默认下载地址不可用，小文件可用 `format="base64"` 取件。A2A 的地址校验失败可在日志中按发布 ID 和 `phase=public_address` 定位。
+服务就绪后，通过有权访问测试应用的凭据读取 A2A Card，核对 `supportedInterfaces[].url` 包含访问时使用的主机和网关前缀，再发起一次任务。管理员接口 `GET /api/v1/agent-service/client-config` 返回完整 `mcp_url`。用 MCP `GetTask` 核对产物引用，通过鉴权下载校验文件字节。请求地址无法解析时，A2A 卡片与任务接口返回 503、MCP 的任务结果仍可查询，文件部分省略 HTTP 下载地址。A2A 的地址校验失败可在日志中按发布 ID 和 `phase=public_address` 定位。
 
 ## 接入与取件
 
@@ -74,7 +74,6 @@ PYTHONPATH=src .venv/bin/python -m deep_agent.combined_runtime \
 | `GetTask` | 按 `id` 查询 Task。用 `waitSeconds` 控制等待，`historyLength` 控制历史条数 |
 | `ListTasks` | 按 `agentCode` 查询，筛选可用 `contextId`、`status`、`statusTimestampAfter`，分页使用 `pageSize`、`pageToken`，可用 `historyLength`、`includeArtifacts` 扩展返回 |
 | `CancelTask` | 按 `id` 请求停止任务，并查询返回的状态 |
-| `get_artifact` | 按 `task_id` 和 `artifact_id` 取单份文件，可显式请求 Base64 |
 
 两个工具默认等待 120 秒，传 `0` 立即返回。完成、失败或需要补答时直接返回相应状态。到时仍未结束，则返回带原 `id` 和 `contextId` 的任务快照，后台继续执行。调用方可立即用相同的 `id` 调用 `GetTask` 再等一轮。客户端和网关的请求超时需覆盖等待时间及请求开销。
 
@@ -82,7 +81,9 @@ MCP 的 `message` 使用 `messageId`、`role: "ROLE_USER"`、`parts`。文字用
 
 `ListTasks` 的 `statusTimestampAfter` 接受带时区的 RFC 3339 时间戳，包含更新时间等于阈值的任务。发布结果中的业务 JSON 按 A2A Part 的数值精度传输。对需要逐位保真的长编号，建议在业务 Schema 中声明为字符串。
 
-MCP 的任务在 `structuredContent` 和 `content[].text` 中采用相同的 A2A Task 字段。任务标题和简介见 `metadata.title` 和 `metadata.description`。完成的正文及业务 JSON 分别在 `artifacts[].parts[].text` 和 `.data`。Agent 使用 `present(file_ids)` 明确要交付的文件，引用在文件产物的 `parts[].url`。调用方用原 App、Space 和鉴权 Header 执行 HTTPS GET。也可用 `get_artifact` 获得下载地址，或传 `format="base64"` 内联至多 20 MiB。从内联响应的 `content[].text` 解析 `data_base64`。
+MCP 的任务在 `structuredContent` 和 `content[].text` 中采用相同的 A2A Task 字段。任务标题和简介见 `metadata.title` 和 `metadata.description`。完成的正文及业务 JSON 分别在 `artifacts[].parts[].text` 和 `.data`。Agent 使用 `present(file_ids)` 明确要交付的文件。`SendMessage` 和 `GetTask` 返回任务 `id`、产物 `artifactId` 和文件的 `parts[].url`。用原 App、Space 和鉴权 Header 对该地址执行 HTTPS GET。
+
+需让用户领取报告时，可委托发布 Agent 将成品登记到 DeepFOS 下载中心。确认登记成功后，告知用户文件名和领取位置。完整操作见 MCP 资源的「结果与文件」。
 
 支持 MCP Resources 的客户端可用 `resources/list` 和 `resources/read` 读取 `deepagent://guides/mcp` 中的完整示例。
 

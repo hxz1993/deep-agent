@@ -11,54 +11,194 @@
       }
     },
     {
-      "name": "submit_task",
-      "description": "Start a task with text, data or attachments. Use context_id to continue a completed conversation, and reuse the same message_id and payload on retry.",
+      "name": "SendMessage",
+      "description": "Start a task with agentCode and an A2A message. To continue an input-required task, send a new message containing the original taskId and a new messageId. Use contextId alone to start a new task in the same conversation. Waits up to configuration.waitSeconds (default 120, 0 for immediate return). If still running when the wait expires, returns the current task with its original id and contextId. File parts include an authenticated download URL when available. For downloadable reports, ask the published Agent to register the file in the caller's DeepFOS Download Center. See deepagent://guides/mcp for report delivery and authenticated direct downloads.",
       "inputSchema": {
         "$defs": {
-          "Attachment": {
+          "JsonValue": {},
+          "Message": {
             "additionalProperties": false,
             "properties": {
-              "name": {
-                "maxLength": 255,
+              "messageId": {
+                "maxLength": 128,
                 "minLength": 1,
-                "title": "Name",
+                "title": "Messageid",
                 "type": "string"
               },
-              "media_type": {
-                "maxLength": 255,
-                "minLength": 1,
-                "title": "Media Type",
+              "role": {
+                "const": "ROLE_USER",
+                "title": "Role",
                 "type": "string"
               },
-              "data_base64": {
-                "maxLength": 11184812,
-                "minLength": 1,
-                "title": "Data Base64",
-                "type": "string"
+              "parts": {
+                "items": {
+                  "$ref": "#/$defs/MessagePart"
+                },
+                "maxItems": 20,
+                "minItems": 1,
+                "title": "Parts",
+                "type": "array"
+              },
+              "taskId": {
+                "anyOf": [
+                  {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Taskid"
+              },
+              "contextId": {
+                "anyOf": [
+                  {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Contextid"
+              },
+              "referenceTaskIds": {
+                "items": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "title": "Referencetaskids",
+                "type": "array"
+              },
+              "metadata": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/JsonValue"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Metadata"
               }
             },
             "required": [
-              "name",
-              "media_type",
-              "data_base64"
+              "messageId",
+              "role",
+              "parts"
             ],
-            "title": "Attachment",
+            "title": "Message",
+            "type": "object"
+          },
+          "MessagePart": {
+            "additionalProperties": false,
+            "properties": {
+              "text": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Text"
+              },
+              "data": {
+                "$ref": "#/$defs/JsonValue",
+                "default": null
+              },
+              "raw": {
+                "anyOf": [
+                  {
+                    "maxLength": 11184812,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Raw"
+              },
+              "filename": {
+                "anyOf": [
+                  {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Filename"
+              },
+              "mediaType": {
+                "anyOf": [
+                  {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Mediatype"
+              }
+            },
+            "title": "MessagePart",
+            "type": "object"
+          },
+          "SendConfiguration": {
+            "additionalProperties": false,
+            "properties": {
+              "historyLength": {
+                "anyOf": [
+                  {
+                    "maximum": 50,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Historylength"
+              },
+              "waitSeconds": {
+                "default": 120,
+                "description": "Maximum seconds to wait for the task. Use 0 for an immediate snapshot.",
+                "minimum": 0,
+                "title": "Waitseconds",
+                "type": "number"
+              }
+            },
+            "title": "SendConfiguration",
             "type": "object"
           }
         },
         "additionalProperties": false,
         "properties": {
-          "message_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Message Id",
-            "type": "string"
-          },
-          "text": {
+          "agentCode": {
             "anyOf": [
               {
-                "maxLength": 65536,
-                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
                 "type": "string"
               },
               {
@@ -66,81 +206,43 @@
               }
             ],
             "default": null,
-            "title": "Text"
+            "title": "Agentcode"
           },
-          "data": {
+          "message": {
+            "$ref": "#/$defs/Message"
+          },
+          "configuration": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/$defs/SendConfiguration"
               },
               {
                 "type": "null"
               }
             ],
-            "default": null,
-            "title": "Data"
-          },
-          "attachments": {
-            "items": {
-              "$ref": "#/$defs/Attachment"
-            },
-            "maxItems": 20,
-            "title": "Attachments",
-            "type": "array"
-          },
-          "context_id": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Context Id"
-          },
-          "reference_task_ids": {
-            "items": {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 10,
-            "title": "Reference Task Ids",
-            "type": "array"
-          },
-          "agent_code": {
-            "maxLength": 64,
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-            "title": "Agent Code",
-            "type": "string"
+            "default": null
           }
         },
         "required": [
-          "message_id",
-          "agent_code"
+          "message"
         ],
-        "title": "SubmitTool",
+        "title": "SendTool",
         "type": "object"
       }
     },
     {
-      "name": "get_task",
-      "description": "Read task status, output, and file artifacts. Use question_id to reply. Download selected files via HTTP GET to download_url using the MCP connection's app and authentication headers.",
+      "name": "GetTask",
+      "description": "Read an A2A Task by id. Waits up to waitSeconds (default 120, 0 for immediate return). Check status.state, status.message for questions, and artifacts for results. File parts include an authenticated download URL when available. For downloadable reports, ask the published Agent to register the file in the caller's DeepFOS Download Center. See deepagent://guides/mcp for report delivery and authenticated direct downloads.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "task_id": {
+          "id": {
             "maxLength": 128,
             "minLength": 1,
-            "title": "Task Id",
+            "title": "Id",
             "type": "string"
           },
-          "history_length": {
+          "historyLength": {
             "anyOf": [
               {
                 "maximum": 50,
@@ -152,23 +254,36 @@
               }
             ],
             "default": null,
-            "title": "History Length"
+            "title": "Historylength"
+          },
+          "waitSeconds": {
+            "default": 120,
+            "description": "Maximum seconds to wait for the task. Use 0 for an immediate snapshot.",
+            "minimum": 0,
+            "title": "Waitseconds",
+            "type": "number"
           }
         },
         "required": [
-          "task_id"
+          "id"
         ],
         "title": "GetTool",
         "type": "object"
       }
     },
     {
-      "name": "list_tasks",
-      "description": "List recent tasks for a published Agent in the configured App. Filter by state or context_id and pass next_cursor as cursor to continue.",
+      "name": "ListTasks",
+      "description": "List tasks for agentCode in this App with A2A filters and paging. Use nextPageToken as pageToken and includeArtifacts to include results.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "context_id": {
+          "agentCode": {
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "title": "Agentcode",
+            "type": "string"
+          },
+          "contextId": {
             "anyOf": [
               {
                 "maxLength": 128,
@@ -180,20 +295,20 @@
               }
             ],
             "default": null,
-            "title": "Context Id"
+            "title": "Contextid"
           },
-          "state": {
+          "status": {
             "anyOf": [
               {
                 "enum": [
-                  "submitted",
-                  "working",
-                  "input_required",
-                  "auth_required",
-                  "completed",
-                  "failed",
-                  "canceled",
-                  "rejected"
+                  "TASK_STATE_SUBMITTED",
+                  "TASK_STATE_WORKING",
+                  "TASK_STATE_INPUT_REQUIRED",
+                  "TASK_STATE_AUTH_REQUIRED",
+                  "TASK_STATE_COMPLETED",
+                  "TASK_STATE_FAILED",
+                  "TASK_STATE_CANCELED",
+                  "TASK_STATE_REJECTED"
                 ],
                 "type": "string"
               },
@@ -202,20 +317,26 @@
               }
             ],
             "default": null,
-            "title": "State"
+            "title": "Status"
           },
-          "page_size": {
-            "default": 20,
-            "maximum": 100,
-            "minimum": 1,
-            "title": "Page Size",
-            "type": "integer"
+          "pageSize": {
+            "anyOf": [
+              {
+                "maximum": 100,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Pagesize"
           },
-          "cursor": {
+          "pageToken": {
             "anyOf": [
               {
                 "maxLength": 4096,
-                "minLength": 1,
                 "type": "string"
               },
               {
@@ -223,183 +344,66 @@
               }
             ],
             "default": null,
-            "title": "Cursor"
+            "title": "Pagetoken"
           },
-          "agent_code": {
-            "maxLength": 64,
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-            "title": "Agent Code",
-            "type": "string"
+          "historyLength": {
+            "anyOf": [
+              {
+                "maximum": 50,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Historylength"
+          },
+          "statusTimestampAfter": {
+            "anyOf": [
+              {
+                "maxLength": 35,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "format": "date-time",
+            "title": "Statustimestampafter"
+          },
+          "includeArtifacts": {
+            "default": false,
+            "title": "Includeartifacts",
+            "type": "boolean"
           }
         },
         "required": [
-          "agent_code"
+          "agentCode"
         ],
         "title": "ListTool",
         "type": "object"
       }
     },
     {
-      "name": "reply_task",
-      "description": "Answer a task in input_required, using its task_id, question_id as reply_to, and a new message_id. Attachments can accompany the answer.",
+      "name": "CancelTask",
+      "description": "Cancel a task by id and return its current task state.",
       "inputSchema": {
-        "$defs": {
-          "Attachment": {
-            "additionalProperties": false,
-            "properties": {
-              "name": {
-                "maxLength": 255,
-                "minLength": 1,
-                "title": "Name",
-                "type": "string"
-              },
-              "media_type": {
-                "maxLength": 255,
-                "minLength": 1,
-                "title": "Media Type",
-                "type": "string"
-              },
-              "data_base64": {
-                "maxLength": 11184812,
-                "minLength": 1,
-                "title": "Data Base64",
-                "type": "string"
-              }
-            },
-            "required": [
-              "name",
-              "media_type",
-              "data_base64"
-            ],
-            "title": "Attachment",
-            "type": "object"
-          }
-        },
         "additionalProperties": false,
         "properties": {
-          "message_id": {
+          "id": {
             "maxLength": 128,
             "minLength": 1,
-            "title": "Message Id",
-            "type": "string"
-          },
-          "text": {
-            "anyOf": [
-              {
-                "maxLength": 65536,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Text"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Data"
-          },
-          "attachments": {
-            "items": {
-              "$ref": "#/$defs/Attachment"
-            },
-            "maxItems": 20,
-            "title": "Attachments",
-            "type": "array"
-          },
-          "reply_to": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Reply To"
-          },
-          "task_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Task Id",
+            "title": "Id",
             "type": "string"
           }
         },
         "required": [
-          "message_id",
-          "task_id"
+          "id"
         ],
-        "title": "ReplyTool",
-        "type": "object"
-      }
-    },
-    {
-      "name": "cancel_task",
-      "description": "Request cancellation of an unfinished task by task_id and read the returned state.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "task_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Task Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "task_id"
-        ],
-        "title": "TaskTool",
-        "type": "object"
-      }
-    },
-    {
-      "name": "get_artifact",
-      "description": "Get a file's complete download_url by task_id and artifact_id (format=url by default). Download with the connection's app and authentication headers. If your client cannot send those headers, request format=base64 for a file up to 20 MiB. Decode data_base64 from the original text JSON and save the bytes under name. Larger files always return the download URL.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "task_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Task Id",
-            "type": "string"
-          },
-          "artifact_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Artifact Id",
-            "type": "string"
-          },
-          "format": {
-            "default": "url",
-            "enum": [
-              "url",
-              "base64"
-            ],
-            "title": "Format",
-            "type": "string"
-          }
-        },
-        "required": [
-          "task_id",
-          "artifact_id"
-        ],
-        "title": "ArtifactTool",
+        "title": "CancelTool",
         "type": "object"
       }
     }

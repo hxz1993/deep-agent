@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import json
-from base64 import b64encode
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from typing import Literal
 from urllib.parse import urlsplit
 
 import anyio
@@ -18,22 +16,20 @@ from mcp.server.streamable_http import StreamableHTTPServerTransport
 from mcp.shared.exceptions import McpError
 from pydantic import ValidationError
 
-from deep_agent.agent_service.download import ArtifactDownloadResponse, artifact_chunks
-from deep_agent.agent_service.mcp_guides import MCP_GUIDE, MCP_GUIDE_URI, MCP_INSTRUCTIONS
+from deep_agent.agent_service.download import ArtifactDownloadResponse
+from deep_agent.agent_service.mcp_guides import MCP_FILE_DELIVERY_HINT, MCP_GUIDE, MCP_GUIDE_URI, MCP_INSTRUCTIONS
 from deep_agent.agent_service.mcp_tasks import CancelTool, GetTool, ListTool, McpTasks, SendTool
-from deep_agent.agent_service.public import PublicInput, TaskId, artifact_reference, task_error
+from deep_agent.agent_service.public import PublicInput, TaskId, task_error
 from deep_agent.agent_service.security import needs_platform_address, observe_access, platform_caller, service_base_url
 from deep_agent.agent_service.service import bounded_body
 from deep_agent.api.v1.agent_service import admin
 from deep_agent.api.v1.request_identity import RequestUserDep
 from deep_agent.core.context import AppContextDep
-from deep_agent.files.storage import FileStoreError, FileStoreIntegrityError
 
 router = APIRouter(prefix="/agent-service")
 tag = "agent-service"
 server = Server("deepagent-agents", instructions=MCP_INSTRUCTIONS)
 current: ContextVar[McpTasks] = ContextVar("agent_service_mcp")
-INLINE_ARTIFACT_LIMIT = 20 * 1024 * 1024
 
 
 @router.get("/client-config", dependencies=admin)
@@ -59,37 +55,6 @@ async def download(ctx: AppContextDep, request: Request, task_id: TaskId, artifa
     return ArtifactDownloadResponse(entry, artifact, handle, protocol="mcp")
 
 
-class TaskTool(PublicInput):
-    task_id: TaskId
-
-
-class ArtifactTool(TaskTool):
-    artifact_id: TaskId
-    format: Literal["url", "base64"] = "url"
-
-
-async def get_artifact(tasks: McpTasks, args: ArtifactTool) -> dict:
-    entry, artifact = await tasks.artifact(args.task_id, args.artifact_id)
-    if args.format == "url" or artifact.size > INLINE_ARTIFACT_LIMIT:
-        if not tasks.download_base_url:
-            raise HTTPException(503, "无法从当前请求解析下载地址")
-        reference = artifact_reference(args.task_id, args.artifact_id, artifact, tasks.download_base_url)
-        return {**reference, "delivery": "http_download"}
-
-    metadata = artifact_reference(args.task_id, args.artifact_id, artifact)
-    data = bytearray()
-    with await tasks.service.open_artifact(entry, artifact, tasks.headers, protocol="mcp") as handle:
-        try:
-            async for chunk in artifact_chunks(entry, artifact, handle, protocol="mcp"):
-                data.extend(chunk)
-        except FileStoreIntegrityError as exc:
-            raise HTTPException(502, "文件大小与产物元数据不一致") from exc
-        except FileStoreError as exc:
-            raise HTTPException(502, "文件暂不可读取") from exc
-    encoded = await anyio.to_thread.run_sync(b64encode, data)
-    return {**metadata, "delivery": "inline", "data_base64": encoded.decode("ascii")}
-
-
 TOOLS: dict[str, tuple[str, type[PublicInput], Callable[..., Awaitable[dict]]]] = {
     "list_agents": ("Discover enabled published Agents and their agent_code values.",
                     PublicInput, lambda tasks, _: tasks.list_agents()),
@@ -97,22 +62,18 @@ TOOLS: dict[str, tuple[str, type[PublicInput], Callable[..., Awaitable[dict]]]] 
                     "send a new message containing the original taskId and a new messageId. "
                     "Use contextId alone to start a new task in the same conversation. Waits up to "
                     "configuration.waitSeconds (default 120, 0 for immediate return). If still running when "
-                    "the wait expires, returns the current task with its original id and contextId.",
+                    "the wait expires, returns the current task with its original id and contextId. "
+                    f"{MCP_FILE_DELIVERY_HINT}",
                     SendTool, lambda tasks, a: tasks.send(a)),
     "GetTask": ("Read an A2A Task by id. Waits up to waitSeconds (default 120, 0 for immediate return). "
                 "Check status.state, status.message for questions, and artifacts for results. "
-                "Download file parts with HTTP GET to parts[].url using the same App/Space and authentication headers.",
+                f"{MCP_FILE_DELIVERY_HINT}",
                 GetTool, lambda tasks, a: tasks.get_task(a)),
     "ListTasks": ("List tasks for agentCode in this App with A2A filters and paging. "
                   "Use nextPageToken as pageToken and includeArtifacts to include results.",
                   ListTool, lambda tasks, a: tasks.page(a)),
     "CancelTask": ("Cancel a task by id and return its current task state.",
                    CancelTool, lambda tasks, a: tasks.cancel(a.id)),
-    "get_artifact": ("Get a file's complete download_url by task_id and artifact_id (format=url by default). "
-                     "Download with the connection's app, space when set, and authentication headers. If your client cannot send those "
-                     "headers, request format=base64 for a file up to 20 MiB. Decode data_base64 from the original "
-                     "text JSON and save the bytes under name. Larger files always return the download URL.",
-                     ArtifactTool, get_artifact),
 }
 
 
@@ -143,9 +104,6 @@ async def call_tool(name: str, arguments: dict):
         error = task_error(exc)
         return tool_error(error.status_code, error.detail)
     content = types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))
-    if name == "get_artifact":
-        # Keep file bytes only in the text JSON so clients receive a single payload.
-        result.pop("data_base64", None)
     return types.CallToolResult(content=[content], structuredContent=result)
 
 

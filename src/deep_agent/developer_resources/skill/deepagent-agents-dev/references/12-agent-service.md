@@ -26,13 +26,13 @@ A2A JSON-RPC 调用加 `A2A-Version: 1.0`，读取卡片时可以省略。回环
 
 MCP 的 `SendMessage` 和 `GetTask` 默认最多等待 120 秒。调用方分别用 `configuration.waitSeconds` 和顶层 `waitSeconds` 指定等待时长，传 `0` 立即取得当前状态。超时仍返回原 `id` 和 `contextId`，任务继续执行，可立即再用原 `id` 调用 `GetTask`。
 
-同一次提交重试时保留消息 ID 和原内容。A2A 附件用 Message Part 的 `raw`、`mediaType`、`filename`，MCP 附件用 `attachments` 中的 `data_base64`、`media_type`、`name`。每条消息内联文件的解码总量最多 8 MiB，并受目标环境的上传限制。MCP 完整调用示例可通过 `resources/read` 读取 `deepagent://guides/mcp`。SDK 和 CLI 发布入口以目标环境实际提供的能力为准，当前只注册 A2A 和 MCP。
+同一次提交重试时保留消息 ID 和原内容。A2A 和 MCP 输入附件都用 Message Part 的 `raw`、`mediaType` 和 `filename`。每条消息内联文件的解码总量最多 8 MiB，并受目标环境的上传限制。MCP 完整调用示例可通过 `resources/read` 读取 `deepagent://guides/mcp`。SDK 和 CLI 发布入口以目标环境实际提供的能力为准，当前只注册 A2A 和 MCP。
 
 ## 获取产物
 
 - **A2A** 从任务的 Artifact 读取文件 URL，沿用该任务的调用身份下载。通用链接携带原 `app` Header，指定应用链接使用 URL 中的应用。
-- **MCP** 从 `GetTask` 的 `artifacts[].parts[].url` 读下载地址，或调用 `get_artifact` 取得单个文件链接。对原链接发 HTTP GET，携带原 `app`、`space`（如有）和同一凭据。服务按 MCP 请求的入口生成地址。请求地址无法解析时，`GetTask` 省略链接，链接模式的 `get_artifact` 返回地址错误。
-- **无法附加 HTTP Header 的 MCP 客户端**可对不超过 20 MiB 的文件调用 `get_artifact`，传原 `task_id`、`artifact_id` 和 `format="base64"`。从同一次响应的 `content[].text` 解析 JSON，用程序解码 `data_base64`，按 `name` 保存并核对字节数。大于 20 MiB 时仍走鉴权 HTTP 下载。
+- **MCP** 从 `SendMessage` 或 `GetTask` 的 `artifacts[].parts[].url` 取得下载地址。对原链接发 HTTP GET，携带原 `app`、`space`（如有）和同一凭据。请求地址无法解析时，任务省略 HTTP 链接。
+- **报告交付**可委托发布 Agent 将文件登记到 DeepFOS 下载中心，确认成功后告知用户文件名和领取位置。完整操作见 MCP 资源 `deepagent://guides/mcp` 的「结果与文件」。
 
 只在可信发布服务返回的预期地址上发送凭据。取件 URL 随任务记录过期而失效。交付时确认文件实际下载并可读，批量验收可另外核对 SHA-256。
 

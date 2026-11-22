@@ -8,6 +8,14 @@ CHANNEL_NAMES = {
 }
 
 
+CHANNEL_UI_INSTRUCTIONS = (
+    "当前消息渠道不提供交互式 UI 工具。缺少必要信息或需要澄清、确认时，"
+    "直接在当前渠道的回复正文中用简短的问题询问用户，无需为询问调用工具。"
+    "即使其他提示词要求调用 UI 工具，也使用文字询问，并在用户发来新消息后继续。"
+    "业务操作另有审批要求时，仍按原审批流程处理。"
+)
+
+
 def channel_instructions(channel_type: str | None) -> str:
     if not channel_type:
         return ""

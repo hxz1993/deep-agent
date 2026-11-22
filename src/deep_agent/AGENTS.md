@@ -578,7 +578,7 @@ Plan表、隐藏全局计划、Reminder用户消息或自研任务状态机。
 ### 渠道消息系统工具
 
 `channel_message` 和 `channel_doc()` 归入系统工具目录 `runtime:channel`，由可信渠道 Run 自动加载。
-来源来自渠道 Run/Binding，不能靠正文或 context_refs 授权。渠道 Run 屏蔽 Agent 配置及请求指定的 UI 工具。
+来源来自渠道 Run/Binding，不能靠正文或 context_refs 授权。渠道 Run 屏蔽 Agent 配置及请求指定的 UI 工具，运行时追加原渠道文字澄清指令。用户补充信息走普通新消息。
 `channel_doc()` 以当前渠道返回快捷命令和收发说明，复用网关命令目录和适配器的出站限制。
 `channel_message` 执行时重新检查账号、Agent、会话、Run 与文件权限，只发本轮群或私聊。
 普通 Console 和历史浏览不加载这两个工具。首轮不必有附件，沙箱新生成的授权 file_id 也可发送。

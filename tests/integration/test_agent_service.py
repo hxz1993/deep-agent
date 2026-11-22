@@ -34,7 +34,7 @@ from deep_agent.security.console_admin import ConsoleAdminAuthenticationError
 from tests.helpers.sandbox import sandbox_test_python
 
 from deep_agent.core.context import AppContext, init_context, reset_context
-from deep_agent.files.storage import LocalFileStore
+from deep_agent.files.storage import FileStoreError, LocalFileStore
 from deep_agent.security import ConsoleAdminAccess, ConsoleAdminAuthorizer
 from deep_agent.services.integration_app_access import IntegrationAppAccessError
 from deep_agent.services.scope_names import ScopeDirectory
@@ -1342,7 +1342,7 @@ w.save(publish_path("预算.xlsx"))
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
 
-        files = {"empty": b"", "boundary": b"a" * (20 * 1024 * 1024), "large": b"b" * (20 * 1024 * 1024 + 1)}
+        files = {"empty": b"", "small": b"private-report-fixture", "large": b"b" * (20 * 1024 * 1024 + 1)}
         headers = {"user": "owner", "app": "budget001", "space": "budget"}
         artifacts = {}
         for key, data in files.items():
@@ -1352,34 +1352,41 @@ w.save(publish_path("预算.xlsx"))
             )
             artifacts[key] = ArtifactFile(stored.id, filename, "text/plain", len(data))
 
-        async def execute(_entry, _message, _continuing):
+        async def execute(_runner, _entry, _message, _continuing):
             return Result(
                 artifacts=[wire.Artifact(artifact_id=key, parts=[wire.Part(filename=file.name)])
                            for key, file in artifacts.items()],
                 files=artifacts,
             )
 
-        with patch("deep_agent.agent_service.protocol.RunnerExecution", return_value=execute):
-            task_id = self.result(await self.rpc("SendMessage", {
-                "message": self.message("artifact-boundaries", "生成文件"),
-            }))["task"]["id"]
         self.client.headers.update(HEADERS)
         async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
             async with ClientSession(rx, tx) as session:
                 await session.initialize()
+                with patch("deep_agent.agent_service.execution.RunnerExecution.__call__", autospec=True,
+                           side_effect=execute):
+                    sent = await session.call_tool("SendMessage", {
+                        "agentCode": "budget-report", "message": mcp_message("artifact-boundaries", "生成文件"),
+                    })
+                self.assertFalse(sent.isError, sent.structuredContent)
+                task_id = sent.structuredContent["id"]
 
                 async def fetch():
                     return await session.call_tool("GetTask", {"id": task_id})
 
-                async def fetch_artifact(key, **options):
-                    return await session.call_tool("get_artifact", {
-                        "task_id": task_id, "artifact_id": key, **options,
-                    })
-
                 result = await fetch()
                 self.assertFalse(result.isError, result.structuredContent)
-                self.assertEqual([item.type for item in result.content], ["text"])
-                self.assertEqual(json.loads(result.content[0].text), result.structuredContent)
+                for view in (sent, result):
+                    self.assertEqual(view.structuredContent, result.structuredContent)
+                    self.assertEqual([item.type for item in view.content], ["text"])
+                    self.assertEqual(json.loads(view.content[0].text), view.structuredContent)
+                    self.assertIsNone(view.meta)
+                    self.assertNotIn('"raw"', view.content[0].text)
+                    self.assertNotIn('"deepagentFile"', view.content[0].text)
+                    self.assertNotIn(files["small"].decode(), view.content[0].text)
+                    self.assertNotIn(base64.b64encode(files["small"]).decode(), view.content[0].text)
+                    self.assertNotIn('"blob"', view.content[0].text)
+                    self.assertNotIn('"data_base64"', view.content[0].text)
                 download_urls = {}
                 for file in result.structuredContent["artifacts"]:
                     key = file["artifactId"]
@@ -1390,35 +1397,15 @@ w.save(publish_path("预算.xlsx"))
                     self.assertEqual(download.status_code, 200)
                     self.assertEqual(download.content, files[key])
                 self.assertEqual(download_urls.keys(), files.keys())
-                for key, url in download_urls.items():
-                    default = await fetch_artifact(key)
-                    self.assertFalse(default.isError)
-                    self.assertEqual(json.loads(default.content[0].text), default.structuredContent)
-                    self.assertEqual(default.structuredContent["delivery"], "http_download")
-                    self.assertEqual(default.structuredContent["download_url"], url)
-                    self.assertNotIn("data_base64", default.structuredContent)
-
-                    tool = await fetch_artifact(key, format="base64")
-                    self.assertFalse(tool.isError)
-                    self.assertEqual([item.type for item in tool.content], ["text"])
-                    self.assertNotIn("data_base64", tool.structuredContent)
-                    payload = json.loads(tool.content[0].text)
-                    self.assertEqual(payload["size"], len(files[key]))
-                    if key == "large":
-                        self.assertEqual(payload, default.structuredContent)
-                    else:
-                        self.assertEqual(payload["delivery"], "inline")
-                        decoded = base64.b64decode(payload["data_base64"], validate=True)
-                        self.assertEqual(hashlib.sha256(decoded).digest(), hashlib.sha256(files[key]).digest())
-                explicit_url = await fetch_artifact("empty", format="url")
-                self.assertEqual(explicit_url.structuredContent["download_url"], download_urls["empty"])
-                self.assertEqual((await fetch_artifact("empty", format="invalid")).structuredContent["status"], 422)
+                async with AsyncClient(transport=ASGITransport(app=self.app), base_url=DIRECT_BASE) as anonymous:
+                    scope = {key: HEADERS[key] for key in ("app", "space")}
+                    without_credentials = await anonymous.get(download_urls["small"], headers=scope)
+                    self.assertEqual(without_credentials.status_code, 401)
 
                 gateway_headers = {"host": BACKEND_AUTHORITY}
                 self.client.headers.update(gateway_headers)
                 try:
                     result = await fetch()
-                    over_limit = await fetch_artifact("large", format="base64")
                 finally:
                     for name in gateway_headers:
                         del self.client.headers[name]
@@ -1426,15 +1413,10 @@ w.save(publish_path("预算.xlsx"))
                     f"https://gateway.example.test{GATEWAY_PREFIX}{ROOT}/tasks/{task_id}/artifacts/{key}/download"
                     for key in files
                 })
-                self.assertEqual(over_limit.structuredContent["download_url"],
-                                 f"https://gateway.example.test{GATEWAY_PREFIX}{ROOT}/tasks/{task_id}/artifacts/large/download")
                 self.assertEqual(self.realm_queries, 1)
                 self.client.headers["host"] = "invalid-host.test"
                 try:
                     result = await fetch()
-                    self.assertEqual((await fetch_artifact("empty")).structuredContent["status"], 503)
-                    self.assertEqual((await fetch_artifact("large", format="base64")).structuredContent["status"], 503)
-                    self.assertFalse((await fetch_artifact("empty", format="base64")).isError)
                 finally:
                     del self.client.headers["host"]
                 self.assertEqual(result.structuredContent["status"]["state"], "TASK_STATE_COMPLETED")
@@ -1446,36 +1428,99 @@ w.save(publish_path("预算.xlsx"))
                         denied = await fetch()
                         self.assertTrue(denied.isError)
                         self.assertEqual(denied.structuredContent["status"], 404)
-                        self.assertEqual((await fetch_artifact("empty")).structuredContent["status"], 404)
                         self.assertEqual((await self.client.get(download_urls["large"])).status_code, 404)
                     finally:
                         self.client.headers.update(HEADERS)
                 await self.ctx.file_store.delete(artifacts["empty"].id, headers)
                 with patch("deep_agent.diagnostics.emit") as emit:
                     self.assertEqual((await self.client.get(download_urls["empty"])).status_code, 404)
-                    self.assertEqual((await fetch_artifact("empty", format="base64")).structuredContent["status"], 404)
                 events = [call.kwargs for call in emit.call_args_list if call.args == ("published_agent_task",)]
-                self.assertEqual(len(events), 2)
+                self.assertEqual(len(events), 1)
                 for event in events:
                     self.assertEqual((event["phase"], event["protocol"], event["task_id"], event["reason"]),
                                      ("artifact_read", "mcp", task_id, "artifact_unavailable"))
                     self.assertNotIn("empty.txt", str(event))
-                short_file = io.BytesIO(b"one chunk")
-                with patch.object(self.ctx.file_store, "open_download", return_value=short_file), \
-                     patch("deep_agent.diagnostics.emit") as emit:
-                    failed = await fetch_artifact("boundary", format="base64")
-                self.assertTrue(short_file.closed)
-                self.assertTrue(failed.isError)
-                self.assertEqual(failed.structuredContent["status"], 502)
-                reads = [call.kwargs for call in emit.call_args_list if call.args == ("published_agent_task",)]
-                self.assertEqual([(row["protocol"], row["reason"], row["error_type"]) for row in reads],
-                                 [("mcp", "artifact_read_failed", "FileStoreIntegrityError")])
                 self.ctx.agent_tasks.entries[task_id].changed -= RETENTION + timedelta(seconds=1)
                 expired = await fetch()
                 self.assertTrue(expired.isError)
                 self.assertEqual(expired.structuredContent["status"], 404)
-                self.assertEqual((await fetch_artifact("boundary")).structuredContent["status"], 404)
                 self.assertEqual((await self.client.get(download_urls["large"])).status_code, 404)
+
+    async def test_mcp_present_delivers_the_file_on_download_center_success_and_failure(self):
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+
+        filename = "report.html"
+        data = b"<p>Download center delivery fixture</p>"
+
+        def respond(messages, info):
+            if not info.output_tools:
+                return ModelResponse(parts=[TextPart("报告交付验收")])
+            tools = {tool.name: tool.description for tool in info.function_tools}
+            self.assertIn("export_file_to_download_center", tools["present"])
+            registered = latest_tool_result(messages, "export_file_to_download_center")
+            selected = latest_tool_result(messages, "present")
+            file_id = re.search(r"local_[0-9a-f]{32}", str(messages))[0]
+            if registered is None:
+                return ModelResponse(parts=[ToolCallPart("export_file_to_download_center", {
+                    "source": {"type": "platform_file", "file_id": file_id}, "file_name": filename,
+                })])
+            if selected is None:
+                return ModelResponse(parts=[ToolCallPart("present", {"file_ids": [file_id]})])
+            self.assertEqual(selected.outcome, "success")
+            if registered.outcome == "success":
+                self.assertIn("local_record_", str(registered.content))
+                return publication_result(text=f"请在 DeepFOS 下载中心领取 {filename}。")
+            self.assertEqual(registered.outcome, "failed")
+            return publication_result(text=f"{filename} 已生成，登记失败。")
+
+        file_store = self.ctx.file_store
+        register_download = file_store.register_download
+        self.client.headers.update(HEADERS)
+        async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
+            async with ClientSession(rx, tx) as session:
+                await session.initialize()
+                for succeeds in (True, False):
+                    with self.subTest(succeeds=succeeds):
+                        register = AsyncMock(wraps=register_download) if succeeds else AsyncMock(
+                            side_effect=FileStoreError("Download center unavailable"),
+                        )
+                        with patch.object(file_store, "register_download", register), patch(
+                            "deep_agent.agent.factory._resolve_model", return_value=publication_model(respond),
+                        ):
+                            sent = await session.call_tool("SendMessage", {
+                                "agentCode": "budget-report",
+                                "message": mcp_message(
+                                    f"register-report-{succeeds}", "请交付成品报告并登记到下载中心。",
+                                    files=[(filename, "text/html", data)],
+                                ),
+                            })
+                        self.assertFalse(sent.isError, sent.structuredContent)
+                        task = sent.structuredContent
+                        self.assertEqual(task["status"]["state"], "TASK_STATE_COMPLETED", task)
+                        register.assert_awaited_once()
+                        args = register.await_args.kwargs
+                        self.assertEqual((args["file_name"], args["byte_size"]), (filename, len(data)))
+                        self.assertEqual(
+                            {key: args["request_headers"][key] for key in ("user", "app", "space")},
+                            {"user": "owner", "app": "budget001", "space": "budget"},
+                        )
+                        parts = [part for item in task["artifacts"] for part in item["parts"]]
+                        content, = [part["text"] for part in parts if "text" in part]
+                        self.assertEqual("下载中心领取" in content, succeeds)
+                        self.assertEqual("登记失败" in content, not succeeds)
+                        url, = [part["url"] for part in parts if "url" in part]
+                        self.assertEqual((await self.client.get(url)).content, data)
+                        fetched = await session.call_tool("GetTask", {"id": task["id"], "historyLength": 5})
+                        self.assertFalse(fetched.isError, fetched.structuredContent)
+                        self.assertTrue(fetched.structuredContent["history"])
+                        self.assertEqual(fetched.structuredContent["artifacts"], task["artifacts"])
+                        for view in (sent, fetched):
+                            response = view.content[0].text
+                            self.assertEqual(json.loads(response), view.structuredContent)
+                            self.assertNotIn(args["file_id"], response)
+                            self.assertNotIn(data.decode(), response)
+                            self.assertNotIn(base64.b64encode(data).decode(), response)
 
     async def test_download_read_failure_and_disconnect_after_headers(self):
         class BrokenFile(io.BytesIO):
@@ -1716,6 +1761,7 @@ w.save(publish_path("预算.xlsx"))
     async def test_public_task_visibility_and_cross_transport_mcp(self):
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
+        from mcp.shared.exceptions import McpError
         from deep_agent.api.v1.agent_service_public import draft_router
 
         self.app.include_router(draft_router, prefix="/api/v1")
@@ -1752,35 +1798,54 @@ w.save(publish_path("预算.xlsx"))
         mcp_url = f"{ROOT}/mcp"
         denied_origin = await self.client.post(mcp_url, headers={**HEADERS, "origin": "https://example.net"})
         self.assertEqual(denied_origin.status_code, 403)
-        unauthenticated = await self.client.post(mcp_url, json={
-            "jsonrpc": "2.0", "id": 1, "method": "resources/list",
-        })
-        self.assertEqual(unauthenticated.status_code, 401)
+        for method in ("resources/list", "resources/templates/list", "resources/read"):
+            unauthenticated = await self.client.post(mcp_url, json={
+                "jsonrpc": "2.0", "id": 1, "method": method,
+            })
+            self.assertEqual(unauthenticated.status_code, 401)
         self.client.headers.update(HEADERS)
 
         async with streamable_http_client(f"{DIRECT_BASE}{ROOT}/mcp", http_client=self.client) as (rx, tx, _):
             async with ClientSession(rx, tx) as session:
                 hello = await session.initialize()
                 self.assertIsNotNone(hello.capabilities.resources)
-                tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+                catalog = await session.list_tools()
+                tools = {tool.name: tool for tool in catalog.tools}
+                schema_path = Path(__file__).resolve().parents[2] / "docs/design/45-a2a-access/mcp-tool-inputs.json"
+                self.assertEqual(json.loads(schema_path.read_text(encoding="utf-8")),
+                                 catalog.model_dump(by_alias=True, exclude_none=True))
                 descriptions = {name: tool.description for name, tool in tools.items()}
                 get_wait = tools["GetTask"].inputSchema["properties"]["waitSeconds"]
                 send_wait = tools["SendMessage"].inputSchema["$defs"]["SendConfiguration"]["properties"]["waitSeconds"]
                 self.assertEqual((get_wait["default"], send_wait["default"]), (120, 120))
                 names = set(descriptions)
-                self.assertEqual(names, {"list_agents", "SendMessage", "GetTask", "ListTasks", "CancelTask", "get_artifact"})
-                self.assertIn("HTTP GET", descriptions["GetTask"])
-                for field in ("data_base64", "format=url by default", "format=base64"):
-                    self.assertIn(field, descriptions["get_artifact"])
+                self.assertEqual(names, {"list_agents", "SendMessage", "GetTask", "ListTasks", "CancelTask"})
                 guides = {str(resource.uri): resource.mimeType for resource in (await session.list_resources()).resources}
                 guide_uri = "deepagent://guides/mcp"
                 self.assertEqual(guides, {guide_uri: "text/markdown"})
+                for name in ("SendMessage", "GetTask"):
+                    self.assertIsNone(tools[name].meta)
+                    self.assertIn(guide_uri, descriptions[name])
+                    self.assertIn("DeepFOS Download Center", descriptions[name])
+                removed = await session.call_tool("get_artifact", {
+                    "task_id": "old-task", "artifact_id": "old-artifact", "format": "base64",
+                })
+                self.assertTrue(removed.isError)
+                self.assertEqual(removed.structuredContent["status"], 404)
+                with self.assertRaises(McpError) as missing_templates:
+                    await session.list_resource_templates()
+                self.assertEqual(missing_templates.exception.error.code, -32601)
+                for old_uri in ("ui://deepagent/task-artifacts.html", "deepagent://artifacts/old-task/old-artifact"):
+                    with self.assertRaises(McpError) as unavailable:
+                        await session.read_resource(old_uri)
+                    self.assertEqual(unavailable.exception.error.data, {"status": 404})
                 resource = (await session.read_resource(guide_uri)).contents[0]
                 self.assertEqual(resource.mimeType, "text/markdown")
-                for example in names | {"contextId", "data_base64", "download_url", "HTTP GET"}:
+                for example in names | {"contextId", "下载中心", "HTTP GET", "parts[].url"}:
                     self.assertIn(example, resource.text)
-                for example in ("taskId", "download_url", "HTTP GET", "authentication headers", "format=base64"):
+                for example in ("taskId", guide_uri):
                     self.assertIn(example, hello.instructions)
+                self.assertNotIn("下载中心", hello.instructions)
                 listed = await session.call_tool("list_agents")
                 self.assertEqual(listed.structuredContent, response.json())
                 del self.client.headers["app"]
@@ -1797,6 +1862,7 @@ w.save(publish_path("预算.xlsx"))
                         "agentCode": "budget-report", "message": mcp_message(request["message_id"], request["text"]),
                     })
                     self.assertFalse(result.isError, result)
+                    self.assertIsNone(result.meta)
                     initial = result.structuredContent
                     self.assertEqual(initial["status"]["state"], "TASK_STATE_COMPLETED")
                     task_id = initial["id"]

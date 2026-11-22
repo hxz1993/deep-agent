@@ -103,11 +103,20 @@ def build_file_delivery_toolset() -> FunctionToolset[AgentDeps]:
         if ctx.deps.file_delivery is None:
             return None
         if ctx.deps.publication_protocol:
-            return replace(tool, description=(
+            description = (
                 "Select up to 10 exact File IDs from this conversation to deliver with the current publication result. "
                 "Use only files already checked and ready for the caller, never intermediate drafts. This works even "
                 "when you also need to ask a follow-up question. Call present separately before the final result."
-            ))
+            )
+            if ctx.deps.publication_protocol == "mcp":
+                description += (
+                    " When the user requests a downloadable report, prefer also registering the finished file "
+                    "with export_file_to_download_center using its File ID when that tool is available. "
+                    "Registration is for the current caller. Only after registration succeeds, tell the user "
+                    "the filename and where to find it in the DeepFOS Download Center. If registration is "
+                    "unavailable or fails, still present the finished file and report the actual outcome."
+                )
+            return replace(tool, description=description)
         return tool
 
     @toolset.tool(prepare=prepare, name=PRESENT)
